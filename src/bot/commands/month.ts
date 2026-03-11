@@ -62,7 +62,6 @@ export async function handleMonth(
   const header = 'Mo Tu We Th Fr Sa Su';
   const firstDayOfWeek = (getDay(monthStart) + 6) % 7; // 0=Mon
   let grid = '';
-  const _dayNum = 1;
 
   // Pad first week
   for (let i = 0; i < firstDayOfWeek; i++) grid += '   ';
@@ -81,8 +80,15 @@ export async function handleMonth(
   const ym = format(monthStart, 'yyyy-MM');
   const text = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
 
-  await ctx.send(text, {
-    parse_mode: 'HTML',
-    reply_markup: monthNavKeyboard(ym),
-  });
+  if (yearMonth) {
+    await (ctx as BotCallbackContext).editText(text, {
+      parse_mode: 'HTML',
+      reply_markup: monthNavKeyboard(ym),
+    });
+  } else {
+    await ctx.send(text, {
+      parse_mode: 'HTML',
+      reply_markup: monthNavKeyboard(ym),
+    });
+  }
 }

@@ -1,12 +1,11 @@
 // src/bot/commands/timezone.ts
-import type { DatabaseService } from '../../database/index.ts';
 import type { User } from '../../database/types.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
 import { timezoneManualKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 import { setSession } from '../types.ts';
 
-export async function handleTimezone(ctx: BotCommandContext, _db: DatabaseService): Promise<void> {
+export async function handleTimezone(ctx: BotCommandContext): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const display = getTimezoneDisplay(user.timezone);

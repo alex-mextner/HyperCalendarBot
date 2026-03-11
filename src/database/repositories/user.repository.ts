@@ -50,10 +50,19 @@ export class UserRepository {
     const existing = this.findByTelegramId(telegramId);
     if (!existing) return null;
 
+    const ALLOWED_COLUMNS = new Set([
+      'username',
+      'first_name',
+      'language',
+      'timezone',
+      'country_code',
+      'onboarding_completed',
+    ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
 
     for (const [key, value] of Object.entries(data)) {
+      if (!ALLOWED_COLUMNS.has(key)) continue;
       if (value !== undefined) {
         fields.push(`${key} = ?`);
         values.push(value);

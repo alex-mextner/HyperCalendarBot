@@ -60,7 +60,7 @@ export function createCallbackHandler(db: DatabaseService, eventService: EventSe
       if (action === CB.EDIT_FIELD) {
         const [eidStr, field] = payload.split(':');
         if (field === 'cancel' || eidStr === 'cancel') return ctx.editText('OK');
-        return handleEditFieldCallback(ctx, eventService, user, Number(eidStr), field!);
+        return handleEditFieldCallback(ctx, user, Number(eidStr), field!);
       }
 
       // Event delete

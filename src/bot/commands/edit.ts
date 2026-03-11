@@ -59,7 +59,6 @@ export async function handleEditCallback(
  */
 export async function handleEditFieldCallback(
   ctx: BotCallbackContext,
-  _eventService: EventService,
   user: User,
   eventId: number,
   field: string,

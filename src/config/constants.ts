@@ -117,7 +117,7 @@ export const TZ_REGIONS: Record<string, string[]> = {
     'Europe/Berlin',
     'Europe/Moscow',
     'Europe/Istanbul',
-    'Europe/Kiev',
+    'Europe/Kyiv',
     'Europe/Warsaw',
     'Europe/Rome',
     'Europe/Madrid',

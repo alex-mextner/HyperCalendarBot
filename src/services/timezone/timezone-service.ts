@@ -14,7 +14,7 @@ export function getTimezoneDisplay(timezone: string): string {
 export function guessCountryFromTimezone(timezone: string): string | null {
   const tzToCountry: Record<string, string> = {
     'Europe/Moscow': 'RU',
-    'Europe/Kiev': 'UA',
+    'Europe/Kyiv': 'UA',
     'Europe/London': 'GB',
     'Europe/Paris': 'FR',
     'Europe/Berlin': 'DE',

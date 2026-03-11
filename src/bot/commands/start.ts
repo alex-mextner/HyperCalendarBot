@@ -20,7 +20,7 @@ import {
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 import { clearSession, getSession, setSession } from '../types.ts';
 
-export async function handleStart(ctx: BotCommandContext, _db: DatabaseService): Promise<void> {
+export async function handleStart(ctx: BotCommandContext): Promise<void> {
   const user = ctx.dbUser as User;
 
   if (user.onboarding_completed) {
@@ -63,9 +63,7 @@ export async function handleOnboardingCallback(
 
   if (action === 'otr') {
     // Timezone region selected
-    const session = getSession(userId);
-    const _lang = (session?.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
-    await ctx.editText(`Select city:`, {
+    await ctx.editText('Select city:', {
       reply_markup: timezoneCitiesKeyboard(payload),
     });
   }
@@ -138,7 +136,6 @@ export async function handleOnboardingCallback(
  */
 export async function handleOnboardingLocation(
   ctx: BotCommandContext,
-  _db: DatabaseService,
   latitude: number,
   longitude: number,
 ): Promise<void> {

@@ -66,7 +66,7 @@ export function createBot(token: string, db: DatabaseService) {
       return next();
     })
     // Commands
-    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, db))
+    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext))
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService))
@@ -78,14 +78,14 @@ export function createBot(token: string, db: DatabaseService) {
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
     .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService))
-    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, db))
+    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
-    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, eventService))
+    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext))
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     // Callback queries
     .on('callback_query', (ctx) => createCallbackHandler(db, eventService)(ctx as unknown as BotCallbackContext))
     // Free-text messages
-    .on('message', (ctx) => createMessageHandler(db, eventService)(ctx as unknown as BotCommandContext))
+    .on('message', (ctx) => createMessageHandler(db, eventService, token)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');

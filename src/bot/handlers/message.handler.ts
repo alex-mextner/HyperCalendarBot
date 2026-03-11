@@ -14,7 +14,7 @@ import { clearSession, getSession } from '../types.ts';
  * Handle free-text messages and file uploads.
  * Routes to active wizard sessions or falls back to "use /help".
  */
-export function createMessageHandler(db: DatabaseService, eventService: EventService) {
+export function createMessageHandler(db: DatabaseService, eventService: EventService, botToken: string) {
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
@@ -25,14 +25,13 @@ export function createMessageHandler(db: DatabaseService, eventService: EventSer
       const session = getSession(user.telegram_id);
 
       if (session?.step.startsWith('onboard:tz')) {
-        return handleOnboardingLocation(ctx, db, latitude, longitude);
+        return handleOnboardingLocation(ctx, latitude, longitude);
       }
 
       if (session?.step === 'tz:select') {
         const tz = resolveTimezone(latitude, longitude);
         db.users.update(user.telegram_id, { timezone: tz });
         clearSession(user.telegram_id);
-        const _lang = user.language as 'en' | 'ru';
         await ctx.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
         return;
       }
@@ -47,7 +46,7 @@ export function createMessageHandler(db: DatabaseService, eventService: EventSer
         clearSession(user.telegram_id);
         try {
           const file = await ctx.getFile();
-          const response = await fetch(`https://api.telegram.org/file/bot${process.env.BOT_TOKEN}/${file.file_path}`);
+          const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${file.file_path}`);
           const content = await response.text();
           return handleImportFile(ctx, eventService, user, content);
         } catch {

@@ -6,7 +6,7 @@ import { parseIcs } from '../../services/ics/parser.ts';
 import type { BotCommandContext } from '../types.ts';
 import { setSession } from '../types.ts';
 
-export async function handleImport(ctx: BotCommandContext, _eventService: EventService): Promise<void> {
+export async function handleImport(ctx: BotCommandContext): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   setSession(user.telegram_id, 'import:waiting');

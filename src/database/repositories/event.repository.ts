@@ -61,10 +61,23 @@ export class EventRepository {
     const existing = this.findById(id, userId);
     if (!existing) return null;
 
+    const ALLOWED_COLUMNS = new Set([
+      'title',
+      'description',
+      'category',
+      'start_at',
+      'end_at',
+      'all_day',
+      'timezone',
+      'location',
+      'recurrence_rule',
+      'recurrence_end_at',
+    ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
 
     for (const [key, value] of Object.entries(data)) {
+      if (!ALLOWED_COLUMNS.has(key)) continue;
       if (value !== undefined) {
         fields.push(`${key} = ?`);
         values.push(key === 'all_day' ? (value ? 1 : 0) : value);

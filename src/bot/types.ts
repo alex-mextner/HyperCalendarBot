@@ -38,15 +38,6 @@ export type BotCommandContext = MessageContext<AnyBot> & DerivedProps & GramIOMe
 export type BotCallbackContext = CallbackQueryContext<AnyBot> & DerivedProps;
 
 /**
- * @deprecated Use DerivedProps instead
- */
-export interface BotDerived {
-  dbUser: User;
-  userTimezone: string;
-  lang: 'en' | 'ru';
-}
-
-/**
  * Session state for multi-step interactions (onboarding, /add wizard, /edit wizard)
  */
 export interface UserSession {

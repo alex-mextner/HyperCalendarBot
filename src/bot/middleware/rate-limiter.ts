@@ -14,12 +14,30 @@ interface UserBucket {
 export class RateLimiter {
   private buckets = new Map<number, UserBucket>();
   private config: RateLimiterConfig;
+  private callsSinceCleanup = 0;
 
   constructor(config: RateLimiterConfig) {
     this.config = config;
   }
 
+  private cleanup(): void {
+    const now = Date.now();
+    const staleMs = 5 * 60 * 1000;
+    for (const [userId, bucket] of this.buckets) {
+      const lastActivity = Math.max(bucket.silencedUntil, bucket.timestamps[bucket.timestamps.length - 1] ?? 0);
+      if (now - lastActivity > staleMs) {
+        this.buckets.delete(userId);
+      }
+    }
+  }
+
   check(userId: number): boolean {
+    this.callsSinceCleanup++;
+    if (this.callsSinceCleanup >= 100) {
+      this.callsSinceCleanup = 0;
+      this.cleanup();
+    }
+
     const now = Date.now();
     let bucket = this.buckets.get(userId);
 
