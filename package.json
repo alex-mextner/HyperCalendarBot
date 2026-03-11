@@ -3,7 +3,13 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "lint": "biome check .",
+    "lint:fix": "biome check --fix .",
+    "format": "biome format --write ."
+  },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
     "@types/bun": "latest",
     "pino-pretty": "13.1.3"
   },

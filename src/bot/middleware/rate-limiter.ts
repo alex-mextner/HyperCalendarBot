@@ -33,7 +33,7 @@ export class RateLimiter {
 
     // Prune old timestamps (older than 1 minute)
     const windowStart = now - 60_000;
-    bucket.timestamps = bucket.timestamps.filter(t => t > windowStart);
+    bucket.timestamps = bucket.timestamps.filter((t) => t > windowStart);
 
     if (bucket.timestamps.length >= this.config.perMinute) {
       bucket.silencedUntil = now + this.config.cooldownMs;

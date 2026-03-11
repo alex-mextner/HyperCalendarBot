@@ -1,14 +1,16 @@
 // src/bot/commands/add.ts
-import type { EventService } from '../../services/event/event-service.ts';
-import type { User } from '../../database/types.ts';
-import { t } from '../../config/constants.ts';
-import { setSession, getSession, clearSession } from '../types.ts';
-import { parseSimpleDate, parseDuration } from '../../utils/date.ts';
-import { formatEventDetail } from '../../services/event/formatters.ts';
-import { eventActionsKeyboard } from '../keyboards.ts';
-import { addMinutes } from 'date-fns';
 
-export async function handleAdd(ctx: any, eventService: EventService): Promise<void> {
+import { addMinutes } from 'date-fns';
+import { t } from '../../config/constants.ts';
+import type { User } from '../../database/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { formatEventDetail } from '../../services/event/formatters.ts';
+import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { eventActionsKeyboard } from '../keyboards.ts';
+import type { BotCommandContext } from '../types.ts';
+import { clearSession, getSession, setSession } from '../types.ts';
+
+export async function handleAdd(ctx: BotCommandContext, eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const args = ctx.args as string | undefined;
@@ -23,7 +25,12 @@ export async function handleAdd(ctx: any, eventService: EventService): Promise<v
   await ctx.send(t(lang).add_title_prompt);
 }
 
-async function handleQuickAdd(ctx: any, eventService: EventService, user: User, input: string): Promise<void> {
+async function handleQuickAdd(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  user: User,
+  input: string,
+): Promise<void> {
   const lang = user.language as 'en' | 'ru';
 
   // Try to parse "Title <date expression>"
@@ -70,7 +77,7 @@ async function handleQuickAdd(ctx: any, eventService: EventService, user: User, 
  * Handle wizard steps for /add (called from message handler)
  */
 export async function handleAddWizardStep(
-  ctx: any,
+  ctx: BotCommandContext,
   eventService: EventService,
   user: User,
   text: string,
@@ -88,7 +95,11 @@ export async function handleAddWizardStep(
   if (session.step === 'add:time') {
     const parsed = parseSimpleDate(text, user.timezone);
     if (!parsed) {
-      await ctx.send(lang === 'ru' ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"' : 'Can\'t parse that date. Try: "tomorrow 15:00"');
+      await ctx.send(
+        lang === 'ru'
+          ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"'
+          : 'Can\'t parse that date. Try: "tomorrow 15:00"',
+      );
       return true;
     }
     setSession(user.telegram_id, 'add:duration', { ...session.data, start_at: parsed.toISOString() });

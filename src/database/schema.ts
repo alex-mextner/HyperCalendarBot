@@ -16,10 +16,7 @@ export function runMigrations(db: Database, migrations: Migration[]): void {
     )
   `);
 
-  const applied = new Set(
-    (db.prepare('SELECT name FROM migrations').all() as { name: string }[])
-      .map(r => r.name)
-  );
+  const applied = new Set((db.prepare('SELECT name FROM migrations').all() as { name: string }[]).map((r) => r.name));
 
   for (const migration of migrations) {
     if (applied.has(migration.name)) continue;

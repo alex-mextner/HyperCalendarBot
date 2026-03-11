@@ -1,16 +1,31 @@
 // test/services/ics/generator.test.ts
-import { describe, test, expect } from 'bun:test';
-import { generateIcs } from '../../../src/services/ics/generator.ts';
+import { describe, expect, test } from 'bun:test';
 import type { CalendarEvent } from '../../../src/database/types.ts';
+import { generateIcs } from '../../../src/services/ics/generator.ts';
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
-    id: 1, user_id: 123, title: 'Test Event', description: null, category: null,
-    start_at: '2026-03-12T15:00:00Z', end_at: '2026-03-12T16:00:00Z',
-    all_day: 0, timezone: 'UTC', location: null, recurrence_rule: null,
-    recurrence_end_at: null, parent_event_id: null, original_start_at: null,
-    is_cancelled: 0, reminder_overrides: null, google_event_id: null,
-    google_calendar_id: null, last_synced_at: null, created_at: '', updated_at: '',
+    id: 1,
+    user_id: 123,
+    title: 'Test Event',
+    description: null,
+    category: null,
+    start_at: '2026-03-12T15:00:00Z',
+    end_at: '2026-03-12T16:00:00Z',
+    all_day: 0,
+    timezone: 'UTC',
+    location: null,
+    recurrence_rule: null,
+    recurrence_end_at: null,
+    parent_event_id: null,
+    original_start_at: null,
+    is_cancelled: 0,
+    reminder_overrides: null,
+    google_event_id: null,
+    google_calendar_id: null,
+    last_synced_at: null,
+    created_at: '',
+    updated_at: '',
     ...overrides,
   };
 }
@@ -25,11 +40,13 @@ describe('generateIcs', () => {
   });
 
   test('includes event fields', () => {
-    const ics = generateIcs([makeEvent({
-      title: 'Dentist',
-      description: 'Checkup',
-      location: 'Clinic',
-    })]);
+    const ics = generateIcs([
+      makeEvent({
+        title: 'Dentist',
+        description: 'Checkup',
+        location: 'Clinic',
+      }),
+    ]);
     expect(ics).toContain('SUMMARY:Dentist');
     expect(ics).toContain('DESCRIPTION:Checkup');
     expect(ics).toContain('LOCATION:Clinic');

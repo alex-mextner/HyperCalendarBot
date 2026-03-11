@@ -30,8 +30,5 @@ function isoToIcsDate(iso: string): string {
 }
 
 function escapeIcs(value: string): string {
-  return value
-    .replace(/\\/g, '\\\\')
-    .replace(/,/g, '\\,')
-    .replace(/\n/g, '\\n');
+  return value.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/\n/g, '\\n');
 }

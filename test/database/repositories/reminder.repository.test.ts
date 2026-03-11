@@ -1,11 +1,12 @@
 // test/database/repositories/reminder.repository.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
-import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -25,7 +26,10 @@ describe('ReminderRepository', () => {
     reminders = new ReminderRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
     const event = new EventRepository(db).create({
-      user_id: USER_ID, title: 'Test', start_at: '2026-03-12T12:00:00Z', timezone: 'UTC',
+      user_id: USER_ID,
+      title: 'Test',
+      start_at: '2026-03-12T12:00:00Z',
+      timezone: 'UTC',
     });
     eventId = event.id;
   });
@@ -42,7 +46,7 @@ describe('ReminderRepository', () => {
     reminders.create(eventId, 60);
     const list = reminders.getByEventId(eventId);
     expect(list.length).toBe(3);
-    expect(list.map(r => r.minutes_before)).toEqual([5, 15, 60]);
+    expect(list.map((r) => r.minutes_before)).toEqual([5, 15, 60]);
   });
 
   test('removeByEventId deletes all reminders for event', () => {
@@ -56,6 +60,6 @@ describe('ReminderRepository', () => {
     reminders.create(eventId, 5);
     reminders.setForEvent(eventId, [10, 30]);
     const list = reminders.getByEventId(eventId);
-    expect(list.map(r => r.minutes_before)).toEqual([10, 30]);
+    expect(list.map((r) => r.minutes_before)).toEqual([10, 30]);
   });
 });

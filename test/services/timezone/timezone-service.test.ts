@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'bun:test';
-import { resolveTimezone, getTimezoneDisplay } from '../../../src/services/timezone/timezone-service.ts';
+import { describe, expect, test } from 'bun:test';
+import { getTimezoneDisplay, resolveTimezone } from '../../../src/services/timezone/timezone-service.ts';
 
 describe('resolveTimezone', () => {
   test('resolves Moscow coordinates to Europe/Moscow', () => {

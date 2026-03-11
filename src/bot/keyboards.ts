@@ -7,17 +7,12 @@ import { formatTime } from '../utils/date.ts';
 // ── Onboarding ──
 
 export function languageKeyboard(): InlineKeyboard {
-  return new InlineKeyboard()
-    .text('English', `${CB.ONBOARD_LANG}:en`)
-    .text('Русский', `${CB.ONBOARD_LANG}:ru`);
+  return new InlineKeyboard().text('English', `${CB.ONBOARD_LANG}:en`).text('Русский', `${CB.ONBOARD_LANG}:ru`);
 }
 
 export function timezoneMethodKeyboard(lang: 'en' | 'ru'): Keyboard {
   const locationText = lang === 'ru' ? '📍 Отправить геолокацию' : '📍 Share Location';
-  return new Keyboard()
-    .requestLocation(locationText)
-    .resized()
-    .oneTime();
+  return new Keyboard().requestLocation(locationText).resized().oneTime();
 }
 
 export function timezoneManualKeyboard(): InlineKeyboard {
@@ -106,9 +101,7 @@ export function monthNavKeyboard(yearMonth: string): InlineKeyboard {
   const [y, m] = yearMonth.split('-').map(Number) as [number, number];
   const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
-  return new InlineKeyboard()
-    .text('◀️', `${CB.MONTH_NAV}:${prev}`)
-    .text('▶️', `${CB.MONTH_NAV}:${next}`);
+  return new InlineKeyboard().text('◀️', `${CB.MONTH_NAV}:${prev}`).text('▶️', `${CB.MONTH_NAV}:${next}`);
 }
 
 // ── Remove keyboard helper ──

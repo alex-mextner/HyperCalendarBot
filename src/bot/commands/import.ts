@@ -1,24 +1,23 @@
 // src/bot/commands/import.ts
-import type { EventService } from '../../services/event/event-service.ts';
+
 import type { User } from '../../database/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
 import { parseIcs } from '../../services/ics/parser.ts';
-import { t } from '../../config/constants.ts';
+import type { BotCommandContext } from '../types.ts';
 import { setSession } from '../types.ts';
 
-export async function handleImport(ctx: any, eventService: EventService): Promise<void> {
+export async function handleImport(ctx: BotCommandContext, _eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   setSession(user.telegram_id, 'import:waiting');
-  await ctx.send(lang === 'ru'
-    ? 'Отправьте .ics файл.'
-    : 'Send an .ics file.');
+  await ctx.send(lang === 'ru' ? 'Отправьте .ics файл.' : 'Send an .ics file.');
 }
 
 /**
  * Handle received document for import (called from message handler)
  */
 export async function handleImportFile(
-  ctx: any,
+  ctx: BotCommandContext,
   eventService: EventService,
   user: User,
   fileContent: string,
@@ -46,7 +45,5 @@ export async function handleImportFile(
     imported++;
   }
 
-  await ctx.send(lang === 'ru'
-    ? `✅ Импортировано ${imported} событий.`
-    : `✅ Imported ${imported} events.`);
+  await ctx.send(lang === 'ru' ? `✅ Импортировано ${imported} событий.` : `✅ Imported ${imported} events.`);
 }

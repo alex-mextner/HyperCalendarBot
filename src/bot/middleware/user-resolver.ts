@@ -1,18 +1,38 @@
 // src/bot/middleware/user-resolver.ts
+import type { AnyBot, Context } from 'gramio';
 import type { DatabaseService } from '../../database/index.ts';
+
+interface TelegramFrom {
+  id: number;
+  username?: string;
+  firstName?: string;
+}
+
+/**
+ * Extract `from` from GramIO context via runtime check.
+ * GramIO's base Context class doesn't expose `from` in its type —
+ * it's mixed in by TargetMixin on specific update contexts (message, callback_query, etc.).
+ */
+function extractFrom(context: Context<AnyBot>): TelegramFrom | undefined {
+  if ('from' in context && context.from) {
+    return context.from as TelegramFrom;
+  }
+  return undefined;
+}
 
 /**
  * Returns a derive function that resolves/creates user from Telegram update.
  * Attaches dbUser, userTimezone, and lang to context.
  */
 export function createUserResolver(db: DatabaseService) {
-  return async (context: any) => {
-    if (!context.from) return {};
+  return async (context: Context<AnyBot>) => {
+    const from = extractFrom(context);
+    if (!from) return {};
 
     const dbUser = db.users.findOrCreate({
-      telegram_id: context.from.id,
-      username: context.from.username,
-      first_name: context.from.firstName,
+      telegram_id: from.id,
+      username: from.username,
+      first_name: from.firstName,
     });
 
     return {

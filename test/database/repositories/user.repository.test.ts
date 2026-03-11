@@ -1,9 +1,10 @@
 // test/database/repositories/user.repository.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');

@@ -1,21 +1,21 @@
 // src/bot/handlers/message.handler.ts
 import type { DatabaseService } from '../../database/index.ts';
-import type { EventService } from '../../services/event/event-service.ts';
 import type { User } from '../../database/types.ts';
-import { getSession } from '../types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { handleAddWizardStep } from '../commands/add.ts';
 import { handleEditWizardStep } from '../commands/edit.ts';
-import { handleOnboardingLocation } from '../commands/start.ts';
 import { handleImportFile } from '../commands/import.ts';
-import { resolveTimezone, getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
-import { setSession, clearSession } from '../types.ts';
+import { handleOnboardingLocation } from '../commands/start.ts';
+import type { BotCommandContext } from '../types.ts';
+import { clearSession, getSession } from '../types.ts';
 
 /**
  * Handle free-text messages and file uploads.
  * Routes to active wizard sessions or falls back to "use /help".
  */
 export function createMessageHandler(db: DatabaseService, eventService: EventService) {
-  return async (ctx: any) => {
+  return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
 
@@ -32,11 +32,8 @@ export function createMessageHandler(db: DatabaseService, eventService: EventSer
         const tz = resolveTimezone(latitude, longitude);
         db.users.update(user.telegram_id, { timezone: tz });
         clearSession(user.telegram_id);
-        const lang = user.language as 'en' | 'ru';
-        await ctx.send(
-          `✅ ${getTimezoneDisplay(tz)}`,
-          { reply_markup: { remove_keyboard: true } },
-        );
+        const _lang = user.language as 'en' | 'ru';
+        await ctx.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
         return;
       }
 
@@ -70,8 +67,10 @@ export function createMessageHandler(db: DatabaseService, eventService: EventSer
 
     // No active session, no command — hint
     const lang = user.language as 'en' | 'ru';
-    await ctx.send(lang === 'ru'
-      ? 'Не понимаю. Используйте /help для списка команд.'
-      : "I don't understand. Use /help for commands.");
+    await ctx.send(
+      lang === 'ru'
+        ? 'Не понимаю. Используйте /help для списка команд.'
+        : "I don't understand. Use /help for commands.",
+    );
   };
 }

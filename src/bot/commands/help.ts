@@ -1,4 +1,6 @@
 // src/bot/commands/help.ts
+import type { BotCommandContext } from '../types.ts';
+
 const HELP_EN = `📖 <b>HyperCalendar Commands</b>
 
 📅 <b>Schedule Views</b>
@@ -53,7 +55,7 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
   /ping — проверка бота
   /help — это сообщение`;
 
-export async function handleHelp(ctx: any): Promise<void> {
+export async function handleHelp(ctx: BotCommandContext): Promise<void> {
   const lang = ctx.dbUser?.language ?? 'en';
   await ctx.send(lang === 'ru' ? HELP_RU : HELP_EN, { parse_mode: 'HTML' });
 }

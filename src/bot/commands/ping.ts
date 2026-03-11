@@ -1,8 +1,9 @@
 // src/bot/commands/ping.ts
 import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
+import type { BotCommandContext } from '../types.ts';
 
-export async function handlePing(ctx: any): Promise<void> {
+export async function handlePing(ctx: BotCommandContext): Promise<void> {
   const start = Date.now();
   const lang = (ctx.dbUser as User)?.language ?? 'en';
   const ms = Date.now() - start;

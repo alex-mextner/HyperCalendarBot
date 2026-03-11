@@ -1,17 +1,26 @@
 // src/bot/commands/start.ts
 import { InlineKeyboard } from 'gramio';
+import { CB, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import type { User } from '../../database/types.ts';
-import { t, CB } from '../../config/constants.ts';
-import { setSession, getSession, clearSession } from '../types.ts';
 import {
-  languageKeyboard, timezoneMethodKeyboard, timezoneManualKeyboard,
-  timezoneCitiesKeyboard, timezoneConfirmKeyboard, countryKeyboard,
+  getTimezoneDisplay,
+  guessCountryFromTimezone,
+  resolveTimezone,
+} from '../../services/timezone/timezone-service.ts';
+import {
+  countryKeyboard,
+  languageKeyboard,
   removeKeyboard,
+  timezoneCitiesKeyboard,
+  timezoneConfirmKeyboard,
+  timezoneManualKeyboard,
+  timezoneMethodKeyboard,
 } from '../keyboards.ts';
-import { resolveTimezone, getTimezoneDisplay, guessCountryFromTimezone } from '../../services/timezone/timezone-service.ts';
+import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+import { clearSession, getSession, setSession } from '../types.ts';
 
-export async function handleStart(ctx: any, db: DatabaseService): Promise<void> {
+export async function handleStart(ctx: BotCommandContext, _db: DatabaseService): Promise<void> {
   const user = ctx.dbUser as User;
 
   if (user.onboarding_completed) {
@@ -30,7 +39,7 @@ export async function handleStart(ctx: any, db: DatabaseService): Promise<void> 
  * Called from the callback handler router.
  */
 export async function handleOnboardingCallback(
-  ctx: any,
+  ctx: BotCallbackContext,
   db: DatabaseService,
   action: string,
   payload: string,
@@ -55,7 +64,7 @@ export async function handleOnboardingCallback(
   if (action === 'otr') {
     // Timezone region selected
     const session = getSession(userId);
-    const lang = (session?.data.lang as 'en' | 'ru') ?? user.language as 'en' | 'ru';
+    const _lang = (session?.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
     await ctx.editText(`Select city:`, {
       reply_markup: timezoneCitiesKeyboard(payload),
     });
@@ -63,11 +72,11 @@ export async function handleOnboardingCallback(
 
   if (action === 'ot') {
     const session = getSession(userId);
-    const lang = (session?.data.lang as 'en' | 'ru') ?? user.language as 'en' | 'ru';
+    const lang = (session?.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
 
     if (payload === 'confirm') {
       // Timezone already set in session data, proceed to country
-      const tz = session?.data.detectedTz as string ?? user.timezone;
+      const tz = (session?.data.detectedTz as string) ?? user.timezone;
       db.users.update(userId, { timezone: tz });
       const country = guessCountryFromTimezone(tz);
       setSession(userId, 'onboard:country', { ...session?.data, tz });
@@ -97,7 +106,7 @@ export async function handleOnboardingCallback(
   if (action === 'oc') {
     // Country selected or skipped
     const session = getSession(userId);
-    const lang = (session?.data.lang as 'en' | 'ru') ?? user.language as 'en' | 'ru';
+    const lang = (session?.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
 
     if (payload !== 'skip') {
       db.users.update(userId, { country_code: payload });
@@ -116,7 +125,7 @@ export async function handleOnboardingCallback(
     // Note: actual notification preferences are set in sub-project 04.
     // Here we just acknowledge the choice and finish.
     const session = getSession(userId);
-    const lang = (session?.data.lang as 'en' | 'ru') ?? user.language as 'en' | 'ru';
+    const lang = (session?.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
 
     db.users.update(userId, { onboarding_completed: 1 });
     clearSession(userId);
@@ -128,8 +137,8 @@ export async function handleOnboardingCallback(
  * Handle location message during onboarding
  */
 export async function handleOnboardingLocation(
-  ctx: any,
-  db: DatabaseService,
+  ctx: BotCommandContext,
+  _db: DatabaseService,
   latitude: number,
   longitude: number,
 ): Promise<void> {
@@ -137,7 +146,7 @@ export async function handleOnboardingLocation(
   const session = getSession(user.telegram_id);
   if (!session || !session.step.startsWith('onboard:tz')) return;
 
-  const lang = (session.data.lang as 'en' | 'ru') ?? user.language as 'en' | 'ru';
+  const lang = (session.data.lang as 'en' | 'ru') ?? (user.language as 'en' | 'ru');
   const tz = resolveTimezone(latitude, longitude);
   const display = getTimezoneDisplay(tz);
 

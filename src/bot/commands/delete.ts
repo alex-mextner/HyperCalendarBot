@@ -1,10 +1,12 @@
 // src/bot/commands/delete.ts
-import type { EventService } from '../../services/event/event-service.ts';
-import type { User } from '../../database/types.ts';
-import { t, CB } from '../../config/constants.ts';
-import { eventPickerKeyboard, deleteConfirmKeyboard } from '../keyboards.ts';
 
-export async function handleDelete(ctx: any, eventService: EventService): Promise<void> {
+import { CB, t } from '../../config/constants.ts';
+import type { User } from '../../database/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { deleteConfirmKeyboard, eventPickerKeyboard } from '../keyboards.ts';
+import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+
+export async function handleDelete(ctx: BotCommandContext, eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const upcoming = eventService.getUpcoming(user.telegram_id, 10);
@@ -20,7 +22,7 @@ export async function handleDelete(ctx: any, eventService: EventService): Promis
 }
 
 export async function handleDeleteCallback(
-  ctx: any,
+  ctx: BotCallbackContext,
   eventService: EventService,
   user: User,
   eventId: number,
@@ -45,7 +47,7 @@ export async function handleDeleteCallback(
 }
 
 export async function handleDeleteConfirmCallback(
-  ctx: any,
+  ctx: BotCallbackContext,
   eventService: EventService,
   user: User,
   eventId: number,

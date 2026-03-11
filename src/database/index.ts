@@ -2,12 +2,12 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { runMigrations } from './schema.ts';
+import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
-import { UserRepository } from './repositories/user.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
-import { dbLogger } from '../utils/logger.ts';
+import { UserRepository } from './repositories/user.repository.ts';
+import { runMigrations } from './schema.ts';
 
 export class DatabaseService {
   readonly db: Database;

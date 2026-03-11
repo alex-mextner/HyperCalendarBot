@@ -1,12 +1,17 @@
 // src/bot/commands/month.ts
-import type { EventService } from '../../services/event/event-service.ts';
-import type { DatabaseService } from '../../database/index.ts';
-import type { User } from '../../database/types.ts';
-import { TZDate } from '@date-fns/tz';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, getDaysInMonth, getDay } from 'date-fns';
-import { monthNavKeyboard } from '../keyboards.ts';
 
-export async function handleMonth(ctx: any, eventService: EventService, yearMonth?: string): Promise<void> {
+import { TZDate } from '@date-fns/tz';
+import { endOfMonth, format, getDay, getDaysInMonth, startOfMonth } from 'date-fns';
+import type { User } from '../../database/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { monthNavKeyboard } from '../keyboards.ts';
+import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+
+export async function handleMonth(
+  ctx: BotCommandContext | BotCallbackContext,
+  eventService: EventService,
+  yearMonth?: string,
+): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
@@ -24,8 +29,26 @@ export async function handleMonth(ctx: any, eventService: EventService, yearMont
   const daysInMonth = getDaysInMonth(monthStart);
 
   // Count events per day — single range query for the whole month, then bucket
-  const monthStartUtc = new TZDate(monthStart.getFullYear(), monthStart.getMonth(), 1, 0, 0, 0, 0, user.timezone).toISOString();
-  const monthEndUtc = new TZDate(monthEnd.getFullYear(), monthEnd.getMonth(), daysInMonth, 23, 59, 59, 999, user.timezone).toISOString();
+  const monthStartUtc = new TZDate(
+    monthStart.getFullYear(),
+    monthStart.getMonth(),
+    1,
+    0,
+    0,
+    0,
+    0,
+    user.timezone,
+  ).toISOString();
+  const monthEndUtc = new TZDate(
+    monthEnd.getFullYear(),
+    monthEnd.getMonth(),
+    daysInMonth,
+    23,
+    59,
+    59,
+    999,
+    user.timezone,
+  ).toISOString();
   const allOccurrences = eventService.getEventsInRange(user.telegram_id, monthStartUtc, monthEndUtc);
 
   const eventCounts: Record<number, number> = {};
@@ -39,14 +62,14 @@ export async function handleMonth(ctx: any, eventService: EventService, yearMont
   const header = 'Mo Tu We Th Fr Sa Su';
   const firstDayOfWeek = (getDay(monthStart) + 6) % 7; // 0=Mon
   let grid = '';
-  let dayNum = 1;
+  const _dayNum = 1;
 
   // Pad first week
   for (let i = 0; i < firstDayOfWeek; i++) grid += '   ';
 
   for (let d = 1; d <= daysInMonth; d++) {
     const dayStr = String(d).padStart(2, ' ');
-    grid += dayStr + ' ';
+    grid += `${dayStr} `;
     if ((firstDayOfWeek + d) % 7 === 0) grid += '\n';
   }
 

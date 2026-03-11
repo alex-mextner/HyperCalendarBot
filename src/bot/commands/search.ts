@@ -1,17 +1,21 @@
 // src/bot/commands/search.ts
-import type { EventService } from '../../services/event/event-service.ts';
+
+import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
-import { t, CB } from '../../config/constants.ts';
+import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventListItem } from '../../services/event/formatters.ts';
 import { eventPickerKeyboard } from '../keyboards.ts';
+import type { BotCommandContext } from '../types.ts';
 
-export async function handleSearch(ctx: any, eventService: EventService): Promise<void> {
+export async function handleSearch(ctx: BotCommandContext, eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const query = (ctx.args as string)?.trim();
 
   if (!query) {
-    await ctx.send(lang === 'ru' ? 'Укажите текст для поиска: /search <запрос>' : 'Provide search text: /search <query>');
+    await ctx.send(
+      lang === 'ru' ? 'Укажите текст для поиска: /search <запрос>' : 'Provide search text: /search <query>',
+    );
     return;
   }
 
@@ -22,9 +26,7 @@ export async function handleSearch(ctx: any, eventService: EventService): Promis
     return;
   }
 
-  const lines = results.slice(0, 10).map((e, i) =>
-    formatEventListItem(e, user.timezone, i)
-  );
+  const lines = results.slice(0, 10).map((e, i) => formatEventListItem(e, user.timezone, i));
 
   await ctx.send(
     `🔍 ${lang === 'ru' ? `Найдено ${results.length}:` : `Found ${results.length}:`}\n\n${lines.join('\n')}`,

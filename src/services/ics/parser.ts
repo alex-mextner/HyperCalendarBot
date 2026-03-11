@@ -42,7 +42,7 @@ export function parseIcs(icsContent: string): IcsEvent[] {
     const propName = keyParts[0];
 
     // Extract TZID parameter if present (e.g. DTSTART;TZID=Europe/Berlin:20260312T150000)
-    const tzidParam = keyParts.find(p => p.startsWith('TZID='));
+    const tzidParam = keyParts.find((p) => p.startsWith('TZID='));
     const tzid = tzidParam ? tzidParam.slice(5) : undefined;
 
     switch (propName) {
@@ -76,8 +76,8 @@ function unfoldIcsLines(content: string): string[] {
     .replace(/\r\n/g, '\n')
     .replace(/\n[ \t]/g, '') // Unfold continued lines
     .split('\n')
-    .map(l => l.trim())
-    .filter(l => l.length > 0);
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
 }
 
 /**
@@ -108,8 +108,5 @@ function icsDateToIso(icsDate: string, tzid?: string): string {
 }
 
 function unescapeIcs(value: string): string {
-  return value
-    .replace(/\\n/g, '\n')
-    .replace(/\\,/g, ',')
-    .replace(/\\\\/g, '\\');
+  return value.replace(/\\n/g, '\n').replace(/\\,/g, ',').replace(/\\\\/g, '\\');
 }

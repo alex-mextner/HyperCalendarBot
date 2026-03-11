@@ -6,17 +6,16 @@ export class ReminderRepository {
   constructor(private db: Database) {}
 
   create(eventId: number, minutesBefore: number): Reminder {
-    const result = this.db.prepare(
-      'INSERT INTO reminders (event_id, minutes_before) VALUES (?, ?)'
-    ).run(eventId, minutesBefore);
-    return this.db.prepare('SELECT * FROM reminders WHERE id = ?')
-      .get(Number(result.lastInsertRowid)) as Reminder;
+    const result = this.db
+      .prepare('INSERT INTO reminders (event_id, minutes_before) VALUES (?, ?)')
+      .run(eventId, minutesBefore);
+    return this.db.prepare('SELECT * FROM reminders WHERE id = ?').get(Number(result.lastInsertRowid)) as Reminder;
   }
 
   getByEventId(eventId: number): Reminder[] {
-    return this.db.prepare(
-      'SELECT * FROM reminders WHERE event_id = ? ORDER BY minutes_before'
-    ).all(eventId) as Reminder[];
+    return this.db
+      .prepare('SELECT * FROM reminders WHERE event_id = ? ORDER BY minutes_before')
+      .all(eventId) as Reminder[];
   }
 
   removeByEventId(eventId: number): void {

@@ -1,27 +1,28 @@
 // src/database/repositories/user.repository.ts
-import type { Database } from 'bun:sqlite';
-import type { User, CreateUserData, UpdateUserData } from '../types.ts';
+import type { Database, SQLQueryBindings } from 'bun:sqlite';
+import type { CreateUserData, UpdateUserData, User } from '../types.ts';
 
 export class UserRepository {
   constructor(private db: Database) {}
 
   findByTelegramId(telegramId: number): User | null {
-    return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?')
-      .get(telegramId) as User | null;
+    return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId) as User | null;
   }
 
   create(data: CreateUserData): User {
-    this.db.prepare(`
+    this.db
+      .prepare(`
       INSERT INTO users (telegram_id, username, first_name, language, timezone, country_code)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      data.telegram_id,
-      data.username ?? null,
-      data.first_name ?? null,
-      data.language ?? 'en',
-      data.timezone ?? 'UTC',
-      data.country_code ?? null,
-    );
+    `)
+      .run(
+        data.telegram_id,
+        data.username ?? null,
+        data.first_name ?? null,
+        data.language ?? 'en',
+        data.timezone ?? 'UTC',
+        data.country_code ?? null,
+      );
     return this.findByTelegramId(data.telegram_id)!;
   }
 
@@ -50,7 +51,7 @@ export class UserRepository {
     if (!existing) return null;
 
     const fields: string[] = [];
-    const values: any[] = [];
+    const values: SQLQueryBindings[] = [];
 
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {
@@ -64,9 +65,7 @@ export class UserRepository {
     fields.push("updated_at = datetime('now')");
     values.push(telegramId);
 
-    this.db.prepare(
-      `UPDATE users SET ${fields.join(', ')} WHERE telegram_id = ?`
-    ).run(...values);
+    this.db.prepare(`UPDATE users SET ${fields.join(', ')} WHERE telegram_id = ?`).run(...values);
 
     return this.findByTelegramId(telegramId)!;
   }

@@ -1,30 +1,45 @@
 // src/bot/index.ts
 import { Bot } from 'gramio';
-import type { DatabaseService } from '../database/index.ts';
-import { EventService } from '../services/event/event-service.ts';
-import { createUserResolver } from './middleware/user-resolver.ts';
-import { RateLimiter } from './middleware/rate-limiter.ts';
 import { RATE_LIMIT, t } from '../config/constants.ts';
+import type { DatabaseService } from '../database/index.ts';
+import type { User } from '../database/types.ts';
+import { EventService } from '../services/event/event-service.ts';
 import { botLogger } from '../utils/logger.ts';
-
-import { handlePing } from './commands/ping.ts';
+import { handleAdd } from './commands/add.ts';
+import { handleDelete } from './commands/delete.ts';
+import { handleEdit } from './commands/edit.ts';
+import { handleExport } from './commands/export.ts';
+import { handleFree } from './commands/free.ts';
 import { handleHelp } from './commands/help.ts';
+import { handleImport } from './commands/import.ts';
+import { handleMonth } from './commands/month.ts';
+import { handlePing } from './commands/ping.ts';
+import { handleSearch } from './commands/search.ts';
+import { handleSettings } from './commands/settings.ts';
 import { handleStart } from './commands/start.ts';
+import { handleTimezone } from './commands/timezone.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
-import { handleMonth } from './commands/month.ts';
-import { handleAdd } from './commands/add.ts';
-import { handleEdit } from './commands/edit.ts';
-import { handleDelete } from './commands/delete.ts';
-import { handleSearch } from './commands/search.ts';
-import { handleFree } from './commands/free.ts';
-import { handleTimezone } from './commands/timezone.ts';
-import { handleSettings } from './commands/settings.ts';
-import { handleImport } from './commands/import.ts';
-import { handleExport } from './commands/export.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createMessageHandler } from './handlers/message.handler.ts';
+import { RateLimiter } from './middleware/rate-limiter.ts';
+import { createUserResolver } from './middleware/user-resolver.ts';
+import type { BotCallbackContext, BotCommandContext } from './types.ts';
+
+/**
+ * GramIO's base Context class doesn't expose `from` or derived properties
+ * in its type definition — they come from TargetMixin on specific update
+ * contexts. We use a narrow interface and cast where needed.
+ */
+interface GramIOContextWithFrom {
+  from?: { id: number };
+}
+
+interface GramIOContextWithDerived {
+  dbUser?: User;
+  send(text: string): Promise<unknown>;
+}
 
 export function createBot(token: string, db: DatabaseService) {
   const eventService = new EventService(db.events, db.reminders);
@@ -35,47 +50,50 @@ export function createBot(token: string, db: DatabaseService) {
 
   const bot = new Bot(token)
     .derive(createUserResolver(db))
-    .use(async (context: any, next) => {
-      const userId = context.from?.id;
+    .use(async (context, next) => {
+      const ctx = context as unknown as GramIOContextWithFrom;
+      const userId = ctx.from?.id;
       if (!userId) return next();
       const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
       if (!allowed) {
         if (firstBlock && 'send' in context) {
-          const lang = ((context as any).dbUser?.language ?? 'en') as 'en' | 'ru';
-          await (context as any).send(t(lang).rate_limited);
+          const derived = context as unknown as GramIOContextWithDerived;
+          const lang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
+          await derived.send(t(lang).rate_limited);
         }
         return;
       }
       return next();
     })
     // Commands
-    .command('start', (ctx) => handleStart(ctx, db))
-    .command('ping', (ctx) => handlePing(ctx))
-    .command('help', (ctx) => handleHelp(ctx))
-    .command('today', (ctx) => handleToday(ctx, eventService))
-    .command('tomorrow', (ctx) => handleTomorrow(ctx, eventService))
-    .command('week', (ctx) => handleWeek(ctx, eventService))
-    .command('month', (ctx) => handleMonth(ctx, eventService))
-    .command('add', (ctx) => handleAdd(ctx, eventService))
-    .command('edit', (ctx) => handleEdit(ctx, eventService))
-    .command('delete', (ctx) => handleDelete(ctx, eventService))
-    .command('search', (ctx) => handleSearch(ctx, eventService))
-    .command('free', (ctx) => handleFree(ctx, eventService))
-    .command('timezone', (ctx) => handleTimezone(ctx, db))
-    .command('settings', (ctx) => handleSettings(ctx))
-    .command('import', (ctx) => handleImport(ctx, eventService))
-    .command('export', (ctx) => handleExport(ctx, eventService))
+    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, db))
+    .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
+    .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
+    .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService))
+    .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService))
+    .command('week', (ctx) => handleWeek(ctx as unknown as BotCommandContext, eventService))
+    .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService))
+    .command('add', (ctx) => handleAdd(ctx as unknown as BotCommandContext, eventService))
+    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
+    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
+    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
+    .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService))
+    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, db))
+    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
+    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, eventService))
+    .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     // Callback queries
-    .on('callback_query', createCallbackHandler(db, eventService))
+    .on('callback_query', (ctx) => createCallbackHandler(db, eventService)(ctx as unknown as BotCallbackContext))
     // Free-text messages
-    .on('message', createMessageHandler(db, eventService))
+    .on('message', (ctx) => createMessageHandler(db, eventService)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');
       try {
         if (context && 'send' in context) {
-          const errLang = ((context as any).dbUser?.language ?? 'en') as 'en' | 'ru';
-          (context as any).send(t(errLang).something_wrong);
+          const derived = context as unknown as GramIOContextWithDerived;
+          const errLang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
+          derived.send(t(errLang).something_wrong);
         }
       } catch {}
     });

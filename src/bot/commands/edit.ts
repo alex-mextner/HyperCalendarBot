@@ -1,14 +1,15 @@
 // src/bot/commands/edit.ts
-import type { EventService } from '../../services/event/event-service.ts';
+
+import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
-import { t } from '../../config/constants.ts';
-import { CB } from '../../config/constants.ts';
-import { setSession, getSession, clearSession } from '../types.ts';
-import { eventPickerKeyboard, editFieldKeyboard, recurringEditKeyboard } from '../keyboards.ts';
+import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
+import { editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
+import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+import { clearSession, getSession, setSession } from '../types.ts';
 
-export async function handleEdit(ctx: any, eventService: EventService): Promise<void> {
+export async function handleEdit(ctx: BotCommandContext, eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const upcoming = eventService.getUpcoming(user.telegram_id, 10);
@@ -27,7 +28,7 @@ export async function handleEdit(ctx: any, eventService: EventService): Promise<
  * Handle edit callbacks (called from callback handler)
  */
 export async function handleEditCallback(
-  ctx: any,
+  ctx: BotCallbackContext,
   eventService: EventService,
   user: User,
   eventId: number,
@@ -57,8 +58,8 @@ export async function handleEditCallback(
  * Handle field edit callback
  */
 export async function handleEditFieldCallback(
-  ctx: any,
-  eventService: EventService,
+  ctx: BotCallbackContext,
+  _eventService: EventService,
   user: User,
   eventId: number,
   field: string,
@@ -75,7 +76,10 @@ export async function handleEditFieldCallback(
   const prompts: Record<string, Record<string, string>> = {
     title: { en: 'Send new title:', ru: 'Отправьте новое название:' },
     time: { en: 'Send new date/time (e.g., "tomorrow 15:00"):', ru: 'Отправьте новую дату/время:' },
-    description: { en: 'Send new description (or "clear" to remove):', ru: 'Отправьте описание (или "clear" для удаления):' },
+    description: {
+      en: 'Send new description (or "clear" to remove):',
+      ru: 'Отправьте описание (или "clear" для удаления):',
+    },
     location: { en: 'Send new location (or "clear" to remove):', ru: 'Отправьте место (или "clear" для удаления):' },
   };
 
@@ -88,7 +92,7 @@ export async function handleEditFieldCallback(
  * Handle edit wizard step (called from message handler)
  */
 export async function handleEditWizardStep(
-  ctx: any,
+  ctx: BotCommandContext,
   eventService: EventService,
   user: User,
   text: string,
@@ -99,7 +103,7 @@ export async function handleEditWizardStep(
   const eventId = session.data.eventId as number;
   const field = session.step.replace('edit:', '');
 
-  let updateData: Record<string, unknown> = {};
+  const updateData: Record<string, unknown> = {};
 
   if (field === 'title') {
     updateData.title = text;

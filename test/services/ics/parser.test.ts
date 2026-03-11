@@ -1,5 +1,5 @@
 // test/services/ics/parser.test.ts
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { parseIcs } from '../../../src/services/ics/parser.ts';
 
 const SAMPLE_ICS = `BEGIN:VCALENDAR

@@ -1,11 +1,12 @@
 // test/services/event/event-service.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
-import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 
 function createTestDb() {
@@ -68,7 +69,7 @@ describe('EventService', () => {
 
     const occurrences = service.getEventsForDay(USER_ID, new Date('2026-03-11T12:00:00Z'), TZ);
     expect(occurrences.length).toBe(2);
-    const titles = occurrences.map(o => o.event.title).sort();
+    const titles = occurrences.map((o) => o.event.title).sort();
     expect(titles).toEqual(['Daily', 'OneOff']);
   });
 
@@ -85,12 +86,18 @@ describe('EventService', () => {
 
   test('getFreeSlots finds gaps between events', () => {
     service.createEvent({
-      user_id: USER_ID, title: 'A',
-      start_at: '2026-03-11T09:00:00Z', end_at: '2026-03-11T10:00:00Z', timezone: TZ,
+      user_id: USER_ID,
+      title: 'A',
+      start_at: '2026-03-11T09:00:00Z',
+      end_at: '2026-03-11T10:00:00Z',
+      timezone: TZ,
     });
     service.createEvent({
-      user_id: USER_ID, title: 'B',
-      start_at: '2026-03-11T12:00:00Z', end_at: '2026-03-11T13:00:00Z', timezone: TZ,
+      user_id: USER_ID,
+      title: 'B',
+      start_at: '2026-03-11T12:00:00Z',
+      end_at: '2026-03-11T13:00:00Z',
+      timezone: TZ,
     });
 
     const slots = service.getFreeSlots(USER_ID, new Date('2026-03-11T12:00:00Z'), TZ);

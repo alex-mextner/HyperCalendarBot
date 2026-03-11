@@ -48,8 +48,9 @@ export const MSG = {
     choose_manually: '⌨️ Choose Manually',
     country_prompt: 'Want to see public holidays in your calendar?',
     country_skip: 'Skip',
-    agenda_prompt: 'I can send you a morning summary of your day\'s events.\n\nEnable morning agenda at 08:00?',
-    onboard_done: '✅ All set! Here\'s what you can do:\n\n/add — create your first event\n/today — view today\'s schedule\n/help — see all commands',
+    agenda_prompt: "I can send you a morning summary of your day's events.\n\nEnable morning agenda at 08:00?",
+    onboard_done:
+      "✅ All set! Here's what you can do:\n\n/add — create your first event\n/today — view today's schedule\n/help — see all commands",
     no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
     no_events: 'No events in this range.',
     event_created: (title: string) => `✅ Created: "${title}"`,
@@ -66,7 +67,7 @@ export const MSG = {
     delete_pick: 'Which event to delete?',
     free_header: (date: string) => `📋 Free slots ${date}:`,
     pong: (ms: number) => `pong (${ms}ms)`,
-    welcome_back: "Welcome back! Use /help for commands.",
+    welcome_back: 'Welcome back! Use /help for commands.',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -79,7 +80,8 @@ export const MSG = {
     country_prompt: 'Показывать государственные праздники в календаре?',
     country_skip: 'Пропустить',
     agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВключить утреннюю сводку в 08:00?',
-    onboard_done: '✅ Всё готово! Вот что можно сделать:\n\n/add — создать событие\n/today — расписание на сегодня\n/help — список команд',
+    onboard_done:
+      '✅ Всё готово! Вот что можно сделать:\n\n/add — создать событие\n/today — расписание на сегодня\n/help — список команд',
     no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,
     no_events: 'Нет событий за этот период.',
     event_created: (title: string) => `✅ Создано: "${title}"`,
@@ -101,7 +103,7 @@ export const MSG = {
 } as const;
 
 export type Lang = keyof typeof MSG;
-export type Messages = typeof MSG[Lang];
+export type Messages = (typeof MSG)[Lang];
 
 export function t(lang: Lang): Messages {
   return MSG[lang] || MSG.en;
@@ -110,23 +112,43 @@ export function t(lang: Lang): Messages {
 // Popular timezone regions for manual selection
 export const TZ_REGIONS: Record<string, string[]> = {
   Europe: [
-    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
-    'Europe/Istanbul', 'Europe/Kiev', 'Europe/Warsaw', 'Europe/Rome',
-    'Europe/Madrid', 'Europe/Amsterdam', 'Europe/Belgrade', 'Europe/Helsinki',
+    'Europe/London',
+    'Europe/Paris',
+    'Europe/Berlin',
+    'Europe/Moscow',
+    'Europe/Istanbul',
+    'Europe/Kiev',
+    'Europe/Warsaw',
+    'Europe/Rome',
+    'Europe/Madrid',
+    'Europe/Amsterdam',
+    'Europe/Belgrade',
+    'Europe/Helsinki',
   ],
   Asia: [
-    'Asia/Dubai', 'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Singapore',
-    'Asia/Tokyo', 'Asia/Seoul', 'Asia/Shanghai', 'Asia/Hong_Kong',
-    'Asia/Almaty', 'Asia/Tbilisi', 'Asia/Yerevan', 'Asia/Tashkent',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Bangkok',
+    'Asia/Singapore',
+    'Asia/Tokyo',
+    'Asia/Seoul',
+    'Asia/Shanghai',
+    'Asia/Hong_Kong',
+    'Asia/Almaty',
+    'Asia/Tbilisi',
+    'Asia/Yerevan',
+    'Asia/Tashkent',
   ],
   Americas: [
-    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-    'America/Toronto', 'America/Sao_Paulo', 'America/Mexico_City', 'America/Buenos_Aires',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Toronto',
+    'America/Sao_Paulo',
+    'America/Mexico_City',
+    'America/Buenos_Aires',
   ],
-  Africa: [
-    'Africa/Cairo', 'Africa/Lagos', 'Africa/Johannesburg', 'Africa/Nairobi',
-  ],
-  Oceania: [
-    'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland',
-  ],
+  Africa: ['Africa/Cairo', 'Africa/Lagos', 'Africa/Johannesburg', 'Africa/Nairobi'],
+  Oceania: ['Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland'],
 };

@@ -1,5 +1,5 @@
 // test/bot/middleware/rate-limiter.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { RateLimiter } from '../../../src/bot/middleware/rate-limiter.ts';
 
 describe('RateLimiter', () => {

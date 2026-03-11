@@ -1,7 +1,8 @@
 // src/index.ts
+
+import { createBot } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
-import { createBot } from './bot/index.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();

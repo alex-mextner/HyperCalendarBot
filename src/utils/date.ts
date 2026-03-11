@@ -1,5 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, addDays, addMinutes, parse } from 'date-fns';
+import { addDays, addMinutes, endOfDay, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
 
 export function toUserTime(isoUtc: string, timezone: string): string {
@@ -74,9 +74,27 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   }
 
   const dayNames: Record<string, number> = {
-    mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6, sun: 0,
-    monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6, sunday: 0,
-    пн: 1, вт: 2, ср: 3, чт: 4, пт: 5, сб: 6, вс: 0,
+    mon: 1,
+    tue: 2,
+    wed: 3,
+    thu: 4,
+    fri: 5,
+    sat: 6,
+    sun: 0,
+    monday: 1,
+    tuesday: 2,
+    wednesday: 3,
+    thursday: 4,
+    friday: 5,
+    saturday: 6,
+    sunday: 0,
+    пн: 1,
+    вт: 2,
+    ср: 3,
+    чт: 4,
+    пт: 5,
+    сб: 6,
+    вс: 0,
   };
 
   const nextDayMatch = trimmed.match(/^(?:next\s+)?(\w+)\s+(\d{1,2}):(\d{2})$/);
@@ -93,18 +111,45 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     }
   }
 
-  const monthDateMatch = trimmed.match(
-    /^(\w+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/
-  );
+  const monthDateMatch = trimmed.match(/^(\w+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/);
   if (monthDateMatch) {
     const [, part1, part2, h, m] = monthDateMatch;
     const months: Record<string, number> = {
-      jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
-      jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11,
-      january: 0, february: 1, march: 2, april: 3, june: 5,
-      july: 6, august: 7, september: 8, october: 9, november: 10, december: 11,
-      янв: 0, фев: 1, мар: 2, апр: 3, май: 4, июн: 5,
-      июл: 6, авг: 7, сен: 8, окт: 9, ноя: 10, дек: 11,
+      jan: 0,
+      feb: 1,
+      mar: 2,
+      apr: 3,
+      may: 4,
+      jun: 5,
+      jul: 6,
+      aug: 7,
+      sep: 8,
+      oct: 9,
+      nov: 10,
+      dec: 11,
+      january: 0,
+      february: 1,
+      march: 2,
+      april: 3,
+      june: 5,
+      july: 6,
+      august: 7,
+      september: 8,
+      october: 9,
+      november: 10,
+      december: 11,
+      янв: 0,
+      фев: 1,
+      мар: 2,
+      апр: 3,
+      май: 4,
+      июн: 5,
+      июл: 6,
+      авг: 7,
+      сен: 8,
+      окт: 9,
+      ноя: 10,
+      дек: 11,
     };
     const monthNum = months[part1!];
     if (monthNum !== undefined) {
@@ -121,7 +166,10 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
 }
 
 export function parseDuration(input: string): number | null {
-  const match = input.trim().toLowerCase().match(/^(?:(\d+)\s*[hч])?\s*(?:(\d+)\s*[mм])?$/);
+  const match = input
+    .trim()
+    .toLowerCase()
+    .match(/^(?:(\d+)\s*[hч])?\s*(?:(\d+)\s*[mм])?$/);
   if (!match || (!match[1] && !match[2])) return null;
   const hours = match[1] ? Number(match[1]) : 0;
   const mins = match[2] ? Number(match[2]) : 0;

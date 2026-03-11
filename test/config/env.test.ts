@@ -1,5 +1,5 @@
 // test/config/env.test.ts
-import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { loadConfig } from '../../src/config/env.ts';
 
 describe('loadConfig', () => {

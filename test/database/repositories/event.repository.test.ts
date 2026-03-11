@@ -1,10 +1,11 @@
 // test/database/repositories/event.repository.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -65,11 +66,17 @@ describe('EventRepository', () => {
 
     const result = events.getInRange(USER_ID, '2026-03-11T00:00:00Z', '2026-03-12T23:59:59Z');
     expect(result.length).toBe(2);
-    expect(result.map(e => e.title)).toEqual(['E1', 'E2']);
+    expect(result.map((e) => e.title)).toEqual(['E1', 'E2']);
   });
 
   test('getRecurringTemplates returns events with recurrence_rule', () => {
-    events.create({ user_id: USER_ID, title: 'Daily', start_at: '2026-01-01T09:00:00Z', timezone: 'UTC', recurrence_rule: 'FREQ=DAILY' });
+    events.create({
+      user_id: USER_ID,
+      title: 'Daily',
+      start_at: '2026-01-01T09:00:00Z',
+      timezone: 'UTC',
+      recurrence_rule: 'FREQ=DAILY',
+    });
     events.create({ user_id: USER_ID, title: 'OneOff', start_at: '2026-03-11T09:00:00Z', timezone: 'UTC' });
 
     const templates = events.getRecurringTemplates(USER_ID);
@@ -78,20 +85,35 @@ describe('EventRepository', () => {
   });
 
   test('update modifies event fields', () => {
-    const created = events.create({ user_id: USER_ID, title: 'Old', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
+    const created = events.create({
+      user_id: USER_ID,
+      title: 'Old',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+    });
     const updated = events.update(created.id, USER_ID, { title: 'New' });
     expect(updated!.title).toBe('New');
   });
 
   test('remove deletes event', () => {
-    const created = events.create({ user_id: USER_ID, title: 'Del', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
+    const created = events.create({
+      user_id: USER_ID,
+      title: 'Del',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+    });
     const removed = events.remove(created.id, USER_ID);
     expect(removed).toBe(true);
     expect(events.findById(created.id, USER_ID)).toBeNull();
   });
 
   test('search finds events by title substring', () => {
-    events.create({ user_id: USER_ID, title: 'Dentist appointment', start_at: '2026-03-12T12:00:00Z', timezone: 'UTC' });
+    events.create({
+      user_id: USER_ID,
+      title: 'Dentist appointment',
+      start_at: '2026-03-12T12:00:00Z',
+      timezone: 'UTC',
+    });
     events.create({ user_id: USER_ID, title: 'Team lunch', start_at: '2026-03-12T12:00:00Z', timezone: 'UTC' });
 
     const results = events.search(USER_ID, 'dent');
@@ -111,14 +133,17 @@ describe('EventRepository', () => {
 
   test('getUpcoming includes recurring templates regardless of start_at', () => {
     events.create({
-      user_id: USER_ID, title: 'Old recurring', start_at: '2020-01-01T10:00:00Z',
-      timezone: 'UTC', recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO',
+      user_id: USER_ID,
+      title: 'Old recurring',
+      start_at: '2020-01-01T10:00:00Z',
+      timezone: 'UTC',
+      recurrence_rule: 'FREQ=WEEKLY;BYDAY=MO',
     });
     events.create({ user_id: USER_ID, title: 'Future one-off', start_at: '2099-06-01T10:00:00Z', timezone: 'UTC' });
 
     const upcoming = events.getUpcoming(USER_ID, 10);
     expect(upcoming.length).toBe(2);
-    const titles = upcoming.map(e => e.title);
+    const titles = upcoming.map((e) => e.title);
     expect(titles).toContain('Old recurring');
     expect(titles).toContain('Future one-off');
   });

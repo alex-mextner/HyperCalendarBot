@@ -1,8 +1,9 @@
 // test/database/schema.test.ts
-import { describe, test, expect, beforeEach } from 'bun:test';
+
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Migration } from '../../src/database/schema.ts';
+import { runMigrations } from '../../src/database/schema.ts';
 
 describe('runMigrations', () => {
   let db: Database;
@@ -23,10 +24,10 @@ describe('runMigrations', () => {
 
     runMigrations(db, migrations);
 
-    const tables = db.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-    ).all() as { name: string }[];
-    const tableNames = tables.map(t => t.name);
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const tableNames = tables.map((t) => t.name);
 
     expect(tableNames).toContain('migrations');
     expect(tableNames).toContain('test_table');
@@ -37,7 +38,9 @@ describe('runMigrations', () => {
     const migrations: Migration[] = [
       {
         name: '001_test',
-        up: () => { callCount++; },
+        up: () => {
+          callCount++;
+        },
       },
     ];
 
@@ -50,8 +53,18 @@ describe('runMigrations', () => {
   test('applies migrations in order', () => {
     const order: string[] = [];
     const migrations: Migration[] = [
-      { name: '001_first', up: () => { order.push('first'); } },
-      { name: '002_second', up: () => { order.push('second'); } },
+      {
+        name: '001_first',
+        up: () => {
+          order.push('first');
+        },
+      },
+      {
+        name: '002_second',
+        up: () => {
+          order.push('second');
+        },
+      },
     ];
 
     runMigrations(db, migrations);

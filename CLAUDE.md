@@ -109,3 +109,48 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Linting
+
+- **Biome** for linting and formatting. Config in `biome.jsonc`.
+- `bun run lint` — check, `bun run lint:fix` — auto-fix, `bun run format` — format.
+- Run `biome` directly (from `node_modules/.bin`), not via `bunx biome`.
+- **Zero warnings policy**: lint warnings are NOT acceptable. Fix before committing.
+
+## Coding Guidelines
+
+- Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
+- **Smallest reasonable changes**: make the minimum change to achieve the outcome.
+  Don't refactor surroundings "while you're at it".
+- **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
+  `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
+- Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **Never throw away implementations**: never rewrite working code without explicit permission.
+- **Fix broken things immediately** when you find them.
+- **Never add temporal context comments**: "improved", "better", "new", "refactored from".
+  Comments must be evergreen — describe the code as it is now.
+- **Never add instructional comments**: "copy this pattern", "use this instead", "prefer X over Y".
+- **Naming**: describe WHAT the code does, not HOW. No implementation details in names
+  (`Validator` not `ZodValidator`). No temporal names (`NewAPI`, `LegacyHandler`).
+
+## Testing Guidelines
+
+- **Always write tests**: new functionality must include unit tests; bug fixes must include
+  regression tests that reproduce the bug before the fix.
+- **TDD workflow** (mandatory for new features and bugfixes):
+  1. Write a failing test that validates the desired behavior
+  2. Run the test — confirm it fails for the RIGHT reason (not a syntax error or wrong import)
+  3. Write ONLY enough code to make the test pass
+  4. Run the test — confirm it passes
+  5. Refactor while keeping tests green
+- **Tests must exercise production code**: never reimplement logic in tests.
+- **Never delete a failing test**. Investigate and fix the root cause.
+- **Changing tests to match code is a red flag**: always analyze WHY.
+
+## Debugging
+
+- Read error messages carefully — they often contain the exact solution.
+- Find similar working code in the same codebase. Compare working vs broken.
+- State a single hypothesis, make the smallest possible change to test it.
+- NEVER add multiple fixes at once. ALWAYS test after each change.

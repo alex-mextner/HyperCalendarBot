@@ -1,10 +1,11 @@
 // src/services/event/event-service.ts
+
+import { DEFAULTS } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
-import type { CalendarEvent, CreateEventData, UpdateEventData, EventOccurrence } from '../../database/types.ts';
+import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
+import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
 import { expandRecurrence } from './recurrence.ts';
-import { getDayRangeUtc, getWeekRangeUtc, getNDayRangeUtc } from '../../utils/date.ts';
-import { DEFAULTS } from '../../config/constants.ts';
 
 export interface FreeSlot {
   start: string;
@@ -55,13 +56,15 @@ export class EventService {
   }
 
   getEventsInRange(userId: number, startUtc: string, endUtc: string): EventOccurrence[] {
-    const oneOff = this.eventRepo.getInRange(userId, startUtc, endUtc)
-      .map(event => ({
-        event,
-        occurrence_start: event.start_at,
-        occurrence_end: event.end_at,
-        is_exception: false,
-      } satisfies EventOccurrence));
+    const oneOff = this.eventRepo.getInRange(userId, startUtc, endUtc).map(
+      (event) =>
+        ({
+          event,
+          occurrence_start: event.start_at,
+          occurrence_end: event.end_at,
+          is_exception: false,
+        }) satisfies EventOccurrence,
+    );
 
     const templates = this.eventRepo.getRecurringTemplates(userId);
     const recurring: EventOccurrence[] = [];
@@ -71,9 +74,7 @@ export class EventService {
       recurring.push(...expanded);
     }
 
-    return [...oneOff, ...recurring].sort((a, b) =>
-      a.occurrence_start.localeCompare(b.occurrence_start)
-    );
+    return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
   }
 
   getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {
@@ -81,8 +82,8 @@ export class EventService {
     const events = this.getEventsInRange(userId, dayStart, dayEnd);
 
     const busy = events
-      .filter(o => o.occurrence_end)
-      .map(o => ({
+      .filter((o) => o.occurrence_end)
+      .map((o) => ({
         start: new Date(o.occurrence_start).getTime(),
         end: new Date(o.occurrence_end!).getTime(),
       }))

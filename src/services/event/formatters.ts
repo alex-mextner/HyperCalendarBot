@@ -1,6 +1,6 @@
 // src/services/event/formatters.ts
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
-import { formatTime, formatTimeRange, formatDateHeader, formatDateShort } from '../../utils/date.ts';
+import { formatDateHeader, formatDateShort, formatTime, formatTimeRange } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 
 export function formatDayAgenda(
@@ -16,7 +16,7 @@ export function formatDayAgenda(
     return `${header}\n\n${noEvents}`;
   }
 
-  const lines = occurrences.map(occ => {
+  const lines = occurrences.map((occ) => {
     const time = formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
     const title = escapeHtml(occ.event.title);
     const recur = occ.event.recurrence_rule ? ' 🔁' : '';
@@ -54,7 +54,9 @@ export function formatWeekAgenda(
       const noEvents = lang === 'ru' ? '— нет событий' : '— no events';
       lines.push(`${dayLabel}  ${noEvents}`);
     } else {
-      lines.push(`${dayLabel}  ▪ ${dayEvents.length} ${dayEvents.length === 1 ? (lang === 'ru' ? 'событие' : 'event') : (lang === 'ru' ? 'событий' : 'events')}`);
+      lines.push(
+        `${dayLabel}  ▪ ${dayEvents.length} ${dayEvents.length === 1 ? (lang === 'ru' ? 'событие' : 'event') : lang === 'ru' ? 'событий' : 'events'}`,
+      );
       for (const occ of dayEvents) {
         const time = formatTime(occ.occurrence_start, timezone);
         lines.push(`  ${time} ${escapeHtml(occ.event.title)}`);

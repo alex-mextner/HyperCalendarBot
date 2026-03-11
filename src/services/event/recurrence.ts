@@ -1,4 +1,4 @@
-import { RRule, rrulestr } from 'rrule';
+import { rrulestr } from 'rrule';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 
 export function expandRecurrence(
@@ -13,9 +13,7 @@ export function expandRecurrence(
   const rruleString = `DTSTART:${formatRRuleDate(dtstart)}\nRRULE:${template.recurrence_rule}`;
   const rule = rrulestr(rruleString);
 
-  const durationMs = template.end_at
-    ? new Date(template.end_at).getTime() - new Date(template.start_at).getTime()
-    : 0;
+  const durationMs = template.end_at ? new Date(template.end_at).getTime() - new Date(template.start_at).getTime() : 0;
 
   const exceptionMap = new Map<string, CalendarEvent>();
   for (const exc of exceptions) {
@@ -40,9 +38,9 @@ export function expandRecurrence(
       if (exception.is_cancelled) {
         continue;
       }
-      const occEnd = exception.end_at ?? (durationMs
-        ? new Date(new Date(exception.start_at).getTime() + durationMs).toISOString()
-        : null);
+      const occEnd =
+        exception.end_at ??
+        (durationMs ? new Date(new Date(exception.start_at).getTime() + durationMs).toISOString() : null);
       occurrences.push({
         event: exception,
         occurrence_start: exception.start_at,
@@ -50,9 +48,7 @@ export function expandRecurrence(
         is_exception: true,
       });
     } else {
-      const occEnd = durationMs
-        ? new Date(date.getTime() + durationMs).toISOString()
-        : null;
+      const occEnd = durationMs ? new Date(date.getTime() + durationMs).toISOString() : null;
       occurrences.push({
         event: template,
         occurrence_start: occStart,
@@ -62,11 +58,12 @@ export function expandRecurrence(
     }
   }
 
-  return occurrences.sort((a, b) =>
-    a.occurrence_start.localeCompare(b.occurrence_start)
-  );
+  return occurrences.sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
 }
 
 function formatRRuleDate(date: Date): string {
-  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  return date
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}/, '');
 }
