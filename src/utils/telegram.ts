@@ -16,5 +16,7 @@ export function formatUtcOffset(timezone: string): string {
   const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
   const parts = formatter.formatToParts(d);
   const tzPart = parts.find(p => p.type === 'timeZoneName');
-  return tzPart?.value ?? timezone;
+  const raw = tzPart?.value ?? timezone;
+  // Normalize GMT+X to UTC+X
+  return raw.replace(/^GMT/, 'UTC');
 }
