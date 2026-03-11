@@ -1,4 +1,7 @@
 // src/bot/handlers/message.handler.ts
+
+import type { LocationContext } from '@gramio/contexts';
+import type { AnyBot } from 'gramio';
 import type { DatabaseService } from '../../database/index.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -7,37 +10,45 @@ import { handleAddWizardStep } from '../commands/add.ts';
 import { handleEditWizardStep } from '../commands/edit.ts';
 import { handleImportFile } from '../commands/import.ts';
 import { handleOnboardingLocation } from '../commands/start.ts';
-import type { BotCommandContext } from '../types.ts';
+import type { BotCommandContext, DerivedProps } from '../types.ts';
 import { clearSession, getSession } from '../types.ts';
+
+/**
+ * Handle location messages (GramIO routes these to a separate 'location' event).
+ * Used for onboarding timezone detection and /timezone command.
+ */
+export function createLocationHandler(db: DatabaseService) {
+  return async (ctx: LocationContext<AnyBot> & DerivedProps) => {
+    const user = ctx.dbUser as User | undefined;
+    if (!user) return;
+
+    const { latitude, longitude } = ctx.eventLocation;
+    const session = getSession(user.telegram_id);
+
+    if (session?.step.startsWith('onboard:tz')) {
+      return handleOnboardingLocation(ctx as unknown as BotCommandContext, latitude, longitude);
+    }
+
+    if (session?.step === 'tz:select') {
+      const tz = resolveTimezone(latitude, longitude);
+      db.users.update(user.telegram_id, { timezone: tz });
+      clearSession(user.telegram_id);
+      await ctx.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
+      return;
+    }
+
+    // Ignore unsolicited location
+  };
+}
 
 /**
  * Handle free-text messages and file uploads.
  * Routes to active wizard sessions or falls back to "use /help".
  */
-export function createMessageHandler(db: DatabaseService, eventService: EventService, botToken: string) {
+export function createMessageHandler(eventService: EventService, botToken: string) {
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
-
-    // Handle location (for onboarding or /timezone)
-    if (ctx.location) {
-      const { latitude, longitude } = ctx.location;
-      const session = getSession(user.telegram_id);
-
-      if (session?.step.startsWith('onboard:tz')) {
-        return handleOnboardingLocation(ctx, latitude, longitude);
-      }
-
-      if (session?.step === 'tz:select') {
-        const tz = resolveTimezone(latitude, longitude);
-        db.users.update(user.telegram_id, { timezone: tz });
-        clearSession(user.telegram_id);
-        await ctx.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
-        return;
-      }
-
-      return; // Ignore unsolicited location
-    }
 
     // Handle document (for /import)
     if (ctx.document) {

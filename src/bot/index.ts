@@ -22,7 +22,7 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
-import { createMessageHandler } from './handlers/message.handler.ts';
+import { createLocationHandler, createMessageHandler } from './handlers/message.handler.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
 import type { BotCallbackContext, BotCommandContext } from './types.ts';
@@ -84,8 +84,12 @@ export function createBot(token: string, db: DatabaseService) {
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     // Callback queries
     .on('callback_query', (ctx) => createCallbackHandler(db, eventService)(ctx as unknown as BotCallbackContext))
+    // Location messages (GramIO routes these separately from 'message')
+    .on('location', (ctx) =>
+      createLocationHandler(db)(ctx as unknown as Parameters<ReturnType<typeof createLocationHandler>>[0]),
+    )
     // Free-text messages
-    .on('message', (ctx) => createMessageHandler(db, eventService, token)(ctx as unknown as BotCommandContext))
+    .on('message', (ctx) => createMessageHandler(eventService, token)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');
