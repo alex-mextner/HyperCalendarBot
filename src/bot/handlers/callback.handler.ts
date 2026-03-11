@@ -27,7 +27,7 @@ export function createCallbackHandler(db: DatabaseService, eventService: EventSe
 
     try {
       // Onboarding actions
-      if ([CB.ONBOARD_LANG, CB.ONBOARD_TZ_REGION, CB.ONBOARD_TZ, CB.ONBOARD_COUNTRY, CB.ONBOARD_AGENDA].includes(action)) {
+      if (([CB.ONBOARD_LANG, CB.ONBOARD_TZ_REGION, CB.ONBOARD_TZ, CB.ONBOARD_COUNTRY, CB.ONBOARD_AGENDA] as string[]).includes(action)) {
         return handleOnboardingCallback(ctx, db, action, payload);
       }
 

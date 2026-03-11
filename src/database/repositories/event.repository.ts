@@ -58,7 +58,7 @@ export class EventRepository {
     if (!existing) return null;
 
     const fields: string[] = [];
-    const values: unknown[] = [];
+    const values: any[] = [];
 
     for (const [key, value] of Object.entries(data)) {
       if (value !== undefined) {

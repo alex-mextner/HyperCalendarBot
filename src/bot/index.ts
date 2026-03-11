@@ -35,7 +35,7 @@ export function createBot(token: string, db: DatabaseService) {
 
   const bot = new Bot(token)
     .derive(createUserResolver(db))
-    .use(async (context, next) => {
+    .use(async (context: any, next) => {
       const userId = context.from?.id;
       if (!userId) return next();
       const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);

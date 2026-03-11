@@ -6,7 +6,7 @@ import type { DatabaseService } from '../../database/index.ts';
  * Attaches dbUser, userTimezone, and lang to context.
  */
 export function createUserResolver(db: DatabaseService) {
-  return async (context: { from?: { id: number; username?: string; firstName?: string } }) => {
+  return async (context: any) => {
     if (!context.from) return {};
 
     const dbUser = db.users.findOrCreate({
