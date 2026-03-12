@@ -1,6 +1,6 @@
 // src/services/event/formatters.ts
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
-import { formatDateHeader, formatDateShort, formatTime, formatTimeRange } from '../../utils/date.ts';
+import { formatDateHeader, formatDateShort, formatDuration, formatTime, formatTimeRange } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 
 export function formatDayAgenda(
@@ -78,7 +78,12 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
     lines.push(`📅 ${lang === 'ru' ? 'Весь день' : 'All day'}`);
   } else {
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
-    lines.push(`🕐 ${time}`);
+    if (event.end_at) {
+      const duration = formatDuration(event.start_at, event.end_at, lang);
+      lines.push(`🕐 ${time} (${duration})`);
+    } else {
+      lines.push(`🕐 ${time}`);
+    }
   }
 
   if (event.description) {

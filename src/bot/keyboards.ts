@@ -82,9 +82,10 @@ export function editFieldKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKey
     .text(lang === 'ru' ? 'Название' : 'Title', `${CB.EDIT_FIELD}:${eventId}:title`)
     .text(lang === 'ru' ? 'Время' : 'Time', `${CB.EDIT_FIELD}:${eventId}:time`)
     .row()
+    .text(lang === 'ru' ? 'Длительность' : 'Duration', `${CB.EDIT_FIELD}:${eventId}:duration`)
     .text(lang === 'ru' ? 'Описание' : 'Description', `${CB.EDIT_FIELD}:${eventId}:description`)
-    .text(lang === 'ru' ? 'Место' : 'Location', `${CB.EDIT_FIELD}:${eventId}:location`)
     .row()
+    .text(lang === 'ru' ? 'Место' : 'Location', `${CB.EDIT_FIELD}:${eventId}:location`)
     .text(lang === 'ru' ? 'Отмена' : 'Cancel', `${CB.EDIT_FIELD}:cancel`);
 }
 

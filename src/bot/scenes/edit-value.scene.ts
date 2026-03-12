@@ -1,19 +1,27 @@
 // src/bot/scenes/edit-value.scene.ts
 import { Scene } from '@gramio/scenes';
+import { addMinutes } from 'date-fns';
 import { t } from '../../config/constants.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { parseSimpleDate } from '../../utils/date.ts';
-import { getSceneLang, getSceneUser, isCommandEscape } from './helpers.ts';
+import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { eventActionsKeyboard } from '../keyboards.ts';
+import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface EditValueParams {
   eventId: number;
   field: string;
+  chatId: number;
+  messageId: number;
 }
 
 const EDIT_PROMPTS: Record<string, Record<string, string>> = {
   title: { en: 'Send new title:', ru: 'Отправьте новое название:' },
   time: { en: 'Send new date/time (e.g., "tomorrow 15:00"):', ru: 'Отправьте новую дату/время:' },
+  duration: {
+    en: 'Send duration (e.g., "1h 30m") or "clear" to remove:',
+    ru: 'Отправьте длительность (напр. "1ч 30м") или "clear" для удаления:',
+  },
   description: {
     en: 'Send new description (or "clear" to remove):',
     ru: 'Отправьте описание (или "clear" для удаления):',
@@ -34,16 +42,6 @@ export function createEditValueScene(eventService: EventService) {
         const lang = getSceneLang(context);
         const params = (context as unknown as { scene: { params: EditValueParams } }).scene.params;
         await context.send(EDIT_PROMPTS[params.field]?.[lang] ?? 'Send new value:');
-      })
-      .on('message', async (context, next) => {
-        const text = (context as unknown as { text?: string }).text;
-        if (isCommandEscape(text) && !context.scene.step.firstTime) {
-          await context.scene.exit();
-          const lang = getSceneLang(context);
-          await context.send(lang === 'ru' ? 'Отменено.' : 'Cancelled.');
-          return;
-        }
-        return next();
       })
       .step('message', async (context) => {
         const lang = getSceneLang(context);
@@ -68,6 +66,27 @@ export function createEditValueScene(eventService: EventService) {
             return;
           }
           updateData.start_at = parsed.toISOString();
+        } else if (field === 'duration') {
+          if (text.toLowerCase() === 'clear') {
+            updateData.end_at = null;
+          } else {
+            const mins = parseDuration(text);
+            if (!mins) {
+              await context.send(
+                lang === 'ru'
+                  ? 'Не могу разобрать. Примеры: 1ч, 30м, 1ч 30м'
+                  : "Can't parse. Examples: 1h, 30m, 1h 30m",
+              );
+              return;
+            }
+            const event = eventService.getEvent(eventId, user.telegram_id);
+            if (!event) {
+              await context.scene.exit();
+              await context.send(t(lang).something_wrong);
+              return;
+            }
+            updateData.end_at = addMinutes(new Date(event.start_at), mins).toISOString();
+          }
         } else if (field === 'description') {
           updateData.description = text.toLowerCase() === 'clear' ? null : text;
         } else if (field === 'location') {
@@ -75,11 +94,24 @@ export function createEditValueScene(eventService: EventService) {
         }
 
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
+        const { chatId, messageId } = context.scene.params;
         await context.scene.exit();
 
         if (updated) {
           const detail = formatEventDetail(updated, user.timezone, lang);
-          await context.send(`${t(lang).event_updated(updated.title)}\n\n${detail}`, { parse_mode: 'HTML' });
+          const editText = `${t(lang).event_updated(updated.title)}\n\n${detail}`;
+          const bot = (
+            context as unknown as {
+              bot: { api: { editMessageText: (p: Record<string, unknown>) => Promise<unknown> } };
+            }
+          ).bot;
+          await bot.api.editMessageText({
+            chat_id: chatId,
+            message_id: messageId,
+            text: editText,
+            parse_mode: 'HTML',
+            reply_markup: eventActionsKeyboard(eventId, lang),
+          });
         } else {
           await context.send(t(lang).something_wrong);
         }
