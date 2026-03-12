@@ -37,7 +37,7 @@ export function createEditValueScene(eventService: EventService) {
       })
       .on('message', async (context, next) => {
         const text = (context as unknown as { text?: string }).text;
-        if (isCommandEscape(text)) {
+        if (isCommandEscape(text) && !context.scene.step.firstTime) {
           await context.scene.exit();
           const lang = getSceneLang(context);
           await context.send(lang === 'ru' ? 'Отменено.' : 'Cancelled.');

@@ -29,7 +29,7 @@ export function createTimezoneScene(db: DatabaseService) {
       })
       .on('message', async (context, next) => {
         const text = (context as unknown as { text?: string }).text;
-        if (text?.startsWith('/')) {
+        if (text?.startsWith('/') && !context.scene.step.firstTime) {
           await context.scene.exit();
           const lang = getSceneLang(context);
           await context.send(lang === 'ru' ? 'Отменено.' : 'Cancelled.', {
