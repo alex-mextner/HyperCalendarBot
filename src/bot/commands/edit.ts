@@ -39,6 +39,8 @@ export async function handleEditCallback(
     return;
   }
 
+  await ctx.answer();
+
   if (event.recurrence_rule) {
     await ctx.editText(formatEventDetail(event, user.timezone, lang), {
       parse_mode: 'HTML',
@@ -70,6 +72,8 @@ export async function handleEditFieldCallback(
     return;
   }
 
+  const chatId = ctx.chatId!;
+  const messageId = (ctx.message as unknown as { id: number } | undefined)?.id ?? 0;
   await ctx.answer();
-  await ctx.scene.enter(editValueScene, { eventId, field });
+  await ctx.scene.enter(editValueScene, { eventId, field, chatId, messageId });
 }

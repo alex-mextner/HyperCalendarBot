@@ -30,7 +30,7 @@ export async function handleDeleteCallback(
   const lang = user.language as 'en' | 'ru';
 
   if (eventId === 0) {
-    // Cancel
+    await ctx.answer();
     await ctx.editText(lang === 'ru' ? 'Отменено.' : 'Cancelled.');
     return;
   }
@@ -41,6 +41,7 @@ export async function handleDeleteCallback(
     return;
   }
 
+  await ctx.answer();
   await ctx.editText(t(lang).confirm_delete(event.title), {
     reply_markup: deleteConfirmKeyboard(eventId, lang),
   });
@@ -57,6 +58,7 @@ export async function handleDeleteConfirmCallback(
   const title = event?.title ?? '?';
   const deleted = eventService.deleteEvent(eventId, user.telegram_id);
 
+  await ctx.answer();
   if (deleted) {
     await ctx.editText(t(lang).event_deleted(title));
   } else {

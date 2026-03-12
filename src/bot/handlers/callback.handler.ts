@@ -29,11 +29,15 @@ export function createCallbackHandler(eventService: EventService, editValueScene
     try {
       // Event view
       if (action === CB.EVENT_VIEW) {
-        if (payload === 'cancel') return ctx.editText('OK');
+        if (payload === 'cancel') {
+          await ctx.answer();
+          return ctx.editText('OK');
+        }
         const eventId = Number(payload);
         const event = eventService.getEvent(eventId, user.telegram_id);
         if (!event) return ctx.answer({ text: 'Not found' });
         const detail = formatEventDetail(event, user.timezone, user.language);
+        await ctx.answer();
         return ctx.editText(detail, {
           parse_mode: 'HTML',
           reply_markup: eventActionsKeyboard(eventId, user.language as 'en' | 'ru'),
@@ -42,20 +46,29 @@ export function createCallbackHandler(eventService: EventService, editValueScene
 
       // Event edit
       if (action === CB.EVENT_EDIT) {
-        if (payload === 'cancel') return ctx.editText('OK');
+        if (payload === 'cancel') {
+          await ctx.answer();
+          return ctx.editText('OK');
+        }
         return handleEditCallback(ctx, eventService, user, Number(payload));
       }
 
       // Edit field
       if (action === CB.EDIT_FIELD) {
         const [eidStr, field] = payload.split(':');
-        if (field === 'cancel' || eidStr === 'cancel') return ctx.editText('OK');
+        if (field === 'cancel' || eidStr === 'cancel') {
+          await ctx.answer();
+          return ctx.editText('OK');
+        }
         return handleEditFieldCallback(ctx, user, Number(eidStr), field!, editValueScene);
       }
 
       // Event delete
       if (action === CB.EVENT_DELETE) {
-        if (payload === 'cancel') return ctx.editText('OK');
+        if (payload === 'cancel') {
+          await ctx.answer();
+          return ctx.editText('OK');
+        }
         return handleDeleteCallback(ctx, eventService, user, Number(payload));
       }
 
@@ -71,13 +84,12 @@ export function createCallbackHandler(eventService: EventService, editValueScene
         const lang = (user.language ?? 'en') as 'en' | 'ru';
 
         if (mode === 'all') {
-          // Edit the template (all occurrences)
+          await ctx.answer();
           return ctx.editText(lang === 'ru' ? 'Что изменить?' : 'What to edit?', {
             reply_markup: editFieldKeyboard(eventId, lang),
           });
         }
 
-        // 'this' and 'future' require occurrence-level context — not yet implemented
         await ctx.answer({
           text: lang === 'ru' ? 'Будет в следующей версии' : 'Coming in next version',
         });
@@ -86,14 +98,23 @@ export function createCallbackHandler(eventService: EventService, editValueScene
 
       // Month navigation
       if (action === CB.MONTH_NAV) {
+        await ctx.answer();
         return handleMonth(ctx, eventService, payload);
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {
-      cmdLogger.error({ error: String(error), action }, 'Callback handler error');
-      await ctx.answer({ text: 'Error' });
+      const errStr = String(error);
+      // Duplicate click — message already updated, silently acknowledge
+      if (errStr.includes('message is not modified')) {
+        await ctx.answer().catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() after duplicate click'));
+        return;
+      }
+      cmdLogger.error({ error: errStr, action }, 'Callback handler error');
+      await ctx
+        .answer({ text: 'Error' })
+        .catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() in error handler'));
     }
   };
 }
