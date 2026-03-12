@@ -57,7 +57,7 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
   const trimmed = input.trim().toLowerCase();
 
-  const todayMatch = trimmed.match(/^(today|сегодня)\s+(\d{1,2}):(\d{2})$/);
+  const todayMatch = trimmed.match(/^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
   if (todayMatch) {
     const [, , h, m] = todayMatch;
     const d = startOfDay(ref);
@@ -65,7 +65,7 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     return new Date(result.toISOString());
   }
 
-  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)\s+(\d{1,2}):(\d{2})$/);
+  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
   if (tomorrowMatch) {
     const [, , h, m] = tomorrowMatch;
     const d = startOfDay(addDays(ref, 1));
@@ -97,7 +97,7 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     вс: 0,
   };
 
-  const nextDayMatch = trimmed.match(/^(?:next\s+)?(\w+)\s+(\d{1,2}):(\d{2})$/);
+  const nextDayMatch = trimmed.match(/^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
   if (nextDayMatch) {
     const [, dayStr, h, m] = nextDayMatch;
     const targetDay = dayNames[dayStr!];
@@ -111,9 +111,16 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     }
   }
 
-  const monthDateMatch = trimmed.match(/^(\w+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/);
+  // Match both "mar 15 19:30" and "15 mar 19:30" (day-first)
+  const monthDateMatch =
+    trimmed.match(/^([a-zа-яё]+)\s+(\d{1,2})(?:\s+(\d{1,2}):(\d{2}))?$/) ??
+    trimmed.match(/^(\d{1,2})\s+([a-zа-яё]+)(?:\s+(\d{1,2}):(\d{2}))?$/);
   if (monthDateMatch) {
-    const [, part1, part2, h, m] = monthDateMatch;
+    let [, part1, part2, h, m] = monthDateMatch;
+    // Swap if day-first format (part1 is digits, part2 is month name)
+    if (/^\d+$/.test(part1!) && !/^\d+$/.test(part2!)) {
+      [part1, part2] = [part2, part1];
+    }
     const months: Record<string, number> = {
       jan: 0,
       feb: 1,

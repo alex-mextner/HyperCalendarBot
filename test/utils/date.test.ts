@@ -58,6 +58,48 @@ describe('parseSimpleDate', () => {
     const result = parseSimpleDate('gibberish', 'UTC');
     expect(result).toBeNull();
   });
+
+  test('parses "завтра в 10:00" (with preposition)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('Завтра в 10:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-12T10:00');
+  });
+
+  test('parses "today at 14:00" (with preposition)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('today at 14:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T14:00');
+  });
+
+  test('parses "сегодня в 18:30" (with preposition)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('сегодня в 18:30', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T18:30');
+  });
+
+  test('parses "tomorrow at 9:00" (with preposition)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('tomorrow at 9:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-12T09:00');
+  });
+
+  test('parses "15 мар 19:30" (day-first month format)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('15 мар 19:30', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-15T19:30');
+  });
+
+  test('parses "пн в 10:00" (weekday with preposition)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z'); // Wednesday
+    const result = parseSimpleDate('пн в 10:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-16T10:00');
+  });
 });
 
 describe('parseDuration', () => {
