@@ -25,6 +25,7 @@ import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
+import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { BotCallbackContext, BotCommandContext } from './types.ts';
@@ -69,6 +70,7 @@ export function createBot(token: string, db: DatabaseService) {
       }
       return next();
     })
+    .use(createSceneCommandEscape(scenesSetup.storage) as never)
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .extend(scenesSetup.plugin)
     // Commands

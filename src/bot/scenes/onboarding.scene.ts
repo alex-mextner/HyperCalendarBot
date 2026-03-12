@@ -18,7 +18,6 @@ import {
   timezoneManualKeyboard,
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
-import { getSceneLang, isCommandEscape } from './helpers.ts';
 
 interface OnboardingState {
   lang?: 'en' | 'ru';
@@ -36,20 +35,6 @@ export function createOnboardingScene(db: DatabaseService) {
       .onEnter(async (context) => {
         await context.send(t('en').welcome, { reply_markup: languageKeyboard() });
       })
-      // Command escape for text messages during callback-only steps
-      .on('message', async (context, next) => {
-        const text = (context as unknown as { text?: string }).text;
-        if (isCommandEscape(text) && !context.scene.step.firstTime) {
-          await context.scene.exit();
-          const lang = getSceneLang(context);
-          await context.send(lang === 'ru' ? 'Отменено.' : 'Cancelled.', {
-            reply_markup: { remove_keyboard: true },
-          });
-          return;
-        }
-        return next();
-      })
-
       // Step 0: Language selection (callback only)
       .step('callback_query', async (context) => {
         const data = (context as unknown as { data: string }).data;

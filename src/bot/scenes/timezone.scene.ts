@@ -4,7 +4,7 @@ import { CB } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { timezoneCitiesKeyboard, timezoneManualKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
-import { getSceneLang, getSceneUser } from './helpers.ts';
+import { getSceneUser } from './helpers.ts';
 
 export function createTimezoneScene(db: DatabaseService) {
   return (
@@ -26,18 +26,6 @@ export function createTimezoneScene(db: DatabaseService) {
         await context.send(lang === 'ru' ? 'Или отправьте геолокацию:' : 'Or share your location:', {
           reply_markup: timezoneMethodKeyboard(lang),
         });
-      })
-      .on('message', async (context, next) => {
-        const text = (context as unknown as { text?: string }).text;
-        if (text?.startsWith('/') && !context.scene.step.firstTime) {
-          await context.scene.exit();
-          const lang = getSceneLang(context);
-          await context.send(lang === 'ru' ? 'Отменено.' : 'Cancelled.', {
-            reply_markup: { remove_keyboard: true },
-          });
-          return;
-        }
-        return next();
       })
       .step(['callback_query', 'location'], async (context) => {
         const user = getSceneUser(context);

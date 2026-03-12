@@ -2,14 +2,6 @@
 import type { User } from '../../database/types.ts';
 
 /**
- * Check if the text is a bot command that should exit the current scene.
- */
-export function isCommandEscape(text: string | undefined | null): boolean {
-  if (!text) return false;
-  return text.startsWith('/');
-}
-
-/**
  * Get user from derived context.
  * Scenes don't have DerivedProps typing, so this helper extracts dbUser safely.
  */
