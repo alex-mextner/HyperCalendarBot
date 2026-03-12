@@ -22,6 +22,7 @@
     "@gramio/scenes": "0.5.1",
     "@gramio/storage-sqlite": "0.0.2",
     "date-fns": "4.1.0",
+    "date-holidays": "^3.26.9",
     "geo-tz": "8.1.6",
     "gramio": "0.7.0",
     "pino": "10.3.1",

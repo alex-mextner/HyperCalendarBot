@@ -76,4 +76,53 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '004_create_holiday_tables',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE holiday_countries (
+          code TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          region TEXT NOT NULL
+        );
+
+        CREATE TABLE holidays (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          country_code TEXT NOT NULL,
+          date TEXT NOT NULL,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'public',
+          year INTEGER NOT NULL,
+          FOREIGN KEY (country_code) REFERENCES holiday_countries(code) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_holidays_country_date ON holidays(country_code, date);
+        CREATE INDEX idx_holidays_date ON holidays(date);
+        CREATE UNIQUE INDEX idx_holidays_unique ON holidays(country_code, date, name);
+
+        CREATE TABLE holiday_subscriptions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          country_code TEXT NOT NULL,
+          is_primary INTEGER NOT NULL DEFAULT 0,
+          notify INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (country_code) REFERENCES holiday_countries(code) ON DELETE CASCADE,
+          UNIQUE(user_id, country_code)
+        );
+        CREATE INDEX idx_holiday_subs_user ON holiday_subscriptions(user_id);
+
+        CREATE TABLE holiday_overrides (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          date TEXT NOT NULL,
+          is_day_off INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          UNIQUE(user_id, date)
+        );
+        CREATE INDEX idx_holiday_overrides_user_date ON holiday_overrides(user_id, date);
+      `);
+    },
+  },
 ];

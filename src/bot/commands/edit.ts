@@ -31,6 +31,7 @@ export async function handleEditCallback(
   eventService: EventService,
   user: User,
   eventId: number,
+  occurrenceDate?: string,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
   const event = eventService.getEvent(eventId, user.telegram_id);
@@ -41,10 +42,10 @@ export async function handleEditCallback(
 
   await ctx.answer();
 
-  if (event.recurrence_rule) {
+  if (event.recurrence_rule && occurrenceDate) {
     await ctx.editText(formatEventDetail(event, user.timezone, lang), {
       parse_mode: 'HTML',
-      reply_markup: recurringEditKeyboard(eventId, lang),
+      reply_markup: recurringEditKeyboard(eventId, occurrenceDate, lang),
     });
     return;
   }

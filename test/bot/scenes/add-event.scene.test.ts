@@ -7,6 +7,6 @@ describe('createAddEventScene', () => {
     const mockEventService = {} as unknown as EventService;
     const scene = createAddEventScene(mockEventService);
     expect(scene.name).toBe('add_event');
-    expect(scene.stepsCount).toBe(5);
+    expect(scene.stepsCount).toBe(7);
   });
 });

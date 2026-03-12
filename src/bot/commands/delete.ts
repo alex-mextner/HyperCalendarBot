@@ -3,7 +3,7 @@
 import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { deleteConfirmKeyboard, eventPickerKeyboard } from '../keyboards.ts';
+import { deleteConfirmKeyboard, eventPickerKeyboard, recurrenceScopeKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export async function handleDelete(ctx: BotCommandContext, eventService: EventService): Promise<void> {
@@ -26,6 +26,7 @@ export async function handleDeleteCallback(
   eventService: EventService,
   user: User,
   eventId: number,
+  occurrenceDate?: string,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
 
@@ -42,6 +43,14 @@ export async function handleDeleteCallback(
   }
 
   await ctx.answer();
+
+  if (event.recurrence_rule && occurrenceDate) {
+    await ctx.editText(t(lang).confirm_delete(event.title), {
+      reply_markup: recurrenceScopeKeyboard(CB.RECURRENCE_DELETE, eventId, occurrenceDate, lang),
+    });
+    return;
+  }
+
   await ctx.editText(t(lang).confirm_delete(event.title), {
     reply_markup: deleteConfirmKeyboard(eventId, lang),
   });

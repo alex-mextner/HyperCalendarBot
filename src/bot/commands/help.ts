@@ -23,6 +23,10 @@ const HELP_EN = `📖 <b>HyperCalendar Commands</b>
   /import — import .ics file
   /export — export events
 
+🌍 <b>Holidays</b>
+  /holidays — manage holiday subscriptions
+  /holidays list — upcoming holidays
+
 🔧 <b>Other</b>
   /free — find free time slots
   /ping — check bot status
@@ -49,6 +53,10 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
 📤 <b>Импорт/Экспорт</b>
   /import — импорт .ics
   /export — экспорт событий
+
+🌍 <b>Праздники</b>
+  /holidays — управление праздниками
+  /holidays list — ближайшие праздники
 
 🔧 <b>Другое</b>
   /free — свободные слоты

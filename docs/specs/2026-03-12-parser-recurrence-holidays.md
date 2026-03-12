@@ -45,6 +45,7 @@ Combined: `"1 час 30 минут"`, `"2 hours 15 min"`, `"12 часов"`, `"1
 | Full RU months | январь/января, февраль/февраля, март/марта, апрель/апреля, май/мая, июнь/июня, июль/июля, август/августа, сентябрь/сентября, октябрь/октября, ноябрь/ноября, декабрь/декабря |
 
 **Implementation:**
+
 - Extend `dayNames` record with full Russian forms.
 - Add `послезавтра` / `day after tomorrow` branch (analogous to `завтра` / `tomorrow`, with `addDays(ref, 2)`). Time is optional — defaults to 00:00 if omitted, same as `tomorrow`.
 - Extend `months` record with full Russian forms and declensions.
@@ -79,6 +80,7 @@ If "Custom..." selected → text input parsed by `parseRecurrence()`.
 **Step "Recurrence End"** — shown only if recurrence selected. If "Don't repeat" was chosen, skip this step entirely (call `scene.step.go(nextStepIndex)` or equivalent mechanism — see 2.7).
 
 Inline keyboard:
+
 ```
 [Бесконечно / No end]
 [До даты / Until date]
@@ -93,6 +95,7 @@ Result: RRULE string (e.g. `FREQ=WEEKLY;INTERVAL=2;COUNT=10`) stored in scene st
 
 **Updated scene step order:**
 0. Title (text)
+
 1. Date/Time (text)
 2. Duration (text + skip button)
 3. Recurrence (keyboard + custom text)
@@ -132,6 +135,7 @@ Patterns (all bilingual):
 Format: `{prefix}:{templateId}:{occurrenceISO}`
 
 Examples:
+
 - `ee:42:2026-03-15T10:00:00Z` — edit occurrence of event 42 on Mar 15
 - `ed:42:2026-03-15T10:00:00Z` — delete occurrence of event 42 on Mar 15
 
@@ -140,6 +144,7 @@ For one-off events, format stays as-is: `ee:42`, `ed:42`.
 The callback handler detects recurring vs one-off by checking whether the third segment exists. If it does → show scope keyboard. If not → proceed directly to edit/delete.
 
 **Scope keyboard callback data:**
+
 - `er:42:2026-03-15T10:00:00Z:this` — edit this occurrence only
 - `er:42:2026-03-15T10:00:00Z:future` — edit all future
 - `erd:42:2026-03-15T10:00:00Z:this` — delete this occurrence
@@ -157,12 +162,14 @@ When user taps "Edit" or "Delete" on a recurring event occurrence, show scope ke
 ```
 
 **Edit — "This only":**
+
 1. Create exception record: child event with `parent_event_id = templateId`, `original_start_at = occurrenceDate`.
 2. Copy all fields from template to exception.
 3. Enter edit-value scene with the new exception's ID.
 4. User edits the field → `updateEvent(exceptionId, ...)` updates the exception row.
 
 **Edit — "All future":**
+
 1. Append `UNTIL` to original template's RRULE (set to day before `occurrenceDate`).
 2. Create new template event: copy all fields from original, set `start_at` = `occurrenceDate`, set `recurrence_rule` = original FREQ/INTERVAL (no UNTIL/COUNT, or adjusted COUNT).
 3. Re-parent exceptions: any exception with `parent_event_id = originalId` AND `original_start_at >= occurrenceDate` → update `parent_event_id` to new template ID.
@@ -172,6 +179,7 @@ When user taps "Edit" or "Delete" on a recurring event occurrence, show scope ke
 `cancelOccurrence(templateId, occurrenceDate)` — creates cancelled exception (already implemented in EventService).
 
 **Delete — "All future":**
+
 1. Append `UNTIL` to original template's RRULE (set to day before `occurrenceDate`).
 2. Delete all exceptions with `parent_event_id = templateId` AND `original_start_at >= occurrenceDate`.
 
@@ -227,6 +235,7 @@ Replace text-based "skip"/"пропустить" with inline keyboard buttons on
 - Recurrence step: `[Не повторять / Don't repeat]` serves as skip
 
 Each optional step sends an inline keyboard along with the prompt message. The step handler must handle both:
+
 - `callback_query` with skip callback data → set field to null, advance
 - `message` with text → parse and set field, advance
 
@@ -235,6 +244,7 @@ Each optional step sends an inline keyboard along with the prompt message. The s
 ### 2.9 Display
 
 Event detail card: show recurrence line using `formatRecurrenceHuman()` from `formatters.ts`. Extend `formatRecurrenceHuman()` to also parse and display UNTIL and COUNT from the RRULE string:
+
 - `FREQ=WEEKLY` → "Every week"
 - `FREQ=WEEKLY;COUNT=10` → "Every week, 10 times"
 - `FREQ=DAILY;UNTIL=20260330T000000Z` → "Every day until Mar 30"
@@ -292,6 +302,7 @@ export const CB = {
 ### 3.4 `/holidays` Command
 
 Pure callback-driven flow (no scene needed — all interactions via inline keyboard):
+
 - Main menu with subscription list
 - Add country: region → country picker (paginated, 8 per page)
 - Manage: set primary, toggle notifications (stored but not delivered until Phase B), remove
@@ -317,6 +328,7 @@ As defined in spec 08 section 8. `IHolidayService` with data, subscription, and 
 ### 3.7 New i18n Message Keys
 
 Add to `MSG.en` / `MSG.ru`:
+
 - `holidays_menu`, `holidays_add`, `holidays_added`, `holidays_removed`
 - `holidays_set_primary`, `holidays_no_subs`, `holidays_upcoming`
 - `holidays_none_upcoming`, `holidays_day_off`
@@ -336,6 +348,7 @@ Add to `MSG.en` / `MSG.ru`:
 ## Testing
 
 All three features follow TDD:
+
 - Parser extensions: unit tests for every new format
 - Recurring events: unit tests for `parseRecurrence()`, integration tests for create/edit/delete flows
 - Holidays: unit tests for `HolidayService`, integration tests for `/holidays` command flow

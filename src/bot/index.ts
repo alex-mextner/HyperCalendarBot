@@ -4,6 +4,7 @@ import { RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
 import type { User } from '../database/types.ts';
 import { EventService } from '../services/event/event-service.ts';
+import { HolidayService } from '../services/holiday/holiday-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleDelete } from './commands/delete.ts';
@@ -11,6 +12,7 @@ import { handleEdit } from './commands/edit.ts';
 import { handleExport } from './commands/export.ts';
 import { handleFree } from './commands/free.ts';
 import { handleHelp } from './commands/help.ts';
+import { handleHolidays } from './commands/holidays.ts';
 import { handleImport } from './commands/import.ts';
 import { handleMonth } from './commands/month.ts';
 import { handlePing } from './commands/ping.ts';
@@ -46,6 +48,8 @@ interface GramIOContextWithDerived {
 
 export function createBot(token: string, db: DatabaseService) {
   const eventService = new EventService(db.events, db.reminders);
+  const holidayService = new HolidayService(db.holidays);
+  holidayService.refreshOnStartup();
   const rateLimiter = new RateLimiter({
     perMinute: RATE_LIMIT.MESSAGES_PER_MINUTE,
     cooldownMs: RATE_LIMIT.COOLDOWN_MS,
@@ -77,9 +81,9 @@ export function createBot(token: string, db: DatabaseService) {
     .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, scenesSetup.scenes.onboardingScene))
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
-    .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService))
-    .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService))
-    .command('week', (ctx) => handleWeek(ctx as unknown as BotCommandContext, eventService))
+    .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('week', (ctx) => handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService))
     .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService))
     .command('add', (ctx) =>
       handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
@@ -87,14 +91,19 @@ export function createBot(token: string, db: DatabaseService) {
     .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
-    .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService))
+    .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService, holidayService))
     .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, scenesSetup.scenes.timezoneScene))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
+    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     // Callback queries
     .on('callback_query', (ctx) =>
-      createCallbackHandler(eventService, scenesSetup.scenes.editValueScene)(ctx as unknown as BotCallbackContext),
+      createCallbackHandler(
+        eventService,
+        scenesSetup.scenes.editValueScene,
+        holidayService,
+      )(ctx as unknown as BotCallbackContext),
     )
     // Free-text messages (wizard routing handled by @gramio/scenes)
     .on('message', (ctx) => createMessageHandler()(ctx as unknown as BotCommandContext))
@@ -110,5 +119,5 @@ export function createBot(token: string, db: DatabaseService) {
       } catch {}
     });
 
-  return { bot, eventService, db };
+  return { bot, eventService, holidayService, db };
 }

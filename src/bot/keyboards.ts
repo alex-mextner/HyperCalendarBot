@@ -89,13 +89,146 @@ export function editFieldKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKey
     .text(lang === 'ru' ? 'Отмена' : 'Cancel', `${CB.EDIT_FIELD}:cancel`);
 }
 
-export function recurringEditKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKeyboard {
+export function recurringEditKeyboard(eventId: number, occurrenceDate: string, lang: 'en' | 'ru'): InlineKeyboard {
   return new InlineKeyboard()
-    .text(lang === 'ru' ? 'Только это' : 'This only', `${CB.EVENT_RECURRENCE}:${eventId}:this`)
+    .text(lang === 'ru' ? 'Только это' : 'This only', `${CB.EVENT_RECURRENCE}:${eventId}:${occurrenceDate}:this`)
     .row()
-    .text(lang === 'ru' ? 'Все будущие' : 'All future', `${CB.EVENT_RECURRENCE}:${eventId}:future`)
+    .text(lang === 'ru' ? 'Все будущие' : 'All future', `${CB.EVENT_RECURRENCE}:${eventId}:${occurrenceDate}:future`);
+}
+
+// Occurrence-aware event actions keyboard (for recurring event detail view)
+export function eventActionsKeyboardOcc(eventId: number, occurrenceDate: string, lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? '✏️ Редактировать' : '✏️ Edit', `${CB.EVENT_EDIT}:${eventId}:${occurrenceDate}`)
+    .text(lang === 'ru' ? '🗑 Удалить' : '🗑 Delete', `${CB.EVENT_DELETE}:${eventId}:${occurrenceDate}`);
+}
+
+// Recurrence selection for add-event scene
+export function recurrenceKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? 'Не повторять' : "Don't repeat", `${CB.ADD_RECURRENCE}:none`)
     .row()
-    .text(lang === 'ru' ? 'Все вхождения' : 'All occurrences', `${CB.EVENT_RECURRENCE}:${eventId}:all`);
+    .text(lang === 'ru' ? 'Каждый день' : 'Daily', `${CB.ADD_RECURRENCE}:DAILY`)
+    .text(lang === 'ru' ? 'Каждую неделю' : 'Weekly', `${CB.ADD_RECURRENCE}:WEEKLY`)
+    .row()
+    .text(lang === 'ru' ? 'Каждый месяц' : 'Monthly', `${CB.ADD_RECURRENCE}:MONTHLY`)
+    .text(lang === 'ru' ? 'Каждый год' : 'Yearly', `${CB.ADD_RECURRENCE}:YEARLY`)
+    .row()
+    .text(lang === 'ru' ? 'Другое...' : 'Custom...', `${CB.ADD_RECURRENCE}:custom`);
+}
+
+// Recurrence end for add-event scene
+export function recurrenceEndKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? 'Бесконечно' : 'No end', `${CB.ADD_REC_END}:forever`)
+    .row()
+    .text(lang === 'ru' ? 'До даты' : 'Until date', `${CB.ADD_REC_END}:until`)
+    .text(lang === 'ru' ? 'N повторений' : 'N times', `${CB.ADD_REC_END}:count`);
+}
+
+// Skip button for optional scene steps
+export function skipKeyboard(lang: 'en' | 'ru', stepIndex: number): InlineKeyboard {
+  return new InlineKeyboard().text(lang === 'ru' ? 'Пропустить' : 'Skip', `${CB.ADD_SKIP}:${stepIndex}`);
+}
+
+// Scope keyboard for recurring event edit/delete actions
+export function recurrenceScopeKeyboard(
+  prefix: string,
+  eventId: number,
+  occurrenceDate: string,
+  lang: 'en' | 'ru',
+): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? 'Только это' : 'This only', `${prefix}:${eventId}:${occurrenceDate}:this`)
+    .row()
+    .text(lang === 'ru' ? 'Все будущие' : 'All future', `${prefix}:${eventId}:${occurrenceDate}:future`);
+}
+
+// ── Holiday keyboards ──
+
+export function holidaysMenuKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? '+ Добавить' : '+ Add', `${CB.HOLIDAYS}:add`)
+    .text(lang === 'ru' ? 'Управление' : 'Manage', `${CB.HOLIDAYS}:manage`)
+    .row()
+    .text(lang === 'ru' ? 'Ближайшие' : 'Upcoming', `${CB.HOLIDAYS}:list`);
+}
+
+export function holidayRegionKeyboard(regions: string[], lang: 'en' | 'ru'): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const region of regions) {
+    kb.text(region, `${CB.HOLIDAYS}:add:${region}`).row();
+  }
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.HOLIDAYS}:menu`);
+  return kb;
+}
+
+const COUNTRIES_PER_PAGE = 8;
+
+export function holidayCountryKeyboard(
+  countries: { code: string; name: string }[],
+  region: string,
+  page: number,
+  lang: 'en' | 'ru',
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const start = page * COUNTRIES_PER_PAGE;
+  const slice = countries.slice(start, start + COUNTRIES_PER_PAGE);
+
+  for (const c of slice) {
+    kb.text(c.name, `${CB.HOLIDAYS}:sub:${c.code}`).row();
+  }
+
+  const totalPages = Math.ceil(countries.length / COUNTRIES_PER_PAGE);
+  if (totalPages > 1) {
+    if (page > 0) {
+      kb.text('◀️', `${CB.HOLIDAYS}:add:${region}:${page - 1}`);
+    }
+    kb.text(`${page + 1}/${totalPages}`, `${CB.HOLIDAYS}:noop`);
+    if (page < totalPages - 1) {
+      kb.text('▶️', `${CB.HOLIDAYS}:add:${region}:${page + 1}`);
+    }
+    kb.row();
+  }
+
+  kb.text(lang === 'ru' ? '← Регионы' : '← Regions', `${CB.HOLIDAYS}:add`);
+  return kb;
+}
+
+export function holidayManageListKeyboard(
+  subs: { country_code: string; countryName: string; is_primary: number }[],
+  lang: 'en' | 'ru',
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const sub of subs) {
+    const primary = sub.is_primary ? ' ⭐' : '';
+    kb.text(`${sub.countryName}${primary}`, `${CB.HOLIDAYS}:manage:${sub.country_code}`).row();
+  }
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.HOLIDAYS}:menu`);
+  return kb;
+}
+
+export function holidayManageCountryKeyboard(
+  countryCode: string,
+  isPrimary: boolean,
+  isNotifyOn: boolean,
+  lang: 'en' | 'ru',
+): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (!isPrimary) {
+    kb.text(lang === 'ru' ? '⭐ Основная' : '⭐ Set Primary', `${CB.HOLIDAYS}:primary:${countryCode}`).row();
+  }
+  const notifyLabel = isNotifyOn
+    ? lang === 'ru'
+      ? '🔔 Уведомления: ВКЛ'
+      : '🔔 Notifications: ON'
+    : lang === 'ru'
+      ? '🔕 Уведомления: ВЫКЛ'
+      : '🔕 Notifications: OFF';
+  kb.text(notifyLabel, `${CB.HOLIDAYS}:notify:${countryCode}`).row();
+  kb.text(lang === 'ru' ? '🗑 Удалить' : '🗑 Remove', `${CB.HOLIDAYS}:remove:${countryCode}`).row();
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.HOLIDAYS}:manage`);
+  return kb;
 }
 
 export function monthNavKeyboard(yearMonth: string): InlineKeyboard {

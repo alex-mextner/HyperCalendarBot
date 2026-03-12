@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { EventRepository } from './repositories/event.repository.ts';
+import { HolidayRepository } from './repositories/holiday.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
 import { runMigrations } from './schema.ts';
@@ -14,6 +15,7 @@ export class DatabaseService {
   readonly users: UserRepository;
   readonly events: EventRepository;
   readonly reminders: ReminderRepository;
+  readonly holidays: HolidayRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -29,6 +31,7 @@ export class DatabaseService {
     this.users = new UserRepository(this.db);
     this.events = new EventRepository(this.db);
     this.reminders = new ReminderRepository(this.db);
+    this.holidays = new HolidayRepository(this.db);
   }
 
   close(): void {

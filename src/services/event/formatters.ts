@@ -2,28 +2,33 @@
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import { formatDateHeader, formatDateShort, formatDuration, formatTime, formatTimeRange } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
+import type { HolidayEntry } from '../holiday/holiday-service.ts';
 
 export function formatDayAgenda(
   occurrences: EventOccurrence[],
   dateIso: string,
   timezone: string,
   lang: string,
+  holidays?: HolidayEntry[],
 ): string {
   const header = `📅 ${formatDateHeader(dateIso, timezone, lang)}`;
 
-  if (occurrences.length === 0) {
+  const holidayLines = (holidays ?? []).map((h) => `  🎉 ${escapeHtml(h.name)}`);
+
+  if (occurrences.length === 0 && holidayLines.length === 0) {
     const noEvents = lang === 'ru' ? 'Нет событий. /add для создания.' : 'No events. Use /add to create one.';
     return `${header}\n\n${noEvents}`;
   }
 
-  const lines = occurrences.map((occ) => {
+  const eventLines = occurrences.map((occ) => {
     const time = formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
     const title = escapeHtml(occ.event.title);
     const recur = occ.event.recurrence_rule ? ' 🔁' : '';
     return `  ${time}  ${title}${recur}`;
   });
 
-  return `${header}\n\n${lines.join('\n')}`;
+  const allLines = [...holidayLines, ...eventLines];
+  return `${header}\n\n${allLines.join('\n')}`;
 }
 
 export function formatWeekAgenda(
@@ -32,6 +37,7 @@ export function formatWeekAgenda(
   endDateIso: string,
   timezone: string,
   lang: string,
+  holidaysByDate?: Map<string, HolidayEntry[]>,
 ): string {
   const byDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
@@ -49,11 +55,18 @@ export function formatWeekAgenda(
     const dayKey = d.toISOString().slice(0, 10);
     const dayLabel = formatDateShort(d.toISOString(), timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
+    const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
 
-    if (dayEvents.length === 0) {
+    if (dayHolidays.length > 0) {
+      for (const h of dayHolidays) {
+        lines.push(`${dayLabel}  🎉 ${escapeHtml(h.name)}`);
+      }
+    }
+
+    if (dayEvents.length === 0 && dayHolidays.length === 0) {
       const noEvents = lang === 'ru' ? '— нет событий' : '— no events';
       lines.push(`${dayLabel}  ${noEvents}`);
-    } else {
+    } else if (dayEvents.length > 0) {
       lines.push(
         `${dayLabel}  ▪ ${dayEvents.length} ${dayEvents.length === 1 ? (lang === 'ru' ? 'событие' : 'event') : lang === 'ru' ? 'событий' : 'events'}`,
       );

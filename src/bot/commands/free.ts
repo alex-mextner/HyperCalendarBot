@@ -3,10 +3,15 @@
 import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
+import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { formatDateHeader, formatTime, parseSimpleDate } from '../../utils/date.ts';
 import type { BotCommandContext } from '../types.ts';
 
-export async function handleFree(ctx: BotCommandContext, eventService: EventService): Promise<void> {
+export async function handleFree(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  holidayService?: HolidayService,
+): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const args = (ctx.args as string)?.trim();
@@ -15,6 +20,12 @@ export async function handleFree(ctx: BotCommandContext, eventService: EventServ
   if (args) {
     const parsed = parseSimpleDate(`${args} 00:00`, user.timezone);
     if (parsed) date = parsed;
+  }
+
+  if (holidayService?.isDayOff(user.telegram_id, date.toISOString().slice(0, 10))) {
+    const dateLabel = formatDateHeader(date.toISOString(), user.timezone, lang);
+    await ctx.send(`${dateLabel}\n\n${t(lang).holidays_day_off}`);
+    return;
   }
 
   const slots = eventService.getFreeSlots(user.telegram_id, date, user.timezone);
