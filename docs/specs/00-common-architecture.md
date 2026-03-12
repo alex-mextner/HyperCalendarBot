@@ -53,6 +53,7 @@ No commands are dropped. All listed commands WILL be implemented in their respec
 | Runtime | Bun | NOT Node.js. No `node:` prefix imports unless unavoidable |
 | Language | TypeScript (strict) | |
 | Bot framework | GramIO | |
+| Bot sessions/FSM | `@gramio/scenes` + `@gramio/session` | Persistent via `@gramio/storage-sqlite` |
 | Database | `bun:sqlite` (WAL mode) | |
 | Job queue | BullMQ | Worker process, separate from bot |
 | Redis | `Bun.redis` | For BullMQ, caching, sessions |
@@ -213,7 +214,84 @@ Required for production. In development, a default key is used with a warning.
 
 ---
 
-## 7. Canonical SQLite Schema
+## 7. Session & Conversation State
+
+**All multi-step user interactions (wizards, onboarding, flows) MUST survive bot restarts.**
+
+### GramIO plugins
+
+| Package | Purpose |
+|---------|---------|
+| `@gramio/scenes` | Step-based FSM for multi-step flows (onboarding, `/add` wizard, `/edit` wizard) |
+| `@gramio/session` | Simple key-value session data on context (e.g. last viewed date) |
+| `@gramio/storage-sqlite` | SQLite backend for both plugins, uses `bun:sqlite` natively |
+
+Both plugins share the same `storage` interface. Use a single `sqliteStorage()` instance backed by the main DB file.
+
+### Scenes (FSM)
+
+Each multi-step flow is a `Scene` with typed state:
+
+```typescript
+import { Scene } from '@gramio/scenes';
+
+const addEventScene = new Scene('add_event')
+  .step('message', async (ctx) => {
+    if (ctx.scene.step.firstTime) {
+      await ctx.send('Event title?');
+      return;
+    }
+    await ctx.scene.update({ title: ctx.text });
+  })
+  .step('message', async (ctx) => {
+    if (ctx.scene.step.firstTime) {
+      await ctx.send('Date and time?');
+      return;
+    }
+    // parse and save...
+    await ctx.scene.exit();
+  });
+```
+
+- Enter scene: `ctx.scene.enter(sceneName)`
+- State: `ctx.scene.state` (typed, persisted)
+- Navigation: `ctx.scene.update(data)` advances to next step
+- Exit: `ctx.scene.exit()`
+- Abort: user sends `/cancel` or a new command
+
+### Storage
+
+```typescript
+import { sqliteStorage } from '@gramio/storage-sqlite';
+
+const storage = sqliteStorage({
+  db: existingBunSqliteDb,  // reuse the main DB connection
+  tableName: 'gramio_state',
+});
+```
+
+The storage table is auto-created. TTL is supported (`$ttl` option in seconds).
+
+### What stays in-memory
+
+- **Rate limiter** — sliding window counters. Reset on restart is fine (users get fresh allowance).
+- **Callback data overflow** — short-lived ID→payload map. Inline keyboards are regenerated on restart.
+
+### What MUST be persistent
+
+- Onboarding wizard state (spec 01)
+- `/add` event wizard state (spec 01)
+- `/edit` event wizard state (spec 01)
+- `/timezone` location prompt state (spec 01)
+- `/import` file upload waiting state (spec 01)
+- OAuth CSRF state tokens (spec 03 — Redis)
+- Share preview sessions (spec 06 — Redis)
+- Voice call sessions (spec 07 — Redis or SQLite)
+
+---
+
+## 8. Canonical SQLite Schema
+
 
 This is the unified schema. Individual specs may describe their tables for context, but this section is the canonical version. Conflicts are resolved here.
 
@@ -638,7 +716,7 @@ CREATE TABLE call_sessions (
 
 ---
 
-## 8. Environment Variables (Full List)
+## 9. Environment Variables (Full List)
 
 ```env
 # Required
@@ -673,7 +751,7 @@ NODE_ENV=development
 
 ---
 
-## 9. Error Handling
+## 10. Error Handling
 
 ### Layers (all sub-projects)
 
@@ -727,7 +805,7 @@ Dependencies: `pino` + `pino-pretty` (devDependency for local dev).
 
 ---
 
-## 10. Voice Calls — Monetization & Abuse Prevention
+## 11. Voice Calls — Monetization & Abuse Prevention
 
 Voice call reminders (sub-project 07) are a premium feature gated behind **Telegram Stars** payment.
 

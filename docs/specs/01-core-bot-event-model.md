@@ -560,6 +560,8 @@ Bot: ✅ Created: "Team dinner"
 [Add Description] [Add Location] [Make Recurring] [Add Reminder] [Delete]
 ```
 
+**Implementation:** The `/add` wizard is a `@gramio/scenes` Scene. The collected `title`, parsed `when`, and `duration` are stored in scene state (SQLite-backed) until the event is created or the user cancels.
+
 ### /edit — Modify Event
 
 Shows upcoming events to pick from, or accepts event ID.
@@ -881,6 +883,8 @@ Or just type something like "Meeting tomorrow at 10" and I'll figure it out.
 
 Sets `onboarding_completed = 1`.
 
+**Implementation:** The onboarding flow is a `@gramio/scenes` Scene (see spec 00 §7). State (collected language, timezone, country) is persisted in SQLite so it survives bot restarts. If a user abandons mid-flow and returns later, they continue from where they left off.
+
 ---
 
 ## Middleware Pipeline
@@ -893,7 +897,7 @@ Middleware runs on every incoming update, in order:
 - Looks up user in DB by `telegram_id`
 - If not found: creates a new user row with defaults
 - Updates cached `username` and `first_name` if changed
-- Attaches `user` object to the context (via GramIO's derive mechanism or a simple Map lookup)
+- Attaches `user` object to the context via GramIO's `derive()` mechanism
 
 ```typescript
 // Pseudo-code
@@ -1090,7 +1094,7 @@ No external logging library for now. Structured logging (JSON) can be added late
 
 2. **SQLite concurrency under load**: WAL mode helps, but write contention is possible with many simultaneous users. Mitigation: keep write transactions short, use prepared statements (already the pattern from ExpenseSyncBot), consider connection pooling if needed. Not a real concern until ~1000+ active users.
 
-3. **Callback data 64-byte limit**: Complex interactions (editing recurring events with many parameters) may hit this limit. Mitigation: use action-based routing with minimal parameters, store state server-side in a temporary Map when needed.
+3. **Callback data 64-byte limit**: Complex interactions (editing recurring events with many parameters) may hit this limit. Mitigation: use action-based routing with minimal parameters, for wizard/multi-step state, use `@gramio/scenes` (see spec 00 §7); for truly transient callback overflow, use a short-lived in-memory Map (reset on restart is fine).
 
 4. **Timezone DST transitions**: Events created during DST transition periods may display incorrectly if not handled carefully. Mitigation: always store UTC, always convert at display time using the IANA timezone, use `date-fns-tz` which handles DST correctly.
 
