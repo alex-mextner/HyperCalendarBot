@@ -159,6 +159,101 @@ describe('parseSimpleDate', () => {
     expect(result).not.toBeNull();
     expect(result!.toISOString()).toContain('2026-03-15T00:00');
   });
+
+  // Full Russian weekdays
+  test('parses "понедельник 10:00"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z'); // Wednesday
+    const result = parseSimpleDate('понедельник 10:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-16T10:00');
+  });
+
+  test('parses "пятница 18:00"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z'); // Wednesday
+    const result = parseSimpleDate('пятница 18:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-13T18:00');
+  });
+
+  test('parses "среда 9:00" (next occurrence)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z'); // Wednesday → next Wednesday
+    const result = parseSimpleDate('среда 9:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-18T09:00');
+  });
+
+  // "Day after tomorrow"
+  test('parses "послезавтра 15:00"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('послезавтра 15:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-13T15:00');
+  });
+
+  test('parses "day after tomorrow 10:00"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('day after tomorrow 10:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-13T10:00');
+  });
+
+  test('parses "послезавтра" without time (defaults to 00:00)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('послезавтра', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-13T00:00');
+  });
+
+  test('parses "day after tomorrow" without time (defaults to 00:00)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('day after tomorrow', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-13T00:00');
+  });
+
+  // Full Russian months
+  test('parses "15 января 19:30"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('15 января 19:30', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-01-15T19:30');
+  });
+
+  test('parses "1 февраля 10:00"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('1 февраля 10:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-02-01T10:00');
+  });
+
+  test('parses "25 декабря"', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('25 декабря', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-12-25T00:00');
+  });
+
+  test('parses "март 20 14:00" (nominative month name)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('март 20 14:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-20T14:00');
+  });
+
+  // "tomorrow" / "завтра" without time
+  test('parses "tomorrow" without time (defaults to 00:00)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('tomorrow', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-12T00:00');
+  });
+
+  test('parses "завтра" without time (defaults to 00:00)', () => {
+    const ref = new Date('2026-03-11T12:00:00Z');
+    const result = parseSimpleDate('завтра', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-12T00:00');
+  });
 });
 
 describe('parseDuration', () => {
@@ -186,6 +281,34 @@ describe('parseDuration', () => {
   test('parses "30" as 30 minutes', () => expect(parseDuration('30')).toBe(30));
   test('parses "90" as 90 minutes', () => expect(parseDuration('90')).toBe(90));
   test('parses "60" as 60 minutes', () => expect(parseDuration('60')).toBe(60));
+
+  // Full-word English suffixes
+  test('parses "1 hour"', () => expect(parseDuration('1 hour')).toBe(60));
+  test('parses "2 hours"', () => expect(parseDuration('2 hours')).toBe(120));
+  test('parses "1 hr"', () => expect(parseDuration('1 hr')).toBe(60));
+  test('parses "30 minutes"', () => expect(parseDuration('30 minutes')).toBe(30));
+  test('parses "45 minute"', () => expect(parseDuration('45 minute')).toBe(45));
+  test('parses "15 min"', () => expect(parseDuration('15 min')).toBe(15));
+  test('parses "2 hours 15 min"', () => expect(parseDuration('2 hours 15 min')).toBe(135));
+  test('parses "1hr 30min"', () => expect(parseDuration('1hr 30min')).toBe(90));
+
+  // Full-word Russian suffixes
+  test('parses "1 час"', () => expect(parseDuration('1 час')).toBe(60));
+  test('parses "2 часа"', () => expect(parseDuration('2 часа')).toBe(120));
+  test('parses "5 часов"', () => expect(parseDuration('5 часов')).toBe(300));
+  test('parses "30 минут"', () => expect(parseDuration('30 минут')).toBe(30));
+  test('parses "45 минуты"', () => expect(parseDuration('45 минуты')).toBe(45));
+  test('parses "15 мин"', () => expect(parseDuration('15 мин')).toBe(15));
+  test('parses "1 минута"', () => expect(parseDuration('1 минута')).toBe(1));
+  test('parses "1 час 30 минут"', () => expect(parseDuration('1 час 30 минут')).toBe(90));
+  test('parses "2 часа 15 мин"', () => expect(parseDuration('2 часа 15 мин')).toBe(135));
+  test('parses "12 часов"', () => expect(parseDuration('12 часов')).toBe(720));
+
+  // Special forms
+  test('parses "полчаса"', () => expect(parseDuration('полчаса')).toBe(30));
+  test('parses "полтора часа"', () => expect(parseDuration('полтора часа')).toBe(90));
+  test('parses "half an hour"', () => expect(parseDuration('half an hour')).toBe(30));
+  test('parses "half hour"', () => expect(parseDuration('half hour')).toBe(30));
 
   // Invalid
   test('returns null for "abc"', () => expect(parseDuration('abc')).toBeNull());

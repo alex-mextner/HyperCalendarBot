@@ -74,11 +74,22 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     return new Date(result.toISOString());
   }
 
-  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
+  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/);
   if (tomorrowMatch) {
     const [, , h, m] = tomorrowMatch;
     const d = startOfDay(addDays(ref, 1));
-    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
+    const result = addMinutes(d, Number(h ?? 0) * 60 + Number(m ?? 0));
+    return new Date(result.toISOString());
+  }
+
+  // "послезавтра" / "day after tomorrow" — with optional time
+  const dayAfterMatch = trimmed.match(
+    /^(послезавтра|day after tomorrow)(?:\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?)?$/,
+  );
+  if (dayAfterMatch) {
+    const [, , h, m] = dayAfterMatch;
+    const d = startOfDay(addDays(ref, 2));
+    const result = addMinutes(d, Number(h ?? 0) * 60 + Number(m ?? 0));
     return new Date(result.toISOString());
   }
 
@@ -104,6 +115,13 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     пт: 5,
     сб: 6,
     вс: 0,
+    понедельник: 1,
+    вторник: 2,
+    среда: 3,
+    четверг: 4,
+    пятница: 5,
+    суббота: 6,
+    воскресенье: 0,
   };
 
   const nextDayMatch = trimmed.match(/^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
@@ -166,6 +184,31 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
       окт: 9,
       ноя: 10,
       дек: 11,
+      // Full Russian — nominative
+      январь: 0,
+      февраль: 1,
+      март: 2,
+      апрель: 3,
+      июнь: 5,
+      июль: 6,
+      август: 7,
+      сентябрь: 8,
+      октябрь: 9,
+      ноябрь: 10,
+      декабрь: 11,
+      // Full Russian — genitive
+      января: 0,
+      февраля: 1,
+      марта: 2,
+      апреля: 3,
+      мая: 4,
+      июня: 5,
+      июля: 6,
+      августа: 7,
+      сентября: 8,
+      октября: 9,
+      ноября: 10,
+      декабря: 11,
     };
     const monthNum = months[part1!];
     if (monthNum !== undefined) {
@@ -194,6 +237,10 @@ export function formatDuration(startUtc: string, endUtc: string, lang: string): 
 export function parseDuration(input: string): number | null {
   const trimmed = input.trim().toLowerCase();
 
+  // Special forms (check before regex)
+  if (trimmed === 'полчаса' || trimmed === 'half an hour' || trimmed === 'half hour') return 30;
+  if (trimmed === 'полтора часа') return 90;
+
   // Colon format: "1:30", "0:45", "10:30"
   const colonMatch = trimmed.match(/^(\d+):(\d{2})$/);
   if (colonMatch) {
@@ -201,8 +248,11 @@ export function parseDuration(input: string): number | null {
     return total > 0 ? total : null;
   }
 
-  // Suffix format: "1h", "30m", "2h30m", "1ч 30м"
-  const suffixMatch = trimmed.match(/^(?:(\d+)\s*[hч])?\s*(?:(\d+)\s*[mм])?$/);
+  // Suffix format with full-word support
+  const hourPattern = '(?:hours?|hr|час(?:а|ов)?|[hч])';
+  const minPattern = '(?:minutes?|min|минут[аыу]?|мин|[mм])';
+  const suffixRegex = new RegExp(`^(?:(\\d+)\\s*${hourPattern})?\\s*(?:(\\d+)\\s*${minPattern})?$`);
+  const suffixMatch = trimmed.match(suffixRegex);
   if (suffixMatch && (suffixMatch[1] || suffixMatch[2])) {
     const hours = suffixMatch[1] ? Number(suffixMatch[1]) : 0;
     const mins = suffixMatch[2] ? Number(suffixMatch[2]) : 0;
@@ -214,6 +264,64 @@ export function parseDuration(input: string): number | null {
   if (plainMatch) {
     const mins = Number(plainMatch[1]);
     return mins > 0 ? mins : null;
+  }
+
+  return null;
+}
+
+export interface RecurrenceParsed {
+  freq: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  interval: number;
+}
+
+export function parseRecurrence(input: string): RecurrenceParsed | null {
+  const trimmed = input.trim().toLowerCase();
+  if (!trimmed) return null;
+
+  const simple: Record<string, RecurrenceParsed> = {
+    daily: { freq: 'DAILY', interval: 1 },
+    'every day': { freq: 'DAILY', interval: 1 },
+    'каждый день': { freq: 'DAILY', interval: 1 },
+    ежедневно: { freq: 'DAILY', interval: 1 },
+    weekly: { freq: 'WEEKLY', interval: 1 },
+    'every week': { freq: 'WEEKLY', interval: 1 },
+    'каждую неделю': { freq: 'WEEKLY', interval: 1 },
+    еженедельно: { freq: 'WEEKLY', interval: 1 },
+    monthly: { freq: 'MONTHLY', interval: 1 },
+    'every month': { freq: 'MONTHLY', interval: 1 },
+    'каждый месяц': { freq: 'MONTHLY', interval: 1 },
+    ежемесячно: { freq: 'MONTHLY', interval: 1 },
+    yearly: { freq: 'YEARLY', interval: 1 },
+    'every year': { freq: 'YEARLY', interval: 1 },
+    'каждый год': { freq: 'YEARLY', interval: 1 },
+    ежегодно: { freq: 'YEARLY', interval: 1 },
+    'через неделю': { freq: 'WEEKLY', interval: 2 },
+  };
+
+  if (simple[trimmed]) return simple[trimmed];
+
+  // "every N <unit>" pattern
+  const everyN = trimmed.match(/^every\s+(\d+)\s+(days?|weeks?|months?|years?)$/);
+  if (everyN) {
+    const n = Number(everyN[1]);
+    const unit = everyN[2]!;
+    if (unit.startsWith('day')) return { freq: 'DAILY', interval: n };
+    if (unit.startsWith('week')) return { freq: 'WEEKLY', interval: n };
+    if (unit.startsWith('month')) return { freq: 'MONTHLY', interval: n };
+    if (unit.startsWith('year')) return { freq: 'YEARLY', interval: n };
+  }
+
+  // "каждые N <unit>" pattern
+  const kazhdyeN = trimmed.match(
+    /^кажд(?:ый|ую|ые|ое)\s+(\d+)\s+(дн(?:я|ей|и)|день|недел[юиь]|месяц(?:а|ев)?|год[аов]?)$/,
+  );
+  if (kazhdyeN) {
+    const n = Number(kazhdyeN[1]);
+    const unit = kazhdyeN[2]!;
+    if (unit.startsWith('дн') || unit === 'день') return { freq: 'DAILY', interval: n };
+    if (unit.startsWith('недел')) return { freq: 'WEEKLY', interval: n };
+    if (unit.startsWith('месяц')) return { freq: 'MONTHLY', interval: n };
+    if (unit.startsWith('год')) return { freq: 'YEARLY', interval: n };
   }
 
   return null;

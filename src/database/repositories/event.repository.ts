@@ -151,6 +151,42 @@ export class EventRepository {
     return this.db.prepare('SELECT * FROM events WHERE id = ?').get(Number(result.lastInsertRowid)) as CalendarEvent;
   }
 
+  getExceptionsFrom(parentEventId: number, fromDate: string): CalendarEvent[] {
+    return this.db
+      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ?')
+      .all(parentEventId, fromDate) as CalendarEvent[];
+  }
+
+  reparentExceptions(oldTemplateId: number, newTemplateId: number, fromDate: string): void {
+    this.db
+      .prepare('UPDATE events SET parent_event_id = ? WHERE parent_event_id = ? AND original_start_at >= ?')
+      .run(newTemplateId, oldTemplateId, fromDate);
+  }
+
+  deleteExceptionsFrom(parentEventId: number, fromDate: string): void {
+    this.db
+      .prepare('DELETE FROM events WHERE parent_event_id = ? AND original_start_at >= ?')
+      .run(parentEventId, fromDate);
+  }
+
+  setRecurrenceUntil(eventId: number, untilDate: string): void {
+    const untilStr = untilDate.replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const event = this.db.prepare('SELECT recurrence_rule FROM events WHERE id = ?').get(eventId) as {
+      recurrence_rule: string;
+    } | null;
+    if (!event?.recurrence_rule) return;
+
+    const baseRule = event.recurrence_rule
+      .split(';')
+      .filter((p) => !p.startsWith('UNTIL='))
+      .join(';');
+    const newRule = `${baseRule};UNTIL=${untilStr}`;
+
+    this.db
+      .prepare("UPDATE events SET recurrence_rule = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(newRule, eventId);
+  }
+
   countInRange(userId: number, startUtc: string, endUtc: string): number {
     const row = this.db
       .prepare(`

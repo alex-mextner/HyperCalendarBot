@@ -107,10 +107,69 @@ export function formatEventListItem(event: CalendarEvent, timezone: string, inde
   return `${index + 1}. ${time} — ${escapeHtml(event.title)}`;
 }
 
-function formatRecurrenceHuman(rrule: string, lang: string): string {
-  if (rrule.includes('FREQ=DAILY')) return lang === 'ru' ? 'Ежедневно' : 'Daily';
-  if (rrule.includes('FREQ=WEEKLY')) return lang === 'ru' ? 'Еженедельно' : 'Weekly';
-  if (rrule.includes('FREQ=MONTHLY')) return lang === 'ru' ? 'Ежемесячно' : 'Monthly';
-  if (rrule.includes('FREQ=YEARLY')) return lang === 'ru' ? 'Ежегодно' : 'Yearly';
-  return rrule;
+export function formatRecurrenceHuman(rrule: string, lang: string): string {
+  const parts = new Map(
+    rrule.split(';').map((p) => {
+      const [k, v] = p.split('=');
+      return [k!, v!] as [string, string];
+    }),
+  );
+
+  const freq = parts.get('FREQ');
+  const interval = Number(parts.get('INTERVAL') ?? 1);
+  const count = parts.get('COUNT');
+  const until = parts.get('UNTIL');
+
+  let base: string;
+
+  if (interval > 1) {
+    const unitMap: Record<string, Record<string, string>> = {
+      DAILY: { en: 'days', ru: ruPlural(interval, 'день', 'дня', 'дней') },
+      WEEKLY: { en: 'weeks', ru: ruPlural(interval, 'неделю', 'недели', 'недель') },
+      MONTHLY: { en: 'months', ru: ruPlural(interval, 'месяц', 'месяца', 'месяцев') },
+      YEARLY: { en: 'years', ru: ruPlural(interval, 'год', 'года', 'лет') },
+    };
+    const unit = unitMap[freq!]?.[lang] ?? freq;
+    base = lang === 'ru' ? `Каждые ${interval} ${unit}` : `Every ${interval} ${unit}`;
+  } else {
+    const freqMap: Record<string, Record<string, string>> = {
+      DAILY: { en: 'Daily', ru: 'Ежедневно' },
+      WEEKLY: { en: 'Weekly', ru: 'Еженедельно' },
+      MONTHLY: { en: 'Monthly', ru: 'Ежемесячно' },
+      YEARLY: { en: 'Yearly', ru: 'Ежегодно' },
+    };
+    base = freqMap[freq!]?.[lang] ?? rrule;
+  }
+
+  if (count) {
+    base += lang === 'ru' ? `, ${count} раз` : `, ${count} times`;
+  }
+
+  if (until) {
+    const untilDate = parseUntilDate(until);
+    if (untilDate) {
+      const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const monthsRu = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+      const day = untilDate.getUTCDate();
+      const mon = lang === 'ru' ? monthsRu[untilDate.getUTCMonth()]! : monthsEn[untilDate.getUTCMonth()]!;
+      base += lang === 'ru' ? ` до ${day} ${mon}` : ` until ${mon} ${day}`;
+    }
+  }
+
+  return base;
+}
+
+function ruPlural(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 19) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function parseUntilDate(until: string): Date | null {
+  const match = until.match(/^(\d{4})(\d{2})(\d{2})/);
+  if (!match) return null;
+  return new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
 }

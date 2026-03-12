@@ -103,4 +103,64 @@ describe('EventService', () => {
     const slots = service.getFreeSlots(USER_ID, new Date('2026-03-11T12:00:00Z'), TZ);
     expect(slots.length).toBe(3);
   });
+
+  describe('recurring event operations', () => {
+    test('editOccurrence creates exception from template', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly Standup',
+        start_at: '2026-03-01T10:00:00Z',
+        end_at: '2026-03-01T11:00:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+
+      const exception = service.editOccurrence(template.id, '2026-03-08T10:00:00Z', USER_ID);
+      expect(exception).not.toBeNull();
+      expect(exception!.parent_event_id).toBe(template.id);
+      expect(exception!.original_start_at).toBe('2026-03-08T10:00:00Z');
+      expect(exception!.title).toBe('Weekly Standup');
+    });
+
+    test('splitRecurrence splits template into two series', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Weekly',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+
+      const newTemplate = service.splitRecurrence(template.id, '2026-03-15T10:00:00Z', USER_ID);
+      expect(newTemplate).not.toBeNull();
+      expect(newTemplate!.start_at).toBe('2026-03-15T10:00:00Z');
+      expect(newTemplate!.recurrence_rule).toBe('FREQ=WEEKLY');
+
+      // Original template now has UNTIL
+      const original = service.getEvent(template.id, USER_ID);
+      expect(original!.recurrence_rule).toContain('UNTIL=');
+    });
+
+    test('deleteFuture adds UNTIL and removes future exceptions', () => {
+      const template = service.createEvent({
+        user_id: USER_ID,
+        title: 'Daily',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: TZ,
+        recurrence_rule: 'FREQ=DAILY',
+      });
+
+      // Create a cancelled exception in the future
+      service.cancelOccurrence(template.id, USER_ID, '2026-03-20T10:00:00Z');
+
+      service.deleteFuture(template.id, '2026-03-15T10:00:00Z', USER_ID);
+
+      const updated = service.getEvent(template.id, USER_ID);
+      expect(updated!.recurrence_rule).toContain('UNTIL=');
+
+      // Future exceptions should be deleted
+      const exceptions = db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(template.id);
+      expect(exceptions.length).toBe(0);
+    });
+  });
 });

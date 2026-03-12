@@ -1,7 +1,7 @@
 // test/services/event/formatters.test.ts
 import { describe, expect, test } from 'bun:test';
 import type { CalendarEvent, EventOccurrence } from '../../../src/database/types.ts';
-import { formatDayAgenda, formatEventDetail } from '../../../src/services/event/formatters.ts';
+import { formatDayAgenda, formatEventDetail, formatRecurrenceHuman } from '../../../src/services/event/formatters.ts';
 
 function makeOccurrence(title: string, startUtc: string, endUtc: string | null = null): EventOccurrence {
   return {
@@ -81,5 +81,32 @@ describe('formatEventDetail', () => {
     expect(result).toContain('Dentist');
     expect(result).toContain('12:00');
     expect(result).toContain('Clinic');
+  });
+});
+
+describe('formatRecurrenceHuman', () => {
+  test('FREQ=DAILY → "Daily"', () => {
+    expect(formatRecurrenceHuman('FREQ=DAILY', 'en')).toBe('Daily');
+  });
+  test('FREQ=WEEKLY → "Еженедельно"', () => {
+    expect(formatRecurrenceHuman('FREQ=WEEKLY', 'ru')).toBe('Еженедельно');
+  });
+  test('FREQ=WEEKLY;INTERVAL=2 → "Every 2 weeks"', () => {
+    expect(formatRecurrenceHuman('FREQ=WEEKLY;INTERVAL=2', 'en')).toBe('Every 2 weeks');
+  });
+  test('FREQ=DAILY;INTERVAL=3 → "Каждые 3 дня"', () => {
+    expect(formatRecurrenceHuman('FREQ=DAILY;INTERVAL=3', 'ru')).toBe('Каждые 3 дня');
+  });
+  test('FREQ=WEEKLY;COUNT=10 → "Weekly, 10 times"', () => {
+    expect(formatRecurrenceHuman('FREQ=WEEKLY;COUNT=10', 'en')).toBe('Weekly, 10 times');
+  });
+  test('FREQ=DAILY;UNTIL=20260330T000000Z → "Daily until Mar 30"', () => {
+    expect(formatRecurrenceHuman('FREQ=DAILY;UNTIL=20260330T000000Z', 'en')).toBe('Daily until Mar 30');
+  });
+  test('FREQ=MONTHLY;COUNT=5 → "Ежемесячно, 5 раз"', () => {
+    expect(formatRecurrenceHuman('FREQ=MONTHLY;COUNT=5', 'ru')).toBe('Ежемесячно, 5 раз');
+  });
+  test('FREQ=DAILY;UNTIL=20260330T000000Z in RU → "Ежедневно до 30 мар"', () => {
+    expect(formatRecurrenceHuman('FREQ=DAILY;UNTIL=20260330T000000Z', 'ru')).toBe('Ежедневно до 30 мар');
   });
 });

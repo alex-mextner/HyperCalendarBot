@@ -127,6 +127,77 @@ export class EventService {
     return this.eventRepo.getUpcoming(userId, limit);
   }
 
+  editOccurrence(templateId: number, occurrenceDate: string, userId: number): CalendarEvent | null {
+    const template = this.eventRepo.findById(templateId, userId);
+    if (!template || !template.recurrence_rule) return null;
+
+    return this.eventRepo.createException(templateId, {
+      user_id: userId,
+      title: template.title,
+      description: template.description ?? undefined,
+      category: template.category ?? undefined,
+      start_at: occurrenceDate,
+      end_at: template.end_at
+        ? new Date(
+            new Date(occurrenceDate).getTime() +
+              (new Date(template.end_at).getTime() - new Date(template.start_at).getTime()),
+          ).toISOString()
+        : undefined,
+      timezone: template.timezone,
+      location: template.location ?? undefined,
+      original_start_at: occurrenceDate,
+    });
+  }
+
+  splitRecurrence(templateId: number, occurrenceDate: string, userId: number): CalendarEvent | null {
+    const template = this.eventRepo.findById(templateId, userId);
+    if (!template || !template.recurrence_rule) return null;
+
+    // Set UNTIL on original template to day before occurrenceDate
+    const dayBefore = new Date(new Date(occurrenceDate).getTime() - 86400000).toISOString();
+    this.eventRepo.setRecurrenceUntil(templateId, dayBefore);
+
+    // Extract base FREQ/INTERVAL from original rule (without UNTIL/COUNT)
+    const baseRule = template.recurrence_rule
+      .split(';')
+      .filter((p) => !p.startsWith('UNTIL=') && !p.startsWith('COUNT='))
+      .join(';');
+
+    // Create new template starting at occurrenceDate
+    const durationMs = template.end_at
+      ? new Date(template.end_at).getTime() - new Date(template.start_at).getTime()
+      : 0;
+
+    const newTemplate = this.eventRepo.create({
+      user_id: userId,
+      title: template.title,
+      description: template.description ?? undefined,
+      category: template.category ?? undefined,
+      start_at: occurrenceDate,
+      end_at: durationMs ? new Date(new Date(occurrenceDate).getTime() + durationMs).toISOString() : undefined,
+      timezone: template.timezone,
+      location: template.location ?? undefined,
+      recurrence_rule: baseRule,
+    });
+
+    // Re-parent exceptions
+    this.eventRepo.reparentExceptions(templateId, newTemplate.id, occurrenceDate);
+
+    return newTemplate;
+  }
+
+  deleteFuture(templateId: number, occurrenceDate: string, userId: number): void {
+    const template = this.eventRepo.findById(templateId, userId);
+    if (!template || !template.recurrence_rule) return;
+
+    // Set UNTIL on template to day before occurrenceDate
+    const dayBefore = new Date(new Date(occurrenceDate).getTime() - 86400000).toISOString();
+    this.eventRepo.setRecurrenceUntil(templateId, dayBefore);
+
+    // Delete all exceptions >= occurrenceDate
+    this.eventRepo.deleteExceptionsFrom(templateId, occurrenceDate);
+  }
+
   cancelOccurrence(templateId: number, userId: number, originalStartAt: string): CalendarEvent | null {
     const template = this.eventRepo.findById(templateId, userId);
     if (!template || !template.recurrence_rule) return null;

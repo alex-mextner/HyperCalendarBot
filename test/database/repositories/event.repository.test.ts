@@ -6,6 +6,7 @@ import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { CalendarEvent } from '../../../src/database/types.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -146,5 +147,111 @@ describe('EventRepository', () => {
     const titles = upcoming.map((e) => e.title);
     expect(titles).toContain('Old recurring');
     expect(titles).toContain('Future one-off');
+  });
+
+  describe('recurring event helpers', () => {
+    test('getExceptionsFrom returns exceptions on or after date', () => {
+      const template = events.create({
+        user_id: USER_ID,
+        title: 'Weekly',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      events.createException(template.id, {
+        user_id: USER_ID,
+        title: 'Moved',
+        start_at: '2026-03-08T11:00:00Z',
+        timezone: 'UTC',
+        original_start_at: '2026-03-08T10:00:00Z',
+      });
+      events.createException(template.id, {
+        user_id: USER_ID,
+        title: 'Moved2',
+        start_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+        original_start_at: '2026-03-15T10:00:00Z',
+      });
+
+      const from = events.getExceptionsFrom(template.id, '2026-03-15T00:00:00Z');
+      expect(from.length).toBe(1);
+      expect(from[0]!.title).toBe('Moved2');
+    });
+
+    test('reparentExceptions moves exceptions to new template', () => {
+      const old = events.create({
+        user_id: USER_ID,
+        title: 'Old',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      const exc = events.createException(old.id, {
+        user_id: USER_ID,
+        title: 'Exc',
+        start_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+        original_start_at: '2026-03-15T10:00:00Z',
+      });
+      const newTemplate = events.create({
+        user_id: USER_ID,
+        title: 'New',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+
+      events.reparentExceptions(old.id, newTemplate.id, '2026-03-15T00:00:00Z');
+
+      const moved = db.prepare('SELECT * FROM events WHERE id = ?').get(exc.id) as CalendarEvent;
+      expect(moved.parent_event_id).toBe(newTemplate.id);
+    });
+
+    test('deleteExceptionsFrom removes exceptions on or after date', () => {
+      const template = events.create({
+        user_id: USER_ID,
+        title: 'Weekly',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+      events.createException(template.id, {
+        user_id: USER_ID,
+        title: 'E1',
+        start_at: '2026-03-08T10:00:00Z',
+        timezone: 'UTC',
+        original_start_at: '2026-03-08T10:00:00Z',
+        is_cancelled: true,
+      });
+      events.createException(template.id, {
+        user_id: USER_ID,
+        title: 'E2',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+        original_start_at: '2026-03-15T10:00:00Z',
+        is_cancelled: true,
+      });
+
+      events.deleteExceptionsFrom(template.id, '2026-03-15T00:00:00Z');
+
+      const remaining = events.getExceptions(template.id);
+      expect(remaining.length).toBe(1);
+      expect(remaining[0]!.title).toBe('E1');
+    });
+
+    test('setRecurrenceUntil appends UNTIL to rrule', () => {
+      const template = events.create({
+        user_id: USER_ID,
+        title: 'Weekly',
+        start_at: '2026-03-01T10:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+      });
+
+      events.setRecurrenceUntil(template.id, '2026-03-14T00:00:00Z');
+
+      const updated = events.findById(template.id, USER_ID);
+      expect(updated!.recurrence_rule).toBe('FREQ=WEEKLY;UNTIL=20260314T000000Z');
+    });
   });
 });
