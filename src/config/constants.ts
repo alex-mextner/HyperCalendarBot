@@ -48,7 +48,7 @@ export const MSG = {
     choose_manually: '⌨️ Choose Manually',
     country_prompt: 'Want to see public holidays in your calendar?',
     country_skip: 'Skip',
-    agenda_prompt: "I can send you a morning summary of your day's events.\n\nEnable morning agenda at 08:00?",
+    agenda_prompt: "I can send you a morning summary of your day's events.\n\nChoose a time for the daily agenda:",
     onboard_done:
       "✅ All set! Here's what you can do:\n\n/add — create your first event\n/today — view today's schedule\n/help — see all commands",
     no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
@@ -79,7 +79,7 @@ export const MSG = {
     choose_manually: '⌨️ Выбрать вручную',
     country_prompt: 'Показывать государственные праздники в календаре?',
     country_skip: 'Пропустить',
-    agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВключить утреннюю сводку в 08:00?',
+    agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВыберите время для утренней сводки:',
     onboard_done:
       '✅ Всё готово! Вот что можно сделать:\n\n/add — создать событие\n/today — расписание на сегодня\n/help — список команд',
     no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,

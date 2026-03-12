@@ -113,7 +113,12 @@ export async function handleOnboardingCallback(
     // Step 4: Morning agenda prompt
     setSession(userId, 'onboard:agenda', { ...session?.data });
     const agendaKb = new InlineKeyboard()
-      .text(lang === 'ru' ? 'Да, 08:00' : 'Yes, 08:00', `${CB.ONBOARD_AGENDA}:yes`)
+      .text('08:00', `${CB.ONBOARD_AGENDA}:08:00`)
+      .text('09:00', `${CB.ONBOARD_AGENDA}:09:00`)
+      .text('10:00', `${CB.ONBOARD_AGENDA}:10:00`)
+      .row()
+      .text('11:00', `${CB.ONBOARD_AGENDA}:11:00`)
+      .text('12:00', `${CB.ONBOARD_AGENDA}:12:00`)
       .text(lang === 'ru' ? 'Нет' : 'No thanks', `${CB.ONBOARD_AGENDA}:no`);
     await ctx.send(t(lang).agenda_prompt, { reply_markup: agendaKb });
   }
