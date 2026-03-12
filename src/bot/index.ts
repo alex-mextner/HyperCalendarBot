@@ -23,6 +23,7 @@ import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createMessageHandler } from './handlers/message.handler.ts';
+import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
 import { createScenesPlugin } from './scenes/index.ts';
@@ -68,6 +69,7 @@ export function createBot(token: string, db: DatabaseService) {
       }
       return next();
     })
+    .use(createCallbackFallback(scenesSetup.storage) as never)
     .extend(scenesSetup.plugin)
     // Commands
     .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, scenesSetup.scenes.onboardingScene))
