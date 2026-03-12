@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__serena__activate_project",
+      "Bash(/Users/ultra/.bun/bin/bunx npm:*)",
+      "Bash(bunx tsc:*)",
+      "Bash(mkdir -p /tmp/gramio-check)",
+      "Read(//tmp/**)"
+    ]
+  }
+}
