@@ -1,7 +1,7 @@
 // src/bot/handlers/callback.handler.ts
 
+import type { AnyScene } from '@gramio/scenes';
 import { CB } from '../../config/constants.ts';
-import type { DatabaseService } from '../../database/index.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -9,7 +9,6 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
 import { handleMonth } from '../commands/month.ts';
-import { handleOnboardingCallback } from '../commands/start.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 
@@ -17,7 +16,7 @@ import type { BotCallbackContext } from '../types.ts';
  * Route all inline keyboard callbacks.
  * Callback data format: "prefix:payload" or "prefix:p1:p2"
  */
-export function createCallbackHandler(db: DatabaseService, eventService: EventService) {
+export function createCallbackHandler(eventService: EventService, editValueScene: AnyScene) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
     if (!data) return;
@@ -28,15 +27,6 @@ export function createCallbackHandler(db: DatabaseService, eventService: EventSe
     const payload = parts.slice(1).join(':');
 
     try {
-      // Onboarding actions
-      if (
-        (
-          [CB.ONBOARD_LANG, CB.ONBOARD_TZ_REGION, CB.ONBOARD_TZ, CB.ONBOARD_COUNTRY, CB.ONBOARD_AGENDA] as string[]
-        ).includes(action)
-      ) {
-        return handleOnboardingCallback(ctx, db, action, payload);
-      }
-
       // Event view
       if (action === CB.EVENT_VIEW) {
         if (payload === 'cancel') return ctx.editText('OK');
@@ -60,7 +50,7 @@ export function createCallbackHandler(db: DatabaseService, eventService: EventSe
       if (action === CB.EDIT_FIELD) {
         const [eidStr, field] = payload.split(':');
         if (field === 'cancel' || eidStr === 'cancel') return ctx.editText('OK');
-        return handleEditFieldCallback(ctx, user, Number(eidStr), field!);
+        return handleEditFieldCallback(ctx, user, Number(eidStr), field!, editValueScene);
       }
 
       // Event delete

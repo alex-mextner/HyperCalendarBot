@@ -6,6 +6,8 @@
       "name": "hypercalendarbot",
       "dependencies": {
         "@date-fns/tz": "1.4.1",
+        "@gramio/scenes": "0.5.1",
+        "@gramio/storage-sqlite": "0.0.2",
         "date-fns": "4.1.0",
         "geo-tz": "8.1.6",
         "gramio": "0.7.0",
@@ -54,6 +56,12 @@
     "@gramio/format": ["@gramio/format@0.5.0", "", { "dependencies": { "@gramio/types": "^9.5.0" }, "peerDependencies": { "marked": "^15.0.11", "node-html-parser": ">=6.0.0" }, "optionalPeers": ["marked", "node-html-parser"] }, "sha512-aVW3XfmrTQHiDeUB0Ps0S7z9L2Kxvn9RL193rAWxtsj6aW0EUNRUyVhJw9zk4Q1fmnWaO3kqUAHDrcce5d36ng=="],
 
     "@gramio/keyboards": ["@gramio/keyboards@1.3.1", "", { "dependencies": { "@gramio/types": ">=9.5.0" } }, "sha512-yUNRMCXgUxbP+A96jdRvsM/VCS2vBBA/tJ1hk+AV2ernKKAR8MYgGJ9lkAbArK6NHvSwKK3TLytRaRcY5wZQrA=="],
+
+    "@gramio/scenes": ["@gramio/scenes@0.5.1", "", { "dependencies": { "@gramio/storage": "^2.0.0" }, "peerDependencies": { "gramio": ">=0.7.0" } }, "sha512-asNFwf1EucksPO93W15d/gsZD28cQSJwikgExH58VEOC5d7d3eNeLcUDZzxw8wO+aQjICK9UfIV19uS7/0FKfQ=="],
+
+    "@gramio/storage": ["@gramio/storage@2.0.1", "", {}, "sha512-aUZM3PCfvtKisMXvJyTwothKNJygaocuCJ4D4rvibdqfv6XnU2retVMOt7RTFM1BOEyVVByfaqkAXcZ1z6NsEw=="],
+
+    "@gramio/storage-sqlite": ["@gramio/storage-sqlite@0.0.2", "", { "dependencies": { "@gramio/storage": "^2.0.1" } }, "sha512-F4I07s1GDb6uaLb/5cjTPjM9wQIF81/Xymvqu5Z70uR1q6ritnakbgfsWQ41crbbZoNvuWfi2WWLa56iz8/GqQ=="],
 
     "@gramio/types": ["@gramio/types@9.5.0", "", {}, "sha512-bpOxXjtsabZpm2TTvr0QA4XJKPVeIoN0scMFuViUaLb1FbtQ+yp4hGz0XUKHVUTr39TzPV4ICANNX5b5uMtTKw=="],
 

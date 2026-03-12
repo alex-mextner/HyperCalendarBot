@@ -22,9 +22,10 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
-import { createLocationHandler, createMessageHandler } from './handlers/message.handler.ts';
+import { createMessageHandler } from './handlers/message.handler.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
+import { createScenesPlugin } from './scenes/index.ts';
 import type { BotCallbackContext, BotCommandContext } from './types.ts';
 
 /**
@@ -48,6 +49,8 @@ export function createBot(token: string, db: DatabaseService) {
     cooldownMs: RATE_LIMIT.COOLDOWN_MS,
   });
 
+  const scenesSetup = createScenesPlugin(db, eventService, token);
+
   const bot = new Bot(token)
     .derive(createUserResolver(db))
     .use(async (context, next) => {
@@ -65,31 +68,32 @@ export function createBot(token: string, db: DatabaseService) {
       }
       return next();
     })
+    .extend(scenesSetup.plugin)
     // Commands
-    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext))
+    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, scenesSetup.scenes.onboardingScene))
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService))
     .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService))
     .command('week', (ctx) => handleWeek(ctx as unknown as BotCommandContext, eventService))
     .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService))
-    .command('add', (ctx) => handleAdd(ctx as unknown as BotCommandContext, eventService))
+    .command('add', (ctx) =>
+      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
+    )
     .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
     .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService))
-    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext))
+    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, scenesSetup.scenes.timezoneScene))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
-    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext))
+    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     // Callback queries
-    .on('callback_query', (ctx) => createCallbackHandler(db, eventService)(ctx as unknown as BotCallbackContext))
-    // Location messages (GramIO routes these separately from 'message')
-    .on('location', (ctx) =>
-      createLocationHandler(db)(ctx as unknown as Parameters<ReturnType<typeof createLocationHandler>>[0]),
+    .on('callback_query', (ctx) =>
+      createCallbackHandler(eventService, scenesSetup.scenes.editValueScene)(ctx as unknown as BotCallbackContext),
     )
-    // Free-text messages
-    .on('message', (ctx) => createMessageHandler(eventService, token)(ctx as unknown as BotCommandContext))
+    // Free-text messages (wizard routing handled by @gramio/scenes)
+    .on('message', (ctx) => createMessageHandler()(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');

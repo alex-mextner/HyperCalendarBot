@@ -1,13 +1,12 @@
 // src/bot/commands/edit.ts
 
+import type { AnyScene } from '@gramio/scenes';
 import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { parseSimpleDate } from '../../utils/date.ts';
 import { editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
-import { clearSession, getSession, setSession } from '../types.ts';
 
 export async function handleEdit(ctx: BotCommandContext, eventService: EventService): Promise<void> {
   const user = ctx.dbUser as User;
@@ -55,13 +54,14 @@ export async function handleEditCallback(
 }
 
 /**
- * Handle field edit callback
+ * Handle field edit callback — enter edit_value scene
  */
 export async function handleEditFieldCallback(
   ctx: BotCallbackContext,
   user: User,
   eventId: number,
   field: string,
+  editValueScene: AnyScene,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
 
@@ -70,64 +70,6 @@ export async function handleEditFieldCallback(
     return;
   }
 
-  setSession(user.telegram_id, `edit:${field}`, { eventId });
-
-  const prompts: Record<string, Record<string, string>> = {
-    title: { en: 'Send new title:', ru: 'Отправьте новое название:' },
-    time: { en: 'Send new date/time (e.g., "tomorrow 15:00"):', ru: 'Отправьте новую дату/время:' },
-    description: {
-      en: 'Send new description (or "clear" to remove):',
-      ru: 'Отправьте описание (или "clear" для удаления):',
-    },
-    location: { en: 'Send new location (or "clear" to remove):', ru: 'Отправьте место (или "clear" для удаления):' },
-  };
-
-  const prompt = prompts[field]?.[lang] ?? 'Send new value:';
   await ctx.answer();
-  await ctx.send(prompt);
-}
-
-/**
- * Handle edit wizard step (called from message handler)
- */
-export async function handleEditWizardStep(
-  ctx: BotCommandContext,
-  eventService: EventService,
-  user: User,
-  text: string,
-): Promise<boolean> {
-  const session = getSession(user.telegram_id);
-  if (!session || !session.step.startsWith('edit:')) return false;
-  const lang = user.language as 'en' | 'ru';
-  const eventId = session.data.eventId as number;
-  const field = session.step.replace('edit:', '');
-
-  const updateData: Record<string, unknown> = {};
-
-  if (field === 'title') {
-    updateData.title = text;
-  } else if (field === 'time') {
-    const parsed = parseSimpleDate(text, user.timezone);
-    if (!parsed) {
-      await ctx.send(lang === 'ru' ? 'Не могу разобрать дату.' : "Can't parse that date.");
-      return true;
-    }
-    updateData.start_at = parsed.toISOString();
-  } else if (field === 'description') {
-    updateData.description = text.toLowerCase() === 'clear' ? null : text;
-  } else if (field === 'location') {
-    updateData.location = text.toLowerCase() === 'clear' ? null : text;
-  }
-
-  const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
-  clearSession(user.telegram_id);
-
-  if (updated) {
-    const detail = formatEventDetail(updated, user.timezone, lang);
-    await ctx.send(`${t(lang).event_updated(updated.title)}\n\n${detail}`, { parse_mode: 'HTML' });
-  } else {
-    await ctx.send(t(lang).something_wrong);
-  }
-
-  return true;
+  await ctx.scene.enter(editValueScene, { eventId, field });
 }

@@ -1,28 +1,27 @@
 // src/bot/commands/add.ts
 
-import { addMinutes } from 'date-fns';
+import type { AnyScene } from '@gramio/scenes';
 import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import { parseSimpleDate } from '../../utils/date.ts';
 import { eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
-import { clearSession, getSession, setSession } from '../types.ts';
 
-export async function handleAdd(ctx: BotCommandContext, eventService: EventService): Promise<void> {
+export async function handleAdd(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  addEventScene: AnyScene,
+): Promise<void> {
   const user = ctx.dbUser as User;
-  const lang = user.language as 'en' | 'ru';
   const args = ctx.args as string | undefined;
 
   if (args && args.trim().length > 0) {
-    // Quick format: /add Title tomorrow at 15:00
-    return handleQuickAdd(ctx, eventService, user, args.trim());
+    return handleQuickAdd(ctx, eventService, user, args.trim(), addEventScene);
   }
 
-  // Start wizard
-  setSession(user.telegram_id, 'add:title');
-  await ctx.send(t(lang).add_title_prompt);
+  await ctx.scene.enter(addEventScene);
 }
 
 async function handleQuickAdd(
@@ -30,6 +29,7 @@ async function handleQuickAdd(
   eventService: EventService,
   user: User,
   input: string,
+  addEventScene: AnyScene,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
 
@@ -52,9 +52,7 @@ async function handleQuickAdd(
   }
 
   if (!title || !dateStr) {
-    // Couldn't parse — fall back to wizard
-    setSession(user.telegram_id, 'add:title');
-    await ctx.send(t(lang).add_title_prompt);
+    await ctx.scene.enter(addEventScene);
     return;
   }
 
@@ -71,70 +69,4 @@ async function handleQuickAdd(
     parse_mode: 'HTML',
     reply_markup: eventActionsKeyboard(event.id, lang),
   });
-}
-
-/**
- * Handle wizard steps for /add (called from message handler)
- */
-export async function handleAddWizardStep(
-  ctx: BotCommandContext,
-  eventService: EventService,
-  user: User,
-  text: string,
-): Promise<boolean> {
-  const session = getSession(user.telegram_id);
-  if (!session || !session.step.startsWith('add:')) return false;
-  const lang = user.language as 'en' | 'ru';
-
-  if (session.step === 'add:title') {
-    setSession(user.telegram_id, 'add:time', { ...session.data, title: text });
-    await ctx.send(t(lang).add_time_prompt);
-    return true;
-  }
-
-  if (session.step === 'add:time') {
-    const parsed = parseSimpleDate(text, user.timezone);
-    if (!parsed) {
-      await ctx.send(
-        lang === 'ru'
-          ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"'
-          : 'Can\'t parse that date. Try: "tomorrow 15:00"',
-      );
-      return true;
-    }
-    setSession(user.telegram_id, 'add:duration', { ...session.data, start_at: parsed.toISOString() });
-    await ctx.send(t(lang).add_duration_prompt);
-    return true;
-  }
-
-  if (session.step === 'add:duration') {
-    const title = session.data.title as string;
-    const startAt = session.data.start_at as string;
-    let endAt: string | undefined;
-
-    if (text.toLowerCase() !== 'skip' && text.toLowerCase() !== 'пропустить') {
-      const mins = parseDuration(text);
-      if (mins) {
-        endAt = addMinutes(new Date(startAt), mins).toISOString();
-      }
-    }
-
-    const event = eventService.createEvent({
-      user_id: user.telegram_id,
-      title,
-      start_at: startAt,
-      end_at: endAt,
-      timezone: user.timezone,
-    });
-
-    clearSession(user.telegram_id);
-    const detail = formatEventDetail(event, user.timezone, lang);
-    await ctx.send(`${t(lang).event_created(title)}\n\n${detail}`, {
-      parse_mode: 'HTML',
-      reply_markup: eventActionsKeyboard(event.id, lang),
-    });
-    return true;
-  }
-
-  return false;
 }
