@@ -181,13 +181,40 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   return null;
 }
 
+export function formatDuration(startUtc: string, endUtc: string, lang: string): string {
+  const diffMs = new Date(endUtc).getTime() - new Date(startUtc).getTime();
+  const totalMinutes = Math.round(diffMs / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return lang === 'ru' ? `${minutes}мин` : `${minutes}m`;
+  if (minutes === 0) return lang === 'ru' ? `${hours}ч` : `${hours}h`;
+  return lang === 'ru' ? `${hours}ч ${minutes}мин` : `${hours}h ${minutes}m`;
+}
+
 export function parseDuration(input: string): number | null {
-  const match = input
-    .trim()
-    .toLowerCase()
-    .match(/^(?:(\d+)\s*[hч])?\s*(?:(\d+)\s*[mм])?$/);
-  if (!match || (!match[1] && !match[2])) return null;
-  const hours = match[1] ? Number(match[1]) : 0;
-  const mins = match[2] ? Number(match[2]) : 0;
-  return hours * 60 + mins;
+  const trimmed = input.trim().toLowerCase();
+
+  // Colon format: "1:30", "0:45", "10:30"
+  const colonMatch = trimmed.match(/^(\d+):(\d{2})$/);
+  if (colonMatch) {
+    const total = Number(colonMatch[1]) * 60 + Number(colonMatch[2]);
+    return total > 0 ? total : null;
+  }
+
+  // Suffix format: "1h", "30m", "2h30m", "1ч 30м"
+  const suffixMatch = trimmed.match(/^(?:(\d+)\s*[hч])?\s*(?:(\d+)\s*[mм])?$/);
+  if (suffixMatch && (suffixMatch[1] || suffixMatch[2])) {
+    const hours = suffixMatch[1] ? Number(suffixMatch[1]) : 0;
+    const mins = suffixMatch[2] ? Number(suffixMatch[2]) : 0;
+    return hours * 60 + mins || null;
+  }
+
+  // Plain number: treat as minutes
+  const plainMatch = trimmed.match(/^(\d+)$/);
+  if (plainMatch) {
+    const mins = Number(plainMatch[1]);
+    return mins > 0 ? mins : null;
+  }
+
+  return null;
 }

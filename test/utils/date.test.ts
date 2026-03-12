@@ -162,10 +162,37 @@ describe('parseSimpleDate', () => {
 });
 
 describe('parseDuration', () => {
+  // Latin suffixes
   test('parses "1h"', () => expect(parseDuration('1h')).toBe(60));
   test('parses "30m"', () => expect(parseDuration('30m')).toBe(30));
   test('parses "2h30m"', () => expect(parseDuration('2h30m')).toBe(150));
-  test('returns null for invalid', () => expect(parseDuration('abc')).toBeNull());
+  test('parses "1h 30m"', () => expect(parseDuration('1h 30m')).toBe(90));
+  test('parses "2h 15m"', () => expect(parseDuration('2h 15m')).toBe(135));
+
+  // Russian suffixes
+  test('parses "1ч"', () => expect(parseDuration('1ч')).toBe(60));
+  test('parses "30м"', () => expect(parseDuration('30м')).toBe(30));
+  test('parses "1ч 30м"', () => expect(parseDuration('1ч 30м')).toBe(90));
+  test('parses "2ч30м"', () => expect(parseDuration('2ч30м')).toBe(150));
+
+  // Colon format — "H:MM"
+  test('parses "1:30" as 90 minutes', () => expect(parseDuration('1:30')).toBe(90));
+  test('parses "0:45" as 45 minutes', () => expect(parseDuration('0:45')).toBe(45));
+  test('parses "2:00" as 120 minutes', () => expect(parseDuration('2:00')).toBe(120));
+  test('parses "0:15" as 15 minutes', () => expect(parseDuration('0:15')).toBe(15));
+  test('parses "10:30" as 630 minutes', () => expect(parseDuration('10:30')).toBe(630));
+
+  // Plain number — treat as minutes
+  test('parses "30" as 30 minutes', () => expect(parseDuration('30')).toBe(30));
+  test('parses "90" as 90 minutes', () => expect(parseDuration('90')).toBe(90));
+  test('parses "60" as 60 minutes', () => expect(parseDuration('60')).toBe(60));
+
+  // Invalid
+  test('returns null for "abc"', () => expect(parseDuration('abc')).toBeNull());
+  test('returns null for empty', () => expect(parseDuration('')).toBeNull());
+  test('returns null for "hello"', () => expect(parseDuration('hello')).toBeNull());
+  test('returns null for "0"', () => expect(parseDuration('0')).toBeNull());
+  test('returns null for "0:00"', () => expect(parseDuration('0:00')).toBeNull());
 });
 
 describe('formatTime', () => {
