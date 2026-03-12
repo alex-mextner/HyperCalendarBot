@@ -100,6 +100,65 @@ describe('parseSimpleDate', () => {
     expect(result).not.toBeNull();
     expect(result!.toISOString()).toContain('2026-03-16T10:00');
   });
+
+  // Hour-only (no minutes)
+  test('parses "сегодня в 12" (hour without minutes)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('сегодня в 12', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T12:00');
+  });
+
+  test('parses "today 9" (hour without minutes)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('today 9', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T09:00');
+  });
+
+  test('parses "завтра 14" (tomorrow hour-only)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('завтра 14', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-12T14:00');
+  });
+
+  test('parses "пн 10" (weekday hour-only)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z'); // Wednesday
+    const result = parseSimpleDate('пн 10', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-16T10:00');
+  });
+
+  // Bare time (implies today)
+  test('parses "15:30" (bare time, implies today)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('15:30', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T15:30');
+  });
+
+  test('parses "в 19:00" (bare time with preposition)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('в 19:00', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T19:00');
+  });
+
+  test('parses "at 8" (bare hour with preposition)', () => {
+    const ref = new Date('2026-03-11T05:00:00Z');
+    const result = parseSimpleDate('at 8', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-11T08:00');
+  });
+
+  // Date without time (defaults to 00:00)
+  test('parses "15 мар" (date without time)', () => {
+    const ref = new Date('2026-03-11T08:00:00Z');
+    const result = parseSimpleDate('15 мар', 'UTC', ref);
+    expect(result).not.toBeNull();
+    expect(result!.toISOString()).toContain('2026-03-15T00:00');
+  });
 });
 
 describe('parseDuration', () => {

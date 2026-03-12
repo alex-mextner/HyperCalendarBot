@@ -57,19 +57,28 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
   const trimmed = input.trim().toLowerCase();
 
-  const todayMatch = trimmed.match(/^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
-  if (todayMatch) {
-    const [, , h, m] = todayMatch;
+  // Bare time: "15:30", "в 19:00", "at 8" → today
+  const bareTimeMatch = trimmed.match(/^(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
+  if (bareTimeMatch) {
+    const [, h, m] = bareTimeMatch;
     const d = startOfDay(ref);
-    const result = addMinutes(d, Number(h) * 60 + Number(m));
+    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
     return new Date(result.toISOString());
   }
 
-  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
+  const todayMatch = trimmed.match(/^(today|сегодня)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
+  if (todayMatch) {
+    const [, , h, m] = todayMatch;
+    const d = startOfDay(ref);
+    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
+    return new Date(result.toISOString());
+  }
+
+  const tomorrowMatch = trimmed.match(/^(tomorrow|завтра)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
   if (tomorrowMatch) {
     const [, , h, m] = tomorrowMatch;
     const d = startOfDay(addDays(ref, 1));
-    const result = addMinutes(d, Number(h) * 60 + Number(m));
+    const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
     return new Date(result.toISOString());
   }
 
@@ -97,7 +106,7 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
     вс: 0,
   };
 
-  const nextDayMatch = trimmed.match(/^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2}):(\d{2})$/);
+  const nextDayMatch = trimmed.match(/^(?:next\s+)?([a-zа-яё]+)\s+(?:(?:at|в)\s+)?(\d{1,2})(?::(\d{2}))?$/);
   if (nextDayMatch) {
     const [, dayStr, h, m] = nextDayMatch;
     const targetDay = dayNames[dayStr!];
@@ -106,7 +115,7 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
       let daysToAdd = targetDay - currentDay;
       if (daysToAdd <= 0) daysToAdd += 7;
       const d = startOfDay(addDays(ref, daysToAdd));
-      const result = addMinutes(d, Number(h) * 60 + Number(m));
+      const result = addMinutes(d, Number(h) * 60 + Number(m ?? 0));
       return new Date(result.toISOString());
     }
   }
