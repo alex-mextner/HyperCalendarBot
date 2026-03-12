@@ -46,11 +46,13 @@ bot.extend(scenes([scene1, scene2], { storage }));
 When `scene.enter()` is called, `scene.compose(context)` runs immediately with the CURRENT context. If the first step's event type doesn't match the entry context type, the step handler **won't fire** and `firstTime` is silently set to `false`. The prompt is never shown.
 
 **Affected scenes and fix:**
+
 - `edit_value`: entered from callback → step 0 is `"message"` → use `onEnter()` for prompt
 - `onboarding`: entered from `/start` (message) → step 0 is `"callback_query"` → use `onEnter()` for prompt
 - `timezone`: entered from `/timezone` (message) → step 0 is `["callback_query", "location"]` → use `onEnter()` for prompt
 
 **Unaffected scenes:**
+
 - `add_event`: entered from `/add` (message) → step 0 is `"message"` → `firstTime` works
 - `import`: entered from `/import` (message) → step 0 is `"message"` → `firstTime` works
 
@@ -63,6 +65,7 @@ Confirmed from `@gramio/scenes@0.5.1` source: the internal `events` array includ
 ## File Structure
 
 **New files:**
+
 - `src/bot/scenes/storage.ts` — SQLite storage singleton factory
 - `src/bot/scenes/helpers.ts` — Command escape middleware, shared scene utilities
 - `src/bot/scenes/add-event.scene.ts` — /add wizard (3 steps: title → time → duration)
@@ -75,6 +78,7 @@ Confirmed from `@gramio/scenes@0.5.1` source: the internal `events` array includ
 - `test/bot/scenes/helpers.test.ts`
 
 **Modified files:**
+
 - `package.json` — Add `@gramio/scenes`, `@gramio/storage-sqlite`
 - `src/bot/types.ts` — Remove in-memory session Map; add `SceneAccess` to context types
 - `src/bot/index.ts` — Wire scenes plugin, remove session-based routing
@@ -93,6 +97,7 @@ Confirmed from `@gramio/scenes@0.5.1` source: the internal `events` array includ
 ### Task 1.1: Install dependencies
 
 **Files:**
+
 - Modify: `package.json`
 
 - [ ] **Step 1: Install packages**
@@ -107,6 +112,7 @@ Expected: `@gramio/scenes@0.5.1` and `@gramio/storage-sqlite@0.0.2` in output
 ### Task 1.2: Create storage factory
 
 **Files:**
+
 - Create: `src/bot/scenes/storage.ts`
 
 - [ ] **Step 1: Write storage.ts**
@@ -130,6 +136,7 @@ Note: `@gramio/storage-sqlite` auto-creates the table. The `$ttl` option sets ex
 ### Task 1.3: Create scene helpers
 
 **Files:**
+
 - Create: `src/bot/scenes/helpers.ts`
 - Create: `test/bot/scenes/helpers.test.ts`
 
@@ -212,6 +219,7 @@ Expected: PASS
 ### Task 1.4: Create scenes index with factory
 
 **Files:**
+
 - Create: `src/bot/scenes/index.ts`
 
 - [ ] **Step 1: Write the initial index (empty scene list — populated in later chunks)**
@@ -241,6 +249,7 @@ export function createScenesPlugin(db: DatabaseService, eventService: EventServi
 ### Task 1.5: Update context types
 
 **Files:**
+
 - Modify: `src/bot/types.ts`
 
 - [ ] **Step 1: Add SceneAccess interface to types.ts**
@@ -274,16 +283,19 @@ export type BotCallbackContext = CallbackQueryContext<AnyBot> & DerivedProps & {
 ### Task 1.6: Wire scenes plugin into bot factory
 
 **Files:**
+
 - Modify: `src/bot/index.ts`
 
 - [ ] **Step 1: Import and extend bot with scenes plugin**
 
 Add import at top:
+
 ```typescript
 import { createScenesPlugin } from './scenes/index.ts';
 ```
 
 In `createBot`, after creating `rateLimiter`, before `const bot = new Bot(token)`:
+
 ```typescript
 const scenesSetup = createScenesPlugin(db, eventService, token);
 ```
@@ -314,6 +326,7 @@ git commit -m "feat: add @gramio/scenes infrastructure with SQLite storage"
 ### Task 2.1: Create add event scene
 
 **Files:**
+
 - Create: `src/bot/scenes/add-event.scene.ts`
 - Create: `test/bot/scenes/add-event.scene.test.ts`
 - Modify: `src/bot/scenes/index.ts`
@@ -473,6 +486,7 @@ Expected: PASS
 ### Task 2.2: Register scene and update command handler
 
 **Files:**
+
 - Modify: `src/bot/scenes/index.ts`
 - Modify: `src/bot/commands/add.ts`
 
@@ -500,10 +514,13 @@ export function createScenesPlugin(db: DatabaseService, eventService: EventServi
 - [ ] **Step 2: Update bot/index.ts to pass scene to add command**
 
 In the `.command('add', ...)` handler, change from:
+
 ```typescript
 .command('add', (ctx) => handleAdd(ctx as unknown as BotCommandContext, eventService))
 ```
+
 to:
+
 ```typescript
 .command('add', (ctx) => handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene))
 ```
@@ -537,9 +554,11 @@ Remove `handleAddWizardStep` function entirely — the scene handles it now.
 - [ ] **Step 4: Update message.handler.ts — remove add wizard routing**
 
 In `createMessageHandler`, remove the line:
+
 ```typescript
 if (await handleAddWizardStep(ctx, eventService, user, text)) return;
 ```
+
 And remove the import of `handleAddWizardStep`.
 
 - [ ] **Step 5: Run tests**
@@ -566,6 +585,7 @@ git commit -m "feat: migrate /add wizard to @gramio/scenes"
 ### Task 3.1: Create edit value scene
 
 **Files:**
+
 - Create: `src/bot/scenes/edit-value.scene.ts`
 
 Single-step scene. Entered from callback handler with params `{ eventId, field }`. Collects one text message and applies the edit.
@@ -661,6 +681,7 @@ export function createEditValueScene(eventService: EventService) {
 ### Task 3.2: Create import scene
 
 **Files:**
+
 - Create: `src/bot/scenes/import.scene.ts`
 
 Single-step scene. Waits for a document upload.
@@ -750,6 +771,7 @@ export function createImportScene(eventService: EventService, botToken: string) 
 ### Task 3.3: Create timezone scene
 
 **Files:**
+
 - Create: `src/bot/scenes/timezone.scene.ts`
 
 Single-step scene. Handles both callback (manual region/city selection) and location (geo-resolve).
@@ -859,6 +881,7 @@ export function createTimezoneScene(db: DatabaseService) {
 ### Task 3.4: Register scenes and update command handlers
 
 **Files:**
+
 - Modify: `src/bot/scenes/index.ts`
 - Modify: `src/bot/commands/edit.ts`
 - Modify: `src/bot/commands/import.ts`
@@ -946,6 +969,7 @@ Remove old session and keyboard imports.
 - [ ] **Step 5: Update bot/index.ts — pass scene references to commands**
 
 Update command registrations:
+
 ```typescript
 .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
 // edit itself unchanged — field callback enters the scene
@@ -955,6 +979,7 @@ Update command registrations:
 ```
 
 Update callback handler creation to pass editValueScene:
+
 ```typescript
 .on('callback_query', (ctx) =>
   createCallbackHandler(db, eventService, scenesSetup.scenes.editValueScene)(ctx as unknown as BotCallbackContext))
@@ -963,11 +988,13 @@ Update callback handler creation to pass editValueScene:
 - [ ] **Step 6: Update callback.handler.ts — pass scene to edit field callback**
 
 Update `createCallbackHandler` signature to accept `editValueScene`:
+
 ```typescript
 export function createCallbackHandler(db: DatabaseService, eventService: EventService, editValueScene: AnyScene) {
 ```
 
 Update the EDIT_FIELD case:
+
 ```typescript
 if (action === CB.EDIT_FIELD) {
   const [eidStr, field] = payload.split(':');
@@ -979,6 +1006,7 @@ if (action === CB.EDIT_FIELD) {
 - [ ] **Step 7: Update message.handler.ts — remove wizard routing**
 
 Remove these lines from `createMessageHandler`:
+
 ```typescript
 if (await handleAddWizardStep(ctx, eventService, user, text)) return;
 if (await handleEditWizardStep(ctx, eventService, user, text)) return;
@@ -1012,6 +1040,7 @@ export function createMessageHandler() {
 - [ ] **Step 8: Update bot/index.ts — simplify message/location handlers**
 
 For `.on('message')`:
+
 ```typescript
 .on('message', (ctx) => createMessageHandler()(ctx as unknown as BotCommandContext))
 ```
@@ -1040,6 +1069,7 @@ Steps use `["callback_query", "location"]` for timezone and `"callback_query"` f
 ### Task 4.1: Create onboarding scene
 
 **Files:**
+
 - Create: `src/bot/scenes/onboarding.scene.ts`
 
 - [ ] **Step 1: Write scene**
@@ -1259,6 +1289,7 @@ export function createOnboardingScene(db: DatabaseService) {
 ### Task 4.2: Register onboarding scene and update handlers
 
 **Files:**
+
 - Modify: `src/bot/scenes/index.ts`
 - Modify: `src/bot/commands/start.ts`
 - Modify: `src/bot/handlers/callback.handler.ts`
@@ -1307,6 +1338,7 @@ Keep the keyboard imports (they're used by the scene, but imported from scene fi
 - [ ] **Step 3: Update callback.handler.ts — remove onboarding callback routing**
 
 Remove the entire onboarding callback block:
+
 ```typescript
 // REMOVE THIS:
 if (([CB.ONBOARD_LANG, CB.ONBOARD_TZ_REGION, CB.ONBOARD_TZ, CB.ONBOARD_COUNTRY, CB.ONBOARD_AGENDA] as string[]).includes(action)) {
@@ -1343,12 +1375,14 @@ git commit -m "feat: migrate onboarding flow to @gramio/scenes"
 ### Task 5.1: Remove in-memory session system
 
 **Files:**
+
 - Modify: `src/bot/types.ts`
 - Verify: all files that imported session functions
 
 - [ ] **Step 1: Remove session code from types.ts**
 
 Delete:
+
 - `UserSession` interface
 - `sessions` Map
 - `getSession` function
@@ -1375,6 +1409,7 @@ If `createLocationHandler` still exists, remove it — timezone and onboarding s
 - [ ] **Step 4: Clean up bot/index.ts**
 
 Verify:
+
 - No `.on('location', ...)` handler (scenes handle it)
 - `.on('message', ...)` uses simplified `createMessageHandler()`
 - No session-related imports
@@ -1406,6 +1441,7 @@ Run: `bun run src/index.ts`
 - [ ] **Step 2: Manual smoke test**
 
 Test these flows:
+
 1. `/start` — should begin onboarding (language selection keyboard)
 2. `/add` — should start add wizard (title prompt)
 3. `/add Meeting tomorrow at 15:00` — should create event directly (no wizard)
@@ -1430,14 +1466,17 @@ If this works, sessions are persistent. If not, debug the storage layer.
 ## Post-Implementation Notes
 
 ### Migration risks
+
 - **Scene intercepts ALL events for users in scenes.** If a user clicks an old inline button (from a previous message) while in a scene, the scene step handler receives it. Step handlers should gracefully ignore unrecognized callback data.
 - **Command escape pattern.** Every scene has `.on('message', ...)` middleware that checks `isCommandEscape()`. This exits the scene when user types any `/command`. The command itself is NOT re-dispatched — user must resend it.
 - **Location event handling.** The `scenes()` plugin intercepts `location` events for users in scenes. The `.on('location')` bot handler is no longer needed.
 
 ### What stays in-memory (not migrated)
+
 - **Rate limiter** — sliding window counters. Reset on restart is fine.
 - **Callback data overflow map** — if used for long callback data strings. Inline keyboards are regenerated on restart.
 
 ### Testing limitations
+
 - Scene step handlers are hard to unit test (require full GramIO context). The plan tests scene structure (name, stepsCount) and helper functions. Integration testing is manual.
 - Future improvement: write a `SceneTestHarness` utility that simulates context objects for automated scene testing.
