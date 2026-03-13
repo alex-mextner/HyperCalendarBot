@@ -245,4 +245,20 @@ export class SyncService {
       });
     }
   }
+
+  async setupWatchChannel(
+    api: GoogleCalendarApi,
+    calendarRowId: number,
+    calendarId: string,
+    publicDomain: string,
+  ): Promise<void> {
+    const channelId = crypto.randomUUID();
+    const webhookUrl = `https://${publicDomain}/webhooks/google-calendar`;
+    const expirationMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
+
+    const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs);
+    this.calendarRepo.addWatchChannel(calendarRowId, channelId, result.resourceId, result.expiration);
+
+    syncLogger.info({ calendarId, channelId }, 'Watch channel created');
+  }
 }
