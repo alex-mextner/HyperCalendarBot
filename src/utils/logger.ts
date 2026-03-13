@@ -9,3 +9,4 @@ export const logger = pino({
 export const botLogger = logger.child({ module: 'bot' });
 export const dbLogger = logger.child({ module: 'db' });
 export const cmdLogger = logger.child({ module: 'cmd' });
+export const notifyLogger = logger.child({ module: 'notify' });

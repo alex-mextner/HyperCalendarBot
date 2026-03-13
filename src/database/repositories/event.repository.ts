@@ -33,6 +33,14 @@ export class EventRepository {
       .get(id, userId) as CalendarEvent | null;
   }
 
+  getByDateRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(
+        'SELECT * FROM events WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 ORDER BY start_at',
+      )
+      .all(userId, startUtc, endUtc) as CalendarEvent[];
+  }
+
   getInRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(`
