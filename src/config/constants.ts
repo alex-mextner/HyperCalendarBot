@@ -129,6 +129,8 @@ export const MSG = {
     gcal_calendars_saved: '✅ Calendar selection saved. Initial sync starting...',
     gcal_sync_complete: '✅ Initial sync complete. Your Google events are now in the bot.',
     gcal_revoked: '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.',
+    gcal_conflict: (title: string, winner: string) =>
+      `⚠️ Sync conflict on "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Local'} version was applied (more recent).`,
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -212,6 +214,8 @@ export const MSG = {
     gcal_calendars_saved: '✅ Выбор сохранён. Начинается синхронизация...',
     gcal_sync_complete: '✅ Синхронизация завершена. Ваши события из Google теперь в боте.',
     gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
+    gcal_conflict: (title: string, winner: string) =>
+      `⚠️ Конфликт синхронизации "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Локальная'} версия применена (более новая).`,
   },
 } as const;
 
