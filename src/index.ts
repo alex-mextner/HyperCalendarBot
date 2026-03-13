@@ -1,12 +1,126 @@
 // src/index.ts
 
-import { createBot } from './bot/index.ts';
+import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
+import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
+
+// Mutable ref — patched after bot creation
+const botRef: { sendMessage: (telegramId: number, text: string) => Promise<void> } = {
+  sendMessage: async () => {},
+};
+
+let googleDeps: GoogleBotDeps | undefined;
+let webServerHandle: { stop: () => void } | undefined;
+let syncQueueCleanup: { close: () => Promise<void> } | undefined;
+
+if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
+  const { GoogleOAuthService } = await import('./services/google/oauth.ts');
+  const { startWebServer } = await import('./web/server.ts');
+  const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
+  const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
+  const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
+  const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
+  const Redis = (await import('ioredis')).default;
+
+  const oauthService = new GoogleOAuthService(config, db.users, db.googleSync);
+  const redis = new Redis(config.REDIS_URL);
+
+  const stateStore = {
+    set: async (key: string, value: string, ttl: number) => {
+      await redis.set(key, value, 'EX', ttl);
+    },
+    get: async (key: string) => redis.get(key),
+    del: async (key: string) => {
+      await redis.del(key);
+    },
+  };
+
+  const { queue, worker } = createGoogleSyncQueue({
+    config,
+    redisUrl: config.REDIS_URL,
+    oauthService,
+    eventRepo: db.events,
+    syncRepo: db.googleSync,
+    calendarRepo: db.googleCalendars,
+    onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
+    onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
+    onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
+    sendMessage: (telegramId, text) => botRef.sendMessage(telegramId, text),
+  });
+
+  syncQueueCleanup = {
+    close: async () => {
+      await worker.close();
+      await queue.close();
+      redis.disconnect();
+    },
+  };
+
+  const disconnectDeps: DisconnectDeps = {
+    config,
+    oauthService,
+    userRepo: db.users,
+    eventRepo: db.events,
+    syncRepo: db.googleSync,
+    calendarRepo: db.googleCalendars,
+    stopWatchChannels: async (userId) => {
+      await queue.add('stop-watch', { type: 'stop-watch', userId });
+    },
+  };
+
+  googleDeps = {
+    oauthService,
+    stateStore,
+    disconnectDeps,
+    calendarRepo: db.googleCalendars,
+    onCalendarsDone: async (userId) => {
+      const calendars = db.googleCalendars.getEnabledCalendars(userId);
+      for (const cal of calendars) {
+        await queue.add('initial-sync', {
+          type: 'initial-sync',
+          userId,
+          calendarId: cal.google_calendar_id,
+        });
+      }
+    },
+  };
+
+  webServerHandle = startWebServer({
+    config,
+    oauthService,
+    userRepo: db.users,
+    syncRepo: db.googleSync,
+    calendarRepo: db.googleCalendars,
+    stateLookup: stateStore,
+    onConnected: async (userId) => {
+      await queue.add('refresh-calendars', { type: 'refresh-calendars', userId });
+    },
+    onWebhook: async (channelId, resourceId) => {
+      const channel = db.googleCalendars.findChannelByIds(channelId, resourceId);
+      if (!channel) return;
+      const cal = db.googleCalendars.getCalendarById(channel.google_calendar_row_id);
+      if (!cal) return;
+      await queue.add('pull-sync', {
+        type: 'pull-sync',
+        userId: cal.user_id,
+        calendarId: cal.google_calendar_id,
+        trigger: 'webhook',
+      });
+    },
+  });
+
+  await setupSyncCron(queue);
+  await setupWatchRenewalCron(queue);
+  await setupCleanupCron(queue);
+
+  botLogger.info('Google Calendar sync initialized');
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -15,8 +129,13 @@ const { bot } = createBot(
     baseUrl: config.AI_BASE_URL,
     model: config.AI_MODEL,
   },
-  !!config.GOOGLE_CLIENT_ID,
+  googleDeps,
 );
+
+// Patch sendMessage to use real bot API
+botRef.sendMessage = async (telegramId, text) => {
+  await bot.api.sendMessage({ chat_id: telegramId, text });
+};
 
 // Register bot commands in Telegram menu — both languages
 const COMMANDS_EN = [
@@ -55,10 +174,19 @@ const COMMANDS_RU = [
   { command: 'help', description: 'Справка' },
 ];
 
+if (config.GOOGLE_CLIENT_ID) {
+  COMMANDS_EN.push(
+    { command: 'connect_google', description: 'Connect Google Calendar' },
+    { command: 'disconnect_google', description: 'Disconnect Google Calendar' },
+  );
+  COMMANDS_RU.push(
+    { command: 'connect_google', description: 'Подключить Google Calendar' },
+    { command: 'disconnect_google', description: 'Отключить Google Calendar' },
+  );
+}
+
 bot.onStart(async ({ info }) => {
-  // Default (English)
   await bot.api.setMyCommands({ commands: COMMANDS_EN });
-  // Russian language scope
   await bot.api.setMyCommands({
     commands: COMMANDS_RU,
     language_code: 'ru',
@@ -70,15 +198,18 @@ bot.onStart(async ({ info }) => {
 process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
+  if (syncQueueCleanup) await syncQueueCleanup.close();
+  if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   await bot.stop();
+  if (syncQueueCleanup) await syncQueueCleanup.close();
+  if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
 });
 
-// Start polling
 bot.start({ dropPendingUpdates: true });

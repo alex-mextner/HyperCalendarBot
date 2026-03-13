@@ -30,6 +30,10 @@ const HELP_EN = `📖 <b>HyperCalendar Commands</b>
 🔔 <b>Notifications</b>
   /notify — notification settings
 
+📡 <b>Google Calendar</b>
+  /connect_google — connect Google Calendar
+  /disconnect_google — disconnect Google Calendar
+
 🔧 <b>Other</b>
   /free — find free time slots
   /ping — check bot status
@@ -63,6 +67,10 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
 
 🔔 <b>Уведомления</b>
   /notify — настройки уведомлений
+
+📡 <b>Google Calendar</b>
+  /connect_google — подключить Google Calendar
+  /disconnect_google — отключить Google Calendar
 
 🔧 <b>Другое</b>
   /free — свободные слоты

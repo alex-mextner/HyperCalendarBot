@@ -2,16 +2,20 @@
 import { Bot } from 'gramio';
 import { RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
+import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { EventService } from '../services/event/event-service.ts';
+import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
+import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
 import { handleEdit } from './commands/edit.ts';
 import { handleExport } from './commands/export.ts';
 import { handleFree } from './commands/free.ts';
@@ -51,7 +55,15 @@ interface GramIOContextWithDerived {
   send(text: string): Promise<unknown>;
 }
 
-export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, gcalConfigured = false) {
+export interface GoogleBotDeps {
+  oauthService: GoogleOAuthService;
+  stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
+  disconnectDeps: DisconnectDeps;
+  calendarRepo: GoogleCalendarRepository;
+  onCalendarsDone?: (userId: number) => Promise<void>;
+}
+
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, googleDeps?: GoogleBotDeps) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -61,7 +73,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     cooldownMs: RATE_LIMIT.COOLDOWN_MS,
   });
 
-  const scenesSetup = createScenesPlugin(db, eventService, token, gcalConfigured);
+  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps);
 
   const bot = new Bot(token);
   const telegramSender = createTelegramSender(bot);
@@ -115,6 +127,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         scenesSetup.scenes.editValueScene,
         holidayService,
         prefsService,
+        googleDeps?.calendarRepo,
+        googleDeps?.disconnectDeps,
+        googleDeps?.onCalendarsDone,
       )(ctx as unknown as BotCallbackContext),
     )
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
@@ -140,6 +155,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         }
       } catch {}
     });
+
+  // Google Calendar commands (registered after derive chain so dbUser is available)
+  if (googleDeps) {
+    bot
+      .command('connect_google', (ctx) =>
+        handleConnectGoogle(ctx as unknown as BotCommandContext, {
+          oauthService: googleDeps.oauthService,
+          stateStore: googleDeps.stateStore,
+        }),
+      )
+      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
+  }
 
   return { bot, eventService, holidayService, prefsService, db };
 }

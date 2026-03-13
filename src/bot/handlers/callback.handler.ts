@@ -3,13 +3,16 @@
 import type { AnyScene } from '@gramio/scenes';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
+import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
@@ -26,6 +29,9 @@ export function createCallbackHandler(
   editValueScene: AnyScene,
   holidayService: HolidayService,
   prefsService: NotificationPreferencesService,
+  calendarRepo?: GoogleCalendarRepository,
+  disconnectDeps?: DisconnectDeps,
+  onCalendarsDone?: (userId: number) => Promise<void>,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -173,18 +179,37 @@ export function createCallbackHandler(
         return handleHolidayCallback(ctx, holidayService, user, payload);
       }
 
-      // Google Calendar onboarding dismiss / connect hint
+      // Google Calendar callbacks
       if (action === CB.GCAL) {
-        if (payload === 'onboard:later') {
+        const lang = (user.language ?? 'en') as Lang;
+        const subParts = payload.split(':');
+        const subAction = subParts[0];
+        const subPayload = subParts.slice(1).join(':');
+
+        if (subAction === 'cal' && calendarRepo) {
+          return handleCalendarPickerCallback(ctx, calendarRepo, user.telegram_id, subPayload, lang, onCalendarsDone);
+        }
+        if (subAction === 'disconnect') {
+          if (subPayload === 'yes' && disconnectDeps) {
+            await executeDisconnect(user.telegram_id, disconnectDeps);
+            await ctx.answer();
+            return ctx.editText(t(lang).gcal_disconnected);
+          }
           await ctx.answer();
-          await ctx.message?.delete();
-          return;
+          return ctx.editText('OK');
         }
-        if (payload === 'onboard:connect') {
-          const lang = (user.language ?? 'en') as Lang;
-          await ctx.answer({ text: t(lang).gcal_connect_prompt });
-          return;
+        if (subAction === 'onboard') {
+          if (subPayload === 'later') {
+            await ctx.answer();
+            await ctx.message?.delete();
+            return;
+          }
+          if (subPayload === 'connect') {
+            await ctx.answer({ text: t(lang).gcal_connect_prompt });
+            return;
+          }
         }
+        return;
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
