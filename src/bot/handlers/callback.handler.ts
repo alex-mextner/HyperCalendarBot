@@ -7,11 +7,13 @@ import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
+import { handleNotifyCallback } from '../commands/notify.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 
@@ -23,6 +25,7 @@ export function createCallbackHandler(
   eventService: EventService,
   editValueScene: AnyScene,
   holidayService: HolidayService,
+  prefsService: NotificationPreferencesService,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -158,6 +161,11 @@ export function createCallbackHandler(
       if (action === CB.MONTH_NAV) {
         await ctx.answer();
         return handleMonth(ctx, eventService, payload);
+      }
+
+      // Notifications
+      if (action === CB.NOTIFY) {
+        return handleNotifyCallback(ctx, prefsService, user, payload);
       }
 
       // Holidays

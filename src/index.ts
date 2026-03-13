@@ -28,6 +28,7 @@ const COMMANDS_EN = [
   { command: 'settings', description: 'Settings' },
   { command: 'import', description: 'Import .ics' },
   { command: 'export', description: 'Export .ics' },
+  { command: 'notify', description: 'Notification settings' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -45,6 +46,7 @@ const COMMANDS_RU = [
   { command: 'settings', description: 'Настройки' },
   { command: 'import', description: 'Импорт .ics' },
   { command: 'export', description: 'Экспорт .ics' },
+  { command: 'notify', description: 'Настройки уведомлений' },
   { command: 'help', description: 'Справка' },
 ];
 

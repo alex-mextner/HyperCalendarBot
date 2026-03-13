@@ -27,6 +27,9 @@ const HELP_EN = `📖 <b>HyperCalendar Commands</b>
   /holidays — manage holiday subscriptions
   /holidays list — upcoming holidays
 
+🔔 <b>Notifications</b>
+  /notify — notification settings
+
 🔧 <b>Other</b>
   /free — find free time slots
   /ping — check bot status
@@ -57,6 +60,9 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
 🌍 <b>Праздники</b>
   /holidays — управление праздниками
   /holidays list — ближайшие праздники
+
+🔔 <b>Уведомления</b>
+  /notify — настройки уведомлений
 
 🔧 <b>Другое</b>
   /free — свободные слоты
