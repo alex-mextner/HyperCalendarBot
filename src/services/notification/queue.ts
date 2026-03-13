@@ -2,16 +2,9 @@
 import { Queue, Worker } from 'bullmq';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
+import { parseRedisUrl } from '../../utils/redis.ts';
 import type { NotificationJobData } from './worker.ts';
 import { processNotification } from './worker.ts';
-
-function parseRedisUrl(url: string): { host: string; port: number } {
-  const parsed = new URL(url);
-  return {
-    host: parsed.hostname || 'localhost',
-    port: Number(parsed.port) || 6379,
-  };
-}
 
 export function createNotificationQueue(redisUrl: string) {
   const connection = parseRedisUrl(redisUrl);
