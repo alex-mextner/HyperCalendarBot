@@ -125,4 +125,20 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '005_create_chat_history',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE chat_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_chat_history_user ON chat_history(user_id, created_at);
+      `);
+    },
+  },
 ];
