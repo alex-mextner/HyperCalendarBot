@@ -46,6 +46,27 @@ export class UserRepository {
     return this.create(data);
   }
 
+  updateGoogleToken(telegramId: number, encRefreshToken: string): void {
+    this.db
+      .prepare(`
+      UPDATE users SET google_refresh_token_enc = ?, updated_at = datetime('now')
+      WHERE telegram_id = ?
+    `)
+      .run(encRefreshToken, telegramId);
+  }
+
+  clearGoogleToken(telegramId: number): void {
+    this.db
+      .prepare(`
+      UPDATE users SET
+        google_refresh_token_enc = NULL,
+        google_calendar_id = NULL,
+        updated_at = datetime('now')
+      WHERE telegram_id = ?
+    `)
+      .run(telegramId);
+  }
+
   update(telegramId: number, data: UpdateUserData): User | null {
     const existing = this.findByTelegramId(telegramId);
     if (!existing) return null;

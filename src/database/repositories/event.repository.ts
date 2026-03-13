@@ -195,6 +195,87 @@ export class EventRepository {
       .run(newRule, eventId);
   }
 
+  findByGoogleEventId(userId: number, googleCalendarId: string, googleEventId: string): CalendarEvent | null {
+    return this.db
+      .prepare('SELECT * FROM events WHERE user_id = ? AND google_calendar_id = ? AND google_event_id = ?')
+      .get(userId, googleCalendarId, googleEventId) as CalendarEvent | null;
+  }
+
+  updateSyncFields(
+    eventId: number,
+    data: {
+      google_event_id?: string;
+      google_calendar_id?: string;
+      google_etag?: string;
+      sync_status?: string;
+      last_synced_at?: string;
+    },
+  ): void {
+    const fields: string[] = [];
+    const values: (string | number)[] = [];
+    for (const [k, v] of Object.entries(data)) {
+      if (v !== undefined) {
+        fields.push(`${k} = ?`);
+        values.push(v);
+      }
+    }
+    if (fields.length === 0) return;
+    fields.push("updated_at = datetime('now')");
+    values.push(eventId);
+    this.db.prepare(`UPDATE events SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+  }
+
+  clearGoogleSync(userId: number): void {
+    this.db
+      .prepare(`
+      UPDATE events SET
+        google_calendar_id = NULL, google_event_id = NULL,
+        google_etag = NULL, sync_status = 'local_only', last_synced_at = NULL
+      WHERE user_id = ?
+    `)
+      .run(userId);
+  }
+
+  insertSyncedEvent(data: {
+    user_id: number;
+    title: string;
+    description: string | null;
+    start_at: string;
+    end_at: string | null;
+    all_day: boolean | number;
+    timezone: string;
+    location: string | null;
+    recurrence_rule: string | null;
+    google_calendar_id: string;
+    google_event_id: string;
+    google_etag: string | null;
+    is_cancelled: boolean | number;
+  }): void {
+    this.db
+      .prepare(`
+      INSERT OR IGNORE INTO events (
+        user_id, title, description, start_at, end_at, all_day,
+        timezone, location, recurrence_rule, google_calendar_id, google_event_id,
+        google_etag, sync_status, sync_version, is_cancelled
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 0, ?)
+    `)
+      .run(
+        data.user_id,
+        data.title,
+        data.description,
+        data.start_at,
+        data.end_at,
+        data.all_day ? 1 : 0,
+        data.timezone,
+        data.location,
+        data.recurrence_rule,
+        data.google_calendar_id,
+        data.google_event_id,
+        data.google_etag,
+        data.is_cancelled ? 1 : 0,
+      );
+  }
+
   countInRange(userId: number, startUtc: string, endUtc: string): number {
     const row = this.db
       .prepare(`

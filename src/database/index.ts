@@ -7,6 +7,8 @@ import { migrations } from './migrations.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
+import { GoogleCalendarRepository } from './repositories/google-calendar.repository.ts';
+import { GoogleSyncRepository } from './repositories/google-sync.repository.ts';
 import { HolidayRepository } from './repositories/holiday.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
@@ -24,6 +26,8 @@ export class DatabaseService {
   readonly notificationPreferences: NotificationPreferencesRepository;
   readonly eventReminders: EventReminderRepository;
   readonly notificationLog: NotificationLogRepository;
+  readonly googleSync: GoogleSyncRepository;
+  readonly googleCalendars: GoogleCalendarRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -44,6 +48,8 @@ export class DatabaseService {
     this.notificationPreferences = new NotificationPreferencesRepository(this.db);
     this.eventReminders = new EventReminderRepository(this.db);
     this.notificationLog = new NotificationLogRepository(this.db);
+    this.googleSync = new GoogleSyncRepository(this.db);
+    this.googleCalendars = new GoogleCalendarRepository(this.db);
   }
 
   close(): void {
