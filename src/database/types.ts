@@ -96,6 +96,14 @@ export interface UpdateEventData {
   reminder_overrides?: string | null;
 }
 
+export interface ChatHistoryMessage {
+  id: number;
+  user_id: number;
+  role: 'user' | 'assistant' | 'tool';
+  content: string; // plain text for user, JSON content blocks for assistant/tool
+  created_at: string;
+}
+
 // ── Computed types ──
 
 export interface EventOccurrence {
