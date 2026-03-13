@@ -1,0 +1,111 @@
+import { Database } from 'bun:sqlite';
+import { beforeEach, describe, expect, test } from 'bun:test';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+
+describe('EventReminderRepository', () => {
+  let db: Database;
+  let repo: EventReminderRepository;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.run('PRAGMA foreign_keys = ON');
+    db.run(`CREATE TABLE users (
+      telegram_id INTEGER PRIMARY KEY,
+      timezone TEXT NOT NULL DEFAULT 'UTC',
+      language TEXT NOT NULL DEFAULT 'en',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    db.run(`CREATE TABLE events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      start_at TEXT NOT NULL,
+      location TEXT,
+      timezone TEXT NOT NULL DEFAULT 'UTC',
+      all_day INTEGER NOT NULL DEFAULT 0,
+      is_cancelled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+    )`);
+    db.run(`CREATE TABLE event_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      remind_at_utc TEXT NOT NULL,
+      interval_minutes INTEGER NOT NULL,
+      interval_label TEXT NOT NULL,
+      sent INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+    )`);
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Meeting', '2026-03-15T10:00:00Z')");
+    repo = new EventReminderRepository(db);
+  });
+
+  test('insert creates a reminder row', () => {
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+    const rows = repo.getForEvent(1);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.interval_minutes).toBe(15);
+  });
+
+  test('getDue returns reminders in time window', () => {
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+    const due = repo.getDue('2026-03-15T09:45:00Z', '2026-03-15T09:46:00Z');
+    expect(due.length).toBe(1);
+  });
+
+  test('getDue excludes already-sent reminders', () => {
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+    const rows = repo.getForEvent(1);
+    repo.markSent(rows[0]!.id);
+    const due = repo.getDue('2026-03-15T09:45:00Z', '2026-03-15T09:46:00Z');
+    expect(due.length).toBe(0);
+  });
+
+  test('deleteForEvent removes all reminders for an event', () => {
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+    repo.deleteForEvent(1);
+    expect(repo.getForEvent(1).length).toBe(0);
+  });
+
+  test('deleteUnsentForUser removes unsent reminders for a user', () => {
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+    repo.deleteUnsentForUser(42);
+    expect(repo.getForEvent(1).length).toBe(0);
+  });
+});
