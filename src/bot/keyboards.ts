@@ -1,6 +1,6 @@
 // src/bot/keyboards.ts
 import { InlineKeyboard, Keyboard } from 'gramio';
-import { CB, TZ_REGIONS } from '../config/constants.ts';
+import { CB, TZ_REGIONS, t } from '../config/constants.ts';
 import type { CalendarEvent } from '../database/types.ts';
 import { formatTime } from '../utils/date.ts';
 
@@ -236,6 +236,91 @@ export function monthNavKeyboard(yearMonth: string): InlineKeyboard {
   const prev = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
   const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
   return new InlineKeyboard().text('◀️', `${CB.MONTH_NAV}:${prev}`).text('▶️', `${CB.MONTH_NAV}:${next}`);
+}
+
+// ── Notification keyboards ──
+
+export function notifyMenuKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  const msgs = t(lang);
+  return new InlineKeyboard()
+    .text(msgs.notify_morning as string, `${CB.NOTIFY}:morning`)
+    .text(msgs.notify_reminders as string, `${CB.NOTIFY}:reminders`)
+    .row()
+    .text(msgs.notify_evening as string, `${CB.NOTIFY}:evening`)
+    .text(msgs.notify_quiet as string, `${CB.NOTIFY}:quiet`)
+    .row();
+}
+
+export function notifyMorningKeyboard(enabled: boolean): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  kb.text(enabled ? '❌ Disable' : '✅ Enable', `${CB.NOTIFY}:morning:toggle`);
+  kb.text('🕐 Change Time', `${CB.NOTIFY}:morning:time`);
+  kb.row();
+  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  return kb;
+}
+
+export function notifyHourPickerKeyboard(section: string): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (let h = 5; h <= 12; h++) {
+    kb.text(String(h).padStart(2, '0'), `${CB.NOTIFY}:${section}:hour:${String(h).padStart(2, '0')}`);
+    if ((h - 4) % 4 === 0) kb.row();
+  }
+  for (let h = 13; h <= 23; h++) {
+    kb.text(String(h).padStart(2, '0'), `${CB.NOTIFY}:${section}:hour:${String(h).padStart(2, '0')}`);
+    if ((h - 12) % 4 === 0) kb.row();
+  }
+  kb.text('← Back', `${CB.NOTIFY}:${section}`);
+  return kb;
+}
+
+export function notifyMinutePickerKeyboard(section: string, hour: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text(':00', `${CB.NOTIFY}:${section}:minute:${hour}:00`)
+    .text(':15', `${CB.NOTIFY}:${section}:minute:${hour}:15`)
+    .text(':30', `${CB.NOTIFY}:${section}:minute:${hour}:30`)
+    .text(':45', `${CB.NOTIFY}:${section}:minute:${hour}:45`)
+    .row()
+    .text('← Back', `${CB.NOTIFY}:${section}:time`);
+}
+
+export function notifyReminderIntervalsKeyboard(activeIntervals: number[]): InlineKeyboard {
+  const ALL = [5, 15, 30, 60, 1440];
+  const labels: Record<number, string> = { 5: '5min', 15: '15min', 30: '30min', 60: '1hr', 1440: '1day' };
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < ALL.length; i++) {
+    const m = ALL[i]!;
+    const active = activeIntervals.includes(m);
+    kb.text(`${labels[m]} ${active ? '✅' : '❌'}`, `${CB.NOTIFY}:reminders:toggle:${m}`);
+    if ((i + 1) % 3 === 0) kb.row();
+  }
+  kb.row();
+  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  return kb;
+}
+
+export function notifyEveningKeyboard(enabled: boolean): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  kb.text(enabled ? '❌ Disable' : '✅ Enable', `${CB.NOTIFY}:evening:toggle`);
+  kb.text('🕐 Change Time', `${CB.NOTIFY}:evening:time`);
+  kb.row();
+  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  return kb;
+}
+
+export function notifyQuietKeyboard(enabled: boolean): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (enabled) {
+    kb.text('❌ Disable', `${CB.NOTIFY}:quiet:toggle`);
+    kb.row();
+    kb.text('🕐 Change Start', `${CB.NOTIFY}:quiet:start`);
+    kb.text('🕐 Change End', `${CB.NOTIFY}:quiet:end`);
+  } else {
+    kb.text('✅ Enable', `${CB.NOTIFY}:quiet:toggle`);
+  }
+  kb.row();
+  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  return kb;
 }
 
 // ── Remove keyboard helper ──

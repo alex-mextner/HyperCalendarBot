@@ -5,6 +5,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
 import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
+import type { ReminderMaterializer } from '../notification/materializer.ts';
 import { expandRecurrence } from './recurrence.ts';
 
 export interface FreeSlot {
@@ -17,6 +18,7 @@ export class EventService {
   constructor(
     private eventRepo: EventRepository,
     private reminderRepo: ReminderRepository,
+    private materializer?: ReminderMaterializer,
   ) {}
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -25,14 +27,30 @@ export class EventService {
     for (const mins of reminderMinutes) {
       this.reminderRepo.create(event.id, mins);
     }
+    if (this.materializer) {
+      this.materializer.materialize(
+        { id: event.id, start_at: event.start_at, reminder_overrides: event.reminder_overrides ?? null },
+        event.user_id,
+      );
+    }
     return event;
   }
 
   updateEvent(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
-    return this.eventRepo.update(id, userId, data);
+    const updated = this.eventRepo.update(id, userId, data);
+    if (this.materializer && updated) {
+      this.materializer.materialize(
+        { id: updated.id, start_at: updated.start_at, reminder_overrides: updated.reminder_overrides ?? null },
+        updated.user_id,
+      );
+    }
+    return updated;
   }
 
   deleteEvent(id: number, userId: number): boolean {
+    if (this.materializer) {
+      this.materializer.deleteForEvent(id);
+    }
     return this.eventRepo.remove(id, userId);
   }
 

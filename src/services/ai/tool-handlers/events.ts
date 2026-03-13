@@ -1,0 +1,124 @@
+import type { AgentContext, ToolResult } from '../types.ts';
+
+interface GetEventsInput {
+  start_date: string;
+  end_date: string;
+}
+
+interface CreateEventInput {
+  title: string;
+  start_at: string;
+  end_at?: string;
+  description?: string;
+  location?: string;
+  all_day?: boolean;
+  recurrence_rule?: string;
+  reminder_minutes?: number[];
+}
+
+interface UpdateEventInput {
+  event_id: number;
+  title?: string;
+  start_at?: string;
+  end_at?: string | null;
+  description?: string | null;
+  location?: string | null;
+  recurrence_rule?: string | null;
+}
+
+interface DeleteEventInput {
+  event_id: number;
+}
+
+interface SearchEventsInput {
+  query: string;
+}
+
+export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
+  const occurrences = ctx.eventService.getEventsInRange(ctx.user.telegram_id, input.start_date, input.end_date);
+
+  if (occurrences.length === 0) {
+    return { success: true, output: 'No events found in this range.' };
+  }
+
+  const lines = occurrences.map((occ) => {
+    const e = occ.event;
+    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
+    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    if (e.description) parts.push(`description: ${e.description}`);
+    if (e.location) parts.push(`location: ${e.location}`);
+    if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
+    return parts.join(', ');
+  });
+
+  return { success: true, output: lines.join('\n') };
+}
+
+export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
+  try {
+    const event = ctx.eventService.createEvent({
+      user_id: ctx.user.telegram_id,
+      title: input.title,
+      start_at: input.start_at,
+      end_at: input.end_at,
+      description: input.description,
+      location: input.location,
+      all_day: input.all_day,
+      timezone: ctx.user.timezone,
+      recurrence_rule: input.recurrence_rule,
+      reminder_minutes: input.reminder_minutes,
+    });
+
+    const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
+    if (event.end_at) parts.push(`end: ${event.end_at}`);
+    if (event.description) parts.push(`description: ${event.description}`);
+    if (event.location) parts.push(`location: ${event.location}`);
+
+    return { success: true, output: `Event created: ${parts.join(', ')}` };
+  } catch (error) {
+    return { success: false, error: `Failed to create event: ${String(error)}` };
+  }
+}
+
+export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
+  const { event_id, ...updates } = input;
+  const updated = ctx.eventService.updateEvent(event_id, ctx.user.telegram_id, updates);
+
+  if (!updated) {
+    return { success: false, error: `Event ${event_id} not found or not owned by you.` };
+  }
+
+  const parts = [`id: ${updated.id}`, `title: ${updated.title}`, `start: ${updated.start_at}`];
+  if (updated.end_at) parts.push(`end: ${updated.end_at}`);
+  if (updated.description) parts.push(`description: ${updated.description}`);
+  if (updated.location) parts.push(`location: ${updated.location}`);
+
+  return { success: true, output: `Event updated: ${parts.join(', ')}` };
+}
+
+export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  ctx.eventService.deleteEvent(input.event_id, ctx.user.telegram_id);
+  return { success: true, output: `Event "${event.title}" (id: ${event.id}) deleted.` };
+}
+
+export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
+  const events = ctx.eventService.searchEvents(ctx.user.telegram_id, input.query);
+
+  if (events.length === 0) {
+    return { success: true, output: 'No events found matching the query.' };
+  }
+
+  const lines = events.map((e) => {
+    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
+    if (e.end_at) parts.push(`end: ${e.end_at}`);
+    if (e.location) parts.push(`location: ${e.location}`);
+    return parts.join(', ');
+  });
+
+  return { success: true, output: lines.join('\n') };
+}

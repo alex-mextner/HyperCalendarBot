@@ -2,6 +2,7 @@
 
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { migrations } from '../../src/database/migrations.ts';
 import type { Migration } from '../../src/database/schema.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 
@@ -70,5 +71,40 @@ describe('runMigrations', () => {
     runMigrations(db, migrations);
 
     expect(order).toEqual(['first', 'second']);
+  });
+});
+
+describe('production migrations', () => {
+  let db: Database;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+  });
+
+  test('migration 005 creates chat_history table', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='chat_history'").all() as {
+      name: string;
+    }[];
+    expect(tables.length).toBe(1);
+
+    const columns = db.prepare('PRAGMA table_info(chat_history)').all() as { name: string }[];
+    const colNames = columns.map((c) => c.name);
+    expect(colNames).toContain('id');
+    expect(colNames).toContain('user_id');
+    expect(colNames).toContain('role');
+    expect(colNames).toContain('content');
+    expect(colNames).toContain('created_at');
+  });
+
+  test('migration 006 creates notification tables', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('notification_preferences');
+    expect(names).toContain('event_reminders');
+    expect(names).toContain('notification_log');
   });
 });

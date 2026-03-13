@@ -18,9 +18,11 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@date-fns/tz": "1.4.1",
     "@gramio/scenes": "0.5.1",
     "@gramio/storage-sqlite": "0.0.2",
+    "bullmq": "^5.71.0",
     "date-fns": "4.1.0",
     "date-holidays": "^3.26.9",
     "geo-tz": "8.1.6",
