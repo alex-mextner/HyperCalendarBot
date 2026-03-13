@@ -3,6 +3,9 @@ import { Bot } from 'gramio';
 import { RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
 import type { User } from '../database/types.ts';
+import { CalendarBotAgent } from '../services/ai/agent.ts';
+import { createTelegramSender } from '../services/ai/telegram-sender.ts';
+import type { AgentConfig } from '../services/ai/types.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import { botLogger } from '../utils/logger.ts';
@@ -46,7 +49,7 @@ interface GramIOContextWithDerived {
   send(text: string): Promise<unknown>;
 }
 
-export function createBot(token: string, db: DatabaseService) {
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -57,7 +60,11 @@ export function createBot(token: string, db: DatabaseService) {
 
   const scenesSetup = createScenesPlugin(db, eventService, token);
 
-  const bot = new Bot(token)
+  const bot = new Bot(token);
+  const telegramSender = createTelegramSender(bot);
+  const agent = new CalendarBotAgent(aiConfig, telegramSender);
+
+  bot
     .derive(createUserResolver(db))
     .use(async (context, next) => {
       const ctx = context as unknown as GramIOContextWithFrom;
@@ -105,8 +112,18 @@ export function createBot(token: string, db: DatabaseService) {
         holidayService,
       )(ctx as unknown as BotCallbackContext),
     )
-    // Free-text messages (wizard routing handled by @gramio/scenes)
-    .on('message', (ctx) => createMessageHandler()(ctx as unknown as BotCommandContext))
+    // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
+    .on('message', (ctx) =>
+      createMessageHandler({
+        agent,
+        eventService,
+        holidayService,
+        chatHistory: db.chatHistory,
+        userRepo: db.users,
+        reminderRepo: db.reminders,
+        sceneStorage: scenesSetup.storage,
+      })(ctx as unknown as BotCommandContext),
+    )
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');

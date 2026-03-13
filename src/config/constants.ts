@@ -7,6 +7,8 @@ export const RATE_LIMIT = {
   ADD_PER_HOUR: 20,
   EXPORT_PER_HOUR: 5,
   COOLDOWN_MS: 60_000,
+  AI_PER_MINUTE: 10,
+  AI_PER_HOUR: 60,
 } as const;
 
 // Defaults
@@ -94,6 +96,8 @@ export const MSG = {
     holidays_manage_prompt: 'Choose a subscription to manage:',
     holidays_notify_on: (country: string) => `${country}: notifications ON`,
     holidays_notify_off: (country: string) => `${country}: notifications OFF`,
+    ai_error: 'AI is temporarily unavailable. Use bot commands (/help).',
+    ai_clear_history: 'Chat history cleared.',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -146,6 +150,8 @@ export const MSG = {
     holidays_manage_prompt: 'Выберите подписку для управления:',
     holidays_notify_on: (country: string) => `${country}: уведомления ВКЛ`,
     holidays_notify_off: (country: string) => `${country}: уведомления ВЫКЛ`,
+    ai_error: 'ИИ временно недоступен. Используйте команды бота (/help).',
+    ai_clear_history: 'История чата очищена.',
   },
 } as const;
 

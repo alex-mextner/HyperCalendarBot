@@ -7,7 +7,11 @@ import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
-const { bot } = createBot(config.BOT_TOKEN, db);
+const { bot } = createBot(config.BOT_TOKEN, db, {
+  apiKey: config.ANTHROPIC_API_KEY,
+  baseUrl: config.AI_BASE_URL,
+  model: config.AI_MODEL,
+});
 
 // Register bot commands in Telegram menu — both languages
 const COMMANDS_EN = [
