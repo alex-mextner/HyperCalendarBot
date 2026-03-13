@@ -114,6 +114,9 @@ export const MSG = {
     notify_updated: 'Settings updated',
     notify_intervals_label: (intervals: number[]) =>
       `Default reminders: ${intervals.map((m) => (m >= 60 ? `${m / 60}hr` : `${m}min`)).join(', ')}`,
+    gcal_onboarding:
+      'Want to sync with Google Calendar?\n\nYour events will stay in the bot either way. Google Calendar sync is optional but gives you:\n- See bot events in your phone calendar\n- Changes in Google Calendar auto-sync to the bot\n- Two-way sync keeps everything up to date',
+    gcal_onboarding_maybe_later: 'Maybe Later',
     gcal_not_configured: 'Google Calendar sync is not configured. Contact the admin.',
     gcal_already_connected: 'Google Calendar is already connected. Use /disconnect_google first to reconnect.',
     gcal_connect_prompt: '🔗 Connect Google Calendar to sync your events bidirectionally.',
@@ -199,6 +202,9 @@ export const MSG = {
     notify_updated: 'Настройки обновлены',
     notify_intervals_label: (intervals: number[]) =>
       `Напоминания: ${intervals.map((m) => (m >= 60 ? `${m / 60}ч` : `${m}мин`)).join(', ')}`,
+    gcal_onboarding:
+      'Хотите синхронизировать с Google Calendar?\n\nСобытия останутся в боте в любом случае. Синхронизация даёт:\n- Просмотр событий бота в Google Calendar\n- Изменения в Google Calendar авто-синхронизируются\n- Двусторонняя синхронизация',
+    gcal_onboarding_maybe_later: 'Позже',
     gcal_not_configured: 'Синхронизация с Google Calendar не настроена. Обратитесь к администратору.',
     gcal_already_connected: 'Google Calendar уже подключён. Используйте /disconnect_google чтобы переподключить.',
     gcal_connect_prompt: '🔗 Подключите Google Calendar для двусторонней синхронизации событий.',

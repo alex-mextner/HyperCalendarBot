@@ -9,14 +9,19 @@ import { createOnboardingScene } from './onboarding.scene.ts';
 import { createSceneStorage } from './storage.ts';
 import { createTimezoneScene } from './timezone.scene.ts';
 
-export function createScenesPlugin(db: DatabaseService, eventService: EventService, botToken: string) {
+export function createScenesPlugin(
+  db: DatabaseService,
+  eventService: EventService,
+  botToken: string,
+  gcalConfigured = false,
+) {
   const storage = createSceneStorage(db.db);
 
   const addEventScene = createAddEventScene(eventService);
   const editValueScene = createEditValueScene(eventService);
   const importScene = createImportScene(eventService, botToken);
   const timezoneScene = createTimezoneScene(db);
-  const onboardingScene = createOnboardingScene(db);
+  const onboardingScene = createOnboardingScene(db, gcalConfigured);
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
 
   return {

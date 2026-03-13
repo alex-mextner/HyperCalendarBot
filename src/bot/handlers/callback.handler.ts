@@ -173,6 +173,20 @@ export function createCallbackHandler(
         return handleHolidayCallback(ctx, holidayService, user, payload);
       }
 
+      // Google Calendar onboarding dismiss / connect hint
+      if (action === CB.GCAL) {
+        if (payload === 'onboard:later') {
+          await ctx.answer();
+          await ctx.message?.delete();
+          return;
+        }
+        if (payload === 'onboard:connect') {
+          const lang = (user.language ?? 'en') as Lang;
+          await ctx.answer({ text: t(lang).gcal_connect_prompt });
+          return;
+        }
+      }
+
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {

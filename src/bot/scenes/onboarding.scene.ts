@@ -19,6 +19,8 @@ import {
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
 
+const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
+
 interface OnboardingState {
   lang?: 'en' | 'ru';
   detectedTz?: string;
@@ -26,7 +28,7 @@ interface OnboardingState {
   country?: string;
 }
 
-export function createOnboardingScene(db: DatabaseService) {
+export function createOnboardingScene(db: DatabaseService, gcalConfigured = false) {
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
@@ -202,6 +204,19 @@ export function createOnboardingScene(db: DatabaseService) {
         await cbCtx.answer();
 
         await context.send(t(l).onboard_done);
+
+        // Show Google Calendar onboarding prompt if configured and not already connected
+        if (gcalConfigured) {
+          const user = db.users.findByTelegramId(context.from.id);
+          if (!user?.google_refresh_token_enc) {
+            const gcalKb = new InlineKeyboard()
+              .text(t(l).gcal_connect_button, `${CB.GCAL}:onboard:connect`)
+              .row()
+              .text(t(l).gcal_onboarding_maybe_later, GCAL_ONBOARD_LATER);
+            await context.send(t(l).gcal_onboarding, { reply_markup: gcalKb });
+          }
+        }
+
         await context.scene.exit();
       })
   );

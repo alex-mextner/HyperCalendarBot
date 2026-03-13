@@ -51,7 +51,7 @@ interface GramIOContextWithDerived {
   send(text: string): Promise<unknown>;
 }
 
-export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig) {
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, gcalConfigured = false) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -61,7 +61,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     cooldownMs: RATE_LIMIT.COOLDOWN_MS,
   });
 
-  const scenesSetup = createScenesPlugin(db, eventService, token);
+  const scenesSetup = createScenesPlugin(db, eventService, token, gcalConfigured);
 
   const bot = new Bot(token);
   const telegramSender = createTelegramSender(bot);
