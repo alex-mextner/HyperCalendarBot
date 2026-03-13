@@ -1,0 +1,189 @@
+import Anthropic from '@anthropic-ai/sdk';
+import type { ChatHistoryMessage } from '../../database/types.ts';
+import { logger } from '../../utils/logger.ts';
+import { buildSystemPrompt } from './system-prompt.ts';
+import { TelegramStreamWriter } from './telegram-stream.ts';
+import { executeTool } from './tool-executor.ts';
+import { toolDefinitions } from './tools.ts';
+import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
+
+const aiLogger = logger.child({ module: 'ai-agent' });
+
+const MAX_ROUNDS = 15;
+const TIMEOUT_MS = 90_000;
+
+interface MessageParam {
+  role: 'user' | 'assistant';
+  content: string | Anthropic.ContentBlockParam[];
+}
+
+export class CalendarBotAgent {
+  private client: Anthropic;
+  private model: string;
+  private sender: TelegramSender;
+
+  constructor(config: AgentConfig, sender: TelegramSender) {
+    this.client = new Anthropic({
+      apiKey: config.apiKey,
+      baseURL: config.baseUrl,
+    });
+    this.model = config.model;
+    this.sender = sender;
+  }
+
+  buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
+    const systemPrompt = buildSystemPrompt(ctx);
+    const messages: MessageParam[] = [];
+
+    for (const msg of history) {
+      let content: string | Anthropic.ContentBlockParam[];
+      try {
+        const parsed = JSON.parse(msg.content);
+        content = Array.isArray(parsed) ? (parsed as Anthropic.ContentBlockParam[]) : msg.content;
+      } catch {
+        content = msg.content;
+      }
+      const role = msg.role === 'tool' ? 'user' : msg.role;
+      messages.push({ role, content } as MessageParam);
+    }
+
+    messages.push({ role: 'user', content: ctx.messageText });
+
+    return { systemPrompt, messages };
+  }
+
+  saveUserMessage(ctx: AgentContext): void {
+    ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText);
+  }
+
+  saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
+    ctx.chatHistory.save(ctx.user.telegram_id, 'assistant', JSON.stringify(contentBlocks));
+  }
+
+  saveToolResults(ctx: AgentContext, toolResults: Anthropic.ToolResultBlockParam[]): void {
+    ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults));
+  }
+
+  async run(ctx: AgentContext): Promise<void> {
+    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
+    const { systemPrompt, messages } = this.buildMessages(ctx, history);
+
+    const writer = new TelegramStreamWriter(this.sender, ctx.chatId);
+    await writer.init();
+
+    this.saveUserMessage(ctx);
+
+    const startTime = Date.now();
+
+    try {
+      let currentMessages = [...messages];
+
+      for (let round = 0; round < MAX_ROUNDS; round++) {
+        if (Date.now() - startTime > TIMEOUT_MS) {
+          aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout');
+          writer.appendText('\n\n⚠️ Timeout reached.');
+          break;
+        }
+
+        const stream = this.client.messages.stream({
+          model: this.model,
+          max_tokens: 4096,
+          system: [
+            {
+              type: 'text',
+              text: systemPrompt,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+          messages: currentMessages,
+          tools: toolDefinitions,
+        });
+
+        let hasToolUse = false;
+        const toolResults: Anthropic.ToolResultBlockParam[] = [];
+        const contentBlocks: Anthropic.ContentBlockParam[] = [];
+
+        for await (const event of stream) {
+          if (event.type === 'content_block_delta') {
+            if (event.delta.type === 'text_delta') {
+              writer.appendText(event.delta.text);
+              await writer.flush(false);
+            }
+          }
+
+          if (event.type === 'content_block_start') {
+            if (event.content_block.type === 'tool_use') {
+              hasToolUse = true;
+              writer.setToolLabel(event.content_block.name);
+              await writer.flush(true);
+            }
+          }
+
+          if (event.type === 'message_delta') {
+            if (event.delta.stop_reason === 'tool_use') {
+              hasToolUse = true;
+            }
+          }
+        }
+
+        const finalMessage = await stream.finalMessage();
+
+        for (const block of finalMessage.content) {
+          if (block.type === 'text') {
+            contentBlocks.push({ type: 'text', text: block.text });
+          } else if (block.type === 'tool_use') {
+            contentBlocks.push({
+              type: 'tool_use',
+              id: block.id,
+              name: block.name,
+              input: block.input,
+            });
+
+            aiLogger.info({ tool: block.name, input: block.input, userId: ctx.user.telegram_id }, 'Tool call');
+
+            const result = executeTool(ctx, block.name, block.input as Record<string, unknown>);
+
+            aiLogger.info({ tool: block.name, success: result.success, userId: ctx.user.telegram_id }, 'Tool result');
+
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: block.id,
+              content: result.success ? (result.output ?? 'OK') : `Error: ${result.error}`,
+              is_error: !result.success,
+            });
+          }
+        }
+
+        writer.clearToolLabel();
+
+        if (contentBlocks.length > 0) {
+          this.saveAssistantTurn(ctx, contentBlocks);
+        }
+
+        if (!hasToolUse || toolResults.length === 0) {
+          break;
+        }
+
+        this.saveToolResults(ctx, toolResults);
+
+        currentMessages = [
+          ...currentMessages,
+          { role: 'assistant' as const, content: contentBlocks },
+          { role: 'user' as const, content: toolResults },
+        ];
+      }
+    } catch (error) {
+      const errStr = String(error);
+      aiLogger.error({ error: errStr, userId: ctx.user.telegram_id }, 'Agent error');
+
+      const lang = ctx.user.language;
+      const errorMsg =
+        lang === 'ru'
+          ? '\n\n⚠️ Произошла ошибка при обработке запроса.'
+          : '\n\n⚠️ An error occurred while processing your request.';
+      writer.appendText(errorMsg);
+    }
+
+    await writer.finalize();
+  }
+}
