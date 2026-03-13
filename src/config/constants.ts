@@ -42,6 +42,7 @@ export const CB = {
   ADD_SKIP: 'ask',
   HOLIDAYS: 'hl',
   NOTIFY: 'nf',
+  GCAL: 'gc',
 } as const;
 
 // i18n messages
@@ -113,6 +114,21 @@ export const MSG = {
     notify_updated: 'Settings updated',
     notify_intervals_label: (intervals: number[]) =>
       `Default reminders: ${intervals.map((m) => (m >= 60 ? `${m / 60}hr` : `${m}min`)).join(', ')}`,
+    gcal_not_configured: 'Google Calendar sync is not configured. Contact the admin.',
+    gcal_already_connected: 'Google Calendar is already connected. Use /disconnect_google first to reconnect.',
+    gcal_connect_prompt: '🔗 Connect Google Calendar to sync your events bidirectionally.',
+    gcal_connect_button: 'Connect Google Calendar',
+    gcal_connected: '✅ Google Calendar connected! Now pick which calendars to sync.',
+    gcal_disconnected: '✅ Google Calendar disconnected. Your local events are untouched.',
+    gcal_disconnect_confirm: 'Disconnect Google Calendar? Your events will stay in the bot.',
+    gcal_disconnect_yes: 'Yes, disconnect',
+    gcal_disconnect_no: 'Cancel',
+    gcal_calendar_picker: 'Select calendars to sync (tap to toggle):',
+    gcal_calendar_done: 'Done ✓',
+    gcal_calendar_readonly: '(read-only)',
+    gcal_calendars_saved: '✅ Calendar selection saved. Initial sync starting...',
+    gcal_sync_complete: '✅ Initial sync complete. Your Google events are now in the bot.',
+    gcal_revoked: '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -181,6 +197,21 @@ export const MSG = {
     notify_updated: 'Настройки обновлены',
     notify_intervals_label: (intervals: number[]) =>
       `Напоминания: ${intervals.map((m) => (m >= 60 ? `${m / 60}ч` : `${m}мин`)).join(', ')}`,
+    gcal_not_configured: 'Синхронизация с Google Calendar не настроена. Обратитесь к администратору.',
+    gcal_already_connected: 'Google Calendar уже подключён. Используйте /disconnect_google чтобы переподключить.',
+    gcal_connect_prompt: '🔗 Подключите Google Calendar для двусторонней синхронизации событий.',
+    gcal_connect_button: 'Подключить Google Calendar',
+    gcal_connected: '✅ Google Calendar подключён! Выберите календари для синхронизации.',
+    gcal_disconnected: '✅ Google Calendar отключён. Локальные события сохранены.',
+    gcal_disconnect_confirm: 'Отключить Google Calendar? События останутся в боте.',
+    gcal_disconnect_yes: 'Да, отключить',
+    gcal_disconnect_no: 'Отмена',
+    gcal_calendar_picker: 'Выберите календари для синхронизации (нажмите для переключения):',
+    gcal_calendar_done: 'Готово ✓',
+    gcal_calendar_readonly: '(только чтение)',
+    gcal_calendars_saved: '✅ Выбор сохранён. Начинается синхронизация...',
+    gcal_sync_complete: '✅ Синхронизация завершена. Ваши события из Google теперь в боте.',
+    gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
   },
 } as const;
 
