@@ -203,4 +203,74 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '007_google_sync',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE google_sync_state (
+          user_id INTEGER PRIMARY KEY,
+          access_token TEXT,
+          expires_at TEXT,
+          scopes TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active'
+            CHECK (status IN ('active', 'revoked', 'expired')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE google_calendars (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          google_calendar_id TEXT NOT NULL,
+          calendar_name TEXT NOT NULL,
+          color TEXT,
+          is_primary INTEGER NOT NULL DEFAULT 0,
+          sync_enabled INTEGER NOT NULL DEFAULT 1,
+          access_role TEXT NOT NULL DEFAULT 'owner'
+            CHECK (access_role IN ('owner', 'writer', 'reader', 'freeBusyReader')),
+          sync_token TEXT,
+          last_synced_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          UNIQUE (user_id, google_calendar_id)
+        );
+        CREATE INDEX idx_google_calendars_user_id ON google_calendars(user_id);
+
+        CREATE TABLE google_watch_channels (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          google_calendar_row_id INTEGER NOT NULL,
+          channel_id TEXT NOT NULL UNIQUE,
+          resource_id TEXT NOT NULL,
+          expiration TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (google_calendar_row_id) REFERENCES google_calendars(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_watch_channels_expiration ON google_watch_channels(expiration);
+
+        CREATE TABLE sync_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          event_id INTEGER,
+          google_event_id TEXT,
+          direction TEXT NOT NULL CHECK (direction IN ('push', 'pull')),
+          action TEXT NOT NULL CHECK (action IN ('create', 'update', 'delete', 'conflict_resolve')),
+          details TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_sync_log_user_created ON sync_log(user_id, created_at);
+      `);
+
+      db.exec('ALTER TABLE events ADD COLUMN google_etag TEXT');
+      db.exec(`ALTER TABLE events ADD COLUMN sync_status TEXT NOT NULL DEFAULT 'local_only'
+        CHECK (sync_status IN ('local_only', 'synced', 'pending_push', 'pending_pull', 'conflict', 'push_failed'))`);
+      db.exec('ALTER TABLE events ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 0');
+
+      db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_events_google_cal_event
+        ON events(google_calendar_id, google_event_id)
+        WHERE google_event_id IS NOT NULL`);
+    },
+  },
 ];

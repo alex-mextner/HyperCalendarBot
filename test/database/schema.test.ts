@@ -107,4 +107,23 @@ describe('production migrations', () => {
     expect(names).toContain('event_reminders');
     expect(names).toContain('notification_log');
   });
+
+  test('migration 007 creates google sync tables', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('google_sync_state');
+    expect(names).toContain('google_calendars');
+    expect(names).toContain('google_watch_channels');
+    expect(names).toContain('sync_log');
+  });
+
+  test('migration 007 adds sync fields to events table', () => {
+    const columns = db.prepare('PRAGMA table_info(events)').all() as { name: string }[];
+    const colNames = columns.map((c) => c.name);
+    expect(colNames).toContain('google_etag');
+    expect(colNames).toContain('sync_status');
+    expect(colNames).toContain('sync_version');
+  });
 });
