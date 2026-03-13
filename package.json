@@ -26,6 +26,7 @@
     "date-fns": "4.1.0",
     "date-holidays": "^3.26.9",
     "geo-tz": "8.1.6",
+    "googleapis": "^171.4.0",
     "gramio": "0.7.0",
     "pino": "10.3.1",
     "rrule": "2.8.1"
