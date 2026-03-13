@@ -19,6 +19,7 @@ export class EventService {
     private eventRepo: EventRepository,
     private reminderRepo: ReminderRepository,
     private materializer?: ReminderMaterializer,
+    private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void,
   ) {}
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -33,6 +34,9 @@ export class EventService {
         event.user_id,
       );
     }
+    if (this.pushSync && event.google_calendar_id) {
+      this.pushSync(event.user_id, event.id, 'create');
+    }
     return event;
   }
 
@@ -44,10 +48,19 @@ export class EventService {
         updated.user_id,
       );
     }
+    if (this.pushSync && updated?.google_calendar_id) {
+      this.pushSync(updated.user_id, updated.id, 'update');
+    }
     return updated;
   }
 
   deleteEvent(id: number, userId: number): boolean {
+    if (this.pushSync) {
+      const event = this.eventRepo.findById(id, userId);
+      if (event?.google_calendar_id) {
+        this.pushSync(userId, id, 'delete');
+      }
+    }
     if (this.materializer) {
       this.materializer.deleteForEvent(id);
     }
