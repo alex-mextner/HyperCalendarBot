@@ -1,5 +1,11 @@
 // src/database/types.ts
 
+// ── Sync enums ──
+
+export type SyncStatus = 'local_only' | 'synced' | 'pending_push' | 'pending_pull' | 'conflict' | 'push_failed';
+export type GoogleSyncStatusValue = 'active' | 'revoked' | 'expired';
+export type GoogleAccessRole = 'owner' | 'writer' | 'reader' | 'freeBusyReader';
+
 // ── Row types (match SQLite columns exactly) ──
 
 export interface User {
@@ -35,6 +41,9 @@ export interface CalendarEvent {
   reminder_overrides: string | null; // JSON array "[5, 30]"
   google_event_id: string | null;
   google_calendar_id: string | null;
+  google_etag: string | null;
+  sync_status: SyncStatus;
+  sync_version: number;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -94,6 +103,12 @@ export interface UpdateEventData {
   recurrence_rule?: string | null;
   recurrence_end_at?: string | null;
   reminder_overrides?: string | null;
+  google_calendar_id?: string | null;
+  google_event_id?: string | null;
+  google_etag?: string | null;
+  sync_status?: SyncStatus;
+  sync_version?: number;
+  last_synced_at?: string | null;
 }
 
 export interface ChatHistoryMessage {
@@ -101,6 +116,53 @@ export interface ChatHistoryMessage {
   user_id: number;
   role: 'user' | 'assistant' | 'tool';
   content: string; // plain text for user, JSON content blocks for assistant/tool
+  created_at: string;
+}
+
+// ── Google Sync row types ──
+
+export interface GoogleSyncState {
+  user_id: number;
+  access_token: string | null;
+  expires_at: string | null;
+  scopes: string;
+  status: GoogleSyncStatusValue;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleCalendar {
+  id: number;
+  user_id: number;
+  google_calendar_id: string;
+  calendar_name: string;
+  color: string | null;
+  is_primary: number;
+  sync_enabled: number;
+  access_role: GoogleAccessRole;
+  sync_token: string | null;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoogleWatchChannel {
+  id: number;
+  google_calendar_row_id: number;
+  channel_id: string;
+  resource_id: string;
+  expiration: string;
+  created_at: string;
+}
+
+export interface SyncLogEntry {
+  id: number;
+  user_id: number;
+  event_id: number | null;
+  google_event_id: string | null;
+  direction: 'push' | 'pull';
+  action: 'create' | 'update' | 'delete' | 'conflict_resolve';
+  details: string | null;
   created_at: string;
 }
 
