@@ -23,10 +23,10 @@ interface GoogleEventReminder {
   minutes: number;
 }
 
-interface GoogleEvent {
-  summary?: string;
-  description?: string;
-  location?: string;
+export interface GoogleEvent {
+  summary?: string | null;
+  description?: string | null;
+  location?: string | null;
   start?: GoogleEventTime;
   end?: GoogleEventTime;
   recurrence?: string[];
@@ -37,9 +37,10 @@ interface GoogleEvent {
   extendedProperties?: {
     private?: Record<string, string>;
   };
-  id?: string;
-  etag?: string;
-  status?: string;
+  id?: string | null;
+  etag?: string | null;
+  status?: string | null;
+  updated?: string | null;
 }
 
 interface LocalEventFromGoogle {

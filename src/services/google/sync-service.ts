@@ -5,7 +5,7 @@ import type { GoogleSyncRepository } from '../../database/repositories/google-sy
 import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import type { GoogleCalendarApi } from './calendar-api.ts';
-import { googleToLocal, localToGoogle } from './event-mapper.ts';
+import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
 
 export class SyncService {
   constructor(
@@ -28,7 +28,7 @@ export class SyncService {
         if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
         if (gEvent.status === 'cancelled') continue;
 
-        const local = googleToLocal(gEvent, userId, calendarId);
+        const local = googleToLocal(gEvent as GoogleEvent, userId, calendarId);
         this.eventRepo.insertSyncedEvent({
           user_id: userId,
           title: local.title,
@@ -76,7 +76,7 @@ export class SyncService {
         if (gEvent.status === 'cancelled') {
           this.handleDeletedEvent(userId, calendarId, gEvent.id!);
         } else {
-          await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent);
+          await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent as GoogleEvent);
         }
       }
 
@@ -169,11 +169,7 @@ export class SyncService {
     }
   }
 
-  private async handleUpdatedOrNewEvent(
-    userId: number,
-    calendarId: string,
-    gEvent: import('googleapis').calendar_v3.Schema$Event,
-  ): Promise<void> {
+  private async handleUpdatedOrNewEvent(userId: number, calendarId: string, gEvent: GoogleEvent): Promise<void> {
     const local = googleToLocal(gEvent, userId, calendarId);
     const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
 
