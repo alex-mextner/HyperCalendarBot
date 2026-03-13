@@ -97,4 +97,14 @@ describe('production migrations', () => {
     expect(colNames).toContain('content');
     expect(colNames).toContain('created_at');
   });
+
+  test('migration 006 creates notification tables', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('notification_preferences');
+    expect(names).toContain('event_reminders');
+    expect(names).toContain('notification_log');
+  });
 });

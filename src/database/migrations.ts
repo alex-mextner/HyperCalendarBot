@@ -141,4 +141,66 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '006_create_notification_tables',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS notification_preferences (
+          user_id                    INTEGER PRIMARY KEY,
+          morning_agenda_enabled     INTEGER NOT NULL DEFAULT 1,
+          morning_agenda_time        TEXT NOT NULL DEFAULT '08:00',
+          morning_agenda_utc         TEXT,
+          morning_agenda_format      TEXT NOT NULL DEFAULT 'text',
+          default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
+          evening_review_enabled     INTEGER NOT NULL DEFAULT 0,
+          evening_review_time        TEXT NOT NULL DEFAULT '21:00',
+          evening_review_utc         TEXT,
+          evening_review_format      TEXT NOT NULL DEFAULT 'text',
+          quiet_hours_enabled        INTEGER NOT NULL DEFAULT 0,
+          quiet_hours_start          TEXT,
+          quiet_hours_end            TEXT,
+          updated_at                 TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS event_reminders (
+          id                INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id          INTEGER NOT NULL,
+          user_id           INTEGER NOT NULL,
+          remind_at_utc     TEXT NOT NULL,
+          interval_minutes  INTEGER NOT NULL,
+          interval_label    TEXT NOT NULL,
+          sent              INTEGER NOT NULL DEFAULT 0,
+          created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_event_reminders_due
+          ON event_reminders(remind_at_utc, sent) WHERE sent = 0;
+        CREATE INDEX IF NOT EXISTS idx_event_reminders_event
+          ON event_reminders(event_id);
+
+        CREATE TABLE IF NOT EXISTS notification_log (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id         INTEGER NOT NULL,
+          type            TEXT NOT NULL,
+          reference_key   TEXT NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'queued',
+          channel         TEXT NOT NULL DEFAULT 'telegram_text',
+          payload         TEXT,
+          error           TEXT,
+          attempts        INTEGER NOT NULL DEFAULT 0,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          sent_at         TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_log_dedup
+          ON notification_log(reference_key);
+        CREATE INDEX IF NOT EXISTS idx_notification_log_status
+          ON notification_log(status, created_at);
+      `);
+    },
+  },
 ];
