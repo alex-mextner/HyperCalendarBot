@@ -68,7 +68,7 @@ export class CalendarBotAgent {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
-    const writer = new TelegramStreamWriter(this.sender, ctx.chatId);
+    const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language);
     await writer.init();
 
     this.saveUserMessage(ctx);

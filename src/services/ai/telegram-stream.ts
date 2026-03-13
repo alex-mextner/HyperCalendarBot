@@ -3,31 +3,34 @@ import type { TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
-const TOOL_LABELS: Record<string, string> = {
-  get_events: '📅 Смотрю события...',
-  create_event: '✏️ Создаю событие...',
-  update_event: '✏️ Обновляю событие...',
-  delete_event: '🗑 Удаляю событие...',
-  get_free_slots: '🔍 Ищу свободное время...',
-  search_events: '🔍 Ищу события...',
-  set_reminder: '⏰ Ставлю напоминание...',
-  get_holidays: '🎉 Проверяю праздники...',
-  get_user_settings: '⚙️ Загружаю настройки...',
-  update_user_settings: '⚙️ Обновляю настройки...',
+const TOOL_LABELS: Record<string, Record<string, string>> = {
+  get_events: { en: '📅 Looking up events...', ru: '📅 Смотрю события...' },
+  create_event: { en: '✏️ Creating event...', ru: '✏️ Создаю событие...' },
+  update_event: { en: '✏️ Updating event...', ru: '✏️ Обновляю событие...' },
+  delete_event: { en: '🗑 Deleting event...', ru: '🗑 Удаляю событие...' },
+  get_free_slots: { en: '🔍 Finding free time...', ru: '🔍 Ищу свободное время...' },
+  search_events: { en: '🔍 Searching events...', ru: '🔍 Ищу события...' },
+  set_reminder: { en: '⏰ Setting reminder...', ru: '⏰ Ставлю напоминание...' },
+  get_holidays: { en: '🎉 Checking holidays...', ru: '🎉 Проверяю праздники...' },
+  get_user_settings: { en: '⚙️ Loading settings...', ru: '⚙️ Загружаю настройки...' },
+  update_user_settings: { en: '⚙️ Updating settings...', ru: '⚙️ Обновляю настройки...' },
 };
 
 const MIN_FLUSH_DELTA = 20;
+const FLUSH_INTERVAL_MS = 3000;
 const MAX_MESSAGE_LENGTH = 4000;
 
 export class TelegramStreamWriter {
   private messageId: number | null = null;
   private text = '';
   private lastFlushedLength = 0;
+  private lastFlushTime = 0;
   private toolLabel: string | null = null;
 
   constructor(
     private sender: TelegramSender,
     private chatId: number,
+    private lang: string = 'en',
   ) {}
 
   async init(): Promise<void> {
@@ -44,7 +47,8 @@ export class TelegramStreamWriter {
   }
 
   setToolLabel(toolName: string): void {
-    this.toolLabel = TOOL_LABELS[toolName] ?? `🔧 ${toolName}...`;
+    const labels = TOOL_LABELS[toolName];
+    this.toolLabel = labels?.[this.lang] ?? labels?.en ?? `🔧 ${toolName}...`;
   }
 
   clearToolLabel(): void {
@@ -55,8 +59,10 @@ export class TelegramStreamWriter {
     if (!this.messageId) return;
 
     const delta = this.text.length - this.lastFlushedLength;
+    const now = Date.now();
+    const timeSinceFlush = now - this.lastFlushTime;
 
-    if (!force && delta < MIN_FLUSH_DELTA) {
+    if (!force && (delta < MIN_FLUSH_DELTA || timeSinceFlush < FLUSH_INTERVAL_MS)) {
       return;
     }
 
@@ -72,8 +78,9 @@ export class TelegramStreamWriter {
     }
 
     try {
-      await this.sender.editMessageText(this.chatId, this.messageId, displayText);
+      await this.sender.editMessageText(this.chatId, this.messageId, displayText, 'Markdown');
       this.lastFlushedLength = this.text.length;
+      this.lastFlushTime = Date.now();
     } catch (error) {
       const errStr = String(error);
       if (errStr.includes('429') || errStr.includes('Too Many Requests')) {
