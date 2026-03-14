@@ -1,0 +1,101 @@
+// src/bot/handlers/inline.handler.ts
+
+import { cmdLogger } from '../../utils/logger.ts';
+
+/**
+ * Result item produced by InlineService.buildResults().
+ */
+export interface InlineResultItem {
+  id: string;
+  type: 'article';
+  title: string;
+  description: string;
+  messageText: string;
+}
+
+/**
+ * Parsed inline query intent from InlineService.parseQuery().
+ */
+export interface InlineQueryIntent {
+  type: string;
+}
+
+/**
+ * Subset of InlineService used by the handler (depend on abstraction, not concrete class).
+ */
+export interface InlineServiceLike {
+  parseQuery(query: string): InlineQueryIntent;
+  buildResults(userId: number, intent: InlineQueryIntent, timezone: string): InlineResultItem[];
+}
+
+/**
+ * Subset of UserRepository used by the handler.
+ */
+export interface UserRepoLike {
+  findByTelegramId(telegramId: number): { telegram_id: number; timezone: string; language?: string } | null;
+}
+
+/**
+ * Subset of SharingSettingsRepository used by the handler.
+ */
+export interface SettingsRepoLike {
+  get(userId: number): { inline_mode_enabled: number } | null;
+}
+
+/**
+ * Inline query context — minimal interface for Telegram inline queries.
+ */
+interface InlineQueryContext {
+  from?: { id: number };
+  query: string;
+  answerInlineQuery: (results: unknown[], options?: Record<string, unknown>) => Promise<void>;
+}
+
+export function createInlineHandler(
+  inlineService: InlineServiceLike,
+  userRepo: UserRepoLike,
+  settingsRepo: SettingsRepoLike,
+) {
+  return async (ctx: InlineQueryContext): Promise<void> => {
+    const userId = ctx.from?.id;
+    if (!userId) {
+      await ctx.answerInlineQuery([]);
+      return;
+    }
+
+    const user = userRepo.findByTelegramId(userId);
+    if (!user) {
+      await ctx.answerInlineQuery([]);
+      return;
+    }
+
+    // Check if inline mode is enabled for this user
+    const settings = settingsRepo.get(userId);
+    if (settings && !settings.inline_mode_enabled) {
+      await ctx.answerInlineQuery([]);
+      return;
+    }
+
+    try {
+      const intent = inlineService.parseQuery(ctx.query);
+      const items = inlineService.buildResults(userId, intent, user.timezone);
+
+      // Convert to Telegram InlineQueryResult format
+      const results = items.map((item) => ({
+        type: item.type,
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        input_message_content: {
+          message_text: item.messageText,
+          parse_mode: 'HTML',
+        },
+      }));
+
+      await ctx.answerInlineQuery(results, { cache_time: 30 });
+    } catch (error) {
+      cmdLogger.error({ error: String(error), userId }, 'Inline query error');
+      await ctx.answerInlineQuery([]);
+    }
+  };
+}
