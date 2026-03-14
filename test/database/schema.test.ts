@@ -3,6 +3,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../src/database/migrations.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
 import type { Migration } from '../../src/database/schema.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 
@@ -125,5 +126,32 @@ describe('production migrations', () => {
     expect(colNames).toContain('google_etag');
     expect(colNames).toContain('sync_status');
     expect(colNames).toContain('sync_version');
+  });
+
+  test('migration 008 creates sharing tables', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('invitations');
+    expect(names).toContain('shared_events');
+    expect(names).toContain('sharing_settings');
+    expect(names).toContain('event_visibility');
+    expect(names).toContain('group_chats');
+    expect(names).toContain('group_shared_events');
+    expect(names).toContain('deep_links');
+  });
+
+  test('invitations foreign key cascades on event delete', () => {
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: 100 });
+    db.prepare(
+      "INSERT INTO events (user_id, title, start_at, timezone) VALUES (100, 'Test', '2026-03-15T10:00:00Z', 'UTC')",
+    ).run();
+    const eventId = db.prepare('SELECT last_insert_rowid() as id').get() as { id: number };
+    db.prepare('INSERT INTO invitations (event_id, inviter_id, invitee_id) VALUES (?, 100, 200)').run(eventId.id);
+    db.prepare('DELETE FROM events WHERE id = ?').run(eventId.id);
+    const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(eventId.id);
+    expect(inv).toHaveLength(0);
   });
 });

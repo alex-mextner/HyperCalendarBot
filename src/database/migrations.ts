@@ -273,4 +273,94 @@ export const migrations: Migration[] = [
         WHERE google_event_id IS NOT NULL`);
     },
   },
+  {
+    name: '008_create_sharing_tables',
+    up(db) {
+      db.exec(`
+        CREATE TABLE invitations (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id        INTEGER NOT NULL,
+          inviter_id      INTEGER NOT NULL,
+          invitee_id      INTEGER NOT NULL,
+          status          TEXT NOT NULL DEFAULT 'pending',
+          message_id      INTEGER,
+          chat_id         INTEGER,
+          deep_link_code  TEXT,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          responded_at    TEXT,
+          UNIQUE(event_id, invitee_id, created_at),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_invitations_invitee ON invitations(invitee_id, status);
+        CREATE INDEX idx_invitations_event ON invitations(event_id);
+        CREATE INDEX idx_invitations_status ON invitations(status)
+          WHERE status IN ('pending', 'maybe');
+
+        CREATE TABLE shared_events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id        INTEGER NOT NULL,
+          shared_by       INTEGER NOT NULL,
+          shared_to_type  TEXT NOT NULL,
+          shared_to_id    INTEGER NOT NULL,
+          share_type      TEXT NOT NULL,
+          message_id      INTEGER,
+          deep_link_code  TEXT,
+          created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_shared_events_event ON shared_events(event_id);
+        CREATE INDEX idx_shared_events_target ON shared_events(shared_to_type, shared_to_id);
+
+        CREATE TABLE sharing_settings (
+          user_id              INTEGER PRIMARY KEY,
+          default_visibility   TEXT NOT NULL DEFAULT 'private',
+          inline_mode_enabled  INTEGER NOT NULL DEFAULT 1,
+          allow_invitations    INTEGER NOT NULL DEFAULT 1,
+          share_location       INTEGER NOT NULL DEFAULT 0,
+          share_description    INTEGER NOT NULL DEFAULT 0,
+          updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE event_visibility (
+          event_id    INTEGER PRIMARY KEY,
+          visibility  TEXT NOT NULL,
+          updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE group_chats (
+          chat_id     INTEGER PRIMARY KEY,
+          title       TEXT,
+          added_by    INTEGER NOT NULL,
+          added_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          is_active   INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE TABLE group_shared_events (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id     INTEGER NOT NULL,
+          event_id    INTEGER NOT NULL,
+          shared_by   INTEGER NOT NULL,
+          message_id  INTEGER,
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(chat_id, event_id),
+          FOREIGN KEY (chat_id) REFERENCES group_chats(chat_id),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_group_shared_chat ON group_shared_events(chat_id);
+
+        CREATE TABLE deep_links (
+          code       TEXT PRIMARY KEY,
+          type       TEXT NOT NULL,
+          payload    TEXT NOT NULL,
+          created_by INTEGER NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          expires_at TEXT,
+          used_count INTEGER NOT NULL DEFAULT 0
+        );
+      `);
+    },
+  },
 ];
