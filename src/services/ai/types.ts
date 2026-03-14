@@ -1,9 +1,15 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
+import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
+import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
+import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { InvitationService } from '../sharing/invitation-service.ts';
+import type { PrivacyService } from '../sharing/privacy-service.ts';
+import type { SharingService } from '../sharing/sharing-service.ts';
 
 export interface AgentContext {
   user: User;
@@ -14,6 +20,12 @@ export interface AgentContext {
   chatHistory: ChatHistoryRepository;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
+  invitationService?: InvitationService;
+  invitationRepo?: InvitationRepository;
+  sharingService?: SharingService;
+  sharingSettingsRepo?: SharingSettingsRepository;
+  sharedEventRepo?: SharedEventRepository;
+  privacyService?: PrivacyService;
 }
 
 export interface ToolResult {

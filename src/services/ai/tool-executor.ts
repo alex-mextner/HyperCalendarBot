@@ -8,6 +8,14 @@ import {
 } from './tool-handlers/events.ts';
 import { handleGetHolidays, handleGetUserSettings, handleUpdateUserSettings } from './tool-handlers/meta.ts';
 import { handleSetReminder } from './tool-handlers/reminders.ts';
+import {
+  handleGetInvitationStatus,
+  handleSendInvitation,
+  handleSetEventVisibility,
+  handleShareAgenda,
+  handleShareEvent,
+  handleUpdateSharingSettings,
+} from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -70,6 +78,41 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'update_user_settings':
         return handleUpdateUserSettings(ctx, input as { timezone?: string; language?: 'en' | 'ru' });
+
+      case 'share_event':
+        return handleShareEvent(ctx, input as { event_id: number; target_type: 'user' | 'group'; target_id: number });
+
+      case 'send_invitation':
+        return handleSendInvitation(ctx, input as { event_id: number; invitee_id: number });
+
+      case 'get_invitation_status':
+        return handleGetInvitationStatus(ctx, input as { event_id: number });
+
+      case 'update_sharing_settings':
+        return handleUpdateSharingSettings(
+          ctx,
+          input as {
+            default_visibility?: 'private' | 'free_busy' | 'full';
+            inline_mode_enabled?: boolean;
+            allow_invitations?: boolean;
+          },
+        );
+
+      case 'share_agenda':
+        return handleShareAgenda(
+          ctx,
+          input as {
+            period: 'today' | 'tomorrow' | 'week';
+            target_type: 'user' | 'group';
+            target_id: number;
+          },
+        );
+
+      case 'set_event_visibility':
+        return handleSetEventVisibility(
+          ctx,
+          input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
+        );
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
