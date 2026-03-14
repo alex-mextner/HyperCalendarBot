@@ -43,6 +43,9 @@ export const CB = {
   HOLIDAYS: 'hl',
   NOTIFY: 'nf',
   GCAL: 'gc',
+  INVITATION_ACTION: 'inv',
+  SHARE_CONFIRM: 'share_cf',
+  SHARE_EVENT: 'share_evt',
 } as const;
 
 // i18n messages
@@ -134,6 +137,22 @@ export const MSG = {
     gcal_revoked: '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Sync conflict on "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Local'} version was applied (more recent).`,
+    invitation_sent: 'Invitation sent',
+    invitation_received: (title: string, from: string) =>
+      `📨 <b>Invitation</b>\n${from} invites you to: <b>${title}</b>`,
+    invitation_accepted: 'Invitation accepted ✅',
+    invitation_declined: 'Invitation declined ❌',
+    invitation_maybe: 'Marked as maybe 🤔',
+    invitation_cancelled: 'Invitation cancelled',
+    invitation_expired: 'This invitation has expired',
+    invitation_not_found: 'Invitation not found',
+    invitation_already_sent: 'Invitation already sent to this user',
+    invitations_disabled: 'This user has disabled invitations',
+    privacy_current: (level: string) => `🔒 Current visibility: <b>${level}</b>`,
+    share_preview: '📤 Preview — this is what will be shared:',
+    share_sent: '✅ Shared successfully',
+    share_cancelled: '❌ Share cancelled',
+    no_events_to_share: 'No events to share for this period',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -222,6 +241,22 @@ export const MSG = {
     gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Конфликт синхронизации "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Локальная'} версия применена (более новая).`,
+    invitation_sent: 'Приглашение отправлено',
+    invitation_received: (title: string, from: string) =>
+      `📨 <b>Приглашение</b>\n${from} приглашает вас: <b>${title}</b>`,
+    invitation_accepted: 'Приглашение принято ✅',
+    invitation_declined: 'Приглашение отклонено ❌',
+    invitation_maybe: 'Отмечено как "возможно" 🤔',
+    invitation_cancelled: 'Приглашение отменено',
+    invitation_expired: 'Это приглашение истекло',
+    invitation_not_found: 'Приглашение не найдено',
+    invitation_already_sent: 'Приглашение уже отправлено этому пользователю',
+    invitations_disabled: 'Этот пользователь отключил приглашения',
+    privacy_current: (level: string) => `🔒 Текущая видимость: <b>${level}</b>`,
+    share_preview: '📤 Превью — вот что будет отправлено:',
+    share_sent: '✅ Отправлено',
+    share_cancelled: '❌ Отправка отменена',
+    no_events_to_share: 'Нет событий для этого периода',
   },
 } as const;
 
