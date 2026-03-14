@@ -137,6 +137,10 @@ export const MSG = {
     gcal_revoked: '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Sync conflict on "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Local'} version was applied (more recent).`,
+    invite_usage: 'Usage: /invite <user_id> <event_id>',
+    invite_delivered: (title: string) => `📨 Invitation to "<b>${title}</b>" sent`,
+    invite_deep_link: (title: string, url: string) =>
+      `The user hasn't started the bot yet. Forward this link so they can accept:\n\n${url}\n\n(Invitation to "<b>${title}</b>")`,
     invitation_sent: 'Invitation sent',
     invitation_received: (title: string, from: string) =>
       `📨 <b>Invitation</b>\n${from} invites you to: <b>${title}</b>`,
@@ -241,6 +245,10 @@ export const MSG = {
     gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Конфликт синхронизации "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Локальная'} версия применена (более новая).`,
+    invite_usage: 'Использование: /invite <user_id> <event_id>',
+    invite_delivered: (title: string) => `📨 Приглашение на "<b>${title}</b>" отправлено`,
+    invite_deep_link: (title: string, url: string) =>
+      `Пользователь ещё не запустил бота. Перешлите ссылку для принятия:\n\n${url}\n\n(Приглашение на "<b>${title}</b>")`,
     invitation_sent: 'Приглашение отправлено',
     invitation_received: (title: string, from: string) =>
       `📨 <b>Приглашение</b>\n${from} приглашает вас: <b>${title}</b>`,
