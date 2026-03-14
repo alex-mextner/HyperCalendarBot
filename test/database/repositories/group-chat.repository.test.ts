@@ -95,4 +95,56 @@ describe('GroupChatRepository', () => {
     repo.deactivate(GROUP_ID);
     expect(repo.findByChatId(GROUP_ID)!.is_active).toBe(0);
   });
+
+  test('getSharedEventsPaginated returns paginated results', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    const eventRepo = new EventRepository(db);
+    for (let i = 0; i < 15; i++) {
+      const event = eventRepo.create({
+        user_id: USER_ID,
+        title: `Event ${i}`,
+        start_at: `2026-03-${String(15 + i).padStart(2, '0')}T10:00:00Z`,
+        timezone: 'UTC',
+      });
+      repo.shareEvent(GROUP_ID, event.id, USER_ID);
+    }
+
+    const page1 = repo.getSharedEventsPaginated(GROUP_ID, 0, 10);
+    expect(page1.total).toBe(15);
+    expect(page1.items).toHaveLength(10);
+
+    const page2 = repo.getSharedEventsPaginated(GROUP_ID, 10, 10);
+    expect(page2.total).toBe(15);
+    expect(page2.items).toHaveLength(5);
+  });
+
+  test('getSharedEventsPaginated orders by event start_at ASC', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    const eventRepo = new EventRepository(db);
+    const late = eventRepo.create({
+      user_id: USER_ID,
+      title: 'Late Event',
+      start_at: '2026-03-30T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const early = eventRepo.create({
+      user_id: USER_ID,
+      title: 'Early Event',
+      start_at: '2026-03-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    repo.shareEvent(GROUP_ID, late.id, USER_ID);
+    repo.shareEvent(GROUP_ID, early.id, USER_ID);
+
+    const result = repo.getSharedEventsPaginated(GROUP_ID, 0, 10);
+    expect(result.items[0]!.event_id).toBe(early.id);
+    expect(result.items[1]!.event_id).toBe(late.id);
+  });
+
+  test('getSharedEventsPaginated returns empty for no events', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    const result = repo.getSharedEventsPaginated(GROUP_ID, 0, 10);
+    expect(result.total).toBe(0);
+    expect(result.items).toHaveLength(0);
+  });
 });

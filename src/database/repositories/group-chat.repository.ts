@@ -39,6 +39,22 @@ export class GroupChatRepository {
       .all(chatId) as GroupSharedEvent[];
   }
 
+  getSharedEventsPaginated(chatId: number, offset = 0, limit = 10): { items: GroupSharedEvent[]; total: number } {
+    const total = this.db.prepare('SELECT COUNT(*) as cnt FROM group_shared_events WHERE chat_id = ?').get(chatId) as {
+      cnt: number;
+    };
+    const items = this.db
+      .prepare(
+        `SELECT gse.* FROM group_shared_events gse
+         JOIN events e ON e.id = gse.event_id
+         WHERE gse.chat_id = ?
+         ORDER BY e.start_at ASC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(chatId, limit, offset) as GroupSharedEvent[];
+    return { items, total: total.cnt };
+  }
+
   unshareEvent(chatId: number, eventId: number, userId: number): boolean {
     const result = this.db
       .prepare('DELETE FROM group_shared_events WHERE chat_id = ? AND event_id = ? AND shared_by = ?')

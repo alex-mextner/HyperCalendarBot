@@ -3,7 +3,9 @@
 import type { AnyScene } from '@gramio/scenes';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -11,6 +13,7 @@ import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { handleGroupAgendaCallback } from '../commands/agenda.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
@@ -34,6 +37,8 @@ export function createCallbackHandler(
   disconnectDeps?: DisconnectDeps,
   onCalendarsDone?: (userId: number) => Promise<void>,
   invitationService?: InvitationService,
+  groupChatRepo?: GroupChatRepository,
+  eventRepo?: EventRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -252,6 +257,11 @@ export function createCallbackHandler(
           await ctx.answer(result.error ?? 'Error');
         }
         return;
+      }
+
+      // Group agenda pagination
+      if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
+        return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');

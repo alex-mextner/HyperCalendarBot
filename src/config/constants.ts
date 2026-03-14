@@ -46,6 +46,7 @@ export const CB = {
   INVITATION_ACTION: 'inv',
   SHARE_CONFIRM: 'share_cf',
   SHARE_EVENT: 'share_evt',
+  GROUP_AGENDA: 'grp_ag',
 } as const;
 
 // i18n messages

@@ -180,6 +180,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         googleDeps?.disconnectDeps,
         googleDeps?.onCalendarsDone,
         invitationService,
+        db.groupChats,
+        db.events,
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)
