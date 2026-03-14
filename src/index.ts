@@ -4,6 +4,7 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { setupSharingCleanup } from './services/sharing/sharing-cleanup.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
@@ -13,6 +14,8 @@ const db = createDatabase(config.DATABASE_PATH);
 const botRef: { sendMessage: (telegramId: number, text: string) => Promise<void> } = {
   sendMessage: async () => {},
 };
+
+const sharingCleanup = setupSharingCleanup(db.invitations, db.deepLinks);
 
 let googleDeps: GoogleBotDeps | undefined;
 let webServerHandle: { stop: () => void } | undefined;
@@ -206,6 +209,7 @@ bot.onStart(async ({ info }) => {
 process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
+  sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
@@ -214,6 +218,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   await bot.stop();
+  sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
