@@ -5,14 +5,19 @@ import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
+import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
 import { GoogleCalendarRepository } from './repositories/google-calendar.repository.ts';
 import { GoogleSyncRepository } from './repositories/google-sync.repository.ts';
+import { GroupChatRepository } from './repositories/group-chat.repository.ts';
 import { HolidayRepository } from './repositories/holiday.repository.ts';
+import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
+import { SharedEventRepository } from './repositories/shared-event.repository.ts';
+import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
 import { runMigrations } from './schema.ts';
 
@@ -28,6 +33,11 @@ export class DatabaseService {
   readonly notificationLog: NotificationLogRepository;
   readonly googleSync: GoogleSyncRepository;
   readonly googleCalendars: GoogleCalendarRepository;
+  readonly deepLinks: DeepLinkRepository;
+  readonly sharingSettings: SharingSettingsRepository;
+  readonly invitations: InvitationRepository;
+  readonly sharedEvents: SharedEventRepository;
+  readonly groupChats: GroupChatRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -50,6 +60,11 @@ export class DatabaseService {
     this.notificationLog = new NotificationLogRepository(this.db);
     this.googleSync = new GoogleSyncRepository(this.db);
     this.googleCalendars = new GoogleCalendarRepository(this.db);
+    this.deepLinks = new DeepLinkRepository(this.db);
+    this.sharingSettings = new SharingSettingsRepository(this.db);
+    this.invitations = new InvitationRepository(this.db);
+    this.sharedEvents = new SharedEventRepository(this.db);
+    this.groupChats = new GroupChatRepository(this.db);
   }
 
   close(): void {
