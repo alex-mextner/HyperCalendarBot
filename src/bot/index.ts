@@ -12,8 +12,13 @@ import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
+import { InlineService } from '../services/sharing/inline-service.ts';
+import { InvitationService } from '../services/sharing/invitation-service.ts';
+import { PrivacyService } from '../services/sharing/privacy-service.ts';
+import { SharingService } from '../services/sharing/sharing-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleGroupAgenda } from './commands/agenda.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -23,17 +28,24 @@ import { handleFree } from './commands/free.ts';
 import { handleHelp } from './commands/help.ts';
 import { handleHolidays } from './commands/holidays.ts';
 import { handleImport } from './commands/import.ts';
+import { handleInvitations } from './commands/invitations.ts';
+import { handleInvite } from './commands/invite.ts';
 import { handleMonth } from './commands/month.ts';
 import { handleNotify } from './commands/notify.ts';
 import { handlePing } from './commands/ping.ts';
+import { handlePrivacy } from './commands/privacy.ts';
 import { handleSearch } from './commands/search.ts';
 import { handleSettings } from './commands/settings.ts';
+import { handleShare } from './commands/share.ts';
 import { handleStart } from './commands/start.ts';
 import { handleTimezone } from './commands/timezone.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
+import { handleUnshare } from './commands/unshare.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
+import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
+import { createInlineHandler } from './handlers/inline.handler.ts';
 import { createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
@@ -75,6 +87,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   });
 
   const deepLinkService = new DeepLinkService(db.deepLinks);
+  const privacyService = new PrivacyService(db.sharingSettings);
+  const invitationService = new InvitationService(db.invitations, db.events, db.sharingSettings);
+  const sharingService = new SharingService(db.events, privacyService);
+  const inlineService = new InlineService(eventService, privacyService);
   const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps);
 
   const bot = new Bot(token);
@@ -129,6 +145,30 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     .command('notify', (ctx) => handleNotify(ctx as unknown as BotCommandContext, prefsService))
+    // Sharing commands
+    .command('invite', (ctx) =>
+      handleInvite(
+        ctx as unknown as BotCommandContext,
+        invitationService,
+        eventService,
+        db.invitations,
+        deepLinkService,
+        (chatId, text, options) =>
+          bot.api.sendMessage({
+            chat_id: chatId,
+            text,
+            parse_mode: options.parse_mode,
+            reply_markup: options.reply_markup as never,
+          }),
+      ),
+    )
+    .command('invitations', (ctx) => handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events))
+    .command('privacy', (ctx) => handlePrivacy(ctx as unknown as BotCommandContext, db.sharingSettings))
+    .command('share', (ctx) =>
+      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
+    )
+    .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats))
+    .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
     // Callback queries
     .on('callback_query', (ctx) =>
       createCallbackHandler(
@@ -139,8 +179,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         googleDeps?.calendarRepo,
         googleDeps?.disconnectDeps,
         googleDeps?.onCalendarsDone,
+        invitationService,
       )(ctx as unknown as BotCallbackContext),
     )
+    // Inline queries (sharing via inline mode)
+    .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
+    // Chat member updates (bot added/removed from groups)
+    .on('my_chat_member', (ctx) => createChatMemberHandler(db.groupChats)(ctx as never))
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     .on('message', (ctx) =>
       createMessageHandler({
@@ -177,5 +222,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
   }
 
-  return { bot, eventService, holidayService, prefsService, deepLinkService, db };
+  return {
+    bot,
+    eventService,
+    holidayService,
+    prefsService,
+    deepLinkService,
+    privacyService,
+    invitationService,
+    sharingService,
+    inlineService,
+    db,
+  };
 }
