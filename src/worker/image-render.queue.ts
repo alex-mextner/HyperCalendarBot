@@ -1,16 +1,16 @@
-import { Queue, QueueEvents, Worker } from "bullmq";
-import { parseRedisUrl } from "../utils/redis.ts";
-import { imageLogger } from "../utils/logger.ts";
-import { playwrightPool } from "./playwright-pool.ts";
-import { getTemplate } from "./templates/index.ts";
-import type { DailyAgendaData, EventCardData, WeeklyOverviewData } from "./templates/types.ts";
+import { Queue, QueueEvents, Worker } from 'bullmq';
+import { imageLogger } from '../utils/logger.ts';
+import { parseRedisUrl } from '../utils/redis.ts';
+import { playwrightPool } from './playwright-pool.ts';
+import { getTemplate } from './templates/index.ts';
+import type { DailyAgendaData, EventCardData, WeeklyOverviewData } from './templates/types.ts';
 
 // --- Job types ---
 
 export type ImageRenderJob =
-  | { type: "daily-agenda"; data: DailyAgendaData; userId: number }
-  | { type: "weekly-overview"; data: WeeklyOverviewData; userId: number }
-  | { type: "event-card"; data: EventCardData; userId: number };
+  | { type: 'daily-agenda'; data: DailyAgendaData; userId: number }
+  | { type: 'weekly-overview'; data: WeeklyOverviewData; userId: number }
+  | { type: 'event-card'; data: EventCardData; userId: number };
 
 export interface ImageRenderResult {
   bufferBase64: string; // PNG as base64 (Buffer doesn't survive Redis JSON roundtrip)
@@ -21,7 +21,7 @@ export interface ImageRenderResult {
 
 // --- Queue name ---
 
-const QUEUE_NAME = "image-render";
+const QUEUE_NAME = 'image-render';
 
 // --- Process function (exported for testing) ---
 
@@ -33,24 +33,22 @@ export async function processRenderJob(job: ImageRenderJob): Promise<ImageRender
 
   const page = await playwrightPool.acquire();
   try {
-    await page.setContent(html, { waitUntil: "load" });
+    await page.setContent(html, { waitUntil: 'load' });
 
-    const height = await page.evaluate(() =>
-      document.getElementById("__root")?.scrollHeight ?? 800,
-    );
+    const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 800);
 
     await page.setViewportSize({ width: 1080, height });
 
     const buffer = await page.screenshot({
-      type: "png",
+      type: 'png',
       clip: { x: 0, y: 0, width: 1080, height },
     });
 
     const renderTimeMs = Math.round(performance.now() - start);
-    imageLogger.info({ type: job.type, userId: job.userId, renderTimeMs, height }, "Image rendered");
+    imageLogger.info({ type: job.type, userId: job.userId, renderTimeMs, height }, 'Image rendered');
 
     return {
-      bufferBase64: Buffer.from(buffer).toString("base64"),
+      bufferBase64: Buffer.from(buffer).toString('base64'),
       width: 1080,
       height,
       renderTimeMs,
@@ -69,7 +67,8 @@ export function createImageRenderQueue(redisUrl: string) {
     connection,
     defaultJobOptions: {
       attempts: 2,
-      backoff: { type: "fixed", delay: 1000 },
+      backoff: { type: 'fixed', delay: 1000 },
+      timeout: 15_000,
       removeOnComplete: { age: 60, count: 100 },
       removeOnFail: { age: 3600 },
     },
@@ -87,8 +86,8 @@ export function createImageRenderQueue(redisUrl: string) {
     },
   );
 
-  worker.on("failed", (bullJob, err) => {
-    imageLogger.error({ jobId: bullJob?.id, error: err.message }, "Image render failed");
+  worker.on('failed', (bullJob, err) => {
+    imageLogger.error({ jobId: bullJob?.id, error: err.message }, 'Image render failed');
   });
 
   return { queue, worker, queueEvents };

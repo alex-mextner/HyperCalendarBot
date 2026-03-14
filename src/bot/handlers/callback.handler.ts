@@ -255,10 +255,18 @@ export function createCallbackHandler(
             userId: user.telegram_id,
           });
           const file = new File([buffer], 'agenda.png', { type: 'image/png' });
-          await ctx.message?.sendPhoto(file);
+          if (ctx.message) {
+            await ctx.message.sendPhoto(file);
+          } else {
+            await ctx.answer({ text: '⚠️ Could not send image' });
+          }
         } catch (err) {
           imageLogger.error({ error: (err as Error).message }, 'Render failed');
-          await ctx.message?.send('⚠️ Image generation failed. Use text version above.');
+          if (ctx.message) {
+            await ctx.message.send('⚠️ Image generation failed. Use text version above.');
+          } else {
+            await ctx.answer({ text: '⚠️ Render failed' });
+          }
         }
         return;
       }
@@ -307,10 +315,18 @@ export function createCallbackHandler(
             userId: user.telegram_id,
           });
           const file = new File([buffer], 'week.png', { type: 'image/png' });
-          await ctx.message?.sendPhoto(file);
+          if (ctx.message) {
+            await ctx.message.sendPhoto(file);
+          } else {
+            await ctx.answer({ text: '⚠️ Could not send image' });
+          }
         } catch (err) {
           imageLogger.error({ error: (err as Error).message }, 'Render failed');
-          await ctx.message?.send('⚠️ Image generation failed. Use text version above.');
+          if (ctx.message) {
+            await ctx.message.send('⚠️ Image generation failed. Use text version above.');
+          } else {
+            await ctx.answer({ text: '⚠️ Render failed' });
+          }
         }
         return;
       }
