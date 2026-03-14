@@ -10,6 +10,7 @@ import type { AgentConfig } from '../services/ai/types.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
+import type { RenderService } from '../services/image/render-service.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
@@ -63,7 +64,13 @@ export interface GoogleBotDeps {
   onCalendarsDone?: (userId: number) => Promise<void>;
 }
 
-export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, googleDeps?: GoogleBotDeps) {
+export function createBot(
+  token: string,
+  db: DatabaseService,
+  aiConfig: AgentConfig,
+  googleDeps?: GoogleBotDeps,
+  renderService?: RenderService,
+) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -168,5 +175,5 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
   }
 
-  return { bot, eventService, holidayService, prefsService, db };
+  return { bot, eventService, holidayService, prefsService, db, renderService };
 }
