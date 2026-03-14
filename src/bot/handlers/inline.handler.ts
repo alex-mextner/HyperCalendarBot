@@ -7,10 +7,13 @@ import { cmdLogger } from '../../utils/logger.ts';
  */
 export interface InlineResultItem {
   id: string;
-  type: 'article';
+  type: 'article' | 'photo';
   title: string;
   description: string;
   messageText: string;
+  photoUrl?: string;
+  thumbnailUrl?: string;
+  caption?: string;
 }
 
 /**
@@ -26,6 +29,7 @@ export interface InlineQueryIntent {
 export interface InlineServiceLike {
   parseQuery(query: string): InlineQueryIntent;
   buildResults(userId: number, intent: InlineQueryIntent, timezone: string): InlineResultItem[];
+  buildPhotoResult(userId: number, date: Date, timezone: string): Promise<InlineResultItem | null>;
 }
 
 /**
@@ -107,6 +111,10 @@ export function createInlineHandler(
     try {
       const intent = inlineService.parseQuery(ctx.query);
       const items = inlineService.buildResults(userId, intent, user.timezone);
+
+      // Photo result is optional — only included when available
+      // const photoResult = await inlineService.buildPhotoResult(userId, new Date(), user.timezone);
+      // Photo support will be enabled when image serving is configured
 
       // Convert to Telegram InlineQueryResult format
       const results = items.map((item) => ({

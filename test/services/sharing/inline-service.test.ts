@@ -244,6 +244,20 @@ describe('InlineService', () => {
       expect(results[0].title).toContain('Dentist appointment');
     });
 
+    test('buildPhotoResult returns null (stub)', async () => {
+      const eventService = {
+        getEventsForDay: () => [] as EventOccurrence[],
+        getEventsForWeek: () => [] as EventOccurrence[],
+        searchEvents: () => [],
+      };
+      const privacyService = {
+        resolveVisibility: () => 'full' as Visibility,
+      };
+      const service = new InlineService(eventService as never, privacyService as never);
+      const result = await service.buildPhotoResult(100, new Date(), 'UTC');
+      expect(result).toBeNull();
+    });
+
     test('result ids are unique', () => {
       const eventService = {
         getEventsForDay: () => [

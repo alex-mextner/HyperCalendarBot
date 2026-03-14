@@ -9,10 +9,13 @@ export interface QueryIntent {
 
 export interface InlineResultItem {
   id: string;
-  type: 'article';
+  type: 'article' | 'photo';
   title: string;
   description: string;
   messageText: string;
+  photoUrl?: string;
+  thumbnailUrl?: string;
+  caption?: string;
 }
 
 interface EventServiceDep {
@@ -80,6 +83,14 @@ export class InlineService {
       });
     }
     return results;
+  }
+
+  async buildPhotoResult(userId: number, date: Date, timezone: string): Promise<InlineResultItem | null> {
+    // Photo results require a publicly accessible URL for Telegram.
+    // Implementation depends on image serving infrastructure
+    // (Bun.serve static route, Telegram file upload, etc.)
+    // Returns null until RenderService and serving are wired up.
+    return null;
   }
 
   private buildSearchResults(userId: number, query: string): InlineResultItem[] {
