@@ -69,11 +69,17 @@ function renderTimeline(data: DailyAgendaData): string {
     })
     .join('');
 
-  // Current time indicator
+  // Current time indicator — spans full width (hour labels + events area)
   let nowLine = '';
   if (currentTimeMinutes !== undefined && currentTimeMinutes >= minHour * 60 && currentTimeMinutes <= maxHour * 60) {
     const top = currentTimeMinutes - minHour * 60;
-    nowLine = `<div class="now-line" style="top:${top}px;"></div>`;
+    const timeLabel = formatTime(currentTimeMinutes);
+    nowLine = `
+      <div class="now-line" style="top:${top}px;">
+        <div class="now-line__label">${timeLabel}</div>
+        <div class="now-line__dot"></div>
+        <div class="now-line__rule"></div>
+      </div>`;
   }
 
   return `
@@ -83,8 +89,8 @@ function renderTimeline(data: DailyAgendaData): string {
       </div>
       <div class="timeline__events" style="position:absolute;top:0;left:80px;right:0;height:${containerHeight}px;">
         ${eventBlocks}
-        ${nowLine}
       </div>
+      ${nowLine}
     </div>`;
 }
 
@@ -208,18 +214,29 @@ function css(data: DailyAgendaData): string {
       position: absolute;
       left: 0;
       right: 0;
-      height: 3px;
-      background: #EF4444;
+      height: 0;
       z-index: 10;
+      display: flex;
+      align-items: center;
     }
-    .now-line::before {
-      content: '';
-      position: absolute;
-      left: -6px;
-      top: -4px;
+    .now-line__label {
+      width: 72px;
+      font-size: 13px;
+      font-weight: 700;
+      color: #EF4444;
+      text-align: right;
+      padding-right: 6px;
+    }
+    .now-line__dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
+      background: #EF4444;
+      flex-shrink: 0;
+    }
+    .now-line__rule {
+      flex: 1;
+      height: 2px;
       background: #EF4444;
     }
     .empty-state {

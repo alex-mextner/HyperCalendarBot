@@ -16,7 +16,7 @@ export interface Theme {
 export interface AgendaEvent {
   id: number;
   title: string;
-  startMinutes: number;   // minutes since midnight in user TZ
+  startMinutes: number; // minutes since midnight in user TZ
   endMinutes: number;
   location?: string;
   calendarColor: string;
@@ -26,10 +26,10 @@ export interface AgendaEvent {
 }
 
 export interface DailyAgendaData {
-  date: string;            // ISO "2026-03-11"
-  dayOfWeek: string;       // "Wednesday" / "Среда"
-  dateFormatted: string;   // "March 11, 2026" / "11 марта 2026"
-  relativeDay?: string;    // "Today" / "Сегодня"
+  date: string; // ISO "2026-03-11"
+  dayOfWeek: string; // "Wednesday" / "Среда"
+  dateFormatted: string; // "March 11, 2026" / "11 марта 2026"
+  relativeDay?: string; // "Today" / "Сегодня"
   eventCount: number;
   currentTimeMinutes?: number;
   isHoliday?: boolean;
@@ -37,10 +37,11 @@ export interface DailyAgendaData {
   allDayEvents: AgendaEvent[];
   timedEvents: AgendaEvent[];
   theme: Theme;
-  locale: "ru" | "en";
+  locale: 'ru' | 'en';
 }
 
 export interface MiniEvent {
+  title: string;
   startMinutes: number;
   endMinutes: number;
   color: string;
@@ -60,7 +61,7 @@ export interface WeeklyOverviewData {
   days: WeekDay[];
   todayIndex?: number;
   theme: Theme;
-  locale: "ru" | "en";
+  locale: 'ru' | 'en';
 }
 
 export interface EventCardData {
@@ -77,7 +78,7 @@ export interface EventCardData {
   calendarColor: string;
   isAllDay: boolean;
   theme: Theme;
-  locale: "ru" | "en";
+  locale: 'ru' | 'en';
 }
 
-export type ImageType = "daily-agenda" | "weekly-overview" | "event-card";
+export type ImageType = 'daily-agenda' | 'weekly-overview' | 'event-card';

@@ -6,18 +6,16 @@ function initials(name: string): string {
   return name
     .split(' ')
     .slice(0, 2)
-    .map(w => w[0] ?? '')
+    .map((w) => w[0] ?? '')
     .join('')
     .toUpperCase();
 }
 
 function renderAttendees(attendees: string[], overflow: number): string {
   const avatars = attendees
-    .map(name => `<div class="card__avatar" title="${escapeHtml(name)}">${escapeHtml(initials(name))}</div>`)
+    .map((name) => `<div class="card__avatar" title="${escapeHtml(name)}">${escapeHtml(initials(name))}</div>`)
     .join('');
-  const overflowBadge = overflow > 0
-    ? `<span class="card__overflow">+${overflow}</span>`
-    : '';
+  const overflowBadge = overflow > 0 ? `<span class="card__overflow">+${overflow}</span>` : '';
   return `<div class="card__attendees">${avatars}${overflowBadge}</div>`;
 }
 
@@ -117,23 +115,35 @@ function css(data: EventCardData): string {
 }
 
 function render(data: EventCardData): string {
-  const { title, dateFormatted, timeFormatted, duration, location, description, attendees, attendeeOverflow, conferenceLink, calendarName, calendarColor } = data;
+  const {
+    title,
+    dateFormatted,
+    timeFormatted,
+    duration,
+    location,
+    description,
+    attendees,
+    attendeeOverflow,
+    conferenceLink,
+    calendarName,
+    calendarColor,
+  } = data;
 
-  const locationRow = location !== undefined
-    ? `<div class="card__row"><span class="card__icon">📍</span><span>${escapeHtml(location)}</span></div>`
-    : '';
+  const locationRow =
+    location !== undefined
+      ? `<div class="card__row"><span class="card__icon">📍</span><span>${escapeHtml(location)}</span></div>`
+      : '';
 
-  const descriptionBlock = description !== undefined
-    ? `<div class="card__description">${escapeHtml(description)}</div>`
-    : '';
+  const descriptionBlock =
+    description !== undefined ? `<div class="card__description">${escapeHtml(description)}</div>` : '';
 
-  const attendeesBlock = attendees !== undefined && attendees.length > 0
-    ? renderAttendees(attendees, attendeeOverflow ?? 0)
-    : '';
+  const attendeesBlock =
+    attendees !== undefined && attendees.length > 0 ? renderAttendees(attendees, attendeeOverflow ?? 0) : '';
 
-  const conferenceRow = conferenceLink !== undefined
-    ? `<div class="card__row"><span class="card__icon">🔗</span><span>${escapeHtml(conferenceLink)}</span></div>`
-    : '';
+  const conferenceRow =
+    conferenceLink !== undefined
+      ? `<div class="card__row"><span class="card__icon">🔗</span><span>${escapeHtml(conferenceLink)}</span></div>`
+      : '';
 
   return `<!DOCTYPE html>
 <html>

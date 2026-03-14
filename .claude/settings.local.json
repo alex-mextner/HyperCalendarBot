@@ -5,7 +5,11 @@
       "Bash(/Users/ultra/.bun/bin/bunx npm:*)",
       "Bash(bunx tsc:*)",
       "Bash(mkdir -p /tmp/gramio-check)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(./node_modules/.bin/biome check:*)",
+      "Bash(./node_modules/.bin/biome format:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(/Users/ultra/.bun/bin/bunx playwright:*)"
     ]
   }
 }

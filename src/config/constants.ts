@@ -43,8 +43,8 @@ export const CB = {
   HOLIDAYS: 'hl',
   NOTIFY: 'nf',
   GCAL: 'gc',
-  IMG_DAILY: 'imd',    // image daily: "imd:2026-03-11"
-  IMG_WEEKLY: 'imw',   // image weekly: "imw:2026-03-09"
+  IMG_DAILY: 'imd', // image daily: "imd:2026-03-11"
+  IMG_WEEKLY: 'imw', // image weekly: "imw:2026-03-09"
 } as const;
 
 // i18n messages

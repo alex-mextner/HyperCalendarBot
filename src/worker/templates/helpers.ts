@@ -1,19 +1,15 @@
 export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 export function formatTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 export function formatDuration(minutes: number): string {
-  if (minutes <= 0) return "";
+  if (minutes <= 0) return '';
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   if (h === 0) return `${m}min`;
@@ -34,9 +30,7 @@ export interface EventColumn {
 export function computeEventColumns(events: TimeRange[]): EventColumn[] {
   if (events.length === 0) return [];
 
-  const indices = events
-    .map((_, i) => i)
-    .sort((a, b) => events[a].startMinutes - events[b].startMinutes);
+  const indices = events.map((_, i) => i).sort((a, b) => events[a].startMinutes - events[b].startMinutes);
 
   const columns: EventColumn[] = new Array(events.length);
   const columnEnds: number[] = [];
@@ -55,10 +49,7 @@ export function computeEventColumns(events: TimeRange[]): EventColumn[] {
     let maxCol = columns[i].column;
     for (let j = 0; j < events.length; j++) {
       if (i === j) continue;
-      if (
-        events[j].startMinutes < events[i].endMinutes &&
-        events[j].endMinutes > events[i].startMinutes
-      ) {
+      if (events[j].startMinutes < events[i].endMinutes && events[j].endMinutes > events[i].startMinutes) {
         maxCol = Math.max(maxCol, columns[j].column);
       }
     }

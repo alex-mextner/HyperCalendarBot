@@ -1,41 +1,31 @@
-import { escapeHtml } from './helpers.ts';
+import { escapeHtml, formatTime } from './helpers.ts';
 import { sharedCSS } from './shared-css.ts';
 import type { MiniEvent, TemplateRenderer, WeeklyOverviewData } from './types.ts';
 
-const VISIBLE_START = 480; // 08:00
-const VISIBLE_END = 1320; // 22:00
-const VISIBLE_RANGE = VISIBLE_END - VISIBLE_START;
-
-function renderMiniEvent(ev: MiniEvent): string {
-  if (ev.isAllDay) {
-    return `<div class="mini-event" style="height:6px;background:${escapeHtml(ev.color)};"></div>`;
-  }
-  const heightPct = Math.max(0.5, ((ev.endMinutes - ev.startMinutes) / VISIBLE_RANGE) * 100);
-  return `<div class="mini-event" style="height:${heightPct}%;background:${escapeHtml(ev.color)};"></div>`;
+function renderEvent(ev: MiniEvent): string {
+  const bg = `${ev.color}18`;
+  const timeStr = ev.isAllDay ? '' : formatTime(ev.startMinutes);
+  const timeHtml = timeStr ? `<span class="event-pill__time">${timeStr}</span>` : '';
+  return `<div class="event-pill" style="background:${bg};border-left:3px solid ${ev.color};color:${ev.color};">
+    ${timeHtml}<span class="event-pill__title">${escapeHtml(ev.title)}</span>
+  </div>`;
 }
 
-function renderDayColumn(
-  day: WeeklyOverviewData['days'][number],
-  isToday: boolean,
-  theme: WeeklyOverviewData['theme'],
-): string {
-  const weekendBg = `${theme.border}33`;
+function renderDayColumn(day: WeeklyOverviewData['days'][number], isToday: boolean): string {
   const columnClass = day.isWeekend ? 'day-column day-column--weekend' : 'day-column';
-  const columnStyle = day.isWeekend ? `style="background:${weekendBg};"` : '';
 
   const numberHtml = isToday
     ? `<div class="day-column__number"><span class="today-highlight">${day.dayNumber}</span></div>`
     : `<div class="day-column__number">${day.dayNumber}</div>`;
 
-  const eventsHtml = day.events.map(renderMiniEvent).join('');
-  const countHtml = day.eventCount > 0 ? `<div class="day-column__count">${day.eventCount}</div>` : '';
+  const eventsHtml =
+    day.events.length > 0 ? day.events.map(renderEvent).join('') : `<div class="day-column__empty"></div>`;
 
   return `
-    <div class="${columnClass}" ${columnStyle}>
+    <div class="${columnClass}">
       <div class="day-column__name">${escapeHtml(day.dayName)}</div>
       ${numberHtml}
       <div class="day-column__events">${eventsHtml}</div>
-      ${countHtml}
     </div>`;
 }
 
@@ -54,30 +44,32 @@ function css(data: WeeklyOverviewData): string {
     .week-grid {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 12px;
+      gap: 8px;
     }
     .day-column {
       background: ${t.cardBg};
-      border-radius: 16px;
-      padding: 16px;
+      border-radius: 14px;
+      padding: 12px 8px;
       display: flex;
       flex-direction: column;
-      min-height: 600px;
+      min-height: 500px;
     }
     .day-column--weekend {
-      background: ${t.border}33;
+      background: ${t.border}15;
     }
     .day-column__name {
-      font-size: 16px;
+      font-size: 13px;
       color: ${t.textSecondary};
       text-align: center;
-      margin-bottom: 8px;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     .day-column__number {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 700;
       text-align: center;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       display: flex;
       justify-content: center;
     }
@@ -85,34 +77,45 @@ function css(data: WeeklyOverviewData): string {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 40px;
-      height: 40px;
+      width: 36px;
+      height: 36px;
       border-radius: 50%;
       background: #EF4444;
       color: #FFFFFF;
-      margin: 0 auto;
     }
     .day-column__events {
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 3px;
-      position: relative;
+      gap: 4px;
     }
-    .mini-event {
+    .day-column__empty {
+      flex: 1;
+    }
+    .event-pill {
       border-radius: 6px;
-      min-height: 4px;
-      opacity: 0.7;
+      padding: 5px 6px;
+      font-size: 11px;
+      line-height: 1.3;
+      display: flex;
+      align-items: baseline;
+      gap: 3px;
+      overflow: hidden;
     }
-    .day-column__count {
-      text-align: center;
-      font-size: 14px;
-      color: ${t.textSecondary};
-      margin-top: 12px;
+    .event-pill__time {
       font-weight: 600;
+      flex-shrink: 0;
+      font-size: 10px;
+      opacity: 0.8;
+    }
+    .event-pill__title {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
     }
     .footer {
-      margin-top: 32px;
+      margin-top: 24px;
       text-align: right;
       font-size: 14px;
       color: ${t.textSecondary};
@@ -122,7 +125,7 @@ function css(data: WeeklyOverviewData): string {
 }
 
 function render(data: WeeklyOverviewData): string {
-  const columnsHtml = data.days.map((day, i) => renderDayColumn(day, i === data.todayIndex, data.theme)).join('');
+  const columnsHtml = data.days.map((day, i) => renderDayColumn(day, i === data.todayIndex)).join('');
 
   return `<!DOCTYPE html>
 <html>

@@ -113,6 +113,7 @@ export function mapWeeklyOverviewData(params: {
       isWeekend: i >= 5,
       events: occs.map(
         (o): MiniEvent => ({
+          title: o.event.title,
           startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, timezone),
           endMinutes:
             o.event.all_day === 1
