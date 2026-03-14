@@ -11,6 +11,7 @@ import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
+import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
@@ -73,6 +74,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     cooldownMs: RATE_LIMIT.COOLDOWN_MS,
   });
 
+  const deepLinkService = new DeepLinkService(db.deepLinks);
   const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps);
 
   const bot = new Bot(token);
@@ -100,7 +102,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .extend(scenesSetup.plugin)
     // Commands
-    .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, scenesSetup.scenes.onboardingScene))
+    .command('start', (ctx) =>
+      handleStart(
+        ctx as unknown as BotCommandContext,
+        scenesSetup.scenes.onboardingScene,
+        deepLinkService,
+        eventService,
+      ),
+    )
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService, holidayService))
@@ -168,5 +177,5 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
   }
 
-  return { bot, eventService, holidayService, prefsService, db };
+  return { bot, eventService, holidayService, prefsService, deepLinkService, db };
 }
