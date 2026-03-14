@@ -1,17 +1,21 @@
-import { escapeHtml, formatTime, computeEventColumns } from './helpers.ts';
-import { pluralizeEvents, getLabels } from './labels.ts';
+import { computeEventColumns, escapeHtml, formatTime } from './helpers.ts';
+import { getLabels, pluralizeEvents } from './labels.ts';
 import { sharedCSS } from './shared-css.ts';
-import type { DailyAgendaData, AgendaEvent, TemplateRenderer } from './types.ts';
+import type { AgendaEvent, DailyAgendaData, TemplateRenderer } from './types.ts';
 
 function renderAllDaySection(events: AgendaEvent[], locale: string): string {
   if (events.length === 0) return '';
   const labels = getLabels(locale);
-  const items = events.map(ev => `
+  const items = events
+    .map(
+      (ev) => `
     <div class="allday__item">
       <div class="allday__dot" style="background:${escapeHtml(ev.calendarColor)};"></div>
       <div class="allday__title">${escapeHtml(ev.title)}</div>
       <div class="allday__label">${labels.allDay}</div>
-    </div>`).join('');
+    </div>`,
+    )
+    .join('');
   return `<div class="allday">${items}</div>`;
 }
 
@@ -21,8 +25,8 @@ function renderTimeline(data: DailyAgendaData): string {
   let minHour = 8;
   let maxHour = 18;
   if (timedEvents.length > 0) {
-    const firstStart = Math.min(...timedEvents.map(e => e.startMinutes));
-    const lastEnd = Math.max(...timedEvents.map(e => e.endMinutes));
+    const firstStart = Math.min(...timedEvents.map((e) => e.startMinutes));
+    const lastEnd = Math.max(...timedEvents.map((e) => e.endMinutes));
     minHour = Math.max(0, Math.floor(firstStart / 60) - 1);
     maxHour = Math.min(24, Math.ceil(lastEnd / 60) + 1);
   }
@@ -42,26 +46,28 @@ function renderTimeline(data: DailyAgendaData): string {
 
   // Event blocks
   const cols = computeEventColumns(timedEvents);
-  const eventBlocks = timedEvents.map((ev, i) => {
-    const top = ev.startMinutes - minHour * 60;
-    const height = Math.max(ev.endMinutes - ev.startMinutes, 20);
-    const col = cols[i];
-    const widthPct = 100 / col.totalColumns;
-    const leftPct = col.column * widthPct;
-    const bg = `${ev.calendarColor}20`;
-    const border = ev.calendarColor;
-    const color = ev.calendarColor;
+  const eventBlocks = timedEvents
+    .map((ev, i) => {
+      const top = ev.startMinutes - minHour * 60;
+      const height = Math.max(ev.endMinutes - ev.startMinutes, 20);
+      const col = cols[i];
+      const widthPct = 100 / col.totalColumns;
+      const leftPct = col.column * widthPct;
+      const bg = `${ev.calendarColor}20`;
+      const border = ev.calendarColor;
+      const color = ev.calendarColor;
 
-    const locationHtml = ev.location
-      ? `<div class="event-block__location">${escapeHtml(ev.location)}</div>`
-      : '';
+      const timeStr = `${formatTime(ev.startMinutes)} – ${formatTime(ev.endMinutes)}`;
+      const locationStr = ev.location ? ` · ${escapeHtml(ev.location)}` : '';
+      // Compact: time + location on one line; title adapts to available height
+      const isShort = height <= 30;
 
-    return `<div class="event-block" style="top:${top}px;height:${height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${border};color:${color};">
+      return `<div class="event-block${isShort ? ' event-block--compact' : ''}" style="top:${top}px;height:${height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${border};color:${color};">
       <div class="event-block__title">${escapeHtml(ev.title)}</div>
-      <div class="event-block__time">${formatTime(ev.startMinutes)} – ${formatTime(ev.endMinutes)}</div>
-      ${locationHtml}
+      <div class="event-block__meta">${timeStr}${locationStr}</div>
     </div>`;
-  }).join('');
+    })
+    .join('');
 
   // Current time indicator
   let nowLine = '';
@@ -181,15 +187,22 @@ function css(data: DailyAgendaData): string {
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .event-block__time {
+    .event-block__meta {
       font-size: 13px;
       opacity: 0.8;
       margin-top: 2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
-    .event-block__location {
+    .event-block--compact {
+      padding: 4px 10px;
+    }
+    .event-block--compact .event-block__title {
       font-size: 13px;
-      opacity: 0.7;
-      margin-top: 2px;
+    }
+    .event-block--compact .event-block__meta {
+      display: none;
     }
     .now-line {
       position: absolute;
@@ -226,13 +239,25 @@ function css(data: DailyAgendaData): string {
 }
 
 function render(data: DailyAgendaData): string {
-  const { dateFormatted, dayOfWeek, eventCount, relativeDay, isHoliday, holidayName, allDayEvents, timedEvents, locale } = data;
+  const {
+    dateFormatted,
+    dayOfWeek,
+    eventCount,
+    relativeDay,
+    isHoliday,
+    holidayName,
+    allDayEvents,
+    timedEvents,
+    locale,
+  } = data;
   const labels = getLabels(locale);
 
   const badgesHtml = [
     relativeDay ? `<span class="header__badge">${escapeHtml(relativeDay)}</span>` : '',
     isHoliday && holidayName ? `<span class="holiday-badge">${escapeHtml(holidayName)}</span>` : '',
-  ].filter(Boolean).join('');
+  ]
+    .filter(Boolean)
+    .join('');
 
   const metaHtml = badgesHtml
     ? `<div class="header__meta">${badgesHtml}</div><div class="header__meta">${escapeHtml(dayOfWeek)} · ${eventCount} ${pluralizeEvents(eventCount, locale)}</div>`

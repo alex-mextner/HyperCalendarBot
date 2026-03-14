@@ -1,9 +1,9 @@
 import { escapeHtml } from './helpers.ts';
 import { sharedCSS } from './shared-css.ts';
-import type { WeeklyOverviewData, MiniEvent, TemplateRenderer } from './types.ts';
+import type { MiniEvent, TemplateRenderer, WeeklyOverviewData } from './types.ts';
 
 const VISIBLE_START = 480; // 08:00
-const VISIBLE_END = 1320;  // 22:00
+const VISIBLE_END = 1320; // 22:00
 const VISIBLE_RANGE = VISIBLE_END - VISIBLE_START;
 
 function renderMiniEvent(ev: MiniEvent): string {
@@ -28,9 +28,7 @@ function renderDayColumn(
     : `<div class="day-column__number">${day.dayNumber}</div>`;
 
   const eventsHtml = day.events.map(renderMiniEvent).join('');
-  const countHtml = day.eventCount > 0
-    ? `<div class="day-column__count">${day.eventCount}</div>`
-    : '';
+  const countHtml = day.eventCount > 0 ? `<div class="day-column__count">${day.eventCount}</div>` : '';
 
   return `
     <div class="${columnClass}" ${columnStyle}>
@@ -90,7 +88,8 @@ function css(data: WeeklyOverviewData): string {
       width: 40px;
       height: 40px;
       border-radius: 50%;
-      border: 3px solid ${t.accent};
+      background: #EF4444;
+      color: #FFFFFF;
       margin: 0 auto;
     }
     .day-column__events {
@@ -101,8 +100,9 @@ function css(data: WeeklyOverviewData): string {
       position: relative;
     }
     .mini-event {
-      border-radius: 4px;
+      border-radius: 6px;
       min-height: 4px;
+      opacity: 0.7;
     }
     .day-column__count {
       text-align: center;
@@ -122,9 +122,7 @@ function css(data: WeeklyOverviewData): string {
 }
 
 function render(data: WeeklyOverviewData): string {
-  const columnsHtml = data.days
-    .map((day, i) => renderDayColumn(day, i === data.todayIndex, data.theme))
-    .join('');
+  const columnsHtml = data.days.map((day, i) => renderDayColumn(day, i === data.todayIndex, data.theme)).join('');
 
   return `<!DOCTYPE html>
 <html>
