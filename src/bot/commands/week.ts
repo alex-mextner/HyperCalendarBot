@@ -1,9 +1,14 @@
 // src/bot/commands/week.ts
 
+import { TZDate } from '@date-fns/tz';
+import { startOfWeek } from 'date-fns';
+import { InlineKeyboard } from 'gramio';
+import { CB } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatWeekAgenda } from '../../services/event/formatters.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { RenderService } from '../../services/image/render-service.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -11,6 +16,7 @@ export async function handleWeek(
   ctx: BotCommandContext,
   eventService: EventService,
   holidayService?: HolidayService,
+  renderService?: RenderService,
 ): Promise<void> {
   const user = ctx.dbUser as User;
   const now = new Date();
@@ -32,5 +38,11 @@ export async function handleWeek(
   }
 
   const text = formatWeekAgenda(occurrences, start, end, user.timezone, user.language, holidaysByDate);
-  await ctx.send(text, { parse_mode: 'HTML' });
+
+  const params: { parse_mode: 'HTML'; reply_markup?: InlineKeyboard } = { parse_mode: 'HTML' };
+  if (renderService) {
+    const weekStartIso = startOfWeek(new TZDate(now, user.timezone), { weekStartsOn: 1 }).toISOString().slice(0, 10);
+    params.reply_markup = new InlineKeyboard().text('📷', `${CB.IMG_WEEKLY}:${weekStartIso}`);
+  }
+  await ctx.send(text, params);
 }

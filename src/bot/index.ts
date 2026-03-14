@@ -110,9 +110,13 @@ export function createBot(
     .command('start', (ctx) => handleStart(ctx as unknown as BotCommandContext, scenesSetup.scenes.onboardingScene))
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
-    .command('today', (ctx) => handleToday(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('today', (ctx) =>
+      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+    )
     .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService))
-    .command('week', (ctx) => handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('week', (ctx) =>
+      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+    )
     .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService))
     .command('add', (ctx) =>
       handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
@@ -137,6 +141,7 @@ export function createBot(
         googleDeps?.calendarRepo,
         googleDeps?.disconnectDeps,
         googleDeps?.onCalendarsDone,
+        renderService,
       )(ctx as unknown as BotCallbackContext),
     )
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)

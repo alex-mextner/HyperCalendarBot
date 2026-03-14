@@ -1,5 +1,6 @@
 // src/bot/handlers/callback.handler.ts
 
+import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
@@ -8,8 +9,12 @@ import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
+import type { RenderService } from '../../services/image/render-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
-import { cmdLogger } from '../../utils/logger.ts';
+import { getWeekRangeUtc } from '../../utils/date.ts';
+import { cmdLogger, imageLogger } from '../../utils/logger.ts';
+import { getTheme } from '../../worker/templates/themes.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
@@ -32,6 +37,7 @@ export function createCallbackHandler(
   calendarRepo?: GoogleCalendarRepository,
   disconnectDeps?: DisconnectDeps,
   onCalendarsDone?: (userId: number) => Promise<void>,
+  renderService?: RenderService,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -208,6 +214,103 @@ export function createCallbackHandler(
             await ctx.answer({ text: t(lang).gcal_connect_prompt });
             return;
           }
+        }
+        return;
+      }
+
+      // Image: daily agenda
+      if (action === CB.IMG_DAILY && renderService) {
+        const dateIso = payload;
+        await ctx.answer();
+
+        const now = new Date();
+        const occurrences = eventService.getEventsForDay(
+          user.telegram_id,
+          new Date(`${dateIso}T12:00:00Z`),
+          user.timezone,
+        );
+
+        const userNow = new TZDate(now, user.timezone);
+        const todayIso = userNow.toISOString().slice(0, 10);
+        const isToday = dateIso === todayIso;
+        const currentTimeMinutes = isToday ? userNow.getHours() * 60 + userNow.getMinutes() : undefined;
+
+        const holidays = holidayService.getHolidaysForDate(user.telegram_id, dateIso);
+
+        const data = mapDailyAgendaData({
+          occurrences,
+          dateIso,
+          timezone: user.timezone,
+          locale: user.language as 'ru' | 'en',
+          theme: getTheme(),
+          currentTimeMinutes,
+          isHoliday: holidays.length > 0,
+          holidayName: holidays[0]?.name,
+        });
+
+        try {
+          const buffer = await renderService.renderDirect({
+            type: 'daily-agenda',
+            data,
+            userId: user.telegram_id,
+          });
+          const file = new File([buffer], 'agenda.png', { type: 'image/png' });
+          await ctx.message?.sendPhoto(file);
+        } catch (err) {
+          imageLogger.error({ error: (err as Error).message }, 'Render failed');
+          await ctx.message?.send('⚠️ Image generation failed. Use text version above.');
+        }
+        return;
+      }
+
+      // Image: weekly overview
+      if (action === CB.IMG_WEEKLY && renderService) {
+        const weekStartIso = payload;
+        await ctx.answer();
+
+        const now = new Date();
+        const weekStartDate = new Date(`${weekStartIso}T12:00:00Z`);
+        const { start, end } = getWeekRangeUtc(weekStartDate, user.timezone);
+        const occurrences = eventService.getEventsInRange(user.telegram_id, start, end);
+
+        const occurrencesByDay = new Map<string, typeof occurrences>();
+        const startD = new Date(start);
+        for (let i = 0; i < 7; i++) {
+          const d = new Date(startD.getTime() + i * 86400000);
+          const dayKey = d.toISOString().slice(0, 10);
+          occurrencesByDay.set(dayKey, []);
+        }
+        for (const occ of occurrences) {
+          const occDate = new TZDate(new Date(occ.occurrence_start), user.timezone).toISOString().slice(0, 10);
+          const dayList = occurrencesByDay.get(occDate);
+          if (dayList) {
+            dayList.push(occ);
+          }
+        }
+
+        const userNow = new TZDate(now, user.timezone);
+        const todayIso = userNow.toISOString().slice(0, 10);
+
+        const data = mapWeeklyOverviewData({
+          occurrencesByDay,
+          weekStartIso,
+          timezone: user.timezone,
+          locale: user.language as 'ru' | 'en',
+          theme: getTheme(),
+          todayIso,
+        });
+
+        try {
+          const buffer = await renderService.renderDirect({
+            type: 'weekly-overview',
+            data,
+            userId: user.telegram_id,
+          });
+          const file = new File([buffer], 'week.png', { type: 'image/png' });
+          await ctx.message?.sendPhoto(file);
+        } catch (err) {
+          imageLogger.error({ error: (err as Error).message }, 'Render failed');
+          await ctx.message?.send('⚠️ Image generation failed. Use text version above.');
         }
         return;
       }
