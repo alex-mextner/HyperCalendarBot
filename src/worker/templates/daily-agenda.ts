@@ -220,12 +220,17 @@ function css(data: DailyAgendaData): string {
       align-items: center;
     }
     .now-line__label {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
       width: 72px;
-      font-size: 13px;
-      font-weight: 700;
-      color: #EF4444;
-      text-align: right;
-      padding-right: 6px;
+      height: 26px;
+      border-radius: 8px;
+      background: #EF4444;
+      color: #FFFFFF;
+      font-size: 16px;
+      font-weight: 600;
+      flex-shrink: 0;
     }
     .now-line__dot {
       width: 10px;
@@ -233,6 +238,7 @@ function css(data: DailyAgendaData): string {
       border-radius: 50%;
       background: #EF4444;
       flex-shrink: 0;
+      margin-left: -1px;
     }
     .now-line__rule {
       flex: 1;
