@@ -12,3 +12,4 @@ export const cmdLogger = logger.child({ module: 'cmd' });
 export const notifyLogger = logger.child({ module: 'notify' });
 export const syncLogger = logger.child({ module: 'sync' });
 export const webLogger = logger.child({ module: 'web' });
+export const imageLogger = logger.child({ module: 'image' });
