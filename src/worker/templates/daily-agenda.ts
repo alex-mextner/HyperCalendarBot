@@ -77,6 +77,7 @@ function renderTimeline(data: DailyAgendaData): string {
     nowLine = `
       <div class="now-line" style="top:${top}px;">
         <div class="now-line__label">${timeLabel}</div>
+        <div class="now-line__connector"></div>
         <div class="now-line__dot"></div>
         <div class="now-line__rule"></div>
       </div>`;
@@ -230,7 +231,12 @@ function css(data: DailyAgendaData): string {
       font-weight: 600;
       flex-shrink: 0;
       padding: 0 8px;
-      margin-right: 4px;
+    }
+    .now-line__connector {
+      flex: 1;
+      height: 2px;
+      background: #EF444440;
+      max-width: 20px;
     }
     .now-line__dot {
       width: 10px;
@@ -238,7 +244,6 @@ function css(data: DailyAgendaData): string {
       border-radius: 50%;
       background: #EF4444;
       flex-shrink: 0;
-      margin-left: -1px;
     }
     .now-line__rule {
       flex: 1;
