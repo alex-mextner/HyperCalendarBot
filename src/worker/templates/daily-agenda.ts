@@ -230,7 +230,8 @@ function css(data: DailyAgendaData): string {
       font-size: 16px;
       font-weight: 600;
       flex-shrink: 0;
-      padding: 0 8px 0 0;
+      padding: 0 8px;
+      margin-left: -8px;
     }
     .now-line__connector {
       flex: 1;
