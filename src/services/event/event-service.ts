@@ -20,6 +20,8 @@ export class EventService {
     private reminderRepo: ReminderRepository,
     private materializer?: ReminderMaterializer,
     private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void,
+    private onEventDeleted?: (eventId: number, userId: number) => void,
+    private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void,
   ) {}
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -41,6 +43,7 @@ export class EventService {
   }
 
   updateEvent(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
+    const existing = data.start_at && this.onEventTimeChanged ? this.eventRepo.findById(id, userId) : null;
     const updated = this.eventRepo.update(id, userId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
@@ -51,6 +54,9 @@ export class EventService {
     if (this.pushSync && updated?.google_calendar_id) {
       this.pushSync(updated.user_id, updated.id, 'update');
     }
+    if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
+      this.onEventTimeChanged(id, userId, data.start_at);
+    }
     return updated;
   }
 
@@ -60,6 +66,9 @@ export class EventService {
       if (event?.google_calendar_id) {
         this.pushSync(userId, id, 'delete');
       }
+    }
+    if (this.onEventDeleted) {
+      this.onEventDeleted(id, userId);
     }
     if (this.materializer) {
       this.materializer.deleteForEvent(id);

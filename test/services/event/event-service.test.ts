@@ -1,7 +1,7 @@
 // test/services/event/event-service.test.ts
 
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
@@ -161,6 +161,87 @@ describe('EventService', () => {
       // Future exceptions should be deleted
       const exceptions = db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(template.id);
       expect(exceptions.length).toBe(0);
+    });
+  });
+
+  describe('event lifecycle hooks', () => {
+    test('deleteEvent cascades to invitations via foreign key', () => {
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: TZ,
+      });
+      // Create invitee user
+      new UserRepository(db).create({ telegram_id: 200 });
+      // Create invitation manually
+      db.prepare('INSERT INTO invitations (event_id, inviter_id, invitee_id) VALUES (?, ?, ?)').run(
+        event.id,
+        USER_ID,
+        200,
+      );
+
+      service.deleteEvent(event.id, USER_ID);
+
+      // CASCADE delete removes invitation record entirely
+      const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(event.id);
+      expect(inv).toHaveLength(0);
+    });
+
+    test('deleteEvent calls onEventDeleted before deletion', () => {
+      const callback = mock(() => {});
+      const eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, callback);
+
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: TZ,
+      });
+
+      svc.deleteEvent(event.id, USER_ID);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(event.id, USER_ID);
+    });
+
+    test('updateEvent calls onEventTimeChanged when start_at changes', () => {
+      const callback = mock(() => {});
+      const eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
+
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Meeting',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: TZ,
+      });
+
+      svc.updateEvent(event.id, USER_ID, { start_at: '2026-03-15T14:00:00Z' });
+
+      expect(callback).toHaveBeenCalledTimes(1);
+      expect(callback).toHaveBeenCalledWith(event.id, USER_ID, '2026-03-15T14:00:00Z');
+    });
+
+    test('updateEvent does not call onEventTimeChanged when start_at unchanged', () => {
+      const callback = mock(() => {});
+      const eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
+
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Meeting',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: TZ,
+      });
+
+      svc.updateEvent(event.id, USER_ID, { title: 'Renamed Meeting' });
+
+      expect(callback).toHaveBeenCalledTimes(0);
     });
   });
 });
