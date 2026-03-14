@@ -222,8 +222,6 @@ function css(data: DailyAgendaData): string {
     .now-line__label {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
-      min-width: 62px;
       height: 26px;
       border-radius: 8px;
       background: #EF4444;
@@ -231,6 +229,7 @@ function css(data: DailyAgendaData): string {
       font-size: 16px;
       font-weight: 600;
       flex-shrink: 0;
+      padding: 0 8px;
       margin-right: 4px;
     }
     .now-line__dot {
