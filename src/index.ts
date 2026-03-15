@@ -17,6 +17,8 @@ const botRef: { sendMessage: (telegramId: number, text: string) => Promise<void>
 let googleDeps: GoogleBotDeps | undefined;
 let webServerHandle: { stop: () => void } | undefined;
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
+let imageQueueCleanup: { close: () => Promise<void> } | undefined;
+let renderService: import('./services/image/render-service.ts').RenderService | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -121,6 +123,28 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   botLogger.info('Google Calendar sync initialized');
 }
 
+if (config.REDIS_URL) {
+  const { createImageRenderQueue } = await import('./worker/image-render.queue.ts');
+  const { RenderService } = await import('./services/image/render-service.ts');
+  const { playwrightPool } = await import('./worker/playwright-pool.ts');
+
+  await playwrightPool.initialize();
+
+  const { queue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
+  renderService = new RenderService(queue, queueEvents);
+
+  imageQueueCleanup = {
+    close: async () => {
+      await worker.close();
+      await queue.close();
+      await queueEvents.close();
+      await playwrightPool.shutdown();
+    },
+  };
+
+  botLogger.info('Image render queue initialized');
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -130,6 +154,7 @@ const { bot } = createBot(
     model: config.AI_MODEL,
   },
   googleDeps,
+  renderService,
 );
 
 // Patch sendMessage to use real bot API
@@ -199,6 +224,7 @@ process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
+  if (imageQueueCleanup) await imageQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
@@ -207,6 +233,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   await bot.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
+  if (imageQueueCleanup) await imageQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
