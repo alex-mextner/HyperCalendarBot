@@ -87,9 +87,11 @@ export class InlineService {
 
   async buildPhotoResult(userId: number, date: Date, timezone: string): Promise<InlineResultItem | null> {
     // Photo results require a publicly accessible URL for Telegram.
-    // Implementation depends on image serving infrastructure
-    // (Bun.serve static route, Telegram file upload, etc.)
+    // Will use RenderService to generate agenda image, then serve it.
     // Returns null until RenderService and serving are wired up.
+    const events = this.eventService.getEventsForDay(userId, date, timezone);
+    if (events.length === 0) return null;
+    // TODO: render image and return photo result when infrastructure is ready
     return null;
   }
 
