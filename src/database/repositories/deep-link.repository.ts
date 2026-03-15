@@ -15,10 +15,7 @@ export class DeepLinkRepository {
   }
 
   findByCode(code: string): DeepLink | null {
-    return (
-      (this.db.prepare('SELECT * FROM deep_links WHERE code = ?').get(code) as DeepLink | null) ??
-      null
-    );
+    return (this.db.prepare('SELECT * FROM deep_links WHERE code = ?').get(code) as DeepLink | null) ?? null;
   }
 
   incrementUsedCount(code: string): void {

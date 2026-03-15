@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { migrations } from '../../../src/database/migrations.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
-import { migrations } from '../../../src/database/migrations.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 
 function createTestDb(): Database {

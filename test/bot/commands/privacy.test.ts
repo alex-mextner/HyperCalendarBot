@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
+import type { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import type { SharingSettings } from '../../../src/database/types.ts';
 
 function makeSettings(overrides: Partial<SharingSettings> = {}): SharingSettings {
