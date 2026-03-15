@@ -174,3 +174,113 @@ export interface EventOccurrence {
   occurrence_end: string | null;
   is_exception: boolean;
 }
+
+// --- Sharing & Social (sub-project 06) ---
+
+export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'maybe' | 'cancelled' | 'expired';
+export type Visibility = 'private' | 'free_busy' | 'full';
+export type SharedToType = 'user' | 'group';
+export type ShareType = 'card' | 'image' | 'agenda';
+export type DeepLinkType = 'shared_event' | 'invitation' | 'group_context';
+
+export interface Invitation {
+  id: number;
+  event_id: number;
+  inviter_id: number;
+  invitee_id: number;
+  status: InvitationStatus;
+  message_id: number | null;
+  chat_id: number | null;
+  deep_link_code: string | null;
+  created_at: string;
+  updated_at: string;
+  responded_at: string | null;
+}
+
+export interface SharedEvent {
+  id: number;
+  event_id: number;
+  shared_by: number;
+  shared_to_type: SharedToType;
+  shared_to_id: number;
+  share_type: ShareType;
+  message_id: number | null;
+  deep_link_code: string | null;
+  created_at: string;
+}
+
+export interface SharingSettings {
+  user_id: number;
+  default_visibility: Visibility;
+  inline_mode_enabled: number;
+  allow_invitations: number;
+  share_location: number;
+  share_description: number;
+  updated_at: string;
+}
+
+export interface EventVisibilityRow {
+  event_id: number;
+  visibility: Visibility;
+  updated_at: string;
+}
+
+export interface GroupChat {
+  chat_id: number;
+  title: string | null;
+  added_by: number;
+  added_at: string;
+  is_active: number;
+}
+
+export interface GroupSharedEvent {
+  id: number;
+  chat_id: number;
+  event_id: number;
+  shared_by: number;
+  message_id: number | null;
+  created_at: string;
+}
+
+export interface DeepLink {
+  code: string;
+  type: DeepLinkType;
+  payload: string;
+  created_by: number;
+  created_at: string;
+  expires_at: string | null;
+  used_count: number;
+}
+
+export interface CreateInvitationData {
+  event_id: number;
+  inviter_id: number;
+  invitee_id: number;
+  message_id?: number;
+  chat_id?: number;
+  deep_link_code?: string;
+}
+
+export interface CreateSharedEventData {
+  event_id: number;
+  shared_by: number;
+  shared_to_type: SharedToType;
+  shared_to_id: number;
+  share_type: ShareType;
+  message_id?: number;
+  deep_link_code?: string;
+}
+
+export interface CreateDeepLinkData {
+  code: string;
+  type: DeepLinkType;
+  payload: string;
+  created_by: number;
+  expires_at?: string;
+}
+
+export interface CreateGroupChatData {
+  chat_id: number;
+  title?: string;
+  added_by: number;
+}

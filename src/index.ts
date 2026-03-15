@@ -4,6 +4,7 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { setupSharingCleanup } from './services/sharing/sharing-cleanup.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
@@ -13,6 +14,8 @@ const db = createDatabase(config.DATABASE_PATH);
 const botRef: { sendMessage: (telegramId: number, text: string) => Promise<void> } = {
   sendMessage: async () => {},
 };
+
+const sharingCleanup = setupSharingCleanup(db.invitations, db.deepLinks);
 
 let googleDeps: GoogleBotDeps | undefined;
 let webServerHandle: { stop: () => void } | undefined;
@@ -178,6 +181,10 @@ const COMMANDS_EN = [
   { command: 'import', description: 'Import .ics' },
   { command: 'export', description: 'Export .ics' },
   { command: 'notify', description: 'Notification settings' },
+  { command: 'share', description: 'Share agenda or event' },
+  { command: 'invite', description: 'Invite user to event' },
+  { command: 'invitations', description: 'View invitations' },
+  { command: 'privacy', description: 'Privacy & visibility' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -196,6 +203,10 @@ const COMMANDS_RU = [
   { command: 'import', description: 'Импорт .ics' },
   { command: 'export', description: 'Экспорт .ics' },
   { command: 'notify', description: 'Настройки уведомлений' },
+  { command: 'share', description: 'Поделиться повесткой/событием' },
+  { command: 'invite', description: 'Пригласить на событие' },
+  { command: 'invitations', description: 'Просмотр приглашений' },
+  { command: 'privacy', description: 'Приватность и видимость' },
   { command: 'help', description: 'Справка' },
 ];
 
@@ -223,6 +234,7 @@ bot.onStart(async ({ info }) => {
 process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
+  sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
@@ -232,6 +244,7 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   await bot.stop();
+  sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();

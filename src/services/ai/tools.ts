@@ -190,4 +190,104 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'share_event',
+    description: 'Share an event with a user or group. Records the sharing action.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event to share' },
+        target_type: {
+          type: 'string',
+          enum: ['user', 'group'],
+          description: 'Whether sharing with a user or group',
+        },
+        target_id: { type: 'number', description: 'Telegram ID of the user or group to share with' },
+      },
+      required: ['event_id', 'target_type', 'target_id'],
+    },
+  },
+  {
+    name: 'send_invitation',
+    description: 'Send an invitation for an event to another user.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event to invite to' },
+        invitee_id: { type: 'number', description: 'Telegram ID of the user to invite' },
+      },
+      required: ['event_id', 'invitee_id'],
+    },
+  },
+  {
+    name: 'get_invitation_status',
+    description: 'Get invitation statuses for an event. Returns all invitations and their current status.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event to check invitations for' },
+      },
+      required: ['event_id'],
+    },
+  },
+  {
+    name: 'update_sharing_settings',
+    description: 'Update sharing and privacy settings. Only pass fields that need to change.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        default_visibility: {
+          type: 'string',
+          enum: ['private', 'free_busy', 'full'],
+          description: 'Default visibility for events. Optional.',
+        },
+        inline_mode_enabled: {
+          type: 'boolean',
+          description: 'Whether inline mode is enabled. Optional.',
+        },
+        allow_invitations: {
+          type: 'boolean',
+          description: 'Whether to allow receiving invitations. Optional.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'share_agenda',
+    description: 'Share agenda for a time period with a user or group.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        period: {
+          type: 'string',
+          enum: ['today', 'tomorrow', 'week'],
+          description: 'Time period to share agenda for',
+        },
+        target_type: {
+          type: 'string',
+          enum: ['user', 'group'],
+          description: 'Whether sharing with a user or group',
+        },
+        target_id: { type: 'number', description: 'Telegram ID of the user or group' },
+      },
+      required: ['period', 'target_type', 'target_id'],
+    },
+  },
+  {
+    name: 'set_event_visibility',
+    description: 'Set visibility for a specific event (overrides default settings).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event' },
+        visibility: {
+          type: 'string',
+          enum: ['private', 'free_busy', 'full'],
+          description: 'Visibility level for the event',
+        },
+      },
+      required: ['event_id', 'visibility'],
+    },
+  },
 ];

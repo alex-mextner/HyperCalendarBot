@@ -4,7 +4,9 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -12,9 +14,11 @@ import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
+import { handleGroupAgendaCallback } from '../commands/agenda.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
@@ -38,6 +42,9 @@ export function createCallbackHandler(
   disconnectDeps?: DisconnectDeps,
   onCalendarsDone?: (userId: number) => Promise<void>,
   renderService?: RenderService,
+  invitationService?: InvitationService,
+  groupChatRepo?: GroupChatRepository,
+  eventRepo?: EventRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -330,6 +337,52 @@ export function createCallbackHandler(
         }
         return;
       }
+
+      // Invitation actions
+      if (action === CB.INVITATION_ACTION && invitationService) {
+        const subAction = parts[1];
+        const invId = Number(parts[2]);
+        const lang = (user.language ?? 'en') as Lang;
+
+        if (subAction === 'keep') {
+          await ctx.answer(t(lang).invitation_accepted);
+          return;
+        }
+
+        let result: { success: boolean; error?: string } | undefined;
+        if (subAction === 'accept') {
+          result = invitationService.acceptInvitation(invId, user.telegram_id);
+        } else if (subAction === 'decline') {
+          result = invitationService.declineInvitation(invId, user.telegram_id);
+        } else if (subAction === 'maybe') {
+          result = invitationService.maybeInvitation(invId, user.telegram_id);
+        }
+
+        if (!result) {
+          await ctx.answer();
+          return;
+        }
+
+        if (result.success) {
+          const statusText =
+            subAction === 'accept'
+              ? t(lang).invitation_accepted
+              : subAction === 'decline'
+                ? t(lang).invitation_declined
+                : t(lang).invitation_maybe;
+          await ctx.answer(statusText);
+          await ctx.editText(statusText).catch(() => {});
+        } else {
+          await ctx.answer(result.error ?? 'Error');
+        }
+        return;
+      }
+
+      // Group agenda pagination
+      if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
+        return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
+      }
+
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
