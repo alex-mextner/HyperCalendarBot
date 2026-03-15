@@ -4,13 +4,19 @@ import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
+import { SharedEventRepository } from '../../../src/database/repositories/shared-event.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+import { PrivacyService } from '../../../src/services/sharing/privacy-service.ts';
+import { SharingService } from '../../../src/services/sharing/sharing-service.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -134,5 +140,274 @@ describe('executeTool', () => {
     const result = executeTool(ctx, 'unknown_tool', {});
     expect(result.success).toBe(false);
     expect(result.error).toContain('Unknown tool');
+  });
+
+  describe('sharing tools', () => {
+    let sharingCtx: AgentContext;
+    let eventRepo: EventRepository;
+    let invitationRepo: InvitationRepository;
+    let sharingSettingsRepo: SharingSettingsRepository;
+    let sharedEventRepo: SharedEventRepository;
+
+    beforeEach(() => {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const chatHistoryRepo = new ChatHistoryRepository(db);
+      const holidayRepo = new HolidayRepository(db);
+      invitationRepo = new InvitationRepository(db);
+      sharingSettingsRepo = new SharingSettingsRepository(db);
+      sharedEventRepo = new SharedEventRepository(db);
+
+      userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+      const eventService = new EventService(eventRepo, reminderRepo);
+      const holidayService = new HolidayService(holidayRepo);
+      const invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo);
+      const privacyService = new PrivacyService(sharingSettingsRepo);
+      const sharingService = new SharingService(eventRepo, privacyService);
+
+      sharingCtx = {
+        user: userRepo.findByTelegramId(USER_ID)!,
+        chatId: USER_ID,
+        messageText: '',
+        eventService,
+        holidayService,
+        chatHistory: chatHistoryRepo,
+        userRepo,
+        reminderRepo,
+        invitationService,
+        invitationRepo,
+        sharingService,
+        sharingSettingsRepo,
+        sharedEventRepo,
+      };
+    });
+
+    test('share_event returns error when sharing not configured', () => {
+      const result = executeTool(ctx, 'share_event', {
+        event_id: 1,
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('share_event shares an existing event', () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Shared Meeting',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = executeTool(sharingCtx, 'share_event', {
+        event_id: event.id,
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Shared Meeting');
+      expect(result.output).toContain('456');
+    });
+
+    test('share_event returns error for non-existent event', () => {
+      const result = executeTool(sharingCtx, 'share_event', {
+        event_id: 9999,
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('send_invitation returns error when invitations not configured', () => {
+      const result = executeTool(ctx, 'send_invitation', {
+        event_id: 1,
+        invitee_id: 456,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('send_invitation sends invitation for existing event', () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Invite Test',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = executeTool(sharingCtx, 'send_invitation', {
+        event_id: event.id,
+        invitee_id: 456,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Invitation sent');
+      expect(result.output).toContain('456');
+    });
+
+    test('send_invitation returns error for non-existent event', () => {
+      const result = executeTool(sharingCtx, 'send_invitation', {
+        event_id: 9999,
+        invitee_id: 456,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('get_invitation_status returns error when invitations not configured', () => {
+      const result = executeTool(ctx, 'get_invitation_status', { event_id: 1 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('get_invitation_status returns no invitations for event without any', () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Status Test',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('No invitations');
+    });
+
+    test('get_invitation_status lists pending and accepted invitations', () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Party',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: 456 });
+      const inv2 = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: 789 });
+      invitationRepo.updateStatus(inv2.id, 'accepted', 'pending');
+
+      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('456');
+      expect(result.output).toContain('789');
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain('pending');
+    });
+
+    test('get_invitation_status returns error for non-existent event', () => {
+      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: 9999 });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('update_sharing_settings returns error when not configured', () => {
+      const result = executeTool(ctx, 'update_sharing_settings', {
+        default_visibility: 'full',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('update_sharing_settings updates visibility setting', () => {
+      const result = executeTool(sharingCtx, 'update_sharing_settings', {
+        default_visibility: 'full',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('default_visibility');
+      expect(result.output).toContain('full');
+    });
+
+    test('update_sharing_settings updates multiple settings', () => {
+      const result = executeTool(sharingCtx, 'update_sharing_settings', {
+        default_visibility: 'free_busy',
+        inline_mode_enabled: false,
+        allow_invitations: false,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('free_busy');
+      expect(result.output).toContain('inline_mode_enabled');
+      expect(result.output).toContain('allow_invitations');
+    });
+
+    test('update_sharing_settings returns error when no settings provided', () => {
+      const result = executeTool(sharingCtx, 'update_sharing_settings', {});
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No settings provided');
+    });
+
+    test('share_agenda returns error when sharing not configured', () => {
+      const result = executeTool(ctx, 'share_agenda', {
+        period: 'today',
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('share_agenda returns no events when agenda is empty', () => {
+      const result = executeTool(sharingCtx, 'share_agenda', {
+        period: 'today',
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('No visible events');
+    });
+
+    test('share_agenda shares visible events for today', () => {
+      // Set visibility to full so events are shareable
+      sharingSettingsRepo.ensureDefaults(USER_ID);
+      sharingSettingsRepo.update(USER_ID, { default_visibility: 'full' });
+
+      const now = new Date();
+      sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Today Event',
+        start_at: now.toISOString(),
+        timezone: 'UTC',
+      });
+
+      const result = executeTool(sharingCtx, 'share_agenda', {
+        period: 'today',
+        target_type: 'user',
+        target_id: 456,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Today Event');
+      expect(result.output).toContain('456');
+    });
+
+    test('set_event_visibility returns error when not configured', () => {
+      const result = executeTool(ctx, 'set_event_visibility', {
+        event_id: 1,
+        visibility: 'full',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('set_event_visibility sets visibility on existing event', () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Visible Event',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = executeTool(sharingCtx, 'set_event_visibility', {
+        event_id: event.id,
+        visibility: 'full',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Visible Event');
+      expect(result.output).toContain('full');
+    });
+
+    test('set_event_visibility returns error for non-existent event', () => {
+      const result = executeTool(sharingCtx, 'set_event_visibility', {
+        event_id: 9999,
+        visibility: 'full',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
   });
 });

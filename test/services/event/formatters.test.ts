@@ -1,33 +1,53 @@
 // test/services/event/formatters.test.ts
 import { describe, expect, test } from 'bun:test';
 import type { CalendarEvent, EventOccurrence } from '../../../src/database/types.ts';
-import { formatDayAgenda, formatEventDetail, formatRecurrenceHuman } from '../../../src/services/event/formatters.ts';
+import {
+  formatDayAgenda,
+  formatEventDetail,
+  formatEventListItem,
+  formatRecurrenceHuman,
+  formatWeekAgenda,
+} from '../../../src/services/event/formatters.ts';
+import type { HolidayEntry } from '../../../src/services/holiday/holiday-service.ts';
 
-function makeOccurrence(title: string, startUtc: string, endUtc: string | null = null): EventOccurrence {
+function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
-    event: {
-      id: 1,
-      user_id: 123,
-      title,
-      description: null,
-      category: null,
-      start_at: startUtc,
-      end_at: endUtc,
-      all_day: 0,
-      timezone: 'UTC',
-      location: null,
-      recurrence_rule: null,
-      recurrence_end_at: null,
-      parent_event_id: null,
-      original_start_at: null,
-      is_cancelled: 0,
-      reminder_overrides: null,
-      google_event_id: null,
-      google_calendar_id: null,
-      last_synced_at: null,
-      created_at: '',
-      updated_at: '',
-    },
+    id: 1,
+    user_id: 123,
+    title: 'Test Event',
+    description: null,
+    category: null,
+    start_at: '2026-03-11T09:00:00Z',
+    end_at: '2026-03-11T10:00:00Z',
+    all_day: 0,
+    timezone: 'UTC',
+    location: null,
+    recurrence_rule: null,
+    recurrence_end_at: null,
+    parent_event_id: null,
+    original_start_at: null,
+    is_cancelled: 0,
+    reminder_overrides: null,
+    google_event_id: null,
+    google_calendar_id: null,
+    google_etag: null,
+    sync_status: 'local_only',
+    sync_version: 1,
+    last_synced_at: null,
+    created_at: '',
+    updated_at: '',
+    ...overrides,
+  };
+}
+
+function makeOccurrence(
+  title: string,
+  startUtc: string,
+  endUtc: string | null = null,
+  overrides: Partial<CalendarEvent> = {},
+): EventOccurrence {
+  return {
+    event: makeEvent({ title, start_at: startUtc, end_at: endUtc, ...overrides }),
     occurrence_start: startUtc,
     occurrence_end: endUtc,
     is_exception: false,
@@ -108,5 +128,181 @@ describe('formatRecurrenceHuman', () => {
   });
   test('FREQ=DAILY;UNTIL=20260330T000000Z in RU → "Ежедневно до 30 мар"', () => {
     expect(formatRecurrenceHuman('FREQ=DAILY;UNTIL=20260330T000000Z', 'ru')).toBe('Ежедневно до 30 мар');
+  });
+});
+
+// ── formatWeekAgenda (lines 34-82) ──
+
+describe('formatWeekAgenda', () => {
+  test('renders a week with no events — each day shows "no events"', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).toContain('Week');
+    // All 7 days should say "no events"
+    expect(result.match(/no events/g)?.length).toBe(7);
+  });
+
+  test('renders a week with no events in Russian', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');
+    expect(result).toContain('Неделя');
+    expect(result.match(/нет событий/g)?.length).toBe(7);
+  });
+
+  test('renders events grouped by day', () => {
+    const events = [
+      makeOccurrence('Monday Standup', '2026-03-09T09:00:00Z', '2026-03-09T09:30:00Z'),
+      makeOccurrence('Monday Lunch', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z'),
+      makeOccurrence('Wednesday Call', '2026-03-11T15:00:00Z', '2026-03-11T16:00:00Z'),
+    ];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).toContain('Monday Standup');
+    expect(result).toContain('Monday Lunch');
+    expect(result).toContain('Wednesday Call');
+    // Monday has 2 events
+    expect(result).toContain('2 events');
+    // Wednesday has 1 event
+    expect(result).toContain('1 event');
+    // Other 5 days should say "no events"
+    expect(result.match(/no events/g)?.length).toBe(5);
+  });
+
+  test('renders single event day with singular "событие" in Russian', () => {
+    const events = [makeOccurrence('Обед', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z')];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');
+    expect(result).toContain('1 событие');
+    expect(result).toContain('Обед');
+  });
+
+  test('renders multiple events day with "событий" in Russian', () => {
+    const events = [
+      makeOccurrence('Утро', '2026-03-09T08:00:00Z', '2026-03-09T09:00:00Z'),
+      makeOccurrence('Обед', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z'),
+      makeOccurrence('Вечер', '2026-03-09T18:00:00Z', '2026-03-09T19:00:00Z'),
+    ];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');
+    expect(result).toContain('3 событий');
+  });
+
+  test('renders holidays on a day', () => {
+    const holidaysByDate = new Map<string, HolidayEntry[]>([
+      [
+        '2026-03-09',
+        [
+          {
+            date: '2026-03-09',
+            name: "Women's Day (observed)",
+            type: 'public',
+            countryCode: 'UA',
+            countryName: 'Ukraine',
+          },
+        ],
+      ],
+    ]);
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en', holidaysByDate);
+    expect(result).toContain("Women's Day (observed)");
+    expect(result).toContain('🎉');
+    // Holiday day should NOT show "no events" since it has a holiday line
+    // The remaining 6 days should show "no events"
+    expect(result.match(/no events/g)?.length).toBe(6);
+  });
+
+  test('renders holidays + events on the same day', () => {
+    const events = [makeOccurrence('Party', '2026-03-09T18:00:00Z', '2026-03-09T22:00:00Z')];
+    const holidaysByDate = new Map<string, HolidayEntry[]>([
+      [
+        '2026-03-09',
+        [{ date: '2026-03-09', name: 'Holiday', type: 'public', countryCode: 'UA', countryName: 'Ukraine' }],
+      ],
+    ]);
+    const result = formatWeekAgenda(
+      events,
+      '2026-03-09T00:00:00Z',
+      '2026-03-15T23:59:59Z',
+      'UTC',
+      'en',
+      holidaysByDate,
+    );
+    expect(result).toContain('🎉 Holiday');
+    expect(result).toContain('Party');
+    expect(result).toContain('1 event');
+  });
+});
+
+// ── formatEventDetail edge cases (lines 91, 97, 112) ──
+
+describe('formatEventDetail — edge cases', () => {
+  test('all-day event shows "All day" label', () => {
+    const event = makeEvent({ title: 'Conference', all_day: 1 });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('All day');
+    expect(result).not.toContain('🕐');
+  });
+
+  test('all-day event shows "Весь день" in Russian', () => {
+    const event = makeEvent({ title: 'Конференция', all_day: 1 });
+    const result = formatEventDetail(event, 'UTC', 'ru');
+    expect(result).toContain('Весь день');
+  });
+
+  test('event without end_at omits duration', () => {
+    const event = makeEvent({ title: 'Open-ended', end_at: null });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('🕐');
+    expect(result).not.toContain('(');
+  });
+
+  test('event with recurrence_rule shows recurrence line', () => {
+    const event = makeEvent({ title: 'Weekly sync', recurrence_rule: 'FREQ=WEEKLY' });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('🔁');
+    expect(result).toContain('Weekly');
+  });
+
+  test('event with all optional fields (description, location, category, recurrence)', () => {
+    const event = makeEvent({
+      title: 'Full Event',
+      description: 'A detailed description',
+      location: 'Office 42',
+      category: 'work',
+      recurrence_rule: 'FREQ=DAILY;COUNT=3',
+    });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('📝 A detailed description');
+    expect(result).toContain('📍 Office 42');
+    expect(result).toContain('🏷 work');
+    expect(result).toContain('🔁 Daily, 3 times');
+  });
+
+  test('event with no optional fields — minimal output', () => {
+    const event = makeEvent({ title: 'Bare', description: null, location: null, category: null });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('📌');
+    expect(result).toContain('Bare');
+    expect(result).not.toContain('📝');
+    expect(result).not.toContain('📍');
+    expect(result).not.toContain('🏷');
+    expect(result).not.toContain('🔁');
+  });
+});
+
+// ── formatEventListItem (lines 118-119) ──
+
+describe('formatEventListItem', () => {
+  test('formats event as numbered list item', () => {
+    const event = makeEvent({ title: 'Standup', start_at: '2026-03-11T09:00:00Z' });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toBe('1. 09:00 — Standup');
+  });
+
+  test('uses 1-based index from 0-based input', () => {
+    const event = makeEvent({ title: 'Lunch', start_at: '2026-03-11T12:30:00Z' });
+    const result = formatEventListItem(event, 'UTC', 2);
+    expect(result).toBe('3. 12:30 — Lunch');
+  });
+
+  test('escapes HTML in title', () => {
+    const event = makeEvent({ title: '<b>Bold</b>', start_at: '2026-03-11T14:00:00Z' });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toContain('&lt;b&gt;Bold&lt;/b&gt;');
+    expect(result).not.toContain('<b>');
   });
 });

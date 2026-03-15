@@ -383,7 +383,6 @@ export function createCallbackHandler(
         return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
       }
 
-
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {

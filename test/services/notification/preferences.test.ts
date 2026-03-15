@@ -72,4 +72,65 @@ describe('NotificationPreferencesService', () => {
     const prefs = service.getOrCreate(42);
     expect(prefs.morning_agenda_enabled).toBe(0);
   });
+
+  test('updateEveningTime updates time and recomputes UTC', () => {
+    service.getOrCreate(42);
+    service.updateEveningTime(42, '22:30', 'Europe/Moscow');
+    const prefs = service.getOrCreate(42);
+    expect(prefs.evening_review_time).toBe('22:30');
+    expect(prefs.evening_review_utc).toBe('19:30');
+  });
+
+  test('toggleEveningReview flips enabled flag', () => {
+    service.getOrCreate(42);
+    expect(service.getOrCreate(42).evening_review_enabled).toBe(0);
+    service.toggleEveningReview(42);
+    expect(service.getOrCreate(42).evening_review_enabled).toBe(1);
+    service.toggleEveningReview(42);
+    expect(service.getOrCreate(42).evening_review_enabled).toBe(0);
+  });
+
+  test('toggleQuietHours flips enabled flag', () => {
+    service.getOrCreate(42);
+    expect(service.getOrCreate(42).quiet_hours_enabled).toBe(0);
+    service.toggleQuietHours(42);
+    expect(service.getOrCreate(42).quiet_hours_enabled).toBe(1);
+    service.toggleQuietHours(42);
+    expect(service.getOrCreate(42).quiet_hours_enabled).toBe(0);
+  });
+
+  test('updateQuietHoursStart sets quiet hours start time', () => {
+    service.getOrCreate(42);
+    service.updateQuietHoursStart(42, '23:00');
+    const prefs = service.getOrCreate(42);
+    expect(prefs.quiet_hours_start).toBe('23:00');
+  });
+
+  test('updateQuietHoursEnd sets quiet hours end time', () => {
+    service.getOrCreate(42);
+    service.updateQuietHoursEnd(42, '07:00');
+    const prefs = service.getOrCreate(42);
+    expect(prefs.quiet_hours_end).toBe('07:00');
+  });
+
+  test('updateDefaultIntervals persists intervals as JSON', () => {
+    service.getOrCreate(42);
+    service.updateDefaultIntervals(42, [5, 10, 30]);
+    const intervals = service.resolveDefaultIntervals(42);
+    expect(intervals).toEqual([5, 10, 30]);
+  });
+
+  test('recomputeUtcTimes recalculates both morning and evening UTC', () => {
+    service.getOrCreate(42);
+    service.updateMorningTime(42, '09:00', 'Europe/Moscow');
+    service.updateEveningTime(42, '21:00', 'Europe/Moscow');
+
+    // Recompute with a different timezone (UTC+2 vs UTC+3)
+    service.recomputeUtcTimes(42, 'Europe/Kyiv');
+    const prefs = service.getOrCreate(42);
+    // Morning 09:00 in Europe/Kyiv (UTC+3 summer) => 06:00 UTC
+    expect(prefs.morning_agenda_utc).toBe('06:00');
+    // Evening 21:00 in Europe/Kyiv (UTC+3 summer) => 18:00 UTC
+    expect(prefs.evening_review_utc).toBe('18:00');
+  });
 });
