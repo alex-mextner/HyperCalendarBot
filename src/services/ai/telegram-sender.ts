@@ -1,4 +1,5 @@
 import type { Bot } from 'gramio';
+import { InlineKeyboard, Keyboard } from 'gramio';
 import type { TelegramSender } from './types.ts';
 
 export function createTelegramSender(bot: Bot): TelegramSender {
@@ -18,6 +19,36 @@ export function createTelegramSender(bot: Bot): TelegramSender {
         text,
         ...(parseMode ? { parse_mode: parseMode } : {}),
       });
+    },
+    async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: string) {
+      const kb = new InlineKeyboard();
+      for (const btn of buttons) {
+        kb.text(btn, `ai_btn:${btn}`).row();
+      }
+      const result = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        reply_markup: kb,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+      });
+      return { message_id: result.message_id };
+    },
+    async sendUserPicker(chatId: number, text: string, requestId: number) {
+      const kb = new Keyboard()
+        .requestUsers('👤 Выбрать участников', requestId, {
+          user_is_bot: false,
+          max_quantity: 10,
+          request_name: true,
+          request_username: true,
+        })
+        .resized()
+        .oneTime();
+      const result = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        reply_markup: kb,
+      });
+      return { message_id: result.message_id };
     },
   };
 }

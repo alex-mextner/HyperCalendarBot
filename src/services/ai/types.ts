@@ -1,4 +1,5 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
+import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
@@ -26,12 +27,15 @@ export interface AgentContext {
   sharingSettingsRepo?: SharingSettingsRepository;
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
+  contactRepo?: ContactRepository;
+  sender?: TelegramSender;
 }
 
 export interface ToolResult {
   success: boolean;
   output?: string;
   error?: string;
+  stopLoop?: boolean;
 }
 
 export interface AgentConfig {
@@ -43,4 +47,6 @@ export interface AgentConfig {
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: string): Promise<{ message_id: number }>;
   editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void>;
+  sendButtons?(chatId: number, text: string, buttons: string[], parseMode?: string): Promise<{ message_id: number }>;
+  sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
 }
