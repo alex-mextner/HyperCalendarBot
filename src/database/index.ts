@@ -7,6 +7,7 @@ import { migrations } from './migrations.ts';
 import { CallLogRepository } from './repositories/call-log.repository.ts';
 import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
+import { ContactRepository } from './repositories/contact.repository.ts';
 import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
@@ -42,6 +43,7 @@ export class DatabaseService {
   readonly invitations: InvitationRepository;
   readonly sharedEvents: SharedEventRepository;
   readonly groupChats: GroupChatRepository;
+  readonly contacts: ContactRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -71,6 +73,7 @@ export class DatabaseService {
     this.invitations = new InvitationRepository(this.db);
     this.sharedEvents = new SharedEventRepository(this.db);
     this.groupChats = new GroupChatRepository(this.db);
+    this.contacts = new ContactRepository(this.db);
   }
 
   close(): void {

@@ -65,4 +65,25 @@ describe('UserRepository', () => {
   test('update returns null for non-existent user', () => {
     expect(repo.update(999, { language: 'ru' })).toBeNull();
   });
+
+  test('findByUsername returns user by username (case-insensitive)', () => {
+    repo.create({ telegram_id: 123, username: 'larichkina_b' });
+    const user = repo.findByUsername('larichkina_b');
+    expect(user).not.toBeNull();
+    expect(user!.telegram_id).toBe(123);
+  });
+
+  test('findByUsername strips @ prefix', () => {
+    repo.create({ telegram_id: 123, username: 'larichkina_b' });
+    expect(repo.findByUsername('@larichkina_b')).not.toBeNull();
+  });
+
+  test('findByUsername returns null for unknown username', () => {
+    expect(repo.findByUsername('nobody')).toBeNull();
+  });
+
+  test('findByUsername is case-insensitive', () => {
+    repo.create({ telegram_id: 123, username: 'AlexUltra' });
+    expect(repo.findByUsername('alexultra')).not.toBeNull();
+  });
 });

@@ -314,7 +314,7 @@ export const migrations: Migration[] = [
 
         CREATE TABLE sharing_settings (
           user_id              INTEGER PRIMARY KEY,
-          default_visibility   TEXT NOT NULL DEFAULT 'private',
+          default_visibility   TEXT NOT NULL DEFAULT 'full',
           inline_mode_enabled  INTEGER NOT NULL DEFAULT 1,
           allow_invitations    INTEGER NOT NULL DEFAULT 1,
           share_location       INTEGER NOT NULL DEFAULT 0,
@@ -393,6 +393,24 @@ export const migrations: Migration[] = [
         );
         CREATE INDEX idx_call_log_user ON call_log(user_id, created_at);
         CREATE INDEX idx_call_log_status ON call_log(status) WHERE status IN ('queued', 'ringing');
+      `);
+    },
+  },
+  {
+    name: '010_create_contacts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE contacts (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          name       TEXT NOT NULL,
+          username   TEXT,
+          telegram_id INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX idx_contacts_user_name ON contacts(user_id, LOWER(name));
+        CREATE INDEX idx_contacts_user ON contacts(user_id);
       `);
     },
   },

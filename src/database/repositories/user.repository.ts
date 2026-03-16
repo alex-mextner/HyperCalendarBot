@@ -9,6 +9,11 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId) as User | null;
   }
 
+  findByUsername(username: string): User | null {
+    const normalized = username.startsWith('@') ? username.slice(1) : username;
+    return this.db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(normalized) as User | null;
+  }
+
   create(data: CreateUserData): User {
     this.db
       .prepare(`
