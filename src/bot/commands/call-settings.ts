@@ -1,12 +1,10 @@
 // src/bot/commands/call-settings.ts
-import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository';
+
 import { t } from '../../config/constants';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository';
 import type { BotCommandContext } from '../types';
 
-export async function handleCallSettings(
-  ctx: BotCommandContext,
-  settingsRepo: CallSettingsRepository,
-): Promise<void> {
+export async function handleCallSettings(ctx: BotCommandContext, settingsRepo: CallSettingsRepository): Promise<void> {
   const user = ctx.dbUser;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   const userId = user.telegram_id;

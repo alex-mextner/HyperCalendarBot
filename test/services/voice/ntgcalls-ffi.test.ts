@@ -1,9 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  NtgCalls,
-  getNtgCallsLoadError,
-  isNtgCallsAvailable,
-} from '../../../src/services/voice/ntgcalls-ffi';
+import { getNtgCallsLoadError, isNtgCallsAvailable, NtgCalls } from '../../../src/services/voice/ntgcalls-ffi';
 
 describe('NtgCalls FFI', () => {
   test('isNtgCallsAvailable returns boolean', () => {

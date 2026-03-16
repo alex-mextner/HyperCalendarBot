@@ -1,5 +1,5 @@
 // src/worker/call-queue.ts
-import { Queue, Worker, type ConnectionOptions } from 'bullmq';
+import { type ConnectionOptions, Queue, Worker } from 'bullmq';
 import type { CallManager } from '../services/voice/call-manager';
 import type { CallReminderJobData } from '../services/voice/types';
 import { voiceLogger } from '../services/voice/types';
@@ -19,10 +19,7 @@ export function createCallQueue(connection: ConnectionOptions) {
   };
 }
 
-export function createCallWorker(
-  connection: ConnectionOptions,
-  callManager: CallManager,
-) {
+export function createCallWorker(connection: ConnectionOptions, callManager: CallManager) {
   const worker = new Worker<CallReminderJobData>(
     'call-reminders',
     async (job) => {

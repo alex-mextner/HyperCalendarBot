@@ -11,7 +11,14 @@ describe('handleCallSettings', () => {
     };
     const settingsRepo = {
       ensureDefaults: mock(() => {}),
-      get: mock(() => ({ enabled: 0, max_daily_calls: 5, language: 'en', quiet_hours_start: null, quiet_hours_end: null, important_only: 0 })),
+      get: mock(() => ({
+        enabled: 0,
+        max_daily_calls: 5,
+        language: 'en',
+        quiet_hours_start: null,
+        quiet_hours_end: null,
+        important_only: 0,
+      })),
     };
     await handleCallSettings(ctx as never, settingsRepo as never);
     expect(ctx.send).toHaveBeenCalled();

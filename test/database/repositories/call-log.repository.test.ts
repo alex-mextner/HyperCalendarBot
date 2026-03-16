@@ -1,9 +1,9 @@
 // test/database/repositories/call-log.repository.test.ts
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { migrations } from '../../../src/database/migrations';
 import { CallLogRepository } from '../../../src/database/repositories/call-log.repository';
 import { UserRepository } from '../../../src/database/repositories/user.repository';
-import { migrations } from '../../../src/database/migrations';
 import { runMigrations } from '../../../src/database/schema';
 
 function createTestDb(): Database {

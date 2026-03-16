@@ -20,9 +20,9 @@ const LIB_SEARCH_PATHS = [
 ];
 
 interface NtgCallsSymbols {
-  ntg_init: { (): number };
-  ntg_destroy: { (handle: number): number };
-  ntg_get_version: { (bufferPtr: number): number };
+  ntg_init: () => number;
+  ntg_destroy: (handle: number) => number;
+  ntg_get_version: (bufferPtr: number) => number;
 }
 
 interface NtgCallsLib {
