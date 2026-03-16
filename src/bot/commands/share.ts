@@ -1,11 +1,12 @@
 // src/bot/commands/share.ts
 
-import { t } from '../../config/constants.ts';
+import { InlineKeyboard } from 'gramio';
+import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
-import { formatTimeRange } from '../../utils/date.ts';
+import { formatTime, formatTimeRange } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -28,12 +29,7 @@ export async function handleShare(
   const userId = user.telegram_id;
 
   if (!ctx.args || ctx.args.trim() === '') {
-    await ctx.send(
-      lang === 'ru'
-        ? '📤 Использование:\n<code>/share today</code> — поделиться повесткой на сегодня\n<code>/share tomorrow</code> — на завтра\n<code>/share week</code> — на неделю\n<code>/share event &lt;id&gt;</code> — поделиться событием'
-        : "📤 Usage:\n<code>/share today</code> — share today's agenda\n<code>/share tomorrow</code> — tomorrow\n<code>/share week</code> — this week\n<code>/share event &lt;id&gt;</code> — share a single event",
-      { parse_mode: 'HTML' },
-    );
+    await showShareNavigator(ctx, eventService, user);
     return;
   }
 
@@ -137,6 +133,33 @@ async function shareEvent(
   const text = [t(lang).share_preview, '', `  ${time}  ${title}`, '', `🔗 ${url}`].join('\n');
 
   await ctx.send(text, { parse_mode: 'HTML' });
+}
+
+async function showShareNavigator(ctx: BotCommandContext, eventService: EventService, user: User): Promise<void> {
+  const lang = user.language as 'en' | 'ru';
+  const upcoming = eventService.getUpcoming(user.telegram_id, 5);
+
+  const kb = new InlineKeyboard();
+
+  // Period buttons row
+  kb.text(lang === 'ru' ? '📅 Сегодня' : '📅 Today', `${CB.SHARE_EVENT}:today`);
+  kb.text(lang === 'ru' ? '📅 Завтра' : '📅 Tomorrow', `${CB.SHARE_EVENT}:tomorrow`);
+  kb.text(lang === 'ru' ? '📅 Неделя' : '📅 Week', `${CB.SHARE_EVENT}:week`);
+  kb.row();
+
+  // Upcoming events
+  for (const event of upcoming) {
+    const time = formatTime(event.start_at, user.timezone);
+    const label = `${time} ${event.title}`;
+    kb.text(label, `${CB.SHARE_EVENT}:evt:${event.id}`).row();
+  }
+
+  const header =
+    lang === 'ru'
+      ? '📤 <b>Поделиться</b>\n\nВыберите период или событие:'
+      : '📤 <b>Share</b>\n\nPick a period or event:';
+
+  await ctx.send(header, { parse_mode: 'HTML', reply_markup: kb });
 }
 
 async function showUsageHint(ctx: BotCommandContext, lang: 'en' | 'ru'): Promise<void> {

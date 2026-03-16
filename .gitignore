@@ -38,6 +38,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # SQLite data
 data/
+*.db
+*.db-shm
+*.db-wal
 
 # ntgcalls prebuilt binaries
 lib/

@@ -4,12 +4,13 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { formatEventDetail } from '../../services/event/formatters.ts';
+import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
@@ -46,6 +47,8 @@ export function createCallbackHandler(
   invitationService?: InvitationService,
   groupChatRepo?: GroupChatRepository,
   eventRepo?: EventRepository,
+  chatHistoryRepo?: ChatHistoryRepository,
+  onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -382,6 +385,68 @@ export function createCallbackHandler(
       // Group agenda pagination
       if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
         return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
+      }
+
+      // AI ask_user button responses — save answer and trigger AI continuation
+      if (action === 'ai_btn') {
+        await ctx.answer();
+        await ctx.editText(`✅ ${payload}`);
+        if (chatHistoryRepo) {
+          chatHistoryRepo.save(user.telegram_id, 'user', payload);
+        }
+        const cbChatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        if (onAiButtonClick && cbChatId) {
+          onAiButtonClick(user.telegram_id, cbChatId, payload).catch(() => {});
+        }
+        return;
+      }
+
+      // Share navigator callbacks
+      if (action === CB.SHARE_EVENT) {
+        const lang = (user.language ?? 'en') as Lang;
+        const subParts = payload.split(':');
+        const subAction = subParts[0]!;
+
+        if (subAction === 'today' || subAction === 'tomorrow' || subAction === 'week') {
+          const date = new Date();
+          if (subAction === 'tomorrow') date.setDate(date.getDate() + 1);
+
+          const occurrences =
+            subAction === 'week'
+              ? eventService.getEventsForWeek(user.telegram_id, date, user.timezone)
+              : eventService.getEventsForDay(user.telegram_id, date, user.timezone);
+
+          if (occurrences.length === 0) {
+            await ctx.answer();
+            return ctx.editText(t(lang).no_events_to_share);
+          }
+
+          const agenda = formatDayAgenda(occurrences, date.toISOString(), user.timezone, lang);
+          const hint = lang === 'ru' ? '↗️ Перешлите это сообщение' : '↗️ Forward this message';
+          await ctx.answer();
+          await ctx.editText(lang === 'ru' ? '✅ Отправлено ниже' : '✅ Sent below');
+          if (ctx.message) {
+            await ctx.message.send(`${agenda}\n\n${hint}`, { parse_mode: 'HTML' });
+          }
+          return;
+        }
+
+        if (subAction === 'evt') {
+          const eventId = Number(subParts[1]);
+          const event = eventService.getEvent(eventId, user.telegram_id);
+          if (!event) return ctx.answer({ text: 'Not found' });
+          const detail = formatEventDetail(event, user.timezone, lang);
+          const hint = lang === 'ru' ? '↗️ Перешлите это сообщение' : '↗️ Forward this message';
+          await ctx.answer();
+          await ctx.editText(lang === 'ru' ? '✅ Отправлено ниже' : '✅ Sent below');
+          if (ctx.message) {
+            await ctx.message.send(`${detail}\n\n${hint}`, { parse_mode: 'HTML' });
+          }
+          return;
+        }
+
+        await ctx.answer();
+        return;
       }
 
       // Feature tour

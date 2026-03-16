@@ -197,12 +197,69 @@ export function createBot(
         invitationService,
         db.groupChats,
         db.events,
+        db.chatHistory,
+        async (userId: number, chatId: number, text: string) => {
+          const user = db.users.findByTelegramId(userId);
+          if (!user) return;
+          await agent.run({
+            user,
+            chatId,
+            messageText: text,
+            eventService,
+            holidayService,
+            chatHistory: db.chatHistory,
+            userRepo: db.users,
+            reminderRepo: db.reminders,
+            contactRepo: db.contacts,
+            invitationService,
+            invitationRepo: db.invitations,
+            sharingService,
+            sharingSettingsRepo: db.sharingSettings,
+            sharedEventRepo: db.sharedEvents,
+            privacyService,
+          });
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)
     .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) => createChatMemberHandler(db.groupChats)(ctx as never))
+    // Users shared from picker modal → send invitations
+    .on('users_shared', async (ctx) => {
+      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      if (!user) return;
+      const eventId = ctx.requestId;
+      const selected = ctx.users;
+      const lang = (user.language ?? 'en') as 'en' | 'ru';
+      const results: string[] = [];
+
+      for (const shared of selected) {
+        const name = shared.firstName ?? shared.username ?? `id:${shared.userId}`;
+        // Save to contacts
+        if (db.contacts) {
+          const existing = db.contacts.findByName(user.telegram_id, name);
+          if (!existing) {
+            db.contacts.add(user.telegram_id, name, shared.username, shared.userId);
+          } else if (shared.username && !existing.username) {
+            db.contacts.update(existing.id, { username: shared.username, telegram_id: shared.userId });
+          }
+        }
+        // Send invitation
+        if (invitationService) {
+          const inv = invitationService.sendInvitation(eventId, user.telegram_id, shared.userId);
+          results.push(inv.success ? `✅ ${name}` : `❌ ${name}: ${inv.error}`);
+        } else {
+          results.push(`❌ ${name}: invitations not configured`);
+        }
+      }
+
+      const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
+      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
+        `${header}\n${results.join('\n')}`,
+        { reply_markup: { remove_keyboard: true } },
+      );
+    })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     .on('message', (ctx) =>
       createMessageHandler({
@@ -212,7 +269,15 @@ export function createBot(
         chatHistory: db.chatHistory,
         userRepo: db.users,
         reminderRepo: db.reminders,
+        contactRepo: db.contacts,
+        invitationService,
+        invitationRepo: db.invitations,
+        sharingService,
+        sharingSettingsRepo: db.sharingSettings,
+        sharedEventRepo: db.sharedEvents,
+        privacyService,
         sceneStorage: scenesSetup.storage,
+        botUsername: process.env.BOT_USERNAME,
       })(ctx as unknown as BotCommandContext),
     )
     // Error handler

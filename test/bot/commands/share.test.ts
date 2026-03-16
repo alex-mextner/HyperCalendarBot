@@ -2,31 +2,37 @@
 import { describe, expect, mock, test } from 'bun:test';
 
 describe('handleShare', () => {
-  test('shows usage when no args', async () => {
+  test('shows interactive navigator when no args', async () => {
     const { handleShare } = await import('../../../src/bot/commands/share.ts');
+    const eventService = {
+      getUpcoming: mock(() => [{ id: 1, title: 'Meeting', start_at: '2026-03-16T10:00:00Z' }]),
+    };
     const ctx = {
       args: null,
       dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
       send: mock(() => Promise.resolve()),
     };
-    await handleShare(ctx as never, {} as never, {} as never, {} as never);
+    await handleShare(ctx as never, eventService as never, {} as never, {} as never);
     expect(ctx.send).toHaveBeenCalled();
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('/share');
+    expect(msg).toContain('Share');
+    expect(msg).toContain('Pick');
   });
 
-  test('shows usage in Russian for ru language', async () => {
+  test('shows navigator in Russian for ru language', async () => {
     const { handleShare } = await import('../../../src/bot/commands/share.ts');
+    const eventService = {
+      getUpcoming: mock(() => []),
+    };
     const ctx = {
       args: null,
       dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
       send: mock(() => Promise.resolve()),
     };
-    await handleShare(ctx as never, {} as never, {} as never, {} as never);
+    await handleShare(ctx as never, eventService as never, {} as never, {} as never);
     expect(ctx.send).toHaveBeenCalled();
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('/share today');
-    expect(msg).toContain('Использование');
+    expect(msg).toContain('Поделиться');
   });
 
   test('shows no events message when day is empty', async () => {

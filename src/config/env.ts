@@ -60,5 +60,6 @@ export function loadConfig(): EnvConfig {
     OAUTH_SERVER_PORT: process.env.OAUTH_SERVER_PORT ? Number(process.env.OAUTH_SERVER_PORT) : undefined,
     ENCRYPTION_KEY,
     PUBLIC_DOMAIN,
+    BOT_USERNAME: process.env.BOT_USERNAME || undefined,
   };
 }
