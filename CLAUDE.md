@@ -147,6 +147,12 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - **Tests must exercise production code**: never reimplement logic in tests.
 - **Never delete a failing test**. Investigate and fix the root cause.
 - **Changing tests to match code is a red flag**: always analyze WHY.
+- **Every commit must have tests**: no committing code without corresponding test coverage.
+  New tool handlers, new utilities, new AI tools, bug fixes — all need tests in the same commit.
+- **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
+- **Commit often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
+  Don't accumulate 30+ changed files across multiple features.
+- **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
 ## Debugging
 

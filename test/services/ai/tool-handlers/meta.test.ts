@@ -2,15 +2,21 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
+import { ContactRepository } from '../../../../src/database/repositories/contact.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
+  handleAddContact,
+  handleAskUser,
+  handleFindContact,
   handleFindUser,
+  handleGetContacts,
   handleGetHolidays,
   handleGetUserSettings,
+  handlePickUsers,
   handleUpdateUserSettings,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
@@ -26,10 +32,11 @@ function createTestDb() {
 
 describe('meta tool handlers', () => {
   let ctx: AgentContext;
+  let db: Database;
   const USER_ID = 123;
 
   beforeEach(() => {
-    const db = createTestDb();
+    db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
     const reminderRepo = new ReminderRepository(db);
@@ -117,6 +124,109 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('ghost_user');
       expect(result.error).not.toContain('@@');
+    });
+  });
+
+  describe('handleGetContacts', () => {
+    test('returns empty message when no contacts', () => {
+      ctx.contactRepo = new ContactRepository(db);
+      const result = handleGetContacts(ctx);
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('empty');
+    });
+
+    test('lists contacts with usernames', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
+      ctx.contactRepo = contactRepo;
+      const result = handleGetContacts(ctx);
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Лена');
+      expect(result.output).toContain('@larichkina_b');
+    });
+
+    test('returns error when contactRepo not configured', () => {
+      ctx.contactRepo = undefined;
+      const result = handleGetContacts(ctx);
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('handleFindContact', () => {
+    test('finds contact by name', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', 'larichkina_b');
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('larichkina_b');
+    });
+
+    test('returns error for unknown contact', () => {
+      ctx.contactRepo = new ContactRepository(db);
+      const result = handleFindContact(ctx, { name: 'Nobody' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Nobody');
+    });
+  });
+
+  describe('handleAddContact', () => {
+    test('adds new contact', () => {
+      ctx.contactRepo = new ContactRepository(db);
+      const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Вова');
+      expect(result.output).toContain('@vova123');
+    });
+
+    test('updates existing contact with username', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Вова');
+      ctx.contactRepo = contactRepo;
+      const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Updated');
+    });
+
+    test('returns already exists for duplicate without new username', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Вова', 'vova');
+      ctx.contactRepo = contactRepo;
+      const result = handleAddContact(ctx, { name: 'Вова' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('already exists');
+    });
+  });
+
+  describe('handleAskUser', () => {
+    test('returns stopLoop true', () => {
+      const sendButtons = () => Promise.resolve({ message_id: 1 });
+      ctx.sender = { sendMessage: sendButtons as never, editMessageText: (() => {}) as never, sendButtons };
+      const result = handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
+      expect(result.success).toBe(true);
+      expect(result.stopLoop).toBe(true);
+    });
+
+    test('returns error when sender has no sendButtons', () => {
+      ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never };
+      const result = handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('handlePickUsers', () => {
+    test('returns stopLoop true', () => {
+      const sendUserPicker = () => Promise.resolve({ message_id: 1 });
+      ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never, sendUserPicker };
+      const result = handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
+      expect(result.success).toBe(true);
+      expect(result.stopLoop).toBe(true);
+    });
+
+    test('returns error when sender has no sendUserPicker', () => {
+      ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never };
+      const result = handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
+      expect(result.success).toBe(false);
     });
   });
 });
