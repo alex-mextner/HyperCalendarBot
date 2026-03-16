@@ -281,22 +281,23 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'update_sharing_settings',
-    description: 'Update sharing and privacy settings. Only pass fields that need to change.',
+    description:
+      "Update the CURRENT USER's privacy settings. These control how OTHER people see and interact with this user. This does NOT affect the user's ability to send invitations — sending is always allowed.",
     input_schema: {
       type: 'object' as const,
       properties: {
         default_visibility: {
           type: 'string',
           enum: ['private', 'free_busy', 'full'],
-          description: 'Default visibility for events. Optional.',
+          description: "Default visibility of this user's events when shared. Optional.",
         },
         inline_mode_enabled: {
           type: 'boolean',
-          description: 'Whether inline mode is enabled. Optional.',
+          description: 'Whether this user can be found via inline mode. Optional.',
         },
         allow_invitations: {
           type: 'boolean',
-          description: 'Whether to allow receiving invitations. Optional.',
+          description: 'Whether OTHER users can send invitations TO this user. Does NOT control sending. Optional.',
         },
       },
       required: [],
@@ -321,6 +322,86 @@ export const toolDefinitions: ToolDefinition[] = [
         target_id: { type: 'number', description: 'Telegram ID of the user or group' },
       },
       required: ['period', 'target_type', 'target_id'],
+    },
+  },
+  {
+    name: 'find_user',
+    description:
+      'Find a bot user by their Telegram @username. Returns their telegram_id which can be used with send_invitation. Only finds users who have interacted with the bot.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        username: {
+          type: 'string',
+          description: 'Telegram username (with or without @ prefix)',
+        },
+      },
+      required: ['username'],
+    },
+  },
+  {
+    name: 'get_contacts',
+    description: "List all contacts from the user's address book.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'add_contact',
+    description: "Save a person to the user's address book. Use after learning someone's username.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Display name (e.g., "Лена")' },
+        username: { type: 'string', description: 'Telegram @username (without @). Optional.' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'find_contact',
+    description: "Look up a person by name in the user's address book. Returns username and telegram_id if known.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        name: { type: 'string', description: 'Name to search for' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'ask_user',
+    description:
+      'Send a question to the user with clickable button options. Use when you need a yes/no or choice answer. After calling, STOP and wait for the user to respond.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        question: { type: 'string', description: 'The question text' },
+        options: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Short button labels (e.g., ["Да", "Нет"])',
+        },
+      },
+      required: ['question', 'options'],
+    },
+  },
+  {
+    name: 'pick_users',
+    description:
+      'Open a Telegram user picker modal so the user can select people to invite to an event. Use this after creating an event when participants are mentioned. After calling, STOP and wait.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'Event ID to invite users to' },
+        prompt: {
+          type: 'string',
+          description: 'Text shown above the picker button (e.g., "Выберите участников для приглашения")',
+        },
+      },
+      required: ['event_id', 'prompt'],
     },
   },
   {

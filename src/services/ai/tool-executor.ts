@@ -9,7 +9,17 @@ import {
   handleSnoozeEvent,
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
-import { handleGetHolidays, handleGetUserSettings, handleUpdateUserSettings } from './tool-handlers/meta.ts';
+import {
+  handleAddContact,
+  handleAskUser,
+  handleFindContact,
+  handleFindUser,
+  handleGetContacts,
+  handleGetHolidays,
+  handleGetUserSettings,
+  handlePickUsers,
+  handleUpdateUserSettings,
+} from './tool-handlers/meta.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
 import {
   handleGetInvitationStatus,
@@ -84,6 +94,24 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'set_reminder':
         return handleSetReminder(ctx, input as { event_id: number; minutes_before: number[] });
+
+      case 'find_user':
+        return handleFindUser(ctx, input as { username: string });
+
+      case 'ask_user':
+        return handleAskUser(ctx, input as { question: string; options: string[] });
+
+      case 'pick_users':
+        return handlePickUsers(ctx, input as { event_id: number; prompt: string });
+
+      case 'get_contacts':
+        return handleGetContacts(ctx);
+
+      case 'add_contact':
+        return handleAddContact(ctx, input as { name: string; username?: string });
+
+      case 'find_contact':
+        return handleFindContact(ctx, input as { name: string });
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as { limit?: number });

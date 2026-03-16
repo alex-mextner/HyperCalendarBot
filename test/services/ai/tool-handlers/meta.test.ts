@@ -8,6 +8,7 @@ import { ReminderRepository } from '../../../../src/database/repositories/remind
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
+  handleFindUser,
   handleGetHolidays,
   handleGetUserSettings,
   handleUpdateUserSettings,
@@ -89,6 +90,33 @@ describe('meta tool handlers', () => {
       const result = handleGetHolidays(ctx, {});
       expect(result.success).toBe(true);
       expect(result.output).toContain('No');
+    });
+  });
+
+  describe('handleFindUser', () => {
+    test('finds existing user by username', () => {
+      const result = handleFindUser(ctx, { username: 'testuser' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('telegram_id=123');
+    });
+
+    test('finds user with @ prefix', () => {
+      const result = handleFindUser(ctx, { username: '@testuser' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('telegram_id=123');
+    });
+
+    test('returns error for unknown username', () => {
+      const result = handleFindUser(ctx, { username: 'nobody' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('error message includes cleaned username', () => {
+      const result = handleFindUser(ctx, { username: '@ghost_user' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('ghost_user');
+      expect(result.error).not.toContain('@@');
     });
   });
 });
