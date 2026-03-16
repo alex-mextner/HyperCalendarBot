@@ -259,8 +259,31 @@ export function createBot(
       await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
         reply_markup: { remove_keyboard: true },
       });
-      // Save result to chat history so AI knows what happened
-      db.chatHistory.save(user.telegram_id, 'assistant', resultText);
+      // Save result as user message so AI can react to it
+      db.chatHistory.save(user.telegram_id, 'user', resultText);
+      // Trigger AI to acknowledge/continue
+      const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+      if (chatId) {
+        agent
+          .run({
+            user,
+            chatId,
+            messageText: resultText,
+            eventService,
+            holidayService,
+            chatHistory: db.chatHistory,
+            userRepo: db.users,
+            reminderRepo: db.reminders,
+            contactRepo: db.contacts,
+            invitationService,
+            invitationRepo: db.invitations,
+            sharingService,
+            sharingSettingsRepo: db.sharingSettings,
+            sharedEventRepo: db.sharedEvents,
+            privacyService,
+          })
+          .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
+      }
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     .on('message', (ctx) =>
