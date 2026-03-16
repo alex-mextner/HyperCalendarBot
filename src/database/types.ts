@@ -284,3 +284,38 @@ export interface CreateGroupChatData {
   title?: string;
   added_by: number;
 }
+
+// --- Voice Call Reminders (sub-project 07) ---
+
+export type CallStatus =
+  | 'queued'
+  | 'ringing'
+  | 'connected'
+  | 'completed'
+  | 'failed'
+  | 'no_answer'
+  | 'busy'
+  | 'cancelled';
+
+export interface UserCallSettings {
+  user_id: number;
+  enabled: number;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  max_daily_calls: number;
+  language: string;
+  important_only: number;
+  updated_at: string;
+}
+
+export interface CallLog {
+  id: number;
+  user_id: number;
+  event_id: number | null;
+  status: CallStatus;
+  duration_sec: number | null;
+  tts_text: string | null;
+  error: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
