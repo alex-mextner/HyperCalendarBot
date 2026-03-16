@@ -49,6 +49,7 @@ export const CB = {
   SHARE_CONFIRM: 'share_cf',
   SHARE_EVENT: 'share_evt',
   GROUP_AGENDA: 'grp_ag',
+  CALL_SETTINGS: 'csett',
 } as const;
 
 // i18n messages
@@ -160,6 +161,12 @@ export const MSG = {
     share_sent: '✅ Shared successfully',
     share_cancelled: '❌ Share cancelled',
     no_events_to_share: 'No events to share for this period',
+    call_settings_title: '📞 Voice Call Reminders',
+    call_settings_enabled: 'Voice calls: ✅ Enabled',
+    call_settings_disabled: 'Voice calls: ❌ Disabled',
+    call_post_snooze: '⏰ Snoozed for 10 min',
+    call_post_cancel: '❌ Event cancelled',
+    call_post_ack: '✅ Got it',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -268,6 +275,12 @@ export const MSG = {
     share_sent: '✅ Отправлено',
     share_cancelled: '❌ Отправка отменена',
     no_events_to_share: 'Нет событий для этого периода',
+    call_settings_title: '📞 Голосовые напоминания',
+    call_settings_enabled: 'Голосовые звонки: ✅ Включены',
+    call_settings_disabled: 'Голосовые звонки: ❌ Выключены',
+    call_post_snooze: '⏰ Отложено на 10 мин',
+    call_post_cancel: '❌ Событие отменено',
+    call_post_ack: '✅ Понятно',
   },
 } as const;
 

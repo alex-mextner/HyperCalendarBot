@@ -19,6 +19,7 @@ import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleCallSettings } from './commands/call-settings.ts';
 import { handleGroupAgenda } from './commands/agenda.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
@@ -180,6 +181,8 @@ export function createBot(
     )
     .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats))
     .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
+    // Voice call settings
+    .command('callsettings', (ctx) => handleCallSettings(ctx as unknown as BotCommandContext, db.callSettings))
     // Callback queries
     .on('callback_query', (ctx) =>
       createCallbackHandler(
