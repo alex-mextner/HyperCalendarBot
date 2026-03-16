@@ -87,8 +87,31 @@ export class NotificationScheduler {
       notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Event reminder enqueued');
 
       if (this.deps.callSettingsRepo?.isEnabled(reminder.user_id)) {
+        const callSettings = this.deps.callSettingsRepo.get(reminder.user_id);
+
+        // Check call-specific quiet hours
+        if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
+          const hours = nowUtc.getUTCHours();
+          const mins = nowUtc.getUTCMinutes();
+          const currentTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+          const start = callSettings.quiet_hours_start;
+          const end = callSettings.quiet_hours_end;
+
+          // Handle wrap-around (e.g., 22:00 - 08:00)
+          const inQuietHours =
+            start <= end ? currentTime >= start && currentTime < end : currentTime >= start || currentTime < end;
+
+          if (inQuietHours) {
+            notifyLogger.info(
+              { userId: reminder.user_id, eventId: reminder.event_id },
+              'Voice call skipped (quiet hours)',
+            );
+            continue;
+          }
+        }
+
         const dailyCount = this.deps.callLogRepo?.countTodayCalls(reminder.user_id) ?? 0;
-        const maxDaily = this.deps.callSettingsRepo.get(reminder.user_id)?.max_daily_calls ?? 5;
+        const maxDaily = callSettings?.max_daily_calls ?? 5;
         if (dailyCount < maxDaily) {
           const ttsText = renderReminderForSpeech({
             title: reminder.event_title,

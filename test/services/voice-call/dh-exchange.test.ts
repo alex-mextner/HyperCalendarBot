@@ -15,6 +15,7 @@ import {
   type DhConfig,
   DhExchangeError,
   DiscardReason,
+  EMOJI_LIST,
   VoiceCallDhExchange,
 } from '../../../src/services/voice-call/dh-exchange';
 
@@ -374,5 +375,11 @@ describe('end-to-end integration (simulated)', () => {
     const callerEmoji = callerExchange.getEmojiFingerprint();
     const calleeEmoji = calleeExchange.getEmojiFingerprint();
     expect(callerEmoji).toEqual(calleeEmoji);
+  });
+});
+
+describe('EMOJI_LIST', () => {
+  test('contains exactly 333 emoji as required by Telegram protocol', () => {
+    expect(EMOJI_LIST.length).toBe(333);
   });
 });

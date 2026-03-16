@@ -1,14 +1,11 @@
 // test/bot/commands/call-settings.test.ts
 import { describe, expect, mock, test } from 'bun:test';
+import { mockCtx } from '../../helpers/mock-context';
 
 describe('handleCallSettings', () => {
   test('shows current settings', async () => {
     const { handleCallSettings } = await import('../../../src/bot/commands/call-settings');
-    const ctx = {
-      args: null,
-      dbUser: { telegram_id: 100, language: 'en' },
-      send: mock(() => Promise.resolve()),
-    };
+    const ctx = mockCtx();
     const settingsRepo = {
       ensureDefaults: mock(() => {}),
       get: mock(() => ({
@@ -26,11 +23,7 @@ describe('handleCallSettings', () => {
 
   test('enables voice calls', async () => {
     const { handleCallSettings } = await import('../../../src/bot/commands/call-settings');
-    const ctx = {
-      args: 'on',
-      dbUser: { telegram_id: 100, language: 'en' },
-      send: mock(() => Promise.resolve()),
-    };
+    const ctx = mockCtx({ args: 'on' });
     const settingsRepo = {
       ensureDefaults: mock(() => {}),
       setEnabled: mock(() => {}),
@@ -42,11 +35,7 @@ describe('handleCallSettings', () => {
 
   test('disables voice calls', async () => {
     const { handleCallSettings } = await import('../../../src/bot/commands/call-settings');
-    const ctx = {
-      args: 'off',
-      dbUser: { telegram_id: 100, language: 'en' },
-      send: mock(() => Promise.resolve()),
-    };
+    const ctx = mockCtx({ args: 'off' });
     const settingsRepo = {
       ensureDefaults: mock(() => {}),
       setEnabled: mock(() => {}),
