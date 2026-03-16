@@ -391,14 +391,15 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'pick_users',
     description:
-      'Open a Telegram user picker modal so the user can select people to invite to an event. Use this after creating an event when participants are mentioned. After calling, STOP and wait.',
+      'Open a Telegram user picker modal so the user can select people to invite to an event. Use after creating an event when some participants could not be found in the address book. In the prompt, explain WHO specifically needs to be found and why (e.g., "Вова не найден в контактах. Выберите его из списка контактов Telegram"). After calling, STOP and wait.',
     input_schema: {
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'Event ID to invite users to' },
         prompt: {
           type: 'string',
-          description: 'Text shown above the picker button (e.g., "Выберите участников для приглашения")',
+          description:
+            'Explain who needs to be found and why. Mention names not found in address book. E.g., "Вова не найден в контактах. Выберите его в Telegram, чтобы отправить приглашение."',
         },
       },
       required: ['event_id', 'prompt'],

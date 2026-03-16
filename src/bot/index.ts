@@ -255,10 +255,12 @@ export function createBot(
       }
 
       const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
-      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
-        `${header}\n${results.join('\n')}`,
-        { reply_markup: { remove_keyboard: true } },
-      );
+      const resultText = `${header}\n${results.join('\n')}`;
+      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
+        reply_markup: { remove_keyboard: true },
+      });
+      // Save result to chat history so AI knows what happened
+      db.chatHistory.save(user.telegram_id, 'assistant', resultText);
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     .on('message', (ctx) =>
