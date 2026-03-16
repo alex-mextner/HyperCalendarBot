@@ -413,13 +413,12 @@ describe('sharing tool handlers', () => {
       // Must explicitly set visibility to private — default is now 'full'
       sharingSettingsRepo.ensureDefaults(USER_ID);
       sharingSettingsRepo.update(USER_ID, { default_visibility: 'private' });
-      const now = new Date();
-      const startHour = new Date(now);
-      startHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const todayAt14 = new Date();
+      todayAt14.setUTCHours(14, 0, 0, 0);
       eventService.createEvent({
         user_id: USER_ID,
         title: 'Secret Meeting',
-        start_at: startHour.toISOString(),
+        start_at: todayAt14.toISOString(),
         timezone: 'UTC',
       });
       const ctx = makeCtx();
@@ -429,13 +428,12 @@ describe('sharing tool handlers', () => {
     });
 
     test('shares today agenda with visible events', () => {
-      const now = new Date();
-      const startHour = new Date(now);
-      startHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const todayAt14 = new Date();
+      todayAt14.setUTCHours(14, 0, 0, 0);
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Public Standup',
-        start_at: startHour.toISOString(),
+        start_at: todayAt14.toISOString(),
         timezone: 'UTC',
       });
       // Make it visible
@@ -498,13 +496,12 @@ describe('sharing tool handlers', () => {
     });
 
     test('creates shared_event records for each event in agenda', () => {
-      const now = new Date();
-      const startHour = new Date(now);
-      startHour.setHours(now.getHours() + 1, 0, 0, 0);
+      const todayAt14 = new Date();
+      todayAt14.setUTCHours(14, 0, 0, 0);
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Track Me',
-        start_at: startHour.toISOString(),
+        start_at: todayAt14.toISOString(),
         timezone: 'UTC',
       });
       sharingSettingsRepo.setEventVisibility(event.id, 'full');
