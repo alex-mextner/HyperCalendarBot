@@ -1,4 +1,5 @@
 // src/services/voice/call-manager.ts
+import type { CallStatus } from '../../database/types';
 import type { CallReminderJobData } from './types';
 import { voiceLogger } from './types';
 
@@ -9,8 +10,8 @@ export interface CallManagerDeps {
     discardCall: (callId: bigint, accessHash: bigint) => Promise<void>;
   };
   callLogRepo: {
-    updateStatus: (id: number, status: string) => void;
-    complete: (id: number, status: string, duration: number, error?: string) => void;
+    updateStatus: (id: number, status: CallStatus) => void;
+    complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
   sendPostCallButtons: (userId: number, eventId: number) => Promise<void>;
 }
@@ -26,7 +27,8 @@ export class CallManager {
     try {
       // Step 1: Synthesize TTS audio
       voiceLogger.info({ userId: job.userId, eventId: job.eventId }, 'Synthesizing TTS');
-      const _audioBuffer = await this.deps.ttsService.synthesize(job.ttsText, job.language);
+      // Pre-synthesize and cache audio for when ntgcalls media integration is ready
+      await this.deps.ttsService.synthesize(job.ttsText, job.language);
 
       // Step 2: Initiate call
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
@@ -35,10 +37,11 @@ export class CallManager {
       callId = callInfo.callId;
       accessHash = callInfo.accessHash;
 
-      // Step 3: Play audio (ntgcalls integration — placeholder for now)
+      // Step 3: Play audio — ntgcalls media integration pending (C shim required)
+      // Once wired, synthesized audio from cache will be streamed via ntg_set_stream_sources
       this.deps.callLogRepo.updateStatus(job.callLogId, 'connected');
-      // TODO: Wire ntgcalls to play audioBuffer into the call
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const PLACEHOLDER_CALL_DURATION_MS = 1000;
+      await new Promise((resolve) => setTimeout(resolve, PLACEHOLDER_CALL_DURATION_MS));
 
       // Step 4: End call
       await this.deps.callSignaling.discardCall(callId, accessHash);

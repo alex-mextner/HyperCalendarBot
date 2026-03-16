@@ -6,6 +6,8 @@ const VOICES: Record<string, string> = {
   ru: 'ru-RU-SvetlanaNeural',
 };
 
+const MAX_CACHE_ENTRIES = 100;
+
 export class TtsService {
   private cache = new Map<string, Buffer>();
 
@@ -20,6 +22,10 @@ export class TtsService {
 
     const voice = this.getVoice(language);
     const buffer = await tts(text, { voice });
+    if (this.cache.size >= MAX_CACHE_ENTRIES) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest) this.cache.delete(oldest);
+    }
     this.cache.set(cacheKey, buffer);
     return buffer;
   }

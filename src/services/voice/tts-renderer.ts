@@ -6,7 +6,6 @@ interface ReminderSpeechInput {
   startAt: string;
   timezone: string;
   location?: string | null;
-  description?: string | null;
   language: string;
 }
 
