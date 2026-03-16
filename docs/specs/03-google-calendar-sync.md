@@ -6,6 +6,15 @@ Google Calendar is an **optional** bidirectional sync layer. The bot has its own
 
 Key constraint: all sync operations run in the **worker process** via BullMQ, never in the bot process.
 
+### Implementation Decisions
+
+- **Google API client**: `googleapis` npm package (not raw HTTP)
+- **Two-mode architecture**:
+  - **Webhook mode** (`PUBLIC_DOMAIN` is set): Bun.serve handles OAuth callback + Google Calendar webhooks; bot uses webhooks too
+  - **Polling mode** (`PUBLIC_DOMAIN` is not set): no HTTP server for webhooks, cron-based incremental pull every 15 min; OAuth callback still served via Bun.serve on localhost
+- **Redis**: `REDIS_URL` env variable (required), used for BullMQ job queues and OAuth state parameter storage (5min TTL, one-time use)
+- **GOOGLE_* env vars are optional**: if not set, Google sync features are disabled but the bot works normally
+
 ---
 
 ## 1. OAuth 2.0 Flow
@@ -13,11 +22,13 @@ Key constraint: all sync operations run in the **worker process** via BullMQ, ne
 ### 1.1. Environment Variables
 
 ```
-GOOGLE_CLIENT_ID=...
+REDIS_URL=redis://localhost:6379          # Required — BullMQ + OAuth state storage
+GOOGLE_CLIENT_ID=...                      # Optional — Google sync disabled if not set
 GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://<domain>/oauth/google/callback
 OAUTH_SERVER_PORT=3311
 ENCRYPTION_KEY=<64-char hex string = 32 bytes for AES-256-GCM>
+PUBLIC_DOMAIN=example.com                 # Optional — enables webhook mode (HTTPS required)
 ```
 
 ### 1.2. Scopes
@@ -833,6 +844,15 @@ async function renewExpiringChannels(): Promise<void> {
 - Domain must be verified in Google Search Console
 
 For development: use a tunnel (e.g. ngrok, Cloudflare Tunnel).
+
+### 6.6. Polling Mode (no PUBLIC_DOMAIN)
+
+When `PUBLIC_DOMAIN` is not set, webhooks are not available. The system falls back to:
+- **Cron-based incremental pull** every 15 minutes for all active users/calendars
+- No watch channel setup, renewal, or webhook handler
+- All other features (OAuth, push sync, conflict resolution) work identically
+
+This mode is suitable for development and deployments without a public domain.
 
 ---
 
