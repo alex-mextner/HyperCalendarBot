@@ -58,22 +58,16 @@ export function handleGetContacts(ctx: AgentContext): ToolResult {
 
 export function handleAddContact(ctx: AgentContext, input: { name: string; username?: string }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
-  const existing = ctx.contactRepo.findByName(ctx.user.telegram_id, input.name);
-  if (existing) {
-    if (input.username) {
-      ctx.contactRepo.update(existing.id, { username: input.username });
-      return { success: true, output: `Updated contact "${input.name}" with username @${input.username}` };
-    }
-    return { success: true, output: `Contact "${input.name}" already exists.` };
-  }
-  // Try to resolve telegram_id if username provided
   let telegramId: number | undefined;
   if (input.username) {
     const user = ctx.userRepo.findByUsername(input.username);
     if (user) telegramId = user.telegram_id;
   }
-  ctx.contactRepo.add(ctx.user.telegram_id, input.name, input.username, telegramId);
-  return { success: true, output: `Saved contact "${input.name}"${input.username ? ` (@${input.username})` : ''}` };
+  const contact = ctx.contactRepo.upsert(ctx.user.telegram_id, input.name, input.username, telegramId);
+  return {
+    success: true,
+    output: `Contact saved: "${contact.name}"${contact.username ? ` (@${contact.username})` : ''}`,
+  };
 }
 
 export function handleFindContact(ctx: AgentContext, input: { name: string }): ToolResult {

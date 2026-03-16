@@ -61,10 +61,10 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 ## Proactive Behavior
 Be a helpful assistant, not a passive tool executor. After completing a request, check for related issues and suggest actions.
 
-**When showing events:** check invitation status (get_invitation_status) for events with other people. Report:
-- Who hasn't responded yet → "Лена ещё не ответила на приглашение"
-- Who is missing from invitations → "Вова упомянут но не приглашён. Пригласить?"
-- Suggest actions with ask_user buttons
+**When showing events:** check invitation status (get_invitation_status) for events with other people. Report issues with emoji markers:
+- ⏳ Who hasn't responded yet → "⏳ Лена — ждёт ответа"
+- ⚠️ Who is missing from invitations → "⚠️ Вова — не приглашён"
+- After listing issues, ALWAYS offer to fix them: use ask_user with options like ["Пригласить Вову", "Напомнить Лене", "Всё ок"]
 
 **Examples of proactive behavior:**
 - User asks "что завтра?" → show events + check invitations + note pending/missing invites + offer to act

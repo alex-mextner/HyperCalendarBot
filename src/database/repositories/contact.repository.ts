@@ -18,8 +18,39 @@ export class ContactRepository {
       .get(userId, name) as Contact | null;
   }
 
+  findByTelegramId(userId: number, contactTelegramId: number): Contact | null {
+    return this.db
+      .prepare('SELECT * FROM contacts WHERE user_id = ? AND telegram_id = ?')
+      .get(userId, contactTelegramId) as Contact | null;
+  }
+
+  findByUsername(userId: number, username: string): Contact | null {
+    const normalized = username.startsWith('@') ? username.slice(1) : username;
+    return this.db
+      .prepare('SELECT * FROM contacts WHERE user_id = ? AND LOWER(username) = LOWER(?)')
+      .get(userId, normalized) as Contact | null;
+  }
+
   list(userId: number): Contact[] {
     return this.db.prepare('SELECT * FROM contacts WHERE user_id = ? ORDER BY name').all(userId) as Contact[];
+  }
+
+  upsert(userId: number, name: string, username?: string, telegramId?: number): Contact {
+    // Dedup: check by telegram_id first, then username, then name
+    const existing =
+      (telegramId ? this.findByTelegramId(userId, telegramId) : null) ??
+      (username ? this.findByUsername(userId, username) : null) ??
+      this.findByName(userId, name);
+
+    if (existing) {
+      const patch: { name?: string; username?: string; telegram_id?: number } = {};
+      if (username && !existing.username) patch.username = username;
+      if (telegramId && !existing.telegram_id) patch.telegram_id = telegramId;
+      if (Object.keys(patch).length > 0) this.update(existing.id, patch);
+      return this.findByName(userId, existing.name) ?? existing;
+    }
+
+    return this.add(userId, name, username, telegramId);
   }
 
   add(userId: number, name: string, username?: string, telegramId?: number): Contact {

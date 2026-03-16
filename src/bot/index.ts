@@ -238,14 +238,9 @@ export function createBot(
 
       for (const shared of selected) {
         const name = shared.firstName ?? shared.username ?? `id:${shared.userId}`;
-        // Save to contacts
+        // Save/update contact (deduplicates by telegram_id/username)
         if (db.contacts) {
-          const existing = db.contacts.findByName(user.telegram_id, name);
-          if (!existing) {
-            db.contacts.add(user.telegram_id, name, shared.username, shared.userId);
-          } else if (shared.username && !existing.username) {
-            db.contacts.update(existing.id, { username: shared.username, telegram_id: shared.userId });
-          }
+          db.contacts.upsert(user.telegram_id, name, shared.username, shared.userId);
         }
         // Send invitation
         if (invitationService) {

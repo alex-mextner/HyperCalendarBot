@@ -188,13 +188,13 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('Updated');
     });
 
-    test('returns already exists for duplicate without new username', () => {
+    test('upserts existing contact without error', () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова', 'vova');
       ctx.contactRepo = contactRepo;
       const result = handleAddContact(ctx, { name: 'Вова' });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('already exists');
+      expect(result.output).toContain('Вова');
     });
   });
 
