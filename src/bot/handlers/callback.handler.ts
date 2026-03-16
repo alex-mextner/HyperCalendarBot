@@ -23,6 +23,7 @@ import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
+import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleNotifyCallback } from '../commands/notify.ts';
@@ -381,6 +382,11 @@ export function createCallbackHandler(
       // Group agenda pagination
       if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
         return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
+      }
+
+      // Feature tour
+      if (action === CB.FEATURE_TOUR) {
+        return handleFeatureTourCallback(ctx, payload);
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');

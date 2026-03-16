@@ -203,7 +203,8 @@ export function createOnboardingScene(db: DatabaseService, gcalConfigured = fals
         };
         await cbCtx.answer();
 
-        await context.send(t(l).onboard_done);
+        const tourKb = new InlineKeyboard().text(t(l).feature_tour_btn, `${CB.FEATURE_TOUR}:0`);
+        await context.send(t(l).onboard_done, { reply_markup: tourKb });
 
         // Show Google Calendar onboarding prompt if configured and not already connected
         if (gcalConfigured) {

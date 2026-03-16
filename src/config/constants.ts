@@ -50,6 +50,7 @@ export const CB = {
   SHARE_EVENT: 'share_evt',
   GROUP_AGENDA: 'grp_ag',
   CALL_SETTINGS: 'csett',
+  FEATURE_TOUR: 'ftour',
 } as const;
 
 // i18n messages
@@ -66,7 +67,7 @@ export const MSG = {
     country_skip: 'Skip',
     agenda_prompt: "I can send you a morning summary of your day's events.\n\nChoose a time for the daily agenda:",
     onboard_done:
-      "✅ All set! Here's what you can do:\n\n/add — create your first event\n/today — view today's schedule\n/help — see all commands",
+      "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a message in plain text — I understand natural language and can create, edit, search events for you.",
     no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
     no_events: 'No events in this range.',
     event_created: (title: string) => `✅ Created: "${title}"`,
@@ -85,7 +86,7 @@ export const MSG = {
     delete_pick: 'Which event to delete?',
     free_header: (date: string) => `📋 Free slots ${date}:`,
     pong: (ms: number) => `pong (${ms}ms)`,
-    welcome_back: 'Welcome back! Use /help for commands.',
+    welcome_back: 'Welcome back! Send me a message or use /help.',
     recurrence_prompt: 'Repeat this event?',
     recurrence_end_prompt: 'When should it stop repeating?',
     recurrence_custom_prompt: 'Describe the recurrence (e.g., "every 2 weeks", "daily"):',
@@ -167,6 +168,15 @@ export const MSG = {
     call_post_snooze: '⏰ Snoozed for 10 min',
     call_post_cancel: '❌ Event cancelled',
     call_post_ack: '✅ Got it',
+    feature_tour_btn: '📖 All Features',
+    feature_tour: [
+      '<b>🤖 AI Assistant</b>\nJust text me naturally: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". I understand context and execute commands.',
+      '<b>📅 Calendar Management</b>\n/add — step-by-step event creation\n/today, /week, /month — different views\n/edit, /delete — modify events\n/free — find available time slots\nRecurring events with flexible rules.',
+      '<b>🔔 Smart Reminders</b>\n/notify — configure morning agenda, evening review, quiet hours\nMultiple reminders per event (15min, 1h, etc.)\nCustomizable notification intervals.',
+      '<b>🌍 Holidays</b>\n/holidays — browse and subscribe to holidays from 100+ countries\nHolidays appear alongside your events in daily agenda.',
+      '<b>📤 Sharing & Invitations</b>\n/share today — share your agenda\n/invite <user_id> <event_id> — invite someone\n/privacy — control visibility (private / free-busy / full)\nInline mode: type @HyperCalendarBot in any chat.',
+      '<b>🖼 Visual Schedule</b>\nTap "Image" on /today or /week to get a beautiful calendar image.',
+    ],
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -180,7 +190,7 @@ export const MSG = {
     country_skip: 'Пропустить',
     agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВыберите время для утренней сводки:',
     onboard_done:
-      '✅ Всё готово! Вот что можно сделать:\n\n/add — создать событие\n/today — расписание на сегодня\n/help — список команд',
+      '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите мне текстом — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
     no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,
     no_events: 'Нет событий за этот период.',
     event_created: (title: string) => `✅ Создано: "${title}"`,
@@ -199,7 +209,7 @@ export const MSG = {
     delete_pick: 'Какое событие удалить?',
     free_header: (date: string) => `📋 Свободные слоты ${date}:`,
     pong: (ms: number) => `понг (${ms}мс)`,
-    welcome_back: 'С возвращением! /help для списка команд.',
+    welcome_back: 'С возвращением! Напишите мне или /help.',
     recurrence_prompt: 'Повторять событие?',
     recurrence_end_prompt: 'Когда прекратить повторение?',
     recurrence_custom_prompt: 'Опишите повторение (напр. "каждые 2 недели", "ежедневно"):',
@@ -281,6 +291,15 @@ export const MSG = {
     call_post_snooze: '⏰ Отложено на 10 мин',
     call_post_cancel: '❌ Событие отменено',
     call_post_ack: '✅ Понятно',
+    feature_tour_btn: '📖 Все функции',
+    feature_tour: [
+      '<b>🤖 AI-ассистент</b>\nПросто напишите мне: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Я понимаю контекст и выполняю команды.',
+      '<b>📅 Управление календарём</b>\n/add — пошаговое создание\n/today, /week, /month — разные виды\n/edit, /delete — редактирование\n/free — свободные слоты\nПовторяющиеся события с гибкими правилами.',
+      '<b>🔔 Умные напоминания</b>\n/notify — утренняя сводка, вечерний обзор, тихие часы\nНесколько напоминаний на событие (15 мин, 1 ч и т.д.)',
+      '<b>🌍 Праздники</b>\n/holidays — подписка на праздники 100+ стран\nПраздники отображаются в ежедневной повестке.',
+      '<b>📤 Шаринг и приглашения</b>\n/share today — поделиться расписанием\n/invite <user_id> <event_id> — пригласить\n/privacy — видимость (приватно / занят / полный доступ)\nInline-режим: наберите @HyperCalendarBot в любом чате.',
+      '<b>🖼 Визуальное расписание</b>\nНажмите "Картинка" в /today или /week для красивого изображения календаря.',
+    ],
   },
 } as const;
 

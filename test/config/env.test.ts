@@ -24,6 +24,8 @@ describe('loadConfig', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
     delete process.env.NODE_ENV;
+    delete process.env.AI_BASE_URL;
+    delete process.env.AI_MODEL;
     const config = loadConfig();
     expect(config.BOT_TOKEN).toBe('test-token');
     expect(config.DATABASE_PATH).toBe('./data/calendar.db');
