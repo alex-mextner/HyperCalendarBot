@@ -4,6 +4,8 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
+import { CallLogRepository } from './repositories/call-log.repository.ts';
+import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
@@ -23,6 +25,8 @@ import { runMigrations } from './schema.ts';
 
 export class DatabaseService {
   readonly db: Database;
+  readonly callSettings: CallSettingsRepository;
+  readonly callLog: CallLogRepository;
   readonly users: UserRepository;
   readonly events: EventRepository;
   readonly reminders: ReminderRepository;
@@ -50,6 +54,8 @@ export class DatabaseService {
 
     runMigrations(this.db, migrations);
 
+    this.callSettings = new CallSettingsRepository(this.db);
+    this.callLog = new CallLogRepository(this.db);
     this.users = new UserRepository(this.db);
     this.events = new EventRepository(this.db);
     this.reminders = new ReminderRepository(this.db);

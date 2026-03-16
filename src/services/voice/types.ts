@@ -1,0 +1,22 @@
+// src/services/voice/types.ts
+import { logger } from '../../utils/logger';
+
+export const voiceLogger = logger.child({ module: 'voice' });
+
+export type VoiceCallState = 'idle' | 'synthesizing' | 'ringing' | 'connected' | 'playing' | 'ended' | 'failed';
+
+export interface VoiceCallConfig {
+  mtprotoApiId: number;
+  mtprotoApiHash: string;
+  mtprotoSession: string;
+  maxCallDurationSec: number;
+  ttsTimeoutMs: number;
+}
+
+export interface CallReminderJobData {
+  userId: number;
+  eventId: number;
+  callLogId: number;
+  ttsText: string;
+  language: string;
+}

@@ -1,9 +1,12 @@
+import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
+import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 import { isQuietHours } from './timezone.ts';
 
 function truncateToMinute(d: Date): Date {
@@ -16,6 +19,13 @@ function formatHHMM(d: Date): string {
   return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
+export interface EnqueueCallData {
+  userId: number;
+  eventId: number;
+  ttsText: string;
+  language: string;
+}
+
 export interface SchedulerDeps {
   prefsRepo: NotificationPreferencesRepository;
   reminderRepo: EventReminderRepository;
@@ -23,6 +33,9 @@ export interface SchedulerDeps {
   userRepo: UserRepository;
   eventRepo: EventRepository;
   enqueue: (type: string, userId: number, logId: number, payload: string) => void;
+  callSettingsRepo?: CallSettingsRepository;
+  callLogRepo?: CallLogRepository;
+  enqueueCall?: (data: EnqueueCallData) => void;
 }
 
 export class NotificationScheduler {
@@ -72,6 +85,50 @@ export class NotificationScheduler {
       this.deps.reminderRepo.markSent(reminder.id);
       this.deps.enqueue('event_reminder', reminder.user_id, logId, payload);
       notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Event reminder enqueued');
+
+      if (this.deps.callSettingsRepo?.isEnabled(reminder.user_id)) {
+        const callSettings = this.deps.callSettingsRepo.get(reminder.user_id);
+
+        // Check call-specific quiet hours
+        if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
+          const hours = nowUtc.getUTCHours();
+          const mins = nowUtc.getUTCMinutes();
+          const currentTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+          const start = callSettings.quiet_hours_start;
+          const end = callSettings.quiet_hours_end;
+
+          // Handle wrap-around (e.g., 22:00 - 08:00)
+          const inQuietHours =
+            start <= end ? currentTime >= start && currentTime < end : currentTime >= start || currentTime < end;
+
+          if (inQuietHours) {
+            notifyLogger.info(
+              { userId: reminder.user_id, eventId: reminder.event_id },
+              'Voice call skipped (quiet hours)',
+            );
+            continue;
+          }
+        }
+
+        const dailyCount = this.deps.callLogRepo?.countTodayCalls(reminder.user_id) ?? 0;
+        const maxDaily = callSettings?.max_daily_calls ?? 5;
+        if (dailyCount < maxDaily) {
+          const ttsText = renderReminderForSpeech({
+            title: reminder.event_title,
+            startAt: reminder.event_start_at,
+            timezone: user.timezone,
+            location: reminder.event_location,
+            language: user.language,
+          });
+          this.deps.enqueueCall?.({
+            userId: reminder.user_id,
+            eventId: reminder.event_id,
+            ttsText,
+            language: user.language,
+          });
+          notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Voice call enqueued');
+        }
+      }
     }
 
     // 2. Morning agendas

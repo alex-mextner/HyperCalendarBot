@@ -363,4 +363,37 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '009_create_voice_call_tables',
+    up(db) {
+      db.exec(`
+        CREATE TABLE user_call_settings (
+          user_id              INTEGER PRIMARY KEY,
+          enabled              INTEGER NOT NULL DEFAULT 0,
+          quiet_hours_start    TEXT,
+          quiet_hours_end      TEXT,
+          max_daily_calls      INTEGER NOT NULL DEFAULT 5,
+          language             TEXT NOT NULL DEFAULT 'en',
+          important_only       INTEGER NOT NULL DEFAULT 0,
+          updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE call_log (
+          id            INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id       INTEGER NOT NULL,
+          event_id      INTEGER,
+          status        TEXT NOT NULL DEFAULT 'queued',
+          duration_sec  INTEGER,
+          tts_text      TEXT,
+          error         TEXT,
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          completed_at  TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_call_log_user ON call_log(user_id, created_at);
+        CREATE INDEX idx_call_log_status ON call_log(status) WHERE status IN ('queued', 'ringing');
+      `);
+    },
+  },
 ];

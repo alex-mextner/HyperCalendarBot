@@ -142,6 +142,15 @@ describe('production migrations', () => {
     expect(names).toContain('deep_links');
   });
 
+  test('migration 009 creates voice call tables', () => {
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as {
+      name: string;
+    }[];
+    const names = tables.map((t) => t.name);
+    expect(names).toContain('user_call_settings');
+    expect(names).toContain('call_log');
+  });
+
   test('invitations foreign key cascades on event delete', () => {
     const userRepo = new UserRepository(db);
     userRepo.create({ telegram_id: 100 });
