@@ -11,6 +11,8 @@
 **Spec:** `docs/specs/07-voice-calls.md`
 **Architecture spec:** `docs/specs/00-common-architecture.md`
 
+**Testing:** All new `src/` modules must have ≥80% line coverage (enforced by `bunfig.toml`). Each task includes red tests (error paths, edge cases, invalid input) alongside happy-path tests. Run `bun test --coverage` after each chunk to verify.
+
 ---
 
 ## File Structure
@@ -283,6 +285,31 @@ describe('CallSettingsRepository', () => {
     repo.setEnabled(USER_ID, true);
     expect(repo.isEnabled(USER_ID)).toBe(true);
   });
+
+  // --- Red tests ---
+
+  test('get returns null for non-existent user', () => {
+    expect(repo.get(999)).toBeNull();
+  });
+
+  test('isEnabled returns false for non-existent user', () => {
+    expect(repo.isEnabled(999)).toBe(false);
+  });
+
+  test('setQuietHours clears with nulls', () => {
+    repo.ensureDefaults(USER_ID);
+    repo.setQuietHours(USER_ID, '22:00', '08:00');
+    repo.setQuietHours(USER_ID, null, null);
+    const s = repo.get(USER_ID)!;
+    expect(s.quiet_hours_start).toBeNull();
+    expect(s.quiet_hours_end).toBeNull();
+  });
+
+  test('setLanguage updates language', () => {
+    repo.ensureDefaults(USER_ID);
+    repo.setLanguage(USER_ID, 'ru');
+    expect(repo.get(USER_ID)!.language).toBe('ru');
+  });
 });
 ```
 
@@ -355,6 +382,38 @@ describe('CallLogRepository', () => {
     const recent = repo.getRecent(USER_ID, 5);
     expect(recent).toHaveLength(2);
     expect(recent[0].tts_text).toBe('Second');
+  });
+
+  // --- Red tests ---
+
+  test('findById returns null for non-existent id', () => {
+    expect(repo.findById(999)).toBeNull();
+  });
+
+  test('countTodayCalls returns 0 for user with no calls', () => {
+    expect(repo.countTodayCalls(999)).toBe(0);
+  });
+
+  test('getRecent returns empty for user with no calls', () => {
+    expect(repo.getRecent(999, 5)).toHaveLength(0);
+  });
+
+  test('create without optional fields uses defaults', () => {
+    const log = repo.create({ user_id: USER_ID });
+    expect(log.event_id).toBeNull();
+    expect(log.tts_text).toBeNull();
+    expect(log.error).toBeNull();
+    expect(log.duration_sec).toBeNull();
+    expect(log.completed_at).toBeNull();
+  });
+
+  test('complete with failed status stores error', () => {
+    const log = repo.create({ user_id: USER_ID });
+    repo.complete(log.id, 'failed', 0, 'Connection timeout');
+    const updated = repo.findById(log.id)!;
+    expect(updated.status).toBe('failed');
+    expect(updated.error).toBe('Connection timeout');
+    expect(updated.duration_sec).toBe(0);
   });
 });
 ```
@@ -1646,7 +1705,15 @@ ls -la src/worker/call-queue.ts
 ls -la src/bot/commands/call-settings.ts
 ```
 
-- [ ] **Step 4: Review commit history**
+- [ ] **Step 4: Verify test coverage ≥80% on all new modules**
+
+```bash
+bun test --coverage 2>&1 | grep -E 'src/services/voice/|src/database/repositories/call|src/worker/call|src/bot/commands/call'
+```
+
+Expected: all lines ≥80%. If any module is below, write additional red tests (error paths, edge cases, invalid input) until threshold is met.
+
+- [ ] **Step 5: Review commit history**
 
 ```bash
 git log --oneline --not main | head -20
