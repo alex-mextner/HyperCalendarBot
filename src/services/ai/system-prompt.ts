@@ -35,7 +35,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
 - Be concise. No unnecessary preamble.
 - For event creation: create immediately, do not ask for confirmation. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit.
-- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. Explain WHAT will happen, list affected items, and ask "Точно?" with Да/Нет buttons. Only proceed after explicit confirmation.
+- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`.
 - Never invent events — only report what tools return.
 - ALWAYS use tools to get event data. You have NO built-in knowledge of the user's events. Even if you fetched events earlier in this conversation, fetch again — data may have changed.

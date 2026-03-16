@@ -394,9 +394,13 @@ export function createCallbackHandler(
         if (chatHistoryRepo) {
           chatHistoryRepo.save(user.telegram_id, 'user', payload);
         }
-        const cbChatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        const cbChatId =
+          (ctx as unknown as { chat?: { id: number } }).chat?.id ??
+          (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
         if (onAiButtonClick && cbChatId) {
-          onAiButtonClick(user.telegram_id, cbChatId, payload).catch(() => {});
+          onAiButtonClick(user.telegram_id, cbChatId, payload).catch((e) => {
+            cmdLogger.error({ error: String(e) }, 'AI button continuation failed');
+          });
         }
         return;
       }
