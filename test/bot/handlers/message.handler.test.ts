@@ -1,0 +1,144 @@
+import { describe, expect, mock, test } from 'bun:test';
+import { createMessageHandler } from '../../../src/bot/handlers/message.handler.ts';
+
+function makeDeps(overrides: Record<string, unknown> = {}) {
+  return {
+    agent: { run: mock(() => Promise.resolve()) },
+    eventService: {},
+    holidayService: {},
+    chatHistory: {},
+    userRepo: {},
+    reminderRepo: {},
+    sceneStorage: { get: mock(() => Promise.resolve(null)) },
+    botUsername: 'TestBot',
+    ...overrides,
+  };
+}
+
+function makeCtx(overrides: Record<string, unknown> = {}) {
+  return {
+    dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
+    text: 'привет',
+    chatId: 100,
+    chat: { type: 'private' },
+    from: { first_name: 'Alex', username: 'alex' },
+    send: mock(() => Promise.resolve()),
+    ...overrides,
+  };
+}
+
+describe('createMessageHandler', () => {
+  test('routes text message to AI agent in private chat', async () => {
+    const deps = makeDeps();
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx() as never);
+    expect(deps.agent.run).toHaveBeenCalledTimes(1);
+  });
+
+  test('ignores messages without text', async () => {
+    const deps = makeDeps();
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx({ text: undefined }) as never);
+    expect(deps.agent.run).toHaveBeenCalledTimes(0);
+  });
+
+  test('ignores commands starting with /', async () => {
+    const deps = makeDeps();
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx({ text: '/help' }) as never);
+    expect(deps.agent.run).toHaveBeenCalledTimes(0);
+  });
+
+  test('ignores messages when scene is active', async () => {
+    const deps = makeDeps({
+      sceneStorage: { get: mock(() => Promise.resolve({ step: 0 })) },
+    });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx() as never);
+    expect(deps.agent.run).toHaveBeenCalledTimes(0);
+  });
+
+  test('ignores messages without dbUser', async () => {
+    const deps = makeDeps();
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx({ dbUser: undefined }) as never);
+    expect(deps.agent.run).toHaveBeenCalledTimes(0);
+  });
+
+  describe('group messages', () => {
+    test('ignores irrelevant group messages', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'привет как дела',
+          chat: { type: 'group', title: 'Friends' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('routes group message with calendar keyword', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'встреча завтра в 10',
+          chat: { type: 'group', title: 'Work' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('routes group message with @mention', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: '@TestBot покажи расписание',
+          chat: { type: 'group', title: 'Work' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('prepends group context to messageText', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'встреча в 15:00',
+          chat: { type: 'supergroup', title: 'Team' },
+          from: { first_name: 'Alex' },
+        }) as never,
+      );
+      const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as { messageText: string };
+      expect(call.messageText).toContain('[Group: Team');
+      expect(call.messageText).toContain('Alex');
+    });
+
+    test('does NOT match "планшет" as calendar keyword', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'купил новый планшет',
+          chat: { type: 'group', title: 'Chat' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+  });
+
+  test('sends error message on agent failure', async () => {
+    const deps = makeDeps({
+      agent: { run: mock(() => Promise.reject(new Error('boom'))) },
+    });
+    const ctx = makeCtx();
+    const handler = createMessageHandler(deps as never);
+    await handler(ctx as never);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('пошло не так');
+  });
+});
