@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { escapeHtml, formatUtcOffset, truncateMessage } from '../../src/utils/telegram.ts';
+import {
+  escapeHtml,
+  escapeMarkdown,
+  formatUtcOffset,
+  markdownToHtml,
+  splitMessage,
+  truncateMessage,
+} from '../../src/utils/telegram.ts';
 
 describe('escapeHtml', () => {
   test('escapes ampersands', () => {
@@ -44,6 +51,109 @@ describe('truncateMessage', () => {
   });
   test('returns empty string unchanged', () => {
     expect(truncateMessage('')).toBe('');
+  });
+});
+
+describe('escapeMarkdown', () => {
+  test('escapes underscores in usernames', () => {
+    expect(escapeMarkdown('@larichkina_b')).toBe('@larichkina\\_b');
+  });
+  test('escapes asterisks', () => {
+    expect(escapeMarkdown('2*3=6')).toBe('2\\*3=6');
+  });
+  test('escapes backticks', () => {
+    expect(escapeMarkdown('use `code` here')).toBe('use \\`code\\` here');
+  });
+  test('escapes square brackets', () => {
+    expect(escapeMarkdown('[link](url)')).toBe('\\[link\\](url)');
+  });
+  test('escapes multiple special characters together', () => {
+    expect(escapeMarkdown('_bold_ and *italic* [link]')).toBe('\\_bold\\_ and \\*italic\\* \\[link\\]');
+  });
+  test('returns plain text unchanged', () => {
+    expect(escapeMarkdown('hello world')).toBe('hello world');
+  });
+  test('returns empty string unchanged', () => {
+    expect(escapeMarkdown('')).toBe('');
+  });
+});
+
+describe('splitMessage', () => {
+  test('returns single-element array for short text', () => {
+    expect(splitMessage('hello')).toEqual(['hello']);
+  });
+  test('returns single-element array for text at limit', () => {
+    const text = 'a'.repeat(4000);
+    expect(splitMessage(text)).toEqual([text]);
+  });
+  test('splits at paragraph boundary', () => {
+    const para1 = 'a'.repeat(3000);
+    const para2 = 'b'.repeat(3000);
+    const text = `${para1}\n\n${para2}`;
+    const result = splitMessage(text);
+    expect(result.length).toBe(2);
+    expect(result[0]).toBe(para1);
+    expect(result[1]).toBe(para2);
+  });
+  test('splits at line boundary when paragraph is too long', () => {
+    const line1 = 'a'.repeat(1500);
+    const line2 = 'b'.repeat(1500);
+    const line3 = 'c'.repeat(1500);
+    const text = `${line1}\n${line2}\n${line3}`;
+    const result = splitMessage(text);
+    expect(result.length).toBe(2);
+    expect(result[0]).toBe(`${line1}\n${line2}`);
+    expect(result[1]).toBe(line3);
+  });
+  test('hard splits when no natural boundary fits', () => {
+    const text = 'a'.repeat(8000);
+    const result = splitMessage(text, 4000);
+    expect(result.length).toBe(2);
+    expect(result[0]!.length).toBe(4000);
+    expect(result[1]!.length).toBe(4000);
+  });
+  test('returns empty string in array for empty input', () => {
+    expect(splitMessage('')).toEqual(['']);
+  });
+  test('handles custom maxLen', () => {
+    const text = 'aaa\n\nbbb\n\nccc';
+    const result = splitMessage(text, 7);
+    expect(result).toEqual(['aaa', 'bbb', 'ccc']);
+  });
+  test('each chunk respects maxLen', () => {
+    const text = 'a'.repeat(12345);
+    const result = splitMessage(text, 4000);
+    for (const chunk of result) {
+      expect(chunk.length).toBeLessThanOrEqual(4000);
+    }
+    expect(result.join('')).toBe(text);
+  });
+});
+
+describe('markdownToHtml', () => {
+  test('converts **bold** to <b>', () => {
+    expect(markdownToHtml('**hello**')).toBe('<b>hello</b>');
+  });
+  test('converts *italic* to <i>', () => {
+    expect(markdownToHtml('*hello*')).toBe('<i>hello</i>');
+  });
+  test('converts _italic_ to <i>', () => {
+    expect(markdownToHtml('_hello_')).toBe('<i>hello</i>');
+  });
+  test('converts `code` to <code>', () => {
+    expect(markdownToHtml('use `code` here')).toBe('use <code>code</code> here');
+  });
+  test('escapes HTML entities', () => {
+    expect(markdownToHtml('<script>')).toBe('&lt;script&gt;');
+  });
+  test('handles **bold** and *italic* together', () => {
+    expect(markdownToHtml('**bold** and *italic*')).toBe('<b>bold</b> and <i>italic</i>');
+  });
+  test('does not break _underscores_ in middle of words', () => {
+    expect(markdownToHtml('@larichkina_b')).toBe('@larichkina_b');
+  });
+  test('handles plain text unchanged', () => {
+    expect(markdownToHtml('hello world')).toBe('hello world');
   });
 });
 
