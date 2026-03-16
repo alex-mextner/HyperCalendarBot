@@ -300,6 +300,11 @@ export function createBot(
         sharedEventRepo: db.sharedEvents,
         privacyService,
         renderService,
+        notificationPrefs: {
+          getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
+          update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
+          ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
+        },
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
       })(ctx as unknown as BotCommandContext),

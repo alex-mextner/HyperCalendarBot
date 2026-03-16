@@ -191,6 +191,53 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'get_notification_settings',
+    description:
+      "Get the user's notification preferences: morning agenda, evening review, quiet hours, default reminders.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'update_notification_settings',
+    description: 'Update notification preferences. Only pass fields that need to change.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        morning_agenda_enabled: { type: 'boolean', description: 'Enable/disable morning agenda digest' },
+        morning_agenda_time: {
+          type: 'string',
+          description: 'Time for morning agenda in HH:MM format (local time, e.g., "08:00")',
+        },
+        evening_review_enabled: { type: 'boolean', description: 'Enable/disable evening review' },
+        evening_review_time: { type: 'string', description: 'Time for evening review in HH:MM format (e.g., "21:00")' },
+        quiet_hours_enabled: { type: 'boolean', description: 'Enable/disable quiet hours (no notifications)' },
+        quiet_hours_start: { type: 'string', description: 'Quiet hours start in HH:MM (e.g., "23:00")' },
+        quiet_hours_end: { type: 'string', description: 'Quiet hours end in HH:MM (e.g., "07:00")' },
+        default_reminder_minutes: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Default reminder intervals in minutes (e.g., [15, 60])',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'make_call',
+    description:
+      'Make a voice call to the user with a spoken message (TTS). Use when the user asks you to call them or for voice reminders.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        text: { type: 'string', description: 'Text to speak during the call (will be converted to speech)' },
+      },
+      required: ['text'],
+    },
+  },
+  {
     name: 'get_upcoming',
     description:
       'Get the next upcoming events from now. Useful when user asks "what do I have next?" or "upcoming events".',

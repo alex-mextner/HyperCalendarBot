@@ -135,6 +135,47 @@ export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: st
   return { success: true, output: `Week image rendering for ${input.week_start} is not yet implemented via AI tools.` };
 }
 
+export function handleGetNotificationSettings(ctx: AgentContext): ToolResult {
+  if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
+  ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
+  const prefs = ctx.notificationPrefs.getPrefs(ctx.user.telegram_id);
+  const lines = Object.entries(prefs).map(([k, v]) => `${k}: ${v}`);
+  return { success: true, output: lines.join('\n') };
+}
+
+export function handleUpdateNotificationSettings(ctx: AgentContext, input: Record<string, unknown>): ToolResult {
+  if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
+  ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
+
+  const patch: Record<string, unknown> = {};
+  if (input.morning_agenda_enabled !== undefined) patch.morning_agenda_enabled = input.morning_agenda_enabled ? 1 : 0;
+  if (input.morning_agenda_time !== undefined) patch.morning_agenda_time = input.morning_agenda_time;
+  if (input.evening_review_enabled !== undefined) patch.evening_review_enabled = input.evening_review_enabled ? 1 : 0;
+  if (input.evening_review_time !== undefined) patch.evening_review_time = input.evening_review_time;
+  if (input.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = input.quiet_hours_enabled ? 1 : 0;
+  if (input.quiet_hours_start !== undefined) patch.quiet_hours_start = input.quiet_hours_start;
+  if (input.quiet_hours_end !== undefined) patch.quiet_hours_end = input.quiet_hours_end;
+  if (input.default_reminder_minutes !== undefined) {
+    patch.default_reminder_intervals = JSON.stringify(input.default_reminder_minutes);
+  }
+
+  if (Object.keys(patch).length === 0) return { success: false, error: 'No settings provided.' };
+  ctx.notificationPrefs.update(ctx.user.telegram_id, patch);
+  return { success: true, output: `Notification settings updated: ${Object.keys(patch).join(', ')}` };
+}
+
+export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
+  if (!ctx.callQueue) {
+    return {
+      success: false,
+      error:
+        'Voice calls not configured on this server. Suggest the user to enable voice call reminders in /callsettings.',
+    };
+  }
+  ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  return { success: true, output: 'Call queued. The user will receive a voice call shortly.' };
+}
+
 export function handleGetUserSettings(ctx: AgentContext): ToolResult {
   const u = ctx.user;
   const lines = [

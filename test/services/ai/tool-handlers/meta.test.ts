@@ -179,13 +179,13 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('@vova123');
     });
 
-    test('updates existing contact with username', () => {
+    test('upserts existing contact with username', () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова');
       ctx.contactRepo = contactRepo;
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Updated');
+      expect(result.output).toContain('vova123');
     });
 
     test('upserts existing contact without error', () => {

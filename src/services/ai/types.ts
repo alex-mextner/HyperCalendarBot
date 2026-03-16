@@ -30,6 +30,12 @@ export interface AgentContext {
   contactRepo?: ContactRepository;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
+  notificationPrefs?: {
+    getPrefs(userId: number): Record<string, unknown>;
+    update(userId: number, patch: Record<string, unknown>): void;
+    ensureDefaults(userId: number): void;
+  };
+  callQueue?: { enqueue(userId: number, text: string): void };
 }
 
 export interface ToolResult {

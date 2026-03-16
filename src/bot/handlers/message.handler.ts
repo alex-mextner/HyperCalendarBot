@@ -38,6 +38,8 @@ export interface MessageHandlerDeps {
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
   renderService?: RenderService;
+  notificationPrefs?: AgentContext['notificationPrefs'];
+  callQueue?: AgentContext['callQueue'];
   sceneStorage: SceneStorage;
   botUsername?: string;
 }
@@ -164,6 +166,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sharedEventRepo: deps.sharedEventRepo,
       privacyService: deps.privacyService,
       renderService: deps.renderService,
+      notificationPrefs: deps.notificationPrefs,
+      callQueue: deps.callQueue,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

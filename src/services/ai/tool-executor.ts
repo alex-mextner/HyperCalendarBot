@@ -16,10 +16,13 @@ import {
   handleFindUser,
   handleGetContacts,
   handleGetHolidays,
+  handleGetNotificationSettings,
   handleGetUserSettings,
+  handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
   handleRenderWeekImage,
+  handleUpdateNotificationSettings,
   handleUpdateUserSettings,
 } from './tool-handlers/meta.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
@@ -120,6 +123,15 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as { week_start: string });
+
+      case 'get_notification_settings':
+        return handleGetNotificationSettings(ctx);
+
+      case 'update_notification_settings':
+        return handleUpdateNotificationSettings(ctx, input);
+
+      case 'make_call':
+        return handleMakeCall(ctx, input as { text: string });
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as { limit?: number });
