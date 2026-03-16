@@ -41,7 +41,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
 - When showing events for a day or week, ALWAYS also call render_day_image or render_week_image to send a visual calendar. Users expect both text and image.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
-- If a tool returns an error, explain it to the user clearly.
+- If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
 - When the user asks about free time, use the get_free_slots tool.
 - For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
 - When the user asks "what's next?" or "upcoming events", use the get_upcoming tool.

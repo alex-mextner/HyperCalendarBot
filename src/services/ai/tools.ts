@@ -228,7 +228,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'make_call',
     description:
-      'Make a voice call to the user with a spoken message (TTS). Use when the user asks you to call them or for voice reminders.',
+      'Make a voice call to the user with a spoken message (TTS). Use when the user asks you to call them. If this tool returns an error, tell the user voice calls are temporarily unavailable — do NOT suggest changing settings, the issue is server-side.',
     input_schema: {
       type: 'object' as const,
       properties: {

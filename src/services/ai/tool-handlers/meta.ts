@@ -168,8 +168,7 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
   if (!ctx.callQueue) {
     return {
       success: false,
-      error:
-        'Voice calls not configured on this server. Suggest the user to enable voice call reminders in /callsettings.',
+      error: 'Voice calls are temporarily unavailable. This is a server-side issue, not a user setting problem.',
     };
   }
   ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);

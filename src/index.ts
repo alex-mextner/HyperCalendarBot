@@ -185,6 +185,7 @@ const COMMANDS_EN = [
   { command: 'invite', description: 'Invite user to event' },
   { command: 'invitations', description: 'View invitations' },
   { command: 'privacy', description: 'Privacy & visibility' },
+  { command: 'callsettings', description: 'Voice call settings' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -207,6 +208,7 @@ const COMMANDS_RU = [
   { command: 'invite', description: 'Пригласить на событие' },
   { command: 'invitations', description: 'Просмотр приглашений' },
   { command: 'privacy', description: 'Приватность и видимость' },
+  { command: 'callsettings', description: 'Голосовые звонки' },
   { command: 'help', description: 'Справка' },
 ];
 
