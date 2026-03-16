@@ -1,5 +1,15 @@
+import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+
+export interface VoiceRenderInput {
+  title: string;
+  startAt: string;
+  timezone: string;
+  location?: string | null;
+  language: string;
+}
+
 export interface RenderedNotification {
-  channel: 'telegram_text';
+  channel: 'telegram_text' | 'telegram_voice_call';
   text: string;
 }
 
@@ -72,6 +82,17 @@ export class NotificationRenderer {
       lines.push(`📍 ${data.location}`);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
+  }
+
+  renderForVoice(input: VoiceRenderInput): RenderedNotification {
+    const text = renderReminderForSpeech({
+      title: input.title,
+      startAt: input.startAt,
+      timezone: input.timezone,
+      location: input.location,
+      language: input.language,
+    });
+    return { channel: 'telegram_voice_call', text };
   }
 
   renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
