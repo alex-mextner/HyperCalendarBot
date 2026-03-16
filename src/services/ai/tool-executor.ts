@@ -2,12 +2,15 @@ import { logger } from '../../utils/logger.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
+  handleGetEvent,
   handleGetEvents,
+  handleGetUpcoming,
   handleSearchEvents,
+  handleSnoozeEvent,
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
 import { handleGetHolidays, handleGetUserSettings, handleUpdateUserSettings } from './tool-handlers/meta.ts';
-import { handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
 import {
   handleGetInvitationStatus,
   handleSendInvitation,
@@ -66,6 +69,18 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'search_events':
         return handleSearchEvents(ctx, input as { query: string });
+
+      case 'get_upcoming':
+        return handleGetUpcoming(ctx, input as { limit?: number });
+
+      case 'snooze_event':
+        return handleSnoozeEvent(ctx, input as { event_id: number; minutes?: number });
+
+      case 'get_event':
+        return handleGetEvent(ctx, input as { event_id: number });
+
+      case 'get_reminders':
+        return handleGetReminders(ctx, input as { event_id: number });
 
       case 'set_reminder':
         return handleSetReminder(ctx, input as { event_id: number; minutes_before: number[] });

@@ -136,6 +136,46 @@ describe('executeTool', () => {
     expect(result.success).toBe(true);
   });
 
+  test('routes get_upcoming to handler', () => {
+    const result = executeTool(ctx, 'get_upcoming', {});
+    expect(result.success).toBe(true);
+  });
+
+  test('routes snooze_event to handler', () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Snooze Me',
+      start_at: '2026-03-15T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const result = executeTool(ctx, 'snooze_event', { event_id: event.id, minutes: 15 });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('snoozed');
+  });
+
+  test('routes get_event to handler', () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Get Me',
+      start_at: '2026-03-15T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const result = executeTool(ctx, 'get_event', { event_id: event.id });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('Get Me');
+  });
+
+  test('routes get_reminders to handler', () => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Remind Me',
+      start_at: '2026-03-15T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const result = executeTool(ctx, 'get_reminders', { event_id: event.id });
+    expect(result.success).toBe(true);
+  });
+
   test('returns error for unknown tool', () => {
     const result = executeTool(ctx, 'unknown_tool', {});
     expect(result.success).toBe(false);

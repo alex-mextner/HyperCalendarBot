@@ -55,5 +55,11 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - Never invent events — only report what tools return.
 - If a tool returns an error, explain it to the user clearly.
 - When the user asks about free time, use the get_free_slots tool.
-- For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").`;
+- For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
+- When the user asks "what's next?" or "upcoming events", use the get_upcoming tool.
+- When the user wants to postpone/snooze an event, use the snooze_event tool.
+- To check or show reminders for an event, use the get_reminders tool.
+- For sharing events or invitations, use share_event, send_invitation, share_agenda tools.
+- To check invitation responses, use get_invitation_status.
+- To change privacy/visibility, use update_sharing_settings or set_event_visibility.`;
 }

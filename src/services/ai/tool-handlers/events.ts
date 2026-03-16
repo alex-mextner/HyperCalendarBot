@@ -30,6 +30,19 @@ interface DeleteEventInput {
   event_id: number;
 }
 
+interface GetUpcomingInput {
+  limit?: number;
+}
+
+interface SnoozeEventInput {
+  event_id: number;
+  minutes?: number;
+}
+
+interface GetEventInput {
+  event_id: number;
+}
+
 interface SearchEventsInput {
   query: string;
 }
@@ -121,4 +134,72 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   });
 
   return { success: true, output: lines.join('\n') };
+}
+
+export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
+  const limit = input.limit ?? 5;
+  const now = new Date().toISOString();
+  const farFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+  const occurrences = ctx.eventService.getEventsInRange(ctx.user.telegram_id, now, farFuture);
+
+  const upcoming = occurrences.slice(0, limit);
+  if (upcoming.length === 0) {
+    return { success: true, output: 'No upcoming events.' };
+  }
+
+  const lines = upcoming.map((occ) => {
+    const e = occ.event;
+    const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
+    if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
+    if (e.location) parts.push(`location: ${e.location}`);
+    return parts.join(', ');
+  });
+
+  return { success: true, output: `Next ${upcoming.length} events:\n${lines.join('\n')}` };
+}
+
+export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  const minutes = input.minutes ?? 10;
+  const newStart = new Date(new Date(event.start_at).getTime() + minutes * 60_000).toISOString();
+  const updates: Record<string, string> = { start_at: newStart };
+
+  if (event.end_at) {
+    updates.end_at = new Date(new Date(event.end_at).getTime() + minutes * 60_000).toISOString();
+  }
+
+  const updated = ctx.eventService.updateEvent(input.event_id, ctx.user.telegram_id, updates);
+  if (!updated) {
+    return { success: false, error: 'Failed to snooze event.' };
+  }
+
+  return {
+    success: true,
+    output: `Event "${updated.title}" snoozed by ${minutes} min. New start: ${updated.start_at}`,
+  };
+}
+
+export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
+  if (event.end_at) parts.push(`end: ${event.end_at}`);
+  if (event.description) parts.push(`description: ${event.description}`);
+  if (event.location) parts.push(`location: ${event.location}`);
+  if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);
+  if (event.all_day) parts.push('all_day: true');
+
+  const reminders = ctx.reminderRepo.getByEventId(input.event_id);
+  if (reminders.length > 0) {
+    parts.push(`reminders: ${reminders.map((r) => `${r.minutes_before}min`).join(', ')}`);
+  }
+
+  return { success: true, output: parts.join(', ') };
 }

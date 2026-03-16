@@ -191,6 +191,55 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'get_upcoming',
+    description:
+      'Get the next upcoming events from now. Useful when user asks "what do I have next?" or "upcoming events".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Maximum number of events to return. Default: 5.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'snooze_event',
+    description: 'Snooze/postpone an event by a specified number of minutes. Shifts start and end times.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event to snooze' },
+        minutes: { type: 'number', description: 'Minutes to postpone by. Default: 10.' },
+      },
+      required: ['event_id'],
+    },
+  },
+  {
+    name: 'get_event',
+    description: 'Get details of a single event by its ID.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event' },
+      },
+      required: ['event_id'],
+    },
+  },
+  {
+    name: 'get_reminders',
+    description: 'Get the current reminder settings for an event.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event' },
+      },
+      required: ['event_id'],
+    },
+  },
+  {
     name: 'share_event',
     description: 'Share an event with a user or group. Records the sharing action.',
     input_schema: {

@@ -31,3 +31,30 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
     output: `Reminders set for "${event.title}": ${descriptions.join(', ')}`,
   };
 }
+
+interface GetRemindersInput {
+  event_id: number;
+}
+
+export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  const reminders = ctx.reminderRepo.getByEventId(input.event_id);
+  if (reminders.length === 0) {
+    return { success: true, output: `No reminders set for "${event.title}".` };
+  }
+
+  const lines = reminders.map((r) => {
+    if (r.minutes_before >= 60) {
+      const hours = Math.floor(r.minutes_before / 60);
+      const mins = r.minutes_before % 60;
+      return mins > 0 ? `${hours}h ${mins}m before` : `${hours}h before`;
+    }
+    return `${r.minutes_before}min before`;
+  });
+
+  return { success: true, output: `Reminders for "${event.title}": ${lines.join(', ')}` };
+}

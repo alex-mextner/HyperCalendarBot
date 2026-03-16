@@ -88,6 +88,21 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Morning Standup');
   });
 
+  test('includes get_upcoming rule', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('get_upcoming');
+  });
+
+  test('includes snooze_event rule', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('snooze_event');
+  });
+
+  test('includes get_reminders rule', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('get_reminders');
+  });
+
   test('includes language instruction for ru user', () => {
     const userRepo = new UserRepository(db);
     userRepo.update(USER_ID, { language: 'ru' });
