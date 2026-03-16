@@ -962,7 +962,16 @@ export class NtgCalls {
 }
 ```
 
-> ⚠️ **Critical note for implementer:** The exact FFI signatures depend on the ntgcalls C header. Download the library, find the header file (`ntgcalls.h`) in the release zip, and verify/adjust every function signature. The types above are approximations based on the pytgcalls source code. Get the actual header and fix them.
+> ⚠️ **IMPORTANT — C shim required.** Direct Bun FFI won't work because:
+> 1. ntgcalls passes `ntg_async_struct` and `ntg_media_description_struct` **by value** — Bun FFI doesn't support struct-by-value
+> 2. ntgcalls calls callbacks from C++ threads — Bun `JSCallback({ threadsafe: true })` crashes (issue #28113)
+>
+> **Solution:** Write a thin C shim (~100 LOC) that:
+> - Wraps each ntgcalls function, accepting/returning pointers instead of struct-by-value
+> - Replaces callbacks with atomic polling: shim allocates a result struct, JS polls `ntg_shim_poll()` with `Bun.sleep(1)`
+> - Compile: `cc -shared -o lib/ntgcalls_shim.dylib shim.c -L lib -lntgcalls`
+>
+> See `docs/plans/ntgcalls-ffi-research.md` for complete shim source code and Bun FFI bindings with correct signatures.
 
 - [ ] **Step 5: Run test — confirm PASS**
 
@@ -1070,11 +1079,13 @@ export async function createMtprotoClient(config: MtprotoClientConfig): Promise<
 > 3. May need interactive auth first to generate session string
 > 4. Session string can be stored as env var `MTPROTO_SESSION`
 
-- [ ] **Step 4: Implement call signaling**
+- [ ] **Step 4: Implement call signaling (uses DH exchange module)**
+
+The DH exchange is already implemented in `src/services/voice-call/dh-exchange.ts`. The call signaling module wraps it with @mtcute transport:
 
 ```typescript
 // src/services/voice/call-signaling.ts
-import { randomBytes } from 'node:crypto';
+import { VoiceCallOrchestrator } from '../voice-call/dh-exchange';
 
 export interface CallSignalingDeps {
   callRaw: (method: Record<string, unknown>) => Promise<unknown>;
@@ -1086,13 +1097,16 @@ interface CallInfo {
 }
 
 export class CallSignaling {
-  constructor(private deps: CallSignalingDeps) {}
+  private orchestrator: VoiceCallOrchestrator;
+
+  constructor(private deps: CallSignalingDeps) {
+    this.orchestrator = new VoiceCallOrchestrator({
+      callRaw: deps.callRaw,
+    });
+  }
 
   async initiateCall(userId: number): Promise<CallInfo> {
     if (!userId || userId <= 0) throw new Error('Invalid user_id');
-
-    const gAHash = randomBytes(256);
-    const randomId = Math.floor(Math.random() * 2 ** 31);
 
     const result = await this.deps.callRaw({
       _: 'phone.requestCall',
@@ -1727,23 +1741,34 @@ git log --oneline --not main | head -20
 
 1. **Database** — user_call_settings + call_log tables
 2. **TTS** — Edge TTS synthesis with in-memory caching
-3. **Call signaling skeleton** — MTProto phone.requestCall via @mtcute
-4. **ntgcalls FFI skeleton** — Library loaded, basic init/destroy
-5. **Call manager** — Orchestration with proper error handling and logging
-6. **BullMQ queue** — call-reminder jobs with retry logic
-7. **Bot UI** — /callsettings command, post-call inline buttons
-8. **Notification integration** — Voice calls as alternative notification channel
+3. **DH key exchange** — ✅ DONE. Full implementation in `src/services/voice-call/dh-exchange.ts` (22 tests)
+4. **Call signaling** — MTProto phone.requestCall/acceptCall/confirmCall via @mtcute, using DH exchange module
+5. **ntgcalls C shim + FFI** — thin C wrapper around ntgcalls to handle struct-by-value + polling pattern
+6. **Call manager** — Orchestration with proper error handling and logging
+7. **BullMQ queue** — call-reminder jobs with retry logic
+8. **Bot UI** — /callsettings command, post-call inline buttons
+9. **Notification integration** — Voice calls as alternative notification channel
 
-### What needs follow-up work (v1.1)
+### Research conclusions (resolved)
 
-1. **DH key exchange** — Full Diffie-Hellman implementation per Telegram spec. The current signaling is a skeleton — the DH math needs to be correct.
-2. **ntgcalls media integration** — Wire `ntg_set_stream_sources` to play TTS audio buffer into the WebRTC call. This requires understanding the exact ntgcalls audio format requirements.
-3. **Call state machine** — Handle updatePhoneCall events from MTProto (user answers, user declines, user busy, timeout).
-4. **Userbot session management** — Interactive auth to generate initial session string, session persistence.
-5. **Post-call snooze/cancel handlers** — Actually implement the snooze (reschedule event) and cancel (delete event) logic behind the inline buttons.
+1. **DH key exchange** — ✅ Implemented. `src/services/voice-call/dh-exchange.ts` with state machine, MTProto payload builders, emoji verification, MITM detection. 22 tests.
+
+2. **ntgcalls audio format** — PCM 16-bit signed LE (s16le), 10ms frames. Simplest approach: `NTG_SHELL` mode with ffmpeg command `ffmpeg -i file.mp3 -f s16le -ac 2 -ar 48000 pipe:1` — ntgcalls reads from pipe internally. Full research in `docs/plans/ntgcalls-ffi-research.md`.
+
+3. **Bun FFI thread safety** — `JSCallback({ threadsafe: true })` CRASHES (confirmed by Bun issue #28113, March 2026). Two solutions:
+   - **Option A (recommended for v1):** C shim library that converts struct-by-value to pointer-based API + atomic polling instead of callbacks. Simpler, no C++ napi boilerplate.
+   - **Option B (for production hardening):** Node-API (napi) addon with `napi_create_threadsafe_function`. Battle-tested but more implementation effort.
+
+4. **Call state machine** — handled by `VoiceCallDhExchange` state machine (Idle → WaitingAccept → Established/Discarded/Failed) + `handlePhoneCallUpdate` dispatcher for MTProto updates.
+
+### Remaining follow-up work
+
+1. **C shim for ntgcalls** — ~100 LOC C wrapper: convert struct-by-value params to pointer-based, replace callback with atomic polling. Compile as shared lib.
+2. **Userbot session management** — Interactive auth script to generate initial @mtcute session string, store as env var.
+3. **Post-call snooze/cancel handlers** — Wire inline button callbacks to EventService (snooze = update start_at, cancel = delete).
 
 ### Risks
 
-- **ntgcalls + Bun FFI compatibility** — Experimental feature. If callbacks from C threads crash Bun, may need Node-API wrapper instead.
-- **Telegram userbot ban** — Automated calls from userbot accounts may trigger anti-spam. Rate limiting (1 call/5s, max 5/day/user) mitigates this.
-- **@mtcute DH exchange** — The Diffie-Hellman key exchange for voice calls is complex and poorly documented. May need to study pytgcalls source deeply.
+- **Telegram userbot ban** — Automated calls from userbot accounts may trigger anti-spam. Mitigated by rate limiting (1 call/5s, max 5/day/user) and human-like call patterns (ring for 15-30s, don't spam).
+- **C shim compilation** — Needs platform-specific compilation (macOS ARM64, Linux x64). CI cross-compilation or prebuilt binaries per platform.
+- **@roamhq/wrtc in ntgcalls** — ntgcalls bundles its own WebRTC. No external wrtc dependency needed.
