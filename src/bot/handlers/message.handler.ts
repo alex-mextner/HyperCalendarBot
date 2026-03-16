@@ -42,65 +42,67 @@ export interface MessageHandlerDeps {
   botUsername?: string;
 }
 
-// Stems for calendar-related keywords (RU + EN), matched case-insensitively
-const CALENDAR_STEMS = [
-  // RU
-  'событ',
-  'встреч',
-  'потус',
-  'собира',
-  'планир',
-  'план',
-  'напомн',
+// Full words/phrases for calendar-related keyword matching in groups.
+// Uses word boundaries to avoid false positives (e.g., "планшет" ≠ "план").
+const CALENDAR_KEYWORDS = [
+  // RU — full words or long enough stems
+  'событие',
+  'события',
+  'событий',
+  'встреча',
+  'встречу',
+  'встречи',
+  'встречаемся',
+  'потусим',
+  'потусить',
+  'потусуем',
+  'собираемся',
+  'собираться',
+  'планирую',
+  'планируем',
+  'запланируй',
+  'запланировать',
+  'напомни',
+  'напоминание',
+  'напомнить',
+  'календарь',
   'календар',
-  'расписан',
-  'запис',
-  'запланир',
+  'расписание',
+  'расписани',
   'когда',
   'во сколько',
-  'локаци',
-  'место',
-  'адрес',
+  'перенеси',
+  'перенести',
+  'перенос',
+  'отмени',
+  'отменить',
+  'отмена',
+  'удали',
+  'удалить',
   'завтра',
   'послезавтра',
   'сегодня',
-  'в понедельник',
-  'во вторник',
-  'в среду',
-  'в четверг',
-  'в пятницу',
-  'в субботу',
-  'в воскресенье',
-  'перенес',
-  'отмен',
-  'удали',
-  'измен',
-  'сдвин',
-  // EN
+  // EN — full words
   'event',
-  'meet',
-  'schedul',
+  'events',
+  'meeting',
+  'schedule',
+  'scheduled',
+  'reminder',
   'remind',
   'calendar',
-  'plan',
-  'appoint',
-  'when',
-  'where',
-  'location',
+  'appointment',
+  'reschedule',
+  'postpone',
   'tomorrow',
   'today',
-  'cancel',
-  'reschedul',
-  'postpon',
 ];
 
-const STEM_PATTERN = new RegExp(CALENDAR_STEMS.join('|'), 'i');
+const KEYWORD_PATTERN = new RegExp(`(?:^|\\s|[,.!?])(?:${CALENDAR_KEYWORDS.join('|')})(?:\\s|[,.!?]|$)`, 'i');
 
 function isGroupRelevant(text: string, botUsername: string): boolean {
-  // Direct mention
-  if (text.includes(`@${botUsername}`)) return true;
-  // Calendar keyword match
-  return STEM_PATTERN.test(text);
+  if (botUsername && text.includes(`@${botUsername}`)) return true;
+  return KEYWORD_PATTERN.test(text);
 }
 
 export function createMessageHandler(deps: MessageHandlerDeps) {
