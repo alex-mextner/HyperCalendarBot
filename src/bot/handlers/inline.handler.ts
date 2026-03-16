@@ -1,5 +1,6 @@
 // src/bot/handlers/inline.handler.ts
 
+import { resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 
 /**
@@ -37,6 +38,7 @@ export interface InlineServiceLike {
  */
 export interface UserRepoLike {
   findByTelegramId(telegramId: number): { telegram_id: number; timezone: string; language?: string } | null;
+  update?(telegramId: number, data: { timezone?: string }): unknown;
 }
 
 /**
@@ -52,6 +54,7 @@ export interface SettingsRepoLike {
 interface InlineQueryContext {
   from?: { id: number };
   query: string;
+  location?: { latitude: number; longitude: number };
   answerInlineQuery: (results: unknown[], options?: Record<string, unknown>) => Promise<void>;
 }
 
@@ -99,6 +102,20 @@ export function createInlineHandler(
     if (!user) {
       await ctx.answerInlineQuery([]);
       return;
+    }
+
+    // Auto-update timezone from inline query location (requires /setinlinegeo in BotFather)
+    if (ctx.location && userRepo.update) {
+      try {
+        const tz = resolveTimezone(ctx.location.latitude, ctx.location.longitude);
+        if (tz !== user.timezone) {
+          userRepo.update(userId, { timezone: tz });
+          user.timezone = tz;
+          cmdLogger.info({ userId, oldTz: user.timezone, newTz: tz }, 'Auto-updated timezone from inline location');
+        }
+      } catch {
+        // geo-tz lookup failed, ignore
+      }
     }
 
     // Check if inline mode is enabled for this user

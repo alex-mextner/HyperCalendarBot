@@ -176,6 +176,28 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
   return { success: true, output: 'Call queued. The user will receive a voice call shortly.' };
 }
 
+export function handleGetCallSettings(ctx: AgentContext): ToolResult {
+  if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
+  ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  const settings = ctx.callSettingsRepo.get(ctx.user.telegram_id);
+  if (!settings) return { success: true, output: 'No call settings found.' };
+  const lines = Object.entries(settings)
+    .filter(([k]) => k !== 'user_id' && k !== 'updated_at')
+    .map(([k, v]) => `${k}: ${v}`);
+  return { success: true, output: lines.join('\n') };
+}
+
+export function handleUpdateCallSettings(
+  ctx: AgentContext,
+  input: { enabled?: boolean; language?: string },
+): ToolResult {
+  if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
+  ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  if (input.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, input.enabled);
+  if (input.language !== undefined) ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, input.language);
+  return { success: true, output: `Call settings updated.` };
+}
+
 export function handleGetUserSettings(ctx: AgentContext): ToolResult {
   const u = ctx.user;
   const lines = [

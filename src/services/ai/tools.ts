@@ -238,6 +238,23 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'get_call_settings',
+    description: "Get the user's voice call settings (enabled, quiet hours, language).",
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'update_call_settings',
+    description: 'Update voice call settings. Use to enable/disable voice calls for the user.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        enabled: { type: 'boolean', description: 'Enable/disable voice call reminders' },
+        language: { type: 'string', description: 'TTS language (e.g., "ru", "en")' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'get_upcoming',
     description:
       'Get the next upcoming events from now. Useful when user asks "what do I have next?" or "upcoming events".',

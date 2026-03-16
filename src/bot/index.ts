@@ -300,6 +300,7 @@ export function createBot(
         sharedEventRepo: db.sharedEvents,
         privacyService,
         renderService,
+        callSettingsRepo: db.callSettings as never,
         notificationPrefs: {
           getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
           update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),

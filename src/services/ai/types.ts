@@ -36,6 +36,12 @@ export interface AgentContext {
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
+  callSettingsRepo?: {
+    get(userId: number): Record<string, unknown> | null;
+    ensureDefaults(userId: number): void;
+    setEnabled(userId: number, enabled: boolean): void;
+    setLanguage(userId: number, lang: string): void;
+  };
 }
 
 export interface ToolResult {

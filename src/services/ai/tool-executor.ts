@@ -14,6 +14,7 @@ import {
   handleAskUser,
   handleFindContact,
   handleFindUser,
+  handleGetCallSettings,
   handleGetContacts,
   handleGetHolidays,
   handleGetNotificationSettings,
@@ -22,6 +23,7 @@ import {
   handlePickUsers,
   handleRenderDayImage,
   handleRenderWeekImage,
+  handleUpdateCallSettings,
   handleUpdateNotificationSettings,
   handleUpdateUserSettings,
 } from './tool-handlers/meta.ts';
@@ -132,6 +134,12 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'make_call':
         return handleMakeCall(ctx, input as { text: string });
+
+      case 'get_call_settings':
+        return handleGetCallSettings(ctx);
+
+      case 'update_call_settings':
+        return handleUpdateCallSettings(ctx, input as { enabled?: boolean; language?: string });
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as { limit?: number });

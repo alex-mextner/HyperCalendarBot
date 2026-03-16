@@ -40,6 +40,7 @@ export interface MessageHandlerDeps {
   renderService?: RenderService;
   notificationPrefs?: AgentContext['notificationPrefs'];
   callQueue?: AgentContext['callQueue'];
+  callSettingsRepo?: AgentContext['callSettingsRepo'];
   sceneStorage: SceneStorage;
   botUsername?: string;
 }
@@ -168,6 +169,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       renderService: deps.renderService,
       notificationPrefs: deps.notificationPrefs,
       callQueue: deps.callQueue,
+      callSettingsRepo: deps.callSettingsRepo,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

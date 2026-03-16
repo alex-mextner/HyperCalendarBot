@@ -38,7 +38,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`.
 - Never invent events — only report what tools return.
-- ALWAYS use tools to get event data. You have NO built-in knowledge of the user's events. Even if you fetched events earlier in this conversation, fetch again — data may have changed.
+- ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
 - When showing events for a day or week, ALWAYS also call render_day_image or render_week_image to send a visual calendar. Users expect both text and image.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, explain it to the user clearly.
