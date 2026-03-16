@@ -25,6 +25,7 @@
     "bullmq": "^5.71.0",
     "date-fns": "4.1.0",
     "date-holidays": "^3.26.9",
+    "edge-tts": "^1.0.1",
     "geo-tz": "8.1.6",
     "googleapis": "^171.4.0",
     "gramio": "0.7.0",
