@@ -259,8 +259,9 @@ export function createBot(
       await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
         reply_markup: { remove_keyboard: true },
       });
-      // Save result as user message so AI can react to it
-      db.chatHistory.save(user.telegram_id, 'user', resultText);
+      // Build context for AI: who was requested + what happened
+      const selectedNames = selected.map((s) => s.firstName ?? s.username ?? `id:${s.userId}`).join(', ');
+      const contextMsg = `[User picker result] Selected: ${selectedNames}. Results:\n${results.join('\n')}`;
       // Trigger AI to acknowledge/continue
       const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
       if (chatId) {
@@ -268,7 +269,7 @@ export function createBot(
           .run({
             user,
             chatId,
-            messageText: resultText,
+            messageText: contextMsg,
             eventService,
             holidayService,
             chatHistory: db.chatHistory,
