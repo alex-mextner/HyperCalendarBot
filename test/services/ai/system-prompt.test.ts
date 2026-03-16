@@ -72,20 +72,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('ISO 8601');
   });
 
-  test('includes today events when they exist', () => {
-    const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
-    const eventService = new EventService(eventRepo, reminderRepo);
-    eventService.createEvent({
-      user_id: USER_ID,
-      title: 'Morning Standup',
-      start_at: new Date().toISOString(),
-      timezone: 'Europe/Kyiv',
-    });
-    ctx.eventService = eventService;
-
+  test('instructs AI to always use tools for event data', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('Morning Standup');
+    expect(prompt).toContain('ALWAYS use tools');
+    expect(prompt).toContain('get_events');
   });
 
   test('includes get_upcoming rule', () => {
@@ -101,6 +91,26 @@ describe('buildSystemPrompt', () => {
   test('includes get_reminders rule', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('get_reminders');
+  });
+
+  test('includes UTC offset explicitly to prevent AI timezone guessing', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toMatch(/UTC\+\d/);
+    expect(prompt).toContain('Current UTC time');
+    expect(prompt).toContain('subtract');
+  });
+
+  test('instructs to create events immediately without confirmation', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('create immediately');
+    expect(prompt).not.toContain('always confirm the details before creating');
+  });
+
+  test('instructs to use pick_users and find_contact for invitations', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('pick_users');
+    expect(prompt).toContain('find_contact');
+    expect(prompt).toContain('EXACT sequence');
   });
 
   test('includes language instruction for ru user', () => {

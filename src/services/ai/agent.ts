@@ -68,6 +68,7 @@ export class CalendarBotAgent {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
+    ctx.sender = this.sender;
     const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language);
     await writer.init();
 
@@ -141,8 +142,12 @@ export class CalendarBotAgent {
 
             aiLogger.info({ tool: block.name, input: block.input, userId: ctx.user.telegram_id }, 'Tool call');
 
+            writer.setToolLabel(block.name, block.input as Record<string, unknown>);
+            await writer.flush(true);
+
             const result = executeTool(ctx, block.name, block.input as Record<string, unknown>);
 
+            writer.markToolResult(result.success);
             aiLogger.info({ tool: block.name, success: result.success, userId: ctx.user.telegram_id }, 'Tool result');
 
             toolResults.push({
@@ -151,6 +156,18 @@ export class CalendarBotAgent {
               content: result.success ? (result.output ?? 'OK') : `Error: ${result.error}`,
               is_error: !result.success,
             });
+
+            if (result.stopLoop) {
+              // Tool requested to stop and wait for user input
+              writer.clearToolLabel();
+              if (contentBlocks.length > 0) {
+                this.saveAssistantTurn(ctx, contentBlocks);
+              }
+              this.saveToolResults(ctx, toolResults);
+              writer.commitIntermediate();
+              await writer.finalize();
+              return;
+            }
           }
         }
 
@@ -164,6 +181,7 @@ export class CalendarBotAgent {
           break;
         }
 
+        writer.commitIntermediate();
         this.saveToolResults(ctx, toolResults);
 
         currentMessages = [

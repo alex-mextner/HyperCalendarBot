@@ -1,31 +1,13 @@
 import { TZDate } from '@date-fns/tz';
-import { addDays, format, startOfDay } from 'date-fns';
+import { format } from 'date-fns';
+import { formatUtcOffset } from '../../utils/telegram.ts';
 import type { AgentContext } from './types.ts';
-
-function getEventsForPrompt(ctx: AgentContext, date: Date, label: string): string {
-  const occurrences = ctx.eventService.getEventsForDay(ctx.user.telegram_id, date, ctx.user.timezone);
-  if (occurrences.length === 0) return `${label}: No events.`;
-
-  const lines = occurrences.map((occ) => {
-    const start = format(new TZDate(occ.occurrence_start, ctx.user.timezone), 'HH:mm');
-    const end = occ.occurrence_end ? format(new TZDate(occ.occurrence_end, ctx.user.timezone), 'HH:mm') : null;
-    const time = end ? `${start}\u2013${end}` : start;
-    const loc = occ.event.location ? ` (${occ.event.location})` : '';
-    const desc = occ.event.description ? ` \u2014 ${occ.event.description}` : '';
-    return `  - ${time} ${occ.event.title}${loc}${desc}`;
-  });
-
-  return `${label}:\n${lines.join('\n')}`;
-}
 
 export function buildSystemPrompt(ctx: AgentContext): string {
   const now = TZDate.tz(ctx.user.timezone);
   const currentDateTime = format(now, 'yyyy-MM-dd HH:mm EEEE');
-  const today = startOfDay(now);
-  const tomorrow = addDays(today, 1);
-
-  const todayEvents = getEventsForPrompt(ctx, new Date(today.toISOString()), "Today's events");
-  const tomorrowEvents = getEventsForPrompt(ctx, new Date(tomorrow.toISOString()), "Tomorrow's events");
+  const utcNow = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss'Z'");
+  const utcOffset = formatUtcOffset(ctx.user.timezone);
 
   const langInstruction =
     ctx.user.language === 'ru'
@@ -37,22 +19,27 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 ## User Info
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
 - Language: ${ctx.user.language}
-- Timezone: ${ctx.user.timezone}
-- Current date/time: ${currentDateTime}
+- Timezone: ${ctx.user.timezone} (${utcOffset})
+- Current local time: ${currentDateTime}
+- Current UTC time: ${utcNow}
+- To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 
-## ${todayEvents}
-
-## ${tomorrowEvents}
+## Context
+- Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
+- Messages from private chats have no prefix.
 
 ## Rules
 - ${langInstruction}
 - All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z").
-- Convert user's local times to UTC using their timezone (${ctx.user.timezone}) before passing to tools.
-- When displaying times to the user, convert from UTC to their local timezone.
+- The current UTC time is ${utcNow}. Use it as anchor for relative times like "in 1 hour" — just add the hours/minutes directly to the UTC time.
+- When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
 - Be concise. No unnecessary preamble.
-- For event creation, always confirm the details before creating.
+- For event creation: create immediately, do not ask for confirmation. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit.
+- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. Explain WHAT will happen, list affected items, and ask "Точно?" with Да/Нет buttons. Only proceed after explicit confirmation.
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`.
 - Never invent events — only report what tools return.
+- ALWAYS use tools to get event data. You have NO built-in knowledge of the user's events. Even if you fetched events earlier in this conversation, fetch again — data may have changed.
+- When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, explain it to the user clearly.
 - When the user asks about free time, use the get_free_slots tool.
 - For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
@@ -61,5 +48,12 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - To check or show reminders for an event, use the get_reminders tool.
 - For sharing events or invitations, use share_event, send_invitation, share_agenda tools.
 - To check invitation responses, use get_invitation_status.
-- To change privacy/visibility, use update_sharing_settings or set_event_visibility.`;
+- To change privacy/visibility, use update_sharing_settings or set_event_visibility.
+- IMPORTANT: When the user mentions OTHER PEOPLE in an event (names or @usernames), follow this EXACT sequence:
+  1. Create the event first.
+  2. For EACH mentioned person: call find_contact to check the address book.
+  3. After checking all contacts, use pick_users tool to let the user select who to invite via Telegram's native user picker.
+  4. The loop will stop after pick_users — invitations are sent automatically when the user selects people.
+- Use ask_user for yes/no questions with buttons (e.g., confirming destructive actions).
+- After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.`;
 }
