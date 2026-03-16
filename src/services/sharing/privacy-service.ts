@@ -9,7 +9,7 @@ export class PrivacyService {
     if (eventOverride) return eventOverride;
 
     const settings = this.settingsRepo.get(userId);
-    return settings?.default_visibility ?? 'private';
+    return settings?.default_visibility ?? 'full';
   }
 
   canViewEvent(userId: number, eventId: number): boolean {

@@ -28,8 +28,8 @@ describe('PrivacyService', () => {
     service = new PrivacyService(settingsRepo);
   });
 
-  test('defaults to private when no settings exist', () => {
-    expect(service.resolveVisibility(USER_ID, 1)).toBe('private');
+  test('defaults to full when no settings exist', () => {
+    expect(service.resolveVisibility(USER_ID, 1)).toBe('full');
   });
 
   test('uses user default when no event override', () => {
@@ -52,8 +52,8 @@ describe('PrivacyService', () => {
     expect(service.resolveVisibility(USER_ID, event.id)).toBe('full');
   });
 
-  test('canViewEvent returns false for private', () => {
-    expect(service.canViewEvent(USER_ID, 1)).toBe(false);
+  test('canViewEvent returns true when no settings exist (defaults to full)', () => {
+    expect(service.canViewEvent(USER_ID, 1)).toBe(true);
   });
 
   test('canViewEvent returns true for free_busy or full', () => {
@@ -74,7 +74,7 @@ describe('PrivacyService', () => {
     expect(service.isFreeBusyOnly(USER_ID, 999)).toBe(false);
   });
 
-  test('isFreeBusyOnly returns false for private', () => {
+  test('isFreeBusyOnly returns false when no settings (defaults to full)', () => {
     expect(service.isFreeBusyOnly(USER_ID, 1)).toBe(false);
   });
 });

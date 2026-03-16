@@ -29,7 +29,7 @@ describe('SharingSettingsRepository', () => {
     repo.ensureDefaults(USER_ID);
     const settings = repo.get(USER_ID);
     expect(settings).not.toBeNull();
-    expect(settings!.default_visibility).toBe('private');
+    expect(settings!.default_visibility).toBe('full');
     expect(settings!.inline_mode_enabled).toBe(1);
     expect(settings!.allow_invitations).toBe(1);
   });
@@ -38,7 +38,7 @@ describe('SharingSettingsRepository', () => {
     repo.ensureDefaults(USER_ID);
     repo.ensureDefaults(USER_ID);
     const settings = repo.get(USER_ID);
-    expect(settings!.default_visibility).toBe('private');
+    expect(settings!.default_visibility).toBe('full');
   });
 
   test('update changes specified fields only', () => {

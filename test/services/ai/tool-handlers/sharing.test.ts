@@ -409,8 +409,10 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('No visible events');
     });
 
-    test('returns no events when all events are private', () => {
-      // Default visibility is 'private', so events without overrides won't appear
+    test('returns no events when all events are explicitly private', () => {
+      // Must explicitly set visibility to private — default is now 'full'
+      sharingSettingsRepo.ensureDefaults(USER_ID);
+      sharingSettingsRepo.update(USER_ID, { default_visibility: 'private' });
       const now = new Date();
       const startHour = new Date(now);
       startHour.setHours(now.getHours() + 1, 0, 0, 0);

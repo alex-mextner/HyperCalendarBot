@@ -36,17 +36,32 @@ describe('SharingService', () => {
     expect(result).toHaveLength(0);
   });
 
-  test('getAgendaForSharing filters private events', () => {
-    const { service, eventRepo } = setup();
+  test('getAgendaForSharing filters explicitly private events', () => {
+    const { service, eventRepo, settingsRepo } = setup();
+    settingsRepo.ensureDefaults(USER_ID);
+    settingsRepo.update(USER_ID, { default_visibility: 'private' });
     eventRepo.create({
       user_id: USER_ID,
       title: 'Secret',
       start_at: '2026-03-15T10:00:00Z',
       timezone: TZ,
     });
-    // Default visibility is 'private', so nothing should be shareable
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
     expect(result).toHaveLength(0);
+  });
+
+  test('getAgendaForSharing shows events with default (full) visibility', () => {
+    const { service, eventRepo } = setup();
+    eventRepo.create({
+      user_id: USER_ID,
+      title: 'Visible Event',
+      start_at: '2026-03-15T10:00:00Z',
+      timezone: TZ,
+    });
+    // Default visibility is now 'full' when no settings exist
+    const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.visibility).toBe('full');
   });
 
   test('getAgendaForSharing returns events with full visibility', () => {
