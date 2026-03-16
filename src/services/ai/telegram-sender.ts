@@ -33,6 +33,9 @@ export function createTelegramSender(bot: Bot): TelegramSender {
       });
       return { message_id: result.message_id };
     },
+    async sendPhoto(chatId: number, photo: File) {
+      await bot.api.sendPhoto({ chat_id: chatId, photo });
+    },
     async sendUserPicker(chatId: number, text: string, requestId: number) {
       const kb = new Keyboard()
         .requestUsers('👤 Выбрать участников', requestId, {

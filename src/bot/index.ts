@@ -139,7 +139,9 @@ export function createBot(
     .command('today', (ctx) =>
       handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
     )
-    .command('tomorrow', (ctx) => handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('tomorrow', (ctx) =>
+      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+    )
     .command('week', (ctx) =>
       handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
     )
@@ -302,6 +304,7 @@ export function createBot(
         sharingSettingsRepo: db.sharingSettings,
         sharedEventRepo: db.sharedEvents,
         privacyService,
+        renderService,
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
       })(ctx as unknown as BotCommandContext),

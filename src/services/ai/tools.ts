@@ -406,6 +406,36 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'render_day_image',
+    description:
+      'Generate and send a beautiful calendar image for a specific date. Use when showing events for a day (today, tomorrow, specific date) — always send an image alongside text. Users love visual schedules.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        date: {
+          type: 'string',
+          description: 'Date in YYYY-MM-DD format (e.g., "2026-03-17")',
+        },
+      },
+      required: ['date'],
+    },
+  },
+  {
+    name: 'render_week_image',
+    description:
+      'Generate and send a beautiful weekly calendar image starting from a specific date. Use when showing events for a week. Users love visual schedules.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        week_start: {
+          type: 'string',
+          description: 'Monday date in YYYY-MM-DD format (e.g., "2026-03-16")',
+        },
+      },
+      required: ['week_start'],
+    },
+  },
+  {
     name: 'set_event_visibility',
     description: 'Set visibility for a specific event (overrides default settings).',
     input_schema: {

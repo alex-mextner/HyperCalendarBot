@@ -29,6 +29,7 @@ export interface AgentContext {
   privacyService?: PrivacyService;
   contactRepo?: ContactRepository;
   sender?: TelegramSender;
+  renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
 }
 
 export interface ToolResult {
@@ -49,4 +50,5 @@ export interface TelegramSender {
   editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void>;
   sendButtons?(chatId: number, text: string, buttons: string[], parseMode?: string): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
+  sendPhoto?(chatId: number, photo: File): Promise<void>;
 }

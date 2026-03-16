@@ -1,3 +1,4 @@
+import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 interface FindUserInput {
@@ -100,6 +101,44 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   // Use event_id as request_id so we can match the response
   ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch(() => {});
   return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
+}
+
+export function handleRenderDayImage(ctx: AgentContext, input: { date: string }): ToolResult {
+  if (!ctx.renderService || !ctx.sender?.sendPhoto) {
+    return { success: false, error: 'Image rendering not available.' };
+  }
+  const occurrences = ctx.eventService.getEventsForDay(
+    ctx.user.telegram_id,
+    new Date(`${input.date}T12:00:00Z`),
+    ctx.user.timezone,
+  );
+  const holidays = ctx.holidayService?.getHolidaysForDate(ctx.user.telegram_id, input.date) ?? [];
+  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
+  const sender = ctx.sender;
+
+  renderDayImage(
+    ctx.renderService as never,
+    occurrences,
+    input.date,
+    ctx.user.timezone,
+    lang,
+    ctx.user.telegram_id,
+    holidays,
+  )
+    .then((buffer) => {
+      const file = new File([buffer], 'day.png', { type: 'image/png' });
+      return sender.sendPhoto!(ctx.chatId, file);
+    })
+    .catch(() => {});
+
+  return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };
+}
+
+export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string }): ToolResult {
+  if (!ctx.renderService) {
+    return { success: false, error: 'Image rendering not available.' };
+  }
+  return { success: true, output: `Week image rendering for ${input.week_start} is not yet implemented via AI tools.` };
 }
 
 export function handleGetUserSettings(ctx: AgentContext): ToolResult {

@@ -12,6 +12,7 @@ import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import type { RenderService } from '../../services/image/render-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
@@ -36,6 +37,7 @@ export interface MessageHandlerDeps {
   sharingSettingsRepo?: SharingSettingsRepository;
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
+  renderService?: RenderService;
   sceneStorage: SceneStorage;
   botUsername?: string;
 }
@@ -159,6 +161,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sharingSettingsRepo: deps.sharingSettingsRepo,
       sharedEventRepo: deps.sharedEventRepo,
       privacyService: deps.privacyService,
+      renderService: deps.renderService,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

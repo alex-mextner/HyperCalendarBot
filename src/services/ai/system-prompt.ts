@@ -39,6 +39,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`.
 - Never invent events — only report what tools return.
 - ALWAYS use tools to get event data. You have NO built-in knowledge of the user's events. Even if you fetched events earlier in this conversation, fetch again — data may have changed.
+- When showing events for a day or week, ALWAYS also call render_day_image or render_week_image to send a visual calendar. Users expect both text and image.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, explain it to the user clearly.
 - When the user asks about free time, use the get_free_slots tool.

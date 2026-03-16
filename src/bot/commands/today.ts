@@ -1,13 +1,13 @@
 // src/bot/commands/today.ts
 
 import { TZDate } from '@date-fns/tz';
-import { InlineKeyboard } from 'gramio';
-import { CB } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
+import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import { imageLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export async function handleToday(
@@ -23,9 +23,23 @@ export async function handleToday(
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
   const text = formatDayAgenda(occurrences, now.toISOString(), user.timezone, user.language, holidays);
 
-  const params: { parse_mode: 'HTML'; reply_markup?: InlineKeyboard } = { parse_mode: 'HTML' };
+  await ctx.send(text, { parse_mode: 'HTML' });
+
   if (renderService) {
-    params.reply_markup = new InlineKeyboard().text('📷', `${CB.IMG_DAILY}:${dateIso}`);
+    try {
+      const buffer = await renderDayImage(
+        renderService,
+        occurrences,
+        dateIso,
+        user.timezone,
+        user.language as 'ru' | 'en',
+        user.telegram_id,
+        holidays,
+      );
+      const file = new File([buffer], 'today.png', { type: 'image/png' });
+      await ctx.sendPhoto(file);
+    } catch (err) {
+      imageLogger.error({ error: (err as Error).message }, 'Render failed');
+    }
   }
-  await ctx.send(text, params);
 }
