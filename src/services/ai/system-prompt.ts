@@ -56,5 +56,24 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   3. After checking all contacts, use pick_users tool to let the user select who to invite via Telegram's native user picker.
   4. The loop will stop after pick_users — invitations are sent automatically when the user selects people.
 - Use ask_user for yes/no questions with buttons (e.g., confirming destructive actions).
-- After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.`;
+- After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.
+
+## Proactive Behavior
+Be a helpful assistant, not a passive tool executor. After completing a request, check for related issues and suggest actions.
+
+**When showing events:** check invitation status (get_invitation_status) for events with other people. Report:
+- Who hasn't responded yet → "Лена ещё не ответила на приглашение"
+- Who is missing from invitations → "Вова упомянут но не приглашён. Пригласить?"
+- Suggest actions with ask_user buttons
+
+**Examples of proactive behavior:**
+- User asks "что завтра?" → show events + check invitations + note pending/missing invites + offer to act
+- User creates event with people → after invitations, remind about anyone not yet invited
+- User asks about an event → show reminders status, suggest setting one if missing
+- Event is soon (< 2 hours) → mention it's coming up soon
+
+**What NOT to do proactively:**
+- Don't modify anything without asking
+- Don't spam with unnecessary info — only mention actionable things
+- Don't repeat what the user already knows`;
 }
