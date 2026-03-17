@@ -3,6 +3,7 @@ import type { InvitationRepository } from '../../database/repositories/invitatio
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
 import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
+import type { ConflictChecker } from '../event/conflict-checker';
 
 const MAX_DECLINES = 3;
 
@@ -19,6 +20,7 @@ export class InvitationService {
     private eventRepo: EventRepository,
     private settingsRepo: SharingSettingsRepository,
     private participantRepo?: ParticipantRepository,
+    private conflictChecker?: ConflictChecker,
   ) {}
 
   sendInvitation(eventId: number, inviterId: number, inviteeId: number, inviteeUsername?: string): InvitationResult {
@@ -109,6 +111,18 @@ export class InvitationService {
       }
     }
 
-    return { success: true, invitation: this.invRepo.findById(invitationId)! };
+    const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
+
+    if (newStatus === 'accepted' && this.conflictChecker) {
+      const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);
+      if (event) {
+        const conflicts = this.conflictChecker.checkConflicts(event, userId);
+        if (conflicts.length > 0) {
+          result.conflicts = conflicts;
+        }
+      }
+    }
+
+    return result;
   }
 }
