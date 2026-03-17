@@ -432,4 +432,24 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE users ADD COLUMN timezone_updated_at TEXT`);
     },
   },
+  {
+    name: '014_event_participants',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE event_participants (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id   INTEGER NOT NULL,
+          user_id    INTEGER NOT NULL,
+          status     TEXT NOT NULL DEFAULT 'pending',
+          role       TEXT NOT NULL DEFAULT 'attendee',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(event_id, user_id),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_participants_user_status ON event_participants(user_id, status);
+        CREATE INDEX idx_participants_event ON event_participants(event_id);
+      `);
+    },
+  },
 ];

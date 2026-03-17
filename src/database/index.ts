@@ -18,6 +18,7 @@ import { HolidayRepository } from './repositories/holiday.repository.ts';
 import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
+import { ParticipantRepository } from './repositories/participant.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
@@ -44,6 +45,7 @@ export class DatabaseService {
   readonly sharedEvents: SharedEventRepository;
   readonly groupChats: GroupChatRepository;
   readonly contacts: ContactRepository;
+  readonly participants: ParticipantRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -74,6 +76,7 @@ export class DatabaseService {
     this.sharedEvents = new SharedEventRepository(this.db);
     this.groupChats = new GroupChatRepository(this.db);
     this.contacts = new ContactRepository(this.db);
+    this.participants = new ParticipantRepository(this.db);
   }
 
   close(): void {

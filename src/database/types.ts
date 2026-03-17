@@ -182,6 +182,18 @@ export type InvitationStatus = 'pending' | 'accepted' | 'declined' | 'maybe' | '
 export type Visibility = 'private' | 'free_busy' | 'full';
 export type SharedToType = 'user' | 'group';
 export type ShareType = 'card' | 'image' | 'agenda';
+export type ParticipantStatus = 'pending' | 'accepted' | 'declined' | 'maybe';
+export type ParticipantRole = 'organizer' | 'attendee';
+
+export interface EventParticipant {
+  id: number;
+  event_id: number;
+  user_id: number;
+  status: ParticipantStatus;
+  role: ParticipantRole;
+  created_at: string;
+  updated_at: string;
+}
 export type DeepLinkType = 'shared_event' | 'invitation' | 'group_context';
 
 export interface Invitation {
