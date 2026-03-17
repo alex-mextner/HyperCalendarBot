@@ -23,7 +23,10 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'create_event',
-    description: 'Create a new calendar event. Returns the created event.',
+    description:
+      'Create a new calendar event. Returns the created event. ' +
+      'If the event time is in the past, the tool will reject with PAST_EVENT error — ' +
+      'you must ask the user to confirm via ask_user, then retry with force: true.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -50,6 +53,10 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'array',
           items: { type: 'number' },
           description: 'Minutes before event to send reminders (e.g., [15, 60]). Optional.',
+        },
+        force: {
+          type: 'boolean',
+          description: 'Set to true to create event in the past after user confirmed. Do NOT set without asking first.',
         },
       },
       required: ['title', 'start_at'],

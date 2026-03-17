@@ -14,6 +14,7 @@ interface CreateEventInput {
   all_day?: boolean;
   recurrence_rule?: string;
   reminder_minutes?: number[];
+  force?: boolean;
 }
 
 interface UpdateEventInput {
@@ -68,6 +69,31 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
 }
 
 export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
+  // Block creation of events in the past — force the agent to confirm with the user first
+  if (!input.all_day && !input.force) {
+    const eventTime = new Date(input.start_at).getTime();
+    const now = Date.now();
+    if (eventTime < now) {
+      const diffMs = now - eventTime;
+      const diffDays = Math.floor(diffMs / 86_400_000);
+      const diffLabel = diffDays >= 1 ? `${diffDays} day(s) ago` : `${Math.round(diffMs / 60_000)} minutes ago`;
+      return {
+        success: false,
+        error:
+          `PAST_EVENT: The requested time (${input.start_at}) is ${diffLabel}. ` +
+          'You MUST ask the user via ask_user with options like: ' +
+          '["Создать в прошлом", "Перенести на <next reasonable date>"] — ' +
+          'include a suggestion for the most likely intended date (e.g. same time tomorrow, or same day next month). ' +
+          'The user can also reply with free text to specify a different time. ' +
+          'If user confirms past event, call create_event again with force: true.',
+      };
+    }
+  }
+
+  return executeCreateEvent(ctx, input);
+}
+
+function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
   try {
     const event = ctx.eventService.createEvent({
       user_id: ctx.user.telegram_id,

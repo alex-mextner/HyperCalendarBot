@@ -68,6 +68,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
             all_day?: boolean;
             recurrence_rule?: string;
             reminder_minutes?: number[];
+            force?: boolean;
           },
         );
 

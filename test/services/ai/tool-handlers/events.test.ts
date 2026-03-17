@@ -82,11 +82,13 @@ describe('event tool handlers', () => {
   });
 
   describe('handleCreateEvent', () => {
+    const futureDate = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
+
     test('creates event and returns details', () => {
       const result = handleCreateEvent(ctx, {
         title: 'New Meeting',
-        start_at: '2026-03-15T14:00:00Z',
-        end_at: '2026-03-15T15:00:00Z',
+        start_at: `${futureDate}14:00:00Z`,
+        end_at: `${futureDate}15:00:00Z`,
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('New Meeting');
@@ -96,12 +98,41 @@ describe('event tool handlers', () => {
     test('creates event with description and location', () => {
       const result = handleCreateEvent(ctx, {
         title: 'Lunch',
-        start_at: '2026-03-15T12:00:00Z',
+        start_at: `${futureDate}12:00:00Z`,
         description: 'Team lunch',
         location: 'Cafe',
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Lunch');
+    });
+
+    test('rejects past event without force', () => {
+      const result = handleCreateEvent(ctx, {
+        title: 'Past Event',
+        start_at: '2020-01-01T10:00:00Z',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('PAST_EVENT');
+    });
+
+    test('allows past event with force: true', () => {
+      const result = handleCreateEvent(ctx, {
+        title: 'Past Event',
+        start_at: '2020-01-01T10:00:00Z',
+        force: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Past Event');
+    });
+
+    test('allows all-day past event without force', () => {
+      const result = handleCreateEvent(ctx, {
+        title: 'Past Holiday',
+        start_at: '2020-01-01T00:00:00Z',
+        all_day: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Past Holiday');
     });
   });
 

@@ -60,9 +60,10 @@ describe('executeTool', () => {
   });
 
   test('routes create_event to handler', () => {
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
     const result = executeTool(ctx, 'create_event', {
       title: 'Test',
-      start_at: '2026-03-15T14:00:00Z',
+      start_at: `${tomorrow}14:00:00Z`,
     });
     expect(result.success).toBe(true);
     expect(result.output).toContain('Test');
