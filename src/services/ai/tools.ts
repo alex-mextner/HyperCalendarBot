@@ -567,7 +567,8 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'get_bot_info',
-    description: 'Get information about non-obvious bot capabilities that are not derivable from other tools. Call when user asks what the bot can do, asks for help, or wants to know about features.',
+    description:
+      'Get information about non-obvious bot capabilities that are not derivable from other tools. Call when user asks what the bot can do, asks for help, or wants to know about features.',
     input_schema: {
       type: 'object' as const,
       properties: {},

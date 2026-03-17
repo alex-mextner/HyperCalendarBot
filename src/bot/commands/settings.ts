@@ -55,15 +55,9 @@ export async function handleSettingsCallback(
   if (subAction === 'notifications') {
     const prefs = prefsService.getOrCreate(user.telegram_id);
     const intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
-    const morning = prefs.morning_agenda_enabled
-      ? `✅ ${prefs.morning_agenda_time}`
-      : '❌';
-    const evening = prefs.evening_review_enabled
-      ? `✅ ${prefs.evening_review_time}`
-      : '❌';
-    const quiet = prefs.quiet_hours_enabled
-      ? `✅ ${prefs.quiet_hours_start}–${prefs.quiet_hours_end}`
-      : '❌';
+    const morning = prefs.morning_agenda_enabled ? `✅ ${prefs.morning_agenda_time}` : '❌';
+    const evening = prefs.evening_review_enabled ? `✅ ${prefs.evening_review_time}` : '❌';
+    const quiet = prefs.quiet_hours_enabled ? `✅ ${prefs.quiet_hours_start}–${prefs.quiet_hours_end}` : '❌';
     const text = [
       '🔔 Уведомления',
       '',

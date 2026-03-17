@@ -13,6 +13,7 @@ import { SharedEventRepository } from '../../../../src/database/repositories/sha
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import {
   handleGetInvitationStatus,
   handleProposeEdit,
@@ -21,7 +22,6 @@ import {
   handleShareAgenda,
   handleShareEvent,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
-import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';

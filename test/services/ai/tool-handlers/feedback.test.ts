@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
+import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { FeedbackRepository } from '../../../../src/database/repositories/feedback.repository.ts';
+import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
@@ -10,8 +12,6 @@ import { handleSendFeedback } from '../../../../src/services/ai/tool-handlers/fe
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
-import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
-import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -133,11 +133,7 @@ describe('handleSendFeedback', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
-    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as [
-      number,
-      string,
-      Record<string, unknown>,
-    ];
+    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as [number, string, Record<string, unknown>];
     expect(chatId).toBe(ADMIN_ID);
     expect(text).toContain('feature');
     expect(text).toContain('Add dark mode');

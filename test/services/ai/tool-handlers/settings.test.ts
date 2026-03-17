@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
+import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
@@ -9,8 +11,6 @@ import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
-import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
-import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -215,7 +215,9 @@ describe('handleManageSettings', () => {
       ctx.notificationPrefs = {
         ensureDefaults: () => {},
         getPrefs: () => prefs,
-        update: (userId, patch) => { Object.assign(prefs, patch); },
+        update: (userId, patch) => {
+          Object.assign(prefs, patch);
+        },
       };
       const result = handleManageSettings(ctx, {
         action: 'update',

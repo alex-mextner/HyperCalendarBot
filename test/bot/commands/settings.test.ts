@@ -140,13 +140,7 @@ describe('handleSettingsCallback', () => {
       get: mock(() => ({ enabled: 1, language: 'ru' })),
     };
 
-    await handleSettingsCallback(
-      ctx,
-      makeUser() as never,
-      'calls',
-      prefsService as never,
-      callSettingsRepo as never,
-    );
+    await handleSettingsCallback(ctx, makeUser() as never, 'calls', prefsService as never, callSettingsRepo as never);
 
     const [text] = ctx.editText.mock.calls[0] as [string];
     expect(text).toContain('✅');
