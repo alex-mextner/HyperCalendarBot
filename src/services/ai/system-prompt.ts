@@ -6,8 +6,14 @@ import type { AgentContext } from './types.ts';
 export function buildSystemPrompt(ctx: AgentContext): string {
   const now = TZDate.tz(ctx.user.timezone);
   const currentDateTime = format(now, 'yyyy-MM-dd HH:mm EEEE');
+  const currentHour = now.getHours();
   const utcNow = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss'Z'");
   const utcOffset = formatUtcOffset(ctx.user.timezone);
+
+  const tzUpdatedAt = ctx.user.timezone_updated_at;
+  const tzFreshness = tzUpdatedAt
+    ? `Last timezone update: ${tzUpdatedAt}`
+    : 'Timezone was never set by the user (default UTC). Ask them to share location for accurate times.';
 
   const langInstruction =
     ctx.user.language === 'ru'
@@ -21,7 +27,9 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - Language: ${ctx.user.language}
 - Timezone: ${ctx.user.timezone} (${utcOffset})
 - Current local time: ${currentDateTime}
+- Current local hour: ${currentHour}
 - Current UTC time: ${utcNow}
+- ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 
 ## Context
@@ -35,6 +43,11 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
 - Be concise. No unnecessary preamble.
 - For event creation: create immediately, do not ask for confirmation. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit.
+- NEVER auto-correct dates or times. If the user says "на 15" — use the 15th of the CURRENT month, NEVER shift to next month or tomorrow. If the user says "в 8" — use 8:00 today. Always pass the LITERAL date/time to the tool. Let create_event validate — if it rejects, THEN ask the user.
+- PAST EVENTS: create_event will reject with PAST_EVENT error if the time is in the past. When this happens, use ask_user to offer the original time plus reasonable alternatives. The user can also reply with free text to specify their own correction — handle both button presses and text responses.
+- AMBIGUOUS HOURS: If create_event rejects a bare hour (e.g., user said "в 8" and 8:00 today is past), offer buttons: ["8:00 сегодня (прошло)", "20:00 сегодня", "8:00 завтра", "Отмена"]. Do NOT silently pick 20:00 or shift to tomorrow.
+- PAST DATES: If create_event rejects a past date (e.g., user said "на 15" but 15th already passed), offer buttons like: ["15-го числа (прошло)", "15-го в следующем месяце", "Отмена"].
+- "Отмена" button is added automatically to every ask_user call. If user picks "Отмена", acknowledge and do nothing.
 - For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`.
 - Never invent events — only report what tools return.

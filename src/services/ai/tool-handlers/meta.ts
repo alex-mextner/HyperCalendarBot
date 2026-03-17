@@ -102,7 +102,9 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   if (!ctx.sender?.sendButtons) {
     return { success: false, error: 'Buttons not supported.' };
   }
-  ctx.sender.sendButtons(ctx.chatId, input.question, input.options, 'HTML').catch(() => {});
+  const CANCEL = 'Отмена';
+  const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
+  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML').catch(() => {});
   return { success: true, output: 'Question sent. Waiting for user response.', stopLoop: true };
 }
 
