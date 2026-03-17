@@ -236,7 +236,24 @@ export function createBot(
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     // Sharing commands
-    .command('invite', (ctx) => handleInvite(ctx as unknown as BotCommandContext, eventService))
+    .command('invite', (ctx) =>
+      handleInvite(
+        ctx as unknown as BotCommandContext,
+        invitationService,
+        eventService,
+        db.invitations,
+        deepLinkService,
+        async (chatId, text, options) => {
+          const sent = await bot.api.sendMessage({
+            chat_id: chatId,
+            text,
+            parse_mode: options.parse_mode as 'HTML',
+            reply_markup: options.reply_markup as never,
+          });
+          return { message_id: sent.message_id };
+        },
+      ),
+    )
     .command('invitations', (ctx) =>
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )
