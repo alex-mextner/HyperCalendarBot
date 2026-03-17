@@ -53,6 +53,7 @@ export class TelegramStreamWriter {
   private toolLines: string[] = [];
   private pendingIndicators: string[] = [];
   private intermediateChunks: string[] = [];
+  private plainResponseText = '';
 
   constructor(
     private sender: TelegramSender,
@@ -70,7 +71,7 @@ export class TelegramStreamWriter {
   }
 
   getText(): string {
-    return this.text;
+    return this.plainResponseText || this.text;
   }
 
   setToolLabel(toolName: string, input?: Record<string, unknown>): void {
@@ -160,6 +161,7 @@ export class TelegramStreamWriter {
 
   async finalize(): Promise<void> {
     this.toolLabel = null;
+    this.plainResponseText = this.text.trim();
 
     // Collect any remaining tool lines from the last round
     if (this.toolLines.length > 0) {
@@ -167,7 +169,7 @@ export class TelegramStreamWriter {
       this.toolLines = [];
     }
 
-    const finalResponse = this.text.trim() ? markdownToHtml(this.text) : '...';
+    const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
 
     // Build expandable blockquote with ALL intermediate reasoning + tools
     let finalText = finalResponse;
