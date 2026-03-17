@@ -261,9 +261,19 @@ export function createBot(
         if (db.contacts) {
           db.contacts.upsert(user.telegram_id, name, shared.username, shared.userId);
         }
-        // Send invitation
+        // Send invitation + deliver Telegram notification
         if (invitationService) {
           const inv = invitationService.sendInvitation(eventId, user.telegram_id, shared.userId);
+          if (inv.success && inv.invitation) {
+            const event = eventService.getEvent(eventId, user.telegram_id);
+            const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
+            const invText = t(lang).invitation_received(event?.title ?? `Event #${eventId}`, inviterName);
+            telegramSender.sendInvitation!(shared.userId, invText, inv.invitation.id)
+              .then((sent) => {
+                if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, shared.userId);
+              })
+              .catch(() => {});
+          }
           results.push(inv.success ? `✅ ${name}` : `❌ ${name}: ${inv.error}`);
         } else {
           results.push(`❌ ${name}: invitations not configured`);

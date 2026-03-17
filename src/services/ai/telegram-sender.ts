@@ -1,5 +1,6 @@
 import type { Bot } from 'gramio';
 import { InlineKeyboard, Keyboard } from 'gramio';
+import { CB } from '../../config/constants.ts';
 import type { TelegramSender } from './types.ts';
 
 export function createTelegramSender(bot: Bot): TelegramSender {
@@ -35,6 +36,24 @@ export function createTelegramSender(bot: Bot): TelegramSender {
     },
     async sendPhoto(chatId: number, photo: File) {
       await bot.api.sendPhoto({ chat_id: chatId, photo });
+    },
+    async sendInvitation(inviteeId: number, text: string, invitationId: number) {
+      const kb = new InlineKeyboard()
+        .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitationId}`)
+        .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitationId}`)
+        .row()
+        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitationId}`);
+      try {
+        const result = await bot.api.sendMessage({
+          chat_id: inviteeId,
+          text,
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        return { message_id: result.message_id };
+      } catch {
+        return null;
+      }
     },
     async sendUserPicker(chatId: number, text: string, requestId: number) {
       const kb = new Keyboard()

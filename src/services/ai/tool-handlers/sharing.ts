@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import type { Visibility } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
@@ -68,9 +69,26 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
     return { success: false, error: result.error };
   }
 
+  const invitation = result.invitation!;
+
+  // Deliver Telegram notification to invitee
+  if (ctx.sender?.sendInvitation && ctx.invitationRepo) {
+    const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+    const inviterName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+    const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
+    const text = t(lang).invitation_received(event?.title ?? `Event #${input.event_id}`, inviterName);
+
+    const invRepo = ctx.invitationRepo;
+    ctx.sender.sendInvitation(input.invitee_id, text, invitation.id).then((sent) => {
+      if (sent) {
+        invRepo.setMessageInfo(invitation.id, sent.message_id, input.invitee_id);
+      }
+    });
+  }
+
   return {
     success: true,
-    output: `Invitation sent (id: ${result.invitation!.id}, event: ${input.event_id}, invitee: ${input.invitee_id}).`,
+    output: `Invitation sent (id: ${invitation.id}, event: ${input.event_id}, invitee: ${input.invitee_id}).`,
   };
 }
 

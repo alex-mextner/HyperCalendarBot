@@ -191,6 +191,82 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
 
+    test('delivers Telegram message to invitee when sender available', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Delivered Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      let deliveredTo: number | undefined;
+      let deliveredText: string | undefined;
+      let deliveredInvId: number | undefined;
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendInvitation: async (inviteeId, text, invitationId) => {
+            deliveredTo = inviteeId;
+            deliveredText = text;
+            deliveredInvId = invitationId;
+            return { message_id: 42 };
+          },
+        },
+      });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      // Wait for async delivery
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(deliveredTo).toBe(OTHER_USER_ID);
+      expect(deliveredText).toContain('Delivered Party');
+      expect(deliveredInvId).toBeGreaterThan(0);
+
+      // Check message_id was saved
+      const inv = invitationRepo.findById(deliveredInvId!);
+      expect(inv?.message_id).toBe(42);
+      expect(inv?.chat_id).toBe(OTHER_USER_ID);
+    });
+
+    test('does not crash when sender.sendInvitation returns null (user blocked bot)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Blocked User Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+        },
+      });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Invitation created but message_id stays null
+      const inv = invitationRepo.findActiveByEventAndInvitee(event.id, OTHER_USER_ID);
+      expect(inv).not.toBeNull();
+      expect(inv!.message_id).toBeNull();
+    });
+
+    test('still succeeds when sender is not available (no delivery)', () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Sender Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({ sender: undefined });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Invitation sent');
+    });
+
     test('returns error for duplicate invitation', () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
