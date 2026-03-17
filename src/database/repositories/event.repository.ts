@@ -107,6 +107,35 @@ export class EventRepository {
     return result.changes > 0;
   }
 
+  getVisibleInRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `
+      SELECT DISTINCT e.* FROM events e
+      WHERE e.start_at >= ? AND e.start_at < ?
+        AND e.is_cancelled = 0
+        AND e.recurrence_rule IS NULL
+        AND e.parent_event_id IS NULL
+        AND (
+          e.user_id = ?
+          OR e.id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          )
+        )
+      ORDER BY e.start_at
+    `,
+      )
+      .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
+  }
+
+  isParticipant(eventId: number, userId: number): boolean {
+    const row = this.db
+      .prepare("SELECT 1 FROM event_participants WHERE event_id = ? AND user_id = ? AND status = 'accepted'")
+      .get(eventId, userId);
+    return row != null;
+  }
+
   search(userId: number, query: string, limit = 20): CalendarEvent[] {
     return this.db
       .prepare(`
