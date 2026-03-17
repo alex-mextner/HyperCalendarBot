@@ -54,6 +54,11 @@ export interface AgentContext {
   botUsername?: string;
   isVoiceMessage?: boolean;
   stressDictionary?: StressDictionary;
+  feedbackContext?: {
+    threadId: number;
+    subject: string;
+    messages: { sender: string; text: string }[];
+  };
 }
 
 export interface ToolResult {

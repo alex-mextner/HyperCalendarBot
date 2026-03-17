@@ -3,7 +3,9 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
+import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
@@ -12,10 +14,12 @@ import type { SharingSettingsRepository } from '../../database/repositories/shar
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
-import type { AgentContext } from '../../services/ai/types.ts';
+import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
+import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
@@ -24,6 +28,10 @@ import type { SileroTtsService } from '../../services/voice/silero-tts-service.t
 import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
+import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
+import { createIntentMatcherLayer, type WorkflowSession } from '../pipeline/intent-matcher-layer.ts';
+import { runPipeline } from '../pipeline/pipeline.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -59,6 +67,14 @@ export interface MessageHandlerDeps {
   stressDictionary?: AgentContext['stressDictionary'];
   sileroTts?: SileroTtsService;
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
+  // Pipeline: intent matching
+  intentMatcher?: IntentMatcher;
+  intentRepo?: IntentRepository;
+  intentExecutor?: IntentExecutor;
+  intentToolExecutor?: (toolName: string, input: Record<string, unknown>) => ToolResult;
+  workflowSessions?: Map<number, WorkflowSession>;
+  // Pipeline: feedback routing
+  feedbackRepo?: FeedbackRepository;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -212,7 +228,58 @@ async function handleVoiceMessage(
   }
 }
 
+function buildAgentContextFactory(deps: MessageHandlerDeps) {
+  return (user: User, chatId: number, messageText: string): AgentContext => ({
+    user,
+    chatId,
+    messageText,
+    eventService: deps.eventService,
+    holidayService: deps.holidayService,
+    chatHistory: deps.chatHistory,
+    userRepo: deps.userRepo,
+    reminderRepo: deps.reminderRepo,
+    contactRepo: deps.contactRepo,
+    participantRepo: deps.participantRepo,
+    editProposalRepo: deps.editProposalRepo,
+    invitationService: deps.invitationService,
+    invitationRepo: deps.invitationRepo,
+    sharingService: deps.sharingService,
+    sharingSettingsRepo: deps.sharingSettingsRepo,
+    sharedEventRepo: deps.sharedEventRepo,
+    privacyService: deps.privacyService,
+    renderService: deps.renderService,
+    notificationPrefs: deps.notificationPrefs,
+    callQueue: deps.callQueue,
+    callSettingsRepo: deps.callSettingsRepo,
+    googleCalendarRepo: deps.googleCalendarRepo,
+    deepLinkService: deps.deepLinkService,
+    botUsername: deps.botUsername,
+    stressDictionary: deps.stressDictionary,
+  });
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
+  const agentContextBuilder = buildAgentContextFactory(deps);
+  const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
+
+  const aiAgentLayer = createAiAgentLayer({ agent: deps.agent, agentContextBuilder });
+
+  const layers = [
+    ...(deps.intentMatcher && deps.intentRepo && deps.intentExecutor && deps.intentToolExecutor
+      ? [
+          createIntentMatcherLayer(
+            deps.intentMatcher,
+            deps.intentRepo,
+            deps.intentExecutor,
+            deps.intentToolExecutor,
+            workflowSessions,
+          ),
+        ]
+      : []),
+    ...(deps.feedbackRepo ? [createFeedbackRouterLayer(deps.feedbackRepo)] : []),
+    aiAgentLayer,
+  ];
+
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
@@ -265,44 +332,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       messagePrefix = `[Group: ${groupName}, From: ${senderName}] `;
     }
 
-    const agentContext: AgentContext = {
-      user,
-      chatId: Number(chatId),
-      messageText: messagePrefix + text,
-      eventService: deps.eventService,
-      holidayService: deps.holidayService,
-      chatHistory: deps.chatHistory,
-      userRepo: deps.userRepo,
-      reminderRepo: deps.reminderRepo,
-      contactRepo: deps.contactRepo,
-      participantRepo: deps.participantRepo,
-      editProposalRepo: deps.editProposalRepo,
-      invitationService: deps.invitationService,
-      invitationRepo: deps.invitationRepo,
-      sharingService: deps.sharingService,
-      sharingSettingsRepo: deps.sharingSettingsRepo,
-      sharedEventRepo: deps.sharedEventRepo,
-      privacyService: deps.privacyService,
-      renderService: deps.renderService,
-      notificationPrefs: deps.notificationPrefs,
-      callQueue: deps.callQueue,
-      callSettingsRepo: deps.callSettingsRepo,
-      googleCalendarRepo: deps.googleCalendarRepo,
-      deepLinkService: deps.deepLinkService,
-      botUsername: deps.botUsername,
-      stressDictionary: deps.stressDictionary,
-    };
+    const messageText = messagePrefix + text;
 
-    cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');
-
-    try {
-      await deps.agent.run(agentContext);
-    } catch (error) {
-      cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'AI agent error');
-      const lang = user.language as 'en' | 'ru';
-      await ctx.send(
-        lang === 'ru' ? 'Что-то пошло не так. Попробуйте ещё раз.' : 'Something went wrong. Please try again.',
-      );
-    }
+    await runPipeline(ctx, messageText, layers);
   };
 }
