@@ -85,7 +85,11 @@ export function handleAddContact(
 
 export function handleFindContact(ctx: AgentContext, input: { name: string }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
-  const contact = ctx.contactRepo.findByName(ctx.user.telegram_id, input.name);
+  const query = input.name;
+  const userId = ctx.user.telegram_id;
+  const contact = query.startsWith('@')
+    ? (ctx.contactRepo.findByUsername(userId, query) ?? ctx.contactRepo.findByName(userId, query.slice(1)))
+    : (ctx.contactRepo.findByName(userId, query) ?? ctx.contactRepo.findByUsername(userId, query));
   if (!contact) return { success: false, error: `No contact named "${input.name}" in address book.` };
   const parts = [`name: ${contact.name}`];
   if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);

@@ -9,6 +9,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
@@ -44,6 +45,8 @@ export interface AgentContext {
     setLanguage(userId: number, lang: string): void;
   };
   googleCalendarRepo?: GoogleCalendarRepository;
+  deepLinkService?: DeepLinkService;
+  botUsername?: string;
   isVoiceMessage?: boolean;
 }
 
@@ -67,4 +70,5 @@ export interface TelegramSender {
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<void>;
   sendInvitation?(inviteeId: number, text: string, invitationId: number): Promise<{ message_id: number } | null>;
+  sendAsUser?(userId: number, text: string): Promise<boolean>;
 }

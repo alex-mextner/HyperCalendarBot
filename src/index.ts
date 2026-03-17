@@ -29,6 +29,7 @@ let renderService: import('./services/image/render-service.ts').RenderService | 
 let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJobData): Promise<void> } | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
+let mtprotoSendAsUser: ((userId: number, text: string) => Promise<boolean>) | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -261,6 +262,28 @@ if (config.HF_TOKEN) {
   botLogger.info('Voice transcription initialized (Whisper via HF)');
 }
 
+// MTProto userbot for delivering messages to users who haven't started the bot
+if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+  try {
+    const { existsSync } = await import('node:fs');
+    if (existsSync('data/mtproto-session')) {
+      const { createMtprotoClient } = await import('./services/voice/mtproto-client.ts');
+      const { createMtprotoMessenger } = await import('./services/mtproto-messenger.ts');
+      const client = await createMtprotoClient({
+        apiId: config.MTPROTO_API_ID,
+        apiHash: config.MTPROTO_API_HASH,
+        sessionString: '',
+      });
+      mtprotoSendAsUser = createMtprotoMessenger(client);
+      botLogger.info('MTProto messenger initialized for invitation delivery');
+    } else {
+      botLogger.info('MTProto session not found, invitation delivery via userbot disabled');
+    }
+  } catch (error) {
+    botLogger.warn({ error: String(error) }, 'MTProto messenger init failed');
+  }
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -273,6 +296,7 @@ const { bot } = createBot(
   renderService,
   callQueue,
   transcriptionService,
+  mtprotoSendAsUser,
 );
 
 // Patch bot ref to use real bot API

@@ -3,7 +3,11 @@ import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { TelegramSender } from './types.ts';
 
-export function createTelegramSender(bot: Bot): TelegramSender {
+interface TelegramSenderOptions {
+  sendAsUser?: (userId: number, text: string) => Promise<boolean>;
+}
+
+export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions): TelegramSender {
   return {
     async sendMessage(chatId: number, text: string, parseMode?: string) {
       const result = await bot.api.sendMessage({
@@ -72,5 +76,8 @@ export function createTelegramSender(bot: Bot): TelegramSender {
       });
       return { message_id: result.message_id };
     },
+    sendAsUser: options?.sendAsUser
+      ? async (userId: number, text: string) => options.sendAsUser!(userId, text)
+      : undefined,
   };
 }

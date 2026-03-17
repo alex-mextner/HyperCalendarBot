@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
+import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../../src/database/repositories/invitation.repository.ts';
@@ -21,6 +22,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../../src/services/sharing/sharing-service.ts';
@@ -47,6 +49,7 @@ describe('sharing tool handlers', () => {
   let invitationService: InvitationService;
   let sharingService: SharingService;
   let privacyService: PrivacyService;
+  let deepLinkService: DeepLinkService;
 
   function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     return {
@@ -79,6 +82,7 @@ describe('sharing tool handlers', () => {
     privacyService = new PrivacyService(sharingSettingsRepo);
     sharingService = new SharingService(eventRepo, privacyService);
     eventService = new EventService(eventRepo, reminderRepo);
+    deepLinkService = new DeepLinkService(new DeepLinkRepository(db));
 
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
     userRepo.create({ telegram_id: OTHER_USER_ID, timezone: 'UTC' });
@@ -229,7 +233,97 @@ describe('sharing tool handlers', () => {
       expect(inv?.chat_id).toBe(OTHER_USER_ID);
     });
 
-    test('does not crash when sender.sendInvitation returns null (user blocked bot)', async () => {
+    test('falls back to MTProto when bot delivery fails', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'MTProto Fallback',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      let mtprotoCalledWith: { userId: number; text: string } | undefined;
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+          sendAsUser: async (userId, text) => {
+            mtprotoCalledWith = { userId, text };
+            return true;
+          },
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      expect(mtprotoCalledWith).toBeDefined();
+      expect(mtprotoCalledWith!.userId).toBe(OTHER_USER_ID);
+      expect(mtprotoCalledWith!.text).toContain('t.me/TestBot');
+    });
+
+    test('sends deep link to inviter when bot and MTProto both fail', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Both Failed',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const sentMessages: { chatId: number; text: string }[] = [];
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async (chatId, text) => {
+            sentMessages.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+          sendAsUser: async () => false,
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const followUp = sentMessages.find((m) => m.chatId === USER_ID && m.text.includes('t.me/TestBot'));
+      expect(followUp).toBeDefined();
+    });
+
+    test('sends deep link to inviter when no MTProto available', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No MTProto',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const sentMessages: { chatId: number; text: string }[] = [];
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async (chatId, text) => {
+            sentMessages.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      await new Promise((r) => setTimeout(r, 100));
+
+      const followUp = sentMessages.find((m) => m.chatId === USER_ID && m.text.includes('t.me/TestBot'));
+      expect(followUp).toBeDefined();
+    });
+
+    test('does not crash when sender.sendInvitation returns null (no deep link service)', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Blocked User Party',

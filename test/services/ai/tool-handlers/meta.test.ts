@@ -162,6 +162,35 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('larichkina_b');
     });
 
+    test('finds contact by @username', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Mextner', 'mextner');
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: '@mextner' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Mextner');
+      expect(result.output).toContain('@mextner');
+    });
+
+    test('finds contact by username without @', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Mextner', 'mextner');
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'mextner' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Mextner');
+    });
+
+    test('prefers name match over username fallback', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Alex', 'alexbot');
+      contactRepo.add(USER_ID, 'mextner', 'other_user');
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'mextner' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('name: mextner');
+    });
+
     test('returns error for unknown contact', () => {
       ctx.contactRepo = new ContactRepository(db);
       const result = handleFindContact(ctx, { name: 'Nobody' });

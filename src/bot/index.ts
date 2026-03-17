@@ -95,6 +95,7 @@ export function createBot(
     }): Promise<void>;
   },
   transcriptionService?: TranscriptionService,
+  mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>,
 ) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
@@ -113,7 +114,9 @@ export function createBot(
   const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService);
 
   const bot = new Bot(token);
-  const telegramSender = createTelegramSender(bot);
+  const telegramSender = createTelegramSender(bot, {
+    sendAsUser: mtprotoSendAsUser,
+  });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
 
   bot
@@ -339,6 +342,7 @@ export function createBot(
           ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
         },
         googleCalendarRepo: googleDeps?.calendarRepo,
+        deepLinkService,
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
         transcriptionService,

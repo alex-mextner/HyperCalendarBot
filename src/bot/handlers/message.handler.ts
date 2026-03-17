@@ -14,6 +14,7 @@ import type { AgentContext } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
@@ -44,6 +45,7 @@ export interface MessageHandlerDeps {
   callQueue?: AgentContext['callQueue'];
   callSettingsRepo?: AgentContext['callSettingsRepo'];
   googleCalendarRepo?: GoogleCalendarRepository;
+  deepLinkService?: DeepLinkService;
   sceneStorage: SceneStorage;
   botUsername?: string;
   transcriptionService?: TranscriptionService;
@@ -172,6 +174,8 @@ async function handleVoiceMessage(
       callQueue: deps.callQueue,
       callSettingsRepo: deps.callSettingsRepo,
       googleCalendarRepo: deps.googleCalendarRepo,
+      deepLinkService: deps.deepLinkService,
+      botUsername: deps.botUsername,
     };
 
     await deps.agent.run(agentContext);
@@ -250,6 +254,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       callQueue: deps.callQueue,
       callSettingsRepo: deps.callSettingsRepo,
       googleCalendarRepo: deps.googleCalendarRepo,
+      deepLinkService: deps.deepLinkService,
+      botUsername: deps.botUsername,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

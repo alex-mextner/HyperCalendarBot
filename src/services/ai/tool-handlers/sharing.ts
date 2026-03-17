@@ -84,17 +84,47 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
     }
   }
 
-  // Deliver Telegram notification to invitee
+  // Async delivery chain: bot API → MTProto userbot → deep link fallback
   if (ctx.sender?.sendInvitation && ctx.invitationRepo) {
     const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
     const inviterName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
-    const text = t(lang).invitation_received(event?.title ?? `Event #${input.event_id}`, inviterName);
+    const eventTitle = event?.title ?? `Event #${input.event_id}`;
+    const text = t(lang).invitation_received(eventTitle, inviterName);
 
     const invRepo = ctx.invitationRepo;
-    ctx.sender.sendInvitation(input.invitee_id, text, invitation.id).then((sent) => {
+    const sender = ctx.sender;
+    const chatId = ctx.chatId;
+    const deepLinkSvc = ctx.deepLinkService;
+    const botUsername = ctx.botUsername;
+
+    ctx.sender.sendInvitation(input.invitee_id, text, invitation.id).then(async (sent) => {
       if (sent) {
         invRepo.setMessageInfo(invitation.id, sent.message_id, input.invitee_id);
+        return;
+      }
+
+      // Bot delivery failed — generate deep link for fallback methods
+      if (deepLinkSvc && botUsername) {
+        const link = deepLinkSvc.createInvitationLink(invitation.id, input.event_id, ctx.user.telegram_id);
+        const url = deepLinkSvc.generateUrl(link.code, botUsername);
+
+        // Try MTProto userbot
+        if (sender.sendAsUser) {
+          const mtprotoText =
+            lang === 'ru'
+              ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
+              : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
+          const delivered = await sender.sendAsUser(input.invitee_id, mtprotoText);
+          if (delivered) return;
+        }
+
+        // Both failed — notify inviter with deep link
+        const fallbackMsg =
+          lang === 'ru'
+            ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
+            : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`;
+        await sender.sendMessage(chatId, fallbackMsg);
       }
     });
   }
