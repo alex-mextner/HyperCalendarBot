@@ -452,4 +452,23 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '015_edit_proposals',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE edit_proposals (
+          id          INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id    INTEGER NOT NULL,
+          proposer_id INTEGER NOT NULL,
+          changes     TEXT NOT NULL,
+          reason      TEXT,
+          status      TEXT NOT NULL DEFAULT 'pending',
+          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_edit_proposals_event ON edit_proposals(event_id);
+        CREATE INDEX idx_edit_proposals_status ON edit_proposals(status) WHERE status = 'pending';
+      `);
+    },
+  },
 ];

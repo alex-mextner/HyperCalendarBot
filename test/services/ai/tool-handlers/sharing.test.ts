@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
+import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../../src/database/repositories/invitation.repository.ts';
+import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { SharedEventRepository } from '../../../../src/database/repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
@@ -13,6 +15,7 @@ import { UserRepository } from '../../../../src/database/repositories/user.repos
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
   handleGetInvitationStatus,
+  handleProposeEdit,
   handleSendInvitation,
   handleSetEventVisibility,
   handleShareAgenda,
@@ -776,6 +779,97 @@ describe('sharing tool handlers', () => {
       const result = handleSetEventVisibility(ctx, { event_id: event.id, visibility: 'full' });
       expect(result.success).toBe(true);
       expect(result.output).toContain(`id: ${event.id}`);
+    });
+  });
+
+  // ── handleProposeEdit ──
+
+  describe('handleProposeEdit', () => {
+    test('returns error when participantRepo is missing', () => {
+      const ctx = makeCtx({ participantRepo: undefined });
+      const result = handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('returns error when editProposalRepo is missing', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const ctx = makeCtx({ participantRepo, editProposalRepo: undefined });
+      const result = handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not configured');
+    });
+
+    test('returns error when user is not a participant', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Not My Event',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const ctx = makeCtx({ participantRepo, editProposalRepo });
+      const result = handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not an accepted participant');
+    });
+
+    test('stores proposal and returns success', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Shared Event',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      participantRepo.add(event.id, USER_ID, 'accepted');
+
+      const ctx = makeCtx({ participantRepo, editProposalRepo });
+      const result = handleProposeEdit(ctx, {
+        event_id: event.id,
+        changes: { start_at: '2026-03-20T11:00:00Z' },
+        reason: 'Conflict with another meeting',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('proposal submitted');
+
+      const pending = editProposalRepo.getPendingForEvent(event.id);
+      expect(pending).toHaveLength(1);
+      expect(pending[0].proposer_id).toBe(USER_ID);
+      expect(JSON.parse(pending[0].changes)).toEqual({ start_at: '2026-03-20T11:00:00Z' });
+      expect(pending[0].reason).toBe('Conflict with another meeting');
+    });
+
+    test('sends notification to event creator when sender available', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Creator Gets Notified',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      participantRepo.add(event.id, USER_ID, 'accepted');
+
+      let sentTo: number | undefined;
+      const ctx = makeCtx({
+        participantRepo,
+        editProposalRepo,
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendEditProposal: async (creatorId) => {
+            sentTo = creatorId;
+            return { message_id: 42 };
+          },
+        },
+      });
+
+      handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Better Name' } });
+      expect(sentTo).toBe(OTHER_USER_ID);
     });
   });
 });

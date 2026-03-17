@@ -394,3 +394,47 @@ export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisib
     output: `Visibility for "${event.title}" (id: ${event.id}) set to "${input.visibility}".`,
   };
 }
+
+interface ProposeEditInput {
+  event_id: number;
+  changes: Record<string, string | null>;
+  reason?: string;
+}
+
+export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): ToolResult {
+  if (!ctx.participantRepo) {
+    return { success: false, error: 'Participants feature is not configured.' };
+  }
+  if (!ctx.editProposalRepo) {
+    return { success: false, error: 'Edit proposals are not configured.' };
+  }
+
+  const participant = ctx.participantRepo.findByEventAndUser(input.event_id, ctx.user.telegram_id);
+  if (!participant || participant.status !== 'accepted') {
+    return { success: false, error: 'You are not an accepted participant of this event.' };
+  }
+
+  const proposal = ctx.editProposalRepo.create({
+    event_id: input.event_id,
+    proposer_id: ctx.user.telegram_id,
+    changes: JSON.stringify(input.changes),
+    reason: input.reason,
+  });
+
+  if (ctx.sender?.sendEditProposal) {
+    const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
+    if (ownerId) {
+      const proposerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+      const changeLines = Object.entries(input.changes)
+        .map(([k, v]) => `  ${k}: ${v ?? '(remove)'}`)
+        .join('\n');
+      const text = `📝 <b>Edit proposal</b> from ${proposerName}:\n${changeLines}${input.reason ? `\n\nReason: ${input.reason}` : ''}`;
+      ctx.sender.sendEditProposal(ownerId, text, proposal.id).catch(() => {});
+    }
+  }
+
+  return {
+    success: true,
+    output: `Edit proposal submitted (id: ${proposal.id}). The event creator will be notified to accept or reject.`,
+  };
+}

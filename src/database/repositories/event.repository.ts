@@ -33,6 +33,11 @@ export class EventRepository {
       .get(id, userId) as CalendarEvent | null;
   }
 
+  getOwnerId(eventId: number): number | null {
+    const row = this.db.prepare('SELECT user_id FROM events WHERE id = ?').get(eventId) as { user_id: number } | null;
+    return row?.user_id ?? null;
+  }
+
   getByDateRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(

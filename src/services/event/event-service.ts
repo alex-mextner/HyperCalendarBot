@@ -92,6 +92,10 @@ export class EventService {
     return this.eventRepo.findById(id, userId);
   }
 
+  getEventOwnerId(eventId: number): number | null {
+    return this.eventRepo.getOwnerId(eventId);
+  }
+
   getEventsForDay(userId: number, date: Date, timezone: string): EventOccurrence[] {
     const { start, end } = getDayRangeUtc(date, timezone);
     return this.getEventsInRange(userId, start, end);

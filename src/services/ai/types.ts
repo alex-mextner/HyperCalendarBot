@@ -1,5 +1,6 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
@@ -33,6 +34,7 @@ export interface AgentContext {
   privacyService?: PrivacyService;
   contactRepo?: ContactRepository;
   participantRepo?: ParticipantRepository;
+  editProposalRepo?: EditProposalRepository;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
@@ -74,5 +76,6 @@ export interface TelegramSender {
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<void>;
   sendInvitation?(inviteeId: number, text: string, invitationId: number): Promise<{ message_id: number } | null>;
+  sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
 }

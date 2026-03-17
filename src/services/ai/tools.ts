@@ -542,6 +542,27 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'propose_edit',
+    description:
+      'Propose changes to a shared event you participate in (but do not own). The event creator will receive the proposal with Accept/Reject buttons. Use when the invitee wants to suggest time, title, or other changes.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the shared event to propose changes to' },
+        changes: {
+          type: 'object',
+          description:
+            'Key-value pairs of fields to change (e.g., {"start_at": "2026-03-20T11:00:00Z", "title": "Renamed"}). Pass null to remove a field.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Short explanation of why the change is needed. Optional.',
+        },
+      },
+      required: ['event_id', 'changes'],
+    },
+  },
+  {
     name: 'cancel_invitation',
     description: 'Cancel a pending invitation. Use when the user wants to revoke/cancel an invitation they sent.',
     input_schema: {

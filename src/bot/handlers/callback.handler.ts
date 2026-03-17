@@ -6,11 +6,12 @@ import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
+import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { Invitation, User } from '../../database/types.ts';
+import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
@@ -61,6 +62,10 @@ export function createCallbackHandler(
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
   },
   onboardingScene?: AnyScene,
+  editProposalDeps?: {
+    editProposalRepo: EditProposalRepository;
+    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+  },
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -424,6 +429,52 @@ export function createCallbackHandler(
           }
         } else {
           await ctx.answer(result.error ?? 'Error');
+        }
+        return;
+      }
+
+      // Edit proposal accept/reject
+      if (action === CB.EDIT_PROPOSAL && editProposalDeps) {
+        const subAction = parts[1];
+        const proposalId = Number(parts[2]);
+        const proposal = editProposalDeps.editProposalRepo.findById(proposalId);
+
+        if (!proposal) {
+          await ctx.answer({ text: 'Proposal not found' });
+          return;
+        }
+
+        if (proposal.status !== 'pending') {
+          await ctx.answer({ text: `Already ${proposal.status}` });
+          return;
+        }
+
+        const ownerId = eventService.getEventOwnerId(proposal.event_id);
+        if (ownerId !== user.telegram_id) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
+
+        if (subAction === 'accept') {
+          const changes = JSON.parse(proposal.changes) as UpdateEventData;
+          const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
+          editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
+          await ctx.answer();
+          await ctx.editText(
+            updated ? `✅ Proposal accepted. Event "${updated.title}" updated.` : '✅ Proposal accepted.',
+          );
+
+          editProposalDeps
+            .sendMessage(proposal.proposer_id, `✅ Your edit proposal was accepted.`, { parse_mode: 'HTML' })
+            .catch(() => {});
+        } else if (subAction === 'reject') {
+          editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
+          await ctx.answer();
+          await ctx.editText('❌ Proposal rejected.');
+
+          editProposalDeps
+            .sendMessage(proposal.proposer_id, `❌ Your edit proposal was rejected.`, { parse_mode: 'HTML' })
+            .catch(() => {});
         }
         return;
       }

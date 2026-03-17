@@ -35,6 +35,7 @@ import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders
 import {
   handleCancelInvitation,
   handleGetInvitationStatus,
+  handleProposeEdit,
   handleResendInvitation,
   handleSendInvitation,
   handleSetEventVisibility,
@@ -192,6 +193,12 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleSetEventVisibility(
           ctx,
           input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
+        );
+
+      case 'propose_edit':
+        return handleProposeEdit(
+          ctx,
+          input as { event_id: number; changes: Record<string, string | null>; reason?: string },
         );
 
       case 'cancel_invitation':

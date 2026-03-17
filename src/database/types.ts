@@ -302,6 +302,29 @@ export interface CreateGroupChatData {
 
 // --- Voice Call Reminders (sub-project 07) ---
 
+// --- Edit Proposals ---
+
+export type EditProposalStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface EditProposal {
+  id: number;
+  event_id: number;
+  proposer_id: number;
+  changes: string; // JSON
+  reason: string | null;
+  status: EditProposalStatus;
+  created_at: string;
+}
+
+export interface CreateEditProposalData {
+  event_id: number;
+  proposer_id: number;
+  changes: string; // JSON
+  reason?: string;
+}
+
+// --- Voice Call Reminders (sub-project 07) ---
+
 export type CallStatus =
   | 'queued'
   | 'ringing'

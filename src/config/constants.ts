@@ -52,6 +52,7 @@ export const CB = {
   CALL_SETTINGS: 'csett',
   FEATURE_TOUR: 'ftour',
   INVITE_PICK: 'invp',
+  EDIT_PROPOSAL: 'epr',
 } as const;
 
 // i18n messages

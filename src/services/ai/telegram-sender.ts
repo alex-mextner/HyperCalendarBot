@@ -59,6 +59,22 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
         return null;
       }
     },
+    async sendEditProposal(creatorId: number, text: string, proposalId: number) {
+      const kb = new InlineKeyboard()
+        .text('Accept ✅', `${CB.EDIT_PROPOSAL}:accept:${proposalId}`)
+        .text('Reject ❌', `${CB.EDIT_PROPOSAL}:reject:${proposalId}`);
+      try {
+        const result = await bot.api.sendMessage({
+          chat_id: creatorId,
+          text,
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        return { message_id: result.message_id };
+      } catch {
+        return null;
+      }
+    },
     async sendUserPicker(chatId: number, text: string, requestId: number) {
       const kb = new Keyboard()
         .requestUsers('👤 Выбрать участников', requestId, {
