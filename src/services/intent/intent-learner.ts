@@ -1,0 +1,220 @@
+// src/services/intent/intent-learner.ts
+import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
+import type { CreateIntentData } from '../../database/types.ts';
+import { normalize } from './normalizer.ts';
+import { cmdLogger } from '../../utils/logger.ts';
+import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
+
+interface ToolCallRecord {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface ToolResultRecord {
+  success: boolean;
+  output?: string;
+}
+
+interface LearnerConfig {
+  apiKey: string;
+  baseUrl: string;
+  model?: string;
+  dailyLimit: number;
+  adminId?: number;
+  sendToAdmin?: (text: string, replyMarkup: unknown) => Promise<unknown>;
+}
+
+export class IntentLearner {
+  private dailyCallCount = 0;
+  private lastResetDate = '';
+  private recentMessages = new Map<string, number>(); // normalized message → timestamp
+
+  constructor(
+    private intentRepo: IntentRepository,
+    private config: LearnerConfig,
+  ) {}
+
+  /** Analyze an AI interaction and potentially generate an intent candidate */
+  async analyze(
+    message: string,
+    toolCalls: ToolCallRecord[],
+    toolResults: ToolResultRecord[],
+  ): Promise<CreateIntentData | null> {
+    // 1. Skip conditions
+    if (!this.shouldAnalyze(message, toolCalls)) return null;
+
+    // 2. Check daily budget
+    this.resetDailyIfNeeded();
+    if (this.dailyCallCount >= this.config.dailyLimit) return null;
+
+    // 3. Check dedup (1 hour window)
+    const normalized = normalize(message);
+    const lastSeen = this.recentMessages.get(normalized);
+    if (lastSeen && Date.now() - lastSeen < 3600_000) return null;
+
+    // 4. Mark as processed
+    this.recentMessages.set(normalized, Date.now());
+    this.dailyCallCount++;
+
+    // 5. Call AI to generate intent
+    try {
+      const intentData = await this.callLearnerAI(message, toolCalls, toolResults);
+      if (!intentData) return null;
+
+      // 6. Check if similar intent already exists
+      const existing = this.intentRepo.findByCanonicalName(intentData.canonical_name);
+      if (existing) {
+        // Append phrases to existing intent if it's approved
+        if (existing.status === 'approved') {
+          const newPhrases = intentData.phrases.filter(
+            (p: string) => !JSON.parse(existing.phrases).includes(p),
+          );
+          if (newPhrases.length > 0) {
+            this.intentRepo.appendPhrases(existing.id, newPhrases);
+          }
+        }
+        return null;
+      }
+
+      // 7. Save as pending
+      const id = this.intentRepo.create(intentData);
+
+      // 8. Send to admin for verification
+      this.sendToAdminForVerification(id, intentData);
+
+      return intentData;
+    } catch (error) {
+      cmdLogger.error({ error: String(error) }, 'IntentLearner AI call failed');
+      return null;
+    }
+  }
+
+  private shouldAnalyze(message: string, toolCalls: ToolCallRecord[]): boolean {
+    // No tool calls = chat/conversation, not automatable
+    if (toolCalls.length === 0) return false;
+
+    // ask_user = needs dialogue
+    if (toolCalls.some(tc => tc.name === 'ask_user')) return false;
+
+    // Context-dependent phrases (pronouns, references)
+    const contextual = /\b(это|этот|эту|его|её|их|тот|то|that|this|it|them|the same)\b/i;
+    if (contextual.test(message)) return false;
+
+    return true;
+  }
+
+  private resetDailyIfNeeded(): void {
+    const today = new Date().toISOString().slice(0, 10);
+    if (today !== this.lastResetDate) {
+      this.dailyCallCount = 0;
+      this.lastResetDate = today;
+      // Clean up old dedup entries
+      const cutoff = Date.now() - 3600_000;
+      for (const [key, ts] of this.recentMessages) {
+        if (ts < cutoff) this.recentMessages.delete(key);
+      }
+    }
+  }
+
+  private async callLearnerAI(
+    message: string,
+    toolCalls: ToolCallRecord[],
+    toolResults: ToolResultRecord[],
+  ): Promise<CreateIntentData | null> {
+    const userMessage = JSON.stringify({ message, toolCalls, toolResults });
+
+    const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.config.model ?? 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: LEARNER_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: userMessage }],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Learner API error: ${response.status}`);
+    }
+
+    const data = await response.json() as {
+      content: { type: string; text: string }[];
+    };
+
+    const text = data.content.find(c => c.type === 'text')?.text;
+    if (!text) return null;
+
+    // Parse JSON response
+    const parsed = JSON.parse(text) as {
+      skip?: boolean;
+      canonical_name: string;
+      phrases: string[];
+      trigger_words?: string[];
+      pattern?: string;
+      workflow: Record<string, unknown>;
+      format: string;
+    };
+
+    if (parsed.skip) return null;
+
+    // Validate required fields
+    if (!parsed.canonical_name || !parsed.phrases?.length || !parsed.workflow) {
+      return null;
+    }
+
+    return {
+      canonical_name: parsed.canonical_name,
+      phrases: parsed.phrases,
+      trigger_words: parsed.trigger_words,
+      pattern: parsed.pattern,
+      workflow: parsed.workflow,
+      format: parsed.format || 'text',
+      source_message: message,
+    };
+  }
+
+  private sendToAdminForVerification(intentId: number, data: CreateIntentData): void {
+    if (!this.config.adminId || !this.config.sendToAdmin) return;
+
+    const workflowStr = JSON.stringify(data.workflow, null, 2);
+    const text = [
+      `💡 New intent: ${data.canonical_name}`,
+      `Phrases: ${data.phrases.map(p => `"${p}"`).join(', ')}`,
+      data.pattern ? `Pattern: ${data.pattern}` : 'Pattern: none (exact match only)',
+      `Workflow: ${workflowStr}`,
+      `Format: ${data.format}`,
+      `Source: "${data.source_message}"`,
+    ].join('\n');
+
+    const replyMarkup = {
+      inline_keyboard: [[
+        { text: '✅ Accept', callback_data: `intent_accept:${intentId}` },
+        { text: '✏️ Edit', callback_data: `intent_edit:${intentId}` },
+        { text: '❌ Reject', callback_data: `intent_reject:${intentId}` },
+      ]],
+    };
+
+    this.config.sendToAdmin(text, replyMarkup).catch((err: unknown) => {
+      cmdLogger.error({ error: String(err) }, 'Failed to send intent verification to admin');
+    });
+  }
+
+  // For testing
+  resetDailyCounter(): void {
+    this.dailyCallCount = 0;
+    this.lastResetDate = '';
+  }
+
+  incrementCounter(): void {
+    this.dailyCallCount++;
+  }
+
+  getDailyCallCount(): number {
+    return this.dailyCallCount;
+  }
+}
