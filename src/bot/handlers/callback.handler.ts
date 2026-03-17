@@ -9,6 +9,7 @@ import type { CallSettingsRepository } from '../../database/repositories/call-se
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -33,10 +34,10 @@ import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
-import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSettingsCallback } from '../commands/settings.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
+import { handleNotifyCallback } from './notify-callback.ts';
 
 /**
  * Route all inline keyboard callbacks.
@@ -71,6 +72,11 @@ export function createCallbackHandler(
   },
   callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
+  feedbackDeps?: {
+    feedbackRepo: FeedbackRepository;
+    adminReplySession: Map<number, { threadId: number; userId: number }>;
+    sendMessage: (chatId: number, text: string) => Promise<unknown>;
+  },
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -594,6 +600,36 @@ export function createCallbackHandler(
       // Settings category picker
       if (action === 'stg') {
         return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo);
+      }
+
+      // Feedback: admin closes a thread
+      if (action === 'fb_close' && feedbackDeps) {
+        const threadId = Number(payload);
+        const thread = feedbackDeps.feedbackRepo.getThread(threadId);
+        if (!thread) {
+          await ctx.answer({ text: 'Thread not found' });
+          return;
+        }
+        feedbackDeps.feedbackRepo.closeThread(threadId);
+        await ctx.answer({ text: 'Thread closed' });
+        await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
+        feedbackDeps.sendMessage(thread.user_id, 'Your feedback thread has been resolved.').catch((e: unknown) => {
+          cmdLogger.error({ error: String(e) }, 'Failed to notify user of thread close');
+        });
+        return;
+      }
+
+      // Feedback: admin initiates a reply
+      if (action === 'fb_reply' && feedbackDeps) {
+        const threadId = Number(payload);
+        const thread = feedbackDeps.feedbackRepo.getThread(threadId);
+        if (!thread) {
+          await ctx.answer({ text: 'Thread not found' });
+          return;
+        }
+        feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
+        await ctx.answer({ text: 'Send your reply message' });
+        return;
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');

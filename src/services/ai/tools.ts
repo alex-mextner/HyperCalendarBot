@@ -536,6 +536,19 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'send_feedback',
+    description:
+      'Send feedback to the bot developer. Creates a feedback thread for two-way communication. Use when user wants to report a bug, suggest a feature, or ask the developer a question.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['bug', 'feature', 'question', 'other'], description: 'Feedback type' },
+        message: { type: 'string', description: 'Feedback message text' },
+      },
+      required: ['type', 'message'],
+    },
+  },
+  {
     name: 'lookup_stress',
     description:
       'Look up correct stress marks for Russian words in the stress dictionary (555K+ forms). Returns words with + before the stressed vowel (e.g., "молоко" → "молок+о"). For words NOT FOUND, the tool returns similar dictionary entries as reference. You should also proactively include word variations in the same request: different cases (молоком, молока), infinitives (бежать for бегу), nominative forms (встреча for встречей), singular/plural. Pass ALL words and their variations in a single call for efficiency. The tool handles hundreds of words instantly.',

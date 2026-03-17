@@ -10,6 +10,7 @@ import {
   handleSnoozeEvent,
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
+import { handleSendFeedback } from './tool-handlers/feedback.ts';
 import {
   handleAddContact,
   handleAskUser,
@@ -188,6 +189,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'lookup_stress':
         return handleLookupStress(ctx, input as { words: string[] });
+
+      case 'send_feedback':
+        return handleSendFeedback(ctx, input as { type: 'bug' | 'feature' | 'question' | 'other'; message: string });
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

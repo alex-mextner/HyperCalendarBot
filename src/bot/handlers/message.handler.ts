@@ -16,6 +16,7 @@ import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
+import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
@@ -75,6 +76,10 @@ export interface MessageHandlerDeps {
   workflowSessions?: Map<number, WorkflowSession>;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
+  // Admin reply sessions: adminId → { threadId, userId }
+  adminReplySession?: Map<number, { threadId: number; userId: number }>;
+  botAdminId?: number;
+  sendMessageToUser?: (chatId: number, text: string) => Promise<unknown>;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -333,6 +338,35 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     }
 
     const messageText = messagePrefix + text;
+
+    // Admin reply session: if the admin has an active reply session, forward the message to the user
+    if (
+      deps.botAdminId &&
+      user.telegram_id === deps.botAdminId &&
+      deps.adminReplySession &&
+      deps.feedbackRepo &&
+      deps.sendMessageToUser
+    ) {
+      const session = deps.adminReplySession.get(user.telegram_id);
+      if (session) {
+        deps.adminReplySession.delete(user.telegram_id);
+        const thread = deps.feedbackRepo.getThread(session.threadId);
+        if (thread) {
+          deps.feedbackRepo.addMessage({
+            thread_id: session.threadId,
+            sender: 'admin',
+            text: messageText,
+          });
+          sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject).catch(
+            (e: unknown) => {
+              cmdLogger.error({ error: String(e) }, 'Failed to deliver admin reply to user');
+            },
+          );
+          await ctx.send('Reply sent.');
+        }
+        return;
+      }
+    }
 
     await runPipeline(ctx, messageText, layers);
   };
