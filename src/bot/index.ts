@@ -84,6 +84,15 @@ export function createBot(
   aiConfig: AgentConfig,
   googleDeps?: GoogleBotDeps,
   renderService?: RenderService,
+  callQueue?: {
+    enqueue(data: {
+      userId: number;
+      eventId: number;
+      callLogId: number;
+      ttsText: string;
+      language: string;
+    }): Promise<void>;
+  },
 ) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
@@ -301,6 +310,21 @@ export function createBot(
         privacyService,
         renderService,
         callSettingsRepo: db.callSettings as never,
+        callQueue: callQueue
+          ? {
+              enqueue: (userId: number, text: string) => {
+                const callLog = db.callLog.create({ user_id: userId, tts_text: text });
+                const user = db.users.findByTelegramId(userId);
+                return callQueue.enqueue({
+                  userId,
+                  eventId: 0,
+                  callLogId: callLog.id,
+                  ttsText: text,
+                  language: user?.language ?? 'ru',
+                });
+              },
+            }
+          : undefined,
         notificationPrefs: {
           getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
           update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),

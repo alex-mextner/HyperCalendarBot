@@ -61,5 +61,7 @@ export function loadConfig(): EnvConfig {
     ENCRYPTION_KEY,
     PUBLIC_DOMAIN,
     BOT_USERNAME: process.env.BOT_USERNAME || undefined,
+    MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
+    MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
   };
 }

@@ -22,6 +22,8 @@ let webServerHandle: { stop: () => void } | undefined;
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
+let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJobData): Promise<void> } | undefined;
+let callQueueCleanup: { close: () => Promise<void> } | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -148,6 +150,18 @@ if (config.REDIS_URL) {
   botLogger.info('Image render queue initialized');
 }
 
+if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+  const { createCallQueue } = await import('./worker/call-queue.ts');
+  const cq = createCallQueue({ url: config.REDIS_URL });
+  callQueue = cq;
+  callQueueCleanup = {
+    close: async () => {
+      await cq.queue.close();
+    },
+  };
+  botLogger.info('Voice call queue initialized');
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -158,6 +172,7 @@ const { bot } = createBot(
   },
   googleDeps,
   renderService,
+  callQueue,
 );
 
 // Patch sendMessage to use real bot API
@@ -239,6 +254,7 @@ process.on('SIGINT', async () => {
   sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
+  if (callQueueCleanup) await callQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
@@ -249,6 +265,7 @@ process.on('SIGTERM', async () => {
   sharingCleanup.stop();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
+  if (callQueueCleanup) await callQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
   process.exit(0);
