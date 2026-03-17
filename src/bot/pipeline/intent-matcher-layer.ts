@@ -6,6 +6,7 @@ import type { ToolResult } from '../../services/ai/types.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
+import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { PipelineResult } from './types.ts';
 
@@ -58,7 +59,13 @@ export function createIntentMatcherLayer(
     const intent = intentRepo.getById(match.intentId);
     if (!intent) return { handled: false };
 
-    const workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+    let workflow: Record<string, unknown>;
+    try {
+      workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+    } catch {
+      cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
+      return { handled: false };
+    }
 
     // 4. Execute
     const result = await executor.run(

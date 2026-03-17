@@ -114,7 +114,8 @@ export async function handleSettingsCallback(
   }
 
   if (subAction === 'voice') {
-    const text = '🎤 Голосовые ответы\n\nГолосовые ответы: ❌ (не настроено)';
+    const voiceEnabled = !!user.voice_response_enabled;
+    const text = `🎤 Голосовые ответы\n\nГолосовые ответы: ${voiceEnabled ? '✅ Включены' : '❌ Отключены'}`;
     await ctx.answer();
     await ctx.editText(text, { reply_markup: backKeyboard() });
     return;

@@ -78,6 +78,7 @@ export function createCallbackHandler(
     feedbackRepo: FeedbackRepository;
     adminReplySession: Map<number, { threadId: number; userId: number }>;
     sendMessage: (chatId: number, text: string) => Promise<unknown>;
+    adminId?: number;
   },
   userRepo?: UserRepository,
   intentDeps?: {
@@ -612,6 +613,10 @@ export function createCallbackHandler(
 
       // Feedback: admin closes a thread
       if (action === 'fb_close' && feedbackDeps) {
+        if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
         const threadId = Number(payload);
         const thread = feedbackDeps.feedbackRepo.getThread(threadId);
         if (!thread) {
@@ -629,6 +634,10 @@ export function createCallbackHandler(
 
       // Feedback: admin initiates a reply
       if (action === 'fb_reply' && feedbackDeps) {
+        if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
         const threadId = Number(payload);
         const thread = feedbackDeps.feedbackRepo.getThread(threadId);
         if (!thread) {
@@ -644,8 +653,8 @@ export function createCallbackHandler(
       if (action === 'voice_prompt' && userRepo) {
         const enabled = payload === 'yes' ? 1 : 0;
         userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
-        await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
         await ctx.answer();
+        await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
         return;
       }
 

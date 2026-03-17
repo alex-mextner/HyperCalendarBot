@@ -16,6 +16,9 @@ export interface EnvConfig {
   HF_TOKEN?: string;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
+  BOT_USERNAME?: string;
+  MTPROTO_API_ID?: number;
+  MTPROTO_API_HASH?: string;
 }
 
 export function loadConfig(): EnvConfig {

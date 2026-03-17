@@ -15,13 +15,17 @@ interface ToolResultRecord {
   output?: string;
 }
 
+interface InlineKeyboardMarkup {
+  inline_keyboard: { text: string; callback_data: string }[][];
+}
+
 interface LearnerConfig {
   apiKey: string;
   baseUrl: string;
   model?: string;
   dailyLimit: number;
   adminId?: number;
-  sendToAdmin?: (text: string, replyMarkup: unknown) => Promise<unknown>;
+  sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<unknown>;
 }
 
 export class IntentLearner {
@@ -66,7 +70,13 @@ export class IntentLearner {
       if (existing) {
         // Append phrases to existing intent if it's approved
         if (existing.status === 'approved') {
-          const newPhrases = intentData.phrases.filter((p: string) => !JSON.parse(existing.phrases).includes(p));
+          let existingPhrases: string[];
+          try {
+            existingPhrases = JSON.parse(existing.phrases) as string[];
+          } catch {
+            existingPhrases = [];
+          }
+          const newPhrases = intentData.phrases.filter((p: string) => !existingPhrases.includes(p));
           if (newPhrases.length > 0) {
             this.intentRepo.appendPhrases(existing.id, newPhrases);
           }

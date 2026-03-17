@@ -174,7 +174,7 @@ export function createBot(
             bot.api.sendMessage({
               chat_id: botAdminId,
               text,
-              reply_markup: replyMarkup as never,
+              reply_markup: replyMarkup,
             }),
         })
       : undefined;
@@ -295,6 +295,7 @@ export function createBot(
           feedbackRepo,
           adminReplySession,
           sendMessage: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+          adminId: botAdminId,
         },
         db.users,
         {

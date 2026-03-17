@@ -1,6 +1,7 @@
 // src/services/intent/intent-matcher.ts
 
 import type { Intent } from '../../database/types.ts';
+import { cmdLogger } from '../../utils/logger.ts';
 import { normalize, tokenize } from './normalizer.ts';
 
 interface MatchResult {
@@ -23,13 +24,25 @@ export class IntentMatcher {
     this.triggerIndex = new Map();
 
     for (const intent of intents) {
-      const phrases = JSON.parse(intent.phrases) as string[];
+      let phrases: string[];
+      try {
+        phrases = JSON.parse(intent.phrases) as string[];
+      } catch {
+        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON, skipping');
+        continue;
+      }
       for (const phrase of phrases) {
         this.phraseMap.set(normalize(phrase), intent.id);
       }
 
       if (intent.pattern) {
-        const triggerWords = JSON.parse(intent.trigger_words) as string[];
+        let triggerWords: string[];
+        try {
+          triggerWords = JSON.parse(intent.trigger_words) as string[];
+        } catch {
+          cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON, skipping pattern');
+          continue;
+        }
         const pattern = new RegExp(intent.pattern, 'i');
         const entry: TriggerEntry = { intentId: intent.id, pattern };
         for (const word of triggerWords) {

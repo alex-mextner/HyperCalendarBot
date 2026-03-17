@@ -26,8 +26,6 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     const agentContext = deps.agentContextBuilder(user, Number(chatId), messageText);
 
-    // If there is an open feedback thread, pass the context for future use
-    // (actual system prompt injection will be wired in a later task)
     if (extra?.feedbackContext) {
       agentContext.feedbackContext = extra.feedbackContext;
     }

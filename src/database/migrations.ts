@@ -535,4 +535,25 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '020_feedback_threads_fk',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS feedback_threads_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          type TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          closed_at TEXT,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        INSERT INTO feedback_threads_new SELECT * FROM feedback_threads;
+        DROP TABLE feedback_threads;
+        ALTER TABLE feedback_threads_new RENAME TO feedback_threads;
+        CREATE INDEX idx_feedback_threads_user_status ON feedback_threads(user_id, status);
+      `);
+    },
+  },
 ];

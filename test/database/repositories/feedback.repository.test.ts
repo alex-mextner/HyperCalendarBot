@@ -11,6 +11,10 @@ function createTestDb(): Database {
   return db;
 }
 
+function insertTestUser(db: Database, telegramId: number): void {
+  db.run('INSERT OR IGNORE INTO users (telegram_id) VALUES (?)', [telegramId]);
+}
+
 describe('FeedbackRepository', () => {
   let db: Database;
   let repo: FeedbackRepository;
@@ -18,6 +22,8 @@ describe('FeedbackRepository', () => {
   beforeEach(() => {
     db = createTestDb();
     repo = new FeedbackRepository(db);
+    insertTestUser(db, 123);
+    insertTestUser(db, 456);
   });
 
   test('createThread inserts thread with open status and returns id', () => {
