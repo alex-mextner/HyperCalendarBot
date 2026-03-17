@@ -2,12 +2,9 @@ import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
-
-function resolveScope(inputScope: Scope | undefined, isGroup: boolean): Scope {
-  return inputScope ?? (isGroup ? 'group' : 'personal');
-}
 
 const metaLogger = logger.child({ module: 'ai-tools' });
 
@@ -106,7 +103,9 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   const CANCEL = 'Отмена';
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
-  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch(() => {});
+  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch((err) => {
+    metaLogger.error({ error: String(err) }, 'Failed to send buttons');
+  });
   return { success: true, output: 'Question sent. Waiting for user response.', stopLoop: true };
 }
 
@@ -115,7 +114,9 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
     return { success: false, error: 'User picker not supported.' };
   }
   // Use event_id as request_id so we can match the response
-  ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch(() => {});
+  ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch((err) => {
+    metaLogger.error({ error: String(err) }, 'Failed to send user picker');
+  });
   return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
 }
 
@@ -123,7 +124,10 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string; s
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
-  const scope = resolveScope(input.scope, ctx.isGroup);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
   const dateObj = new Date(`${input.date}T12:00:00Z`);
   const occurrences =
     scope === 'group'
@@ -149,12 +153,14 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string; s
       const file = new File([buffer], 'day.png', { type: 'image/png' });
       return sender.sendPhoto!(ctx.chatId, file);
     })
-    .catch(() => {});
+    .catch((err) => {
+      metaLogger.error({ error: String(err) }, 'Day image render failed');
+    });
 
   return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };
 }
 
-export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string; scope?: Scope }): ToolResult {
+export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string }): ToolResult {
   if (!ctx.renderService) {
     return { success: false, error: 'Image rendering not available.' };
   }

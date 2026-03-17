@@ -8,7 +8,7 @@ from pyrogram import Client
 
 async def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: get-chat-members.py <chat_id>"}))
+        print(json.dumps({"error": "Usage: get-chat-members.py <chat_id>"}), file=sys.stderr)
         sys.exit(1)
 
     chat_id = int(sys.argv[1])

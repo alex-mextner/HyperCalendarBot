@@ -50,7 +50,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
   try {
     switch (toolName) {
       case 'get_events':
-        return handleGetEvents(ctx, input as { start_date: string; end_date: string });
+        return handleGetEvents(ctx, input as { start_date: string; end_date: string; scope?: 'personal' | 'group' });
 
       case 'create_event':
         return handleCreateEvent(
@@ -65,6 +65,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
             recurrence_rule?: string;
             reminder_minutes?: number[];
             force?: boolean;
+            scope?: 'personal' | 'group';
           },
         );
 
@@ -79,35 +80,39 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
             description?: string | null;
             location?: string | null;
             recurrence_rule?: string | null;
+            scope?: 'personal' | 'group';
           },
         );
 
       case 'delete_event':
-        return handleDeleteEvent(ctx, input as { event_id: number });
+        return handleDeleteEvent(ctx, input as { event_id: number; scope?: 'personal' | 'group' });
 
       case 'get_free_slots':
-        return handleGetFreeSlots(ctx, input as { date: string });
+        return handleGetFreeSlots(ctx, input as { date: string; scope?: 'personal' | 'group' });
 
       case 'search_events':
-        return handleSearchEvents(ctx, input as { query: string });
+        return handleSearchEvents(ctx, input as { query: string; scope?: 'personal' | 'group' });
 
       case 'get_upcoming':
-        return handleGetUpcoming(ctx, input as { limit?: number });
+        return handleGetUpcoming(ctx, input as { limit?: number; scope?: 'personal' | 'group' });
 
       case 'snooze_event':
-        return handleSnoozeEvent(ctx, input as { event_id: number; minutes?: number });
+        return handleSnoozeEvent(ctx, input as { event_id: number; minutes?: number; scope?: 'personal' | 'group' });
 
       case 'get_event':
-        return handleGetEvent(ctx, input as { event_id: number });
+        return handleGetEvent(ctx, input as { event_id: number; scope?: 'personal' | 'group' });
 
       case 'notify_participants':
         return handleNotifyParticipants(ctx, input as { event_id: number; message: string });
 
       case 'get_reminders':
-        return handleGetReminders(ctx, input as { event_id: number });
+        return handleGetReminders(ctx, input as { event_id: number; scope?: 'personal' | 'group' });
 
       case 'set_reminder':
-        return handleSetReminder(ctx, input as { event_id: number; minutes_before: number[] });
+        return handleSetReminder(
+          ctx,
+          input as { event_id: number; minutes_before: number[]; scope?: 'personal' | 'group' },
+        );
 
       case 'find_user':
         return handleFindUser(ctx, input as { username: string });
@@ -128,7 +133,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleFindContact(ctx, input as { name: string });
 
       case 'render_day_image':
-        return handleRenderDayImage(ctx, input as { date: string });
+        return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group' });
 
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as { week_start: string });

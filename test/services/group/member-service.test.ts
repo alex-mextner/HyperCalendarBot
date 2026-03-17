@@ -18,6 +18,44 @@ function makeUserRepo(registeredIds: number[]): UserRepository {
   } as unknown as UserRepository;
 }
 
+function mockSpawnSuccess(stdout: string) {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(stdout));
+      controller.close();
+    },
+  });
+  return {
+    stdout: stream,
+    stderr: new ReadableStream({
+      start(c) {
+        c.close();
+      },
+    }),
+    exited: Promise.resolve(0),
+    pid: 1,
+    kill: mock(() => {}),
+  } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
+function mockSpawnFailure(exitCode: number) {
+  return {
+    stdout: new ReadableStream({
+      start(c) {
+        c.close();
+      },
+    }),
+    stderr: new ReadableStream({
+      start(c) {
+        c.close();
+      },
+    }),
+    exited: Promise.resolve(exitCode),
+    pid: 1,
+    kill: mock(() => {}),
+  } as unknown as ReturnType<typeof Bun.spawn>;
+}
+
 describe('GroupMemberService', () => {
   const CHAT_ID = -100123;
 
@@ -30,50 +68,37 @@ describe('GroupMemberService', () => {
       ];
 
       const groupRepo = makeGroupMemberRepo([]);
-      // Only ids 1 and 2 are registered bot users
       const userRepo = makeUserRepo([1, 2]);
 
       const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
 
-      // Mock Bun.spawnSync to return successful Pyrogram output
-      const spawnSyncMock = spyOn(Bun, 'spawnSync').mockReturnValue({
-        exitCode: 0,
-        stdout: Buffer.from(JSON.stringify(pyramMembers)),
-        stderr: Buffer.from(''),
-        success: true,
-      } as ReturnType<typeof Bun.spawnSync>);
+      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnSuccess(JSON.stringify(pyramMembers)));
 
       try {
         const result = await service.getRegisteredMembers(CHAT_ID);
         expect(result).toEqual([1, 2]);
         expect(result).not.toContain(3);
       } finally {
-        spawnSyncMock.mockRestore();
+        spawnMock.mockRestore();
       }
     });
 
-    test('passes correct chat_id to Pyrogram script', async () => {
+    test('passes correct arguments to Bun.spawn', async () => {
       const groupRepo = makeGroupMemberRepo([]);
       const userRepo = makeUserRepo([]);
 
       const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
 
-      const spawnSyncMock = spyOn(Bun, 'spawnSync').mockReturnValue({
-        exitCode: 0,
-        stdout: Buffer.from(JSON.stringify([])),
-        stderr: Buffer.from(''),
-        success: true,
-      } as ReturnType<typeof Bun.spawnSync>);
+      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnSuccess(JSON.stringify([])));
 
       try {
         await service.getRegisteredMembers(CHAT_ID);
-        expect(spawnSyncMock).toHaveBeenCalledWith(
-          expect.objectContaining({
-            cmd: ['venv/bin/python', 'scripts/get-chat-members.py', String(CHAT_ID)],
-          }),
+        expect(spawnMock).toHaveBeenCalledWith(
+          ['venv/bin/python', 'scripts/get-chat-members.py', String(CHAT_ID)],
+          expect.objectContaining({ stdout: 'pipe', stderr: 'pipe' }),
         );
       } finally {
-        spawnSyncMock.mockRestore();
+        spawnMock.mockRestore();
       }
     });
   });
@@ -85,34 +110,28 @@ describe('GroupMemberService', () => {
         { chat_id: CHAT_ID, user_id: 20, last_seen_at: '2026-01-01T00:00:00Z' },
         { chat_id: CHAT_ID, user_id: 30, last_seen_at: '2026-01-01T00:00:00Z' },
       ]);
-      // Only 10 and 20 are registered
       const userRepo = makeUserRepo([10, 20]);
 
       const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
 
-      const spawnSyncMock = spyOn(Bun, 'spawnSync').mockReturnValue({
-        exitCode: 1,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from('error'),
-        success: false,
-      } as ReturnType<typeof Bun.spawnSync>);
+      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnFailure(1));
 
       try {
         const result = await service.getRegisteredMembers(CHAT_ID);
         expect(result).toEqual([10, 20]);
         expect(result).not.toContain(30);
       } finally {
-        spawnSyncMock.mockRestore();
+        spawnMock.mockRestore();
       }
     });
 
-    test('falls back to group_members table when Pyrogram throws', async () => {
+    test('falls back to group_members table when Bun.spawn throws', async () => {
       const groupRepo = makeGroupMemberRepo([{ chat_id: CHAT_ID, user_id: 42, last_seen_at: '2026-01-01T00:00:00Z' }]);
       const userRepo = makeUserRepo([42]);
 
       const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
 
-      const spawnSyncMock = spyOn(Bun, 'spawnSync').mockImplementation(() => {
+      const spawnMock = spyOn(Bun, 'spawn').mockImplementation(() => {
         throw new Error('venv not found');
       });
 
@@ -120,7 +139,7 @@ describe('GroupMemberService', () => {
         const result = await service.getRegisteredMembers(CHAT_ID);
         expect(result).toEqual([42]);
       } finally {
-        spawnSyncMock.mockRestore();
+        spawnMock.mockRestore();
       }
     });
 
@@ -129,23 +148,17 @@ describe('GroupMemberService', () => {
         { chat_id: CHAT_ID, user_id: 100, last_seen_at: '2026-01-01T00:00:00Z' },
         { chat_id: CHAT_ID, user_id: 200, last_seen_at: '2026-01-01T00:00:00Z' },
       ]);
-      // Neither 100 nor 200 is registered
       const userRepo = makeUserRepo([]);
 
       const service = new GroupMemberService(groupRepo, userRepo, 'scripts/get-chat-members.py');
 
-      const spawnSyncMock = spyOn(Bun, 'spawnSync').mockReturnValue({
-        exitCode: 1,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from(''),
-        success: false,
-      } as ReturnType<typeof Bun.spawnSync>);
+      const spawnMock = spyOn(Bun, 'spawn').mockReturnValue(mockSpawnFailure(1));
 
       try {
         const result = await service.getRegisteredMembers(CHAT_ID);
         expect(result).toEqual([]);
       } finally {
-        spawnSyncMock.mockRestore();
+        spawnMock.mockRestore();
       }
     });
   });

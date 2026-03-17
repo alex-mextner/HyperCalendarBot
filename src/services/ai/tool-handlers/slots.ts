@@ -1,16 +1,13 @@
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import type { FreeSlot } from '../../event/event-service.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
 
 interface GetFreeSlotsInput {
   date: string;
   scope?: Scope;
-}
-
-function resolveScope(inputScope: Scope | undefined, isGroup: boolean): Scope {
-  return inputScope ?? (isGroup ? 'group' : 'personal');
 }
 
 function computeFreeSlotsFromOccurrences(
@@ -58,7 +55,11 @@ function computeFreeSlotsFromOccurrences(
 
 export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput): ToolResult {
   const date = new Date(input.date);
-  const scope = resolveScope(input.scope, ctx.isGroup);
+  const scope = resolveScope(input, ctx);
+
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
 
   let slots: FreeSlot[];
   if (scope === 'group') {

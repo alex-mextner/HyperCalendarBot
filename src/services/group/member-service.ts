@@ -14,16 +14,18 @@ export class GroupMemberService {
   async getRegisteredMembers(chatId: number): Promise<number[]> {
     // Try Pyrogram first
     try {
-      const result = Bun.spawnSync({
-        cmd: ['venv/bin/python', this.pyBridgePath, String(chatId)],
-        timeout: 10_000,
+      const proc = Bun.spawn(['venv/bin/python', this.pyBridgePath, String(chatId)], {
+        stdout: 'pipe',
+        stderr: 'pipe',
       });
-      if (result.exitCode === 0) {
-        const members = JSON.parse(result.stdout.toString()) as { id: number }[];
+      const exitCode = await proc.exited;
+      if (exitCode === 0) {
+        const stdout = await new Response(proc.stdout).text();
+        const members = JSON.parse(stdout) as { id: number }[];
         const memberIds = members.map((m) => m.id);
         return memberIds.filter((id) => this.userRepo.findByTelegramId(id) !== null);
       }
-      groupLogger.warn({ chatId, exitCode: result.exitCode }, 'Pyrogram fetch failed, using fallback');
+      groupLogger.warn({ chatId, exitCode }, 'Pyrogram fetch failed, using fallback');
     } catch (error) {
       groupLogger.warn({ chatId, error: String(error) }, 'Pyrogram unavailable, using fallback');
     }

@@ -1,10 +1,7 @@
 import type { AgentContext, ToolResult } from '../types.ts';
+import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
-
-function resolveScope(inputScope: Scope | undefined, isGroup: boolean): Scope {
-  return inputScope ?? (isGroup ? 'group' : 'personal');
-}
 
 interface SetReminderInput {
   event_id: number;
@@ -13,7 +10,10 @@ interface SetReminderInput {
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
-  const scope = resolveScope(input.scope, ctx.isGroup);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
   const event =
     scope === 'group'
       ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
@@ -49,7 +49,10 @@ interface GetRemindersInput {
 }
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
-  const scope = resolveScope(input.scope, ctx.isGroup);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
   const event =
     scope === 'group'
       ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)

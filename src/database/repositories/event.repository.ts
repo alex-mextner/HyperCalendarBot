@@ -120,10 +120,7 @@ export class EventRepository {
     return this.db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(parentEventId) as CalendarEvent[];
   }
 
-  update(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
-    const existing = this.findById(id, userId);
-    if (!existing) return null;
-
+  private buildUpdateQuery(data: UpdateEventData): { fields: string[]; values: SQLQueryBindings[] } {
     const ALLOWED_COLUMNS = new Set([
       'title',
       'description',
@@ -147,6 +144,14 @@ export class EventRepository {
       }
     }
 
+    return { fields, values };
+  }
+
+  update(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
+    const existing = this.findById(id, userId);
+    if (!existing) return null;
+
+    const { fields, values } = this.buildUpdateQuery(data);
     if (fields.length === 0) return existing;
 
     fields.push("updated_at = datetime('now')");
@@ -458,29 +463,7 @@ export class EventRepository {
     const existing = this.findByIdInGroup(id, groupId);
     if (!existing) return null;
 
-    const ALLOWED_COLUMNS = new Set([
-      'title',
-      'description',
-      'category',
-      'start_at',
-      'end_at',
-      'all_day',
-      'timezone',
-      'location',
-      'recurrence_rule',
-      'recurrence_end_at',
-    ]);
-    const fields: string[] = [];
-    const values: SQLQueryBindings[] = [];
-
-    for (const [key, value] of Object.entries(data)) {
-      if (!ALLOWED_COLUMNS.has(key)) continue;
-      if (value !== undefined) {
-        fields.push(`${key} = ?`);
-        values.push(key === 'all_day' ? (value ? 1 : 0) : value);
-      }
-    }
-
+    const { fields, values } = this.buildUpdateQuery(data);
     if (fields.length === 0) return existing;
 
     fields.push("updated_at = datetime('now')");
