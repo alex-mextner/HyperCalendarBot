@@ -46,3 +46,4 @@ data/
 lib/
 mtproto-session*
 .claude/worktrees/
+venv/
