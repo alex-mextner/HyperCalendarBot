@@ -226,3 +226,17 @@ export function handleLookupStress(ctx: AgentContext, input: { words: string[] }
 
   return { success: true, output: lines.join('\n') };
 }
+
+export function handleGetBotInfo(): ToolResult {
+  return {
+    success: true,
+    output: [
+      'Non-obvious capabilities:',
+      '- Voice messages: send a voice message and the bot will transcribe and understand it',
+      '- Voice responses: enable in settings to receive voice replies (useful while driving, cooking, or on the go)',
+      '- Group chats: add the bot to a group with friends to create shared calendars',
+      '- feedback: say "found a bug" or "want to suggest a feature" to start a conversation with the developer',
+      '- Developer: @mxtnr',
+    ].join('\n'),
+  };
+}

@@ -1,6 +1,6 @@
-import { describe, expect, test, beforeEach } from 'bun:test';
-import { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Intent } from '../../../src/database/types.ts';
+import { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
 
 function makeIntent(overrides: Partial<Intent> & { id: number; canonical_name: string }): Intent {
   return {
@@ -24,22 +24,28 @@ describe('IntentMatcher', () => {
   });
 
   test('exact match returns intent id', () => {
-    matcher.load([makeIntent({
-      id: 1, canonical_name: 'show_today',
-      phrases: '["что сегодня", "today"]',
-    })]);
+    matcher.load([
+      makeIntent({
+        id: 1,
+        canonical_name: 'show_today',
+        phrases: '["что сегодня", "today"]',
+      }),
+    ]);
     expect(matcher.match('Что сегодня?')).toEqual({ intentId: 1, captures: {} });
     expect(matcher.match('today')).toEqual({ intentId: 1, captures: {} });
   });
 
   test('regex match with capture groups', () => {
-    matcher.load([makeIntent({
-      id: 2, canonical_name: 'search',
-      trigger_words: '["найди", "поиск"]',
-      pattern: '^(?:найди|поиск)\\s+(.+)$',
-    })]);
+    matcher.load([
+      makeIntent({
+        id: 2,
+        canonical_name: 'search',
+        trigger_words: '["найди", "поиск"]',
+        pattern: '^(?:найди|поиск)\\s+(.+)$',
+      }),
+    ]);
     const result = matcher.match('найди встречу с доктором');
-    expect(result).toEqual({ intentId: 2, captures: { '$1': 'встречу с доктором' } });
+    expect(result).toEqual({ intentId: 2, captures: { $1: 'встречу с доктором' } });
   });
 
   test('returns null on no match', () => {
@@ -57,23 +63,29 @@ describe('IntentMatcher', () => {
   });
 
   test('multiple capture groups', () => {
-    matcher.load([makeIntent({
-      id: 3, canonical_name: 'events_date',
-      trigger_words: '["события"]',
-      pattern: '^события\\s+(\\d+)\\s+(\\S+)$',
-    })]);
+    matcher.load([
+      makeIntent({
+        id: 3,
+        canonical_name: 'events_date',
+        trigger_words: '["события"]',
+        pattern: '^события\\s+(\\d+)\\s+(\\S+)$',
+      }),
+    ]);
     const result = matcher.match('события 25 марта');
-    expect(result).toEqual({ intentId: 3, captures: { '$1': '25', '$2': 'марта' } });
+    expect(result).toEqual({ intentId: 3, captures: { $1: '25', $2: 'марта' } });
   });
 
   test('deduplicates candidate regexes by intentId', () => {
-    matcher.load([makeIntent({
-      id: 4, canonical_name: 'search2',
-      trigger_words: '["найди", "встречу"]',
-      pattern: '^найди\\s+встречу\\s+(.+)$',
-    })]);
+    matcher.load([
+      makeIntent({
+        id: 4,
+        canonical_name: 'search2',
+        trigger_words: '["найди", "встречу"]',
+        pattern: '^найди\\s+встречу\\s+(.+)$',
+      }),
+    ]);
     const result = matcher.match('найди встречу завтра');
-    expect(result).toEqual({ intentId: 4, captures: { '$1': 'завтра' } });
+    expect(result).toEqual({ intentId: 4, captures: { $1: 'завтра' } });
   });
 
   test('load clears previous data', () => {

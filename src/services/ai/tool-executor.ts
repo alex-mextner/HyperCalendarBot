@@ -16,6 +16,7 @@ import {
   handleAskUser,
   handleFindContact,
   handleFindUser,
+  handleGetBotInfo,
   handleGetContacts,
   handleGetGoogleCalendarStatus,
   handleGetHolidays,
@@ -192,6 +193,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'send_feedback':
         return handleSendFeedback(ctx, input as { type: 'bug' | 'feature' | 'question' | 'other'; message: string });
+
+      case 'get_bot_info':
+        return handleGetBotInfo();
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

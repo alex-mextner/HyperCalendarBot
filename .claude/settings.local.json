@@ -11,7 +11,8 @@
       "Read(//Users/ultra/xp/**)",
       "Bash(uv pip:*)",
       "Bash(ffmpeg -version)",
-      "Bash(node_modules/.bin/biome check:*)"
+      "Bash(node_modules/.bin/biome check:*)",
+      "Bash(/Users/ultra/xp/hypercalendarbot/node_modules/.bin/tsc --noEmit)"
     ]
   }
 }

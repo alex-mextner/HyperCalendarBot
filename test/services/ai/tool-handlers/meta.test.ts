@@ -13,6 +13,7 @@ import {
   handleAskUser,
   handleFindContact,
   handleFindUser,
+  handleGetBotInfo,
   handleGetContacts,
   handleGetHolidays,
   handlePickUsers,
@@ -224,6 +225,17 @@ describe('meta tool handlers', () => {
       ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never };
       const result = handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('handleGetBotInfo', () => {
+    test('returns capabilities text', () => {
+      const result = handleGetBotInfo();
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('voice');
+      expect(result.output).toContain('group');
+      expect(result.output).toContain('@mxtnr');
+      expect(result.output).toContain('feedback');
     });
   });
 });

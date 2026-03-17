@@ -1,10 +1,5 @@
 import type { Database } from 'bun:sqlite';
-import type {
-  CreateFeedbackMessageData,
-  CreateFeedbackThreadData,
-  FeedbackMessage,
-  FeedbackThread,
-} from '../types.ts';
+import type { CreateFeedbackMessageData, CreateFeedbackThreadData, FeedbackMessage, FeedbackThread } from '../types.ts';
 
 export class FeedbackRepository {
   constructor(private db: Database) {}
@@ -26,12 +21,16 @@ export class FeedbackRepository {
 
   getOpenThreadForUser(userId: number): FeedbackThread | null {
     return this.db
-      .prepare('SELECT * FROM feedback_threads WHERE user_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT 1')
+      .prepare(
+        'SELECT * FROM feedback_threads WHERE user_id = ? AND status = ? ORDER BY created_at DESC, id DESC LIMIT 1',
+      )
       .get(userId, 'open') as FeedbackThread | null;
   }
 
   closeThread(id: number): void {
-    this.db.prepare("UPDATE feedback_threads SET status = ?, closed_at = datetime('now') WHERE id = ?").run('closed', id);
+    this.db
+      .prepare("UPDATE feedback_threads SET status = ?, closed_at = datetime('now') WHERE id = ?")
+      .run('closed', id);
   }
 
   addMessage(data: CreateFeedbackMessageData): number {

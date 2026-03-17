@@ -178,12 +178,12 @@ describe('production migrations', () => {
     });
 
     test('migration 018 creates feedback_threads and feedback_messages', () => {
-      const threads = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_threads'").get() as
-        | { name: string }
-        | undefined;
-      const messages = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_messages'").get() as
-        | { name: string }
-        | undefined;
+      const threads = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_threads'")
+        .get() as { name: string } | undefined;
+      const messages = db
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_messages'")
+        .get() as { name: string } | undefined;
       expect(threads).toBeDefined();
       expect(messages).toBeDefined();
     });
