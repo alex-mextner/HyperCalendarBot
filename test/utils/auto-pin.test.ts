@@ -1,4 +1,4 @@
-import { describe, expect, test, mock } from 'bun:test';
+import { describe, expect, mock, test } from 'bun:test';
 import { autoPin } from '../../src/utils/auto-pin.ts';
 
 describe('autoPin', () => {
@@ -20,7 +20,7 @@ describe('autoPin', () => {
       sendMessage: sendFn,
       isGroupChat: true,
       groupChatRepo: {
-        findByChatId: () => ({ pin_hint_shown: 0 } as never),
+        findByChatId: () => ({ pin_hint_shown: 0 }) as never,
         setPinHintShown,
       },
     });
@@ -35,7 +35,7 @@ describe('autoPin', () => {
       sendMessage: sendFn,
       isGroupChat: true,
       groupChatRepo: {
-        findByChatId: () => ({ pin_hint_shown: 1 } as never),
+        findByChatId: () => ({ pin_hint_shown: 1 }) as never,
         setPinHintShown: mock(() => {}),
       },
     });
@@ -59,7 +59,7 @@ describe('autoPin', () => {
       sendMessage: mock(() => Promise.reject(new Error('send failed'))),
       isGroupChat: true,
       groupChatRepo: {
-        findByChatId: () => ({ pin_hint_shown: 0 } as never),
+        findByChatId: () => ({ pin_hint_shown: 0 }) as never,
         setPinHintShown,
       },
     });

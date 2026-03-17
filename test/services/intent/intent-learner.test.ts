@@ -1,9 +1,9 @@
 // test/services/intent/intent-learner.test.ts
 import { Database } from 'bun:sqlite';
-import { describe, expect, test, beforeEach } from 'bun:test';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 import { IntentLearner } from '../../../src/services/intent/intent-learner.ts';
 
 describe('IntentLearner', () => {
@@ -33,7 +33,11 @@ describe('IntentLearner', () => {
   });
 
   test('skips contextual messages with pronouns', async () => {
-    const result = await learner.analyze('перенеси это на завтра', [{ name: 'update_event', input: {} }], [{ success: true }]);
+    const result = await learner.analyze(
+      'перенеси это на завтра',
+      [{ name: 'update_event', input: {} }],
+      [{ success: true }],
+    );
     expect(result).toBeNull();
   });
 

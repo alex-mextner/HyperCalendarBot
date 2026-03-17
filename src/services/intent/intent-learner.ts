@@ -1,9 +1,9 @@
 // src/services/intent/intent-learner.ts
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { CreateIntentData } from '../../database/types.ts';
-import { normalize } from './normalizer.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
+import { normalize } from './normalizer.ts';
 
 interface ToolCallRecord {
   name: string;
@@ -66,9 +66,7 @@ export class IntentLearner {
       if (existing) {
         // Append phrases to existing intent if it's approved
         if (existing.status === 'approved') {
-          const newPhrases = intentData.phrases.filter(
-            (p: string) => !JSON.parse(existing.phrases).includes(p),
-          );
+          const newPhrases = intentData.phrases.filter((p: string) => !JSON.parse(existing.phrases).includes(p));
           if (newPhrases.length > 0) {
             this.intentRepo.appendPhrases(existing.id, newPhrases);
           }
@@ -94,7 +92,7 @@ export class IntentLearner {
     if (toolCalls.length === 0) return false;
 
     // ask_user = needs dialogue
-    if (toolCalls.some(tc => tc.name === 'ask_user')) return false;
+    if (toolCalls.some((tc) => tc.name === 'ask_user')) return false;
 
     // Context-dependent phrases (pronouns, references)
     const contextual = /\b(это|этот|эту|его|её|их|тот|то|that|this|it|them|the same)\b/i;
@@ -142,11 +140,11 @@ export class IntentLearner {
       throw new Error(`Learner API error: ${response.status}`);
     }
 
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       content: { type: string; text: string }[];
     };
 
-    const text = data.content.find(c => c.type === 'text')?.text;
+    const text = data.content.find((c) => c.type === 'text')?.text;
     if (!text) return null;
 
     // Parse JSON response
@@ -184,7 +182,7 @@ export class IntentLearner {
     const workflowStr = JSON.stringify(data.workflow, null, 2);
     const text = [
       `💡 New intent: ${data.canonical_name}`,
-      `Phrases: ${data.phrases.map(p => `"${p}"`).join(', ')}`,
+      `Phrases: ${data.phrases.map((p) => `"${p}"`).join(', ')}`,
       data.pattern ? `Pattern: ${data.pattern}` : 'Pattern: none (exact match only)',
       `Workflow: ${workflowStr}`,
       `Format: ${data.format}`,
@@ -192,11 +190,13 @@ export class IntentLearner {
     ].join('\n');
 
     const replyMarkup = {
-      inline_keyboard: [[
-        { text: '✅ Accept', callback_data: `intent_accept:${intentId}` },
-        { text: '✏️ Edit', callback_data: `intent_edit:${intentId}` },
-        { text: '❌ Reject', callback_data: `intent_reject:${intentId}` },
-      ]],
+      inline_keyboard: [
+        [
+          { text: '✅ Accept', callback_data: `intent_accept:${intentId}` },
+          { text: '✏️ Edit', callback_data: `intent_edit:${intentId}` },
+          { text: '❌ Reject', callback_data: `intent_reject:${intentId}` },
+        ],
+      ],
     };
 
     this.config.sendToAdmin(text, replyMarkup).catch((err: unknown) => {

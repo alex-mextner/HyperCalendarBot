@@ -10,11 +10,7 @@ interface AutoPinDeps {
   };
 }
 
-export async function autoPin(
-  chatId: number,
-  messageId: number,
-  deps: AutoPinDeps,
-): Promise<void> {
+export async function autoPin(chatId: number, messageId: number, deps: AutoPinDeps): Promise<void> {
   try {
     await deps.pinChatMessage(chatId, messageId, { disable_notification: true });
   } catch (error) {
@@ -31,11 +27,10 @@ export async function autoPin(
 
     // Show hint once
     deps.groupChatRepo.setPinHintShown(chatId);
-    await deps.sendMessage(
-      chatId,
-      'Если дать мне права админа, я буду закреплять актуальный календарь автоматически 📌',
-    ).catch((err: unknown) => {
-      cmdLogger.error({ error: String(err) }, 'Failed to send pin hint');
-    });
+    await deps
+      .sendMessage(chatId, 'Если дать мне права админа, я буду закреплять актуальный календарь автоматически 📌')
+      .catch((err: unknown) => {
+        cmdLogger.error({ error: String(err) }, 'Failed to send pin hint');
+      });
   }
 }
