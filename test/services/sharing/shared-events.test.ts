@@ -729,3 +729,111 @@ describe('creator delete notifies participants', () => {
     expect(notified).toHaveLength(0);
   });
 });
+
+describe('full shared event lifecycle', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let participantRepo: ParticipantRepository;
+  let invitationRepo: InvitationRepository;
+  let eventService: EventService;
+  let invitationService: InvitationService;
+  let userRepo: UserRepository;
+  let reminderRepo: ReminderRepository;
+  let chatHistory: ChatHistoryRepository;
+
+  const ALICE = 100; // creator
+  const BOB = 200; // invitee
+
+  beforeEach(() => {
+    db = createTestDb();
+    userRepo = new UserRepository(db);
+    eventRepo = new EventRepository(db);
+    participantRepo = new ParticipantRepository(db);
+    invitationRepo = new InvitationRepository(db);
+    reminderRepo = new ReminderRepository(db);
+    chatHistory = new ChatHistoryRepository(db);
+    const sharingSettings = new SharingSettingsRepository(db);
+    const conflictChecker = new ConflictChecker(eventRepo);
+    eventService = new EventService(eventRepo, reminderRepo);
+    invitationService = new InvitationService(
+      invitationRepo,
+      eventRepo,
+      sharingSettings,
+      participantRepo,
+      conflictChecker,
+    );
+    userRepo.create({ telegram_id: ALICE, timezone: 'UTC', first_name: 'Alice' });
+    userRepo.create({ telegram_id: BOB, timezone: 'UTC', first_name: 'Bob' });
+  });
+
+  test('create -> invite -> accept -> visible -> edit -> invitee sees -> decline -> gone', () => {
+    // 1. Alice creates an event
+    const event = eventService.createEvent({
+      user_id: ALICE,
+      title: 'Team Standup',
+      start_at: '2026-03-20T09:00:00Z',
+      end_at: '2026-03-20T09:30:00Z',
+      timezone: 'UTC',
+    });
+    expect(event.id).toBeDefined();
+
+    // 2. Alice invites Bob
+    const invResult = invitationService.sendInvitation(event.id, ALICE, BOB);
+    expect(invResult.success).toBe(true);
+    const invitationId = invResult.invitation!.id;
+
+    // Event NOT yet visible to Bob (pending invitation)
+    const beforeAccept = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(beforeAccept).toHaveLength(0);
+
+    // 3. Bob accepts
+    const acceptResult = invitationService.acceptInvitation(invitationId, BOB);
+    expect(acceptResult.success).toBe(true);
+
+    // 4. Event appears in Bob's calendar
+    const afterAccept = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(afterAccept).toHaveLength(1);
+    expect(afterAccept[0].event.title).toBe('Team Standup');
+    expect(afterAccept[0].event.user_id).toBe(ALICE); // Bob sees Alice's event
+
+    // 5. Alice edits the event (changes time)
+    const updated = eventService.updateEvent(event.id, ALICE, { start_at: '2026-03-20T10:00:00Z' });
+    expect(updated).not.toBeNull();
+    expect(updated!.start_at).toBe('2026-03-20T10:00:00Z');
+
+    // 6. Bob sees the updated event
+    const afterEdit = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(afterEdit).toHaveLength(1);
+    expect(afterEdit[0].occurrence_start).toBe('2026-03-20T10:00:00Z');
+
+    // 7. Bob declines (via handleDeleteEvent, which is what the AI uses)
+    const bobUser = userRepo.findByTelegramId(BOB)!;
+    const ctx: AgentContext = {
+      user: bobUser,
+      chatId: BOB,
+      messageText: '',
+      eventService,
+      holidayService: {} as HolidayService,
+      chatHistory,
+      userRepo,
+      reminderRepo,
+      participantRepo,
+    };
+    const deleteResult = handleDeleteEvent(ctx, { event_id: event.id });
+    expect(deleteResult.success).toBe(true);
+    expect(deleteResult.output).toContain('declined');
+
+    // 8. Event gone from Bob's calendar
+    const afterDecline = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(afterDecline).toHaveLength(0);
+
+    // 9. Event still exists for Alice
+    const aliceEvents = eventService.getEventsInRange(ALICE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(aliceEvents).toHaveLength(1);
+    expect(aliceEvents[0].event.title).toBe('Team Standup');
+
+    // 10. Participant status is declined
+    const participant = participantRepo.findByEventAndUser(event.id, BOB);
+    expect(participant!.status).toBe('declined');
+  });
+});
