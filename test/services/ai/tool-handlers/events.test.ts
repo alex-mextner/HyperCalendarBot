@@ -11,9 +11,12 @@ import { runMigrations } from '../../../../src/database/schema.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
+  handleGetEvent,
   handleGetEvents,
+  handleGetUpcoming,
   handleNotifyParticipants,
   handleSearchEvents,
+  handleSnoozeEvent,
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
@@ -315,6 +318,189 @@ describe('event tool handlers', () => {
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain('no accepted participants');
+    });
+  });
+
+  describe('group scope', () => {
+    const GROUP_CHAT_ID = -100999;
+
+    function makeGroupCtx(): AgentContext {
+      return {
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_CHAT_ID,
+        chatId: GROUP_CHAT_ID,
+      };
+    }
+
+    function createGroupEvent(title: string, startAt: string, endAt?: string) {
+      return ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title,
+        start_at: startAt,
+        end_at: endAt,
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+    }
+
+    test('handleGetEvents with scope=group queries group calendar', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Event',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+      });
+      createGroupEvent('Group Event', '2026-03-15T14:00:00Z', '2026-03-15T15:00:00Z');
+
+      const gCtx = makeGroupCtx();
+      const result = handleGetEvents(gCtx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+        scope: 'group',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Event');
+      expect(result.output).not.toContain('Personal Event');
+    });
+
+    test('handleCreateEvent with scope=group creates group event', () => {
+      const gCtx = makeGroupCtx();
+      const result = handleCreateEvent(gCtx, {
+        title: 'Group Meeting',
+        start_at: '2026-03-15T14:00:00Z',
+        scope: 'group',
+        force: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Meeting');
+
+      const events = ctx.eventService.getEventsInRangeForGroup(
+        GROUP_CHAT_ID,
+        '2026-03-15T00:00:00Z',
+        '2026-03-15T23:59:59Z',
+      );
+      expect(events.length).toBe(1);
+      expect(events[0].event.owner_type).toBe('group');
+      expect(events[0].event.group_id).toBe(GROUP_CHAT_ID);
+      expect(events[0].event.created_by).toBe(USER_ID);
+    });
+
+    test('handleUpdateEvent with scope=group updates group event', () => {
+      const event = createGroupEvent('Old Group Title', '2026-03-15T10:00:00Z');
+      const gCtx = makeGroupCtx();
+      const result = handleUpdateEvent(gCtx, {
+        event_id: event.id,
+        title: 'New Group Title',
+        scope: 'group',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('New Group Title');
+    });
+
+    test('handleDeleteEvent with scope=group deletes from group calendar', () => {
+      const event = createGroupEvent('To Delete Group', '2026-03-15T10:00:00Z');
+      const gCtx = makeGroupCtx();
+      const result = handleDeleteEvent(gCtx, { event_id: event.id, scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('To Delete Group');
+
+      const found = ctx.eventService.getEventForGroup(event.id, GROUP_CHAT_ID);
+      expect(found).toBeNull();
+    });
+
+    test('handleSearchEvents with scope=group searches group calendar', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Standup',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      createGroupEvent('Group Standup', '2026-03-15T10:00:00Z');
+
+      const gCtx = makeGroupCtx();
+      const result = handleSearchEvents(gCtx, { query: 'Standup', scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Standup');
+      expect(result.output).not.toContain('Personal Standup');
+    });
+
+    test('handleGetEvent with scope=group fetches group event', () => {
+      const event = createGroupEvent('Group Detail', '2026-03-15T10:00:00Z');
+      const gCtx = makeGroupCtx();
+      const result = handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Detail');
+    });
+
+    test('handleGetUpcoming with scope=group returns group events', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Soon',
+        start_at: new Date(Date.now() + 3600_000).toISOString(),
+        timezone: 'UTC',
+      });
+      createGroupEvent('Group Soon', new Date(Date.now() + 7200_000).toISOString());
+
+      const gCtx = makeGroupCtx();
+      const result = handleGetUpcoming(gCtx, { scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Soon');
+      expect(result.output).not.toContain('Personal Soon');
+    });
+
+    test('handleSnoozeEvent with scope=group snoozes group event', () => {
+      const event = createGroupEvent('Group Snooze', '2026-03-15T10:00:00Z', '2026-03-15T11:00:00Z');
+      const gCtx = makeGroupCtx();
+      const result = handleSnoozeEvent(gCtx, { event_id: event.id, minutes: 15, scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('snoozed by 15 min');
+    });
+
+    test('scope defaults to group when isGroup=true and scope not specified', () => {
+      createGroupEvent('Group Default', '2026-03-15T14:00:00Z', '2026-03-15T15:00:00Z');
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Default',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const gCtx = makeGroupCtx();
+      const result = handleGetEvents(gCtx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Default');
+      expect(result.output).not.toContain('Personal Default');
+    });
+
+    test('scope defaults to personal when isGroup=false', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Visible',
+        start_at: '2026-03-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+
+      // isGroup=false, no scope => personal path
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Personal Visible');
+    });
+
+    test('handleDeleteEvent with scope=group returns error for non-existent group event', () => {
+      const gCtx = makeGroupCtx();
+      const result = handleDeleteEvent(gCtx, { event_id: 9999, scope: 'group' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
     });
   });
 });
