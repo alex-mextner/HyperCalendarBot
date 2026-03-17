@@ -38,8 +38,8 @@ export class CallManager {
         callId = callInfo.callId;
         accessHash = callInfo.accessHash;
 
-        // Ring for 5 seconds then hang up — audio streaming via ntgcalls pending
-        await new Promise((resolve) => setTimeout(resolve, 5000));
+        // Ring for 10 seconds then hang up — audio streaming via ntgcalls pending
+        await new Promise((resolve) => setTimeout(resolve, 10_000));
         await this.deps.callSignaling.discardCall(callId, accessHash);
       } catch (ringError) {
         voiceLogger.warn({ error: String(ringError), userId: job.userId }, 'Ring failed, sending voice message only');

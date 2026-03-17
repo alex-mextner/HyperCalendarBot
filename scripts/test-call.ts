@@ -63,9 +63,13 @@ try {
   const callInfo = await callSignaling.initiateCall(peer.userId);
   console.log(`  ✅ Call initiated: callId=${callInfo.callId}`);
 
-  // Step 5: Wait, then hang up
-  console.log('[5/5] Ringing for 5s...');
-  await new Promise((r) => setTimeout(r, 5000));
+  // Step 5: Ring for 15 seconds
+  console.log('[5/5] Ringing for 15s — check your phone...');
+  for (let i = 15; i > 0; i--) {
+    process.stdout.write(`  ${i}s...\r`);
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  console.log('  Hanging up...');
   await callSignaling.discardCall(callInfo.callId, callInfo.accessHash);
   console.log('  ✅ Call ended');
 } catch (error) {
