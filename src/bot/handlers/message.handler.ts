@@ -15,6 +15,7 @@ import type { SharingSettingsRepository } from '../../database/repositories/shar
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
@@ -393,23 +394,27 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
 
-  const aiAgentLayer = createAiAgentLayer({ agent: deps.agent, agentContextBuilder, intentLearner: deps.intentLearner });
+  const aiAgentLayer = createAiAgentLayer({
+    agent: deps.agent,
+    agentContextBuilder,
+    intentLearner: deps.intentLearner,
+  });
 
-  const layers = [
-    ...(deps.intentMatcher && deps.intentRepo && deps.intentExecutor && deps.intentToolExecutor
-      ? [
-          createIntentMatcherLayer(
-            deps.intentMatcher,
-            deps.intentRepo,
-            deps.intentExecutor,
-            deps.intentToolExecutor,
-            workflowSessions,
-          ),
-        ]
-      : []),
-    ...(deps.feedbackRepo ? [createFeedbackRouterLayer(deps.feedbackRepo)] : []),
-    aiAgentLayer,
-  ];
+  // Static layers that don't require per-message context
+  const staticLayers = [...(deps.feedbackRepo ? [createFeedbackRouterLayer(deps.feedbackRepo)] : []), aiAgentLayer];
+
+  // Intent layer is built statically when a custom tool executor is provided,
+  // or dynamically per-message using agentContextBuilder when it's absent.
+  const staticIntentLayer =
+    deps.intentMatcher && deps.intentRepo && deps.intentExecutor && deps.intentToolExecutor
+      ? createIntentMatcherLayer(
+          deps.intentMatcher,
+          deps.intentRepo,
+          deps.intentExecutor,
+          deps.intentToolExecutor,
+          workflowSessions,
+        )
+      : undefined;
 
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
@@ -507,6 +512,22 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         return;
       }
     }
+
+    // Build per-message intent layer if no static one exists (tool executor requires user context)
+    const intentLayer =
+      staticIntentLayer ??
+      (deps.intentMatcher && deps.intentRepo && deps.intentExecutor
+        ? createIntentMatcherLayer(
+            deps.intentMatcher,
+            deps.intentRepo,
+            deps.intentExecutor,
+            (toolName, input) =>
+              executeTool(agentContextBuilder(user, Number(ctx.chatId!), messageText), toolName, input),
+            workflowSessions,
+          )
+        : undefined);
+
+    const layers = [...(intentLayer ? [intentLayer] : []), ...staticLayers];
 
     await runPipeline(ctx, messageText, layers);
   };

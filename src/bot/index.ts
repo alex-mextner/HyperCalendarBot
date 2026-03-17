@@ -2,7 +2,9 @@
 import { Bot } from 'gramio';
 import { RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
+import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
+import { IntentRepository } from '../database/repositories/intent.repository.ts';
 import type { User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
@@ -12,6 +14,9 @@ import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
+import { IntentExecutor } from '../services/intent/intent-executor.ts';
+import { IntentLearner } from '../services/intent/intent-learner.ts';
+import { IntentMatcher } from '../services/intent/intent-matcher.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { InlineService } from '../services/sharing/inline-service.ts';
@@ -135,11 +140,44 @@ export function createBot(
   const inlineService = new InlineService(eventService, privacyService);
   const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService);
 
+  const intentRepo = new IntentRepository(db.db);
+  const feedbackRepo = new FeedbackRepository(db.db);
+  const intentMatcher = new IntentMatcher();
+  const intentExecutor = new IntentExecutor();
+  const workflowSessions = new Map<number, import('./pipeline/intent-matcher-layer.ts').WorkflowSession>();
+  const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
+  const adminReplySession = new Map<number, { threadId: number; userId: number }>();
+
+  // Load approved intents into matcher on startup
+  intentMatcher.load(intentRepo.getApproved());
+
   const bot = new Bot(token);
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
+
+  const botAdminId = process.env.BOT_ADMIN_ID ? Number.parseInt(process.env.BOT_ADMIN_ID, 10) : undefined;
+  const intentLearnerDailyLimit = process.env.INTENT_LEARNER_DAILY_LIMIT
+    ? Number.parseInt(process.env.INTENT_LEARNER_DAILY_LIMIT, 10)
+    : 100;
+
+  const intentLearner =
+    botAdminId && !Number.isNaN(botAdminId)
+      ? new IntentLearner(intentRepo, {
+          apiKey: aiConfig.apiKey,
+          baseUrl: aiConfig.baseUrl,
+          model: 'claude-haiku-4-5-20251001',
+          dailyLimit: intentLearnerDailyLimit,
+          adminId: botAdminId,
+          sendToAdmin: (text, replyMarkup) =>
+            bot.api.sendMessage({
+              chat_id: botAdminId,
+              text,
+              reply_markup: replyMarkup as never,
+            }),
+        })
+      : undefined;
 
   bot
     .derive(createUserResolver(db))
@@ -253,6 +291,19 @@ export function createBot(
         undefined,
         db.callSettings,
         db.sharingSettings,
+        {
+          feedbackRepo,
+          adminReplySession,
+          sendMessage: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+        },
+        db.users,
+        {
+          intentRepo,
+          intentMatcher: {
+            reload: () => intentMatcher.load(intentRepo.getApproved()),
+          },
+          adminEditSessions,
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)
@@ -380,6 +431,18 @@ export function createBot(
               await bot.api.sendVoice({ chat_id: chatId, voice: file });
             }
           : undefined,
+        intentMatcher,
+        intentRepo,
+        intentExecutor,
+        feedbackRepo,
+        workflowSessions,
+        adminEditSessions,
+        adminReplySession,
+        intentLearner,
+        botAdminId,
+        aiBaseUrl: aiConfig.baseUrl,
+        aiApiKey: aiConfig.apiKey,
+        sendMessageToUser: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
       })(ctx as unknown as BotCommandContext),
     )
     // Error handler
