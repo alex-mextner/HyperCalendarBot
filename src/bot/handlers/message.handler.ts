@@ -20,6 +20,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
@@ -81,6 +82,10 @@ export interface MessageHandlerDeps {
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<unknown>;
+  // Admin intent edit sessions
+  adminEditSessions?: Map<number, AdminEditSession>;
+  aiBaseUrl?: string;
+  aiApiKey?: string;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -280,6 +285,107 @@ function buildAgentContextFactory(deps: MessageHandlerDeps) {
   });
 }
 
+const INTENT_EDIT_SYSTEM_PROMPT = `You are a JSON editor for intent objects.
+Given a current intent JSON and admin instructions, return ONLY a valid JSON object with updated fields.
+Only include fields that should change: phrases (string[]), trigger_words (string[]), pattern (string|null), workflow (object), format (string).
+Do not include id, canonical_name, status, source_message, created_at.`;
+
+async function handleIntentEditInstruction(
+  ctx: BotCommandContext,
+  instruction: string,
+  session: AdminEditSession,
+  deps: MessageHandlerDeps,
+): Promise<void> {
+  const intentRepo = deps.intentRepo;
+  if (!intentRepo) {
+    await ctx.send('Intent repository not configured.');
+    return;
+  }
+
+  const intent = intentRepo.getById(session.intentId);
+  if (!intent) {
+    await ctx.send(`Intent #${session.intentId} not found.`);
+    return;
+  }
+
+  const currentJson = JSON.stringify({
+    phrases: JSON.parse(intent.phrases),
+    trigger_words: JSON.parse(intent.trigger_words),
+    pattern: intent.pattern,
+    workflow: JSON.parse(intent.workflow),
+    format: intent.format,
+  });
+
+  try {
+    const apiKey = deps.aiApiKey ?? '';
+    const baseUrl = deps.aiBaseUrl ?? 'https://api.anthropic.com';
+
+    const response = await fetch(`${baseUrl}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: INTENT_EDIT_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: 'user',
+            content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
+          },
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`AI API error: ${response.status}`);
+    }
+
+    const data = (await response.json()) as { content: { type: string; text: string }[] };
+    const text = data.content.find((c) => c.type === 'text')?.text;
+    if (!text) throw new Error('Empty AI response');
+
+    const updated = JSON.parse(text) as Partial<{
+      phrases: string[];
+      trigger_words: string[];
+      pattern: string | null;
+      workflow: Record<string, unknown>;
+      format: string;
+    }>;
+
+    intentRepo.update(session.intentId, {
+      ...(updated.phrases !== undefined && { phrases: updated.phrases }),
+      ...(updated.trigger_words !== undefined && { trigger_words: updated.trigger_words }),
+      ...(updated.pattern !== undefined && { pattern: updated.pattern ?? undefined }),
+      ...(updated.workflow !== undefined && { workflow: updated.workflow }),
+      ...(updated.format !== undefined && { format: updated.format }),
+    });
+
+    const fresh = intentRepo.getById(session.intentId)!;
+    const preview = [
+      `✏️ Intent #${fresh.id} updated: <b>${fresh.canonical_name}</b>`,
+      `Phrases: ${(JSON.parse(fresh.phrases) as string[]).map((p) => `"${p}"`).join(', ')}`,
+      fresh.pattern ? `Pattern: ${fresh.pattern}` : 'Pattern: none',
+      `Workflow: ${fresh.workflow}`,
+      `Format: ${fresh.format}`,
+    ].join('\n');
+
+    const { InlineKeyboard } = await import('gramio');
+    const kb = new InlineKeyboard()
+      .text('✅ Accept', `intent_accept:${fresh.id}`)
+      .text('✏️ Edit', `intent_edit:${fresh.id}`)
+      .text('❌ Reject', `intent_reject:${fresh.id}`);
+
+    await ctx.send(preview, { parse_mode: 'HTML', reply_markup: kb });
+  } catch (error) {
+    cmdLogger.error({ error: String(error) }, 'Intent edit instruction failed');
+    await ctx.send(`Failed to process edit: ${String(error)}`);
+  }
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
@@ -381,6 +487,20 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           );
           await ctx.send('Reply sent.');
         }
+        return;
+      }
+    }
+
+    // Admin intent edit session: if admin has an active edit session, process as edit instruction
+    if (deps.botAdminId && user.telegram_id === deps.botAdminId && deps.adminEditSessions) {
+      const editSession = deps.adminEditSessions.get(user.telegram_id);
+      if (editSession) {
+        deps.adminEditSessions.delete(user.telegram_id);
+        if (isSessionExpired(editSession)) {
+          await ctx.send('Edit session expired. Please click Edit again.');
+          return;
+        }
+        await handleIntentEditInstruction(ctx, messageText, editSession, deps);
         return;
       }
     }

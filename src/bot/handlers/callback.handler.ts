@@ -12,6 +12,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
@@ -21,6 +22,7 @@ import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
@@ -78,6 +80,11 @@ export function createCallbackHandler(
     sendMessage: (chatId: number, text: string) => Promise<unknown>;
   },
   userRepo?: UserRepository,
+  intentDeps?: {
+    intentRepo: IntentRepository;
+    intentMatcher?: { reload: () => void };
+    adminEditSessions?: Map<number, AdminEditSession>;
+  },
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -639,6 +646,41 @@ export function createCallbackHandler(
         userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
         await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
         await ctx.answer();
+        return;
+      }
+
+      // Intent verification: accept
+      if (action === 'intent_accept' && intentDeps) {
+        const intentId = Number(payload);
+        intentDeps.intentRepo.updateStatus(intentId, 'approved');
+        intentDeps.intentMatcher?.reload();
+        await ctx.answer('Intent approved ✅');
+        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
+        return;
+      }
+
+      // Intent verification: reject
+      if (action === 'intent_reject' && intentDeps) {
+        const intentId = Number(payload);
+        intentDeps.intentRepo.updateStatus(intentId, 'rejected');
+        await ctx.answer('Intent rejected ❌');
+        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
+        return;
+      }
+
+      // Intent verification: edit — store admin edit session
+      if (action === 'intent_edit' && intentDeps) {
+        const intentId = Number(payload);
+        if (intentDeps.adminEditSessions) {
+          intentDeps.adminEditSessions.set(user.telegram_id, {
+            intentId,
+            state: 'awaiting_instructions',
+            createdAt: Date.now(),
+          });
+        }
+        await ctx.answer('Send edit instructions...');
         return;
       }
 
