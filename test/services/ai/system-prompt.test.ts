@@ -121,4 +121,12 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Russian');
   });
+
+  test('includes shared events instructions', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Shared Events');
+    expect(prompt).toContain('notify_participants');
+    expect(prompt).toContain('propose_edit');
+    expect(prompt).toContain('declines the invitation');
+  });
 });

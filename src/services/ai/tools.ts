@@ -89,7 +89,8 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'delete_event',
-    description: 'Delete a calendar event by its ID.',
+    description:
+      'Delete a calendar event by its ID. If the user is a participant (not the creator), this declines the invitation instead of deleting — the event stays for the creator and other participants.',
     input_schema: {
       type: 'object' as const,
       properties: {
