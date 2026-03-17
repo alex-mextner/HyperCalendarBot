@@ -9,6 +9,7 @@ import { CallSettingsRepository } from './repositories/call-settings.repository.
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
 import { ContactRepository } from './repositories/contact.repository.ts';
 import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
+import { EditProposalRepository } from './repositories/edit-proposal.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
 import { GoogleCalendarRepository } from './repositories/google-calendar.repository.ts';
@@ -46,6 +47,7 @@ export class DatabaseService {
   readonly groupChats: GroupChatRepository;
   readonly contacts: ContactRepository;
   readonly participants: ParticipantRepository;
+  readonly editProposals: EditProposalRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -77,6 +79,7 @@ export class DatabaseService {
     this.groupChats = new GroupChatRepository(this.db);
     this.contacts = new ContactRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
+    this.editProposals = new EditProposalRepository(this.db);
   }
 
   close(): void {

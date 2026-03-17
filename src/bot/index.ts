@@ -7,6 +7,7 @@ import type { User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
+import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
@@ -101,7 +102,20 @@ export function createBot(
   stressDictionary?: StressDictionary,
   sileroTts?: SileroTtsService,
 ) {
-  const eventService = new EventService(db.events, db.reminders);
+  const eventService = new EventService(
+    db.events,
+    db.reminders,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    db.participants,
+    (userIds, text) => {
+      for (const uid of userIds) {
+        bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
+      }
+    },
+  );
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
@@ -112,7 +126,14 @@ export function createBot(
 
   const deepLinkService = new DeepLinkService(db.deepLinks);
   const privacyService = new PrivacyService(db.sharingSettings);
-  const invitationService = new InvitationService(db.invitations, db.events, db.sharingSettings);
+  const conflictChecker = new ConflictChecker(db.events);
+  const invitationService = new InvitationService(
+    db.invitations,
+    db.events,
+    db.sharingSettings,
+    db.participants,
+    conflictChecker,
+  );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
   const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService);
@@ -319,6 +340,8 @@ export function createBot(
         userRepo: db.users,
         reminderRepo: db.reminders,
         contactRepo: db.contacts,
+        participantRepo: db.participants,
+        editProposalRepo: db.editProposals,
         invitationService,
         invitationRepo: db.invitations,
         sharingService,
