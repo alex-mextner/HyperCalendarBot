@@ -4,6 +4,7 @@ import type { ChatHistoryRepository } from '../../database/repositories/chat-his
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -36,6 +37,7 @@ export interface MessageHandlerDeps {
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
   contactRepo?: ContactRepository;
+  participantRepo?: ParticipantRepository;
   invitationService?: InvitationService;
   invitationRepo?: InvitationRepository;
   sharingService?: SharingService;
@@ -168,6 +170,7 @@ async function handleVoiceMessage(
       userRepo: deps.userRepo,
       reminderRepo: deps.reminderRepo,
       contactRepo: deps.contactRepo,
+      participantRepo: deps.participantRepo,
       invitationService: deps.invitationService,
       invitationRepo: deps.invitationRepo,
       sharingService: deps.sharingService,
@@ -269,6 +272,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       userRepo: deps.userRepo,
       reminderRepo: deps.reminderRepo,
       contactRepo: deps.contactRepo,
+      participantRepo: deps.participantRepo,
       invitationService: deps.invitationService,
       invitationRepo: deps.invitationRepo,
       sharingService: deps.sharingService,

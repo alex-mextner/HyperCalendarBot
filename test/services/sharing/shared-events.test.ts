@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
@@ -8,8 +9,12 @@ import { ReminderRepository } from '../../../src/database/repositories/reminder.
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { User } from '../../../src/database/types.ts';
+import { handleDeleteEvent } from '../../../src/services/ai/tool-handlers/events.ts';
+import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { ConflictChecker } from '../../../src/services/event/conflict-checker.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 
 const CREATOR = 100;
@@ -505,5 +510,118 @@ describe('calendar views show participated events', () => {
 
     const events = eventService.getEventsInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(events).toHaveLength(0);
+  });
+});
+
+describe('invitee deletes shared event = decline', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let participantRepo: ParticipantRepository;
+  let eventService: EventService;
+  let reminderRepo: ReminderRepository;
+  let chatHistory: ChatHistoryRepository;
+  let userRepo: UserRepository;
+  let inviteeUser: User;
+
+  function makeCtx(user: User): AgentContext {
+    return {
+      user,
+      chatId: user.telegram_id,
+      messageText: '',
+      eventService,
+      holidayService: {} as HolidayService,
+      chatHistory,
+      userRepo,
+      reminderRepo,
+      participantRepo,
+    };
+  }
+
+  beforeEach(() => {
+    db = createTestDb();
+    userRepo = new UserRepository(db);
+    eventRepo = new EventRepository(db);
+    participantRepo = new ParticipantRepository(db);
+    reminderRepo = new ReminderRepository(db);
+    chatHistory = new ChatHistoryRepository(db);
+    eventService = new EventService(eventRepo, reminderRepo);
+    userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
+    inviteeUser = userRepo.findByTelegramId(INVITEE)!;
+  });
+
+  test('participant deleting shared event declines instead of deleting', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Team Meeting',
+      start_at: '2026-03-20T10:00:00Z',
+      end_at: '2026-03-20T11:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+
+    const ctx = makeCtx(inviteeUser);
+    const result = handleDeleteEvent(ctx, { event_id: shared.id });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('declined');
+
+    // Event still exists for the owner
+    const ownerEvent = eventRepo.findById(shared.id, CREATOR);
+    expect(ownerEvent).not.toBeNull();
+
+    // Participant status changed to declined
+    const participant = participantRepo.findByEventAndUser(shared.id, INVITEE);
+    expect(participant!.status).toBe('declined');
+  });
+
+  test('owner can still delete their own event normally', () => {
+    const creatorUser = userRepo.findByTelegramId(CREATOR)!;
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'My Event',
+      start_at: '2026-03-20T10:00:00Z',
+      end_at: '2026-03-20T11:00:00Z',
+      timezone: 'UTC',
+    });
+
+    const ctx = makeCtx(creatorUser);
+    const result = handleDeleteEvent(ctx, { event_id: event.id });
+
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('deleted');
+    expect(eventRepo.findById(event.id, CREATOR)).toBeNull();
+  });
+
+  test('non-participant non-owner gets not found error', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Private',
+      start_at: '2026-03-20T10:00:00Z',
+      timezone: 'UTC',
+    });
+
+    const ctx = makeCtx(inviteeUser);
+    const result = handleDeleteEvent(ctx, { event_id: shared.id });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not found');
+  });
+
+  test('declined event disappears from invitee calendar', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Vanishing',
+      start_at: '2026-03-20T10:00:00Z',
+      end_at: '2026-03-20T11:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+
+    const ctx = makeCtx(inviteeUser);
+    handleDeleteEvent(ctx, { event_id: shared.id });
+
+    const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(visible).toHaveLength(0);
   });
 });

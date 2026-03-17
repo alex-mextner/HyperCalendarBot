@@ -111,6 +111,18 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+
+  if (!event && ctx.participantRepo) {
+    const participant = ctx.participantRepo.findByEventAndUser(input.event_id, ctx.user.telegram_id);
+    if (participant && participant.status === 'accepted') {
+      ctx.participantRepo.updateStatus(input.event_id, ctx.user.telegram_id, 'declined');
+      return {
+        success: true,
+        output: `You declined the shared event (id: ${input.event_id}). It has been removed from your calendar.`,
+      };
+    }
+  }
+
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }

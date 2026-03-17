@@ -2,6 +2,7 @@ import type { ChatHistoryRepository } from '../../database/repositories/chat-his
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -31,6 +32,7 @@ export interface AgentContext {
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
   contactRepo?: ContactRepository;
+  participantRepo?: ParticipantRepository;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
