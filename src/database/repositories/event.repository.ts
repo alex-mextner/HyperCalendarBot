@@ -305,6 +305,32 @@ export class EventRepository {
       );
   }
 
+  findVisibleOverlapping(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `
+      SELECT DISTINCT e.* FROM events e
+      WHERE e.is_cancelled = 0
+        AND e.recurrence_rule IS NULL
+        AND e.parent_event_id IS NULL
+        AND e.start_at < ?
+        AND (
+          e.end_at > ?
+          OR (e.end_at IS NULL AND strftime('%Y-%m-%dT%H:%M:%SZ', e.start_at, '+30 minutes') > ?)
+        )
+        AND (
+          e.user_id = ?
+          OR e.id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          )
+        )
+      ORDER BY e.start_at
+    `,
+      )
+      .all(endUtc, startUtc, startUtc, userId, userId) as CalendarEvent[];
+  }
+
   countInRange(userId: number, startUtc: string, endUtc: string): number {
     const row = this.db
       .prepare(`
