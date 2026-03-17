@@ -169,22 +169,7 @@ export function createBot(
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     .command('notify', (ctx) => handleNotify(ctx as unknown as BotCommandContext, prefsService))
     // Sharing commands
-    .command('invite', (ctx) =>
-      handleInvite(
-        ctx as unknown as BotCommandContext,
-        invitationService,
-        eventService,
-        db.invitations,
-        deepLinkService,
-        (chatId, text, options) =>
-          bot.api.sendMessage({
-            chat_id: chatId,
-            text,
-            parse_mode: options.parse_mode,
-            reply_markup: options.reply_markup as never,
-          }),
-      ),
-    )
+    .command('invite', (ctx) => handleInvite(ctx as unknown as BotCommandContext, eventService))
     .command('invitations', (ctx) =>
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )

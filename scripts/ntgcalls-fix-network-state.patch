@@ -1,0 +1,20 @@
+diff --git wrtc/src/interfaces/native_network_interface.cpp wrtc/src/interfaces/native_network_interface.cpp
+index 9f1f296..99b0ddc 100644
+--- wrtc/src/interfaces/native_network_interface.cpp
++++ wrtc/src/interfaces/native_network_interface.cpp
+@@ -236,6 +236,15 @@ namespace wrtc {
+             if (dataChannelInterface) {
+                 dataChannelInterface->updateIsConnected(isConnected);
+             }
++            // FIX: Signal network availability to Call transport controller.
++            // Without this, PacedSender stays paused and RTP audio is never sent.
++            std::weak_ptr weak(shared_from_this());
++            workerThread()->PostTask([weak, isConnected] {
++                const auto strong = weak.lock();
++                if (!strong || !strong->call) return;
++                strong->call->GetTransportControllerSend()->OnNetworkAvailability(isConnected);
++                RTC_LOG(LS_INFO) << "FIX: SignalNetworkState " << (isConnected ? "Up" : "Down");
++            });
+         }
+     }
+ 

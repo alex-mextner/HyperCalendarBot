@@ -414,4 +414,10 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '011_contacts_preferred_name',
+    up: (db) => {
+      db.exec(`ALTER TABLE contacts ADD COLUMN preferred_name TEXT`);
+    },
+  },
 ];

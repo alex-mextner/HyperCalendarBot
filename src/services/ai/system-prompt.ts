@@ -48,8 +48,10 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - When the user wants to postpone/snooze an event, use the snooze_event tool.
 - To check or show reminders for an event, use the get_reminders tool.
 - For sharing events or invitations, use share_event, send_invitation, share_agenda tools.
+- To cancel a sent invitation, use cancel_invitation. To remind about a pending invitation, use resend_invitation.
 - To check invitation responses, use get_invitation_status.
 - To change privacy/visibility, use update_sharing_settings or set_event_visibility.
+- NAMES: Always use the name form the user used. If a user says "Алекс", call them "Алекс" — never "Алексей", "Александр", or any other form. If they say "Вова", use "Вова" — never "Владимир". Save the preferred name via add_contact. When referring to contacts, use their preferred_name if set, otherwise their display name.
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event (names or @usernames), follow this EXACT sequence:
   1. Create the event first.
   2. For EACH mentioned person: call find_contact to check the address book.

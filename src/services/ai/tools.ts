@@ -414,12 +414,18 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'add_contact',
-    description: "Save a person to the user's address book. Use after learning someone's username.",
+    description:
+      "Save a person to the user's address book. Use after learning someone's name or username. ALWAYS use the name form the user used as preferred_name.",
     input_schema: {
       type: 'object' as const,
       properties: {
-        name: { type: 'string', description: 'Display name (e.g., "Лена")' },
+        name: { type: 'string', description: 'Full display name (e.g., "Elena Larichkina")' },
         username: { type: 'string', description: 'Telegram @username (without @). Optional.' },
+        preferred_name: {
+          type: 'string',
+          description:
+            'How the user refers to this person (e.g., "Лена", "Вова", "Alex"). Always save the exact form used by the user.',
+        },
       },
       required: ['name'],
     },
@@ -513,6 +519,29 @@ export const toolDefinitions: ToolDefinition[] = [
         },
       },
       required: ['event_id', 'visibility'],
+    },
+  },
+  {
+    name: 'cancel_invitation',
+    description: 'Cancel a pending invitation. Use when the user wants to revoke/cancel an invitation they sent.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        invitation_id: { type: 'number', description: 'ID of the invitation to cancel' },
+      },
+      required: ['invitation_id'],
+    },
+  },
+  {
+    name: 'resend_invitation',
+    description:
+      'Re-send a pending invitation notification to the invitee. Use when the user wants to remind/nudge someone about an unanswered invitation.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        invitation_id: { type: 'number', description: 'ID of the invitation to resend' },
+      },
+      required: ['invitation_id'],
     },
   },
   {

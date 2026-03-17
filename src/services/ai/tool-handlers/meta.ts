@@ -60,17 +60,26 @@ export function handleGetContacts(ctx: AgentContext): ToolResult {
   return { success: true, output: `Contacts:\n${lines.join('\n')}` };
 }
 
-export function handleAddContact(ctx: AgentContext, input: { name: string; username?: string }): ToolResult {
+export function handleAddContact(
+  ctx: AgentContext,
+  input: { name: string; username?: string; preferred_name?: string },
+): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
   let telegramId: number | undefined;
   if (input.username) {
     const user = ctx.userRepo.findByUsername(input.username);
     if (user) telegramId = user.telegram_id;
   }
-  const contact = ctx.contactRepo.upsert(ctx.user.telegram_id, input.name, input.username, telegramId);
+  const contact = ctx.contactRepo.upsert(
+    ctx.user.telegram_id,
+    input.name,
+    input.username,
+    telegramId,
+    input.preferred_name,
+  );
   return {
     success: true,
-    output: `Contact saved: "${contact.name}"${contact.username ? ` (@${contact.username})` : ''}`,
+    output: `Contact saved: "${contact.preferred_name ?? contact.name}"${contact.username ? ` (@${contact.username})` : ''}`,
   };
 }
 
@@ -79,6 +88,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
   const contact = ctx.contactRepo.findByName(ctx.user.telegram_id, input.name);
   if (!contact) return { success: false, error: `No contact named "${input.name}" in address book.` };
   const parts = [`name: ${contact.name}`];
+  if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
   if (contact.username) parts.push(`username: @${contact.username}`);
   if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
   return { success: true, output: parts.join(', ') };

@@ -488,6 +488,37 @@ export function createCallbackHandler(
         return;
       }
 
+      // Invite: user picked an event → open user picker
+      if (action === CB.INVITE_PICK) {
+        const eventId = Number(payload);
+        const event = eventService.getEvent(eventId, user.telegram_id);
+        if (!event) return ctx.answer({ text: 'Not found' });
+        await ctx.answer();
+        await ctx.editText(
+          lang === 'ru'
+            ? `📨 Приглашение на: <b>${event.title}</b>\nВыберите участников:`
+            : `📨 Inviting to: <b>${event.title}</b>\nSelect participants:`,
+          { parse_mode: 'HTML' },
+        );
+        // Send user picker with eventId as requestId
+        if (ctx.message) {
+          const { Keyboard } = await import('gramio');
+          const kb = new Keyboard()
+            .requestUsers(lang === 'ru' ? '👤 Выбрать участников' : '👤 Select participants', eventId, {
+              user_is_bot: false,
+              max_quantity: 10,
+              request_name: true,
+              request_username: true,
+            })
+            .resized()
+            .oneTime();
+          await ctx.message.send(lang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', {
+            reply_markup: kb,
+          });
+        }
+        return;
+      }
+
       // Feature tour
       if (action === CB.FEATURE_TOUR) {
         return handleFeatureTourCallback(ctx, payload);

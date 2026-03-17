@@ -51,6 +51,7 @@ export const CB = {
   GROUP_AGENDA: 'grp_ag',
   CALL_SETTINGS: 'csett',
   FEATURE_TOUR: 'ftour',
+  INVITE_PICK: 'invp',
 } as const;
 
 // i18n messages

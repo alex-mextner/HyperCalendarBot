@@ -31,7 +31,9 @@ import {
 } from './tool-handlers/meta.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
 import {
+  handleCancelInvitation,
   handleGetInvitationStatus,
+  handleResendInvitation,
   handleSendInvitation,
   handleSetEventVisibility,
   handleShareAgenda,
@@ -186,6 +188,12 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
           ctx,
           input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
         );
+
+      case 'cancel_invitation':
+        return handleCancelInvitation(ctx, input as { invitation_id: number });
+
+      case 'resend_invitation':
+        return handleResendInvitation(ctx, input as { invitation_id: number });
 
       case 'get_google_calendar_status':
         return handleGetGoogleCalendarStatus(ctx);

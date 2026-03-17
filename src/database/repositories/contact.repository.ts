@@ -6,6 +6,7 @@ export interface Contact {
   name: string;
   username: string | null;
   telegram_id: number | null;
+  preferred_name: string | null;
   created_at: string;
 }
 
@@ -35,7 +36,7 @@ export class ContactRepository {
     return this.db.prepare('SELECT * FROM contacts WHERE user_id = ? ORDER BY name').all(userId) as Contact[];
   }
 
-  upsert(userId: number, name: string, username?: string, telegramId?: number): Contact {
+  upsert(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
     // Dedup: check by telegram_id first, then username, then name
     const existing =
       (telegramId ? this.findByTelegramId(userId, telegramId) : null) ??
@@ -43,24 +44,25 @@ export class ContactRepository {
       this.findByName(userId, name);
 
     if (existing) {
-      const patch: { name?: string; username?: string; telegram_id?: number } = {};
+      const patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string } = {};
       if (username && !existing.username) patch.username = username;
       if (telegramId && !existing.telegram_id) patch.telegram_id = telegramId;
+      if (preferredName && !existing.preferred_name) patch.preferred_name = preferredName;
       if (Object.keys(patch).length > 0) this.update(existing.id, patch);
       return this.findByName(userId, existing.name) ?? existing;
     }
 
-    return this.add(userId, name, username, telegramId);
+    return this.add(userId, name, username, telegramId, preferredName);
   }
 
-  add(userId: number, name: string, username?: string, telegramId?: number): Contact {
+  add(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
     this.db
-      .prepare('INSERT INTO contacts (user_id, name, username, telegram_id) VALUES (?, ?, ?, ?)')
-      .run(userId, name, username ?? null, telegramId ?? null);
+      .prepare('INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)')
+      .run(userId, name, username ?? null, telegramId ?? null, preferredName ?? null);
     return this.findByName(userId, name)!;
   }
 
-  update(id: number, patch: { name?: string; username?: string; telegram_id?: number }): void {
+  update(id: number, patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string }): void {
     const fields: string[] = [];
     const values: (string | number)[] = [];
     if (patch.name !== undefined) {
@@ -74,6 +76,10 @@ export class ContactRepository {
     if (patch.telegram_id !== undefined) {
       fields.push('telegram_id = ?');
       values.push(patch.telegram_id);
+    }
+    if (patch.preferred_name !== undefined) {
+      fields.push('preferred_name = ?');
+      values.push(patch.preferred_name);
     }
     if (fields.length === 0) return;
     values.push(id);
