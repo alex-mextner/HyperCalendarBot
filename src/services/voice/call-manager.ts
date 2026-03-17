@@ -14,6 +14,7 @@ export interface CallManagerDeps {
     complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
   sendPostCallButtons: (userId: number, eventId: number) => Promise<void>;
+  sendVoiceMessage?: (userId: number, audio: Buffer) => Promise<void>;
 }
 
 export class CallManager {
@@ -27,29 +28,35 @@ export class CallManager {
     try {
       // Step 1: Synthesize TTS audio
       voiceLogger.info({ userId: job.userId, eventId: job.eventId }, 'Synthesizing TTS');
-      // Pre-synthesize and cache audio for when ntgcalls media integration is ready
-      await this.deps.ttsService.synthesize(job.ttsText, job.language);
+      const audioBuffer = await this.deps.ttsService.synthesize(job.ttsText, job.language);
 
-      // Step 2: Initiate call
+      // Step 2: Ring the user (call as notification)
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
-      voiceLogger.info({ userId: job.userId }, 'Initiating call');
-      const callInfo = await this.deps.callSignaling.initiateCall(job.userId);
-      callId = callInfo.callId;
-      accessHash = callInfo.accessHash;
+      voiceLogger.info({ userId: job.userId }, 'Initiating call (ring notification)');
+      try {
+        const callInfo = await this.deps.callSignaling.initiateCall(job.userId);
+        callId = callInfo.callId;
+        accessHash = callInfo.accessHash;
 
-      // Step 3: Play audio — ntgcalls media integration pending (C shim required)
-      // Once wired, synthesized audio from cache will be streamed via ntg_set_stream_sources
+        // Ring for 5 seconds then hang up — audio streaming via ntgcalls pending
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+        await this.deps.callSignaling.discardCall(callId, accessHash);
+      } catch (ringError) {
+        voiceLogger.warn({ error: String(ringError), userId: job.userId }, 'Ring failed, sending voice message only');
+      }
+
+      // Step 3: Send TTS audio as voice message (reliable content delivery)
       this.deps.callLogRepo.updateStatus(job.callLogId, 'connected');
-      const PLACEHOLDER_CALL_DURATION_MS = 1000;
-      await new Promise((resolve) => setTimeout(resolve, PLACEHOLDER_CALL_DURATION_MS));
+      if (this.deps.sendVoiceMessage) {
+        await this.deps.sendVoiceMessage(job.userId, audioBuffer);
+        voiceLogger.info({ userId: job.userId, audioBytes: audioBuffer.length }, 'Voice message sent');
+      }
 
-      // Step 4: End call
-      await this.deps.callSignaling.discardCall(callId, accessHash);
       const duration = Math.floor((Date.now() - startTime) / 1000);
       this.deps.callLogRepo.complete(job.callLogId, 'completed', duration);
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
 
-      // Step 5: Send post-call buttons in chat
+      // Step 4: Send post-call buttons in chat
       await this.deps.sendPostCallButtons(job.userId, job.eventId);
     } catch (error) {
       const duration = Math.floor((Date.now() - startTime) / 1000);

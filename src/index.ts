@@ -11,8 +11,12 @@ const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
 
 // Mutable ref — patched after bot creation
-const botRef: { sendMessage: (telegramId: number, text: string) => Promise<void> } = {
+const botRef: {
+  sendMessage: (telegramId: number, text: string) => Promise<void>;
+  sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
+} = {
   sendMessage: async () => {},
+  sendVoice: async () => {},
 };
 
 const sharingCleanup = setupSharingCleanup(db.invitations, db.deepLinks);
@@ -190,6 +194,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       sendPostCallButtons: async (userId, eventId) => {
         botLogger.info({ userId, eventId }, 'Post-call buttons (not yet wired to bot)');
       },
+      sendVoiceMessage: async (userId, audio) => {
+        await (botRef as { sendVoice?: (id: number, audio: Buffer) => Promise<void> }).sendVoice?.(userId, audio);
+      },
     });
 
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
@@ -228,9 +235,13 @@ const { bot } = createBot(
   callQueue,
 );
 
-// Patch sendMessage to use real bot API
+// Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text) => {
   await bot.api.sendMessage({ chat_id: telegramId, text });
+};
+botRef.sendVoice = async (telegramId, audio) => {
+  const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
+  await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
 
 // Register bot commands in Telegram menu — both languages
