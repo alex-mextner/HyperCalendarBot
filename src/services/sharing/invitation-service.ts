@@ -1,14 +1,16 @@
 import type { EventRepository } from '../../database/repositories/event.repository';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
+import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
-import type { Invitation, InvitationStatus } from '../../database/types';
+import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
 
 const MAX_DECLINES = 3;
 
-interface InvitationResult {
+export interface InvitationResult {
   success: boolean;
   invitation?: Invitation;
   error?: string;
+  conflicts?: CalendarEvent[];
 }
 
 export class InvitationService {
@@ -16,6 +18,7 @@ export class InvitationService {
     private invRepo: InvitationRepository,
     private eventRepo: EventRepository,
     private settingsRepo: SharingSettingsRepository,
+    private participantRepo?: ParticipantRepository,
   ) {}
 
   sendInvitation(eventId: number, inviterId: number, inviteeId: number, inviteeUsername?: string): InvitationResult {
@@ -92,6 +95,20 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot update — status already changed' };
     }
+
+    if (this.participantRepo) {
+      const existing = this.participantRepo.findByEventAndUser(invitation.event_id, userId);
+      if (newStatus === 'accepted' || newStatus === 'maybe') {
+        if (existing) {
+          this.participantRepo.updateStatus(invitation.event_id, userId, newStatus);
+        } else {
+          this.participantRepo.add(invitation.event_id, userId, newStatus);
+        }
+      } else if (newStatus === 'declined' && existing) {
+        this.participantRepo.updateStatus(invitation.event_id, userId, 'declined');
+      }
+    }
+
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 }

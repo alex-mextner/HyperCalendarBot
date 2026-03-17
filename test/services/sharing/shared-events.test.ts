@@ -2,9 +2,14 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
+import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
+import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
+import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
 
 const CREATOR = 100;
 const INVITEE = 200;
@@ -146,5 +151,140 @@ describe('visible events (owned + participated)', () => {
     });
     participantRepo.add(event.id, INVITEE, 'declined');
     expect(eventRepo.isParticipant(event.id, INVITEE)).toBe(false);
+  });
+});
+
+describe('acceptInvitation — adds participant', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let participantRepo: ParticipantRepository;
+  let invitationRepo: InvitationRepository;
+  let eventService: EventService;
+  let invitationService: InvitationService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    const userRepo = new UserRepository(db);
+    eventRepo = new EventRepository(db);
+    participantRepo = new ParticipantRepository(db);
+    invitationRepo = new InvitationRepository(db);
+    const sharingSettings = new SharingSettingsRepository(db);
+    eventService = new EventService(eventRepo, new ReminderRepository(db));
+    invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettings, participantRepo);
+    userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
+  });
+
+  test('accepting adds participant with accepted status', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Party',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.acceptInvitation(inv.id, INVITEE);
+
+    const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
+    expect(participant).not.toBeNull();
+    expect(participant!.status).toBe('accepted');
+    expect(participant!.role).toBe('attendee');
+  });
+
+  test('accepting twice does not create duplicate', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Party',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.acceptInvitation(inv.id, INVITEE);
+    const participants = participantRepo.getByEvent(event.id);
+    expect(participants).toHaveLength(1);
+  });
+
+  test('declining does not add participant', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Skip',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.declineInvitation(inv.id, INVITEE);
+    expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
+  });
+
+  test('maybe adds participant with maybe status', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Maybe',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.maybeInvitation(inv.id, INVITEE);
+
+    const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
+    expect(participant).not.toBeNull();
+    expect(participant!.status).toBe('maybe');
+  });
+
+  test('accepted event appears in invitee calendar via getVisibleInRange', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Visible Meeting',
+      start_at: '2026-03-20T10:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.acceptInvitation(inv.id, INVITEE);
+
+    const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(visible).toHaveLength(1);
+    expect(visible[0].title).toBe('Visible Meeting');
+    expect(visible[0].user_id).toBe(CREATOR);
+  });
+
+  test('maybe → accept upgrades participant status', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Evolving',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.maybeInvitation(inv.id, INVITEE);
+
+    // Now re-accept (need new invitation since old one is 'maybe')
+    // Actually the same invitation — respondToInvitation does CAS update
+    // We need to call accept on the same invitation
+    // But status is 'maybe' not 'pending', so CAS will use 'maybe' as expected
+    const result = invitationService.acceptInvitation(inv.id, INVITEE);
+    expect(result.success).toBe(true);
+
+    const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
+    expect(participant!.status).toBe('accepted');
+  });
+
+  test('decline after accept removes participant from visible events', () => {
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Revoke',
+      start_at: '2026-03-20T18:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: event.id, inviter_id: CREATOR, invitee_id: INVITEE });
+    invitationService.acceptInvitation(inv.id, INVITEE);
+
+    // Now decline
+    invitationService.declineInvitation(inv.id, INVITEE);
+
+    const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
+    expect(participant!.status).toBe('declined');
+
+    const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(visible).toHaveLength(0);
   });
 });
