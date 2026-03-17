@@ -22,6 +22,7 @@ import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
+import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -76,6 +77,8 @@ export interface MessageHandlerDeps {
   intentExecutor?: IntentExecutor;
   intentToolExecutor?: (toolName: string, input: Record<string, unknown>) => ToolResult;
   workflowSessions?: Map<number, WorkflowSession>;
+  // Pipeline: intent learning
+  intentLearner?: IntentLearner;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
   // Admin reply sessions: adminId → { threadId, userId }
@@ -217,7 +220,7 @@ async function handleVoiceMessage(
       stressDictionary: deps.stressDictionary,
     };
 
-    const responseText = await deps.agent.run(agentContext);
+    const { responseText } = await deps.agent.run(agentContext);
 
     // Send voice reply if TTS is available and user has opted in
     if (
@@ -390,7 +393,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
 
-  const aiAgentLayer = createAiAgentLayer({ agent: deps.agent, agentContextBuilder });
+  const aiAgentLayer = createAiAgentLayer({ agent: deps.agent, agentContextBuilder, intentLearner: deps.intentLearner });
 
   const layers = [
     ...(deps.intentMatcher && deps.intentRepo && deps.intentExecutor && deps.intentToolExecutor
