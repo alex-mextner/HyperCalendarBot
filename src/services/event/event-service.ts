@@ -254,6 +254,71 @@ export class EventService {
     this.eventRepo.deleteExceptionsFrom(templateId, occurrenceDate);
   }
 
+  getEventsInRangeForGroup(groupId: number, startUtc: string, endUtc: string): EventOccurrence[] {
+    const oneOff = this.eventRepo.getInRangeForGroup(groupId, startUtc, endUtc).map(
+      (event) =>
+        ({
+          event,
+          occurrence_start: event.start_at,
+          occurrence_end: event.end_at,
+          is_exception: false,
+        }) satisfies EventOccurrence,
+    );
+
+    const templates = this.eventRepo.getRecurringTemplatesForGroup(groupId);
+    const recurring: EventOccurrence[] = [];
+    for (const template of templates) {
+      const exceptions = this.eventRepo.getExceptions(template.id);
+      const expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      recurring.push(...expanded);
+    }
+
+    return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+  }
+
+  getEventForGroup(eventId: number, groupId: number): CalendarEvent | null {
+    return this.eventRepo.findByIdInGroup(eventId, groupId);
+  }
+
+  updateEventForGroup(eventId: number, groupId: number, data: UpdateEventData): CalendarEvent | null {
+    return this.eventRepo.updateInGroup(eventId, groupId, data);
+  }
+
+  deleteEventForGroup(eventId: number, groupId: number): boolean {
+    return this.eventRepo.removeFromGroup(eventId, groupId);
+  }
+
+  searchEventsForGroup(groupId: number, query: string): CalendarEvent[] {
+    return this.eventRepo.searchForGroup(groupId, query);
+  }
+
+  getUpcomingForGroup(groupId: number, limit = 10): EventOccurrence[] {
+    const now = new Date().toISOString();
+    const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString();
+    const events = this.eventRepo.getUpcomingForGroup(groupId, limit);
+
+    const oneOff: EventOccurrence[] = events
+      .filter((e) => !e.recurrence_rule)
+      .map((event) => ({
+        event,
+        occurrence_start: event.start_at,
+        occurrence_end: event.end_at,
+        is_exception: false,
+      }));
+
+    const recurring: EventOccurrence[] = [];
+    const templates = events.filter((e) => e.recurrence_rule);
+    for (const template of templates) {
+      const exceptions = this.eventRepo.getExceptions(template.id);
+      const expanded = expandRecurrence(template, exceptions, now, farFuture);
+      recurring.push(...expanded.slice(0, limit));
+    }
+
+    return [...oneOff, ...recurring]
+      .sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start))
+      .slice(0, limit);
+  }
+
   cancelOccurrence(templateId: number, userId: number, originalStartAt: string): CalendarEvent | null {
     const template = this.eventRepo.findById(templateId, userId);
     if (!template || !template.recurrence_rule) return null;
