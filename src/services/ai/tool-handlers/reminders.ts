@@ -1,12 +1,23 @@
 import type { AgentContext, ToolResult } from '../types.ts';
 
+type Scope = 'personal' | 'group';
+
+function resolveScope(inputScope: Scope | undefined, isGroup: boolean): Scope {
+  return inputScope ?? (isGroup ? 'group' : 'personal');
+}
+
 interface SetReminderInput {
   event_id: number;
   minutes_before: number[];
+  scope?: Scope;
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const scope = resolveScope(input.scope, ctx.isGroup);
+  const event =
+    scope === 'group'
+      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
   if (!event) {
     return {
       success: false,
@@ -34,10 +45,15 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
 
 interface GetRemindersInput {
   event_id: number;
+  scope?: Scope;
 }
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const scope = resolveScope(input.scope, ctx.isGroup);
+  const event =
+    scope === 'group'
+      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }

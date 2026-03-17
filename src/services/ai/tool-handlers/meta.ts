@@ -1,6 +1,13 @@
+import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+
+type Scope = 'personal' | 'group';
+
+function resolveScope(inputScope: Scope | undefined, isGroup: boolean): Scope {
+  return inputScope ?? (isGroup ? 'group' : 'personal');
+}
 
 const metaLogger = logger.child({ module: 'ai-tools' });
 
@@ -112,15 +119,19 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
 }
 
-export function handleRenderDayImage(ctx: AgentContext, input: { date: string }): ToolResult {
+export function handleRenderDayImage(ctx: AgentContext, input: { date: string; scope?: Scope }): ToolResult {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
-  const occurrences = ctx.eventService.getEventsForDay(
-    ctx.user.telegram_id,
-    new Date(`${input.date}T12:00:00Z`),
-    ctx.user.timezone,
-  );
+  const scope = resolveScope(input.scope, ctx.isGroup);
+  const dateObj = new Date(`${input.date}T12:00:00Z`);
+  const occurrences =
+    scope === 'group'
+      ? (() => {
+          const { start, end } = getDayRangeUtc(dateObj, ctx.user.timezone);
+          return ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
+        })()
+      : ctx.eventService.getEventsForDay(ctx.user.telegram_id, dateObj, ctx.user.timezone);
   const holidays = ctx.holidayService?.getHolidaysForDate(ctx.user.telegram_id, input.date) ?? [];
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
@@ -143,7 +154,7 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string })
   return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };
 }
 
-export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string }): ToolResult {
+export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string; scope?: Scope }): ToolResult {
   if (!ctx.renderService) {
     return { success: false, error: 'Image rendering not available.' };
   }

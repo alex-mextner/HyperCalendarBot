@@ -96,5 +96,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     sendAsUser: options?.sendAsUser
       ? async (userId: number, text: string, username?: string) => options.sendAsUser!(userId, text, username)
       : undefined,
+    async deleteMessage(chatId: number, messageId: number) {
+      await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });
+    },
   };
 }

@@ -29,7 +29,7 @@ export class ChatHistoryRepository {
       .prepare(`
         SELECT * FROM (
           SELECT * FROM chat_history
-          WHERE user_id = ?
+          WHERE user_id = ? AND chat_id IS NULL
           ORDER BY created_at DESC, id DESC
           LIMIT ?
         ) sub ORDER BY created_at ASC, id ASC

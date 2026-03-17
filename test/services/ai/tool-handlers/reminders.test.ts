@@ -70,4 +70,75 @@ describe('handleSetReminder', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
   });
+
+  describe('group scope', () => {
+    const GROUP_CHAT_ID = -100999;
+
+    function makeGroupCtx(): AgentContext {
+      return {
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_CHAT_ID,
+        chatId: GROUP_CHAT_ID,
+      };
+    }
+
+    test('sets reminders for group event with scope=group', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleSetReminder(gCtx, {
+        event_id: event.id,
+        minutes_before: [15, 30],
+        scope: 'group',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Meeting');
+      expect(result.output).toContain('15');
+      expect(result.output).toContain('30');
+    });
+
+    test('scope defaults to group when isGroup=true', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Default',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleSetReminder(gCtx, {
+        event_id: event.id,
+        minutes_before: [10],
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Default');
+    });
+
+    test('returns error for personal event when scope=group', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Event',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleSetReminder(gCtx, {
+        event_id: event.id,
+        minutes_before: [10],
+        scope: 'group',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+  });
 });

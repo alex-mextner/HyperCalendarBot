@@ -171,5 +171,16 @@ describe('ChatHistoryRepository', () => {
       const messages = repo.getRecent(USER_ID);
       expect(messages.length).toBe(2);
     });
+
+    test('getRecent excludes messages with chat_id (group messages)', () => {
+      repo.save(USER_ID, 'user', 'personal msg');
+      repo.save(USER_ID, 'user', 'group msg', CHAT_ID);
+      repo.save(USER_ID, 'assistant', 'personal reply');
+      repo.save(USER_ID, 'assistant', 'group reply', CHAT_ID);
+      const messages = repo.getRecent(USER_ID);
+      expect(messages.length).toBe(2);
+      expect(messages[0]!.content).toBe('personal msg');
+      expect(messages[1]!.content).toBe('personal reply');
+    });
   });
 });
