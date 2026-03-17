@@ -1,4 +1,5 @@
-// src/bot/commands/notify.ts
+// src/bot/handlers/notify-callback.ts
+// Handles inline keyboard callbacks for notification preferences (CB.NOTIFY / 'nf:' prefix).
 
 import type { Lang } from '../../config/constants.ts';
 import { MSG } from '../../config/constants.ts';
@@ -13,7 +14,7 @@ import {
   notifyQuietKeyboard,
   notifyReminderIntervalsKeyboard,
 } from '../keyboards.ts';
-import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+import type { BotCallbackContext } from '../types.ts';
 
 function buildMenuText(prefsService: NotificationPreferencesService, userId: number, lang: Lang): string {
   const prefs = prefsService.getOrCreate(userId);
@@ -32,19 +33,6 @@ function buildMenuText(prefsService: NotificationPreferencesService, userId: num
     ),
   ];
   return lines.join('\n');
-}
-
-export async function handleNotify(
-  ctx: BotCommandContext,
-  prefsService: NotificationPreferencesService,
-): Promise<void> {
-  const user = ctx.dbUser as User;
-  const lang = (user.language ?? 'en') as Lang;
-  const text = buildMenuText(prefsService, user.telegram_id, lang);
-  await ctx.send(text, {
-    parse_mode: 'HTML',
-    reply_markup: notifyMenuKeyboard(lang),
-  });
 }
 
 export async function handleNotifyCallback(

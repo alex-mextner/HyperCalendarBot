@@ -5,11 +5,13 @@ import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -31,7 +33,8 @@ import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
-import { handleNotifyCallback } from '../commands/notify.ts';
+import { handleNotifyCallback } from './notify-callback.ts';
+import { handleSettingsCallback } from '../commands/settings.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 
@@ -66,6 +69,8 @@ export function createCallbackHandler(
     editProposalRepo: EditProposalRepository;
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
   },
+  callSettingsRepo?: CallSettingsRepository,
+  sharingSettingsRepo?: SharingSettingsRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -584,6 +589,11 @@ export function createCallbackHandler(
       // Feature tour
       if (action === CB.FEATURE_TOUR) {
         return handleFeatureTourCallback(ctx, payload);
+      }
+
+      // Settings category picker
+      if (action === 'stg') {
+        return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo);
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');

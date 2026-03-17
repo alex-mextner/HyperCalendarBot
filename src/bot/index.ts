@@ -24,7 +24,6 @@ import type { TranscriptionService } from '../services/voice/transcription-servi
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleGroupAgenda } from './commands/agenda.ts';
-import { handleCallSettings } from './commands/call-settings.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -37,9 +36,7 @@ import { handleImport } from './commands/import.ts';
 import { handleInvitations } from './commands/invitations.ts';
 import { handleInvite } from './commands/invite.ts';
 import { handleMonth } from './commands/month.ts';
-import { handleNotify } from './commands/notify.ts';
 import { handlePing } from './commands/ping.ts';
-import { handlePrivacy } from './commands/privacy.ts';
 import { handleSearch } from './commands/search.ts';
 import { handleSettings } from './commands/settings.ts';
 import { handleShare } from './commands/share.ts';
@@ -198,20 +195,16 @@ export function createBot(
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
-    .command('notify', (ctx) => handleNotify(ctx as unknown as BotCommandContext, prefsService))
     // Sharing commands
     .command('invite', (ctx) => handleInvite(ctx as unknown as BotCommandContext, eventService))
     .command('invitations', (ctx) =>
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )
-    .command('privacy', (ctx) => handlePrivacy(ctx as unknown as BotCommandContext, db.sharingSettings))
     .command('share', (ctx) =>
       handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
     )
     .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats))
     .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
-    // Voice call settings
-    .command('callsettings', (ctx) => handleCallSettings(ctx as unknown as BotCommandContext, db.callSettings))
     // Callback queries
     .on('callback_query', (ctx) =>
       createCallbackHandler(
@@ -257,6 +250,9 @@ export function createBot(
           },
         },
         scenesSetup.scenes.onboardingScene,
+        undefined,
+        db.callSettings,
+        db.sharingSettings,
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)
