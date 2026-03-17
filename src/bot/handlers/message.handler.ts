@@ -1,5 +1,6 @@
 // src/bot/handlers/message.handler.ts
 
+import { InlineKeyboard } from 'gramio';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -213,8 +214,14 @@ async function handleVoiceMessage(
 
     const responseText = await deps.agent.run(agentContext);
 
-    // Send voice reply if TTS is available
-    if (responseText && deps.sileroTts && deps.sendVoice && deps.stressDictionary) {
+    // Send voice reply if TTS is available and user has opted in
+    if (
+      responseText &&
+      user.voice_response_enabled === 1 &&
+      deps.sileroTts &&
+      deps.sendVoice &&
+      deps.stressDictionary
+    ) {
       try {
         const plainText = stripMarkdown(responseText);
         const withNumbers = numbersToWords(plainText);
@@ -226,6 +233,16 @@ async function handleVoiceMessage(
       } catch (ttsError) {
         cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
       }
+    }
+
+    // One-time opt-in prompt for users who have never been asked
+    if (user.voice_response_enabled === null) {
+      const keyboard = new InlineKeyboard()
+        .text('Да, хочу', 'voice_prompt:yes')
+        .text('Нет, только текстом', 'voice_prompt:no');
+      await ctx.send('🎤 Хочешь получать голосовые ответы?\nУдобно за рулём, на кухне или на ходу.', {
+        reply_markup: keyboard,
+      });
     }
   } catch (error) {
     cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'Voice transcription error');

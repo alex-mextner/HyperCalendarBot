@@ -77,6 +77,7 @@ export function createCallbackHandler(
     adminReplySession: Map<number, { threadId: number; userId: number }>;
     sendMessage: (chatId: number, text: string) => Promise<unknown>;
   },
+  userRepo?: UserRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -629,6 +630,15 @@ export function createCallbackHandler(
         }
         feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
         await ctx.answer({ text: 'Send your reply message' });
+        return;
+      }
+
+      // Voice response opt-in prompt response
+      if (action === 'voice_prompt' && userRepo) {
+        const enabled = payload === 'yes' ? 1 : 0;
+        userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
+        await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
+        await ctx.answer();
         return;
       }
 
