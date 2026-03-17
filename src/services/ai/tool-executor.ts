@@ -159,7 +159,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleShareEvent(ctx, input as { event_id: number; target_type: 'user' | 'group'; target_id: number });
 
       case 'send_invitation':
-        return handleSendInvitation(ctx, input as { event_id: number; invitee_id: number });
+        return handleSendInvitation(ctx, input as { event_id: number; invitee_id: number; invitee_username?: string });
 
       case 'get_invitation_status':
         return handleGetInvitationStatus(ctx, input as { event_id: number });
@@ -194,7 +194,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleCancelInvitation(ctx, input as { invitation_id: number });
 
       case 'resend_invitation':
-        return handleResendInvitation(ctx, input as { invitation_id: number });
+        return handleResendInvitation(ctx, input as { invitation_id: number; invitee_username?: string });
 
       case 'get_google_calendar_status':
         return handleGetGoogleCalendarStatus(ctx);

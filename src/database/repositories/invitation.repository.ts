@@ -7,8 +7,8 @@ export class InvitationRepository {
   create(data: CreateInvitationData): Invitation {
     const result = this.db
       .prepare(
-        `INSERT INTO invitations (event_id, inviter_id, invitee_id, message_id, chat_id, deep_link_code)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO invitations (event_id, inviter_id, invitee_id, message_id, chat_id, deep_link_code, invitee_username)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         data.event_id,
@@ -17,6 +17,7 @@ export class InvitationRepository {
         data.message_id ?? null,
         data.chat_id ?? null,
         data.deep_link_code ?? null,
+        data.invitee_username ?? null,
       );
     return this.findById(Number(result.lastInsertRowid))!;
   }

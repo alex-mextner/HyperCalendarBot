@@ -328,6 +328,10 @@ export const toolDefinitions: ToolDefinition[] = [
       properties: {
         event_id: { type: 'number', description: 'ID of the event to invite to' },
         invitee_id: { type: 'number', description: 'Telegram ID of the user to invite' },
+        invitee_username: {
+          type: 'string',
+          description: 'Telegram @username of the invitee (without @). Pass if known from find_contact.',
+        },
       },
       required: ['event_id', 'invitee_id'],
     },
@@ -540,6 +544,10 @@ export const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         invitation_id: { type: 'number', description: 'ID of the invitation to resend' },
+        invitee_username: {
+          type: 'string',
+          description: 'Telegram @username of the invitee (without @). Pass if known.',
+        },
       },
       required: ['invitation_id'],
     },

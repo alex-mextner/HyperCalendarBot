@@ -145,12 +145,13 @@ export function createBot(
     .extend(scenesSetup.plugin)
     // Commands
     .command('start', (ctx) =>
-      handleStart(
-        ctx as unknown as BotCommandContext,
-        scenesSetup.scenes.onboardingScene,
+      handleStart(ctx as unknown as BotCommandContext, {
+        onboardingScene: scenesSetup.scenes.onboardingScene,
         deepLinkService,
         eventService,
-      ),
+        invitationRepo: db.invitations,
+        userRepo: db.users,
+      }),
     )
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
@@ -234,6 +235,7 @@ export function createBot(
             await bot.api.sendMessage({ chat_id: chatId, text, parse_mode: options.parse_mode });
           },
         },
+        scenesSetup.scenes.onboardingScene,
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)

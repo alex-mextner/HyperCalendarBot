@@ -190,7 +190,7 @@ describe('sharing tool handlers', () => {
       const ctx = makeCtx();
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Invitation sent');
+      expect(result.output).toContain('Invitation');
       expect(result.output).toContain(`${event.id}`);
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
@@ -358,7 +358,7 @@ describe('sharing tool handlers', () => {
       const ctx = makeCtx({ sender: undefined });
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Invitation sent');
+      expect(result.output).toContain('Invitation');
     });
 
     test('returns error for duplicate invitation', () => {

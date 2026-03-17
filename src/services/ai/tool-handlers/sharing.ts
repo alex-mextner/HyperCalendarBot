@@ -1,6 +1,120 @@
 import { t } from '../../../config/constants.ts';
-import type { Visibility } from '../../../database/types.ts';
+import type { CalendarEvent, Visibility } from '../../../database/types.ts';
+import { botLogger } from '../../../utils/logger.ts';
+import { formatInvitation } from '../../event/formatters.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+
+const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
+
+interface DeliveryParams {
+  invitationId: number;
+  eventId: number;
+  inviteeId: number;
+  inviteeUsername?: string;
+  inviterId: number;
+  inviterName: string;
+  inviterUsername?: string;
+  event?: CalendarEvent | null;
+  lang: 'en' | 'ru';
+  ctx: AgentContext;
+}
+
+function deliverInvitationAsync(params: DeliveryParams): void {
+  const {
+    invitationId,
+    eventId,
+    inviteeId,
+    inviteeUsername,
+    inviterId,
+    inviterName,
+    inviterUsername,
+    event,
+    lang,
+    ctx,
+  } = params;
+  if (!ctx.sender?.sendInvitation || !ctx.invitationRepo) return;
+
+  const eventTitle = event?.title ?? `Event #${eventId}`;
+  deliveryLogger.info(
+    { invitationId, inviteeId, inviteeUsername: inviteeUsername ?? 'NONE', eventTitle },
+    'Starting delivery chain',
+  );
+
+  const text = event
+    ? formatInvitation(event, event.timezone, lang, inviterName, inviterId, inviterUsername)
+    : t(lang).invitation_received(eventTitle, inviterName);
+  const invRepo = ctx.invitationRepo;
+  const sender = ctx.sender;
+  const chatId = ctx.chatId;
+  const deepLinkSvc = ctx.deepLinkService;
+  const botUsername = ctx.botUsername;
+
+  sender
+    .sendInvitation(inviteeId, text, invitationId)
+    .then(async (sent) => {
+      if (sent) {
+        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
+        invRepo.setMessageInfo(invitationId, sent.message_id, inviteeId);
+        return;
+      }
+
+      deliveryLogger.warn({ invitationId, inviteeId }, 'Bot API delivery failed');
+
+      if (deepLinkSvc && botUsername) {
+        const link = deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId);
+        const url = deepLinkSvc.generateUrl(link.code, botUsername);
+
+        if (sender.sendAsUser) {
+          deliveryLogger.info({ invitationId, inviteeId }, 'Trying MTProto fallback');
+          const mtprotoText =
+            lang === 'ru'
+              ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
+              : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
+          const delivered = await sender.sendAsUser(inviteeId, mtprotoText, inviteeUsername);
+          if (delivered) {
+            deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
+            return;
+          }
+          deliveryLogger.warn({ invitationId, inviteeId }, 'MTProto delivery failed');
+        }
+
+        deliveryLogger.info({ invitationId, chatId }, 'Sending deep link fallback to inviter');
+        const fallbackMsg =
+          lang === 'ru'
+            ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
+            : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`;
+        await sender.sendMessage(chatId, fallbackMsg);
+      } else {
+        deliveryLogger.warn(
+          { invitationId, hasDeepLink: !!deepLinkSvc, hasBotUsername: !!botUsername },
+          'No fallback available — deepLinkService or botUsername missing',
+        );
+      }
+    })
+    .catch((error) => {
+      deliveryLogger.error({ invitationId, inviteeId, error: String(error) }, 'Delivery chain failed');
+    });
+}
+
+function lookupInviteeUsername(ctx: AgentContext, inviteeId: number): string | undefined {
+  // Try users table
+  const user = ctx.userRepo.findByTelegramId(inviteeId);
+  if (user?.username) return user.username;
+
+  // Try contacts by telegram_id
+  if (ctx.contactRepo) {
+    const contact = ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, inviteeId);
+    if (contact?.username) return contact.username;
+
+    // Last resort: scan all contacts for any with a username (small list)
+    const all = ctx.contactRepo.list(ctx.user.telegram_id);
+    for (const c of all) {
+      if (c.telegram_id === inviteeId && c.username) return c.username;
+    }
+    // If only one contact with a username exists and no telegram_id match, give up
+  }
+  return undefined;
+}
 
 interface ShareEventInput {
   event_id: number;
@@ -11,6 +125,7 @@ interface ShareEventInput {
 interface SendInvitationInput {
   event_id: number;
   invitee_id: number;
+  invitee_username?: string;
 }
 
 interface GetInvitationStatusInput {
@@ -63,7 +178,12 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
     return { success: false, error: 'Invitations are not configured.' };
   }
 
-  const result = ctx.invitationService.sendInvitation(input.event_id, ctx.user.telegram_id, input.invitee_id);
+  const result = ctx.invitationService.sendInvitation(
+    input.event_id,
+    ctx.user.telegram_id,
+    input.invitee_id,
+    input.invitee_username,
+  );
 
   if (!result.success) {
     return { success: false, error: result.error };
@@ -84,54 +204,23 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
     }
   }
 
-  // Async delivery chain: bot API → MTProto userbot → deep link fallback
-  if (ctx.sender?.sendInvitation && ctx.invitationRepo) {
-    const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
-    const inviterName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-    const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
-    const eventTitle = event?.title ?? `Event #${input.event_id}`;
-    const text = t(lang).invitation_received(eventTitle, inviterName);
-
-    const invRepo = ctx.invitationRepo;
-    const sender = ctx.sender;
-    const chatId = ctx.chatId;
-    const deepLinkSvc = ctx.deepLinkService;
-    const botUsername = ctx.botUsername;
-
-    ctx.sender.sendInvitation(input.invitee_id, text, invitation.id).then(async (sent) => {
-      if (sent) {
-        invRepo.setMessageInfo(invitation.id, sent.message_id, input.invitee_id);
-        return;
-      }
-
-      // Bot delivery failed — generate deep link for fallback methods
-      if (deepLinkSvc && botUsername) {
-        const link = deepLinkSvc.createInvitationLink(invitation.id, input.event_id, ctx.user.telegram_id);
-        const url = deepLinkSvc.generateUrl(link.code, botUsername);
-
-        // Try MTProto userbot
-        if (sender.sendAsUser) {
-          const mtprotoText =
-            lang === 'ru'
-              ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
-              : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
-          const delivered = await sender.sendAsUser(input.invitee_id, mtprotoText);
-          if (delivered) return;
-        }
-
-        // Both failed — notify inviter with deep link
-        const fallbackMsg =
-          lang === 'ru'
-            ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
-            : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`;
-        await sender.sendMessage(chatId, fallbackMsg);
-      }
-    });
-  }
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  deliverInvitationAsync({
+    invitationId: invitation.id,
+    eventId: input.event_id,
+    inviteeId: input.invitee_id,
+    inviteeUsername: input.invitee_username ?? lookupInviteeUsername(ctx, input.invitee_id),
+    inviterId: ctx.user.telegram_id,
+    inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
+    inviterUsername: ctx.user.username ?? undefined,
+    event,
+    lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
+    ctx,
+  });
 
   return {
     success: true,
-    output: `Invitation sent (id: ${invitation.id}, event: ${input.event_id}, invitee: ${input.invitee_id}).`,
+    output: `Invitation created (id: ${invitation.id}, event: ${input.event_id}, invitee: ${input.invitee_id}). Notification delivery is being attempted in the background — do NOT tell the user it was delivered. Say the invitation was created and the notification is being sent.`,
   };
 }
 
@@ -146,7 +235,10 @@ export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id
   return { success: true, output: `Invitation ${input.invitation_id} cancelled.` };
 }
 
-export function handleResendInvitation(ctx: AgentContext, input: { invitation_id: number }): ToolResult {
+export function handleResendInvitation(
+  ctx: AgentContext,
+  input: { invitation_id: number; invitee_username?: string },
+): ToolResult {
   if (!ctx.invitationRepo || !ctx.invitationService) {
     return { success: false, error: 'Invitations are not configured.' };
   }
@@ -163,17 +255,23 @@ export function handleResendInvitation(ctx: AgentContext, input: { invitation_id
 
   if (ctx.sender?.sendInvitation) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
-    const inviterName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-    const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
-    const text = t(lang).invitation_received(event?.title ?? `Event #${invitation.event_id}`, inviterName);
-
-    const invRepo = ctx.invitationRepo;
-    ctx.sender.sendInvitation(invitation.invitee_id, text, invitation.id).then((sent) => {
-      if (sent) {
-        invRepo.setMessageInfo(invitation.id, sent.message_id, invitation.invitee_id);
-      }
+    deliverInvitationAsync({
+      invitationId: invitation.id,
+      eventId: invitation.event_id,
+      inviteeId: invitation.invitee_id,
+      inviteeUsername:
+        input.invitee_username ?? invitation.invitee_username ?? lookupInviteeUsername(ctx, invitation.invitee_id),
+      inviterId: ctx.user.telegram_id,
+      inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
+      inviterUsername: ctx.user.username ?? undefined,
+      event,
+      lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
+      ctx,
     });
-    return { success: true, output: `Invitation reminder sent to user ${invitation.invitee_id}.` };
+    return {
+      success: true,
+      output: `Invitation reminder queued for user ${invitation.invitee_id}. Notification delivery is being attempted in the background — do NOT tell the user it was delivered. Say the reminder was queued and the notification is being sent.`,
+    };
   }
 
   return { success: false, error: 'Message delivery not available.' };

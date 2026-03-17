@@ -126,6 +126,8 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
   `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
+  rejections hide bugs and make debugging impossible.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
 - **Fix broken things immediately** when you find them.
 - **Never add temporal context comments**: "improved", "better", "new", "refactored from".

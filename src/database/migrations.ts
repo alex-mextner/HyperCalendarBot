@@ -420,4 +420,16 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE contacts ADD COLUMN preferred_name TEXT`);
     },
   },
+  {
+    name: '012_invitation_invitee_username',
+    up: (db) => {
+      db.exec(`ALTER TABLE invitations ADD COLUMN invitee_username TEXT`);
+    },
+  },
+  {
+    name: '013_timezone_updated_at',
+    up: (db) => {
+      db.exec(`ALTER TABLE users ADD COLUMN timezone_updated_at TEXT`);
+    },
+  },
 ];

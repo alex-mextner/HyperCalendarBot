@@ -60,6 +60,7 @@ export function createCallbackHandler(
     userRepo: UserRepository;
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
   },
+  onboardingScene?: AnyScene,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -392,14 +393,19 @@ export function createCallbackHandler(
         }
 
         if (result.success) {
-          const statusText =
+          const statusEmoji = subAction === 'accept' ? '✅' : subAction === 'decline' ? '❌' : '🤔';
+          const statusLabel =
             subAction === 'accept'
               ? t(lang).invitation_accepted
               : subAction === 'decline'
                 ? t(lang).invitation_declined
                 : t(lang).invitation_maybe;
-          await ctx.answer(statusText);
-          await ctx.editText(statusText).catch(() => {});
+          await ctx.answer(statusLabel);
+
+          const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
+          const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
+          const editText = eventCard ? `${statusEmoji} ${statusLabel}\n\n${eventCard}` : statusLabel;
+          await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
           // Notify inviter about the response
           if (invitationNotifyDeps && result.invitation) {
@@ -410,6 +416,11 @@ export function createCallbackHandler(
               invitationNotifyDeps,
               eventRepo,
             ).catch(() => {});
+          }
+
+          // Start onboarding if not completed
+          if (!user.onboarding_completed && onboardingScene) {
+            await ctx.scene.enter(onboardingScene);
           }
         } else {
           await ctx.answer(result.error ?? 'Error');

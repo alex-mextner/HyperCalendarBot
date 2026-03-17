@@ -57,6 +57,7 @@ describe('loadConfig', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
     delete process.env.REDIS_URL;
+    delete process.env.GOOGLE_CLIENT_ID;
     const config = loadConfig();
     expect(config.REDIS_URL).toBeUndefined();
   });

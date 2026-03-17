@@ -4,7 +4,7 @@ import { CB } from '../../config/constants.ts';
 import type { TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
-  sendAsUser?: (userId: number, text: string) => Promise<boolean>;
+  sendAsUser?: (userId: number, text: string, username?: string) => Promise<boolean>;
 }
 
 export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions): TelegramSender {
@@ -77,7 +77,7 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       return { message_id: result.message_id };
     },
     sendAsUser: options?.sendAsUser
-      ? async (userId: number, text: string) => options.sendAsUser!(userId, text)
+      ? async (userId: number, text: string, username?: string) => options.sendAsUser!(userId, text, username)
       : undefined,
   };
 }

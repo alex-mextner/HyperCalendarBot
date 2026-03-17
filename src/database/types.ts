@@ -18,6 +18,7 @@ export interface User {
   google_refresh_token_enc: string | null;
   google_calendar_id: string | null;
   onboarding_completed: number; // 0 | 1
+  timezone_updated_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -192,6 +193,7 @@ export interface Invitation {
   message_id: number | null;
   chat_id: number | null;
   deep_link_code: string | null;
+  invitee_username: string | null;
   created_at: string;
   updated_at: string;
   responded_at: string | null;
@@ -259,6 +261,7 @@ export interface CreateInvitationData {
   message_id?: number;
   chat_id?: number;
   deep_link_code?: string;
+  invitee_username?: string;
 }
 
 export interface CreateSharedEventData {

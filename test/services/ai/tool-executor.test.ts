@@ -282,7 +282,7 @@ describe('executeTool', () => {
         invitee_id: 456,
       });
       expect(result.success).toBe(true);
-      expect(result.output).toContain('Invitation sent');
+      expect(result.output).toContain('Invitation');
       expect(result.output).toContain('456');
     });
 

@@ -115,6 +115,21 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
   return lines.join('\n');
 }
 
+export function formatInvitation(
+  event: CalendarEvent,
+  timezone: string,
+  lang: string,
+  inviterName: string,
+  inviterId: number,
+  inviterUsername?: string | null,
+): string {
+  const inviterLink = inviterUsername
+    ? `@${escapeHtml(inviterUsername)}`
+    : `<a href="tg://user?id=${inviterId}">${escapeHtml(inviterName)}</a>`;
+  const header = lang === 'ru' ? `📨 <b>Приглашение</b> от ${inviterLink}` : `📨 <b>Invitation</b> from ${inviterLink}`;
+  return `${header}\n\n${formatEventDetail(event, timezone, lang)}`;
+}
+
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number): string {
   const time = formatTime(event.start_at, timezone);
   return `${index + 1}. ${time} — ${escapeHtml(event.title)}`;

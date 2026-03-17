@@ -18,7 +18,7 @@ export class InvitationService {
     private settingsRepo: SharingSettingsRepository,
   ) {}
 
-  sendInvitation(eventId: number, inviterId: number, inviteeId: number): InvitationResult {
+  sendInvitation(eventId: number, inviterId: number, inviteeId: number, inviteeUsername?: string): InvitationResult {
     if (inviterId === inviteeId) {
       return { success: false, error: 'Cannot invite yourself' };
     }
@@ -47,6 +47,7 @@ export class InvitationService {
       event_id: eventId,
       inviter_id: inviterId,
       invitee_id: inviteeId,
+      invitee_username: inviteeUsername,
     });
 
     return { success: true, invitation };

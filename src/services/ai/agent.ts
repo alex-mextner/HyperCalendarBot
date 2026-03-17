@@ -11,6 +11,8 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
+const MAX_API_RETRIES = 2;
+const RETRY_DELAY_MS = 1500;
 
 interface MessageParam {
   role: 'user' | 'assistant';
@@ -86,48 +88,68 @@ export class CalendarBotAgent {
           break;
         }
 
-        const stream = this.client.messages.stream({
-          model: this.model,
-          max_tokens: 4096,
-          system: [
-            {
-              type: 'text',
-              text: systemPrompt,
-              cache_control: { type: 'ephemeral' },
-            },
-          ],
-          messages: currentMessages,
-          tools: toolDefinitions,
-        });
-
         let hasToolUse = false;
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
         const contentBlocks: Anthropic.ContentBlockParam[] = [];
 
-        for await (const event of stream) {
-          if (event.type === 'content_block_delta') {
-            if (event.delta.type === 'text_delta') {
-              writer.appendText(event.delta.text);
-              await writer.flush(false);
-            }
-          }
+        const streamRequest = () =>
+          this.client.messages.stream({
+            model: this.model,
+            max_tokens: 4096,
+            system: [
+              {
+                type: 'text',
+                text: systemPrompt,
+                cache_control: { type: 'ephemeral' },
+              },
+            ],
+            messages: currentMessages,
+            tools: toolDefinitions,
+          });
 
-          if (event.type === 'content_block_start') {
-            if (event.content_block.type === 'tool_use') {
-              hasToolUse = true;
-              writer.setToolLabel(event.content_block.name);
-              await writer.flush(true);
-            }
-          }
+        let stream: ReturnType<typeof streamRequest>;
+        let lastError: unknown;
+        for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+          try {
+            stream = streamRequest();
+            for await (const event of stream) {
+              if (event.type === 'content_block_delta') {
+                if (event.delta.type === 'text_delta') {
+                  writer.appendText(event.delta.text);
+                  await writer.flush(false);
+                }
+              }
 
-          if (event.type === 'message_delta') {
-            if (event.delta.stop_reason === 'tool_use') {
-              hasToolUse = true;
+              if (event.type === 'content_block_start') {
+                if (event.content_block.type === 'tool_use') {
+                  hasToolUse = true;
+                  writer.setToolLabel(event.content_block.name);
+                  await writer.flush(true);
+                }
+              }
+
+              if (event.type === 'message_delta') {
+                if (event.delta.stop_reason === 'tool_use') {
+                  hasToolUse = true;
+                }
+              }
             }
+            lastError = undefined;
+            break;
+          } catch (err) {
+            lastError = err;
+            const isRetryable = String(err).includes('Network') || String(err).includes('overloaded');
+            if (!isRetryable || attempt >= MAX_API_RETRIES) break;
+            aiLogger.warn(
+              { attempt: attempt + 1, error: String(err), userId: ctx.user.telegram_id },
+              'API call failed, retrying',
+            );
+            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
           }
         }
+        if (lastError) throw lastError;
 
-        const finalMessage = await stream.finalMessage();
+        const finalMessage = await stream!.finalMessage();
 
         for (const block of finalMessage.content) {
           if (block.type === 'text') {
