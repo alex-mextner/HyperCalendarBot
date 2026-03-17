@@ -48,12 +48,20 @@ IntentLearner (new — background agent generates intent candidates)
 
 ### Layer Contracts
 
-Each layer receives `(ctx: BotContext, messageText: string)` and returns `{ handled: boolean }`.
+Each layer receives `(ctx: BotContext, messageText: string)` and returns `Promise<PipelineResult>`:
 
-- **IntentMatcher**: SQLite lookup for approved intents → execute workflow → respond. Only `status = 'approved'` intents participate.
-- **FeedbackRouter**: Check `feedback_threads` for open thread for this user → forward to admin → stop. AI determines whether a reply continues the thread or starts a new topic (via system prompt context).
-- **AIAgent**: Existing logic, unchanged. New tools added: `manage_settings`, `send_feedback`, `get_bot_info`.
-- **IntentLearner**: Async post-processing. Analyzes what tools AI called and generates intent candidates for admin verification.
+```typescript
+type PipelineResult =
+  | { handled: true }                              // stop pipeline
+  | { handled: false }                             // pass to next layer
+  | { handled: false, feedbackContext: FeedbackThreadContext }  // enrich context for AI layer
+```
+
+- **VoiceTranscription**: Preprocessing step — extracts text from voice, not a routing layer. Always returns `{ handled: false }` with extracted `messageText`.
+- **IntentMatcher**: SQLite lookup for approved intents → execute workflow → respond. Only `status = 'approved'` intents participate. Returns `{ handled: true }` on match.
+- **FeedbackRouter**: Check `feedback_threads` for open thread for this user. If found, returns `{ handled: false, feedbackContext }` — enriches context so AIAgent receives feedback thread history in system prompt. AI then decides: forward to admin or close thread and process normally. Does NOT handle the message itself.
+- **AIAgent**: Existing logic. New tools added: `manage_settings`, `send_feedback`, `get_bot_info`. If `feedbackContext` is present, includes thread history in system prompt for routing decision.
+- **IntentLearner**: Async post-processing (not a pipeline layer). Analyzes what tools AI called and generates intent candidates for admin verification.
 
 ---
 
@@ -109,19 +117,23 @@ Two-tier matching, all data loaded in memory on startup:
 }
 ```
 
+**Multi-step workflow state:** When a workflow calls `ask_user`, execution suspends. State is persisted in an in-memory Map (`workflow_sessions: Map<userId, WorkflowState>`) with 5-minute TTL (same pattern as scene sessions). On next message from the same user, IntentMatcher checks for active workflow session first — if found, resumes from the suspended step with user's answer. If TTL expires, workflow is abandoned and the message goes through normal pipeline.
+
 **Built-in variables:**
 - `{{today}}`, `{{tomorrow}}`, `{{week_start}}`, `{{week_end}}`, `{{month_start}}`, `{{month_end}}` — computed dates in user timezone
 - `{{$1}}`, `{{$2}}`, ... — regex capture groups
 - `{{step_name.field}}` — results from previous steps (`as` keyword)
 - `{{user.timezone}}`, `{{user.language}}` — user context
 
-**`when` conditions:** Simple expressions evaluated by a safe interpreter (no eval). Supports: `==`, `!=`, `>`, `<`, `>=`, `<=`, `.length`, boolean literals.
+**`when` conditions:** Simple expressions evaluated by a safe interpreter (no eval). Hand-rolled recursive descent parser supporting: `==`, `!=`, `>`, `<`, `>=`, `<=`, `.length`, boolean literals, `&&`, `||`. No arbitrary code execution — only property access and comparisons on step results.
 
-**`format` types:**
+**`format` types** (extensible — new types added as needed):
 - `events_list` — standard event list formatting
 - `free_slots` — free time slots formatting
 - `text` — plain text response
 - `settings` — settings display formatting
+- `holidays` — holiday list formatting
+- `search_results` — event search results
 
 ### Database Schema
 
@@ -149,6 +161,11 @@ Two-tier matching, all data loaded in memory on startup:
 - Tool calls AI made (names + parameters)
 - Tool results (success/error)
 
+**Rate limiting & cost control:**
+- Deduplication: skip if the same normalized message was already processed by IntentLearner within the last hour (per-user dedup window)
+- Daily budget cap: max 100 IntentLearner API calls per day (configurable via `INTENT_LEARNER_DAILY_LIMIT` env var). Counter resets at midnight UTC.
+- Skip if message references event-specific IDs, contains pronouns referring to context ("это", "его", "that one"), or depends on conversation history
+
 **Process:**
 1. Analyze whether the request can be reduced to a deterministic workflow
 2. If yes — generate intent record: canonical_name, phrases (variations), trigger_words, pattern (if parameterized), workflow, format
@@ -156,10 +173,11 @@ Two-tier matching, all data loaded in memory on startup:
 4. Save with `status: pending` → send to admin for verification
 
 **When NOT to generate intent:**
-- AI used `ask_user` tool (needs dialogue — not automatable without workflow complexity)
+- AI used `ask_user` tool (needs dialogue — not automatable without workflow state)
 - AI responded from general knowledge without tool calls (chat/conversation)
-- Request depends on conversation history (contextual)
+- Request depends on conversation history (contextual — pronouns, "the same", "that one")
 - Request was ambiguous and AI needed clarification
+- Request references specific event IDs or user-specific data that won't generalize
 
 **Model:** Haiku or Sonnet — cheap, fast. Separate API call with a short prompt specialized for intent generation.
 
@@ -190,7 +208,7 @@ Edit conversation happens in admin's bot chat. AI routes admin messages: if ther
 
 ### Current State (to be replaced)
 
-6 AI tools: `get_user_settings`, `update_user_settings`, `get_notification_settings`, `update_notification_settings`, `get_call_settings`, `update_call_settings`
+7 AI tools: `get_user_settings`, `update_user_settings`, `get_notification_settings`, `update_notification_settings`, `get_call_settings`, `update_call_settings`, `update_sharing_settings`
 
 4 commands: `/settings` (read-only), `/notify`, `/callsettings`, `/privacy`
 
@@ -232,6 +250,19 @@ Displays category picker with inline keyboard:
 Each button opens the category detail view with current values and toggle/edit buttons.
 
 **Removed commands:** `/notify`, `/callsettings`, `/privacy` — removed entirely, not aliased.
+
+### Migration Strategy
+
+All 7 old settings tools are removed and `manage_settings` is added in a single commit:
+1. Remove tool definitions from `tools.ts` (7 tools)
+2. Remove switch cases from `tool-executor.ts`
+3. Remove old handler functions from `tool-handlers/meta.ts`
+4. Add `manage_settings` definition, executor case, and handler
+5. Update system prompt to reference `manage_settings` instead of individual tools
+6. Remove `/notify`, `/callsettings`, `/privacy` command files and registrations from `bot/index.ts`
+7. Update `/settings` command to show category picker UI
+
+Note: spec 00 (common architecture) lists `/notify` and `/privacy` as planned commands. This spec supersedes that — settings are consolidated into `/settings`.
 
 ### New Setting: voice_response_enabled
 
@@ -319,6 +350,8 @@ ALTER TABLE users ADD COLUMN voice_response_enabled INTEGER DEFAULT NULL;
 - Admin clicks Close → `status = 'closed'`
 - AI determines user switched topics → auto-close
 - No TTL/auto-expiry — threads stay open until explicitly closed
+
+**Rate limit:** Max 3 open feedback threads per user at a time. If user tries to open a 4th, AI responds that previous threads should be resolved first.
 
 ---
 
@@ -460,6 +493,17 @@ Used by:
 
 ### Access
 
-Available via `config.botAdminId` (parsed as number from env).
+Available via `config.botAdminId` (parsed as number from env). Validated at startup — if set but not a valid number, throws configuration error.
 
 If not set, feedback and intent verification features are disabled (tools return error, IntentLearner skips sending).
+
+---
+
+## 11. Database Migrations
+
+All schema changes in this spec require new migrations (current count: 015):
+
+- **Migration 016**: `ALTER TABLE users ADD COLUMN voice_response_enabled INTEGER DEFAULT NULL`
+- **Migration 017**: Create `intents` table
+- **Migration 018**: Create `feedback_threads` and `feedback_messages` tables
+- **Migration 019**: `ALTER TABLE group_chats ADD COLUMN pin_hint_shown INTEGER NOT NULL DEFAULT 0`
