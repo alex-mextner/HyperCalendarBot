@@ -625,3 +625,107 @@ describe('invitee deletes shared event = decline', () => {
     expect(visible).toHaveLength(0);
   });
 });
+
+describe('creator delete notifies participants', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let participantRepo: ParticipantRepository;
+  let eventService: EventService;
+  let reminderRepo: ReminderRepository;
+  let userRepo: UserRepository;
+
+  beforeEach(() => {
+    db = createTestDb();
+    userRepo = new UserRepository(db);
+    eventRepo = new EventRepository(db);
+    participantRepo = new ParticipantRepository(db);
+    reminderRepo = new ReminderRepository(db);
+    userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
+  });
+
+  test('deleteEvent fires onParticipantsNotify for accepted participants', () => {
+    const notified: { userIds: number[]; text: string }[] = [];
+    eventService = new EventService(
+      eventRepo,
+      reminderRepo,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      participantRepo,
+      (userIds, text) => {
+        notified.push({ userIds, text });
+      },
+    );
+
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Team Meeting',
+      start_at: '2026-03-20T10:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(event.id, INVITEE, 'accepted');
+
+    eventService.deleteEvent(event.id, CREATOR);
+
+    expect(notified).toHaveLength(1);
+    expect(notified[0].userIds).toEqual([INVITEE]);
+    expect(notified[0].text).toContain('Team Meeting');
+  });
+
+  test('deleteEvent does not fire callback when no accepted participants', () => {
+    const notified: { userIds: number[]; text: string }[] = [];
+    eventService = new EventService(
+      eventRepo,
+      reminderRepo,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      participantRepo,
+      (userIds, text) => {
+        notified.push({ userIds, text });
+      },
+    );
+
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Solo Event',
+      start_at: '2026-03-20T10:00:00Z',
+      timezone: 'UTC',
+    });
+
+    eventService.deleteEvent(event.id, CREATOR);
+
+    expect(notified).toHaveLength(0);
+  });
+
+  test('deleteEvent does not notify declined participants', () => {
+    const notified: { userIds: number[]; text: string }[] = [];
+    eventService = new EventService(
+      eventRepo,
+      reminderRepo,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      participantRepo,
+      (userIds, text) => {
+        notified.push({ userIds, text });
+      },
+    );
+
+    const event = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Skipped',
+      start_at: '2026-03-20T10:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(event.id, INVITEE, 'declined');
+
+    eventService.deleteEvent(event.id, CREATOR);
+
+    expect(notified).toHaveLength(0);
+  });
+});

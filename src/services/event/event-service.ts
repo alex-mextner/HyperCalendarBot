@@ -2,6 +2,7 @@
 
 import { DEFAULTS } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
 import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
@@ -22,6 +23,8 @@ export class EventService {
     private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void,
     private onEventDeleted?: (eventId: number, userId: number) => void,
     private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void,
+    private participantRepo?: ParticipantRepository,
+    private onParticipantsNotify?: (userIds: number[], text: string) => void,
   ) {}
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -61,10 +64,19 @@ export class EventService {
   }
 
   deleteEvent(id: number, userId: number): boolean {
-    if (this.pushSync) {
-      const event = this.eventRepo.findById(id, userId);
-      if (event?.google_calendar_id) {
-        this.pushSync(userId, id, 'delete');
+    const event = this.eventRepo.findById(id, userId);
+    if (this.pushSync && event?.google_calendar_id) {
+      this.pushSync(userId, id, 'delete');
+    }
+    if (this.onParticipantsNotify && this.participantRepo && event) {
+      const accepted = this.participantRepo
+        .getByEvent(id)
+        .filter((p) => p.status === 'accepted' && p.user_id !== userId);
+      if (accepted.length > 0) {
+        this.onParticipantsNotify(
+          accepted.map((p) => p.user_id),
+          `Event "${event.title}" has been cancelled by the organizer.`,
+        );
       }
     }
     if (this.onEventDeleted) {
