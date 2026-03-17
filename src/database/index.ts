@@ -15,6 +15,7 @@ import { EventReminderRepository } from './repositories/event-reminder.repositor
 import { GoogleCalendarRepository } from './repositories/google-calendar.repository.ts';
 import { GoogleSyncRepository } from './repositories/google-sync.repository.ts';
 import { GroupChatRepository } from './repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from './repositories/group-member.repository.ts';
 import { HolidayRepository } from './repositories/holiday.repository.ts';
 import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
@@ -45,6 +46,7 @@ export class DatabaseService {
   readonly invitations: InvitationRepository;
   readonly sharedEvents: SharedEventRepository;
   readonly groupChats: GroupChatRepository;
+  readonly groupMembers: GroupMemberRepository;
   readonly contacts: ContactRepository;
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
@@ -77,6 +79,7 @@ export class DatabaseService {
     this.invitations = new InvitationRepository(this.db);
     this.sharedEvents = new SharedEventRepository(this.db);
     this.groupChats = new GroupChatRepository(this.db);
+    this.groupMembers = new GroupMemberRepository(this.db);
     this.contacts = new ContactRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);

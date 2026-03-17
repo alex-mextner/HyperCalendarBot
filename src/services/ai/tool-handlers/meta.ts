@@ -98,7 +98,8 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   }
   const CANCEL = 'Отмена';
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
-  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML').catch(() => {});
+  const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
+  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch(() => {});
   return { success: true, output: 'Question sent. Waiting for user response.', stopLoop: true };
 }
 

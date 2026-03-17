@@ -17,6 +17,7 @@ export interface GroupContext {
   isGroup: boolean;
   groupChatId?: number;
   groupTitle?: string;
+  onBotResponse?: (messageId: number) => void;
 }
 
 export type PipelineLayer = (
