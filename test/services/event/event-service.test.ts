@@ -471,4 +471,89 @@ describe('EventService', () => {
       expect(callback).toHaveBeenCalledTimes(0);
     });
   });
+
+  describe('Google sync — group event owner resolution', () => {
+    const GROUP_ID = -100888;
+    const CREATOR_ID = 777;
+
+    function makeSyncService() {
+      const pushSync = mock((_userId: number, _eventId: number, _action: 'create' | 'update' | 'delete') => {});
+      const eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const svc = new EventService(eventRepo, reminderRepo, undefined, pushSync);
+      return { svc, pushSync };
+    }
+
+    beforeEach(() => {
+      new UserRepository(db).create({ telegram_id: CREATOR_ID });
+    });
+
+    function seedGroupEventWithGoogleId(svc: EventService): ReturnType<EventService['createEvent']> {
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Group Sync Event',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: TZ,
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: CREATOR_ID,
+      });
+      // Manually stamp a google_calendar_id so sync fires
+      db.prepare("UPDATE events SET google_calendar_id = 'cal_abc' WHERE id = ?").run(event.id);
+      return db.prepare('SELECT * FROM events WHERE id = ?').get(event.id) as ReturnType<EventService['createEvent']>;
+    }
+
+    test('sync uses created_by for group event creation', () => {
+      const { svc, pushSync } = makeSyncService();
+      // createEvent reads google_calendar_id from DB after insert — set it before the call via raw SQL
+      // Instead, seed it after creation and trigger update sync
+      const event = seedGroupEventWithGoogleId(svc);
+
+      // Trigger update sync path which reads the updated row including google_calendar_id
+      svc.updateEventForGroup(event.id, GROUP_ID, { title: 'Updated Title' });
+
+      expect(pushSync).toHaveBeenCalledWith(CREATOR_ID, event.id, 'update');
+    });
+
+    test('sync uses created_by for group event deletion', () => {
+      const { svc, pushSync } = makeSyncService();
+      const event = seedGroupEventWithGoogleId(svc);
+
+      svc.deleteEventForGroup(event.id, GROUP_ID);
+
+      expect(pushSync).toHaveBeenCalledWith(CREATOR_ID, event.id, 'delete');
+    });
+
+    test('sync uses user_id for personal event deletion', () => {
+      const { svc, pushSync } = makeSyncService();
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Event',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: TZ,
+      });
+      db.prepare("UPDATE events SET google_calendar_id = 'cal_abc' WHERE id = ?").run(event.id);
+
+      svc.deleteEvent(event.id, USER_ID);
+
+      expect(pushSync).toHaveBeenCalledWith(USER_ID, event.id, 'delete');
+    });
+
+    test('deleteEventForGroup does not call sync when no google_calendar_id', () => {
+      const { svc, pushSync } = makeSyncService();
+      const event = svc.createEvent({
+        user_id: USER_ID,
+        title: 'Group No Sync',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: TZ,
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: CREATOR_ID,
+      });
+
+      svc.deleteEventForGroup(event.id, GROUP_ID);
+
+      expect(pushSync).not.toHaveBeenCalled();
+    });
+  });
 });

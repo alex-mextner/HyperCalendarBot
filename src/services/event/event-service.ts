@@ -27,6 +27,10 @@ export class EventService {
     private onParticipantsNotify?: (userIds: number[], text: string) => void,
   ) {}
 
+  private getSyncUserId(event: CalendarEvent): number {
+    return event.owner_type === 'group' && event.created_by ? event.created_by : event.user_id;
+  }
+
   createEvent(data: CreateEventData): CalendarEvent {
     const event = this.eventRepo.create(data);
     const reminderMinutes = data.reminder_minutes ?? [DEFAULTS.REMINDER_MINUTES];
@@ -40,7 +44,7 @@ export class EventService {
       );
     }
     if (this.pushSync && event.google_calendar_id) {
-      this.pushSync(event.user_id, event.id, 'create');
+      this.pushSync(this.getSyncUserId(event), event.id, 'create');
     }
     return event;
   }
@@ -55,7 +59,7 @@ export class EventService {
       );
     }
     if (this.pushSync && updated?.google_calendar_id) {
-      this.pushSync(updated.user_id, updated.id, 'update');
+      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
     }
     if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
       this.onEventTimeChanged(id, userId, data.start_at);
@@ -66,7 +70,7 @@ export class EventService {
   deleteEvent(id: number, userId: number): boolean {
     const event = this.eventRepo.findById(id, userId);
     if (this.pushSync && event?.google_calendar_id) {
-      this.pushSync(userId, id, 'delete');
+      this.pushSync(this.getSyncUserId(event), id, 'delete');
     }
     if (this.onParticipantsNotify && this.participantRepo && event) {
       const accepted = this.participantRepo
@@ -281,11 +285,22 @@ export class EventService {
   }
 
   updateEventForGroup(eventId: number, groupId: number, data: UpdateEventData): CalendarEvent | null {
-    return this.eventRepo.updateInGroup(eventId, groupId, data);
+    const updated = this.eventRepo.updateInGroup(eventId, groupId, data);
+    if (this.pushSync && updated?.google_calendar_id) {
+      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
+    }
+    return updated;
   }
 
   deleteEventForGroup(eventId: number, groupId: number): boolean {
-    return this.eventRepo.removeFromGroup(eventId, groupId);
+    const event = this.eventRepo.findByIdInGroup(eventId, groupId);
+    const result = this.eventRepo.removeFromGroup(eventId, groupId);
+    if (result && event) {
+      if (this.pushSync && event.google_calendar_id) {
+        this.pushSync(this.getSyncUserId(event), eventId, 'delete');
+      }
+    }
+    return result;
   }
 
   searchEventsForGroup(groupId: number, query: string): CalendarEvent[] {
