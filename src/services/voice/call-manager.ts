@@ -53,13 +53,17 @@ export class CallManager {
       await this.deps.sendPostCallButtons(job.userId, job.eventId);
     } catch (error) {
       const duration = Math.floor((Date.now() - startTime) / 1000);
-      voiceLogger.error({ error: String(error), userId: job.userId }, 'Call failed');
+      const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
+      voiceLogger.error(
+        { error: errorMsg, stack: error instanceof Error ? error.stack : undefined, userId: job.userId },
+        'Call failed',
+      );
 
       if (callId && accessHash) {
         await this.deps.callSignaling.discardCall(callId, accessHash).catch(() => {});
       }
 
-      this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, String(error));
+      this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, errorMsg);
 
       // Still send buttons so user can snooze/cancel from chat
       await this.deps.sendPostCallButtons(job.userId, job.eventId).catch(() => {});

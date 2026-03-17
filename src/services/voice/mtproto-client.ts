@@ -18,10 +18,12 @@ export async function createMtprotoClient(config: MtprotoClientConfig): Promise<
   const client = new TelegramClient({
     apiId: config.apiId,
     apiHash: config.apiHash,
-    storage: 'mtproto-session',
+    storage: 'data/mtproto-session',
   });
 
-  await client.importSession(config.sessionString);
+  if (config.sessionString) {
+    await client.importSession(config.sessionString);
+  }
   await client.connect();
 
   voiceLogger.info('MTProto userbot client connected');

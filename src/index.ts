@@ -151,15 +151,64 @@ if (config.REDIS_URL) {
 }
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
-  const { createCallQueue } = await import('./worker/call-queue.ts');
-  const cq = createCallQueue({ url: config.REDIS_URL });
-  callQueue = cq;
-  callQueueCleanup = {
-    close: async () => {
-      await cq.queue.close();
-    },
-  };
-  botLogger.info('Voice call queue initialized');
+  try {
+    const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
+    const { createMtprotoClient } = await import('./services/voice/mtproto-client.ts');
+    const { CallSignaling } = await import('./services/voice/call-signaling.ts');
+    const { TtsService } = await import('./services/voice/tts-service.ts');
+    const { CallManager } = await import('./services/voice/call-manager.ts');
+
+    const cq = createCallQueue({ url: config.REDIS_URL });
+    callQueue = cq;
+
+    // Initialize MTProto client + call pipeline (with timeout — connect can hang)
+    const connectTimeout = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('MTProto connect timeout (10s)')), 10_000),
+    );
+    const mtClient = await Promise.race([
+      createMtprotoClient({
+        apiId: config.MTPROTO_API_ID,
+        apiHash: config.MTPROTO_API_HASH,
+        sessionString: '',
+      }),
+      connectTimeout,
+    ]);
+
+    const callSignaling = new CallSignaling({
+      callRaw: (method) => mtClient.call(method as never) as Promise<unknown>,
+    });
+
+    const ttsService = new TtsService();
+    const callManager = new CallManager({
+      ttsService,
+      callSignaling,
+      callLogRepo: db.callLog,
+      sendPostCallButtons: async (userId, eventId) => {
+        botLogger.info({ userId, eventId }, 'Post-call buttons (not yet wired to bot)');
+      },
+    });
+
+    const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
+    callQueueCleanup = {
+      close: async () => {
+        await worker.close();
+        await cq.queue.close();
+      },
+    };
+
+    botLogger.info('Voice call pipeline initialized (queue + MTProto + worker)');
+  } catch (error) {
+    // Call queue only (no worker) — calls will queue but not execute
+    botLogger.warn({ error: String(error) }, 'Voice call worker failed to init, queue-only mode');
+    const { createCallQueue } = await import('./worker/call-queue.ts');
+    const cq = createCallQueue({ url: config.REDIS_URL });
+    callQueue = cq;
+    callQueueCleanup = {
+      close: async () => {
+        await cq.queue.close();
+      },
+    };
+  }
 }
 
 const { bot } = createBot(

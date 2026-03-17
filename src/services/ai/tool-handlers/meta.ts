@@ -1,5 +1,8 @@
+import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+
+const metaLogger = logger.child({ module: 'ai-tools' });
 
 interface FindUserInput {
   username: string;
@@ -166,11 +169,13 @@ export function handleUpdateNotificationSettings(ctx: AgentContext, input: Recor
 
 export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
   if (!ctx.callQueue) {
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
     return {
       success: false,
       error: 'Voice calls are temporarily unavailable. This is a server-side issue, not a user setting problem.',
     };
   }
+  metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
   ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);
   return { success: true, output: 'Call queued. The user will receive a voice call shortly.' };
 }
