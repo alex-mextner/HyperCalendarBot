@@ -206,6 +206,16 @@ export class TelegramStreamWriter {
     }
   }
 
+  async discard(): Promise<void> {
+    if (this.messageId) {
+      try {
+        await this.sender.deleteMessage?.(this.chatId, this.messageId);
+      } catch {
+        /* ignore — message may already be gone */
+      }
+    }
+  }
+
   getMessageId(): number | null {
     return this.messageId;
   }

@@ -1,5 +1,5 @@
-import { test, expect, beforeEach } from "bun:test";
-import { GroupSessionManager } from "../../../src/services/group/group-session";
+import { beforeEach, expect, test } from 'bun:test';
+import { GroupSessionManager } from '../../../src/services/group/group-session';
 
 let manager: GroupSessionManager;
 
@@ -7,12 +7,12 @@ beforeEach(() => {
   manager = new GroupSessionManager();
 });
 
-test("no session initially", () => {
+test('no session initially', () => {
   expect(manager.hasActiveSession(1)).toBe(false);
   expect(manager.getSession(1)).toBeUndefined();
 });
 
-test("activate() creates a session", () => {
+test('activate() creates a session', () => {
   manager.activate(1, 42, 100);
 
   expect(manager.hasActiveSession(1)).toBe(true);
@@ -26,7 +26,7 @@ test("activate() creates a session", () => {
   expect(session!.expiresAt).toBeGreaterThan(Date.now());
 });
 
-test("tick() decrements remaining messages", () => {
+test('tick() decrements remaining messages', () => {
   manager.activate(1, 42, 100);
   manager.tick(1);
 
@@ -34,7 +34,7 @@ test("tick() decrements remaining messages", () => {
   expect(session!.remainingMessages).toBe(9);
 });
 
-test("session closes after 10 ticks", () => {
+test('session closes after 10 ticks', () => {
   manager.activate(1, 42, 100);
 
   for (let i = 0; i < 10; i++) {
@@ -45,7 +45,7 @@ test("session closes after 10 ticks", () => {
   expect(manager.getSession(1)).toBeUndefined();
 });
 
-test("refresh() resets counter and expiry", () => {
+test('refresh() resets counter and expiry', () => {
   manager.activate(1, 42, 100);
 
   for (let i = 0; i < 5; i++) {
@@ -64,7 +64,7 @@ test("refresh() resets counter and expiry", () => {
   expect(session!.expiresAt).toBeGreaterThanOrEqual(oldExpiry);
 });
 
-test("expired session is not active", () => {
+test('expired session is not active', () => {
   manager.activate(1, 42, 100);
 
   // Manually expire the session
@@ -74,7 +74,7 @@ test("expired session is not active", () => {
   expect(manager.hasActiveSession(1)).toBe(false);
 });
 
-test("close() removes session", () => {
+test('close() removes session', () => {
   manager.activate(1, 42, 100);
   expect(manager.hasActiveSession(1)).toBe(true);
 

@@ -196,6 +196,7 @@ async function handleVoiceMessage(
       user,
       chatId: Number(chatId),
       messageText: transcription,
+      isGroup: false,
       isVoiceMessage: true,
       eventService: deps.eventService,
       holidayService: deps.holidayService,
@@ -260,10 +261,13 @@ async function handleVoiceMessage(
 }
 
 function buildAgentContextFactory(deps: MessageHandlerDeps) {
-  return (user: User, chatId: number, messageText: string): AgentContext => ({
+  return (user: User, chatId: number, messageText: string, groupInfo?: { isGroup: boolean; groupChatId?: number; groupTitle?: string }): AgentContext => ({
     user,
     chatId,
     messageText,
+    isGroup: groupInfo?.isGroup ?? false,
+    groupChatId: groupInfo?.groupChatId,
+    groupTitle: groupInfo?.groupTitle,
     eventService: deps.eventService,
     holidayService: deps.holidayService,
     chatHistory: deps.chatHistory,
@@ -529,6 +533,10 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
     const layers = [...(intentLayer ? [intentLayer] : []), ...staticLayers];
 
-    await runPipeline(ctx, messageText, layers);
+    const groupContext = isGroup
+      ? { isGroup: true as const, groupChatId: Number(chatId), groupTitle: chat?.title ?? undefined }
+      : undefined;
+
+    await runPipeline(ctx, messageText, layers, groupContext);
   };
 }

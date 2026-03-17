@@ -73,6 +73,7 @@ describe('CalendarBotAgent.run()', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: 'Show my events today',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
@@ -307,5 +308,135 @@ describe('CalendarBotAgent.run()', () => {
 
     // Non-array JSON should be kept as string
     expect(typeof messages[0]!.content).toBe('string');
+  });
+
+  test('buildMessages uses per-chat history in group context', () => {
+    const GROUP_CHAT_ID = -1001234;
+    // Save some per-user history (should be ignored in group)
+    ctx.chatHistory.save(USER_ID, 'user', 'personal message');
+    // Save per-chat history
+    ctx.chatHistory.save(USER_ID, 'user', 'group message', GROUP_CHAT_ID);
+    ctx.chatHistory.save(USER_ID, 'assistant', 'group reply', GROUP_CHAT_ID);
+
+    ctx.isGroup = true;
+    ctx.groupChatId = GROUP_CHAT_ID;
+    ctx.groupTitle = 'Test Group';
+
+    const agent = new CalendarBotAgent(config, sender);
+    const personalHistory = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, personalHistory);
+
+    // Should have 2 group history + 1 current message = 3
+    expect(messages.length).toBe(3);
+    expect(messages[0]!.content).toBe('group message');
+    expect(messages[1]!.content).toBe('group reply');
+    expect(messages[2]!.content).toBe('Show my events today');
+  });
+
+  test('[SKIP] response in group discards message instead of finalizing', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '[SKIP]' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+
+    await agent.run(ctx);
+
+    // The placeholder should have been deleted
+    expect(deleteMessage).toHaveBeenCalledTimes(1);
+    // editMessageText should NOT be called for finalize (only intermediate flushes may happen)
+    // sendMessage is called once for init placeholder
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  test('[SKIP] response in DM is NOT discarded', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '[SKIP]' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    ctx.isGroup = false;
+
+    await agent.run(ctx);
+
+    // In DM, [SKIP] should be finalized normally (editMessageText called)
+    expect(sender.editMessageText).toHaveBeenCalled();
+  });
+
+  test('onBotResponse callback is called after finalize with message ID', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: 'Hello' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const onBotResponse = mock(() => {});
+    ctx.onBotResponse = onBotResponse;
+
+    await agent.run(ctx);
+
+    expect(onBotResponse).toHaveBeenCalledTimes(1);
+    // Message ID from mock sender is 42
+    expect(onBotResponse).toHaveBeenCalledWith(42);
+  });
+
+  test('onBotResponse is NOT called after [SKIP] discard', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '[SKIP]' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    const onBotResponse = mock(() => {});
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    ctx.onBotResponse = onBotResponse;
+
+    await agent.run(ctx);
+
+    // onBotResponse should NOT be called after SKIP
+    expect(onBotResponse).not.toHaveBeenCalled();
+  });
+
+  test('saveUserMessage includes chatId in group context', () => {
+    const GROUP_CHAT_ID = -1001234;
+    ctx.isGroup = true;
+    ctx.groupChatId = GROUP_CHAT_ID;
+
+    const agent = new CalendarBotAgent(config, sender);
+    agent.saveUserMessage(ctx);
+
+    const chatHistory = ctx.chatHistory.getRecentByChat(GROUP_CHAT_ID, 10);
+    expect(chatHistory.length).toBe(1);
+    expect(chatHistory[0]!.role).toBe('user');
+    expect(chatHistory[0]!.content).toBe('Show my events today');
   });
 });

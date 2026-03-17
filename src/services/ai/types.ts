@@ -22,6 +22,10 @@ export interface AgentContext {
   user: User;
   chatId: number;
   messageText: string;
+  isGroup: boolean;
+  groupChatId?: number;
+  groupTitle?: string;
+  onBotResponse?: (messageId: number) => void;
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
@@ -87,4 +91,5 @@ export interface TelegramSender {
   sendInvitation?(inviteeId: number, text: string, invitationId: number): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
+  deleteMessage?(chatId: number, messageId: number): Promise<void>;
 }
