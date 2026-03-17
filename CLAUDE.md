@@ -164,3 +164,9 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - Find similar working code in the same codebase. Compare working vs broken.
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
+
+## Documentation
+
+- Specs: `docs/specs/` — design documents and feature specifications
+- Plans: `docs/plans/` — implementation plans with task breakdowns
+- Original specs (sub-projects 00-08): `docs/specs/00-08`

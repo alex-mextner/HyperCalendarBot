@@ -48,6 +48,7 @@ interface GroupSession {
 **Storage:** In-memory `Map<number, GroupSession>` (keyed by `chatId`). Lost on restart — acceptable.
 
 **Lifecycle:**
+
 1. Bot responds in group → session created (or refreshed) with `remainingMessages = 10`, `expiresAt = now + 5 days`
 2. Every message in the group (from anyone) → `remainingMessages--`
 3. While session is active (`remainingMessages > 0` and not expired), ALL messages are forwarded to the AI agent
@@ -59,6 +60,7 @@ interface GroupSession {
 `remainingMessages` is the single counter — it tracks how many messages remain before the session auto-closes. AI responding resets it. There is no separate "consecutive skips" counter; `remainingMessages` serves that purpose.
 
 **Edge cases:**
+
 - Reply to bot always works, even without an active session
 - `/cal` and other keyword triggers always work, even without a session
 - Multiple groups: each has its own independent session
@@ -71,6 +73,7 @@ System prompt instructs the agent:
 > "If the message in the group is clearly not addressed to you (casual conversation, off-topic banter unrelated to calendar/scheduling), respond ONLY with the exact text `[SKIP]`. Do not call any tools, do not create events."
 
 The message handler checks the agent's response:
+
 - If response text is exactly `[SKIP]` → do not send anything to the chat
 - Otherwise → send as normal, refresh session
 
@@ -98,6 +101,7 @@ ALTER TABLE events ADD COLUMN created_by INTEGER;
 ```
 
 **Indexes:**
+
 ```sql
 CREATE INDEX idx_events_group ON events (group_id, start_at)
   WHERE owner_type = 'group';
@@ -110,6 +114,7 @@ ALTER TABLE chat_history ADD COLUMN chat_id INTEGER;
 ```
 
 **Changed methods:**
+
 - `save(userId, role, content, chatId?)` — gains optional `chatId` parameter. In groups, caller passes `chatId`; in DMs, omitted (NULL).
 - `getRecentByChat(chatId: number, limit = 10)` — new method, returns last N messages from the group chat (from all users).
 
@@ -129,6 +134,7 @@ When building AI context in groups, use `getRecentByChat(chatId)` instead of `ge
 ### Type Changes
 
 `CalendarEvent` gains:
+
 ```typescript
 owner_type: 'user' | 'group';
 group_id: number | null;
@@ -136,6 +142,7 @@ created_by: number | null;
 ```
 
 `CreateEventData` gains:
+
 ```typescript
 owner_type?: 'user' | 'group';
 group_id?: number;
@@ -145,6 +152,7 @@ created_by?: number;
 ### Repository Changes
 
 `EventRepository` gains group-aware methods:
+
 - `findByIdInGroup(id: number, groupId: number)` — finds event by id WHERE `owner_type='group' AND group_id=?` (no user_id check — any group member can access)
 - `getByDateRangeForGroup(groupId: number, start: string, end: string)` — replaces user-scoped range query for group context
 - `searchForGroup(groupId: number, query: string)` — group-scoped search
@@ -207,6 +215,7 @@ scope = "personal" → WHERE owner_type='user'  AND user_id=ctx.user.telegram_id
 ```
 
 For `create_event` with `scope = "group"`:
+
 - `owner_type = 'group'`
 - `group_id = ctx.groupChatId`
 - `user_id = ctx.user.telegram_id` (creator)
@@ -266,6 +275,7 @@ In group context, `buildMessages()` loads `getRecentByChat(chatId, 10)` instead 
 ### Main bot
 
 Inline mode disabled via BotFather. Code changes:
+
 - Remove `inline_query` handler registration from `src/bot/index.ts`
 - `src/bot/handlers/inline.handler.ts` moves to the inline bot
 
@@ -284,6 +294,7 @@ INLINE_BOT_USERNAME=...     # "InlineCalBot"
 ```
 
 Both bots initialized in `src/index.ts`:
+
 ```typescript
 const mainBot = new Bot(BOT_TOKEN);     // commands, messages, callbacks
 const inlineBot = new Bot(INLINE_BOT_TOKEN); // inline queries only
@@ -300,13 +311,16 @@ const inlineBot = new Bot(INLINE_BOT_TOKEN); // inline queries only
 ## 7. File Changes Summary
 
 ### New files
+
 - `scripts/get-chat-members.py` — Pyrogram subprocess for fetching group members
 - `src/services/group/group-session.ts` — in-memory GroupSession manager
 
 ### Deleted files
+
 - `src/services/voice/mtproto-client.ts`
 
 ### Modified files
+
 - `src/bot/handlers/message.handler.ts` — session logic, group detection, `[SKIP]` detection, fix `isReplyToBot` check
 - `src/bot/index.ts` — `/cal` command, inline bot instance, remove inline handler from main bot
 - `src/services/ai/tools.ts` — `scope` parameter on event tools
@@ -324,6 +338,7 @@ const inlineBot = new Bot(INLINE_BOT_TOKEN); // inline queries only
 - `.env.example` — inline bot env vars
 
 ### Unchanged
+
 - Personal calendar — works as before
 - Notification system core — extended for group events but unchanged at core
 - Voice calls — separate pipeline
@@ -333,11 +348,13 @@ const inlineBot = new Bot(INLINE_BOT_TOKEN); // inline queries only
 Group events sync to Google Calendar of the **event creator** (if they have Google connected).
 
 When a group event is created:
+
 1. Check if `created_by` user has Google Calendar connected
 2. If yes → push event to their Google Calendar (same sync pipeline as personal events)
 3. If no → event stays local only
 
 When a group event is updated/deleted by any group member:
+
 - Push the change to the original creator's Google Calendar
 
 This reuses the existing sync pipeline — no new Google API integration needed.
