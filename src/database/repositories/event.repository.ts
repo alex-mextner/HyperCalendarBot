@@ -8,8 +8,8 @@ export class EventRepository {
   create(data: CreateEventData): CalendarEvent {
     const result = this.db
       .prepare(`
-      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .run(
         data.user_id,
@@ -23,8 +23,15 @@ export class EventRepository {
         data.location ?? null,
         data.recurrence_rule ?? null,
         data.recurrence_end_at ?? null,
+        data.owner_type ?? 'user',
+        data.group_id ?? null,
+        data.created_by ?? null,
       );
-    return this.findById(Number(result.lastInsertRowid), data.user_id)!;
+    const id = Number(result.lastInsertRowid);
+    if (data.owner_type === 'group' && data.group_id != null) {
+      return this.findByIdInGroup(id, data.group_id)!;
+    }
+    return this.findById(id, data.user_id)!;
   }
 
   findById(id: number, userId: number): CalendarEvent | null {
@@ -387,5 +394,109 @@ export class EventRepository {
     `)
       .get(userId, startUtc, endUtc) as { count: number };
     return row.count;
+  }
+
+  findByIdInGroup(id: number, groupId: number): CalendarEvent | null {
+    return this.db
+      .prepare("SELECT * FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ? AND is_cancelled = 0")
+      .get(id, groupId) as CalendarEvent | null;
+  }
+
+  getByDateRangeForGroup(groupId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(
+        "SELECT * FROM events WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 ORDER BY start_at",
+      )
+      .all(groupId, startUtc, endUtc) as CalendarEvent[];
+  }
+
+  getInRangeForGroup(groupId: number, startUtc: string, endUtc: string): CalendarEvent[] {
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ?
+        AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
+      ORDER BY start_at
+    `)
+      .all(groupId, startUtc, endUtc) as CalendarEvent[];
+  }
+
+  getRecurringTemplatesForGroup(groupId: number): CalendarEvent[] {
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE owner_type = 'group' AND group_id = ? AND recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+    `)
+      .all(groupId) as CalendarEvent[];
+  }
+
+  searchForGroup(groupId: number, query: string, limit = 20): CalendarEvent[] {
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? AND is_cancelled = 0
+      ORDER BY start_at ASC
+      LIMIT ?
+    `)
+      .all(groupId, `%${query}%`, limit) as CalendarEvent[];
+  }
+
+  getUpcomingForGroup(groupId: number, limit = 10, now?: Date): CalendarEvent[] {
+    const nowIso = (now ?? new Date()).toISOString();
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND parent_event_id IS NULL
+        AND (start_at > ? OR recurrence_rule IS NOT NULL)
+      ORDER BY start_at
+      LIMIT ?
+    `)
+      .all(groupId, nowIso, limit) as CalendarEvent[];
+  }
+
+  updateInGroup(id: number, groupId: number, data: UpdateEventData): CalendarEvent | null {
+    const existing = this.findByIdInGroup(id, groupId);
+    if (!existing) return null;
+
+    const ALLOWED_COLUMNS = new Set([
+      'title',
+      'description',
+      'category',
+      'start_at',
+      'end_at',
+      'all_day',
+      'timezone',
+      'location',
+      'recurrence_rule',
+      'recurrence_end_at',
+    ]);
+    const fields: string[] = [];
+    const values: SQLQueryBindings[] = [];
+
+    for (const [key, value] of Object.entries(data)) {
+      if (!ALLOWED_COLUMNS.has(key)) continue;
+      if (value !== undefined) {
+        fields.push(`${key} = ?`);
+        values.push(key === 'all_day' ? (value ? 1 : 0) : value);
+      }
+    }
+
+    if (fields.length === 0) return existing;
+
+    fields.push("updated_at = datetime('now')");
+    values.push(id, groupId);
+
+    this.db
+      .prepare(`UPDATE events SET ${fields.join(', ')} WHERE id = ? AND owner_type = 'group' AND group_id = ?`)
+      .run(...values);
+
+    return this.findByIdInGroup(id, groupId)!;
+  }
+
+  removeFromGroup(id: number, groupId: number): boolean {
+    const result = this.db
+      .prepare("DELETE FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ?")
+      .run(id, groupId);
+    return result.changes > 0;
   }
 }
