@@ -2,6 +2,7 @@
 
 import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
+import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -11,6 +12,7 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
+import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
@@ -49,6 +51,10 @@ export function createCallbackHandler(
   eventRepo?: EventRepository,
   chatHistoryRepo?: ChatHistoryRepository,
   onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>,
+  oauthDeps?: {
+    oauthService: GoogleOAuthService;
+    stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
+  },
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -222,7 +228,20 @@ export function createCallbackHandler(
             return;
           }
           if (subPayload === 'connect') {
-            await ctx.answer({ text: t(lang).gcal_connect_prompt });
+            if (oauthDeps) {
+              const stateId = crypto.randomUUID();
+              await oauthDeps.stateStore.set(
+                `oauth:state:${stateId}`,
+                JSON.stringify({ telegram_user_id: user.telegram_id, created_at: Date.now() }),
+                300,
+              );
+              const authUrl = oauthDeps.oauthService.generateAuthUrl(stateId);
+              const kb = new InlineKeyboard().url(t(lang).gcal_connect_button, authUrl);
+              await ctx.answer();
+              await ctx.editText(t(lang).gcal_connect_prompt, { reply_markup: kb });
+            } else {
+              await ctx.answer({ text: t(lang).gcal_connect_prompt });
+            }
             return;
           }
         }

@@ -1,5 +1,6 @@
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
+import { localTimeToUtcHHMM } from '../../notification/timezone.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 const metaLogger = logger.child({ module: 'ai-tools' });
@@ -152,9 +153,15 @@ export function handleUpdateNotificationSettings(ctx: AgentContext, input: Recor
 
   const patch: Record<string, unknown> = {};
   if (input.morning_agenda_enabled !== undefined) patch.morning_agenda_enabled = input.morning_agenda_enabled ? 1 : 0;
-  if (input.morning_agenda_time !== undefined) patch.morning_agenda_time = input.morning_agenda_time;
+  if (input.morning_agenda_time !== undefined) {
+    patch.morning_agenda_time = input.morning_agenda_time;
+    patch.morning_agenda_utc = localTimeToUtcHHMM(input.morning_agenda_time as string, ctx.user.timezone);
+  }
   if (input.evening_review_enabled !== undefined) patch.evening_review_enabled = input.evening_review_enabled ? 1 : 0;
-  if (input.evening_review_time !== undefined) patch.evening_review_time = input.evening_review_time;
+  if (input.evening_review_time !== undefined) {
+    patch.evening_review_time = input.evening_review_time;
+    patch.evening_review_utc = localTimeToUtcHHMM(input.evening_review_time as string, ctx.user.timezone);
+  }
   if (input.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = input.quiet_hours_enabled ? 1 : 0;
   if (input.quiet_hours_start !== undefined) patch.quiet_hours_start = input.quiet_hours_start;
   if (input.quiet_hours_end !== undefined) patch.quiet_hours_end = input.quiet_hours_end;
@@ -212,6 +219,48 @@ export function handleGetUserSettings(ctx: AgentContext): ToolResult {
     `country_code: ${u.country_code ?? 'not set'}`,
   ];
   return { success: true, output: lines.join('\n') };
+}
+
+export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
+  const connected = !!ctx.user.google_refresh_token_enc;
+  if (!connected) {
+    return {
+      success: true,
+      output: 'Google Calendar is NOT connected. The user can connect it with /connect_google command.',
+    };
+  }
+
+  if (!ctx.googleCalendarRepo) {
+    return { success: true, output: 'Google Calendar is connected, but calendar data is not available.' };
+  }
+
+  const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
+  const enabled = calendars.filter((c) => c.sync_enabled);
+  const lines = ['Google Calendar is connected.', `Calendars: ${calendars.length} total, ${enabled.length} syncing.`];
+  for (const cal of calendars) {
+    lines.push(`  ${cal.sync_enabled ? '✅' : '⬜'} ${cal.calendar_name} (${cal.google_calendar_id})`);
+  }
+  return { success: true, output: lines.join('\n') };
+}
+
+export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
+  if (!ctx.user.google_refresh_token_enc) {
+    return {
+      success: false,
+      error: 'Google Calendar is not connected. Suggest /connect_google command.',
+    };
+  }
+  if (!ctx.googleCalendarRepo) {
+    return { success: false, error: 'Calendar data not available.' };
+  }
+
+  const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
+  if (calendars.length === 0) {
+    return { success: true, output: 'No Google Calendars found. Sync may still be in progress.' };
+  }
+
+  const lines = calendars.map((c) => `${c.sync_enabled ? '✅' : '⬜'} ${c.calendar_name} (${c.google_calendar_id})`);
+  return { success: true, output: `Google Calendars:\n${lines.join('\n')}` };
 }
 
 export function handleUpdateUserSettings(ctx: AgentContext, input: UpdateUserSettingsInput): ToolResult {

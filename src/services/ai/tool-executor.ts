@@ -16,9 +16,11 @@ import {
   handleFindUser,
   handleGetCallSettings,
   handleGetContacts,
+  handleGetGoogleCalendarStatus,
   handleGetHolidays,
   handleGetNotificationSettings,
   handleGetUserSettings,
+  handleListGoogleCalendars,
   handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
@@ -184,6 +186,12 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
           ctx,
           input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
         );
+
+      case 'get_google_calendar_status':
+        return handleGetGoogleCalendarStatus(ctx);
+
+      case 'list_google_calendars':
+        return handleListGoogleCalendars(ctx);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

@@ -4,6 +4,7 @@ import { Scene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
+import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import {
   getTimezoneDisplay,
   guessCountryFromTimezone,
@@ -28,7 +29,11 @@ interface OnboardingState {
   country?: string;
 }
 
-export function createOnboardingScene(db: DatabaseService, gcalConfigured = false) {
+export function createOnboardingScene(
+  db: DatabaseService,
+  gcalConfigured = false,
+  prefsService?: NotificationPreferencesService,
+) {
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
@@ -195,6 +200,16 @@ export function createOnboardingScene(db: DatabaseService, gcalConfigured = fals
         if (!data) return;
         const parts = data.split(':');
         if (parts[0] !== CB.ONBOARD_AGENDA) return;
+
+        const selectedTime = parts.slice(1).join(':');
+        const { timezone } = context.scene.state;
+
+        // Save morning agenda preference if user selected a time (not "no")
+        if (selectedTime !== 'no' && prefsService && timezone) {
+          prefsService.getOrCreate(context.from.id);
+          prefsService.updateMorningTime(context.from.id, selectedTime, timezone);
+          db.notificationPreferences.update(context.from.id, { morning_agenda_enabled: 1 });
+        }
 
         // Complete onboarding
         db.users.update(context.from.id, { onboarding_completed: 1 });

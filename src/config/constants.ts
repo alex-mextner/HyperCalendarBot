@@ -174,8 +174,8 @@ export const MSG = {
       '<b>📅 Calendar Management</b>\n/add — step-by-step event creation\n/today, /week, /month — different views\n/edit, /delete — modify events\n/free — find available time slots\nRecurring events with flexible rules.',
       '<b>🔔 Smart Reminders</b>\n/notify — configure morning agenda, evening review, quiet hours\nMultiple reminders per event (15min, 1h, etc.)\nCustomizable notification intervals.',
       '<b>🌍 Holidays</b>\n/holidays — browse and subscribe to holidays from 100+ countries\nHolidays appear alongside your events in daily agenda.',
-      '<b>📤 Sharing & Invitations</b>\n/share today — share your agenda\n/invite <user_id> <event_id> — invite someone\n/privacy — control visibility (private / free-busy / full)\nInline mode: type @HyperCalendarBot in any chat.',
-      '<b>🖼 Visual Schedule</b>\nTap "Image" on /today or /week to get a beautiful calendar image.',
+      '<b>📤 Sharing &amp; Invitations</b>\n/share today — share your agenda\n/invite @username — invite someone to an event\n/privacy — control visibility (private / free-busy / full)\nInline mode: type @HyperCalendarBot in any chat.',
+      '<b>🖼 Visual Schedule</b>\nBeautiful calendar images are sent automatically with /today and /week commands.',
     ],
   },
   ru: {
@@ -297,8 +297,8 @@ export const MSG = {
       '<b>📅 Управление календарём</b>\n/add — пошаговое создание\n/today, /week, /month — разные виды\n/edit, /delete — редактирование\n/free — свободные слоты\nПовторяющиеся события с гибкими правилами.',
       '<b>🔔 Умные напоминания</b>\n/notify — утренняя сводка, вечерний обзор, тихие часы\nНесколько напоминаний на событие (15 мин, 1 ч и т.д.)',
       '<b>🌍 Праздники</b>\n/holidays — подписка на праздники 100+ стран\nПраздники отображаются в ежедневной повестке.',
-      '<b>📤 Шаринг и приглашения</b>\n/share today — поделиться расписанием\n/invite <user_id> <event_id> — пригласить\n/privacy — видимость (приватно / занят / полный доступ)\nInline-режим: наберите @HyperCalendarBot в любом чате.',
-      '<b>🖼 Визуальное расписание</b>\nНажмите "Картинка" в /today или /week для красивого изображения календаря.',
+      '<b>📤 Шаринг и приглашения</b>\n/share today — поделиться расписанием\n/invite @username — пригласить на событие\n/privacy — видимость (приватно / занят / полный доступ)\nInline-режим: наберите @HyperCalendarBot в любом чате.',
+      '<b>🖼 Визуальное расписание</b>\nКрасивые изображения календаря автоматически отправляются с командами /today и /week.',
     ],
   },
 } as const;

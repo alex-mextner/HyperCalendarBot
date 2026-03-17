@@ -515,4 +515,24 @@ export const toolDefinitions: ToolDefinition[] = [
       required: ['event_id', 'visibility'],
     },
   },
+  {
+    name: 'get_google_calendar_status',
+    description:
+      'Check if Google Calendar is connected for this user. Returns connection status and list of synced calendars. If not connected, suggest /connect_google command.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'list_google_calendars',
+    description:
+      'List all Google Calendars for this user with their sync status (enabled/disabled). Requires Google Calendar to be connected.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];

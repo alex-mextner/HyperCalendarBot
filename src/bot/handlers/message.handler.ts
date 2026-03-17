@@ -2,6 +2,7 @@
 
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
@@ -41,6 +42,7 @@ export interface MessageHandlerDeps {
   notificationPrefs?: AgentContext['notificationPrefs'];
   callQueue?: AgentContext['callQueue'];
   callSettingsRepo?: AgentContext['callSettingsRepo'];
+  googleCalendarRepo?: GoogleCalendarRepository;
   sceneStorage: SceneStorage;
   botUsername?: string;
 }
@@ -170,6 +172,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       notificationPrefs: deps.notificationPrefs,
       callQueue: deps.callQueue,
       callSettingsRepo: deps.callSettingsRepo,
+      googleCalendarRepo: deps.googleCalendarRepo,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

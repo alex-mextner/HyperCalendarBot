@@ -108,7 +108,7 @@ export function createBot(
   const invitationService = new InvitationService(db.invitations, db.events, db.sharingSettings);
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
-  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps);
+  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService);
 
   const bot = new Bot(token);
   const telegramSender = createTelegramSender(bot);
@@ -228,8 +228,10 @@ export function createBot(
             sharingSettingsRepo: db.sharingSettings,
             sharedEventRepo: db.sharedEvents,
             privacyService,
+            googleCalendarRepo: googleDeps?.calendarRepo,
           });
         },
+        googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)
@@ -288,6 +290,7 @@ export function createBot(
             sharingSettingsRepo: db.sharingSettings,
             sharedEventRepo: db.sharedEvents,
             privacyService,
+            googleCalendarRepo: googleDeps?.calendarRepo,
           })
           .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
       }
@@ -330,6 +333,7 @@ export function createBot(
           update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
           ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
         },
+        googleCalendarRepo: googleDeps?.calendarRepo,
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
       })(ctx as unknown as BotCommandContext),

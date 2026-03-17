@@ -28,6 +28,7 @@ let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
 let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJobData): Promise<void> } | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
+let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -154,7 +155,7 @@ if (config.REDIS_URL) {
   botLogger.info('Image render queue initialized');
 }
 
-if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !process.env.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
     const { createMtprotoClient } = await import('./services/voice/mtproto-client.ts');
@@ -220,6 +221,53 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       },
     };
   }
+}
+
+// Notification scheduler — requires Redis for BullMQ queue
+if (config.REDIS_URL) {
+  const { createNotificationQueue, createNotificationWorker, setupNotificationTick } = await import(
+    './services/notification/queue.ts'
+  );
+  const { NotificationScheduler } = await import('./services/notification/scheduler.ts');
+
+  const notifQueue = createNotificationQueue(config.REDIS_URL);
+
+  const scheduler = new NotificationScheduler({
+    prefsRepo: db.notificationPreferences,
+    reminderRepo: db.eventReminders,
+    logRepo: db.notificationLog,
+    userRepo: db.users,
+    eventRepo: db.events,
+    enqueue: (type, userId, logId, payload) => {
+      notifQueue.add(type, { logId, telegramId: userId, type, payload });
+    },
+    callSettingsRepo: db.callSettings,
+    callLogRepo: db.callLog,
+    enqueueCall: callQueue
+      ? (data) => {
+          const log = db.callLog.create({ user_id: data.userId, tts_text: data.ttsText });
+          callQueue!.enqueue({ ...data, callLogId: log.id });
+        }
+      : undefined,
+  });
+
+  const notifWorker = createNotificationWorker(
+    config.REDIS_URL,
+    db.notificationLog,
+    (telegramId, text) => botRef.sendMessage(telegramId, text),
+    scheduler,
+  );
+
+  await setupNotificationTick(notifQueue);
+
+  notificationQueueCleanup = {
+    close: async () => {
+      await notifWorker.close();
+      await notifQueue.close();
+    },
+  };
+
+  botLogger.info('Notification scheduler initialized');
 }
 
 const { bot } = createBot(
@@ -316,6 +364,7 @@ process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
   sharingCleanup.stop();
+  if (notificationQueueCleanup) await notificationQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
@@ -327,6 +376,7 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   await bot.stop();
   sharingCleanup.stop();
+  if (notificationQueueCleanup) await notificationQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();

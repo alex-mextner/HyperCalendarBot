@@ -1,5 +1,6 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
@@ -42,6 +43,7 @@ export interface AgentContext {
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
   };
+  googleCalendarRepo?: GoogleCalendarRepository;
 }
 
 export interface ToolResult {
