@@ -4,7 +4,7 @@
 // Or pipe: echo "текст" | bun scripts/test-tts.ts
 
 import { StressDictionary } from '../src/services/voice/stress-dictionary.ts';
-import { markStress, stripMarkdown, transliterateEnglish } from '../src/services/voice/stress-marker.ts';
+import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../src/services/voice/stress-marker.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,7 +27,10 @@ console.log('Input:', text);
 const plain = stripMarkdown(text);
 console.log('Stripped:', plain);
 
-const stressed = markStress(plain, dict);
+const withNumbers = numbersToWords(plain);
+console.log('Numbers:', withNumbers);
+
+const stressed = markStress(withNumbers, dict);
 console.log('Stressed:', stressed);
 
 const final = transliterateEnglish(stressed);

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { StressDictionary } from '../../../src/services/voice/stress-dictionary.ts';
-import { markStress, stripMarkdown } from '../../../src/services/voice/stress-marker.ts';
+import { markStress, numbersToWords, stripMarkdown } from '../../../src/services/voice/stress-marker.ts';
 
 describe('markStress', () => {
   const dict = new StressDictionary({
@@ -27,6 +27,22 @@ describe('markStress', () => {
   test('leaves unknown words unchanged', () => {
     expect(markStress('Алексом', dict)).toBe('Алексом');
     expect(markStress('привет Алексом', dict)).toBe('прив+ет Алексом');
+  });
+});
+
+describe('numbersToWords', () => {
+  test('converts time HH:MM', () => {
+    expect(numbersToWords('в 15:00')).toBe('в пятн+адцать');
+    expect(numbersToWords('в 9:30')).toBe('в д+евять тр+идцать');
+  });
+
+  test('converts standalone numbers', () => {
+    expect(numbersToWords('через 5 минут')).toBe('через пять минут');
+    expect(numbersToWords('100 событий')).toBe('сто событий');
+  });
+
+  test('leaves non-number text unchanged', () => {
+    expect(numbersToWords('привет мир')).toBe('привет мир');
   });
 });
 

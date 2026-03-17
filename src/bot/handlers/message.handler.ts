@@ -19,7 +19,7 @@ import type { InvitationService } from '../../services/sharing/invitation-servic
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
-import { markStress, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
+import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -190,7 +190,8 @@ async function handleVoiceMessage(
     if (responseText && deps.sileroTts && deps.sendVoice && deps.stressDictionary) {
       try {
         const plainText = stripMarkdown(responseText);
-        const withStress = markStress(plainText, deps.stressDictionary);
+        const withNumbers = numbersToWords(plainText);
+        const withStress = markStress(withNumbers, deps.stressDictionary);
         const stressedText = transliterateEnglish(withStress);
         cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing voice reply');
         const voiceBuffer = await deps.sileroTts.synthesize(stressedText);

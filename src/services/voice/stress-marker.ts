@@ -3,6 +3,83 @@ import type { StressDictionary } from './stress-dictionary';
 
 const RUSSIAN_WORD = /[а-яёА-ЯЁ]+/g;
 
+const ONES = ['', 'один', 'два', 'три', 'чет+ыре', 'пять', 'шесть', 'семь', 'в+осемь', 'д+евять'];
+const TEENS = [
+  'д+есять',
+  'один+адцать',
+  'двен+адцать',
+  'трин+адцать',
+  'четырн+адцать',
+  'пятн+адцать',
+  'шестн+адцать',
+  'семн+адцать',
+  'восемн+адцать',
+  'девятн+адцать',
+];
+const TENS = [
+  '',
+  'д+есять',
+  'дв+адцать',
+  'тр+идцать',
+  'с+орок',
+  'пятьдес+ят',
+  'шестьдес+ят',
+  'с+емьдесят',
+  'в+осемьдесят',
+  'девян+осто',
+];
+const HUNDREDS = [
+  '',
+  'сто',
+  'дв+ести',
+  'тр+иста',
+  'чет+ыреста',
+  'пятьс+от',
+  'шестьс+от',
+  'семьс+от',
+  'восемьс+от',
+  'девятьс+от',
+];
+
+function numToWords(n: number): string {
+  if (n < 0 || n > 999 || !Number.isInteger(n)) return String(n);
+  if (n === 0) return 'ноль';
+
+  const parts: string[] = [];
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  const t = Math.floor(rest / 10);
+  const o = rest % 10;
+
+  if (h > 0) parts.push(HUNDREDS[h]);
+  if (rest >= 10 && rest <= 19) {
+    parts.push(TEENS[rest - 10]);
+  } else {
+    if (t > 0) parts.push(TENS[t]);
+    if (o > 0) parts.push(ONES[o]);
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Convert time patterns (HH:MM) and standalone numbers to Russian words for TTS.
+ */
+export function numbersToWords(text: string): string {
+  return (
+    text
+      // Time: 15:00, 9:30
+      .replace(/\b(\d{1,2}):(\d{2})\b/g, (_, h, m) => {
+        const hours = numToWords(Number.parseInt(h, 10));
+        const mins = Number.parseInt(m, 10);
+        if (mins === 0) return hours;
+        return `${hours} ${numToWords(mins)}`;
+      })
+      // Standalone numbers up to 999
+      .replace(/\b(\d{1,3})\b/g, (_, n) => numToWords(Number.parseInt(n, 10)))
+  );
+}
+
 /**
  * Adds stress marks (+) to Russian text using the stress dictionary.
  * Words not found in the dictionary are left unchanged (Silero has auto-stress).
