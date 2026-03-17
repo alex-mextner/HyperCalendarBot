@@ -14,6 +14,8 @@ export interface EnvConfig {
   ENCRYPTION_KEY?: string;
   PUBLIC_DOMAIN?: string;
   HF_TOKEN?: string;
+  BOT_ADMIN_ID?: number;
+  INTENT_LEARNER_DAILY_LIMIT: number;
 }
 
 export function loadConfig(): EnvConfig {
@@ -47,6 +49,26 @@ export function loadConfig(): EnvConfig {
   const GOOGLE_REDIRECT_URI =
     process.env.GOOGLE_REDIRECT_URI || (PUBLIC_DOMAIN ? `https://${PUBLIC_DOMAIN}/oauth/google/callback` : undefined);
 
+  const BOT_ADMIN_ID = process.env.BOT_ADMIN_ID
+    ? (() => {
+        const parsed = Number.parseInt(process.env.BOT_ADMIN_ID!, 10);
+        if (Number.isNaN(parsed)) {
+          throw new Error('BOT_ADMIN_ID must be a valid number');
+        }
+        return parsed;
+      })()
+    : undefined;
+
+  const INTENT_LEARNER_DAILY_LIMIT = process.env.INTENT_LEARNER_DAILY_LIMIT
+    ? (() => {
+        const parsed = Number.parseInt(process.env.INTENT_LEARNER_DAILY_LIMIT!, 10);
+        if (Number.isNaN(parsed)) {
+          throw new Error('INTENT_LEARNER_DAILY_LIMIT must be a valid number');
+        }
+        return parsed;
+      })()
+    : 100;
+
   return {
     BOT_TOKEN,
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
@@ -65,5 +87,7 @@ export function loadConfig(): EnvConfig {
     MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
     MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
     HF_TOKEN: process.env.HF_TOKEN || undefined,
+    BOT_ADMIN_ID,
+    INTENT_LEARNER_DAILY_LIMIT,
   };
 }
