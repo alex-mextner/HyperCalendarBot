@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatDateHeader,
   formatTime,
+  formatTimeWithTimezones,
   getDayRangeUtc,
   getWeekRangeUtc,
   parseDuration,
@@ -330,5 +331,34 @@ describe('formatDateHeader', () => {
     expect(result).toContain('Wednesday');
     expect(result).toContain('March');
     expect(result).toContain('11');
+  });
+});
+
+describe('formatTimeWithTimezones', () => {
+  const startAt = '2026-03-11T12:00:00Z'; // 15:00 Moscow, 14:00 Kyiv
+
+  test('same timezone — shows time once with sender timezone', () => {
+    const result = formatTimeWithTimezones(startAt, 'Europe/Moscow', 'Europe/Moscow', true);
+    expect(result).toBe('15:00 (Europe/Moscow)');
+  });
+
+  test('different timezones, recipient onboarded — shows both times', () => {
+    const result = formatTimeWithTimezones(startAt, 'Europe/Moscow', 'Europe/Kyiv', true);
+    expect(result).toBe('15:00 (Europe/Moscow) / 14:00 (Europe/Kyiv)');
+  });
+
+  test('recipient not onboarded — shows only sender timezone', () => {
+    const result = formatTimeWithTimezones(startAt, 'Europe/Moscow', 'Europe/Kyiv', false);
+    expect(result).toBe('15:00 (Europe/Moscow)');
+  });
+
+  test('recipient timezone null — shows only sender timezone', () => {
+    const result = formatTimeWithTimezones(startAt, 'Europe/Moscow', null, true);
+    expect(result).toBe('15:00 (Europe/Moscow)');
+  });
+
+  test('recipient timezone null and not onboarded — shows only sender timezone', () => {
+    const result = formatTimeWithTimezones(startAt, 'UTC', null, false);
+    expect(result).toBe('12:00 (UTC)');
   });
 });

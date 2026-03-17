@@ -224,6 +224,22 @@ export function parseSimpleDate(input: string, timezone: string, refDate?: Date)
   return null;
 }
 
+export function formatTimeWithTimezones(
+  startAt: string,
+  senderTimezone: string,
+  recipientTimezone: string | null,
+  recipientOnboarded: boolean,
+): string {
+  const senderTime = formatTime(startAt, senderTimezone);
+
+  if (!recipientOnboarded || !recipientTimezone || recipientTimezone === senderTimezone) {
+    return `${senderTime} (${senderTimezone})`;
+  }
+
+  const recipientTime = formatTime(startAt, recipientTimezone);
+  return `${senderTime} (${senderTimezone}) / ${recipientTime} (${recipientTimezone})`;
+}
+
 export function formatDuration(startUtc: string, endUtc: string, lang: string): string {
   const diffMs = new Date(endUtc).getTime() - new Date(startUtc).getTime();
   const totalMinutes = Math.round(diffMs / 60000);

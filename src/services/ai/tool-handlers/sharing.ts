@@ -40,8 +40,18 @@ function deliverInvitationAsync(params: DeliveryParams): void {
     'Starting delivery chain',
   );
 
+  const invitee = ctx.userRepo.findByTelegramId(inviteeId);
   const text = event
-    ? formatInvitation(event, event.timezone, lang, inviterName, inviterId, inviterUsername)
+    ? formatInvitation(
+        event,
+        event.timezone,
+        lang,
+        inviterName,
+        inviterId,
+        inviterUsername,
+        invitee?.timezone ?? null,
+        !!invitee?.onboarding_completed,
+      )
     : t(lang).invitation_received(eventTitle, inviterName);
   const invRepo = ctx.invitationRepo;
   const sender = ctx.sender;

@@ -1,6 +1,13 @@
 // src/services/event/formatters.ts
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
-import { formatDateHeader, formatDateShort, formatDuration, formatTime, formatTimeRange } from '../../utils/date.ts';
+import {
+  formatDateHeader,
+  formatDateShort,
+  formatDuration,
+  formatTime,
+  formatTimeRange,
+  formatTimeWithTimezones,
+} from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 
@@ -122,11 +129,30 @@ export function formatInvitation(
   inviterName: string,
   inviterId: number,
   inviterUsername?: string | null,
+  recipientTimezone?: string | null,
+  recipientOnboarded?: boolean,
 ): string {
   const inviterLink = inviterUsername
     ? `@${escapeHtml(inviterUsername)}`
     : `<a href="tg://user?id=${inviterId}">${escapeHtml(inviterName)}</a>`;
   const header = lang === 'ru' ? `📨 <b>Приглашение</b> от ${inviterLink}` : `📨 <b>Invitation</b> from ${inviterLink}`;
+
+  if (!event.all_day) {
+    const timeLabel = formatTimeWithTimezones(
+      event.start_at,
+      timezone,
+      recipientTimezone ?? null,
+      recipientOnboarded ?? false,
+    );
+    const eventDetail = formatEventDetail(event, timezone, lang);
+    // Replace the plain time in the event detail with the timezone-annotated one
+    const plainTime = event.end_at
+      ? `${formatTime(event.start_at, timezone)}–${formatTime(event.end_at, timezone)}`
+      : formatTime(event.start_at, timezone);
+    const annotatedDetail = eventDetail.replace(plainTime, timeLabel);
+    return `${header}\n\n${annotatedDetail}`;
+  }
+
   return `${header}\n\n${formatEventDetail(event, timezone, lang)}`;
 }
 
