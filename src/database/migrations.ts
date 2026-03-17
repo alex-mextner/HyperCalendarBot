@@ -556,4 +556,26 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '021_group_calendar',
+    up: (db) => {
+      db.exec(`ALTER TABLE events ADD COLUMN owner_type TEXT NOT NULL DEFAULT 'user'`);
+      db.exec(`ALTER TABLE events ADD COLUMN group_id INTEGER`);
+      db.exec(`ALTER TABLE events ADD COLUMN created_by INTEGER`);
+      db.exec(`
+        CREATE INDEX idx_events_group ON events (group_id, start_at)
+          WHERE owner_type = 'group'
+      `);
+      db.exec(`ALTER TABLE chat_history ADD COLUMN chat_id INTEGER`);
+      db.exec(`CREATE INDEX idx_chat_history_chat ON chat_history(chat_id, created_at)`);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS group_members (
+          chat_id INTEGER NOT NULL,
+          user_id INTEGER NOT NULL,
+          last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (chat_id, user_id)
+        )
+      `);
+    },
+  },
 ];

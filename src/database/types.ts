@@ -46,6 +46,9 @@ export interface CalendarEvent {
   google_etag: string | null;
   sync_status: SyncStatus;
   sync_version: number;
+  owner_type: 'user' | 'group';
+  group_id: number | null;
+  created_by: number | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -92,6 +95,9 @@ export interface CreateEventData {
   recurrence_rule?: string;
   recurrence_end_at?: string;
   reminder_minutes?: number[];
+  owner_type?: 'user' | 'group';
+  group_id?: number;
+  created_by?: number;
 }
 
 export interface UpdateEventData {
@@ -119,6 +125,7 @@ export interface ChatHistoryMessage {
   user_id: number;
   role: 'user' | 'assistant' | 'tool';
   content: string; // plain text for user, JSON content blocks for assistant/tool
+  chat_id: number | null;
   created_at: string;
 }
 
