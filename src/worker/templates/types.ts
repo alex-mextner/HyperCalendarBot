@@ -81,4 +81,21 @@ export interface EventCardData {
   locale: 'ru' | 'en';
 }
 
-export type ImageType = 'daily-agenda' | 'weekly-overview' | 'event-card';
+export interface MonthDay {
+  dayNumber: number;
+  isOtherMonth: boolean;
+  isWeekend: boolean;
+  isToday: boolean;
+  eventCount: number;
+  events: MiniEvent[];
+}
+
+export interface MonthlyCalendarData {
+  monthLabel: string;
+  weekDays: string[];
+  weeks: MonthDay[][];
+  theme: Theme;
+  locale: 'ru' | 'en';
+}
+
+export type ImageType = 'daily-agenda' | 'weekly-overview' | 'event-card' | 'monthly-calendar';

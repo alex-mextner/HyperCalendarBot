@@ -154,7 +154,7 @@ export function createBot(
     .command('week', (ctx) =>
       handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
     )
-    .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService))
+    .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService))
     .command('add', (ctx) =>
       handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
     )
@@ -185,7 +185,7 @@ export function createBot(
           }),
       ),
     )
-    .command('invitations', (ctx) => handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events))
+    .command('invitations', (ctx) => handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users))
     .command('privacy', (ctx) => handlePrivacy(ctx as unknown as BotCommandContext, db.sharingSettings))
     .command('share', (ctx) =>
       handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),

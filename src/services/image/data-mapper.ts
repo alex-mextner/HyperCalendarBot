@@ -8,6 +8,8 @@ import type {
   DailyAgendaData,
   EventCardData,
   MiniEvent,
+  MonthDay,
+  MonthlyCalendarData,
   Theme,
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
@@ -169,5 +171,106 @@ export function mapEventCardData(params: {
     isAllDay: ev.all_day === 1,
     theme,
     locale,
+  };
+}
+
+export function mapMonthlyCalendarData(params: {
+  occurrencesByDay: Map<string, EventOccurrence[]>;
+  year: number;
+  month: number; // 0-based
+  timezone: string;
+  locale: 'ru' | 'en';
+  theme: Theme;
+  todayIso?: string;
+}): MonthlyCalendarData {
+  const { year, month, locale, theme } = params;
+  const labels = getLabels(locale);
+
+  const monthLabel = `${labels.monthNamesNom[month]} ${year}`;
+
+  // First day of month (Monday-based: 0=Mon..6=Sun)
+  const firstDate = new Date(Date.UTC(year, month, 1));
+  const firstDow = (firstDate.getUTCDay() + 6) % 7;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  const prevMonthDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+
+  const allDays: MonthDay[] = [];
+
+  // Previous month padding
+  for (let i = firstDow - 1; i >= 0; i--) {
+    const d = prevMonthDays - i;
+    const prevMonth = month === 0 ? 11 : month - 1;
+    const prevYear = month === 0 ? year - 1 : year;
+    const iso = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const dow = allDays.length % 7;
+    allDays.push(makeDay(d, true, dow >= 5, iso, params));
+  }
+
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const dow = allDays.length % 7;
+    allDays.push(makeDay(d, false, dow >= 5, iso, params));
+  }
+
+  // Next month padding (fill to complete last week)
+  let nextD = 1;
+  while (allDays.length % 7 !== 0) {
+    const nextMonth = month === 11 ? 0 : month + 1;
+    const nextYear = month === 11 ? year + 1 : year;
+    const iso = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(nextD).padStart(2, '0')}`;
+    const dow = allDays.length % 7;
+    allDays.push(makeDay(nextD, true, dow >= 5, iso, params));
+    nextD++;
+  }
+
+  // Split into weeks
+  const weeks: MonthDay[][] = [];
+  for (let i = 0; i < allDays.length; i += 7) {
+    weeks.push(allDays.slice(i, i + 7));
+  }
+
+  return {
+    monthLabel,
+    weekDays: labels.weekDaysShort,
+    weeks,
+    theme,
+    locale,
+  };
+}
+
+function makeDay(
+  dayNumber: number,
+  isOtherMonth: boolean,
+  isWeekend: boolean,
+  iso: string,
+  params: {
+    occurrencesByDay: Map<string, EventOccurrence[]>;
+    timezone: string;
+    theme: Theme;
+    todayIso?: string;
+  },
+): MonthDay {
+  const occs = params.occurrencesByDay.get(iso) ?? [];
+  return {
+    dayNumber,
+    isOtherMonth,
+    isWeekend,
+    isToday: iso === params.todayIso,
+    eventCount: occs.length,
+    events: occs.map(
+      (o, i): MiniEvent => ({
+        title: o.event.title,
+        startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, params.timezone),
+        endMinutes:
+          o.event.all_day === 1
+            ? 1440
+            : o.occurrence_end
+              ? toMinutes(o.occurrence_end, params.timezone)
+              : toMinutes(o.occurrence_start, params.timezone) + 60,
+        color: params.theme.eventColors[i % params.theme.eventColors.length],
+        isAllDay: o.event.all_day === 1,
+      }),
+    ),
   };
 }

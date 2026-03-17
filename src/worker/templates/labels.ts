@@ -7,6 +7,7 @@ export interface Labels {
   weekDaysShort: string[];
   weekDaysFull: string[];
   monthNames: string[];
+  monthNamesNom: string[];
 }
 
 const labelsDict: Record<string, Labels> = {
@@ -32,6 +33,20 @@ const labelsDict: Record<string, Labels> = {
       'ноября',
       'декабря',
     ],
+    monthNamesNom: [
+      'Январь',
+      'Февраль',
+      'Март',
+      'Апрель',
+      'Май',
+      'Июнь',
+      'Июль',
+      'Август',
+      'Сентябрь',
+      'Октябрь',
+      'Ноябрь',
+      'Декабрь',
+    ],
   },
   en: {
     today: 'Today',
@@ -42,6 +57,20 @@ const labelsDict: Record<string, Labels> = {
     weekDaysShort: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
     weekDaysFull: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'],
     monthNames: [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ],
+    monthNamesNom: [
       'January',
       'February',
       'March',

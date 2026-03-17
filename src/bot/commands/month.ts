@@ -2,8 +2,12 @@
 
 import { TZDate } from '@date-fns/tz';
 import { endOfMonth, format, getDay, getDaysInMonth, startOfMonth } from 'date-fns';
-import type { User } from '../../database/types.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
+import { mapMonthlyCalendarData } from '../../services/image/data-mapper.ts';
+import type { RenderService } from '../../services/image/render-service.ts';
+import { imageLogger } from '../../utils/logger.ts';
+import { getTheme } from '../../worker/templates/themes.ts';
 import { monthNavKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -11,6 +15,7 @@ export async function handleMonth(
   ctx: BotCommandContext | BotCallbackContext,
   eventService: EventService,
   yearMonth?: string,
+  renderService?: RenderService,
 ): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
@@ -90,5 +95,41 @@ export async function handleMonth(
       parse_mode: 'HTML',
       reply_markup: monthNavKeyboard(ym),
     });
+  }
+
+  // Render month image (only on initial /month command, not nav callbacks)
+  if (!yearMonth && renderService) {
+    try {
+      const occurrencesByDay = new Map<string, EventOccurrence[]>();
+      for (const occ of allOccurrences) {
+        const localDate = new TZDate(occ.occurrence_start, user.timezone);
+        const dayIso = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+        if (!occurrencesByDay.has(dayIso)) occurrencesByDay.set(dayIso, []);
+        occurrencesByDay.get(dayIso)!.push(occ);
+      }
+
+      const userNow = new TZDate(new Date(), user.timezone);
+      const todayIso = `${userNow.getFullYear()}-${String(userNow.getMonth() + 1).padStart(2, '0')}-${String(userNow.getDate()).padStart(2, '0')}`;
+
+      const data = mapMonthlyCalendarData({
+        occurrencesByDay,
+        year: monthStart.getFullYear(),
+        month: monthStart.getMonth(),
+        timezone: user.timezone,
+        locale: lang,
+        theme: getTheme(),
+        todayIso,
+      });
+
+      const buffer = await renderService.renderDirect({
+        type: 'monthly-calendar',
+        data,
+        userId: user.telegram_id,
+      });
+      const file = new File([buffer], 'month.png', { type: 'image/png' });
+      await ctx.sendPhoto(file);
+    } catch (err) {
+      imageLogger.error({ error: (err as Error).message }, 'Month render failed');
+    }
   }
 }
