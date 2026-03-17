@@ -366,6 +366,22 @@ describe('acceptInvitation — conflict warnings', () => {
     expect(result.conflicts ?? []).toHaveLength(0);
   });
 
+  test('conflicts exclude the accepted event itself', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Accepted Event',
+      start_at: '2026-03-20T10:00:00Z',
+      end_at: '2026-03-20T11:00:00Z',
+      timezone: 'UTC',
+    });
+    const inv = invitationRepo.create({ event_id: shared.id, inviter_id: CREATOR, invitee_id: INVITEE });
+
+    const result = invitationService.acceptInvitation(inv.id, INVITEE);
+    expect(result.success).toBe(true);
+    // The accepted event itself should not appear as a conflict
+    expect(result.conflicts ?? []).toHaveLength(0);
+  });
+
   test('still accepts invitation even with conflicts', () => {
     eventService.createEvent({
       user_id: INVITEE,
@@ -390,5 +406,104 @@ describe('acceptInvitation — conflict warnings', () => {
     const participant = participantRepo.findByEventAndUser(shared.id, INVITEE);
     expect(participant).not.toBeNull();
     expect(participant!.status).toBe('accepted');
+  });
+});
+
+describe('calendar views show participated events', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let participantRepo: ParticipantRepository;
+  let eventService: EventService;
+
+  beforeEach(() => {
+    db = createTestDb();
+    const userRepo = new UserRepository(db);
+    eventRepo = new EventRepository(db);
+    participantRepo = new ParticipantRepository(db);
+    eventService = new EventService(eventRepo, new ReminderRepository(db));
+    userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
+    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
+  });
+
+  test('getEventsInRange includes participated events', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Team Standup',
+      start_at: '2026-03-20T09:00:00Z',
+      end_at: '2026-03-20T09:30:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+    eventService.createEvent({
+      user_id: INVITEE,
+      title: 'My Lunch',
+      start_at: '2026-03-20T12:00:00Z',
+      end_at: '2026-03-20T13:00:00Z',
+      timezone: 'UTC',
+    });
+
+    const events = eventService.getEventsInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(events).toHaveLength(2);
+    expect(events[0].event.title).toBe('Team Standup');
+    expect(events[1].event.title).toBe('My Lunch');
+  });
+
+  test('getEventsForDay includes participated events', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Daily',
+      start_at: '2026-03-20T09:00:00Z',
+      end_at: '2026-03-20T09:30:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+
+    const events = eventService.getEventsForDay(INVITEE, new Date('2026-03-20T00:00:00Z'), 'UTC');
+    const titles = events.map((e) => e.event.title);
+    expect(titles).toContain('Daily');
+  });
+
+  test('getEventsForWeek includes participated events', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Weekly Sync',
+      start_at: '2026-03-18T10:00:00Z',
+      end_at: '2026-03-18T11:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+
+    const events = eventService.getEventsForWeek(INVITEE, new Date('2026-03-18T00:00:00Z'), 'UTC');
+    const titles = events.map((e) => e.event.title);
+    expect(titles).toContain('Weekly Sync');
+  });
+
+  test('getUpcoming includes participated events', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Future Shared',
+      start_at: '2026-12-20T10:00:00Z',
+      end_at: '2026-12-20T11:00:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'accepted');
+
+    const upcoming = eventService.getUpcoming(INVITEE, 10);
+    const titles = upcoming.map((e) => e.title);
+    expect(titles).toContain('Future Shared');
+  });
+
+  test('declined participated events do not appear in views', () => {
+    const shared = eventService.createEvent({
+      user_id: CREATOR,
+      title: 'Declined',
+      start_at: '2026-03-20T09:00:00Z',
+      end_at: '2026-03-20T09:30:00Z',
+      timezone: 'UTC',
+    });
+    participantRepo.add(shared.id, INVITEE, 'declined');
+
+    const events = eventService.getEventsInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
+    expect(events).toHaveLength(0);
   });
 });

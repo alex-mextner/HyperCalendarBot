@@ -96,7 +96,7 @@ export class EventService {
   }
 
   getEventsInRange(userId: number, startUtc: string, endUtc: string): EventOccurrence[] {
-    const oneOff = this.eventRepo.getInRange(userId, startUtc, endUtc).map(
+    const oneOff = this.eventRepo.getVisibleInRange(userId, startUtc, endUtc).map(
       (event) =>
         ({
           event,
@@ -106,7 +106,7 @@ export class EventService {
         }) satisfies EventOccurrence,
     );
 
-    const templates = this.eventRepo.getRecurringTemplates(userId);
+    const templates = this.eventRepo.getVisibleRecurringTemplates(userId);
     const recurring: EventOccurrence[] = [];
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
@@ -164,7 +164,7 @@ export class EventService {
   }
 
   getUpcoming(userId: number, limit = 10): CalendarEvent[] {
-    return this.eventRepo.getUpcoming(userId, limit);
+    return this.eventRepo.getVisibleUpcoming(userId, limit);
   }
 
   editOccurrence(templateId: number, occurrenceDate: string, userId: number): CalendarEvent | null {

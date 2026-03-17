@@ -61,6 +61,49 @@ export class EventRepository {
       .all(userId) as CalendarEvent[];
   }
 
+  getVisibleRecurringTemplates(userId: number): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `
+      SELECT DISTINCT e.* FROM events e
+      WHERE e.recurrence_rule IS NOT NULL
+        AND e.parent_event_id IS NULL
+        AND e.is_cancelled = 0
+        AND (
+          e.user_id = ?
+          OR e.id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          )
+        )
+    `,
+      )
+      .all(userId, userId) as CalendarEvent[];
+  }
+
+  getVisibleUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
+    const nowIso = (now ?? new Date()).toISOString();
+    return this.db
+      .prepare(
+        `
+      SELECT DISTINCT e.* FROM events e
+      WHERE e.is_cancelled = 0
+        AND e.parent_event_id IS NULL
+        AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
+        AND (
+          e.user_id = ?
+          OR e.id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          )
+        )
+      ORDER BY e.start_at
+      LIMIT ?
+    `,
+      )
+      .all(nowIso, userId, userId, limit) as CalendarEvent[];
+  }
+
   getExceptions(parentEventId: number): CalendarEvent[] {
     return this.db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(parentEventId) as CalendarEvent[];
   }
