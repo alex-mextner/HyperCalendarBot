@@ -5,6 +5,7 @@ import {
   handleGetEvent,
   handleGetEvents,
   handleGetUpcoming,
+  handleNotifyParticipants,
   handleSearchEvents,
   handleSnoozeEvent,
   handleUpdateEvent,
@@ -100,6 +101,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'get_event':
         return handleGetEvent(ctx, input as { event_id: number });
+
+      case 'notify_participants':
+        return handleNotifyParticipants(ctx, input as { event_id: number; message: string });
 
       case 'get_reminders':
         return handleGetReminders(ctx, input as { event_id: number });

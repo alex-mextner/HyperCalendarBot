@@ -4,6 +4,7 @@ import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
+import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
@@ -11,6 +12,7 @@ import {
   handleCreateEvent,
   handleDeleteEvent,
   handleGetEvents,
+  handleNotifyParticipants,
   handleSearchEvents,
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
@@ -172,6 +174,115 @@ describe('event tool handlers', () => {
       const result = handleSearchEvents(ctx, { query: 'nonexistent' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
+    });
+  });
+
+  describe('handleUpdateEvent — participant info', () => {
+    test('output mentions participant count when event has accepted participants', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const otherUserId = 999;
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: otherUserId, timezone: 'UTC' });
+
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Shared Meeting',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      participantRepo.add(event.id, otherUserId, 'accepted');
+
+      const ctxWithParticipants = { ...ctx, participantRepo };
+      const result = handleUpdateEvent(ctxWithParticipants, {
+        event_id: event.id,
+        title: 'Renamed Meeting',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('1 participant');
+      expect(result.output).toContain('notify');
+    });
+
+    test('output does not mention participants when event has none', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Solo Event',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const ctxWithParticipants = { ...ctx, participantRepo };
+      const result = handleUpdateEvent(ctxWithParticipants, {
+        event_id: event.id,
+        title: 'Still Solo',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).not.toContain('participant');
+    });
+  });
+
+  describe('handleNotifyParticipants', () => {
+    test('sends message to accepted participants', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const otherUserId = 999;
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: otherUserId, timezone: 'UTC' });
+
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Team Standup',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      participantRepo.add(event.id, otherUserId, 'accepted');
+
+      const sent: { chatId: number; text: string }[] = [];
+      const ctxWithSender = {
+        ...ctx,
+        participantRepo,
+        sender: {
+          sendMessage: async (chatId: number, text: string) => {
+            sent.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+        },
+      };
+
+      const result = handleNotifyParticipants(ctxWithSender, {
+        event_id: event.id,
+        message: 'Meeting moved to 11:00',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('1 participant');
+    });
+
+    test('returns error when event not found', () => {
+      const result = handleNotifyParticipants(ctx, {
+        event_id: 9999,
+        message: 'hello',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('returns error when no participants', () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Solo',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const ctxWithParticipants = { ...ctx, participantRepo };
+      const result = handleNotifyParticipants(ctxWithParticipants, {
+        event_id: event.id,
+        message: 'Test',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('no accepted participants');
     });
   });
 });

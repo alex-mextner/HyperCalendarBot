@@ -106,7 +106,18 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.description) parts.push(`description: ${updated.description}`);
   if (updated.location) parts.push(`location: ${updated.location}`);
 
-  return { success: true, output: `Event updated: ${parts.join(', ')}` };
+  let output = `Event updated: ${parts.join(', ')}`;
+
+  if (ctx.participantRepo) {
+    const accepted = ctx.participantRepo
+      .getByEvent(event_id)
+      .filter((p) => p.status === 'accepted' && p.user_id !== ctx.user.telegram_id);
+    if (accepted.length > 0) {
+      output += `. This event has ${accepted.length} participant${accepted.length > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
+    }
+  }
+
+  return { success: true, output };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
@@ -214,4 +225,41 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
   }
 
   return { success: true, output: parts.join(', ') };
+}
+
+interface NotifyParticipantsInput {
+  event_id: number;
+  message: string;
+}
+
+export function handleNotifyParticipants(ctx: AgentContext, input: NotifyParticipantsInput): ToolResult {
+  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  if (!event) {
+    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  if (!ctx.participantRepo) {
+    return { success: false, error: 'Participants feature is not configured.' };
+  }
+
+  const accepted = ctx.participantRepo
+    .getByEvent(input.event_id)
+    .filter((p) => p.status === 'accepted' && p.user_id !== ctx.user.telegram_id);
+
+  if (accepted.length === 0) {
+    return { success: false, error: 'This event has no accepted participants to notify.' };
+  }
+
+  if (ctx.sender) {
+    const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+    const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
+    for (const p of accepted) {
+      ctx.sender.sendMessage(p.user_id, text).catch(() => {});
+    }
+  }
+
+  return {
+    success: true,
+    output: `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
+  };
 }

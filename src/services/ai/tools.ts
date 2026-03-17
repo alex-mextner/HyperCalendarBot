@@ -102,6 +102,22 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'notify_participants',
+    description:
+      'Send a message to all accepted participants of an event you own. Use when you updated an event and the AI output mentioned participants. Only the event creator can use this.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: { type: 'number', description: 'ID of the event whose participants to notify' },
+        message: {
+          type: 'string',
+          description: 'Message describing the change (e.g., "Meeting moved to 11:00", "Location changed to Room 3")',
+        },
+      },
+      required: ['event_id', 'message'],
+    },
+  },
+  {
     name: 'get_free_slots',
     description: 'Get available free time slots for a specific date. Returns gaps between existing events.',
     input_schema: {
