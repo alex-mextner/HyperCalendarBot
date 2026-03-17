@@ -125,14 +125,16 @@ describe('executeTool', () => {
     expect(result.success).toBe(true);
   });
 
-  test('routes get_user_settings to handler', () => {
-    const result = executeTool(ctx, 'get_user_settings', {});
+  test('routes manage_settings get to handler', () => {
+    const result = executeTool(ctx, 'manage_settings', { action: 'get' });
     expect(result.success).toBe(true);
   });
 
-  test('routes update_user_settings to handler', () => {
-    const result = executeTool(ctx, 'update_user_settings', {
-      timezone: 'Europe/London',
+  test('routes manage_settings update to handler', () => {
+    const result = executeTool(ctx, 'manage_settings', {
+      action: 'update',
+      category: 'general',
+      updates: { timezone: 'Europe/London' },
     });
     expect(result.success).toBe(true);
   });
@@ -339,28 +341,32 @@ describe('executeTool', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('update_sharing_settings returns error when not configured', () => {
-      const result = executeTool(ctx, 'update_sharing_settings', {
-        default_visibility: 'full',
+    test('manage_settings update privacy returns error when not configured', () => {
+      const result = executeTool(ctx, 'manage_settings', {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'full' },
       });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
     });
 
-    test('update_sharing_settings updates visibility setting', () => {
-      const result = executeTool(sharingCtx, 'update_sharing_settings', {
-        default_visibility: 'full',
+    test('manage_settings update privacy updates visibility setting', () => {
+      const result = executeTool(sharingCtx, 'manage_settings', {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'full' },
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('default_visibility');
       expect(result.output).toContain('full');
     });
 
-    test('update_sharing_settings updates multiple settings', () => {
-      const result = executeTool(sharingCtx, 'update_sharing_settings', {
-        default_visibility: 'free_busy',
-        inline_mode_enabled: false,
-        allow_invitations: false,
+    test('manage_settings update privacy updates multiple settings', () => {
+      const result = executeTool(sharingCtx, 'manage_settings', {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'free_busy', inline_mode_enabled: false, allow_invitations: false },
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('free_busy');
@@ -368,10 +374,14 @@ describe('executeTool', () => {
       expect(result.output).toContain('allow_invitations');
     });
 
-    test('update_sharing_settings returns error when no settings provided', () => {
-      const result = executeTool(sharingCtx, 'update_sharing_settings', {});
+    test('manage_settings update privacy returns error when no updates provided', () => {
+      const result = executeTool(sharingCtx, 'manage_settings', {
+        action: 'update',
+        category: 'privacy',
+        updates: {},
+      });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('No settings provided');
+      expect(result.error).toContain('updates');
     });
 
     test('share_agenda returns error when sharing not configured', () => {

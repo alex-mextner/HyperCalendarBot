@@ -1,6 +1,7 @@
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
+import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
@@ -54,6 +55,14 @@ export interface AgentContext {
   botUsername?: string;
   isVoiceMessage?: boolean;
   stressDictionary?: StressDictionary;
+  feedbackContext?: {
+    threadId: number;
+    subject: string;
+    messages: { sender: string; text: string }[];
+  };
+  feedbackRepo?: FeedbackRepository;
+  botAdminId?: number;
+  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface ToolResult {

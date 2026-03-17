@@ -52,7 +52,16 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
             const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${invitation.inviter_id}`;
 
             const text = event
-              ? formatInvitation(event, event.timezone, lang, inviterName, invitation.inviter_id, inviter?.username)
+              ? formatInvitation(
+                  event,
+                  event.timezone,
+                  lang,
+                  inviterName,
+                  invitation.inviter_id,
+                  inviter?.username,
+                  user.timezone,
+                  !!user.onboarding_completed,
+                )
               : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
             const kb = new InlineKeyboard()
               .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)

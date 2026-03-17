@@ -5,6 +5,7 @@ import {
   formatDayAgenda,
   formatEventDetail,
   formatEventListItem,
+  formatInvitation,
   formatRecurrenceHuman,
   formatWeekAgenda,
 } from '../../../src/services/event/formatters.ts';
@@ -281,6 +282,59 @@ describe('formatEventDetail — edge cases', () => {
     expect(result).not.toContain('📍');
     expect(result).not.toContain('🏷');
     expect(result).not.toContain('🔁');
+  });
+});
+
+// ── formatInvitation ──
+
+describe('formatInvitation', () => {
+  const event = makeEvent({
+    title: 'Team Meeting',
+    start_at: '2026-03-11T12:00:00Z', // 15:00 Moscow, 14:00 Kyiv
+    end_at: '2026-03-11T13:00:00Z',
+    timezone: 'Europe/Moscow',
+  });
+
+  test('no recipient info — shows only sender timezone', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
+    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).not.toContain('Europe/Kyiv');
+  });
+
+  test('recipient not onboarded — shows only sender timezone', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', false);
+    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).not.toContain('Europe/Kyiv');
+  });
+
+  test('recipient null timezone — shows only sender timezone', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, null, true);
+    expect(result).toContain('15:00 (Europe/Moscow)');
+    expect(result).not.toContain('(Europe/Moscow) /');
+  });
+
+  test('recipient onboarded with different timezone — shows both timezones', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
+    expect(result).toContain('15:00 (Europe/Moscow) / 14:00 (Europe/Kyiv)');
+  });
+
+  test('recipient onboarded with same timezone — shows timezone once', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Moscow', true);
+    expect(result).toContain('15:00 (Europe/Moscow)');
+    // Should not show duplicate
+    expect(result.match(/Europe\/Moscow/g)?.length).toBe(1);
+  });
+
+  test('all-day event — no timezone annotation', () => {
+    const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
+    const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
+    expect(result).toContain('All day');
+    expect(result).not.toContain('Europe/Moscow)');
+  });
+
+  test('includes inviter username link when provided', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg', 'Europe/Kyiv', true);
+    expect(result).toContain('@alice_tg');
   });
 });
 

@@ -187,66 +187,25 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
-    name: 'get_user_settings',
-    description: "Get the user's current settings (timezone, language, country).",
-    input_schema: {
-      type: 'object' as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'update_user_settings',
-    description: 'Update user settings. Only pass fields that need to change.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        timezone: {
-          type: 'string',
-          description: 'IANA timezone (e.g., "Europe/Kyiv"). Optional.',
-        },
-        language: {
-          type: 'string',
-          enum: ['en', 'ru'],
-          description: 'Interface language. Optional.',
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: 'get_notification_settings',
+    name: 'manage_settings',
     description:
-      "Get the user's notification preferences: morning agenda, evening review, quiet hours, default reminders.",
-    input_schema: {
-      type: 'object' as const,
-      properties: {},
-      required: [],
-    },
-  },
-  {
-    name: 'update_notification_settings',
-    description: 'Update notification preferences. Only pass fields that need to change.',
+      'Get or update user settings. Categories: general (timezone, language), notifications (morning agenda, evening review, quiet hours, reminders), calls (enabled, language), privacy (default visibility, inline mode, invitations), voice (voice response enabled/disabled). Use action "get" without category to return all settings.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        morning_agenda_enabled: { type: 'boolean', description: 'Enable/disable morning agenda digest' },
-        morning_agenda_time: {
+        action: { type: 'string', enum: ['get', 'update'], description: 'Action to perform' },
+        category: {
           type: 'string',
-          description: 'Time for morning agenda in HH:MM format (local time, e.g., "08:00")',
+          enum: ['general', 'notifications', 'calls', 'privacy', 'voice'],
+          description: 'Settings category. Required for update, optional for get (omit to get all).',
         },
-        evening_review_enabled: { type: 'boolean', description: 'Enable/disable evening review' },
-        evening_review_time: { type: 'string', description: 'Time for evening review in HH:MM format (e.g., "21:00")' },
-        quiet_hours_enabled: { type: 'boolean', description: 'Enable/disable quiet hours (no notifications)' },
-        quiet_hours_start: { type: 'string', description: 'Quiet hours start in HH:MM (e.g., "23:00")' },
-        quiet_hours_end: { type: 'string', description: 'Quiet hours end in HH:MM (e.g., "07:00")' },
-        default_reminder_minutes: {
-          type: 'array',
-          items: { type: 'number' },
-          description: 'Default reminder intervals in minutes (e.g., [15, 60])',
+        updates: {
+          type: 'object',
+          description:
+            'Fields to update. For general: timezone (IANA string), language (en/ru). For notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). For calls: enabled (bool), language (string). For privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). For voice: voice_response_enabled (bool).',
         },
       },
-      required: [],
+      required: ['action'],
     },
   },
   {
@@ -259,23 +218,6 @@ export const toolDefinitions: ToolDefinition[] = [
         text: { type: 'string', description: 'Text to speak during the call (will be converted to speech)' },
       },
       required: ['text'],
-    },
-  },
-  {
-    name: 'get_call_settings',
-    description: "Get the user's voice call settings (enabled, quiet hours, language).",
-    input_schema: { type: 'object' as const, properties: {}, required: [] },
-  },
-  {
-    name: 'update_call_settings',
-    description: 'Update voice call settings. Use to enable/disable voice calls for the user.',
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        enabled: { type: 'boolean', description: 'Enable/disable voice call reminders' },
-        language: { type: 'string', description: 'TTS language (e.g., "ru", "en")' },
-      },
-      required: [],
     },
   },
   {
@@ -369,30 +311,6 @@ export const toolDefinitions: ToolDefinition[] = [
         event_id: { type: 'number', description: 'ID of the event to check invitations for' },
       },
       required: ['event_id'],
-    },
-  },
-  {
-    name: 'update_sharing_settings',
-    description:
-      "Update the CURRENT USER's privacy settings. These control how OTHER people see and interact with this user. This does NOT affect the user's ability to send invitations — sending is always allowed.",
-    input_schema: {
-      type: 'object' as const,
-      properties: {
-        default_visibility: {
-          type: 'string',
-          enum: ['private', 'free_busy', 'full'],
-          description: "Default visibility of this user's events when shared. Optional.",
-        },
-        inline_mode_enabled: {
-          type: 'boolean',
-          description: 'Whether this user can be found via inline mode. Optional.',
-        },
-        allow_invitations: {
-          type: 'boolean',
-          description: 'Whether OTHER users can send invitations TO this user. Does NOT control sending. Optional.',
-        },
-      },
-      required: [],
     },
   },
   {
@@ -618,6 +536,19 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'send_feedback',
+    description:
+      'Send feedback to the bot developer. Creates a feedback thread for two-way communication. Use when user wants to report a bug, suggest a feature, or ask the developer a question.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: { type: 'string', enum: ['bug', 'feature', 'question', 'other'], description: 'Feedback type' },
+        message: { type: 'string', description: 'Feedback message text' },
+      },
+      required: ['type', 'message'],
+    },
+  },
+  {
     name: 'lookup_stress',
     description:
       'Look up correct stress marks for Russian words in the stress dictionary (555K+ forms). Returns words with + before the stressed vowel (e.g., "молоко" → "молок+о"). For words NOT FOUND, the tool returns similar dictionary entries as reference. You should also proactively include word variations in the same request: different cases (молоком, молока), infinitives (бежать for бегу), nominative forms (встреча for встречей), singular/plural. Pass ALL words and their variations in a single call for efficiency. The tool handles hundreds of words instantly.',
@@ -632,6 +563,16 @@ export const toolDefinitions: ToolDefinition[] = [
         },
       },
       required: ['words'],
+    },
+  },
+  {
+    name: 'get_bot_info',
+    description:
+      'Get information about non-obvious bot capabilities that are not derivable from other tools. Call when user asks what the bot can do, asks for help, or wants to know about features.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
     },
   },
 ];

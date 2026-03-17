@@ -1,0 +1,161 @@
+import type { ToolResult } from '../ai/types.ts';
+import { evaluate } from './expression-evaluator.ts';
+import { resolveVariables } from './variable-resolver.ts';
+
+interface ExecutorUserContext {
+  timezone: string;
+  language: string;
+}
+
+type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult;
+
+interface ExecutorResult {
+  success: boolean;
+  response?: string;
+  suspended?: boolean;
+  suspendedAt?: number;
+  stepResults?: Record<string, unknown>;
+}
+
+interface ResumeState {
+  stepIndex: number;
+  stepResults: Record<string, unknown>;
+  userAnswer: string;
+}
+
+interface Level1Tool {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+interface Level2Step {
+  call?: string;
+  input?: Record<string, unknown>;
+  as?: string;
+  when?: string;
+  respond?: string;
+  stop?: boolean;
+}
+
+/**
+ * Parse tool output: if valid JSON, return parsed value; otherwise return raw string.
+ */
+function parseToolOutput(output: string): unknown {
+  try {
+    return JSON.parse(output);
+  } catch {
+    return output;
+  }
+}
+
+/**
+ * Execute a Level 1 workflow: { tools: [...], format: "..." }
+ */
+async function runLevel1(
+  tools: Level1Tool[],
+  captures: Record<string, string>,
+  userCtx: ExecutorUserContext,
+  executeTool: ToolExecutorFn,
+): Promise<ExecutorResult> {
+  let lastOutput: string | undefined;
+
+  for (const tool of tools) {
+    const resolvedInput = resolveVariables(tool.input, captures, userCtx) as Record<string, unknown>;
+    const result = executeTool(tool.name, resolvedInput);
+    if (!result.success) {
+      return { success: false, response: result.error };
+    }
+    lastOutput = result.output;
+  }
+
+  return { success: true, response: lastOutput };
+}
+
+/**
+ * Execute a Level 2 workflow: { steps: [...] }
+ */
+async function runLevel2(
+  steps: Level2Step[],
+  captures: Record<string, string>,
+  userCtx: ExecutorUserContext,
+  executeTool: ToolExecutorFn,
+  resumeState?: ResumeState,
+): Promise<ExecutorResult> {
+  const stepResults: Record<string, unknown> = resumeState?.stepResults ?? {};
+
+  // When resuming, set the user answer for the suspended ask_user step
+  let startIndex = 0;
+  if (resumeState !== undefined) {
+    const suspendedStep = steps[resumeState.stepIndex];
+    if (suspendedStep?.as) {
+      stepResults[suspendedStep.as] = resumeState.userAnswer;
+    }
+    startIndex = resumeState.stepIndex + 1;
+  }
+
+  for (let i = startIndex; i < steps.length; i++) {
+    const step = steps[i];
+
+    // Evaluate `when` condition — skip step if false
+    if (step.when !== undefined) {
+      const conditionMet = evaluate(step.when, stepResults);
+      if (!conditionMet) continue;
+    }
+
+    // Respond with text and optionally stop
+    if (step.respond !== undefined) {
+      const text = resolveVariables(step.respond, captures, userCtx, stepResults) as string;
+      return { success: true, response: text };
+    }
+
+    // No call — nothing to execute in this step
+    if (step.call === undefined) continue;
+
+    // Suspend for user input
+    if (step.call === 'ask_user') {
+      return {
+        suspended: true,
+        suspendedAt: i,
+        stepResults: { ...stepResults },
+        success: false,
+      };
+    }
+
+    // Execute tool
+    const resolvedInput = resolveVariables(step.input ?? {}, captures, userCtx, stepResults) as Record<string, unknown>;
+
+    const result = executeTool(step.call, resolvedInput);
+    if (!result.success) {
+      return { success: false, response: result.error };
+    }
+
+    if (step.as !== undefined) {
+      stepResults[step.as] = result.output !== undefined ? parseToolOutput(result.output) : undefined;
+    }
+  }
+
+  return { success: true, stepResults };
+}
+
+export class IntentExecutor {
+  /**
+   * Run a workflow (Level 1 or Level 2).
+   */
+  async run(
+    workflow: Record<string, unknown>,
+    captures: Record<string, string>,
+    userCtx: ExecutorUserContext,
+    executeTool: ToolExecutorFn,
+    resumeState?: ResumeState,
+  ): Promise<ExecutorResult> {
+    if (Array.isArray(workflow.tools)) {
+      return runLevel1(workflow.tools as Level1Tool[], captures, userCtx, executeTool);
+    }
+
+    if (Array.isArray(workflow.steps)) {
+      return runLevel2(workflow.steps as Level2Step[], captures, userCtx, executeTool, resumeState);
+    }
+
+    return { success: false, response: 'Invalid workflow: missing tools or steps' };
+  }
+}

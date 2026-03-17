@@ -5,11 +5,15 @@ import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
+import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -18,6 +22,7 @@ import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
@@ -31,9 +36,10 @@ import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
-import { handleNotifyCallback } from '../commands/notify.ts';
+import { handleSettingsCallback } from '../commands/settings.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
+import { handleNotifyCallback } from './notify-callback.ts';
 
 /**
  * Route all inline keyboard callbacks.
@@ -65,6 +71,20 @@ export function createCallbackHandler(
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+  },
+  callSettingsRepo?: CallSettingsRepository,
+  sharingSettingsRepo?: SharingSettingsRepository,
+  feedbackDeps?: {
+    feedbackRepo: FeedbackRepository;
+    adminReplySession: Map<number, { threadId: number; userId: number }>;
+    sendMessage: (chatId: number, text: string) => Promise<unknown>;
+    adminId?: number;
+  },
+  userRepo?: UserRepository,
+  intentDeps?: {
+    intentRepo: IntentRepository;
+    intentMatcher?: { reload: () => void };
+    adminEditSessions?: Map<number, AdminEditSession>;
   },
 ) {
   return async (ctx: BotCallbackContext) => {
@@ -584,6 +604,93 @@ export function createCallbackHandler(
       // Feature tour
       if (action === CB.FEATURE_TOUR) {
         return handleFeatureTourCallback(ctx, payload);
+      }
+
+      // Settings category picker
+      if (action === 'stg') {
+        return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo);
+      }
+
+      // Feedback: admin closes a thread
+      if (action === 'fb_close' && feedbackDeps) {
+        if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
+        const threadId = Number(payload);
+        const thread = feedbackDeps.feedbackRepo.getThread(threadId);
+        if (!thread) {
+          await ctx.answer({ text: 'Thread not found' });
+          return;
+        }
+        feedbackDeps.feedbackRepo.closeThread(threadId);
+        await ctx.answer({ text: 'Thread closed' });
+        await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
+        feedbackDeps.sendMessage(thread.user_id, 'Your feedback thread has been resolved.').catch((e: unknown) => {
+          cmdLogger.error({ error: String(e) }, 'Failed to notify user of thread close');
+        });
+        return;
+      }
+
+      // Feedback: admin initiates a reply
+      if (action === 'fb_reply' && feedbackDeps) {
+        if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
+        const threadId = Number(payload);
+        const thread = feedbackDeps.feedbackRepo.getThread(threadId);
+        if (!thread) {
+          await ctx.answer({ text: 'Thread not found' });
+          return;
+        }
+        feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
+        await ctx.answer({ text: 'Send your reply message' });
+        return;
+      }
+
+      // Voice response opt-in prompt response
+      if (action === 'voice_prompt' && userRepo) {
+        const enabled = payload === 'yes' ? 1 : 0;
+        userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
+        await ctx.answer();
+        await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
+        return;
+      }
+
+      // Intent verification: accept
+      if (action === 'intent_accept' && intentDeps) {
+        const intentId = Number(payload);
+        intentDeps.intentRepo.updateStatus(intentId, 'approved');
+        intentDeps.intentMatcher?.reload();
+        await ctx.answer('Intent approved ✅');
+        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
+        return;
+      }
+
+      // Intent verification: reject
+      if (action === 'intent_reject' && intentDeps) {
+        const intentId = Number(payload);
+        intentDeps.intentRepo.updateStatus(intentId, 'rejected');
+        await ctx.answer('Intent rejected ❌');
+        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
+        return;
+      }
+
+      // Intent verification: edit — store admin edit session
+      if (action === 'intent_edit' && intentDeps) {
+        const intentId = Number(payload);
+        if (intentDeps.adminEditSessions) {
+          intentDeps.adminEditSessions.set(user.telegram_id, {
+            intentId,
+            state: 'awaiting_instructions',
+            createdAt: Date.now(),
+          });
+        }
+        await ctx.answer('Send edit instructions...');
+        return;
       }
 
       cmdLogger.warn({ action, payload }, 'Unknown callback action');

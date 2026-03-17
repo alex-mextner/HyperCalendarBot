@@ -13,6 +13,7 @@ import { SharedEventRepository } from '../../../../src/database/repositories/sha
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import {
   handleGetInvitationStatus,
   handleProposeEdit,
@@ -20,7 +21,6 @@ import {
   handleSetEventVisibility,
   handleShareAgenda,
   handleShareEvent,
-  handleUpdateSharingSettings,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -491,26 +491,38 @@ describe('sharing tool handlers', () => {
     });
   });
 
-  // ── handleUpdateSharingSettings ──
+  // ── privacy settings via manage_settings ──
 
-  describe('handleUpdateSharingSettings', () => {
+  describe('manage_settings privacy category', () => {
     test('returns error when sharingSettingsRepo is missing', () => {
       const ctx = makeCtx({ sharingSettingsRepo: undefined });
-      const result = handleUpdateSharingSettings(ctx, { default_visibility: 'full' });
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'full' },
+      });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing settings are not configured.');
     });
 
     test('returns error when no settings provided', () => {
       const ctx = makeCtx();
-      const result = handleUpdateSharingSettings(ctx, {});
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: {},
+      });
       expect(result.success).toBe(false);
-      expect(result.error).toBe('No settings provided to update.');
+      expect(result.error).toContain('updates');
     });
 
     test('updates default_visibility', () => {
       const ctx = makeCtx();
-      const result = handleUpdateSharingSettings(ctx, { default_visibility: 'full' });
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'full' },
+      });
       expect(result.success).toBe(true);
       expect(result.output).toContain('default_visibility');
       expect(result.output).toContain('full');
@@ -522,7 +534,11 @@ describe('sharing tool handlers', () => {
 
     test('updates inline_mode_enabled as integer', () => {
       const ctx = makeCtx();
-      const result = handleUpdateSharingSettings(ctx, { inline_mode_enabled: false });
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: { inline_mode_enabled: false },
+      });
       expect(result.success).toBe(true);
       expect(result.output).toContain('inline_mode_enabled');
       expect(result.output).toContain('0');
@@ -533,7 +549,11 @@ describe('sharing tool handlers', () => {
 
     test('updates allow_invitations as integer', () => {
       const ctx = makeCtx();
-      const result = handleUpdateSharingSettings(ctx, { allow_invitations: true });
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: { allow_invitations: true },
+      });
       expect(result.success).toBe(true);
       expect(result.output).toContain('allow_invitations');
       expect(result.output).toContain('1');
@@ -541,10 +561,10 @@ describe('sharing tool handlers', () => {
 
     test('updates multiple settings at once', () => {
       const ctx = makeCtx();
-      const result = handleUpdateSharingSettings(ctx, {
-        default_visibility: 'free_busy',
-        inline_mode_enabled: true,
-        allow_invitations: false,
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'privacy',
+        updates: { default_visibility: 'free_busy', inline_mode_enabled: true, allow_invitations: false },
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('default_visibility');

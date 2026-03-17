@@ -116,4 +116,50 @@ describe('loadConfig', () => {
     const config = loadConfig();
     expect(config.GOOGLE_REDIRECT_URI).toBe('https://example.com/oauth/google/callback');
   });
+
+  test('BOT_ADMIN_ID is undefined when not set', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    delete process.env.BOT_ADMIN_ID;
+    const config = loadConfig();
+    expect(config.BOT_ADMIN_ID).toBeUndefined();
+  });
+
+  test('BOT_ADMIN_ID parses as number when set', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.BOT_ADMIN_ID = '12345';
+    const config = loadConfig();
+    expect(config.BOT_ADMIN_ID).toBe(12345);
+  });
+
+  test('throws when BOT_ADMIN_ID is not a valid number', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.BOT_ADMIN_ID = 'not-a-number';
+    expect(() => loadConfig()).toThrow('BOT_ADMIN_ID must be a valid number');
+  });
+
+  test('INTENT_LEARNER_DAILY_LIMIT defaults to 100', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    delete process.env.INTENT_LEARNER_DAILY_LIMIT;
+    const config = loadConfig();
+    expect(config.INTENT_LEARNER_DAILY_LIMIT).toBe(100);
+  });
+
+  test('INTENT_LEARNER_DAILY_LIMIT uses custom value when set', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.INTENT_LEARNER_DAILY_LIMIT = '50';
+    const config = loadConfig();
+    expect(config.INTENT_LEARNER_DAILY_LIMIT).toBe(50);
+  });
+
+  test('throws when INTENT_LEARNER_DAILY_LIMIT is not a valid number', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.INTENT_LEARNER_DAILY_LIMIT = 'invalid';
+    expect(() => loadConfig()).toThrow('INTENT_LEARNER_DAILY_LIMIT must be a valid number');
+  });
 });

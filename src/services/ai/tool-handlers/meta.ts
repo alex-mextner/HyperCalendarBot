@@ -1,6 +1,5 @@
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
-import { localTimeToUtcHHMM } from '../../notification/timezone.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 const metaLogger = logger.child({ module: 'ai-tools' });
@@ -11,11 +10,6 @@ interface FindUserInput {
 
 interface GetHolidaysInput {
   limit?: number;
-}
-
-interface UpdateUserSettingsInput {
-  timezone?: string;
-  language?: 'en' | 'ru';
 }
 
 export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): ToolResult {
@@ -155,41 +149,6 @@ export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: st
   return { success: true, output: `Week image rendering for ${input.week_start} is not yet implemented via AI tools.` };
 }
 
-export function handleGetNotificationSettings(ctx: AgentContext): ToolResult {
-  if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
-  ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
-  const prefs = ctx.notificationPrefs.getPrefs(ctx.user.telegram_id);
-  const lines = Object.entries(prefs).map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: lines.join('\n') };
-}
-
-export function handleUpdateNotificationSettings(ctx: AgentContext, input: Record<string, unknown>): ToolResult {
-  if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
-  ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
-
-  const patch: Record<string, unknown> = {};
-  if (input.morning_agenda_enabled !== undefined) patch.morning_agenda_enabled = input.morning_agenda_enabled ? 1 : 0;
-  if (input.morning_agenda_time !== undefined) {
-    patch.morning_agenda_time = input.morning_agenda_time;
-    patch.morning_agenda_utc = localTimeToUtcHHMM(input.morning_agenda_time as string, ctx.user.timezone);
-  }
-  if (input.evening_review_enabled !== undefined) patch.evening_review_enabled = input.evening_review_enabled ? 1 : 0;
-  if (input.evening_review_time !== undefined) {
-    patch.evening_review_time = input.evening_review_time;
-    patch.evening_review_utc = localTimeToUtcHHMM(input.evening_review_time as string, ctx.user.timezone);
-  }
-  if (input.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = input.quiet_hours_enabled ? 1 : 0;
-  if (input.quiet_hours_start !== undefined) patch.quiet_hours_start = input.quiet_hours_start;
-  if (input.quiet_hours_end !== undefined) patch.quiet_hours_end = input.quiet_hours_end;
-  if (input.default_reminder_minutes !== undefined) {
-    patch.default_reminder_intervals = JSON.stringify(input.default_reminder_minutes);
-  }
-
-  if (Object.keys(patch).length === 0) return { success: false, error: 'No settings provided.' };
-  ctx.notificationPrefs.update(ctx.user.telegram_id, patch);
-  return { success: true, output: `Notification settings updated: ${Object.keys(patch).join(', ')}` };
-}
-
 export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
   if (!ctx.callQueue) {
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
@@ -201,40 +160,6 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
   metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
   ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);
   return { success: true, output: 'Call queued. The user will receive a voice call shortly.' };
-}
-
-export function handleGetCallSettings(ctx: AgentContext): ToolResult {
-  if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
-  ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  const settings = ctx.callSettingsRepo.get(ctx.user.telegram_id);
-  if (!settings) return { success: true, output: 'No call settings found.' };
-  const lines = Object.entries(settings)
-    .filter(([k]) => k !== 'user_id' && k !== 'updated_at')
-    .map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: lines.join('\n') };
-}
-
-export function handleUpdateCallSettings(
-  ctx: AgentContext,
-  input: { enabled?: boolean; language?: string },
-): ToolResult {
-  if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
-  ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  if (input.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, input.enabled);
-  if (input.language !== undefined) ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, input.language);
-  return { success: true, output: `Call settings updated.` };
-}
-
-export function handleGetUserSettings(ctx: AgentContext): ToolResult {
-  const u = ctx.user;
-  const lines = [
-    `timezone: ${u.timezone}`,
-    `language: ${u.language}`,
-    `username: ${u.username ?? 'not set'}`,
-    `first_name: ${u.first_name ?? 'not set'}`,
-    `country_code: ${u.country_code ?? 'not set'}`,
-  ];
-  return { success: true, output: lines.join('\n') };
 }
 
 export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
@@ -279,26 +204,6 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
   return { success: true, output: `Google Calendars:\n${lines.join('\n')}` };
 }
 
-export function handleUpdateUserSettings(ctx: AgentContext, input: UpdateUserSettingsInput): ToolResult {
-  const updates: Record<string, string> = {};
-  if (input.timezone) updates.timezone = input.timezone;
-  if (input.language) updates.language = input.language;
-
-  if (Object.keys(updates).length === 0) {
-    return { success: false, error: 'No settings provided to update.' };
-  }
-
-  const updated = ctx.userRepo.update(ctx.user.telegram_id, updates);
-  if (!updated) {
-    return { success: false, error: 'Failed to update user settings.' };
-  }
-
-  ctx.user = updated;
-
-  const lines = Object.entries(updates).map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: `Settings updated: ${lines.join(', ')}` };
-}
-
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
   if (!ctx.stressDictionary) {
     return { success: false, error: 'Stress dictionary not loaded' };
@@ -320,4 +225,18 @@ export function handleLookupStress(ctx: AgentContext, input: { words: string[] }
   }
 
   return { success: true, output: lines.join('\n') };
+}
+
+export function handleGetBotInfo(): ToolResult {
+  return {
+    success: true,
+    output: [
+      'Non-obvious capabilities:',
+      '- Voice messages: send a voice message and the bot will transcribe and understand it',
+      '- Voice responses: enable in settings to receive voice replies (useful while driving, cooking, or on the go)',
+      '- Group chats: add the bot to a group with friends to create shared calendars',
+      '- feedback: say "found a bug" or "want to suggest a feature" to start a conversation with the developer',
+      '- Developer: @mxtnr',
+    ].join('\n'),
+  };
 }

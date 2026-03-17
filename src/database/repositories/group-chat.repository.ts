@@ -61,4 +61,8 @@ export class GroupChatRepository {
       .run(chatId, eventId, userId);
     return result.changes > 0;
   }
+
+  setPinHintShown(chatId: number): void {
+    this.db.prepare('UPDATE group_chats SET pin_hint_shown = 1 WHERE chat_id = ?').run(chatId);
+  }
 }

@@ -19,6 +19,22 @@ interface MessageParam {
   content: string | Anthropic.ContentBlockParam[];
 }
 
+export interface AgentToolCallRecord {
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface AgentToolResultRecord {
+  success: boolean;
+  output?: string;
+}
+
+export interface AgentRunResult {
+  responseText: string;
+  toolCalls: AgentToolCallRecord[];
+  toolResults: AgentToolResultRecord[];
+}
+
 export class CalendarBotAgent {
   private client: Anthropic;
   private model: string;
@@ -66,7 +82,7 @@ export class CalendarBotAgent {
     ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults));
   }
 
-  async run(ctx: AgentContext): Promise<string> {
+  async run(ctx: AgentContext): Promise<AgentRunResult> {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
@@ -77,6 +93,8 @@ export class CalendarBotAgent {
     this.saveUserMessage(ctx);
 
     const startTime = Date.now();
+    const allToolCalls: AgentToolCallRecord[] = [];
+    const allToolResults: AgentToolResultRecord[] = [];
 
     try {
       let currentMessages = [...messages];
@@ -172,6 +190,9 @@ export class CalendarBotAgent {
             writer.markToolResult(result.success);
             aiLogger.info({ tool: block.name, success: result.success, userId: ctx.user.telegram_id }, 'Tool result');
 
+            allToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+            allToolResults.push({ success: result.success, output: result.output });
+
             toolResults.push({
               type: 'tool_result',
               tool_use_id: block.id,
@@ -188,7 +209,7 @@ export class CalendarBotAgent {
               this.saveToolResults(ctx, toolResults);
               writer.commitIntermediate();
               await writer.finalize();
-              return writer.getText();
+              return { responseText: writer.getText(), toolCalls: allToolCalls, toolResults: allToolResults };
             }
           }
         }
@@ -225,6 +246,6 @@ export class CalendarBotAgent {
     }
 
     await writer.finalize();
-    return writer.getText();
+    return { responseText: writer.getText(), toolCalls: allToolCalls, toolResults: allToolResults };
   }
 }

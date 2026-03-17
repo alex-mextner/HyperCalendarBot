@@ -40,8 +40,18 @@ function deliverInvitationAsync(params: DeliveryParams): void {
     'Starting delivery chain',
   );
 
+  const invitee = ctx.userRepo.findByTelegramId(inviteeId);
   const text = event
-    ? formatInvitation(event, event.timezone, lang, inviterName, inviterId, inviterUsername)
+    ? formatInvitation(
+        event,
+        event.timezone,
+        lang,
+        inviterName,
+        inviterId,
+        inviterUsername,
+        invitee?.timezone ?? null,
+        !!invitee?.onboarding_completed,
+      )
     : t(lang).invitation_received(eventTitle, inviterName);
   const invRepo = ctx.invitationRepo;
   const sender = ctx.sender;
@@ -130,12 +140,6 @@ interface SendInvitationInput {
 
 interface GetInvitationStatusInput {
   event_id: number;
-}
-
-interface UpdateSharingSettingsInput {
-  default_visibility?: Visibility;
-  inline_mode_enabled?: boolean;
-  allow_invitations?: boolean;
 }
 
 interface ShareAgendaInput {
@@ -306,27 +310,6 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
     success: true,
     output: `Invitations for "${event.title}" (id: ${event.id}):\n${lines.join('\n')}`,
   };
-}
-
-export function handleUpdateSharingSettings(ctx: AgentContext, input: UpdateSharingSettingsInput): ToolResult {
-  if (!ctx.sharingSettingsRepo) {
-    return { success: false, error: 'Sharing settings are not configured.' };
-  }
-
-  const patch: Record<string, string | number> = {};
-  if (input.default_visibility !== undefined) patch.default_visibility = input.default_visibility;
-  if (input.inline_mode_enabled !== undefined) patch.inline_mode_enabled = input.inline_mode_enabled ? 1 : 0;
-  if (input.allow_invitations !== undefined) patch.allow_invitations = input.allow_invitations ? 1 : 0;
-
-  if (Object.keys(patch).length === 0) {
-    return { success: false, error: 'No settings provided to update.' };
-  }
-
-  ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  ctx.sharingSettingsRepo.update(ctx.user.telegram_id, patch);
-
-  const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: `Sharing settings updated: ${lines.join(', ')}` };
 }
 
 export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): ToolResult {
