@@ -163,4 +163,34 @@ describe('production migrations', () => {
     const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(eventId.id);
     expect(inv).toHaveLength(0);
   });
+
+  describe('migrations 016-019', () => {
+    test('migration 016 adds voice_response_enabled to users', () => {
+      const cols = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+      expect(cols.some((c) => c.name === 'voice_response_enabled')).toBe(true);
+    });
+
+    test('migration 017 creates intents table', () => {
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='intents'").get() as
+        | { name: string }
+        | undefined;
+      expect(tables).toBeDefined();
+    });
+
+    test('migration 018 creates feedback_threads and feedback_messages', () => {
+      const threads = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_threads'").get() as
+        | { name: string }
+        | undefined;
+      const messages = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='feedback_messages'").get() as
+        | { name: string }
+        | undefined;
+      expect(threads).toBeDefined();
+      expect(messages).toBeDefined();
+    });
+
+    test('migration 019 adds pin_hint_shown to group_chats', () => {
+      const cols = db.prepare('PRAGMA table_info(group_chats)').all() as { name: string }[];
+      expect(cols.some((c) => c.name === 'pin_hint_shown')).toBe(true);
+    });
+  });
 });

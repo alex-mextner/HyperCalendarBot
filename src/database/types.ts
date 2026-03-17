@@ -19,6 +19,7 @@ export interface User {
   google_calendar_id: string | null;
   onboarding_completed: number; // 0 | 1
   timezone_updated_at: string | null;
+  voice_response_enabled: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -245,6 +246,7 @@ export interface GroupChat {
   added_by: number;
   added_at: string;
   is_active: number;
+  pin_hint_shown: number;
 }
 
 export interface GroupSharedEvent {
@@ -298,6 +300,70 @@ export interface CreateGroupChatData {
   chat_id: number;
   title?: string;
   added_by: number;
+}
+
+// --- Intent Automation ---
+
+export type IntentStatus = 'pending' | 'approved' | 'rejected';
+
+export interface Intent {
+  id: number;
+  canonical_name: string;
+  phrases: string; // JSON array
+  trigger_words: string; // JSON array
+  pattern: string | null;
+  workflow: string; // JSON
+  format: string;
+  status: IntentStatus;
+  source_message: string | null;
+  created_at: string;
+}
+
+export interface CreateIntentData {
+  canonical_name: string;
+  phrases: string[];
+  trigger_words?: string[];
+  pattern?: string;
+  workflow: Record<string, unknown>;
+  format: string;
+  source_message?: string;
+}
+
+// --- Feedback System ---
+
+export type FeedbackThreadStatus = 'open' | 'closed';
+export type FeedbackType = 'bug' | 'feature' | 'question' | 'other';
+
+export interface FeedbackThread {
+  id: number;
+  user_id: number;
+  status: FeedbackThreadStatus;
+  type: FeedbackType;
+  subject: string;
+  created_at: string;
+  closed_at: string | null;
+}
+
+export interface FeedbackMessage {
+  id: number;
+  thread_id: number;
+  sender: 'user' | 'admin';
+  text: string;
+  telegram_message_id: number | null;
+  created_at: string;
+}
+
+export interface CreateFeedbackThreadData {
+  user_id: number;
+  type: FeedbackType;
+  subject: string;
+}
+
+export interface CreateFeedbackMessageData {
+  thread_id: number;
+  sender: 'user' | 'admin';
+  text: string;
+  telegram_message_id?: number;
 }
 
 // --- Voice Call Reminders (sub-project 07) ---

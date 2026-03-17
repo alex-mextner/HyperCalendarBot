@@ -471,4 +471,68 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '016_voice_response_enabled',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE users ADD COLUMN voice_response_enabled INTEGER DEFAULT NULL
+      `);
+    },
+  },
+  {
+    name: '017_intents',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS intents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          canonical_name TEXT UNIQUE NOT NULL,
+          phrases TEXT NOT NULL DEFAULT '[]',
+          trigger_words TEXT DEFAULT '[]',
+          pattern TEXT,
+          workflow TEXT NOT NULL,
+          format TEXT NOT NULL DEFAULT 'text',
+          status TEXT NOT NULL DEFAULT 'pending',
+          source_message TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX idx_intents_status ON intents(status);
+      `);
+    },
+  },
+  {
+    name: '018_feedback',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS feedback_threads (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          status TEXT NOT NULL DEFAULT 'open',
+          type TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          closed_at TEXT
+        );
+        CREATE INDEX idx_feedback_threads_user_status ON feedback_threads(user_id, status);
+
+        CREATE TABLE IF NOT EXISTS feedback_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          thread_id INTEGER NOT NULL,
+          sender TEXT NOT NULL,
+          text TEXT NOT NULL,
+          telegram_message_id INTEGER,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (thread_id) REFERENCES feedback_threads(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_feedback_messages_thread ON feedback_messages(thread_id);
+      `);
+    },
+  },
+  {
+    name: '019_pin_hint_shown',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE group_chats ADD COLUMN pin_hint_shown INTEGER NOT NULL DEFAULT 0
+      `);
+    },
+  },
 ];
