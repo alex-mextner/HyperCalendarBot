@@ -176,6 +176,10 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
 
     const callSignaling = new CallSignaling({
       callRaw: (method) => mtClient.call(method as never) as Promise<unknown>,
+      resolvePeer: async (userId) => {
+        const peer = await mtClient.resolvePeer(userId);
+        return { userId, accessHash: (peer as { accessHash?: unknown }).accessHash ?? 0 };
+      },
     });
 
     const ttsService = new TtsService();

@@ -2,7 +2,6 @@ import {
   buildConfirmCallPayload,
   buildDiscardCallPayload,
   buildGetDhConfigPayload,
-  buildRequestCallPayload,
   type CallerExchangeInit,
   callerDeriveKey,
   callerInitExchange,
@@ -12,6 +11,7 @@ import { voiceLogger } from './types';
 
 export interface CallSignalingDeps {
   callRaw: (method: Record<string, unknown>) => Promise<unknown>;
+  resolvePeer?: (userId: number) => Promise<{ userId: number; accessHash: unknown }>;
 }
 
 interface CallInfo {
@@ -54,22 +54,49 @@ export class CallSignaling {
     const exchange = callerInitExchange(this.dhConfig);
     this.pendingExchange = exchange;
 
-    // Step 3: Send phone.requestCall with proper g_a_hash
-    const payload = buildRequestCallPayload(
-      BigInt(userId),
-      0n, // access_hash — will be resolved by MTProto layer
-      exchange.gAHash,
-    );
-
-    const result = (await this.deps.callRaw(payload as unknown as Record<string, unknown>)) as {
-      phone_call: { id: bigint; access_hash: bigint };
+    // Step 3: Resolve peer to get accessHash, then send phone.requestCall
+    let resolvedAccessHash: unknown = 0;
+    if (this.deps.resolvePeer) {
+      const peer = await this.deps.resolvePeer(userId);
+      resolvedAccessHash = peer.accessHash;
+    }
+    const payload = {
+      _: 'phone.requestCall',
+      userId: { _: 'inputUser', userId, accessHash: resolvedAccessHash },
+      randomId: Math.floor(Math.random() * 0x7ffffffe) + 1,
+      gAHash: exchange.gAHash,
+      protocol: {
+        _: 'phoneCallProtocol',
+        flags: 3,
+        udpP2p: true,
+        udpReflector: true,
+        minLayer: 92,
+        maxLayer: 92,
+        libraryVersions: ['7.0.0'],
+      },
     };
 
-    voiceLogger.info({ userId, callId: String(result.phone_call.id) }, 'Call initiated with DH exchange');
+    const rawResult = await this.deps.callRaw(payload as unknown as Record<string, unknown>);
+    voiceLogger.info(
+      { rawResult: JSON.stringify(rawResult, (_k, v) => (typeof v === 'bigint' ? v.toString() : v)).slice(0, 500) },
+      'phone.requestCall response',
+    );
+    const result = rawResult as {
+      phone_call?: { id: bigint; access_hash: bigint };
+      phoneCall?: { id: bigint; accessHash: bigint };
+    };
 
+    // mtcute may use camelCase or snake_case depending on version
+    const phoneCall = result.phoneCall ?? result.phone_call;
+    if (!phoneCall) throw new Error('No phone_call in response');
+
+    voiceLogger.info({ userId, callId: String(phoneCall.id) }, 'Call initiated with DH exchange');
+
+    const accessHash =
+      (phoneCall as Record<string, unknown>).accessHash ?? (phoneCall as Record<string, unknown>).access_hash;
     return {
-      callId: result.phone_call.id,
-      accessHash: result.phone_call.access_hash,
+      callId: phoneCall.id,
+      accessHash: accessHash as bigint,
     };
   }
 
@@ -112,9 +139,14 @@ export class CallSignaling {
     const payload = buildGetDhConfigPayload();
     const result = (await this.deps.callRaw(payload as unknown as Record<string, unknown>)) as {
       g: number;
-      p: Buffer;
-      random: Buffer;
+      p: Uint8Array | Buffer;
+      random: Uint8Array | Buffer;
     };
-    return { g: result.g, p: result.p, random: result.random };
+    // mtcute may return Uint8Array — ensure Buffer for BigInt conversion
+    return {
+      g: result.g,
+      p: Buffer.isBuffer(result.p) ? result.p : Buffer.from(result.p),
+      random: Buffer.isBuffer(result.random) ? result.random : Buffer.from(result.random),
+    };
   }
 }

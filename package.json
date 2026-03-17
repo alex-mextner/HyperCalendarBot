@@ -8,7 +8,8 @@
     "lint:fix": "biome check --fix .",
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
-    "auth:voice": "bun run scripts/mtproto-auth.ts"
+    "auth:voice": "bun run scripts/mtproto-auth.ts",
+    "test:call": "bun run scripts/test-call.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
