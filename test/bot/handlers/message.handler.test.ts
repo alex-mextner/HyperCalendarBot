@@ -130,6 +130,109 @@ describe('createMessageHandler', () => {
     });
   });
 
+  describe('voice messages', () => {
+    function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+      return makeDeps({
+        transcriptionService: { transcribe: mock(() => Promise.resolve('создай встречу на завтра')) },
+        botToken: 'test-token',
+        ...overrides,
+      });
+    }
+
+    function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+      return makeCtx({
+        text: undefined,
+        voice: { file_id: 'voice_123', duration: 5 },
+        ...overrides,
+      });
+    }
+
+    test('transcribes voice and routes to AI agent with isVoiceMessage flag', async () => {
+      const deps = makeVoiceDeps();
+      // Mock fetch for Telegram file download
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as typeof fetch;
+
+      try {
+        const handler = createMessageHandler(deps as never);
+        await handler(makeVoiceCtx() as never);
+        expect(deps.agent.run).toHaveBeenCalledTimes(1);
+        const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as {
+          messageText: string;
+          isVoiceMessage: boolean;
+        };
+        expect(call.messageText).toBe('создай встречу на завтра');
+        expect(call.isVoiceMessage).toBe(true);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    test('ignores voice when transcriptionService is not configured', async () => {
+      const deps = makeDeps(); // no transcriptionService
+      const handler = createMessageHandler(deps as never);
+      await handler(makeVoiceCtx() as never);
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('sends error message when transcription fails', async () => {
+      const deps = makeVoiceDeps({
+        transcriptionService: { transcribe: mock(() => Promise.reject(new Error('API error'))) },
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as typeof fetch;
+
+      try {
+        const ctx = makeVoiceCtx();
+        const handler = createMessageHandler(deps as never);
+        await handler(ctx as never);
+        expect(ctx.send).toHaveBeenCalledTimes(1);
+        const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+        expect(msg).toContain('голосовое');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    test('sends empty speech message when transcription returns empty', async () => {
+      const deps = makeVoiceDeps({
+        transcriptionService: { transcribe: mock(() => Promise.resolve('')) },
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as typeof fetch;
+
+      try {
+        const ctx = makeVoiceCtx();
+        const handler = createMessageHandler(deps as never);
+        await handler(ctx as never);
+        expect(deps.agent.run).toHaveBeenCalledTimes(0);
+        expect(ctx.send).toHaveBeenCalledTimes(1);
+        const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+        expect(msg).toContain('распознать');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+  });
+
   test('sends error message on agent failure', async () => {
     const deps = makeDeps({
       agent: { run: mock(() => Promise.reject(new Error('boom'))) },

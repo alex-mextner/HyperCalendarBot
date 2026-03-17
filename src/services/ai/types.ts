@@ -44,6 +44,7 @@ export interface AgentContext {
     setLanguage(userId: number, lang: string): void;
   };
   googleCalendarRepo?: GoogleCalendarRepository;
+  isVoiceMessage?: boolean;
 }
 
 export interface ToolResult {

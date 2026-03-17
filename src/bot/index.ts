@@ -17,6 +17,7 @@ import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
+import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleGroupAgenda } from './commands/agenda.ts';
@@ -93,6 +94,7 @@ export function createBot(
       language: string;
     }): Promise<void>;
   },
+  transcriptionService?: TranscriptionService,
 ) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
@@ -339,6 +341,8 @@ export function createBot(
         googleCalendarRepo: googleDeps?.calendarRepo,
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
+        transcriptionService,
+        botToken: token,
       })(ctx as unknown as BotCommandContext),
     )
     // Error handler

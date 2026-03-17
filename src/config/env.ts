@@ -13,6 +13,7 @@ export interface EnvConfig {
   OAUTH_SERVER_PORT?: number;
   ENCRYPTION_KEY?: string;
   PUBLIC_DOMAIN?: string;
+  HF_TOKEN?: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -63,5 +64,6 @@ export function loadConfig(): EnvConfig {
     BOT_USERNAME: process.env.BOT_USERNAME || undefined,
     MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
     MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
+    HF_TOKEN: process.env.HF_TOKEN || undefined,
   };
 }

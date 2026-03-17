@@ -17,6 +17,7 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
+import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -45,6 +46,8 @@ export interface MessageHandlerDeps {
   googleCalendarRepo?: GoogleCalendarRepository;
   sceneStorage: SceneStorage;
   botUsername?: string;
+  transcriptionService?: TranscriptionService;
+  botToken?: string;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -110,10 +113,84 @@ function isGroupRelevant(text: string, botUsername: string): boolean {
   return KEYWORD_PATTERN.test(text);
 }
 
+const TG_API = 'https://api.telegram.org';
+
+async function downloadTelegramFile(botToken: string, fileId: string): Promise<Buffer> {
+  const metaRes = await fetch(`${TG_API}/bot${botToken}/getFile?file_id=${fileId}`);
+  const meta = (await metaRes.json()) as { ok: boolean; result?: { file_path: string } };
+  if (!meta.ok || !meta.result?.file_path) {
+    throw new Error('Failed to get file path from Telegram');
+  }
+  const fileRes = await fetch(`${TG_API}/file/bot${botToken}/${meta.result.file_path}`);
+  if (!fileRes.ok) throw new Error(`Failed to download file: HTTP ${fileRes.status}`);
+  return Buffer.from(await fileRes.arrayBuffer());
+}
+
+async function handleVoiceMessage(
+  ctx: BotCommandContext,
+  user: User,
+  voice: { file_id: string; duration: number },
+  deps: MessageHandlerDeps,
+): Promise<void> {
+  const chatId = ctx.chatId;
+  if (!chatId) return;
+
+  cmdLogger.info({ userId: user.telegram_id, duration: voice.duration }, 'Voice message received');
+
+  const lang = user.language as 'en' | 'ru';
+
+  try {
+    const audioBuffer = await downloadTelegramFile(deps.botToken!, voice.file_id);
+    const transcription = await deps.transcriptionService!.transcribe(audioBuffer);
+
+    if (!transcription) {
+      await ctx.send(lang === 'ru' ? 'Не удалось распознать речь.' : 'Could not recognize speech.');
+      return;
+    }
+
+    cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
+
+    const agentContext: AgentContext = {
+      user,
+      chatId: Number(chatId),
+      messageText: transcription,
+      isVoiceMessage: true,
+      eventService: deps.eventService,
+      holidayService: deps.holidayService,
+      chatHistory: deps.chatHistory,
+      userRepo: deps.userRepo,
+      reminderRepo: deps.reminderRepo,
+      contactRepo: deps.contactRepo,
+      invitationService: deps.invitationService,
+      invitationRepo: deps.invitationRepo,
+      sharingService: deps.sharingService,
+      sharingSettingsRepo: deps.sharingSettingsRepo,
+      sharedEventRepo: deps.sharedEventRepo,
+      privacyService: deps.privacyService,
+      renderService: deps.renderService,
+      notificationPrefs: deps.notificationPrefs,
+      callQueue: deps.callQueue,
+      callSettingsRepo: deps.callSettingsRepo,
+      googleCalendarRepo: deps.googleCalendarRepo,
+    };
+
+    await deps.agent.run(agentContext);
+  } catch (error) {
+    cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'Voice transcription error');
+    await ctx.send(lang === 'ru' ? 'Не удалось обработать голосовое сообщение.' : 'Could not process voice message.');
+  }
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
+
+    // Voice message → transcribe → pass to AI agent
+    const voice = (ctx as unknown as { voice?: { file_id: string; duration: number } }).voice;
+    if (voice && deps.transcriptionService && deps.botToken) {
+      return handleVoiceMessage(ctx, user, voice, deps);
+    }
 
     const text = ctx.text as string | undefined;
     if (!text) return;

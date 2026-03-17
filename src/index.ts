@@ -254,6 +254,13 @@ if (config.REDIS_URL) {
   botLogger.info('Notification scheduler initialized');
 }
 
+let transcriptionService: import('./services/voice/transcription-service.ts').TranscriptionService | undefined;
+if (config.HF_TOKEN) {
+  const { TranscriptionService } = await import('./services/voice/transcription-service.ts');
+  transcriptionService = new TranscriptionService(config.HF_TOKEN);
+  botLogger.info('Voice transcription initialized (Whisper via HF)');
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -265,6 +272,7 @@ const { bot } = createBot(
   googleDeps,
   renderService,
   callQueue,
+  transcriptionService,
 );
 
 // Patch bot ref to use real bot API

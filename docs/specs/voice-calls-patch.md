@@ -27,6 +27,7 @@ The call appears connected on both sides, but the receiver hears nothing.
 `Call::GetTransportControllerSend()->OnNetworkAvailability(true)` when ICE connection establishes.
 
 This causes WebRTC's `PacedSender` to stay paused — RTP audio packets are never sent despite:
+
 - Opus codec negotiated correctly (48kHz, 2 channels)
 - DTLS handshake completed
 - NegotiateChannels exchange completed
@@ -39,10 +40,12 @@ This causes WebRTC's `PacedSender` to stay paused — RTP audio packets are neve
 2. Confirmed pipeline works: capture_time ticks, UDP data sent, codecs negotiated
 3. Built ntgcalls from source with Debug config (`LS_VERBOSE` logging)
 4. Debug logs revealed:
-   ```
+
+   ```cpp
    webrtc rtp_transport_controller_send.cc:424 SignalNetworkState Down
    webrtc pacing_controller.cc:113 PacedSender paused.
    ```
+
 5. Traced to `UpdateAggregateStates_n()` — missing `OnNetworkAvailability()` call
 
 ## The Fix
@@ -132,22 +135,25 @@ cp ntgcalls.cpython-312-darwin.so venv/lib/python3.12/site-packages/
 
 The patched `.so` binary is **platform-specific** and **not in git** (venv is gitignored).
 
-### What's in the repo:
+### What's in the repo
+
 - `scripts/voice-call-bridge.py` — Python bridge for pytgcalls P2P calls
 - `scripts/pyrogram-auth.py` — session authentication
 - `src/services/voice/` — Bun-side call management
 - `src/worker/call-queue.ts` — BullMQ async call queue
 
-### What must be set up per-server:
+### What must be set up per-server
+
 1. Python 3.12 venv with `py-tgcalls`, `pyrofork`, `ntgcalls`
 2. Patched ntgcalls binary (build from source with fix above)
 3. Pyrogram session (`bun run auth:voice`)
 4. Redis for BullMQ
 5. `.env`: `MTPROTO_API_ID`, `MTPROTO_API_HASH`
 
-### When upstream fixes the bug:
+### When upstream fixes the bug
+
 Just `venv/bin/pip install --upgrade ntgcalls` — no manual build needed.
 
 ## Upstream Issue
 
-https://github.com/pytgcalls/ntgcalls/issues/44
+<https://github.com/pytgcalls/ntgcalls/issues/44>
