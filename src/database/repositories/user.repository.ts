@@ -15,18 +15,20 @@ export class UserRepository {
   }
 
   create(data: CreateUserData): User {
+    const tz = data.timezone ?? 'UTC';
     this.db
       .prepare(`
-      INSERT INTO users (telegram_id, username, first_name, language, timezone, country_code)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO users (telegram_id, username, first_name, language, timezone, country_code, timezone_updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `)
       .run(
         data.telegram_id,
         data.username ?? null,
         data.first_name ?? null,
         data.language ?? 'en',
-        data.timezone ?? 'UTC',
+        tz,
         data.country_code ?? null,
+        tz !== 'UTC' ? new Date().toISOString().replace('T', ' ').slice(0, 19) : null,
       );
     return this.findByTelegramId(data.telegram_id)!;
   }
@@ -96,6 +98,10 @@ export class UserRepository {
     }
 
     if (fields.length === 0) return existing;
+
+    if (data.timezone !== undefined && data.timezone !== existing.timezone) {
+      fields.push("timezone_updated_at = datetime('now')");
+    }
 
     fields.push("updated_at = datetime('now')");
     values.push(telegramId);
