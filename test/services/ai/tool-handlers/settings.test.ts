@@ -215,8 +215,8 @@ describe('handleManageSettings', () => {
       ctx.notificationPrefs = {
         ensureDefaults: () => {},
         getPrefs: () => prefs,
-        update: (userId, patch) => {
-          Object.assign(prefs, patch);
+        update: (...args: unknown[]) => {
+          Object.assign(prefs, args[1] as Record<string, unknown>);
         },
       };
       const result = handleManageSettings(ctx, {

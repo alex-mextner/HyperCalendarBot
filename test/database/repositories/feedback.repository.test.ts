@@ -50,7 +50,7 @@ describe('FeedbackRepository', () => {
       subject: 'First issue',
     });
 
-    const otherThreadId = repo.createThread({
+    repo.createThread({
       user_id: 456,
       type: 'feature',
       subject: 'Other user issue',
@@ -128,7 +128,7 @@ describe('FeedbackRepository', () => {
       subject: 'Test',
     });
 
-    const messageId = repo.addMessage({
+    repo.addMessage({
       thread_id: threadId,
       sender: 'admin',
       text: 'We are looking into this',
@@ -199,7 +199,7 @@ describe('FeedbackRepository', () => {
       subject: 'Issue 2',
     });
 
-    const threadId3 = repo.createThread({
+    repo.createThread({
       user_id: 123,
       type: 'question',
       subject: 'Issue 3',

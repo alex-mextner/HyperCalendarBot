@@ -112,7 +112,7 @@ describe('handleSendFeedback', () => {
     expect(result.success).toBe(true);
 
     const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
-    expect(thread!.subject).toBe('A'.repeat(50) + '...');
+    expect(thread!.subject).toBe(`${'A'.repeat(50)}...`);
   });
 
   test('subject not truncated when message is exactly 50 chars', () => {
