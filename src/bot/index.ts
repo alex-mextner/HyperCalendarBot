@@ -185,7 +185,9 @@ export function createBot(
           }),
       ),
     )
-    .command('invitations', (ctx) => handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users))
+    .command('invitations', (ctx) =>
+      handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
+    )
     .command('privacy', (ctx) => handlePrivacy(ctx as unknown as BotCommandContext, db.sharingSettings))
     .command('share', (ctx) =>
       handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
@@ -232,6 +234,12 @@ export function createBot(
           });
         },
         googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
+        {
+          userRepo: db.users,
+          sendMessage: async (chatId: number, text: string, options: { parse_mode: string }) => {
+            await bot.api.sendMessage({ chat_id: chatId, text, parse_mode: options.parse_mode });
+          },
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Inline queries (sharing via inline mode)

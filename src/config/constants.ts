@@ -157,6 +157,14 @@ export const MSG = {
     invitation_not_found: 'Invitation not found',
     invitation_already_sent: 'Invitation already sent to this user',
     invitations_disabled: 'This user has disabled invitations',
+    invitation_response_accepted: (name: string, title: string) =>
+      `📨 ${name} accepted your invitation to "<b>${title}</b>" ✅`,
+    invitation_response_declined: (name: string, title: string) =>
+      `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
+    invitation_response_maybe: (name: string, title: string) =>
+      `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+    invitations_from: (name: string) => `from ${name}`,
+    invitations_to: (name: string) => `to ${name}`,
     privacy_current: (level: string) => `🔒 Current visibility: <b>${level}</b>`,
     share_preview: '📤 Preview — this is what will be shared:',
     share_sent: '✅ Shared successfully',
@@ -280,6 +288,14 @@ export const MSG = {
     invitation_not_found: 'Приглашение не найдено',
     invitation_already_sent: 'Приглашение уже отправлено этому пользователю',
     invitations_disabled: 'Этот пользователь отключил приглашения',
+    invitation_response_accepted: (name: string, title: string) =>
+      `📨 ${name} принял(а) приглашение на "<b>${title}</b>" ✅`,
+    invitation_response_declined: (name: string, title: string) =>
+      `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
+    invitation_response_maybe: (name: string, title: string) =>
+      `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+    invitations_from: (name: string) => `от ${name}`,
+    invitations_to: (name: string) => `для ${name}`,
     privacy_current: (level: string) => `🔒 Текущая видимость: <b>${level}</b>`,
     share_preview: '📤 Превью — вот что будет отправлено:',
     share_sent: '✅ Отправлено',

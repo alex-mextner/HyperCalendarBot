@@ -158,46 +158,31 @@ if (config.REDIS_URL) {
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !process.env.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
-    const { createMtprotoClient } = await import('./services/voice/mtproto-client.ts');
-    const { CallSignaling } = await import('./services/voice/call-signaling.ts');
     const { TtsService } = await import('./services/voice/tts-service.ts');
     const { CallManager } = await import('./services/voice/call-manager.ts');
+    const { existsSync } = await import('node:fs');
 
     const cq = createCallQueue({ url: config.REDIS_URL });
     callQueue = cq;
 
-    // Initialize MTProto client + call pipeline (with timeout — connect can hang)
-    const connectTimeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('MTProto connect timeout (10s)')), 10_000),
-    );
-    const mtClient = await Promise.race([
-      createMtprotoClient({
-        apiId: config.MTPROTO_API_ID,
-        apiHash: config.MTPROTO_API_HASH,
-        sessionString: '',
-      }),
-      connectTimeout,
-    ]);
+    const pyBridgePath = 'scripts/voice-call-bridge.py';
+    const pySessionExists = existsSync('data/voice_caller.session');
 
-    const callSignaling = new CallSignaling({
-      callRaw: (method) => mtClient.call(method as never) as Promise<unknown>,
-      resolvePeer: async (userId) => {
-        const peer = await mtClient.resolvePeer(userId);
-        return { userId, accessHash: (peer as { accessHash?: unknown }).accessHash ?? 0 };
-      },
-    });
+    if (!pySessionExists) {
+      botLogger.warn('Pyrogram session not found (data/voice_caller.session). Run: bun run auth:voice');
+    }
 
     const ttsService = new TtsService();
     const callManager = new CallManager({
       ttsService,
-      callSignaling,
       callLogRepo: db.callLog,
       sendPostCallButtons: async (userId, eventId) => {
         botLogger.info({ userId, eventId }, 'Post-call buttons (not yet wired to bot)');
       },
       sendVoiceMessage: async (userId, audio) => {
-        await (botRef as { sendVoice?: (id: number, audio: Buffer) => Promise<void> }).sendVoice?.(userId, audio);
+        await botRef.sendVoice(userId, audio);
       },
+      pyBridgePath,
     });
 
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
@@ -208,10 +193,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
       },
     };
 
-    botLogger.info('Voice call pipeline initialized (queue + MTProto + worker)');
+    botLogger.info('Voice call pipeline initialized (Python bridge + BullMQ)');
   } catch (error) {
-    // Call queue only (no worker) — calls will queue but not execute
-    botLogger.warn({ error: String(error) }, 'Voice call worker failed to init, queue-only mode');
+    botLogger.warn({ error: String(error) }, 'Voice call init failed, queue-only mode');
     const { createCallQueue } = await import('./worker/call-queue.ts');
     const cq = createCallQueue({ url: config.REDIS_URL });
     callQueue = cq;

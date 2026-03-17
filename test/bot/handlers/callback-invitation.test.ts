@@ -121,3 +121,156 @@ describe('invitation callbacks', () => {
     expect(answerCall[0]).toContain('принято');
   });
 });
+
+describe('inviter notification on response', () => {
+  function makeHandlerWithNotify(
+    invitationService: Record<string, unknown>,
+    notifyDeps: { userRepo: Record<string, unknown>; sendMessage: ReturnType<typeof mock> },
+    eventRepo?: Record<string, unknown>,
+  ) {
+    return createCallbackHandler(
+      {} as never, // eventService
+      {} as never, // editValueScene
+      {} as never, // holidayService
+      {} as never, // prefsService
+      undefined, // calendarRepo
+      undefined, // disconnectDeps
+      undefined, // onCalendarsDone
+      undefined, // renderService
+      invitationService as never, // invitationService
+      undefined, // groupChatRepo
+      eventRepo as never, // eventRepo
+      undefined, // chatHistoryRepo
+      undefined, // onAiButtonClick
+      undefined, // oauthDeps
+      notifyDeps as never, // invitationNotifyDeps
+    );
+  }
+
+  test('notifies inviter when invitation is accepted', async () => {
+    const sendMessage = mock(() => Promise.resolve());
+    const invitationService = {
+      acceptInvitation: mock(() => ({
+        success: true,
+        invitation: { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 },
+      })),
+    };
+    const userRepo = {
+      findByTelegramId: mock(() => ({ telegram_id: 100, first_name: 'Sender', language: 'en' })),
+    };
+    const eventRepo = {
+      findById: mock(() => ({ title: 'Party', start_at: '2026-03-15T18:00:00Z' })),
+    };
+
+    const ctx = makeCtx('inv:accept:1');
+    const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
+
+    await handler(ctx as never);
+
+    // Wait for async notification
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    expect(chatId).toBe(100);
+    expect(text).toContain('Party');
+    expect(text).toContain('accepted');
+    expect(text).toContain('✅');
+  });
+
+  test('notifies inviter when invitation is declined', async () => {
+    const sendMessage = mock(() => Promise.resolve());
+    const invitationService = {
+      declineInvitation: mock(() => ({
+        success: true,
+        invitation: { id: 1, status: 'declined', event_id: 5, inviter_id: 100, invitee_id: 200 },
+      })),
+    };
+    const userRepo = {
+      findByTelegramId: mock(() => ({ telegram_id: 100, first_name: 'Sender', language: 'en' })),
+    };
+    const eventRepo = {
+      findById: mock(() => ({ title: 'Meeting', start_at: '2026-03-15T10:00:00Z' })),
+    };
+
+    const ctx = makeCtx('inv:decline:1');
+    const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
+
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    expect(chatId).toBe(100);
+    expect(text).toContain('declined');
+    expect(text).toContain('❌');
+  });
+
+  test('notifies inviter in their language', async () => {
+    const sendMessage = mock(() => Promise.resolve());
+    const invitationService = {
+      acceptInvitation: mock(() => ({
+        success: true,
+        invitation: { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 },
+      })),
+    };
+    const userRepo = {
+      findByTelegramId: mock(() => ({ telegram_id: 100, first_name: 'Отправитель', language: 'ru' })),
+    };
+    const eventRepo = {
+      findById: mock(() => ({ title: 'Встреча', start_at: '2026-03-15T10:00:00Z' })),
+    };
+
+    const ctx = makeCtx('inv:accept:1');
+    const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
+
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 50));
+
+    const [, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    expect(text).toContain('принял');
+    expect(text).toContain('Встреча');
+  });
+
+  test('does not notify when response fails', async () => {
+    const sendMessage = mock(() => Promise.resolve());
+    const invitationService = {
+      acceptInvitation: mock(() => ({
+        success: false,
+        error: 'Already responded',
+      })),
+    };
+    const userRepo = {
+      findByTelegramId: mock(() => ({ telegram_id: 100, first_name: 'Sender', language: 'en' })),
+    };
+
+    const ctx = makeCtx('inv:accept:1');
+    const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage });
+
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  test('does not crash when sendMessage fails', async () => {
+    const sendMessage = mock(() => Promise.reject(new Error('Forbidden')));
+    const invitationService = {
+      acceptInvitation: mock(() => ({
+        success: true,
+        invitation: { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 },
+      })),
+    };
+    const userRepo = {
+      findByTelegramId: mock(() => ({ telegram_id: 100, first_name: 'Sender', language: 'en' })),
+    };
+
+    const ctx = makeCtx('inv:accept:1');
+    const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage });
+
+    // Should not throw
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(ctx.answer).toHaveBeenCalled();
+  });
+});

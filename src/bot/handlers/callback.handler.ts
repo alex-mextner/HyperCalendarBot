@@ -9,7 +9,8 @@ import type { ChatHistoryRepository } from '../../database/repositories/chat-his
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { UserRepository } from '../../database/repositories/user.repository.ts';
+import type { Invitation, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
@@ -54,6 +55,10 @@ export function createCallbackHandler(
   oauthDeps?: {
     oauthService: GoogleOAuthService;
     stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
+  },
+  invitationNotifyDeps?: {
+    userRepo: UserRepository;
+    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
   },
 ) {
   return async (ctx: BotCallbackContext) => {
@@ -395,6 +400,17 @@ export function createCallbackHandler(
                 : t(lang).invitation_maybe;
           await ctx.answer(statusText);
           await ctx.editText(statusText).catch(() => {});
+
+          // Notify inviter about the response
+          if (invitationNotifyDeps && result.invitation) {
+            notifyInviter(
+              result.invitation,
+              subAction as 'accept' | 'decline' | 'maybe',
+              user,
+              invitationNotifyDeps,
+              eventRepo,
+            ).catch(() => {});
+          }
         } else {
           await ctx.answer(result.error ?? 'Error');
         }
@@ -492,4 +508,34 @@ export function createCallbackHandler(
         .catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() in error handler'));
     }
   };
+}
+
+async function notifyInviter(
+  invitation: Invitation,
+  action: 'accept' | 'decline' | 'maybe',
+  respondent: User,
+  deps: {
+    userRepo: UserRepository;
+    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+  },
+  eventRepo?: EventRepository,
+): Promise<void> {
+  const inviter = deps.userRepo.findByTelegramId(invitation.inviter_id);
+  if (!inviter) return;
+
+  const inviterLang = (inviter.language ?? 'en') as Lang;
+  const msgs = t(inviterLang);
+  const respondentName = respondent.first_name ?? respondent.username ?? `#${respondent.telegram_id}`;
+
+  const event = eventRepo?.findById(invitation.event_id, invitation.inviter_id);
+  const eventTitle = event?.title ?? `Event #${invitation.event_id}`;
+
+  const text =
+    action === 'accept'
+      ? msgs.invitation_response_accepted(respondentName, eventTitle)
+      : action === 'decline'
+        ? msgs.invitation_response_declined(respondentName, eventTitle)
+        : msgs.invitation_response_maybe(respondentName, eventTitle);
+
+  await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML' });
 }

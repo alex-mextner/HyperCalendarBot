@@ -5,16 +5,13 @@ import { voiceLogger } from './types';
 
 export interface CallManagerDeps {
   ttsService: { synthesize: (text: string, lang: string) => Promise<Buffer> };
-  callSignaling: {
-    initiateCall: (userId: number) => Promise<{ callId: bigint; accessHash: bigint }>;
-    discardCall: (callId: bigint, accessHash: bigint) => Promise<void>;
-  };
   callLogRepo: {
     updateStatus: (id: number, status: CallStatus) => void;
     complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
   sendPostCallButtons: (userId: number, eventId: number) => Promise<void>;
   sendVoiceMessage?: (userId: number, audio: Buffer) => Promise<void>;
+  pyBridgePath: string;
 }
 
 export class CallManager {
@@ -22,38 +19,49 @@ export class CallManager {
 
   async executeCall(job: CallReminderJobData): Promise<void> {
     const startTime = Date.now();
-    let callId: bigint | undefined;
-    let accessHash: bigint | undefined;
 
     try {
-      // Step 1: Synthesize TTS audio
+      // Step 1: Synthesize TTS audio to temp file
       voiceLogger.info({ userId: job.userId, eventId: job.eventId }, 'Synthesizing TTS');
       const audioBuffer = await this.deps.ttsService.synthesize(job.ttsText, job.language);
+      const tmpFile = `/tmp/call-${job.callLogId}.mp3`;
+      await Bun.write(tmpFile, audioBuffer);
 
-      // Step 2: Ring the user (call as notification)
+      // Step 2: Ring + send voice message via Python bridge
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
-      voiceLogger.info({ userId: job.userId }, 'Initiating call (ring notification)');
-      try {
-        const callInfo = await this.deps.callSignaling.initiateCall(job.userId);
-        callId = callInfo.callId;
-        accessHash = callInfo.accessHash;
+      voiceLogger.info({ userId: job.userId }, 'Calling via Python bridge');
 
-        // Ring for 10 seconds then hang up — audio streaming via ntgcalls pending
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
-        await this.deps.callSignaling.discardCall(callId, accessHash);
-      } catch (ringError) {
-        voiceLogger.warn({ error: String(ringError), userId: job.userId }, 'Ring failed, sending voice message only');
-      }
+      const proc = Bun.spawn(['venv/bin/python', this.deps.pyBridgePath, String(job.userId), tmpFile, '5'], {
+        env: { ...process.env },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
 
-      // Step 3: Send TTS audio as voice message (reliable content delivery)
-      this.deps.callLogRepo.updateStatus(job.callLogId, 'connected');
-      if (this.deps.sendVoiceMessage) {
+      const output = await new Response(proc.stdout).text();
+      const errors = await new Response(proc.stderr).text();
+      const exitCode = await proc.exited;
+
+      if (errors) voiceLogger.warn({ stderr: errors.slice(0, 200) }, 'Bridge stderr');
+
+      const lines = output.split('\n');
+      const hasRing = lines.some((l) => l.includes('RINGING'));
+      const hasVoice = lines.some((l) => l.includes('VOICE_SENT'));
+
+      voiceLogger.info({ exitCode, hasRing, hasVoice, userId: job.userId }, 'Bridge result');
+
+      // Step 3: Also send voice via bot API as backup
+      if (!hasVoice && this.deps.sendVoiceMessage) {
         await this.deps.sendVoiceMessage(job.userId, audioBuffer);
-        voiceLogger.info({ userId: job.userId, audioBytes: audioBuffer.length }, 'Voice message sent');
+        voiceLogger.info({ userId: job.userId }, 'Voice sent via bot API fallback');
       }
+
+      // Cleanup
+      try {
+        (await Bun.file(tmpFile).exists()) && (await import('node:fs/promises')).unlink(tmpFile);
+      } catch {}
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
-      this.deps.callLogRepo.complete(job.callLogId, 'completed', duration);
+      this.deps.callLogRepo.complete(job.callLogId, hasRing ? 'completed' : 'failed', duration);
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
 
       // Step 4: Send post-call buttons in chat
@@ -65,10 +73,6 @@ export class CallManager {
         { error: errorMsg, stack: error instanceof Error ? error.stack : undefined, userId: job.userId },
         'Call failed',
       );
-
-      if (callId && accessHash) {
-        await this.deps.callSignaling.discardCall(callId, accessHash).catch(() => {});
-      }
 
       this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, errorMsg);
 
