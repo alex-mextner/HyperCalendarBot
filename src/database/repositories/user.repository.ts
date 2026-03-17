@@ -85,6 +85,7 @@ export class UserRepository {
       'timezone',
       'country_code',
       'onboarding_completed',
+      'voice_response_enabled',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];

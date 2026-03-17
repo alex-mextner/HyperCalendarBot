@@ -15,9 +15,7 @@ import {
   handleFindUser,
   handleGetContacts,
   handleGetHolidays,
-  handleGetUserSettings,
   handlePickUsers,
-  handleUpdateUserSettings,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -60,36 +58,6 @@ describe('meta tool handlers', () => {
       userRepo,
       reminderRepo,
     };
-  });
-
-  describe('handleGetUserSettings', () => {
-    test('returns user settings', () => {
-      const result = handleGetUserSettings(ctx);
-      expect(result.success).toBe(true);
-      expect(result.output).toContain('Europe/Kyiv');
-      expect(result.output).toContain('en');
-    });
-  });
-
-  describe('handleUpdateUserSettings', () => {
-    test('updates timezone', () => {
-      const result = handleUpdateUserSettings(ctx, { timezone: 'America/New_York' });
-      expect(result.success).toBe(true);
-      expect(result.output).toContain('America/New_York');
-      expect(ctx.user.timezone).toBe('America/New_York');
-    });
-
-    test('updates language', () => {
-      const result = handleUpdateUserSettings(ctx, { language: 'ru' });
-      expect(result.success).toBe(true);
-      expect(result.output).toContain('ru');
-    });
-
-    test('returns error when nothing to update', () => {
-      const result = handleUpdateUserSettings(ctx, {});
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('No settings');
-    });
   });
 
   describe('handleGetHolidays', () => {

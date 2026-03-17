@@ -76,6 +76,7 @@ export interface UpdateUserData {
   timezone?: string;
   country_code?: string;
   onboarding_completed?: number;
+  voice_response_enabled?: number | null;
 }
 
 export interface CreateEventData {

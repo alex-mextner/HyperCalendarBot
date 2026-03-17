@@ -15,23 +15,18 @@ import {
   handleAskUser,
   handleFindContact,
   handleFindUser,
-  handleGetCallSettings,
   handleGetContacts,
   handleGetGoogleCalendarStatus,
   handleGetHolidays,
-  handleGetNotificationSettings,
-  handleGetUserSettings,
   handleListGoogleCalendars,
   handleLookupStress,
   handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
   handleRenderWeekImage,
-  handleUpdateCallSettings,
-  handleUpdateNotificationSettings,
-  handleUpdateUserSettings,
 } from './tool-handlers/meta.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleManageSettings } from './tool-handlers/settings.ts';
 import {
   handleCancelInvitation,
   handleGetInvitationStatus,
@@ -41,7 +36,6 @@ import {
   handleSetEventVisibility,
   handleShareAgenda,
   handleShareEvent,
-  handleUpdateSharingSettings,
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
 import type { AgentContext, ToolResult } from './types.ts';
@@ -137,29 +131,17 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as { week_start: string });
 
-      case 'get_notification_settings':
-        return handleGetNotificationSettings(ctx);
-
-      case 'update_notification_settings':
-        return handleUpdateNotificationSettings(ctx, input);
-
       case 'make_call':
         return handleMakeCall(ctx, input as { text: string });
-
-      case 'get_call_settings':
-        return handleGetCallSettings(ctx);
-
-      case 'update_call_settings':
-        return handleUpdateCallSettings(ctx, input as { enabled?: boolean; language?: string });
 
       case 'get_holidays':
         return handleGetHolidays(ctx, input as { limit?: number });
 
-      case 'get_user_settings':
-        return handleGetUserSettings(ctx);
-
-      case 'update_user_settings':
-        return handleUpdateUserSettings(ctx, input as { timezone?: string; language?: 'en' | 'ru' });
+      case 'manage_settings':
+        return handleManageSettings(
+          ctx,
+          input as { action: 'get' | 'update'; category?: string; updates?: Record<string, unknown> },
+        );
 
       case 'share_event':
         return handleShareEvent(ctx, input as { event_id: number; target_type: 'user' | 'group'; target_id: number });
@@ -169,16 +151,6 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'get_invitation_status':
         return handleGetInvitationStatus(ctx, input as { event_id: number });
-
-      case 'update_sharing_settings':
-        return handleUpdateSharingSettings(
-          ctx,
-          input as {
-            default_visibility?: 'private' | 'free_busy' | 'full';
-            inline_mode_enabled?: boolean;
-            allow_invitations?: boolean;
-          },
-        );
 
       case 'share_agenda':
         return handleShareAgenda(
