@@ -18,6 +18,8 @@ import type { DeepLinkService } from '../../services/sharing/deep-link-service.t
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
+import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
+import { markStress, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -50,6 +52,9 @@ export interface MessageHandlerDeps {
   botUsername?: string;
   transcriptionService?: TranscriptionService;
   botToken?: string;
+  stressDictionary?: AgentContext['stressDictionary'];
+  sileroTts?: SileroTtsService;
+  sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -121,7 +126,7 @@ async function downloadTelegramFile(botToken: string, fileId: string): Promise<B
   const metaRes = await fetch(`${TG_API}/bot${botToken}/getFile?file_id=${fileId}`);
   const meta = (await metaRes.json()) as { ok: boolean; result?: { file_path: string } };
   if (!meta.ok || !meta.result?.file_path) {
-    throw new Error('Failed to get file path from Telegram');
+    throw new Error(`Failed to get file path from Telegram: ${JSON.stringify(meta)}`);
   }
   const fileRes = await fetch(`${TG_API}/file/bot${botToken}/${meta.result.file_path}`);
   if (!fileRes.ok) throw new Error(`Failed to download file: HTTP ${fileRes.status}`);
@@ -176,9 +181,24 @@ async function handleVoiceMessage(
       googleCalendarRepo: deps.googleCalendarRepo,
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
+      stressDictionary: deps.stressDictionary,
     };
 
-    await deps.agent.run(agentContext);
+    const responseText = await deps.agent.run(agentContext);
+
+    // Send voice reply if TTS is available
+    if (responseText && deps.sileroTts && deps.sendVoice && deps.stressDictionary) {
+      try {
+        const plainText = stripMarkdown(responseText);
+        const withStress = markStress(plainText, deps.stressDictionary);
+        const stressedText = transliterateEnglish(withStress);
+        cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing voice reply');
+        const voiceBuffer = await deps.sileroTts.synthesize(stressedText);
+        await deps.sendVoice(Number(chatId), voiceBuffer);
+      } catch (ttsError) {
+        cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
+      }
+    }
   } catch (error) {
     cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'Voice transcription error');
     await ctx.send(lang === 'ru' ? 'Не удалось обработать голосовое сообщение.' : 'Could not process voice message.');
@@ -191,9 +211,14 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     if (!user) return;
 
     // Voice message → transcribe → pass to AI agent
-    const voice = (ctx as unknown as { voice?: { file_id: string; duration: number } }).voice;
-    if (voice && deps.transcriptionService && deps.botToken) {
-      return handleVoiceMessage(ctx, user, voice, deps);
+    const voiceRaw = (
+      ctx as unknown as {
+        voice?: { payload?: { file_id: string; duration: number }; file_id?: string; duration?: number };
+      }
+    ).voice;
+    const voicePayload = voiceRaw?.payload ?? voiceRaw;
+    if (voicePayload?.file_id && deps.transcriptionService && deps.botToken) {
+      return handleVoiceMessage(ctx, user, voicePayload as { file_id: string; duration: number }, deps);
     }
 
     const text = ctx.text as string | undefined;
@@ -256,6 +281,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       googleCalendarRepo: deps.googleCalendarRepo,
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
+      stressDictionary: deps.stressDictionary,
     };
 
     cmdLogger.info({ userId: user.telegram_id, text, isGroup }, 'Routing to AI agent');

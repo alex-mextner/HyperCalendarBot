@@ -64,7 +64,7 @@ export class CalendarBotAgent {
     ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults));
   }
 
-  async run(ctx: AgentContext): Promise<void> {
+  async run(ctx: AgentContext): Promise<string> {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
@@ -166,7 +166,7 @@ export class CalendarBotAgent {
               this.saveToolResults(ctx, toolResults);
               writer.commitIntermediate();
               await writer.finalize();
-              return;
+              return writer.getText();
             }
           }
         }
@@ -203,5 +203,6 @@ export class CalendarBotAgent {
     }
 
     await writer.finalize();
+    return writer.getText();
   }
 }

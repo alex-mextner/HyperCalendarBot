@@ -13,6 +13,7 @@ import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
+import type { StressDictionary } from '../voice/stress-dictionary.ts';
 
 export interface AgentContext {
   user: User;
@@ -48,6 +49,7 @@ export interface AgentContext {
   deepLinkService?: DeepLinkService;
   botUsername?: string;
   isVoiceMessage?: boolean;
+  stressDictionary?: StressDictionary;
 }
 
 export interface ToolResult {
@@ -70,5 +72,5 @@ export interface TelegramSender {
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<void>;
   sendInvitation?(inviteeId: number, text: string, invitationId: number): Promise<{ message_id: number } | null>;
-  sendAsUser?(userId: number, text: string): Promise<boolean>;
+  sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
 }

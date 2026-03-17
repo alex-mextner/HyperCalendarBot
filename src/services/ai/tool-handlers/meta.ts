@@ -296,3 +296,26 @@ export function handleUpdateUserSettings(ctx: AgentContext, input: UpdateUserSet
   const lines = Object.entries(updates).map(([k, v]) => `${k}: ${v}`);
   return { success: true, output: `Settings updated: ${lines.join(', ')}` };
 }
+
+export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
+  if (!ctx.stressDictionary) {
+    return { success: false, error: 'Stress dictionary not loaded' };
+  }
+
+  const results = ctx.stressDictionary.lookupMany(input.words);
+  const lines: string[] = [];
+
+  for (const [word, { stressed, similar }] of Object.entries(results)) {
+    if (stressed) {
+      lines.push(`${word} → ${stressed}`);
+    } else {
+      let line = `${word} → NOT FOUND`;
+      if (similar.length > 0) {
+        line += ` | similar: ${similar.join(', ')}`;
+      }
+      lines.push(line);
+    }
+  }
+
+  return { success: true, output: lines.join('\n') };
+}

@@ -262,6 +262,25 @@ if (config.HF_TOKEN) {
   botLogger.info('Voice transcription initialized (Whisper via HF)');
 }
 
+let stressDictionary: import('./services/voice/stress-dictionary.ts').StressDictionary | undefined;
+try {
+  const { StressDictionary } = await import('./services/voice/stress-dictionary.ts');
+  stressDictionary = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
+} catch (error) {
+  botLogger.warn({ error: String(error) }, 'Stress dictionary not loaded');
+}
+
+let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService | undefined;
+{
+  const pythonPath = '/tmp/tts-test/bin/python3';
+  const { existsSync } = await import('node:fs');
+  if (existsSync(pythonPath) && stressDictionary) {
+    const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
+    sileroTts = new SileroTtsService(pythonPath);
+    botLogger.info('Silero TTS initialized');
+  }
+}
+
 // MTProto userbot for delivering messages to users who haven't started the bot
 if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
   try {
@@ -297,6 +316,8 @@ const { bot } = createBot(
   callQueue,
   transcriptionService,
   mtprotoSendAsUser,
+  stressDictionary,
+  sileroTts,
 );
 
 // Patch bot ref to use real bot API

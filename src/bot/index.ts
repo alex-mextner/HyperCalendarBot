@@ -17,6 +17,8 @@ import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
+import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
+import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
@@ -96,6 +98,8 @@ export function createBot(
   },
   transcriptionService?: TranscriptionService,
   mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>,
+  stressDictionary?: StressDictionary,
+  sileroTts?: SileroTtsService,
 ) {
   const eventService = new EventService(db.events, db.reminders);
   const holidayService = new HolidayService(db.holidays);
@@ -347,6 +351,14 @@ export function createBot(
         botUsername: process.env.BOT_USERNAME,
         transcriptionService,
         botToken: token,
+        stressDictionary,
+        sileroTts,
+        sendVoice: sileroTts
+          ? async (chatId: number, audio: Buffer) => {
+              const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
+              await bot.api.sendVoice({ chat_id: chatId, voice: file });
+            }
+          : undefined,
       })(ctx as unknown as BotCommandContext),
     )
     // Error handler

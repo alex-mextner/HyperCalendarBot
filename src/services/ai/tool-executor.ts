@@ -21,6 +21,7 @@ import {
   handleGetNotificationSettings,
   handleGetUserSettings,
   handleListGoogleCalendars,
+  handleLookupStress,
   handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
@@ -200,6 +201,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'list_google_calendars':
         return handleListGoogleCalendars(ctx);
+
+      case 'lookup_stress':
+        return handleLookupStress(ctx, input as { words: string[] });
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

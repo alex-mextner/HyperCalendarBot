@@ -564,4 +564,21 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'lookup_stress',
+    description:
+      'Look up correct stress marks for Russian words in the stress dictionary (555K+ forms). Returns words with + before the stressed vowel (e.g., "молоко" → "молок+о"). For words NOT FOUND, the tool returns similar dictionary entries as reference. You should also proactively include word variations in the same request: different cases (молоком, молока), infinitives (бежать for бегу), nominative forms (встреча for встречей), singular/plural. Pass ALL words and their variations in a single call for efficiency. The tool handles hundreds of words instantly.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        words: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Russian words to look up (lowercase, no punctuation). Include the original word AND likely variations: other cases, base forms, related forms. E.g., for "алексом" also try "алекс", "алексей", "алексея".',
+        },
+      },
+      required: ['words'],
+    },
+  },
 ];

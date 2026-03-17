@@ -36,8 +36,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # git worktrees
 .worktrees
 
-# SQLite data
-data/
+# SQLite data — exclude dictionaries
+data/*
+!data/dictionaries/
 *.db
 *.db-shm
 *.db-wal
