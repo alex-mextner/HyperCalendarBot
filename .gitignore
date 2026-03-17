@@ -44,3 +44,4 @@ data/
 
 # ntgcalls prebuilt binaries
 lib/
+mtproto-session*
