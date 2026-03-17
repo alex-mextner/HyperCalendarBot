@@ -31,11 +31,12 @@ export class CallManager {
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
       voiceLogger.info({ userId: job.userId }, 'Calling via Python bridge');
 
-      const proc = Bun.spawn(['venv/bin/python', this.deps.pyBridgePath, String(job.userId), tmpFile, '5'], {
-        env: { ...process.env },
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
+      // Duration: estimate from audio length + buffer
+      const audioDurationSec = Math.ceil(audioBuffer.length / 8000) + 5;
+      const proc = Bun.spawn(
+        ['venv/bin/python', this.deps.pyBridgePath, String(job.userId), tmpFile, String(audioDurationSec)],
+        { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' },
+      );
 
       const output = await new Response(proc.stdout).text();
       const errors = await new Response(proc.stderr).text();
@@ -44,16 +45,10 @@ export class CallManager {
       if (errors) voiceLogger.warn({ stderr: errors.slice(0, 200) }, 'Bridge stderr');
 
       const lines = output.split('\n');
-      const hasRing = lines.some((l) => l.includes('RINGING'));
-      const hasVoice = lines.some((l) => l.includes('VOICE_SENT'));
+      const hasPlaying = lines.some((l) => l.includes('PLAYING'));
+      const hasCallDone = lines.some((l) => l.includes('CALL_DONE'));
 
-      voiceLogger.info({ exitCode, hasRing, hasVoice, userId: job.userId }, 'Bridge result');
-
-      // Step 3: Also send voice via bot API as backup
-      if (!hasVoice && this.deps.sendVoiceMessage) {
-        await this.deps.sendVoiceMessage(job.userId, audioBuffer);
-        voiceLogger.info({ userId: job.userId }, 'Voice sent via bot API fallback');
-      }
+      voiceLogger.info({ exitCode, hasPlaying, hasCallDone, userId: job.userId }, 'Bridge result');
 
       // Cleanup
       try {
@@ -61,7 +56,7 @@ export class CallManager {
       } catch {}
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
-      this.deps.callLogRepo.complete(job.callLogId, hasRing ? 'completed' : 'failed', duration);
+      this.deps.callLogRepo.complete(job.callLogId, hasPlaying ? 'completed' : 'failed', duration);
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
 
       // Step 4: Send post-call buttons in chat
