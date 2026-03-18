@@ -218,6 +218,7 @@ export interface Invitation {
   created_at: string;
   updated_at: string;
   responded_at: string | null;
+  proposed_time: string | null;
 }
 
 export interface SharedEvent {

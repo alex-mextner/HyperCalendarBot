@@ -635,4 +635,10 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '025_invite_proposed_time',
+    up: (db) => {
+      db.exec(`ALTER TABLE invitations ADD COLUMN proposed_time TEXT`);
+    },
+  },
 ];

@@ -237,4 +237,11 @@ describe('production migrations', () => {
       expect(names).toContain(col);
     }
   });
+
+  test('migration 025 adds proposed_time column to invitations', () => {
+    const db2 = new Database(':memory:');
+    runMigrations(db2, migrations);
+    const cols = db2.prepare('PRAGMA table_info(invitations)').all() as { name: string }[];
+    expect(cols.some((c) => c.name === 'proposed_time')).toBe(true);
+  });
 });
