@@ -1,4 +1,5 @@
 import type { AgentContext, ToolResult } from '../types.ts';
+import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
@@ -7,9 +8,13 @@ interface SetReminderInput {
   event_id: number;
   minutes_before: number[];
   scope?: Scope;
+  owner_id?: number;
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
@@ -17,7 +22,7 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
   const event =
     scope === 'group'
       ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
-      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+      : ctx.eventService.getEvent(input.event_id, userId);
   if (!event) {
     return {
       success: false,
@@ -46,9 +51,13 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
 interface GetRemindersInput {
   event_id: number;
   scope?: Scope;
+  owner_id?: number;
 }
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
@@ -56,7 +65,7 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
   const event =
     scope === 'group'
       ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
-      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+      : ctx.eventService.getEvent(input.event_id, userId);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }

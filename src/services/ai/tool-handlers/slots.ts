@@ -1,5 +1,6 @@
 import type { FreeSlot } from '../../event/event-service.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
@@ -7,9 +8,13 @@ type Scope = 'personal' | 'group';
 interface GetFreeSlotsInput {
   date: string;
   scope?: Scope;
+  owner_id?: number;
 }
 
 export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput): ToolResult {
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
   const date = new Date(input.date);
   const scope = resolveScope(input, ctx);
 
@@ -21,7 +26,7 @@ export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput):
   if (scope === 'group') {
     slots = ctx.eventService.getFreeSlotsForGroup(ctx.groupChatId!, date, ctx.user.timezone);
   } else {
-    slots = ctx.eventService.getFreeSlots(ctx.user.telegram_id, date, ctx.user.timezone);
+    slots = ctx.eventService.getFreeSlots(userId, date, ctx.user.timezone);
   }
 
   if (slots.length === 0) {

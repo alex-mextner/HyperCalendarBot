@@ -4,6 +4,7 @@ import { botLogger } from '../../../utils/logger.ts';
 import { formatInvitation } from '../../event/formatters.ts';
 import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { checkSecretaryAccess } from './secretary-access.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
 
@@ -165,6 +166,7 @@ interface ShareAgendaInput {
 interface SetEventVisibilityInput {
   event_id: number;
   visibility: Visibility;
+  owner_id?: number;
 }
 
 export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): ToolResult {
@@ -379,7 +381,11 @@ export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisib
     return { success: false, error: 'Sharing settings are not configured.' };
   }
 
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
+
+  const event = ctx.eventService.getEvent(input.event_id, userId);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
