@@ -814,9 +814,8 @@ export function createCallbackHandler(
               .oneTime();
             await ctx.send(invLang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', { reply_markup: kb });
           } else {
-            // requestId offset +1_000_000 distinguishes chat_shared from users_shared
             const kb = new Keyboard()
-              .requestChat(invLang === 'ru' ? '👥 Выбрать группу' : '👥 Select group', eventId + 1_000_000, {
+              .requestChat(invLang === 'ru' ? '👥 Выбрать группу' : '👥 Select group', eventId, {
                 chat_is_channel: false,
               })
               .resized()
