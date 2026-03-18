@@ -14,9 +14,11 @@ const db = createDatabase(config.DATABASE_PATH);
 const botRef: {
   sendMessage: (telegramId: number, text: string) => Promise<void>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
 } = {
   sendMessage: async () => {},
   sendVoice: async () => {},
+  editMessage: async () => {},
 };
 
 let googleDeps: GoogleBotDeps | undefined;
@@ -255,11 +257,11 @@ if (config.REDIS_URL) {
 }
 
 if (config.REDIS_URL) {
-  const { createBotTasksQueue, setupSecretaryExpiryCron, setupSharingCleanupCron } = await import(
-    './worker/bot-tasks-queue.ts'
-  );
+  const { createBotTasksQueue, setupSecretaryExpiryCron, setupSharingCleanupCron, setupProposalExpiryCron } =
+    await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
+  const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
 
   const secretaryRepo = new SecretaryRepository(db.db);
 
@@ -272,10 +274,16 @@ if (config.REDIS_URL) {
         notify: (userId, text) => botRef.sendMessage(userId, text),
       }),
     onSharingCleanup: () => runSharingCleanup({ invitationRepo: db.invitations, deepLinkRepo: db.deepLinks }),
+    onProposalExpiry: () =>
+      runProposalExpiry({
+        proposalRepo: db.calendarProposals,
+        editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
+      }),
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
+  await setupProposalExpiryCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {
@@ -355,6 +363,9 @@ const { bot } = createBot(
 // Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text) => {
   await bot.api.sendMessage({ chat_id: telegramId, text });
+};
+botRef.editMessage = async (chatId, messageId, text) => {
+  await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
 };
 botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });

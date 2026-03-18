@@ -4,7 +4,7 @@ import { parseRedisUrl } from '../utils/redis.ts';
 
 const botTasksLogger = logger.child({ module: 'bot-tasks' });
 
-export type BotTaskJobType = 'cron-secretary-expiry' | 'cron-sharing-cleanup';
+export type BotTaskJobType = 'cron-secretary-expiry' | 'cron-sharing-cleanup' | 'cron-proposal-expiry';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -14,6 +14,7 @@ interface BotTasksQueueDeps {
   redisUrl: string;
   onSecretaryExpiry?: () => Promise<void>;
   onSharingCleanup?: () => void;
+  onProposalExpiry?: () => Promise<void>;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -38,6 +39,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-sharing-cleanup') {
         deps.onSharingCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-proposal-expiry') {
+        if (deps.onProposalExpiry) await deps.onProposalExpiry();
         return;
       }
     },
@@ -68,4 +73,13 @@ export async function setupSecretaryExpiryCron(queue: Queue<BotTaskJobData>): Pr
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'secretary-expiry-tick' },
   );
   botTasksLogger.info('Secretary expiry cron scheduled (daily)');
+}
+
+export async function setupProposalExpiryCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'proposal-expiry-tick',
+    { type: 'cron-proposal-expiry' },
+    { repeat: { every: 60 * 60_000 }, removeOnComplete: true, jobId: 'proposal-expiry-tick' },
+  );
+  botTasksLogger.info('Proposal expiry cron scheduled (hourly)');
 }
