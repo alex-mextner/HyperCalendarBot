@@ -390,6 +390,7 @@ const COMMANDS_EN = [
   { command: 'share', description: 'Share agenda or event' },
   { command: 'invite', description: 'Invite user to event' },
   { command: 'invitations', description: 'View invitations' },
+  { command: 'unshare', description: 'Remove event from group chat' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -410,6 +411,7 @@ const COMMANDS_RU = [
   { command: 'share', description: 'Поделиться повесткой/событием' },
   { command: 'invite', description: 'Пригласить на событие' },
   { command: 'invitations', description: 'Просмотр приглашений' },
+  { command: 'unshare', description: 'Убрать событие из группового чата' },
   { command: 'help', description: 'Справка' },
 ];
 

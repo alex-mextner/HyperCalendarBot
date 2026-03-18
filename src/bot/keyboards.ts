@@ -1,6 +1,7 @@
 // src/bot/keyboards.ts
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB, TZ_REGIONS, t } from '../config/constants.ts';
+import type { Contact } from '../database/repositories/contact.repository.ts';
 import type { CalendarEvent } from '../database/types.ts';
 import { formatTime } from '../utils/date.ts';
 
@@ -327,6 +328,33 @@ export function notifyQuietKeyboard(enabled: boolean): InlineKeyboard {
   }
   kb.row();
   kb.text('← Back', `${CB.NOTIFY}:menu`);
+  return kb;
+}
+
+// ── Invite keyboards ──
+
+export function inviteContactPickerKeyboard(contacts: Contact[], eventId: number, lang: 'en' | 'ru'): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const withId = contacts.filter((c) => c.telegram_id !== null);
+  for (const c of withId) {
+    const name = c.preferred_name ?? c.name;
+    const label = c.username ? `${name} @${c.username}` : name;
+    kb.text(label.slice(0, 40), `${CB.INVITE_CONTACT}:${eventId}:${c.telegram_id}`).row();
+  }
+  kb.text(lang === 'ru' ? '👤 Другой пользователь' : '👤 Other user', `${CB.INVITE_CONTACT}:${eventId}:picker`).row();
+  kb.text(lang === 'ru' ? '👥 Групповой чат' : '👥 Group chat', `${CB.INVITE_CONTACT}:${eventId}:chat`).row();
+  kb.text(lang === 'ru' ? '❌ Отмена' : '❌ Cancel', `${CB.INVITE_CONTACT}:cancel`);
+  return kb;
+}
+
+// ── Unshare keyboards ──
+
+export function unsharePickerKeyboard(items: { eventId: number; title: string }[], lang: 'en' | 'ru'): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  for (const item of items) {
+    kb.text(item.title.slice(0, 40), `${CB.UNSHARE_PICK}:${item.eventId}`).row();
+  }
+  kb.text(lang === 'ru' ? '❌ Отмена' : '❌ Cancel', `${CB.UNSHARE_PICK}:cancel`);
   return kb;
 }
 

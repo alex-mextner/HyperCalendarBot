@@ -35,7 +35,6 @@ import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
 import { handleEdit } from './commands/edit.ts';
-import { handleExport } from './commands/export.ts';
 import { handleFree } from './commands/free.ts';
 import { handleHelp } from './commands/help.ts';
 import { handleHolidays } from './commands/holidays.ts';
@@ -299,7 +298,6 @@ export function createBot(
     .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, scenesSetup.scenes.timezoneScene))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
-    .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     // Sharing commands
     .command('invite', (ctx) =>
@@ -325,7 +323,7 @@ export function createBot(
     .command('share', (ctx) =>
       handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
     )
-    .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats))
+    .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats, eventService))
     .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {
@@ -457,9 +455,40 @@ export function createBot(
             await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
           },
         },
-        undefined,
+        undefined, // snoozeDeps
+        invitationService
+          ? {
+              invitationService,
+              invRepo: db.invitations,
+              deepLinkService,
+              sendMessage: async (
+                chatId: number,
+                text: string,
+                options: { parse_mode: string; reply_markup?: unknown },
+              ) => {
+                const sent = await bot.api.sendMessage({
+                  chat_id: chatId,
+                  text,
+                  parse_mode: options.parse_mode as 'HTML',
+                  reply_markup: options.reply_markup as never,
+                });
+                return { message_id: sent.message_id };
+              },
+            }
+          : undefined,
         proposeTimeSessions,
         db.invitations,
+        sileroTts && stressDictionary
+          ? {
+              sileroTts,
+              sendVoice: async (chatId: number, audio: Buffer) => {
+                const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
+                await bot.api.sendVoice({ chat_id: chatId, voice: file });
+              },
+              stressDictionary,
+            }
+          : undefined,
+        db.contacts,
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
@@ -519,6 +548,39 @@ export function createBot(
         agent
           .run(buildAgentContext(user, chatId, contextMsg))
           .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
+      }
+    })
+    // Group chat shared from picker → send invitation to group chat
+    .on('chat_shared', async (ctx) => {
+      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      if (!user) return;
+      // requestId was set as eventId + 1_000_000 to distinguish from users_shared
+      const requestId = (ctx as unknown as { requestId?: number }).requestId ?? 0;
+      if (requestId <= 1_000_000) return;
+      const eventId = requestId - 1_000_000;
+      const chat = (ctx as unknown as { chat_shared?: { chat_id: number } }).chat_shared;
+      if (!chat) return;
+      const inviteeId = chat.chat_id;
+      const lang = (user.language ?? 'en') as 'en' | 'ru';
+      if (invitationService) {
+        const event = eventService.getEvent(eventId, user.telegram_id);
+        const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
+        const inv = invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
+        if (inv.success && inv.invitation) {
+          const invText = t(lang).invitation_received(event?.title ?? `Event #${eventId}`, inviterName);
+          telegramSender.sendInvitation!(inviteeId, invText, inv.invitation.id)
+            .then((sent) => {
+              if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);
+            })
+            .catch(() => {});
+        }
+        const resultText = inv.success
+          ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
+          : `❌ ${inv.error}`;
+        await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
+          resultText,
+          { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } },
+        );
       }
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)

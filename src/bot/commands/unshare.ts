@@ -1,6 +1,9 @@
 // src/bot/commands/unshare.ts
 
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { User } from '../../database/types.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { unsharePickerKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface ChatAccess {
@@ -8,8 +11,12 @@ interface ChatAccess {
   id: number;
 }
 
-export async function handleUnshare(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
-  const user = ctx.dbUser;
+export async function handleUnshare(
+  ctx: BotCommandContext,
+  groupRepo: GroupChatRepository,
+  eventService: EventService,
+): Promise<void> {
+  const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const chat = ctx.chat as ChatAccess | undefined;
 
@@ -18,26 +25,22 @@ export async function handleUnshare(ctx: BotCommandContext, groupRepo: GroupChat
     return;
   }
 
-  if (!ctx.args || ctx.args.trim() === '') {
+  const shared = groupRepo.getSharedEvents(chat.id).filter((e) => e.shared_by === user.telegram_id);
+
+  if (shared.length === 0) {
     await ctx.send(
-      lang === 'ru'
-        ? '📤 Использование: <code>/unshare &lt;event_id&gt;</code>'
-        : '📤 Usage: <code>/unshare &lt;event_id&gt;</code>',
-      { parse_mode: 'HTML' },
+      lang === 'ru' ? '📭 У вас нет событий, добавленных в этот чат.' : '📭 You have no events shared in this chat.',
     );
     return;
   }
 
-  const eventId = Number(ctx.args.trim());
-  if (Number.isNaN(eventId)) {
-    await ctx.send(lang === 'ru' ? '❌ Укажите ID события (число)' : '❌ Provide event ID (number)');
-    return;
-  }
+  const items = shared.map((se) => {
+    const event = eventService.getEvent(se.event_id, user.telegram_id);
+    return { eventId: se.event_id, title: event?.title ?? `Event #${se.event_id}` };
+  });
 
-  const removed = groupRepo.unshareEvent(chat.id, eventId, user.telegram_id);
-  if (removed) {
-    await ctx.send(lang === 'ru' ? '✅ Событие убрано из группы' : '✅ Event removed from group');
-  } else {
-    await ctx.send(lang === 'ru' ? '❌ Событие не найдено в группе' : '❌ Event not found in this group');
-  }
+  await ctx.send(
+    lang === 'ru' ? '📤 Выберите событие для удаления из чата:' : '📤 Select an event to remove from this chat:',
+    { reply_markup: unsharePickerKeyboard(items, lang) },
+  );
 }

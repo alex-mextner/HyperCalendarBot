@@ -8,6 +8,7 @@ import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
+import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -29,6 +30,14 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import {
+  fixDateOrdinals,
+  fixLineBreaks,
+  markStress,
+  numbersToWords,
+  stripMarkdown,
+  transliterateEnglish,
+} from '../../services/voice/stress-marker.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
@@ -42,7 +51,7 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback } from '../commands/settings.ts';
-import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
+import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -103,6 +112,12 @@ export function createCallbackHandler(
   forceInviteDeps?: ForceInviteDeps,
   proposeTimeSessions?: Map<number, { invitationId: number }>,
   invitationRepo?: InvitationRepository,
+  voiceDeps?: {
+    sileroTts: { synthesize: (text: string) => Promise<Buffer> };
+    sendVoice: (chatId: number, audio: Buffer) => Promise<void>;
+    stressDictionary: { lookup: (word: string) => string | null };
+  },
+  contactRepo?: ContactRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -741,34 +756,138 @@ export function createCallbackHandler(
         return;
       }
 
-      // Invite: user picked an event → open user picker
+      // Invite: user picked an event → show contact picker
       if (action === CB.INVITE_PICK) {
+        if (payload === 'cancel') {
+          await ctx.answer();
+          await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+          return;
+        }
         const eventId = Number(payload);
         const event = eventService.getEvent(eventId, user.telegram_id);
         if (!event) return ctx.answer({ text: 'Not found' });
         await ctx.answer();
+        const contacts = contactRepo ? contactRepo.list(user.telegram_id) : [];
         await ctx.editText(
           lang === 'ru'
-            ? `📨 Приглашение на: <b>${event.title}</b>\nВыберите участников:`
-            : `📨 Inviting to: <b>${event.title}</b>\nSelect participants:`,
-          { parse_mode: 'HTML' },
+            ? `📨 Приглашение на: <b>${event.title}</b>\nВыберите кого пригласить:`
+            : `📨 Inviting to: <b>${event.title}</b>\nChoose who to invite:`,
+          { parse_mode: 'HTML', reply_markup: inviteContactPickerKeyboard(contacts, eventId, lang) },
         );
-        // Send user picker with eventId as requestId
-        if (ctx.message) {
-          const { Keyboard } = await import('gramio');
-          const kb = new Keyboard()
-            .requestUsers(lang === 'ru' ? '👤 Выбрать участников' : '👤 Select participants', eventId, {
-              user_is_bot: false,
-              max_quantity: 10,
-              request_name: true,
-              request_username: true,
-            })
-            .resized()
-            .oneTime();
-          await ctx.message.send(lang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', {
-            reply_markup: kb,
-          });
+        return;
+      }
+
+      // Invite contact — invc:{eventId}:{telegramId|picker|chat|cancel}
+      if (action === CB.INVITE_CONTACT) {
+        const invLang = (user.language ?? 'en') as Lang;
+        if (payload === 'cancel') {
+          await ctx.answer();
+          await ctx.editText(invLang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+          return;
         }
+        const colonIdx = payload.indexOf(':');
+        const eventId = Number(payload.slice(0, colonIdx));
+        const sub = payload.slice(colonIdx + 1);
+
+        if (sub === 'picker' || sub === 'chat') {
+          const event = eventService.getEvent(eventId, user.telegram_id);
+          if (!event) {
+            await ctx.answer({ text: 'Not found' });
+            return;
+          }
+          await ctx.answer();
+          await ctx.editText(
+            invLang === 'ru' ? `📨 ${event.title}\nВыберите контакт:` : `📨 ${event.title}\nPick a contact:`,
+            { parse_mode: 'HTML' },
+          );
+          const { Keyboard } = await import('gramio');
+          if (sub === 'picker') {
+            const kb = new Keyboard()
+              .requestUsers(invLang === 'ru' ? '👤 Выбрать пользователя' : '👤 Select user', eventId, {
+                user_is_bot: false,
+                max_quantity: 10,
+                request_name: true,
+                request_username: true,
+              })
+              .resized()
+              .oneTime();
+            await ctx.send(invLang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', { reply_markup: kb });
+          } else {
+            // requestId offset +1_000_000 distinguishes chat_shared from users_shared
+            const kb = new Keyboard()
+              .requestChat(invLang === 'ru' ? '👥 Выбрать группу' : '👥 Select group', eventId + 1_000_000, {
+                chat_is_channel: false,
+              })
+              .resized()
+              .oneTime();
+            await ctx.send(invLang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', { reply_markup: kb });
+          }
+          return;
+        }
+
+        // sub = telegramId — send invitation to known contact
+        if (forceInviteDeps) {
+          const inviteeId = Number(sub);
+          const ownerId = eventService.getEventOwnerId(eventId);
+          if (ownerId !== user.telegram_id) {
+            await ctx.answer({ text: 'Not authorized' });
+            return;
+          }
+          const event = eventService.getEvent(eventId, user.telegram_id);
+          const eventTitle = event?.title ?? `Event #${eventId}`;
+          const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
+          const result = forceInviteDeps.invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
+          if (!result.success || !result.invitation) {
+            await ctx.answer({ text: result.error ?? 'Error' });
+            return;
+          }
+          const invitation = result.invitation;
+          const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
+          const kb = new InlineKeyboard()
+            .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+            .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+            .row()
+            .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
+          await ctx.answer();
+          await ctx.editText(t(invLang).invite_delivered(eventTitle), { parse_mode: 'HTML' });
+          forceInviteDeps
+            .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+            .then((sent) => {
+              forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
+            })
+            .catch((err: unknown) => {
+              cmdLogger.error({ error: String(err), inviteeId }, 'Invite contact send failed');
+            });
+        } else {
+          await ctx.answer({ text: 'Not configured' });
+        }
+        return;
+      }
+
+      // Unshare: user picked an event to remove from group — unsp:{eventId|cancel}
+      if (action === CB.UNSHARE_PICK && groupChatRepo) {
+        if (payload === 'cancel') {
+          await ctx.answer();
+          await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+          return;
+        }
+        const eventId = Number(payload);
+        const chat = (ctx as unknown as { chat?: { id: number } }).chat;
+        if (!chat) {
+          await ctx.answer();
+          return;
+        }
+        const removed = groupChatRepo.unshareEvent(chat.id, eventId, user.telegram_id);
+        await ctx.answer();
+        await ctx.editText(
+          removed
+            ? lang === 'ru'
+              ? '✅ Событие убрано из группы'
+              : '✅ Event removed from group'
+            : lang === 'ru'
+              ? '❌ Событие не найдено'
+              : '❌ Event not found',
+        );
         return;
       }
 
@@ -908,6 +1027,38 @@ export function createCallbackHandler(
         userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
         await ctx.answer();
         await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
+
+        // On opt-in: resend the last AI response as voice so user hears it immediately
+        if (enabled && voiceDeps && chatHistoryRepo && ctx.chatId) {
+          const recent = chatHistoryRepo.getRecent(user.telegram_id, 10);
+          const lastAssistant = [...recent].reverse().find((m) => m.role === 'assistant');
+          if (lastAssistant) {
+            let responseText = lastAssistant.content;
+            try {
+              const blocks = JSON.parse(lastAssistant.content) as { type: string; text?: string }[];
+              if (Array.isArray(blocks)) {
+                responseText = blocks
+                  .filter((b) => b.type === 'text')
+                  .map((b) => b.text ?? '')
+                  .join('');
+              }
+            } catch {
+              // content is plain string, use as-is
+            }
+            if (responseText.trim()) {
+              const plainText = stripMarkdown(responseText);
+              const noLineBreaks = fixLineBreaks(plainText);
+              const withOrdinals = fixDateOrdinals(noLineBreaks);
+              const withNumbers = numbersToWords(withOrdinals);
+              const withStress = markStress(withNumbers, voiceDeps.stressDictionary);
+              const stressedText = user.language === 'ru' ? transliterateEnglish(withStress) : withStress;
+              voiceDeps.sileroTts
+                .synthesize(stressedText)
+                .then((audio) => voiceDeps.sendVoice(Number(ctx.chatId), audio))
+                .catch(() => {});
+            }
+          }
+        }
         return;
       }
 
