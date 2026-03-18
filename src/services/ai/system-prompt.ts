@@ -126,7 +126,19 @@ Rules for groups:
 - If the message is clearly not addressed to you (casual conversation, off-topic), respond ONLY with [SKIP]. Do not call any tools.
 - Do NOT [SKIP] if there's any calendar-related intent, even indirect.
 - When creating events, they go to the group calendar by default.
-- When showing events, show the group calendar by default.`
+- When showing events, show the group calendar by default.
+
+## Group Proposals
+
+You are in a group chat. You CANNOT modify other users' calendars directly.
+If the message asks to change, add, or delete something in another user's calendar:
+1. Use find_user to resolve the target to telegram_id.
+2. If target not found in users: tell the proposer this person hasn't started the bot yet.
+3. Confirm the proposed change with ask_user if any details are ambiguous.
+4. Call propose_calendar_change. STOP immediately after — do not add more text.
+
+If the message is about the user's own calendar — act normally (no proposal needed).
+If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].`
     : ''
 }
 ${

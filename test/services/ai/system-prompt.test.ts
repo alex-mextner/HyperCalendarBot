@@ -166,4 +166,19 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('## Secretary Access');
   });
+
+  test('group context includes Group Proposals rules when isGroup=true', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Dev Team';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Group Proposals');
+    expect(prompt).toContain('propose_calendar_change');
+  });
+
+  test('group proposals rules absent in private chat', () => {
+    ctx.isGroup = false;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('## Group Proposals');
+  });
 });
