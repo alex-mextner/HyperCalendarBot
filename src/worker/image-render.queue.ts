@@ -2,6 +2,7 @@ import { Queue, QueueEvents, Worker } from 'bullmq';
 import { imageLogger } from '../utils/logger.ts';
 import { parseRedisUrl } from '../utils/redis.ts';
 import { playwrightPool } from './playwright-pool.ts';
+import type { ConflictScheduleData } from './templates/conflict-schedule.ts';
 import { getTemplate } from './templates/index.ts';
 import type { DailyAgendaData, EventCardData, WeeklyOverviewData } from './templates/types.ts';
 
@@ -10,7 +11,8 @@ import type { DailyAgendaData, EventCardData, WeeklyOverviewData } from './templ
 export type ImageRenderJob =
   | { type: 'daily-agenda'; data: DailyAgendaData; userId: number }
   | { type: 'weekly-overview'; data: WeeklyOverviewData; userId: number }
-  | { type: 'event-card'; data: EventCardData; userId: number };
+  | { type: 'event-card'; data: EventCardData; userId: number }
+  | { type: 'conflict-schedule'; data: ConflictScheduleData; userId: number };
 
 export interface ImageRenderResult {
   bufferBase64: string; // PNG as base64 (Buffer doesn't survive Redis JSON roundtrip)

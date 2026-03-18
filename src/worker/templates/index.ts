@@ -1,3 +1,4 @@
+import { conflictScheduleTemplate } from './conflict-schedule.ts';
 import { dailyAgendaTemplate } from './daily-agenda.ts';
 import { eventCardTemplate } from './event-card.ts';
 import { monthlyCalendarTemplate } from './monthly-calendar.ts';
@@ -9,6 +10,7 @@ const templates: Record<ImageType, TemplateRenderer<unknown>> = {
   'weekly-overview': weeklyOverviewTemplate,
   'event-card': eventCardTemplate,
   'monthly-calendar': monthlyCalendarTemplate,
+  'conflict-schedule': conflictScheduleTemplate,
 };
 
 export function getTemplate<T>(type: ImageType): TemplateRenderer<T> {

@@ -49,7 +49,9 @@ describe('handleInvite', () => {
       invitationService: {
         sendInvitation: mock(() => ({ success: false, error: 'Already invited' })),
       },
-      eventService: {},
+      eventService: {
+        getEvent: mock(() => ({ id: 1, title: 'Test', start_at: null, end_at: null })),
+      },
       invRepo: {},
       deepLinkService: {},
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
@@ -137,5 +139,119 @@ describe('handleInvite', () => {
     };
 
     await expect(handleInvite(ctx as never, deps as never)).rejects.toThrow('Server Error');
+  });
+
+  test('shows conflict UI when invitee has schedule conflict', async () => {
+    const photo = mock(() => Promise.resolve());
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', first_name: 'Alex', username: 'alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+      sendPhoto: photo,
+    };
+    const conflictService = {
+      checkConflicts: mock(() => [
+        {
+          userId: 200,
+          username: 'bob',
+          hasConflict: true,
+          conflictingEvents: [{ title: null, startAt: '2026-03-20T09:30:00.000Z', endAt: '2026-03-20T10:30:00.000Z' }],
+        },
+      ]),
+    };
+    const renderService = {
+      renderDirect: mock(() => Promise.resolve(Buffer.from('png'))),
+    };
+    const deps = {
+      invitationService: { sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })) },
+      eventService: {
+        getEvent: mock(() => ({
+          id: 5,
+          title: 'Party',
+          start_at: '2026-03-20T10:00:00.000Z',
+          end_at: '2026-03-20T11:00:00.000Z',
+        })),
+        getEventsInRange: mock(() => []),
+      },
+      invRepo: { setMessageInfo: mock(() => {}) },
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+      conflictService,
+      renderService,
+    };
+
+    await handleInvite(ctx as never, deps as never);
+    expect(photo).toHaveBeenCalled();
+    // sendInvitation should NOT be called — waiting for user action
+    expect(deps.invitationService.sendInvitation).not.toHaveBeenCalled();
+  });
+
+  test('skips conflict check when no conflictService provided', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex', username: 'alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: { sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })) },
+      eventService: {
+        getEvent: mock(() => ({
+          id: 5,
+          title: 'Party',
+          start_at: '2026-03-20T10:00:00.000Z',
+          end_at: '2026-03-20T11:00:00.000Z',
+        })),
+      },
+      invRepo: { setMessageInfo: mock(() => {}) },
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+    expect(deps.invitationService.sendInvitation).toHaveBeenCalled();
+  });
+
+  test('proceeds without conflict image when render fails', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.reject(new Error('render fail'))),
+    };
+    const conflictService = {
+      checkConflicts: mock(() => [
+        {
+          userId: 200,
+          username: 'bob',
+          hasConflict: true,
+          conflictingEvents: [{ title: null, startAt: '2026-03-20T09:30:00.000Z', endAt: '2026-03-20T10:30:00.000Z' }],
+        },
+      ]),
+    };
+    const renderService = {
+      renderDirect: mock(() => Promise.reject(new Error('render fail'))),
+    };
+    const deps = {
+      invitationService: { sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })) },
+      eventService: {
+        getEvent: mock(() => ({
+          id: 5,
+          title: 'Party',
+          start_at: '2026-03-20T10:00:00.000Z',
+          end_at: '2026-03-20T11:00:00.000Z',
+        })),
+        getEventsInRange: mock(() => []),
+      },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+      conflictService,
+      renderService,
+    };
+
+    await handleInvite(ctx as never, deps as never);
+    // Falls back to text send with keyboard
+    expect(ctx.send).toHaveBeenCalled();
+    expect(deps.invitationService.sendInvitation).not.toHaveBeenCalled();
   });
 });

@@ -53,6 +53,9 @@ export const CB = {
   FEATURE_TOUR: 'ftour',
   INVITE_PICK: 'invp',
   EDIT_PROPOSAL: 'epr',
+  INV_FORCE: 'inv_force',
+  INV_RETIME: 'inv_retime',
+  INV_CANCEL: 'inv_cancel',
 } as const;
 
 // i18n messages

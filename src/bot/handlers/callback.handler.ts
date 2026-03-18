@@ -93,6 +93,7 @@ export function createCallbackHandler(
   secretaryDeps?: SecretaryDeps,
   proposalDeps?: ProposalDeps,
   snoozeDeps?: SnoozeDeps,
+  forceInviteDeps?: ForceInviteDeps,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -639,6 +640,80 @@ export function createCallbackHandler(
         return;
       }
 
+      // Invite force — callback: "inv_force:{eventId}:{inviteeIds}"
+      if (action === CB.INV_FORCE && forceInviteDeps) {
+        const invLang = (user.language ?? 'en') as Lang;
+        const colonIdx = payload.indexOf(':');
+        const eventId = Number(payload.slice(0, colonIdx));
+        const inviteeIdsStr = payload.slice(colonIdx + 1);
+
+        // Security: verify user is event owner
+        const ownerId = eventService.getEventOwnerId(eventId);
+        if (ownerId !== user.telegram_id) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
+
+        const inviteeIds = inviteeIdsStr.split(',').map(Number).filter(Boolean);
+        const eventForInv = eventService.getEvent(eventId, user.telegram_id);
+        const eventTitle = eventForInv?.title ?? `Event #${eventId}`;
+        const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
+
+        await ctx.answer();
+        await ctx.editText(invLang === 'ru' ? '⏳ Отправляем приглашения...' : '⏳ Sending invitations...');
+
+        for (const inviteeId of inviteeIds) {
+          const result = forceInviteDeps.invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
+          if (!result.success || !result.invitation) continue;
+
+          const invitation = result.invitation;
+          const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
+          const kb = new InlineKeyboard()
+            .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+            .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+            .row()
+            .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
+
+          forceInviteDeps
+            .sendMessage(inviteeId, inviteeText, { parse_mode: 'HTML', reply_markup: kb })
+            .then((sent) => {
+              forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
+            })
+            .catch((err: unknown) => {
+              cmdLogger.error({ error: String(err), inviteeId }, 'Force invite send failed');
+            });
+        }
+
+        await ctx.editText(t(invLang).invite_delivered(eventTitle), { parse_mode: 'HTML' });
+        return;
+      }
+
+      // Invite retime — prompt to change event time
+      if (action === CB.INV_RETIME) {
+        const invLang = (user.language ?? 'en') as Lang;
+        const eventId = Number(payload);
+        const ownerId = eventService.getEventOwnerId(eventId);
+        if (ownerId !== user.telegram_id) {
+          await ctx.answer({ text: 'Not authorized' });
+          return;
+        }
+        await ctx.answer();
+        await ctx.editText(
+          invLang === 'ru'
+            ? '🕐 Используйте /edit чтобы изменить время события, затем повторите приглашение.'
+            : '🕐 Use /edit to change the event time, then resend the invitation.',
+        );
+        return;
+      }
+
+      // Invite cancel
+      if (action === CB.INV_CANCEL) {
+        const invLang = (user.language ?? 'en') as Lang;
+        await ctx.answer();
+        await ctx.editText(invLang === 'ru' ? 'Приглашение отменено ❌' : 'Invitation cancelled ❌');
+        return;
+      }
+
       // Feature tour
       if (action === CB.FEATURE_TOUR) {
         return handleFeatureTourCallback(ctx, payload);
@@ -793,6 +868,17 @@ export function createCallbackHandler(
 export interface SnoozeDeps {
   reminderRepo: Pick<EventReminderRepository, 'insert'>;
   eventRepo: Pick<EventRepository, 'findById'>;
+}
+
+export interface ForceInviteDeps {
+  invitationService: InvitationService;
+  invRepo: Pick<import('../../database/repositories/invitation.repository.ts').InvitationRepository, 'setMessageInfo'>;
+  deepLinkService: import('../../services/sharing/deep-link-service.ts').DeepLinkService;
+  sendMessage: (
+    chatId: number,
+    text: string,
+    options: { parse_mode: string; reply_markup?: unknown },
+  ) => Promise<{ message_id: number }>;
 }
 
 export interface SecretaryDeps {
