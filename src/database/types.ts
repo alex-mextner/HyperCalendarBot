@@ -419,6 +419,39 @@ export interface CreateSecretaryData {
   permission: SecretaryPermission;
 }
 
+// --- Group Proposals ---
+
+export type ProposalStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+export type ProposalAction = 'create' | 'update' | 'delete';
+
+export interface CalendarProposal {
+  id: number;
+  group_chat_id: number;
+  group_chat_title: string | null;
+  proposer_id: number;
+  target_id: number;
+  action: ProposalAction;
+  payload: string; // JSON
+  summary: string;
+  status: ProposalStatus;
+  group_message_id: number | null;
+  dm_message_id: number | null;
+  expires_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProposalData {
+  group_chat_id: number;
+  group_chat_title?: string;
+  proposer_id: number;
+  target_id: number;
+  action: ProposalAction;
+  payload: string;
+  summary: string;
+  expires_at: string;
+}
+
 // --- Voice Call Reminders (sub-project 07) ---
 
 export type CallStatus =
