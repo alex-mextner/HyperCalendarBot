@@ -94,11 +94,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('get_reminders');
   });
 
-  test('includes UTC offset explicitly to prevent AI timezone guessing', () => {
+  test('includes UTC offset for timezone conversion', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toMatch(/UTC\+\d/);
-    expect(prompt).toContain('Current UTC time');
-    expect(prompt).toContain('subtract');
+  });
+
+  test('does not include current date/time (injected per-message instead)', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('Current local time');
+    expect(prompt).not.toContain('Current UTC time');
   });
 
   test('instructs to create events immediately without confirmation', () => {

@@ -82,13 +82,55 @@ describe('ChatHistoryRepository', () => {
     expect(messages[2]!.content).toBe('Response 2');
   });
 
-  test('getRecent defaults to 50 messages', () => {
-    for (let i = 0; i < 60; i++) {
+  test('getRecent defaults to 10 messages', () => {
+    for (let i = 0; i < 15; i++) {
       repo.save(USER_ID, 'user', `msg ${i}`);
     }
     const messages = repo.getRecent(USER_ID);
-    expect(messages.length).toBe(50);
-    expect(messages[0]!.content).toBe('msg 10');
+    expect(messages.length).toBe(10);
+    expect(messages[0]!.content).toBe('msg 5');
+  });
+
+  test('search returns messages matching text', () => {
+    repo.save(USER_ID, 'user', 'добавь встречу');
+    repo.save(USER_ID, 'assistant', 'встреча создана');
+    repo.save(USER_ID, 'user', 'что завтра');
+    const results = repo.search(USER_ID, { search: 'встреч' });
+    expect(results.length).toBe(2);
+  });
+
+  test('search respects limit', () => {
+    for (let i = 0; i < 20; i++) repo.save(USER_ID, 'user', `msg ${i}`);
+    const results = repo.search(USER_ID, { limit: 5 });
+    expect(results.length).toBe(5);
+  });
+
+  test('search filters by before date', () => {
+    db.exec(
+      `INSERT INTO chat_history (user_id, role, content, created_at) VALUES (${USER_ID}, 'user', 'old message', '2020-01-01 00:00:00')`,
+    );
+    repo.save(USER_ID, 'user', 'new message');
+    const results = repo.search(USER_ID, { before: '2020-01-02 00:00:00' });
+    expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('old message');
+  });
+
+  test('searchByChat returns messages for a chat filtered by search', () => {
+    const CHAT_ID = -100123;
+    repo.save(USER_ID, 'user', 'встреча завтра', CHAT_ID);
+    repo.save(USER_ID, 'user', 'погода сегодня', CHAT_ID);
+    const results = repo.searchByChat(CHAT_ID, { search: 'встреч' });
+    expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('встреча завтра');
+  });
+
+  test('searchByChat does not include DM messages', () => {
+    const CHAT_ID = -100456;
+    repo.save(USER_ID, 'user', 'dm message');
+    repo.save(USER_ID, 'user', 'group message', CHAT_ID);
+    const results = repo.searchByChat(CHAT_ID, {});
+    expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('group message');
   });
 
   test('clear removes all messages for user', () => {

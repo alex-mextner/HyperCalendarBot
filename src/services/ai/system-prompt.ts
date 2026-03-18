@@ -1,13 +1,7 @@
-import { TZDate } from '@date-fns/tz';
-import { format } from 'date-fns';
 import { formatUtcOffset } from '../../utils/telegram.ts';
 import type { AgentContext } from './types.ts';
 
 export function buildSystemPrompt(ctx: AgentContext): string {
-  const now = TZDate.tz(ctx.user.timezone);
-  const currentDateTime = format(now, 'yyyy-MM-dd HH:mm EEEE');
-  const currentHour = now.getHours();
-  const utcNow = format(new Date(), "yyyy-MM-dd'T'HH:mm:ss'Z'");
   const utcOffset = formatUtcOffset(ctx.user.timezone);
 
   const tzUpdatedAt = ctx.user.timezone_updated_at;
@@ -26,20 +20,17 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
 - Language: ${ctx.user.language}
 - Timezone: ${ctx.user.timezone} (${utcOffset})
-- Current local time: ${currentDateTime}
-- Current local hour: ${currentHour}
-- Current UTC time: ${utcNow}
 - ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 
 ## Context
+- Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as anchor for relative times like "in 1 hour" or "today". Convert to the user's local time by adding the offset (${utcOffset}).
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
-- Messages from private chats have no prefix.
+- Messages from private chats have no group prefix.
 
 ## Rules
 - ${langInstruction}
 - All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z").
-- The current UTC time is ${utcNow}. Use it as anchor for relative times like "in 1 hour" — just add the hours/minutes directly to the UTC time.
 - When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
 - Be concise. No unnecessary preamble.
 - For event creation: create immediately, do not ask for confirmation. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit.

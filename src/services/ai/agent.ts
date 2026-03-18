@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
+import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -17,6 +18,11 @@ const RETRY_DELAY_MS = 1500;
 interface MessageParam {
   role: 'user' | 'assistant';
   content: string | Anthropic.ContentBlockParam[];
+}
+
+function withTimestamp(text: string, createdAt: string): string {
+  const ts = createdAt.slice(0, 19);
+  return `[${ts}] ${text}`;
 }
 
 export interface AgentToolCallRecord {
@@ -61,15 +67,22 @@ export class CalendarBotAgent {
       let content: string | Anthropic.ContentBlockParam[];
       try {
         const parsed = JSON.parse(msg.content);
-        content = Array.isArray(parsed) ? (parsed as Anthropic.ContentBlockParam[]) : msg.content;
+        if (Array.isArray(parsed)) {
+          content = parsed as Anthropic.ContentBlockParam[];
+        } else if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
+          content = withTimestamp(formatActivityEvent(parsed as ActivityEvent), msg.created_at);
+        } else {
+          content = withTimestamp(msg.content, msg.created_at);
+        }
       } catch {
-        content = msg.content;
+        content = withTimestamp(msg.content, msg.created_at);
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
       messages.push({ role, content } as MessageParam);
     }
 
-    messages.push({ role: 'user', content: ctx.messageText });
+    const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
+    messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
 
     return { systemPrompt, messages };
   }

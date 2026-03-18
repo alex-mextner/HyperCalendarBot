@@ -235,6 +235,19 @@ export function createBot(
     })
     .use(createSceneCommandEscape(scenesSetup.storage) as never)
     .use(createCallbackFallback(scenesSetup.storage) as never)
+    .use((context, next) => {
+      const ctx = context as unknown as { text?: string; dbUser?: User; chatId?: number };
+      const text = ctx.text;
+      if (text?.startsWith('/') && ctx.dbUser && ctx.chatId) {
+        const commandName = text.split(' ')[0] ?? text;
+        const chatId = Number(ctx.chatId);
+        // Only log private chat commands (group commands have chat_id != user_id)
+        if (chatId === ctx.dbUser.telegram_id) {
+          db.chatHistory.save(ctx.dbUser.telegram_id, 'user', JSON.stringify({ kind: 'command', name: commandName }));
+        }
+      }
+      return next();
+    })
     .extend(scenesSetup.plugin)
     // Commands
     .command('start', (ctx) =>

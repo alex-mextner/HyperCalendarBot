@@ -24,7 +24,28 @@ export class ChatHistoryRepository {
       .all(chatId, limit) as ChatHistoryMessage[];
   }
 
-  getRecent(userId: number, limit = 50): ChatHistoryMessage[] {
+  searchByChat(chatId: number, params: { limit?: number; search?: string }): ChatHistoryMessage[] {
+    const { limit = 50, search } = params;
+    const conditions: string[] = ['chat_id = ?'];
+    const args: (number | string)[] = [chatId];
+
+    if (search) {
+      conditions.push('content LIKE ?');
+      args.push(`%${search}%`);
+    }
+
+    const where = conditions.join(' AND ');
+    return this.db
+      .prepare(
+        `SELECT * FROM (
+          SELECT * FROM chat_history WHERE ${where}
+          ORDER BY created_at DESC, id DESC LIMIT ?
+        ) sub ORDER BY created_at ASC, id ASC`,
+      )
+      .all(...args, limit) as ChatHistoryMessage[];
+  }
+
+  getRecent(userId: number, limit = 10): ChatHistoryMessage[] {
     return this.db
       .prepare(`
         SELECT * FROM (
@@ -35,6 +56,38 @@ export class ChatHistoryRepository {
         ) sub ORDER BY created_at ASC, id ASC
       `)
       .all(userId, limit) as ChatHistoryMessage[];
+  }
+
+  search(
+    userId: number,
+    params: { limit?: number; search?: string; before?: string; after?: string },
+  ): ChatHistoryMessage[] {
+    const { limit = 50, search, before, after } = params;
+    const conditions: string[] = ['user_id = ?'];
+    const args: (number | string)[] = [userId];
+
+    if (search) {
+      conditions.push('content LIKE ?');
+      args.push(`%${search}%`);
+    }
+    if (before) {
+      conditions.push('created_at < ?');
+      args.push(before);
+    }
+    if (after) {
+      conditions.push('created_at > ?');
+      args.push(after);
+    }
+
+    const where = conditions.join(' AND ');
+    return this.db
+      .prepare(
+        `SELECT * FROM (
+          SELECT * FROM chat_history WHERE ${where}
+          ORDER BY created_at DESC, id DESC LIMIT ?
+        ) sub ORDER BY created_at ASC, id ASC`,
+      )
+      .all(...args, limit) as ChatHistoryMessage[];
   }
 
   clear(userId: number): void {
