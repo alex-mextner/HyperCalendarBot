@@ -339,7 +339,16 @@ describe('propose-time callbacks', () => {
   });
 
   test('propose:+30 calls proposeTime with +30min offset', async () => {
-    const inv = { id: 5, invitee_id: 200, inviter_id: 100, event_id: 3, status: 'pending', proposed_time: null, message_id: 42, chat_id: 200 };
+    const inv = {
+      id: 5,
+      invitee_id: 200,
+      inviter_id: 100,
+      event_id: 3,
+      status: 'pending',
+      proposed_time: null,
+      message_id: 42,
+      chat_id: 200,
+    };
     const event = { id: 3, start_at: '2026-04-01T10:00:00Z', title: 'Party' };
     const invitationRepo = { findById: mock(() => inv) };
     const eventRepoMock = { findById: mock(() => event) };
@@ -369,7 +378,16 @@ describe('propose-time callbacks', () => {
 
   test('reschedule callback calls rescheduleFromProposal and updates event', async () => {
     const proposedTime = '2026-04-01T14:00:00Z';
-    const inv = { id: 5, invitee_id: 200, inviter_id: 100, event_id: 3, status: 'pending', proposed_time: proposedTime, message_id: 42, chat_id: 200 };
+    const inv = {
+      id: 5,
+      invitee_id: 200,
+      inviter_id: 100,
+      event_id: 3,
+      status: 'pending',
+      proposed_time: proposedTime,
+      message_id: 42,
+      chat_id: 200,
+    };
     const event = { id: 3, start_at: '2026-04-01T10:00:00Z', end_at: '2026-04-01T11:00:00Z', title: 'Party' };
     const invitationRepo = { findById: mock(() => inv) };
     const eventRepoMock = { findById: mock(() => event) };
@@ -394,13 +412,27 @@ describe('propose-time callbacks', () => {
       {} as never,
       {} as never,
       {} as never,
-      undefined, undefined, undefined, undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       invitationService as never,
       undefined,
       eventRepoMock as never,
-      undefined, undefined, undefined,
+      undefined,
+      undefined,
+      undefined,
       notifyDeps as never,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       undefined,
       invitationRepo as never,
     );
@@ -414,7 +446,16 @@ describe('propose-time callbacks', () => {
   });
 
   test('dismiss callback calls keepOriginalTime and notifies invitee', async () => {
-    const inv = { id: 5, invitee_id: 200, inviter_id: 100, event_id: 3, status: 'pending', proposed_time: '2026-04-01T14:00:00Z', message_id: 42, chat_id: 200 };
+    const inv = {
+      id: 5,
+      invitee_id: 200,
+      inviter_id: 100,
+      event_id: 3,
+      status: 'pending',
+      proposed_time: '2026-04-01T14:00:00Z',
+      message_id: 42,
+      chat_id: 200,
+    };
     const event = { id: 3, start_at: '2026-04-01T10:00:00Z', title: 'Party' };
     const invitationRepo = { findById: mock(() => inv) };
     const eventRepoMock = { findById: mock(() => event) };
@@ -435,13 +476,31 @@ describe('propose-time callbacks', () => {
     };
 
     const handler = createCallbackHandler(
-      {} as never, {} as never, {} as never, {} as never,
-      undefined, undefined, undefined, undefined,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       invitationService as never,
-      undefined, eventRepoMock as never,
-      undefined, undefined, undefined,
+      undefined,
+      eventRepoMock as never,
+      undefined,
+      undefined,
+      undefined,
       notifyDeps as never,
-      undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       undefined,
       invitationRepo as never,
     );
