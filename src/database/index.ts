@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
+import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
 import { CallLogRepository } from './repositories/call-log.repository.ts';
 import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
@@ -52,6 +53,7 @@ export class DatabaseService {
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
   readonly secretaries: SecretaryRepository;
+  readonly calendarProposals: CalendarProposalRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -86,6 +88,7 @@ export class DatabaseService {
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);
     this.secretaries = new SecretaryRepository(this.db);
+    this.calendarProposals = new CalendarProposalRepository(this.db);
   }
 
   close(): void {

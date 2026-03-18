@@ -1,6 +1,7 @@
 // src/bot/handlers/message.handler.ts
 
 import { InlineKeyboard } from 'gramio';
+import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -57,6 +58,8 @@ export interface MessageHandlerDeps {
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
   secretaryRepo?: SecretaryRepository;
+  calendarProposalRepo?: CalendarProposalRepository;
+  checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
   invitationService?: InvitationService;
   invitationRepo?: InvitationRepository;
   sharingService?: SharingService;
@@ -309,6 +312,8 @@ function buildAgentContextFactory(deps: MessageHandlerDeps) {
       editProposalRepo: deps.editProposalRepo,
       secretaryRepo: deps.secretaryRepo,
       secretaryForLine,
+      calendarProposalRepo: deps.calendarProposalRepo,
+      checkGroupMembership: deps.checkGroupMembership,
       invitationService: deps.invitationService,
       invitationRepo: deps.invitationRepo,
       sharingService: deps.sharingService,
