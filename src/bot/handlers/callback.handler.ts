@@ -13,6 +13,7 @@ import type { FeedbackRepository } from '../../database/repositories/feedback.re
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
+import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
@@ -86,6 +87,7 @@ export function createCallbackHandler(
     intentMatcher?: { reload: () => void };
     adminEditSessions?: Map<number, AdminEditSession>;
   },
+  secretaryDeps?: SecretaryDeps,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -715,6 +717,20 @@ export function createCallbackHandler(
         return;
       }
 
+      // Secretary accept/decline
+      if (data.startsWith('sec:accept:') && secretaryDeps) {
+        const id = Number(data.slice('sec:accept:'.length));
+        await handleSecretaryAccept(id, secretaryDeps);
+        await ctx.answer();
+        return;
+      }
+      if (data.startsWith('sec:decline:') && secretaryDeps) {
+        const id = Number(data.slice('sec:decline:'.length));
+        await handleSecretaryDecline(id, secretaryDeps);
+        await ctx.answer();
+        return;
+      }
+
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {
@@ -730,6 +746,58 @@ export function createCallbackHandler(
         .catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() in error handler'));
     }
   };
+}
+
+export interface SecretaryDeps {
+  secretaryRepo: Pick<SecretaryRepository, 'findById' | 'updateStatus'>;
+  userRepo: Pick<UserRepository, 'findByTelegramId'>;
+  sendMessage: (chatId: number, text: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+}
+
+function formatUserRef(user: { first_name?: string | null; username?: string | null; telegram_id: number }): string {
+  if (user.username) return `@${user.username}`;
+  if (user.first_name) return user.first_name;
+  return `User ${user.telegram_id}`;
+}
+
+export async function handleSecretaryAccept(id: number, deps: SecretaryDeps): Promise<void> {
+  const record = deps.secretaryRepo.findById(id);
+  if (!record) return;
+
+  deps.secretaryRepo.updateStatus(id, 'active');
+
+  const secretary = deps.userRepo.findByTelegramId(record.secretary_id);
+  const secretaryRef = secretary ? formatUserRef(secretary) : `User ${record.secretary_id}`;
+  await deps.sendMessage(
+    record.owner_id,
+    `Пользователь ${secretaryRef} принял приглашение и теперь является секретарём твоего календаря.`,
+  );
+
+  if (record.dm_message_id !== null) {
+    const owner = deps.userRepo.findByTelegramId(record.owner_id);
+    const ownerRef = owner ? formatUserRef(owner) : `User ${record.owner_id}`;
+    await deps.editMessage(
+      record.secretary_id,
+      record.dm_message_id,
+      `✅ Принято. Ты теперь секретарь ${ownerRef}. Напиши мне, чтобы управлять её/его календарём.`,
+    );
+  }
+}
+
+export async function handleSecretaryDecline(id: number, deps: SecretaryDeps): Promise<void> {
+  const record = deps.secretaryRepo.findById(id);
+  if (!record) return;
+
+  deps.secretaryRepo.updateStatus(id, 'declined');
+
+  const secretary = deps.userRepo.findByTelegramId(record.secretary_id);
+  const secretaryRef = secretary ? formatUserRef(secretary) : `User ${record.secretary_id}`;
+  await deps.sendMessage(record.owner_id, `${secretaryRef} отклонил приглашение секретаря.`);
+
+  if (record.dm_message_id !== null) {
+    await deps.editMessage(record.secretary_id, record.dm_message_id, 'Приглашение отклонено.');
+  }
 }
 
 async function notifyInviter(

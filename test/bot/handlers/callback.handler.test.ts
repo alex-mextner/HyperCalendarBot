@@ -1,5 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
+import {
+  createCallbackHandler,
+  handleSecretaryAccept,
+  handleSecretaryDecline,
+} from '../../../src/bot/handlers/callback.handler.ts';
 
 function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
   return {
@@ -173,4 +177,64 @@ describe('createCallbackHandler', () => {
     expect(ctx.answer).toHaveBeenCalled();
     expect(ctx.editText).toHaveBeenCalled();
   });
+});
+
+const pendingRecord = {
+  id: 5,
+  owner_id: 10,
+  secretary_id: 20,
+  permission: 'write' as const,
+  status: 'pending' as const,
+  dm_message_id: 777,
+  created_at: '',
+  updated_at: '',
+};
+
+function makeDeps(overrides: Record<string, unknown> = {}) {
+  return {
+    secretaryRepo: {
+      findById: mock(() => pendingRecord),
+      updateStatus: mock(() => true),
+      setDmMessageId: mock(() => {}),
+    },
+    userRepo: { findByTelegramId: mock(() => ({ first_name: 'Alice', username: 'alice', telegram_id: 10 })) },
+    sendMessage: mock(async () => {}),
+    editMessage: mock(async () => {}),
+    ...overrides,
+  };
+}
+
+test('sec:accept: sets status active and notifies owner', async () => {
+  const deps = makeDeps();
+  await handleSecretaryAccept(5, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'active');
+  expect(deps.sendMessage).toHaveBeenCalledWith(pendingRecord.owner_id, expect.stringContaining('принял'));
+});
+
+test('sec:accept: edits invitation message at secretary', async () => {
+  const deps = makeDeps();
+  await handleSecretaryAccept(5, deps as never);
+
+  expect(deps.editMessage).toHaveBeenCalledWith(
+    pendingRecord.secretary_id,
+    pendingRecord.dm_message_id,
+    expect.stringContaining('Принято'),
+  );
+});
+
+test('sec:accept: no-op if record not found', async () => {
+  const deps = makeDeps({
+    secretaryRepo: { findById: mock(() => null), updateStatus: mock(() => true) },
+  });
+  await expect(handleSecretaryAccept(5, deps as never)).resolves.toBeUndefined();
+  expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+test('sec:decline: sets status declined and notifies owner', async () => {
+  const deps = makeDeps();
+  await handleSecretaryDecline(5, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'declined');
+  expect(deps.sendMessage).toHaveBeenCalledWith(pendingRecord.owner_id, expect.stringContaining('отклонил'));
 });
