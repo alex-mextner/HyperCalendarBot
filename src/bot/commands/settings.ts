@@ -58,7 +58,7 @@ function buildNotificationsView(
     `Тихие часы: ${fmtQuiet(quietEnabled, quietStart, quietEnd)}`,
     '  Напоминания и звонки не беспокоят в это время.',
     `Напоминания: ${intervals.map(fmtInterval).join(', ')}`,
-    '  За сколько до события бот присылает напомининание.',
+    '  За сколько до события бот присылает напоминание.',
     '  Чтобы изменить — напишите AI: «напомни за 10 и 30 минут».',
   ].join('\n');
 
@@ -221,16 +221,14 @@ export async function handleSettingsCallback(
 
   // ─── Calls ─────────────────────────────────────────────────────────────────
 
-  if (subAction === 'toggle_calls' && callSettingsRepo) {
-    callSettingsRepo.ensureDefaults(user.telegram_id);
-    const cur = callSettingsRepo.get(user.telegram_id);
-    callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
-  }
-
   if (subAction === 'calls' || subAction === 'toggle_calls') {
     let enabled = false;
     if (callSettingsRepo) {
       callSettingsRepo.ensureDefaults(user.telegram_id);
+      if (subAction === 'toggle_calls') {
+        const cur = callSettingsRepo.get(user.telegram_id);
+        callSettingsRepo.setEnabled(user.telegram_id, !cur?.enabled);
+      }
       enabled = !!callSettingsRepo.get(user.telegram_id)?.enabled;
     }
     const { text, kb } = buildCallsView(enabled);

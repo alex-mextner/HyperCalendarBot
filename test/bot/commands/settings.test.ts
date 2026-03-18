@@ -40,6 +40,9 @@ function makePrefsService(overrides: Record<string, unknown> = {}) {
       quiet_hours_end: '07:00',
       ...overrides,
     })),
+    toggleMorningAgenda: mock(() => {}),
+    toggleEveningReview: mock(() => {}),
+    toggleQuietHours: mock(() => {}),
   };
 }
 
@@ -197,6 +200,158 @@ describe('handleSettingsCallback', () => {
     const [text] = ctx.editText.mock.calls[0] as [string];
     expect(text).toContain('Голосовые ответы');
     expect(text).toContain('❌');
+  });
+
+  test('stg:toggle_morning calls toggleMorningAgenda and re-renders', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_morning', prefsService as never);
+
+    expect(prefsService.toggleMorningAgenda).toHaveBeenCalledWith(100);
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Уведомления');
+  });
+
+  test('stg:toggle_evening calls toggleEveningReview and re-renders', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_evening', prefsService as never);
+
+    expect(prefsService.toggleEveningReview).toHaveBeenCalledWith(100);
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Уведомления');
+  });
+
+  test('stg:toggle_quiet calls toggleQuietHours and re-renders', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_quiet', prefsService as never);
+
+    expect(prefsService.toggleQuietHours).toHaveBeenCalledWith(100);
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Уведомления');
+  });
+
+  test('stg:toggle_calls flips enabled and re-renders', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const callSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ enabled: 0 })),
+      setEnabled: mock(() => {}),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'toggle_calls',
+      prefsService as never,
+      callSettingsRepo as never,
+    );
+
+    expect(callSettingsRepo.ensureDefaults).toHaveBeenCalledTimes(1);
+    expect(callSettingsRepo.setEnabled).toHaveBeenCalledWith(100, true);
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Голосовые звонки');
+  });
+
+  test('stg:cycle_visibility advances to next visibility', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const sharingSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ default_visibility: 'private', inline_mode_enabled: 0, allow_invitations: 1 })),
+      update: mock(() => {}),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'cycle_visibility',
+      prefsService as never,
+      undefined,
+      sharingSettingsRepo as never,
+    );
+
+    expect(sharingSettingsRepo.update).toHaveBeenCalledWith(100, { default_visibility: 'free_busy' });
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Приватность');
+  });
+
+  test('stg:toggle_inline flips inline_mode_enabled', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const sharingSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ default_visibility: 'private', inline_mode_enabled: 1, allow_invitations: 1 })),
+      update: mock(() => {}),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'toggle_inline',
+      prefsService as never,
+      undefined,
+      sharingSettingsRepo as never,
+    );
+
+    expect(sharingSettingsRepo.update).toHaveBeenCalledWith(100, { inline_mode_enabled: 0 });
+  });
+
+  test('stg:toggle_invitations flips allow_invitations', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const sharingSettingsRepo = {
+      ensureDefaults: mock(() => {}),
+      get: mock(() => ({ default_visibility: 'private', inline_mode_enabled: 0, allow_invitations: 1 })),
+      update: mock(() => {}),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'toggle_invitations',
+      prefsService as never,
+      undefined,
+      sharingSettingsRepo as never,
+    );
+
+    expect(sharingSettingsRepo.update).toHaveBeenCalledWith(100, { allow_invitations: 0 });
+  });
+
+  test('stg:toggle_voice flips voice_response_enabled', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefsService = makePrefsService();
+    const userRepo = {
+      update: mock(() => {}),
+      findByTelegramId: mock(() => ({ ...makeUser(), voice_response_enabled: 0 })),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser({ voice_response_enabled: 1 }) as never,
+      'toggle_voice',
+      prefsService as never,
+      undefined,
+      undefined,
+      userRepo as never,
+    );
+
+    expect(userRepo.update).toHaveBeenCalledWith(100, { voice_response_enabled: 0 });
+    const [text] = ctx.editText.mock.calls[0] as [string];
+    expect(text).toContain('Голосовые ответы');
   });
 
   test('unknown subaction just answers', async () => {
