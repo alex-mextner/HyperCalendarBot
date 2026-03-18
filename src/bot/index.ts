@@ -1,6 +1,6 @@
 // src/bot/index.ts
-import { Bot } from 'gramio';
-import { RATE_LIMIT, t } from '../config/constants.ts';
+import { Bot, InlineKeyboard } from 'gramio';
+import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
@@ -151,6 +151,7 @@ export function createBot(
   const workflowSessions = new Map<number, import('./pipeline/intent-matcher-layer.ts').WorkflowSession>();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
   const adminReplySession = new Map<number, { threadId: number; userId: number }>();
+  const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
 
   // Load approved intents into matcher on startup
   intentMatcher.load(intentRepo.getApproved());
@@ -391,8 +392,28 @@ export function createBot(
         googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
         {
           userRepo: db.users,
-          sendMessage: async (chatId: number, text: string, options: { parse_mode: string }) => {
-            await bot.api.sendMessage({ chat_id: chatId, text, parse_mode: options.parse_mode });
+          sendMessage: async (
+            chatId: number,
+            text: string,
+            options: { parse_mode: string; reply_markup?: unknown },
+          ) => {
+            await bot.api.sendMessage({
+              chat_id: chatId,
+              text,
+              parse_mode: options.parse_mode,
+              ...(options.reply_markup ? { reply_markup: options.reply_markup } : {}),
+            });
+          },
+          editMessage: async (chatId: number, messageId: number, text: string, markup?: unknown) => {
+            await bot.api
+              .editMessageText({
+                chat_id: chatId,
+                message_id: messageId,
+                text,
+                parse_mode: 'HTML',
+                ...(markup ? { reply_markup: markup } : {}),
+              })
+              .catch(() => {});
           },
         },
         scenesSetup.scenes.onboardingScene,
@@ -434,6 +455,8 @@ export function createBot(
             await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
           },
         },
+        proposeTimeSessions,
+        db.invitations,
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
@@ -560,6 +583,34 @@ export function createBot(
         aiBaseUrl: aiConfig.baseUrl,
         aiApiKey: aiConfig.apiKey,
         sendMessageToUser: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+        proposeTimeSessions,
+        editMessage: async (chatId: number, messageId: number, text: string) => {
+          await bot.api
+            .editMessageText({ chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' })
+            .catch(() => {});
+        },
+        notifyInviterProposal: async (
+          invitationId: number,
+          inviteeUser: User,
+          formattedTime: string,
+          eventTitle: string,
+        ) => {
+          const inv = db.invitations.findById(invitationId);
+          if (!inv) return;
+          const inviter = db.users.findByTelegramId(inv.inviter_id);
+          if (!inviter) return;
+          const inviterLang = (inviter.language ?? 'en') as 'en' | 'ru';
+          const keyboard = new InlineKeyboard()
+            .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitationId}`)
+            .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitationId}`);
+          const name = inviteeUser.first_name ?? inviteeUser.username ?? `#${inviteeUser.telegram_id}`;
+          await bot.api.sendMessage({
+            chat_id: inv.inviter_id,
+            text: t(inviterLang).invite_propose_notify(name, eventTitle, formattedTime),
+            parse_mode: 'HTML',
+            reply_markup: keyboard,
+          });
+        },
       })(ctx as unknown as BotCommandContext),
     )
     // Error handler
