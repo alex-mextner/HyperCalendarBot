@@ -1,6 +1,7 @@
 // src/bot/scenes/import.scene.ts
 import { Scene } from '@gramio/scenes';
 import type { EventService } from '../../services/event/event-service.ts';
+import { ruPlural } from '../../services/event/formatters.ts';
 import { parseIcs } from '../../services/ics/parser.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
@@ -62,7 +63,9 @@ export function createImportScene(eventService: EventService, botToken: string) 
       }
 
       await context.send(
-        lang === 'ru' ? `\u2705 Импортировано ${imported} событий.` : `\u2705 Imported ${imported} events.`,
+        lang === 'ru'
+          ? `✅ Импортировано ${imported} ${ruPlural(imported, 'событие', 'события', 'событий')}.`
+          : `✅ Imported ${imported} ${imported === 1 ? 'event' : 'events'}.`,
       );
     } catch {
       await context.send(lang === 'ru' ? 'Не удалось прочитать файл.' : 'Failed to read file.');

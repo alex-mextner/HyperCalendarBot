@@ -171,6 +171,20 @@ For users who haven't started the bot (can't receive bot API messages), delivery
 - Run `biome` directly (from `node_modules/.bin`), not via `bunx biome`.
 - **Zero warnings policy**: lint warnings are NOT acceptable. Fix before committing.
 
+## Russian Pluralization
+
+Use `ruPlural(n, one, few, many)` from `src/services/event/formatters.ts` for all Russian word forms with numbers.
+
+```ts
+import { ruPlural } from '../../services/event/formatters.ts';
+
+`${n} ${ruPlural(n, 'событие', 'события', 'событий')}`
+// 1 → событие, 2-4 → события, 5+ → событий
+// Teens (11-19) always → many. Works correctly for 21, 22, etc.
+```
+
+Never hardcode a single word form next to a variable number.
+
 ## Coding Guidelines
 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.

@@ -8,6 +8,7 @@ import {
   formatInvitation,
   formatRecurrenceHuman,
   formatWeekAgenda,
+  ruPlural,
 } from '../../../src/services/event/formatters.ts';
 import type { HolidayEntry } from '../../../src/services/holiday/holiday-service.ts';
 
@@ -367,5 +368,76 @@ describe('formatEventListItem', () => {
     const result = formatEventListItem(event, 'UTC', 0);
     expect(result).toContain('&lt;b&gt;Bold&lt;/b&gt;');
     expect(result).not.toContain('<b>');
+  });
+});
+
+describe('ruPlural', () => {
+  const cases: [number, string][] = [
+    // 1 → one
+    [1, 'one'],
+    [21, 'one'],
+    [31, 'one'],
+    [101, 'one'],
+    [1001, 'one'],
+    // 2-4 → few
+    [2, 'few'],
+    [3, 'few'],
+    [4, 'few'],
+    [22, 'few'],
+    [23, 'few'],
+    [24, 'few'],
+    [32, 'few'],
+    [102, 'few'],
+    [1002, 'few'],
+    // 5-9 → many
+    [5, 'many'],
+    [6, 'many'],
+    [7, 'many'],
+    [8, 'many'],
+    [9, 'many'],
+    [25, 'many'],
+    [26, 'many'],
+    [99, 'many'],
+    [100, 'many'],
+    [105, 'many'],
+    // 0 → many
+    [0, 'many'],
+    // teens 11-19 → many (exception: overrides 1/2-4 rule)
+    [11, 'many'],
+    [12, 'many'],
+    [13, 'many'],
+    [14, 'many'],
+    [15, 'many'],
+    [16, 'many'],
+    [17, 'many'],
+    [18, 'many'],
+    [19, 'many'],
+    // teens in hundreds → many
+    [111, 'many'],
+    [112, 'many'],
+    [113, 'many'],
+    [114, 'many'],
+    [119, 'many'],
+    [211, 'many'],
+    [312, 'many'],
+    [1011, 'many'],
+    [1014, 'many'],
+    // boundary: 20 → many
+    [20, 'many'],
+  ];
+
+  for (const [n, expected] of cases) {
+    test(`${n} → ${expected}`, () => {
+      expect(ruPlural(n, 'one', 'few', 'many')).toBe(expected);
+    });
+  }
+
+  test('returns correct Russian word forms for "событие"', () => {
+    expect(ruPlural(1, 'событие', 'события', 'событий')).toBe('событие');
+    expect(ruPlural(2, 'событие', 'события', 'событий')).toBe('события');
+    expect(ruPlural(5, 'событие', 'события', 'событий')).toBe('событий');
+    expect(ruPlural(11, 'событие', 'события', 'событий')).toBe('событий');
+    expect(ruPlural(21, 'событие', 'события', 'событий')).toBe('событие');
+    expect(ruPlural(0, 'событие', 'события', 'событий')).toBe('событий');
   });
 });

@@ -213,7 +213,7 @@ export function formatRecurrenceHuman(rrule: string, lang: string): string {
   return base;
 }
 
-function ruPlural(n: number, one: string, few: string, many: string): string {
+export function ruPlural(n: number, one: string, few: string, many: string): string {
   const mod10 = n % 10;
   const mod100 = n % 100;
   if (mod100 >= 11 && mod100 <= 19) return many;
