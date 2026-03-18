@@ -129,6 +129,54 @@ describe('createMessageHandler', () => {
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
     });
 
+    test('routes group message starting with "Календарь,"', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'Календарь, что завтра?',
+          chat: { type: 'group', title: 'Chat' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('routes group message starting with typo "Каледарь,"', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'Каледарь, добавь встречу',
+          chat: { type: 'group', title: 'Chat' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('routes group message starting with "Calendar,"', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'Calendar, show tomorrow',
+          chat: { type: 'group', title: 'Chat' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does NOT route group message starting with short irrelevant word', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'кал хватит спорить',
+          chat: { type: 'group', title: 'Chat' },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
     test('fixes isReplyToBot — only matches actual bot ID, not any reply', async () => {
       const deps = makeDeps({ botId: 999 });
       const handler = createMessageHandler(deps as never);

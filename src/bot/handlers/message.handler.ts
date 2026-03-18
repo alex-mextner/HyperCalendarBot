@@ -180,8 +180,37 @@ const CALENDAR_KEYWORDS = [
 
 const KEYWORD_PATTERN = new RegExp(`(?:^|\\s|[,.!?])(?:${CALENDAR_KEYWORDS.join('|')})(?:\\s|[,.!?]|$)`, 'i');
 
+function levenshtein(a: string, b: string): number {
+  const m = a.length;
+  const n = b.length;
+  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+const ADDRESS_TARGETS = ['календарь', 'calendar'];
+const ADDRESS_MAX_DISTANCE = 2;
+
+// Exact "календарь"/"calendar" words are already in KEYWORD_PATTERN.
+// This function handles typos only (e.g. "Каледарь,", "Calender,").
+function startsWithCalendarAddress(text: string): boolean {
+  const firstWord = text
+    .trim()
+    .split(/[\s,!.?:]+/)[0]
+    .toLowerCase();
+  if (firstWord.length < 5) return false;
+  return ADDRESS_TARGETS.some((target) => levenshtein(firstWord, target) <= ADDRESS_MAX_DISTANCE);
+}
+
 function isGroupRelevant(text: string, botUsername: string): boolean {
   if (botUsername && text.includes(`@${botUsername}`)) return true;
+  if (startsWithCalendarAddress(text)) return true;
   return KEYWORD_PATTERN.test(text);
 }
 
