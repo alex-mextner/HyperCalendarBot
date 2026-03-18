@@ -193,4 +193,20 @@ describe('production migrations', () => {
       expect(cols.some((c) => c.name === 'pin_hint_shown')).toBe(true);
     });
   });
+
+  test('calendar_secretaries table exists', () => {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_secretaries'").get();
+    expect(row).toBeTruthy();
+  });
+
+  test('calendar_secretaries has required columns', () => {
+    const cols = db.prepare('PRAGMA table_info(calendar_secretaries)').all() as { name: string }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toContain('owner_id');
+    expect(names).toContain('secretary_id');
+    expect(names).toContain('permission');
+    expect(names).toContain('status');
+    expect(names).toContain('created_at');
+    expect(names).toContain('updated_at');
+  });
 });

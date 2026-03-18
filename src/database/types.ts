@@ -397,6 +397,28 @@ export interface CreateEditProposalData {
   reason?: string;
 }
 
+// --- Secretary Access ---
+
+export type SecretaryStatus = 'pending' | 'active' | 'revoked' | 'declined' | 'expired';
+export type SecretaryPermission = 'read' | 'write';
+
+export interface CalendarSecretary {
+  id: number;
+  owner_id: number;
+  secretary_id: number;
+  permission: SecretaryPermission;
+  status: SecretaryStatus;
+  dm_message_id: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSecretaryData {
+  owner_id: number;
+  secretary_id: number;
+  permission: SecretaryPermission;
+}
+
 // --- Voice Call Reminders (sub-project 07) ---
 
 export type CallStatus =

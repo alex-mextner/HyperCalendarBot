@@ -578,4 +578,26 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '022_calendar_secretaries',
+    up(db) {
+      db.exec(`
+        CREATE TABLE calendar_secretaries (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          owner_id       INTEGER NOT NULL,
+          secretary_id   INTEGER NOT NULL,
+          permission     TEXT NOT NULL DEFAULT 'read',
+          status         TEXT NOT NULL DEFAULT 'pending',
+          dm_message_id  INTEGER,
+          created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(owner_id, secretary_id),
+          FOREIGN KEY (owner_id)     REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (secretary_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_secretaries_owner     ON calendar_secretaries(owner_id);
+        CREATE INDEX idx_secretaries_secretary ON calendar_secretaries(secretary_id, status);
+      `);
+    },
+  },
 ];
