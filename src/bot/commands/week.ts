@@ -8,7 +8,7 @@ import { formatWeekAgenda } from '../../services/event/formatters.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { renderWeekImage } from '../../services/image/render-week.ts';
-import { getWeekRangeUtc } from '../../utils/date.ts';
+import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -26,12 +26,7 @@ export async function handleWeek(
   let holidaysByDate: Map<string, HolidayEntry[]> | undefined;
   if (holidayService) {
     holidaysByDate = new Map();
-    // Use local calendar dates so holiday keys match the formatter's day grouping.
-    const calendarStart = new TZDate(new Date(start), user.timezone).toISOString().slice(0, 10);
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(`${calendarStart}T12:00:00Z`);
-      d.setUTCDate(d.getUTCDate() + i);
-      const dayKey = d.toISOString().slice(0, 10);
+    for (const dayKey of localCalendarWeekDays(start, user.timezone)) {
       const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
       if (holidays.length > 0) {
         holidaysByDate.set(dayKey, holidays);

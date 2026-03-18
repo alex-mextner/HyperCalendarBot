@@ -8,6 +8,7 @@ import {
   formatTime,
   formatTimeRange,
   formatTimeWithTimezones,
+  localCalendarWeekDays,
 } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
@@ -55,16 +56,10 @@ export function formatWeekAgenda(
     byDay.set(dayKey, arr);
   }
 
-  // Derive the local calendar start date (e.g. "2026-03-16") from the UTC week start.
-  const calendarStart = new TZDate(new Date(startDateIso), timezone).toISOString().slice(0, 10);
+  const days = localCalendarWeekDays(startDateIso, timezone);
   const lines: string[] = [];
 
-  for (let i = 0; i < 7; i++) {
-    // Build a noon-UTC Date for calendar day i so formatDateShort stays on the right date
-    // for any UTC offset (covers UTC-12 to UTC+14).
-    const calDate = new Date(`${calendarStart}T12:00:00Z`);
-    calDate.setUTCDate(calDate.getUTCDate() + i);
-    const dayKey = calDate.toISOString().slice(0, 10);
+  for (const dayKey of days) {
     const dayLabel = formatDateShort(`${dayKey}T12:00:00Z`, timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
     const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
