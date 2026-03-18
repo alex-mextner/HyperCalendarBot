@@ -774,4 +774,33 @@ export const toolDefinitions: ToolDefinition[] = [
       required: ['target_telegram_id', 'action', 'summary'],
     },
   },
+  {
+    name: 'get_history',
+    description:
+      'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Max number of entries to return (default 50)',
+        },
+        search: {
+          type: 'string',
+          description: 'Filter entries containing this text',
+        },
+        before: {
+          type: 'string',
+          description:
+            'Return entries before this datetime. Accepts ISO 8601 (e.g. "2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00") or date only ("2026-03-18"). Ignored in group chats.',
+        },
+        after: {
+          type: 'string',
+          description:
+            'Return entries after this datetime. Accepts ISO 8601 (e.g. "2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00") or date only ("2026-03-18"). Ignored in group chats.',
+        },
+      },
+      required: [],
+    },
+  },
 ];

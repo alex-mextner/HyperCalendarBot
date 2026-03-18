@@ -456,6 +456,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           deps.intentExecutor,
           deps.intentToolExecutor,
           workflowSessions,
+          deps.chatHistory,
         )
       : undefined;
 
@@ -576,6 +577,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             (toolName, input) =>
               executeTool(agentContextBuilder(user, Number(ctx.chatId!), messageText), toolName, input),
             workflowSessions,
+            deps.chatHistory,
           )
         : undefined);
 

@@ -68,21 +68,78 @@ describe('CalendarBotAgent', () => {
     expect(systemPrompt).toContain('calendar assistant');
     expect(messages.length).toBe(1);
     expect(messages[0]!.role).toBe('user');
-    expect(messages[0]!.content).toBe('What do I have today?');
+    expect(messages[0]!.content as string).toContain('What do I have today?');
   });
 
   test('buildMessages includes chat history', () => {
     ctx.chatHistory.save(USER_ID, 'user', 'Previous question');
-    ctx.chatHistory.save(USER_ID, 'assistant', 'Previous answer');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Previous answer' }]));
 
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
     // 2 history + 1 current
     expect(messages.length).toBe(3);
-    expect(messages[0]!.content).toBe('Previous question');
-    expect(messages[1]!.content).toBe('Previous answer');
-    expect(messages[2]!.content).toBe('What do I have today?');
+    expect(messages[0]!.content as string).toContain('Previous question');
+    expect(messages[2]!.content as string).toContain('What do I have today?');
+  });
+
+  test('buildMessages prefixes user text messages with UTC timestamp', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    expect(typeof messages[0]!.content).toBe('string');
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toContain('Hello');
+  });
+
+  test('buildMessages prefixes current message with UTC timestamp', () => {
+    const agent = new CalendarBotAgent(config, sender);
+    const { messages } = agent.buildMessages(ctx, []);
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toContain('What do I have today?');
+  });
+
+  test('buildMessages formats button activity event as readable text', () => {
+    const btnEvent = JSON.stringify({ kind: 'button', label: 'Удалить', detail: 'Спортзал 17 мар' });
+    ctx.chatHistory.save(USER_ID, 'user', btnEvent);
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    const content = messages[0]!.content as string;
+    expect(content).toContain('[Button: "Удалить"]');
+    expect(content).toContain('Спортзал 17 мар');
+  });
+
+  test('buildMessages formats command activity event as readable text', () => {
+    const cmdEvent = JSON.stringify({ kind: 'command', name: '/today' });
+    ctx.chatHistory.save(USER_ID, 'user', cmdEvent);
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    const content = messages[0]!.content as string;
+    expect(content).toContain('[Command: /today]');
+  });
+
+  test('buildMessages formats bot reply activity event as readable text', () => {
+    const botEvent = JSON.stringify({ kind: 'bot', text: 'Сегодня 3 события' });
+    ctx.chatHistory.save(USER_ID, 'assistant', botEvent);
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    const content = messages[0]!.content as string;
+    expect(content).toContain('[Bot: Сегодня 3 события]');
+  });
+
+  test('buildMessages does not add timestamp to ContentBlockParam arrays', () => {
+    const blocks = JSON.stringify([{ type: 'text', text: 'AI response' }]);
+    ctx.chatHistory.save(USER_ID, 'assistant', blocks);
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    // ContentBlock array should not be a string
+    expect(Array.isArray(messages[0]!.content)).toBe(true);
   });
 
   test('buildMessages maps tool role to user for Anthropic API', () => {

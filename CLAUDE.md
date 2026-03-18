@@ -154,8 +154,9 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
-- **Commit often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
+- **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
+- **Before every commit**: run `codex exec review --uncommitted` and address any issues found.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
 ## Debugging
@@ -170,3 +171,4 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - Specs: `docs/specs/` — design documents and feature specifications
 - Plans: `docs/plans/` — implementation plans with task breakdowns
 - Original specs (sub-projects 00-08): `docs/specs/00-08`
+- Do NOT use `docs/superpowers/` — all docs go directly in `docs/specs/` or `docs/plans/`

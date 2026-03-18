@@ -11,6 +11,7 @@ import {
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
 import { handleSendFeedback } from './tool-handlers/feedback.ts';
+import { handleGetHistory } from './tool-handlers/history.ts';
 import {
   handleAddContact,
   handleAskUser,
@@ -225,6 +226,9 @@ export async function executeTool(
 
       case 'propose_calendar_change':
         return handleProposeCalendarChange(ctx, input as ProposeInput);
+
+      case 'get_history':
+        return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

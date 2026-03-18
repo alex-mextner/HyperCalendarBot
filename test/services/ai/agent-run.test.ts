@@ -296,7 +296,7 @@ describe('CalendarBotAgent.run()', () => {
     const { messages } = agent.buildMessages(ctx, history);
 
     expect(typeof messages[0]!.content).toBe('string');
-    expect(messages[0]!.content).toBe('plain text message');
+    expect(messages[0]!.content as string).toContain('plain text message');
   });
 
   test('buildMessages handles non-array JSON as plain string', () => {
@@ -328,9 +328,9 @@ describe('CalendarBotAgent.run()', () => {
 
     // Should have 2 group history + 1 current message = 3
     expect(messages.length).toBe(3);
-    expect(messages[0]!.content).toBe('group message');
-    expect(messages[1]!.content).toBe('group reply');
-    expect(messages[2]!.content).toBe('Show my events today');
+    expect(messages[0]!.content as string).toContain('group message');
+    expect(messages[1]!.content as string).toContain('group reply');
+    expect(messages[2]!.content as string).toContain('Show my events today');
   });
 
   test('[SKIP] response in group discards message instead of finalizing', async () => {
