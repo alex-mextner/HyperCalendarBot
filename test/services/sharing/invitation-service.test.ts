@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations';
 import { EventRepository } from '../../../src/database/repositories/event.repository';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository';
+import { ParticipantRepository } from '../../../src/database/repositories/participant.repository';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository';
 import { UserRepository } from '../../../src/database/repositories/user.repository';
 import { runMigrations } from '../../../src/database/schema';
@@ -185,6 +186,19 @@ describe('InvitationService', () => {
       const updated = invRepo.findById(inv.id)!;
       expect(updated.proposed_time).toBeNull();
       expect(updated.status).toBe('accepted');
+    });
+
+    test('rescheduleFromProposal adds invitee to event_participants', () => {
+      const { db, invRepo, eventRepo, settingsRepo, event } = setup();
+      const participantRepo = new ParticipantRepository(db);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      expect(result.success).toBe(true);
+      const participant = participantRepo.findByEventAndUser(event.id, INVITEE);
+      expect(participant).not.toBeNull();
+      expect(participant!.status).toBe('accepted');
     });
 
     test('rescheduleFromProposal rejects non-inviter', () => {

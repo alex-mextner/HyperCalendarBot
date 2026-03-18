@@ -114,6 +114,14 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot update status — already changed' };
     }
+    if (this.participantRepo) {
+      const existing = this.participantRepo.findByEventAndUser(invitation.event_id, invitation.invitee_id);
+      if (existing) {
+        this.participantRepo.updateStatus(invitation.event_id, invitation.invitee_id, 'accepted');
+      } else {
+        this.participantRepo.add(invitation.event_id, invitation.invitee_id, 'accepted');
+      }
+    }
     return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
   }
 
