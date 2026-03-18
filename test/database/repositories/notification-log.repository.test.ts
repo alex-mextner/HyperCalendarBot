@@ -90,4 +90,50 @@ describe('NotificationLogRepository', () => {
     expect(row!.error).toBe('Bot blocked');
     expect(row!.attempts).toBe(3);
   });
+
+  test('cleanup deletes rows older than N days and returns count', () => {
+    repo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:old1',
+      channel: 'telegram_text',
+      payload: '{}',
+    });
+    repo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:old2',
+      channel: 'telegram_text',
+      payload: '{}',
+    });
+    repo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:new',
+      channel: 'telegram_text',
+      payload: '{}',
+    });
+    // Manually age two rows to 31 days ago
+    db.run(
+      "UPDATE notification_log SET created_at = datetime('now', '-31 days') WHERE reference_key IN ('er:old1', 'er:old2')",
+    );
+
+    const deleted = repo.cleanup(30);
+    expect(deleted).toBe(2);
+
+    const remaining = db.prepare('SELECT COUNT(*) as n FROM notification_log').get() as { n: number };
+    expect(remaining.n).toBe(1);
+  });
+
+  test('cleanup returns 0 when nothing is old enough', () => {
+    repo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:recent',
+      channel: 'telegram_text',
+      payload: '{}',
+    });
+    const deleted = repo.cleanup(30);
+    expect(deleted).toBe(0);
+  });
 });

@@ -62,4 +62,11 @@ export class NotificationLogRepository {
   updateAttempts(id: number, error: string, attempts: number): void {
     this.db.prepare('UPDATE notification_log SET error = ?, attempts = ? WHERE id = ?').run(error, attempts, id);
   }
+
+  cleanup(olderThanDays: number): number {
+    const result = this.db
+      .prepare(`DELETE FROM notification_log WHERE created_at < datetime('now', '-' || ? || ' days')`)
+      .run(olderThanDays);
+    return Number(result.changes);
+  }
 }

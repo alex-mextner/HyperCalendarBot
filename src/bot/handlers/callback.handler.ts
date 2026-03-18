@@ -10,6 +10,7 @@ import type { CallSettingsRepository } from '../../database/repositories/call-se
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
@@ -42,6 +43,7 @@ import { handleSettingsCallback } from '../commands/settings.ts';
 import { editFieldKeyboard, eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
+import { handleSnoozeCallback } from './snooze-callback.ts';
 
 /**
  * Route all inline keyboard callbacks.
@@ -90,6 +92,7 @@ export function createCallbackHandler(
   },
   secretaryDeps?: SecretaryDeps,
   proposalDeps?: ProposalDeps,
+  snoozeDeps?: SnoozeDeps,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -755,6 +758,21 @@ export function createCallbackHandler(
         return;
       }
 
+      // Snooze reminder — callback data: "snooze:{minutes}:{eventId}"
+      if (action === 'snooze' && snoozeDeps) {
+        const minutes = Number(parts[1]);
+        const eventId = Number(parts[2]);
+        await handleSnoozeCallback(
+          ctx,
+          user.telegram_id,
+          eventId,
+          minutes,
+          snoozeDeps.reminderRepo,
+          snoozeDeps.eventRepo,
+        );
+        return;
+      }
+
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {
@@ -770,6 +788,11 @@ export function createCallbackHandler(
         .catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() in error handler'));
     }
   };
+}
+
+export interface SnoozeDeps {
+  reminderRepo: Pick<EventReminderRepository, 'insert'>;
+  eventRepo: Pick<EventRepository, 'findById'>;
 }
 
 export interface SecretaryDeps {

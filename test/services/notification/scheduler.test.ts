@@ -160,6 +160,82 @@ describe('NotificationScheduler', () => {
     expect(callEnqueued.length).toBe(0);
   });
 
+  test('batches multiple reminders at same time for same user into one job', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '2026-03-15T10:00:00Z')");
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (2, 42, 'Звонок', '2026-03-15T10:00:00Z')");
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:30:00Z', 30, '30 minutes')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (2, 42, '2026-03-15T09:30:00Z', 30, '30 minutes')",
+    );
+    await scheduler.tick(new Date('2026-03-15T09:30:30Z'));
+    // Two reminders at same time for same user → one batch job enqueued
+    expect(enqueued.length).toBe(1);
+    expect(enqueued[0]!.type).toBe('event_reminder_batch');
+  });
+
+  test('does not batch reminders at different times', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '2026-03-15T10:00:00Z')");
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (2, 42, 'Звонок', '2026-03-15T11:00:00Z')");
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:45:00Z', 15, '15 minutes')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (2, 42, '2026-03-15T10:45:00Z', 15, '15 minutes')",
+    );
+    // Only reminders within the current 1-min window are due, so only first one fires
+    await scheduler.tick(new Date('2026-03-15T09:45:30Z'));
+    expect(enqueued.length).toBe(1);
+    expect(enqueued[0]!.type).toBe('event_reminder');
+  });
+
+  test('tick runs cleanup on Sundays at 03:00 UTC', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    const logRepo = new NotificationLogRepository(db);
+    const cleanupSpy = { called: false };
+    const origCleanup = logRepo.cleanup.bind(logRepo);
+    logRepo.cleanup = (days: number) => {
+      cleanupSpy.called = true;
+      return origCleanup(days);
+    };
+    const cleanupScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock(() => {}),
+    });
+    // Sunday 2026-03-15 at 03:00 UTC
+    await cleanupScheduler.tick(new Date('2026-03-15T03:00:30Z'));
+    expect(cleanupSpy.called).toBe(true);
+  });
+
+  test('tick does not run cleanup on non-Sunday', async () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (42)');
+    const logRepo = new NotificationLogRepository(db);
+    const cleanupSpy = { called: false };
+    const origCleanup = logRepo.cleanup.bind(logRepo);
+    logRepo.cleanup = (days: number) => {
+      cleanupSpy.called = true;
+      return origCleanup(days);
+    };
+    const cleanupScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock(() => {}),
+    });
+    // Monday 2026-03-16 at 03:00 UTC (day=1 not Sunday=0)
+    await cleanupScheduler.tick(new Date('2026-03-16T03:00:30Z'));
+    expect(cleanupSpy.called).toBe(false);
+  });
+
   test('enqueues voice call outside call-specific quiet hours', async () => {
     db.run('INSERT INTO users (telegram_id) VALUES (42)');
     db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Call', '2026-03-15T15:00:00Z')");

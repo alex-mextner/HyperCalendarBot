@@ -47,6 +47,54 @@ describe('processNotification', () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
+  test('sends with keyboard when buildReminderKeyboard provided and event_id present', async () => {
+    const logId = logRepo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:10',
+      channel: 'telegram_text',
+      payload: '{"event_id":7,"event_title":"Call","interval_label":"15 min"}',
+    })!;
+
+    const sendMessage = mock(() => Promise.resolve());
+    const sendWithKeyboard = mock(() => Promise.resolve());
+
+    await processNotification(
+      { logId, telegramId: 42, type: 'event_reminder', payload: '{}' },
+      logRepo,
+      sendMessage,
+      sendWithKeyboard,
+    );
+
+    expect(sendWithKeyboard).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
+    const row = logRepo.getById(logId);
+    expect(row!.status).toBe('sent');
+  });
+
+  test('falls back to sendMessage when event_id missing from payload', async () => {
+    const logId = logRepo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:11',
+      channel: 'telegram_text',
+      payload: '{"event_title":"NoId","interval_label":"15 min"}',
+    })!;
+
+    const sendMessage = mock(() => Promise.resolve());
+    const sendWithKeyboard = mock(() => Promise.resolve());
+
+    await processNotification(
+      { logId, telegramId: 42, type: 'event_reminder', payload: '{}' },
+      logRepo,
+      sendMessage,
+      sendWithKeyboard,
+    );
+
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendWithKeyboard).not.toHaveBeenCalled();
+  });
+
   test('skips already-sent notifications', async () => {
     const logId = logRepo.insert({
       user_id: 42,
