@@ -31,7 +31,6 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
-import { handleGroupAgenda } from './commands/agenda.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -50,7 +49,6 @@ import { handleShare } from './commands/share.ts';
 import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
-import { handleUnshare } from './commands/unshare.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
@@ -303,25 +301,29 @@ export function createBot(
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) =>
-      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('week', (ctx) =>
-      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
-    .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService))
+    .command('month', (ctx) =>
+      handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService, db.groupChats),
+    )
     .command('add', (ctx) =>
-      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
+      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene, db.groupChats),
     )
-    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
-    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
-    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
-    .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService, holidayService))
-    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
+    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
+    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
+    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService, db.groupChats))
+    .command('free', (ctx) =>
+      handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
+    )
+    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext, db.groupChats))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
-    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
+    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx as unknown as BotCommandContext, {
@@ -329,6 +331,7 @@ export function createBot(
         eventService,
         invRepo: db.invitations,
         deepLinkService,
+        groupRepo: db.groupChats,
         sendMessage: async (chatId, text, options) => {
           const sent = await bot.api.sendMessage({
             chat_id: chatId,
@@ -344,10 +347,8 @@ export function createBot(
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )
     .command('share', (ctx) =>
-      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
+      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService, db.groupChats),
     )
-    .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats, eventService))
-    .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {
       const calCtx = ctx as unknown as BotCommandContext;
@@ -404,7 +405,6 @@ export function createBot(
         googleDeps?.onCalendarsDone,
         renderService,
         invitationService,
-        db.groupChats,
         db.events,
         db.chatHistory,
         async (userId: number, chatId: number, text: string) => {
@@ -514,6 +514,7 @@ export function createBot(
           : undefined,
         db.contacts,
         scenesSetup.scenes.timezoneScene,
+        db.groupChats,
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)

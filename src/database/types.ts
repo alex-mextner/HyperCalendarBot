@@ -256,6 +256,8 @@ export interface GroupChat {
   added_at: string;
   is_active: number;
   pin_hint_shown: number;
+  timezone: string | null;
+  country: string | null;
 }
 
 export interface GroupSharedEvent {

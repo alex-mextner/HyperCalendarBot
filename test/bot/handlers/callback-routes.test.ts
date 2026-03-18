@@ -37,7 +37,6 @@ function makeHandler(
     onCalendarsDone?: unknown;
     renderService?: unknown;
     invitationService?: unknown;
-    groupChatRepo?: unknown;
     eventRepo?: unknown;
   } = {},
 ) {
@@ -51,7 +50,6 @@ function makeHandler(
     overrides.onCalendarsDone as never,
     overrides.renderService as never,
     overrides.invitationService as never,
-    overrides.groupChatRepo as never,
     overrides.eventRepo as never,
   );
 }
@@ -465,35 +463,6 @@ describe('IMG_WEEKLY callback', () => {
     const ctx = makeCtx('imw:2026-03-09');
     const handler = makeHandler();
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalled();
-  });
-});
-
-// ── GROUP_AGENDA ──
-
-describe('GROUP_AGENDA callback', () => {
-  test('delegates to handleGroupAgendaCallback', async () => {
-    const groupChatRepo = {
-      getSharedEventsPaginated: mock(() => ({ items: [], total: 0 })),
-    };
-    const eventRepo = {
-      findById: mock(() => null),
-    };
-    const ctx = makeCtx('grp_ag:0', 'en', {
-      chat: { type: 'group', id: -999 },
-    });
-    const handler = makeHandler({ groupChatRepo, eventRepo });
-    await handler(ctx as never);
-    expect(groupChatRepo.getSharedEventsPaginated).toHaveBeenCalled();
-  });
-
-  test('without groupChatRepo skips GROUP_AGENDA', async () => {
-    const ctx = makeCtx('grp_ag:0', 'en', {
-      chat: { type: 'group', id: -999 },
-    });
-    const handler = makeHandler();
-    await handler(ctx as never);
-    // Falls through to unknown action
     expect(ctx.answer).toHaveBeenCalled();
   });
 });

@@ -48,16 +48,15 @@ export const CB = {
   INVITATION_ACTION: 'inv',
   SHARE_CONFIRM: 'share_cf',
   SHARE_EVENT: 'share_evt',
-  GROUP_AGENDA: 'grp_ag',
   CALL_SETTINGS: 'csett',
   FEATURE_TOUR: 'ftour',
   INVITE_PICK: 'invp',
   INVITE_CONTACT: 'invc',
-  UNSHARE_PICK: 'unsp',
   EDIT_PROPOSAL: 'epr',
   INV_FORCE: 'inv_force',
   INV_RETIME: 'inv_retime',
   INV_CANCEL: 'inv_cancel',
+  GROUP_SETTINGS_TZ: 'gst',
 } as const;
 
 // i18n messages

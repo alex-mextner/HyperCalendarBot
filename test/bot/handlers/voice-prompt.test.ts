@@ -76,7 +76,6 @@ function makeCallbackHandler(userRepo: { update: ReturnType<typeof mock> }) {
     undefined, // onCalendarsDone
     undefined, // renderService
     undefined, // invitationService
-    undefined, // groupChatRepo
     undefined, // eventRepo
     undefined, // chatHistoryRepo
     undefined, // onAiButtonClick
@@ -109,7 +108,6 @@ function makeCallbackHandlerWithVoice(deps: {
     undefined, // onCalendarsDone
     undefined, // renderService
     undefined, // invitationService
-    undefined, // groupChatRepo
     undefined, // eventRepo
     deps.chatHistoryRepo as never, // chatHistoryRepo
     undefined, // onAiButtonClick

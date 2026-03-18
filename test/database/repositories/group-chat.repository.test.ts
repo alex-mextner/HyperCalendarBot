@@ -147,4 +147,22 @@ describe('GroupChatRepository', () => {
     expect(result.total).toBe(0);
     expect(result.items).toHaveLength(0);
   });
+
+  test('getTimezone returns null when not set', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    expect(repo.getTimezone(GROUP_ID)).toBeNull();
+  });
+
+  test('setTimezone stores and getTimezone retrieves', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    repo.setTimezone(GROUP_ID, 'Europe/Moscow');
+    expect(repo.getTimezone(GROUP_ID)).toBe('Europe/Moscow');
+  });
+
+  test('setCountry stores and findByChatId includes country', () => {
+    repo.upsertGroup({ chat_id: GROUP_ID, added_by: USER_ID });
+    repo.setCountry(GROUP_ID, 'RU');
+    const group = repo.findByChatId(GROUP_ID);
+    expect(group?.country).toBe('RU');
+  });
 });

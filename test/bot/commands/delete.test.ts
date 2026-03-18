@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { handleDelete } from '../../../src/bot/commands/delete.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -32,6 +33,76 @@ function makeEvent(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('handleDelete group context', () => {
+  test('uses getUpcomingForGroup in group chat', async () => {
+    const groupOccurrences = [
+      {
+        event: {
+          id: 5,
+          title: 'Sprint review',
+          start_at: new Date().toISOString(),
+          end_at: null,
+          recurrence_rule: null,
+        },
+        occurrence_start: new Date().toISOString(),
+        occurrence_end: null,
+        is_exception: false,
+      },
+    ];
+    const eventService = {
+      getUpcoming: mock(() => []),
+      getUpcomingForGroup: mock(() => groupOccurrences),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    let sentOpts: Record<string, unknown> = {};
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((_text: string, opts: Record<string, unknown>) => {
+        sentOpts = opts ?? {};
+        return Promise.resolve();
+      }),
+    };
+    await handleDelete(ctx as never, eventService as never, groupRepo as never);
+    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(eventService.getUpcoming).not.toHaveBeenCalled();
+    // Keyboard callback data must contain the real event id, not 'undefined'
+    const kb = JSON.stringify(sentOpts.reply_markup ?? '');
+    expect(kb).toContain('5');
+    expect(kb).not.toContain(':undefined');
+  });
+
+  test('prompts timezone setup when group has no timezone', async () => {
+    const groupRepo = { getTimezone: mock(() => null) };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+    };
+    await handleDelete(ctx as never, {} as never, groupRepo as never);
+    expect(sentText).toContain('таймзону');
+  });
+
+  test('in private chat uses getUpcoming not group method', async () => {
+    const eventService = {
+      getUpcoming: mock(() => []),
+      getUpcomingForGroup: mock(() => []),
+    };
+    const ctx = {
+      chat: { type: 'private', id: 1 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    await handleDelete(ctx as never, eventService as never);
+    expect(eventService.getUpcoming).toHaveBeenCalled();
+    expect(eventService.getUpcomingForGroup).not.toHaveBeenCalled();
+  });
+});
 
 describe('handleDelete', () => {
   test('sends no_events when list is empty', async () => {
@@ -69,6 +140,38 @@ describe('handleDelete', () => {
     const args = ctx.send.mock.calls[0] as unknown[];
     expect(args[0]).toContain('Which event to delete');
     expect(args[1]).toHaveProperty('reply_markup');
+  });
+});
+
+describe('handleDeleteCallback group context', () => {
+  test('uses getEventForGroup when in group (allows non-creator to delete)', async () => {
+    const { handleDeleteCallback } = await import('../../../src/bot/commands/delete.ts');
+    const groupEvent = makeEvent({ id: 7, title: 'Group Meeting' });
+    const eventService = {
+      getEvent: mock(() => null), // non-creator: getEvent returns null
+      getEventForGroup: mock(() => groupEvent),
+    };
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    await handleDeleteCallback(ctx as never, eventService as never, user as never, 7);
+    expect(eventService.getEventForGroup).toHaveBeenCalledWith(7, -100);
+    expect(eventService.getEvent).not.toHaveBeenCalled();
+    const msg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Group Meeting');
+  });
+
+  test('uses getEventForGroup title in group confirm callback', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const groupEvent = makeEvent({ id: 7, title: 'Group Event' });
+    const eventService = {
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => groupEvent),
+      deleteEventForGroup: mock(() => true),
+    };
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 7);
+    expect(eventService.getEventForGroup).toHaveBeenCalledWith(7, -100);
+    const msg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Group Event');
   });
 });
 
@@ -146,6 +249,41 @@ describe('handleDeleteCallback', () => {
     const args = ctx.editText.mock.calls[0] as unknown[];
     const msg = args[0] as string;
     expect(msg).toContain('Meeting');
+  });
+});
+
+describe('handleDeleteConfirmCallback group context', () => {
+  test('uses deleteEventForGroup in group chat', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    const event = makeEvent();
+    const eventService = {
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => event),
+      deleteEvent: mock(() => true),
+      deleteEventForGroup: mock(() => true),
+    };
+
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 1);
+
+    expect(eventService.deleteEventForGroup).toHaveBeenCalledWith(1, -100);
+    expect(eventService.deleteEvent).not.toHaveBeenCalled();
+  });
+
+  test('uses deleteEvent in private chat', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCallbackCtx({ chat: { type: 'private', id: 1 } });
+    const event = makeEvent();
+    const eventService = {
+      getEvent: mock(() => event),
+      deleteEvent: mock(() => true),
+      deleteEventForGroup: mock(() => true),
+    };
+
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 1);
+
+    expect(eventService.deleteEvent).toHaveBeenCalledWith(1, 100);
+    expect(eventService.deleteEventForGroup).not.toHaveBeenCalled();
   });
 });
 

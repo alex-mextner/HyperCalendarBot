@@ -52,7 +52,6 @@ function makeHandler(overrides: Record<string, unknown> = {}) {
     undefined, // onCalendarsDone
     undefined, // renderService
     undefined, // invitationService
-    undefined, // groupChatRepo
     undefined, // eventRepo
     undefined, // chatHistoryRepo
   );
@@ -104,7 +103,6 @@ describe('createCallbackHandler', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       chatHistoryRepo as never,
       onAiButtonClick,
     );
@@ -130,7 +128,6 @@ describe('createCallbackHandler', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       chatHistoryRepo as never,
       onAiButtonClick,
     );
@@ -148,7 +145,6 @@ describe('createCallbackHandler', () => {
       {} as never,
       {} as never,
       {} as never,
-      undefined,
       undefined,
       undefined,
       undefined,

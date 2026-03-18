@@ -43,6 +43,27 @@ export function timezoneConfirmKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Нет, вручную' : 'No, choose manually', `${CB.ONBOARD_TZ}:manual`);
 }
 
+export function groupTimezoneRegionKeyboard(): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const regions = Object.keys(TZ_REGIONS);
+  for (const region of regions) {
+    kb.text(region, `${CB.GROUP_SETTINGS_TZ}:${region}`);
+  }
+  return kb;
+}
+
+export function groupTimezoneCitiesKeyboard(region: string): InlineKeyboard {
+  const cities = TZ_REGIONS[region] ?? [];
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < cities.length; i++) {
+    const tz = cities[i]!;
+    const city = tz.split('/').pop()!.replace(/_/g, ' ');
+    kb.text(city, `${CB.GROUP_SETTINGS_TZ}:${tz}`);
+    if (i % 2 === 1) kb.row();
+  }
+  return kb;
+}
+
 export function countryKeyboard(countryCode: string | null, lang: 'en' | 'ru'): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (countryCode) {
@@ -407,17 +428,6 @@ export function inviteContactPickerKeyboard(contacts: Contact[], eventId: number
   kb.text(lang === 'ru' ? '👤 Другой пользователь' : '👤 Other user', `${CB.INVITE_CONTACT}:${eventId}:picker`).row();
   kb.text(lang === 'ru' ? '👥 Групповой чат' : '👥 Group chat', `${CB.INVITE_CONTACT}:${eventId}:chat`).row();
   kb.text(lang === 'ru' ? '❌ Отмена' : '❌ Cancel', `${CB.INVITE_CONTACT}:cancel`);
-  return kb;
-}
-
-// ── Unshare keyboards ──
-
-export function unsharePickerKeyboard(items: { eventId: number; title: string }[], lang: 'en' | 'ru'): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  for (const item of items) {
-    kb.text(item.title.slice(0, 40), `${CB.UNSHARE_PICK}:${item.eventId}`).row();
-  }
-  kb.text(lang === 'ru' ? '❌ Отмена' : '❌ Cancel', `${CB.UNSHARE_PICK}:cancel`);
   return kb;
 }
 

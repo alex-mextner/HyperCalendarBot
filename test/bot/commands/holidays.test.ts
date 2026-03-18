@@ -3,6 +3,21 @@ import { describe, expect, mock, test } from 'bun:test';
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
 
+function makeGroupRepo(country: string | null) {
+  return {
+    findByChatId: mock(() => ({
+      chat_id: -100,
+      country,
+      timezone: null,
+      title: null,
+      added_by: 1,
+      added_at: '',
+      is_active: 1,
+      pin_hint_shown: 0,
+    })),
+  };
+}
+
 function makeCommandCtx(overrides = {}) {
   return {
     args: null as string | null,
@@ -328,5 +343,48 @@ describe('handleHolidayCallback', () => {
 
     const msg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('No upcoming holidays');
+  });
+});
+
+describe('handleHolidays group context', () => {
+  test('in group with no country prompts to set country (ru)', async () => {
+    const { handleHolidays } = await import('../../../src/bot/commands/holidays.ts');
+    const groupRepo = makeGroupRepo(null);
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: userRu,
+      args: '',
+      send: mock(() => Promise.resolve()),
+    };
+    await handleHolidays(ctx as never, makeHolidayService() as never, groupRepo as never);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('страну');
+  });
+
+  test('in group with country proceeds to show menu', async () => {
+    const { handleHolidays } = await import('../../../src/bot/commands/holidays.ts');
+    const groupRepo = makeGroupRepo('RU');
+    const svc = makeHolidayService();
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: userRu,
+      args: '',
+      send: mock(() => Promise.resolve()),
+    };
+    await handleHolidays(ctx as never, svc as never, groupRepo as never);
+    expect(ctx.send).toHaveBeenCalled();
+  });
+
+  test('in private uses personal flow without groupRepo', async () => {
+    const { handleHolidays } = await import('../../../src/bot/commands/holidays.ts');
+    const svc = makeHolidayService();
+    const ctx = {
+      chat: { type: 'private', id: 1 },
+      dbUser: { telegram_id: 1, language: 'ru' as const, timezone: 'UTC', country_code: 'RU' },
+      args: '',
+      send: mock(() => Promise.resolve()),
+    };
+    await handleHolidays(ctx as never, svc as never);
+    expect(ctx.send).toHaveBeenCalled();
   });
 });

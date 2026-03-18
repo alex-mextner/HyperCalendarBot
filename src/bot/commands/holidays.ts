@@ -1,9 +1,11 @@
 // src/bot/commands/holidays.ts
 
 import { t } from '../../config/constants.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import {
   holidayCountryKeyboard,
   holidayManageCountryKeyboard,
@@ -13,10 +15,30 @@ import {
 } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
-export async function handleHolidays(ctx: BotCommandContext, holidayService: HolidayService): Promise<void> {
+export async function handleHolidays(
+  ctx: BotCommandContext,
+  holidayService: HolidayService,
+  groupRepo?: GroupChatRepository,
+): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const args = (ctx.args as string)?.trim();
+
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
+    if (groupId === null) return;
+    const group = groupRepo?.findByChatId(groupId);
+    if (!group?.country) {
+      await ctx.send(
+        lang === 'ru'
+          ? '🏳️ Сначала задайте страну группы через /settings'
+          : '🏳️ Set the group country first via /settings',
+      );
+      return;
+    }
+    await sendMainMenu(ctx, holidayService, user, lang);
+    return;
+  }
 
   if (args === 'list') {
     const text = buildUpcomingText(holidayService, user, lang);

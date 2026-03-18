@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { handleTomorrow } from '../../../src/bot/commands/tomorrow.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -78,5 +79,56 @@ describe('handleTomorrow', () => {
 
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Christmas');
+  });
+});
+
+describe('handleTomorrow group context', () => {
+  test('in group uses getEventsInRangeForGroup, not personal', async () => {
+    const eventService = {
+      getEventsForDay: mock(() => []),
+      getEventsInRangeForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve()),
+    };
+    await handleTomorrow(ctx as never, eventService as never, undefined, undefined, groupRepo as never);
+    expect(eventService.getEventsInRangeForGroup).toHaveBeenCalled();
+    expect(eventService.getEventsForDay).not.toHaveBeenCalled();
+  });
+
+  test('in group with no timezone sends Russian prompt containing таймзону', async () => {
+    const groupRepo = { getTimezone: mock(() => null) };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+      sendPhoto: mock(() => Promise.resolve()),
+    };
+    await handleTomorrow(ctx as never, {} as never, undefined, undefined, groupRepo as never);
+    expect(sentText).toContain('таймзону');
+  });
+
+  test('in private chat uses personal calendar', async () => {
+    const eventService = {
+      getEventsForDay: mock(() => []),
+      getEventsInRangeForGroup: mock(() => []),
+    };
+    const ctx = {
+      chat: { type: 'private', id: 1 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve()),
+    };
+    await handleTomorrow(ctx as never, eventService as never);
+    expect(eventService.getEventsForDay).toHaveBeenCalled();
+    expect(eventService.getEventsInRangeForGroup).not.toHaveBeenCalled();
   });
 });

@@ -641,4 +641,11 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE invitations ADD COLUMN proposed_time TEXT');
     },
   },
+  {
+    name: '026_group_chats_timezone_country',
+    up: (db) => {
+      db.exec('ALTER TABLE group_chats ADD COLUMN timezone TEXT');
+      db.exec('ALTER TABLE group_chats ADD COLUMN country TEXT');
+    },
+  },
 ];

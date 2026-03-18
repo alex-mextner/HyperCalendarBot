@@ -4,7 +4,7 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
-import { CB, t } from '../../config/constants.ts';
+import { CB, TZ_REGIONS, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -42,7 +42,6 @@ import { getWeekRangeUtc } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { handleGroupAgendaCallback } from '../commands/agenda.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
@@ -51,7 +50,13 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback } from '../commands/settings.ts';
-import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import {
+  editFieldKeyboard,
+  eventActionsKeyboard,
+  groupTimezoneCitiesKeyboard,
+  groupTimezoneRegionKeyboard,
+  inviteContactPickerKeyboard,
+} from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -70,7 +75,6 @@ export function createCallbackHandler(
   onCalendarsDone?: (userId: number) => Promise<void>,
   renderService?: RenderService,
   invitationService?: InvitationService,
-  groupChatRepo?: GroupChatRepository,
   eventRepo?: EventRepository,
   chatHistoryRepo?: ChatHistoryRepository,
   onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>,
@@ -120,6 +124,7 @@ export function createCallbackHandler(
   },
   contactRepo?: ContactRepository,
   timezoneScene?: AnyScene,
+  groupRepo?: GroupChatRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -671,11 +676,6 @@ export function createCallbackHandler(
         return;
       }
 
-      // Group agenda pagination
-      if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
-        return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
-      }
-
       // AI ask_user button responses — save answer and trigger AI continuation
       if (action === 'ai_btn') {
         // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
@@ -873,33 +873,6 @@ export function createCallbackHandler(
         return;
       }
 
-      // Unshare: user picked an event to remove from group — unsp:{eventId|cancel}
-      if (action === CB.UNSHARE_PICK && groupChatRepo) {
-        if (payload === 'cancel') {
-          await ctx.answer();
-          await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
-          return;
-        }
-        const eventId = Number(payload);
-        const chat = (ctx as unknown as { chat?: { id: number } }).chat;
-        if (!chat) {
-          await ctx.answer();
-          return;
-        }
-        const removed = groupChatRepo.unshareEvent(chat.id, eventId, user.telegram_id);
-        await ctx.answer();
-        await ctx.editText(
-          removed
-            ? lang === 'ru'
-              ? '✅ Событие убрано из группы'
-              : '✅ Event removed from group'
-            : lang === 'ru'
-              ? '❌ Событие не найдено'
-              : '❌ Event not found',
-        );
-        return;
-      }
-
       // Invite force — callback: "inv_force:{eventId}:{inviteeIds}"
       if (action === CB.INV_FORCE && forceInviteDeps) {
         const invLang = (user.language ?? 'en') as Lang;
@@ -1008,6 +981,38 @@ export function createCallbackHandler(
           sharingSettingsRepo,
           userRepo,
         );
+      }
+
+      // Group settings: timezone picker
+      if (action === CB.GROUP_SETTINGS_TZ && groupRepo) {
+        const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        if (!chatId) {
+          await ctx.answer();
+          return;
+        }
+        if (payload === 'select') {
+          await ctx.answer();
+          await ctx.editText(user.language === 'ru' ? 'Выберите регион:' : 'Choose a region:', {
+            reply_markup: groupTimezoneRegionKeyboard(),
+          });
+          return;
+        }
+        if (Object.keys(TZ_REGIONS).includes(payload)) {
+          await ctx.answer();
+          await ctx.editText(user.language === 'ru' ? 'Выберите город:' : 'Choose a city:', {
+            reply_markup: groupTimezoneCitiesKeyboard(payload),
+          });
+          return;
+        }
+        groupRepo.setTimezone(chatId, payload);
+        await ctx.answer();
+        await ctx.editText(
+          user.language === 'ru'
+            ? `✅ Таймзона группы: <code>${payload}</code>`
+            : `✅ Group timezone: <code>${payload}</code>`,
+          { parse_mode: 'HTML' },
+        );
+        return;
       }
 
       // Feedback: admin closes a thread

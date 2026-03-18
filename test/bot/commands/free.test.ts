@@ -121,4 +121,67 @@ describe('handleFree', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Full day busy');
   });
+
+  test('in group with timezone calls getFreeSlotsForGroup', async () => {
+    const { handleFree } = await import('../../../src/bot/commands/free.ts');
+    const ctx = makeCtx({ chat: { type: 'group', id: -200 } });
+    const svc = {
+      getFreeSlots: mock(() => []),
+      getFreeSlotsForGroup: mock(() => [makeSlot('2026-03-18T09:00:00Z', '2026-03-18T17:00:00Z', 480)]),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+
+    await handleFree(ctx as never, svc as never, undefined, groupRepo as never);
+
+    expect(svc.getFreeSlotsForGroup).toHaveBeenCalledWith(-200, expect.any(Date), 'Europe/Moscow');
+    expect(svc.getFreeSlots).not.toHaveBeenCalled();
+  });
+
+  test('in group without timezone prompts to set timezone', async () => {
+    const { handleFree } = await import('../../../src/bot/commands/free.ts');
+    const ctx = makeCtx({ chat: { type: 'group', id: -200 } });
+    const svc = {
+      getFreeSlots: mock(() => []),
+      getFreeSlotsForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => null) };
+
+    await handleFree(ctx as never, svc as never, undefined, groupRepo as never);
+
+    expect(svc.getFreeSlotsForGroup).not.toHaveBeenCalled();
+    expect(svc.getFreeSlots).not.toHaveBeenCalled();
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('/settings');
+  });
+
+  test('in group with no free slots sends busy message', async () => {
+    const { handleFree } = await import('../../../src/bot/commands/free.ts');
+    const ctx = makeCtx({ chat: { type: 'group', id: -200 } });
+    const svc = {
+      getFreeSlots: mock(() => []),
+      getFreeSlotsForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'UTC') };
+
+    await handleFree(ctx as never, svc as never, undefined, groupRepo as never);
+
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('Full day busy');
+  });
+
+  test('in group with date arg parses the date', async () => {
+    const { handleFree } = await import('../../../src/bot/commands/free.ts');
+    const ctx = makeCtx({ chat: { type: 'group', id: -200 }, args: '2026-04-01' });
+    const svc = {
+      getFreeSlots: mock(() => []),
+      getFreeSlotsForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'UTC') };
+
+    await handleFree(ctx as never, svc as never, undefined, groupRepo as never);
+
+    expect(svc.getFreeSlotsForGroup).toHaveBeenCalledTimes(1);
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('Full day busy');
+  });
 });
