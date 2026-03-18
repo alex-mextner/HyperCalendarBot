@@ -210,7 +210,8 @@ test('calendar_secretaries has required columns', () => {
   expect(names).toContain('secretary_id');
   expect(names).toContain('permission');
   expect(names).toContain('status');
-  expect(names).toContain('expires_at');
+  expect(names).toContain('created_at');
+  expect(names).toContain('updated_at');
 });
 ```
 
@@ -505,13 +506,15 @@ test('list_calendar_access: returns own info + empty lists when no relations', (
 bun test test/services/ai/tool-handlers/secretary.test.ts
 ```
 
-- [ ] **Step 3: Add `secretaryRepo` to AgentContext in `src/services/ai/types.ts`**
+- [ ] **Step 3: Extend AgentContext in `src/services/ai/types.ts`**
 
 ```typescript
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
-// in AgentContext interface:
+import type { TelegramSender } from '../telegram-sender.ts';
+// in AgentContext interface — add if missing:
 secretaryRepo?: SecretaryRepository;
 secretaryForLine?: string;
+sender?: TelegramSender;  // may already exist — add only if missing
 ```
 
 - [ ] **Step 4: Implement handler in `src/services/ai/tool-handlers/secretary.ts`**
@@ -523,21 +526,23 @@ import type { AgentContext } from '../types.ts';
 export type ToolResult = { success: boolean; output?: unknown; error?: string };
 
 export function handleListCalendarAccess(ctx: AgentContext): ToolResult {
-  if (!ctx.secretaryRepo) return { success: false, error: 'Secretary feature not configured.' };
+  if (!ctx.secretaryRepo || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
 
-  const secretaryFor = ctx.secretaryRepo.getActiveSecretaryFor(ctx.user.telegram_id);
-  const mySecretaries = ctx.secretaryRepo.getSecretariesForOwner(ctx.user.telegram_id);
+  const secretaryForRecords = ctx.secretaryRepo.getActiveSecretaryFor(ctx.user.telegram_id);
+  const mySecretaryRecords = ctx.secretaryRepo.getSecretariesForOwner(ctx.user.telegram_id);
+
+  // Enrich with username/display_name from users table
+  const enrichUser = (telegramId: number) => {
+    const u = ctx.userRepo!.findByTelegramId(telegramId);
+    return { telegram_id: telegramId, username: u?.username, display_name: u?.first_name ?? u?.username ?? `User ${telegramId}` };
+  };
 
   return {
     success: true,
     output: {
-      own: {
-        telegram_id: ctx.user.telegram_id,
-        username: ctx.user.username,
-        display_name: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
-      },
-      my_secretaries: mySecretaries,
-      secretary_for: secretaryFor,
+      own: enrichUser(ctx.user.telegram_id),
+      my_secretaries: mySecretaryRecords.map(r => ({ ...r, ...enrichUser(r.secretary_id) })),
+      secretary_for: secretaryForRecords.map(r => ({ ...r, ...enrichUser(r.owner_id) })),
     },
   };
 }
@@ -765,7 +770,9 @@ if (input.action === 'revoke') {
     const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
     sendSecretaryNotification(ctx, record.secretary_id, secUser.username,
-      `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`).catch(() => {});
+      `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`).catch(err =>
+      logger.error({ err }, 'failed to send revoke notification')
+    );
   }
   return { success: true, output: { ok: true } };
 }
@@ -783,7 +790,9 @@ if (input.action === 'self_remove') {
   const ownerUser = ctx.userRepo!.findByTelegramId(record.owner_id);
   if (ownerUser && ctx.sender) {
     sendSecretaryNotification(ctx, record.owner_id, ownerUser.username,
-      `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`).catch(() => {});
+      `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`).catch(err =>
+      logger.error({ err }, 'failed to send self_remove notification')
+    );
   }
   return { success: true, output: { ok: true } };
 }
@@ -814,24 +823,68 @@ git commit -m "feat: add manage_secretaries revoke and self_remove actions"
 
 - [ ] **Step 1: Write failing tests**
 
-Add to `test/bot/handlers/callback.handler.test.ts`:
+Extract `handleSecretaryAccept` and `handleSecretaryDecline` as named exports from `callback.handler.ts` for direct testability. Add to `test/bot/handlers/callback.handler.test.ts`:
+
 ```typescript
-test('sec:accept updates status to active, notifies owner', async () => {
-  // mock secretaryRepo.findById returning a pending record
-  // mock secretaryRepo.updateStatus
-  // mock bot.api.sendMessage
-  // fire callback with data 'sec:accept:5'
-  // assert updateStatus called with (5, 'active')
-  // assert sendMessage called to owner
+import { handleSecretaryAccept, handleSecretaryDecline } from '../../../src/bot/handlers/callback.handler.ts';
+
+const pendingRecord = {
+  id: 5, owner_id: 10, secretary_id: 20, permission: 'write' as const,
+  status: 'pending' as const, created_at: '', updated_at: '',
+};
+
+function makeDeps(overrides: Record<string, unknown> = {}) {
+  return {
+    secretaryRepo: {
+      findById: mock(() => pendingRecord),
+      updateStatus: mock(() => true),
+    },
+    userRepo: { findByTelegramId: mock(() => ({ first_name: 'Alice', username: 'alice', telegram_id: 10 })) },
+    sendMessage: mock(async () => {}),
+    editMessage: mock(async () => {}),
+    ...overrides,
+  };
+}
+
+test('sec:accept: sets status active and notifies owner', async () => {
+  const deps = makeDeps();
+  await handleSecretaryAccept(5, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'active');
+  expect(deps.sendMessage).toHaveBeenCalledWith(
+    pendingRecord.owner_id,
+    expect.stringContaining('принял')
+  );
 });
 
-test('sec:decline updates status to declined, notifies owner', async () => {
-  // same pattern, status = 'declined'
+test('sec:accept: edits invitation message at secretary', async () => {
+  const deps = makeDeps();
+  await handleSecretaryAccept(5, deps as never);
+
+  expect(deps.editMessage).toHaveBeenCalledWith(
+    pendingRecord.secretary_id,
+    expect.any(Number),
+    expect.stringContaining('Принято')
+  );
 });
 
 test('sec:accept: no-op if record not found', async () => {
-  // secretaryRepo.findById returns null
-  // should not throw, answer() called
+  const deps = makeDeps({
+    secretaryRepo: { findById: mock(() => null), updateStatus: mock(() => true) },
+  });
+  await expect(handleSecretaryAccept(5, deps as never)).resolves.toBeUndefined();
+  expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+test('sec:decline: sets status declined and notifies owner', async () => {
+  const deps = makeDeps();
+  await handleSecretaryDecline(5, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'declined');
+  expect(deps.sendMessage).toHaveBeenCalledWith(
+    pendingRecord.owner_id,
+    expect.stringContaining('отклонил')
+  );
 });
 ```
 
@@ -1132,6 +1185,22 @@ grep -r "cron\|setInterval\|schedule\|agenda" src/ --include="*.ts" -l
 ```
 Follow the same pattern exactly.
 
+Also add `getPendingExpired()` to `SecretaryRepository` and a corresponding test in `test/database/repositories/secretary.repository.test.ts`:
+
+```typescript
+// add to secretary.repository.test.ts
+test('getPendingExpired returns pending records older than 7 days', () => {
+  // insert a record with old created_at via raw SQL to simulate age
+  repo['db'].prepare(
+    `INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
+     VALUES (50, 51, 'read', 'pending', datetime('now', '-8 days'), datetime('now', '-8 days'))`
+  ).run();
+  const result = repo.getPendingExpired();
+  expect(result.length).toBeGreaterThan(0);
+  expect(result[0].owner_id).toBe(50);
+});
+```
+
 - [ ] **Step 2: Write failing test**
 
 ```typescript
@@ -1139,48 +1208,86 @@ Follow the same pattern exactly.
 import { test, expect, mock } from 'bun:test';
 import { runSecretaryExpiry } from '../../../src/worker/secretary-expiry.ts';
 
-test('expiry: calls expirePending and sends notifications for expired records', async () => {
+test('expiry: expires pending records then notifies owner with username', async () => {
   const expired = [
-    { id: 1, owner_id: 10, secretary_id: 20, permission: 'read' as const, status: 'pending' as const, created_at: '', updated_at: '' },
+    { id: 1, owner_id: 10, secretary_id: 20, permission: 'read' as const,
+      status: 'pending' as const, created_at: '', updated_at: '' },
   ];
-  const mockExpire = mock(() => 1);
-  const mockFindPending = mock(() => expired); // called before expiry to get list for notifications
+  const mockExpirePending = mock(() => expired); // returns records it just expired
   const mockNotify = mock(async () => {});
+  const mockFindUser = mock(() => ({ username: 'john_sec', first_name: 'John' }));
 
   await runSecretaryExpiry({
-    secretaryRepo: { expirePending: mockExpire, getPendingExpired: mockFindPending } as never,
+    secretaryRepo: { expirePending: mockExpirePending } as never,
+    userRepo: { findByTelegramId: mockFindUser } as never,
     notify: mockNotify,
   });
 
-  expect(mockExpire).toHaveBeenCalled();
+  expect(mockExpirePending).toHaveBeenCalled();
+  expect(mockNotify).toHaveBeenCalledWith(10, expect.stringContaining('@john_sec'));
   expect(mockNotify).toHaveBeenCalledWith(10, expect.stringContaining('истекло'));
 });
 ```
 
 - [ ] **Step 3: Implement `src/worker/secretary-expiry.ts`**
 
-```typescript
-export async function runSecretaryExpiry(deps: {
-  secretaryRepo: { getPendingExpired(): CalendarSecretary[]; expirePending(): number };
-  notify: (userId: number, text: string) => Promise<void>;
-}): Promise<void> {
-  const about to expire = deps.secretaryRepo.getPendingExpired();
-  // Send notifications before expiring
-  for (const record of toExpire) {
-    await deps.notify(record.owner_id,
-      `Приглашение для секретаря (id: ${record.secretary_id}) истекло — нет ответа в течение 7 дней.`
-    ).catch(() => {});
-  }
-  deps.secretaryRepo.expirePending();
-}
-```
+Redesign `expirePending()` in `SecretaryRepository` to return the just-expired records (expire + return in one call, fixes TOCTOU):
 
-Add `getPendingExpired()` method to `SecretaryRepository`:
 ```typescript
+// In secretary.repository.ts — replace expirePending():
+expirePending(): CalendarSecretary[] {
+  const toExpire = this.getPendingExpired();
+  if (toExpire.length > 0) {
+    this.db.prepare(
+      `UPDATE calendar_secretaries SET status = 'expired', updated_at = datetime('now')
+       WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`
+    ).run();
+  }
+  return toExpire;
+}
+
 getPendingExpired(): CalendarSecretary[] {
   return this.db.prepare(
     `SELECT * FROM calendar_secretaries WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`
   ).all() as CalendarSecretary[];
+}
+```
+
+Update `test/database/repositories/secretary.repository.test.ts` — change existing `expirePending` test to check returned records:
+```typescript
+test('expirePending returns expired records and marks them expired', () => {
+  repo['db'].prepare(
+    `INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
+     VALUES (7, 8, 'read', 'pending', datetime('now', '-8 days'), datetime('now', '-8 days'))`
+  ).run();
+  const result = repo.expirePending();
+  expect(result.length).toBeGreaterThan(0);
+  expect(repo.findByOwnerAndSecretary(7, 8)!.status).toBe('expired');
+});
+```
+
+Then `runSecretaryExpiry`:
+
+```typescript
+// src/worker/secretary-expiry.ts
+import type { CalendarSecretary } from '../database/types.ts';
+import type { UserRepository } from '../database/repositories/user.repository.ts';
+import { logger } from '../utils/logger.ts';
+
+export async function runSecretaryExpiry(deps: {
+  secretaryRepo: { expirePending(): CalendarSecretary[] };
+  userRepo: Pick<UserRepository, 'findByTelegramId'>;
+  notify: (userId: number, text: string) => Promise<void>;
+}): Promise<void> {
+  const expired = deps.secretaryRepo.expirePending(); // expire first, then notify
+
+  for (const record of expired) {
+    const secUser = deps.userRepo.findByTelegramId(record.secretary_id);
+    const name = secUser?.username ? `@${secUser.username}` : secUser?.first_name ?? `User ${record.secretary_id}`;
+    await deps.notify(record.owner_id,
+      `Приглашение для ${name} истекло — нет ответа в течение 7 дней.`
+    ).catch(err => logger.error({ err, recordId: record.id }, 'failed to send expiry notification'));
+  }
 }
 ```
 
