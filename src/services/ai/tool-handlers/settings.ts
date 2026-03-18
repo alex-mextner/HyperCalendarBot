@@ -84,6 +84,7 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
   const patch: UpdateUserData = {};
   if (updates.timezone !== undefined) patch.timezone = updates.timezone as string;
   if (updates.language !== undefined) patch.language = updates.language as 'en' | 'ru';
+  if (updates.country_code !== undefined) patch.country_code = updates.country_code as string;
 
   if (Object.keys(patch).length === 0) {
     return { success: false, error: 'No valid general settings to update.' };

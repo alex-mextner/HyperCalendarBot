@@ -120,6 +120,17 @@ describe('handleManageSettings', () => {
       expect(ctx.user.language).toBe('ru');
     });
 
+    test('updates country_code', () => {
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'general',
+        updates: { country_code: 'DE' },
+      });
+      expect(result.success).toBe(true);
+      const updated = ctx.userRepo.findByTelegramId(USER_ID);
+      expect(updated?.country_code).toBe('DE');
+    });
+
     test('updates timezone and language together', () => {
       const result = handleManageSettings(ctx, {
         action: 'update',
