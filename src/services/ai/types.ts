@@ -79,6 +79,7 @@ export interface AgentContext {
   feedbackRepo?: FeedbackRepository;
   botAdminId?: number;
   sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
+  resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
 }
 
 export interface ToolResult {

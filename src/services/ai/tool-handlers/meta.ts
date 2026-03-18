@@ -32,17 +32,29 @@ export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): T
   return { success: true, output: `Upcoming holidays:\n${lines.join('\n')}` };
 }
 
-export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolResult {
-  const user = ctx.userRepo.findByUsername(input.username);
-  if (!user) {
+export async function handleFindUser(ctx: AgentContext, input: FindUserInput): Promise<ToolResult> {
+  const username = input.username.replace(/^@/, '');
+  const user = ctx.userRepo.findByUsername(username);
+  if (user) {
     return {
-      success: false,
-      error: `User @${input.username.replace(/^@/, '')} not found. They may not have used this bot yet.`,
+      success: true,
+      output: `Found user: telegram_id=${user.telegram_id}, name=${user.first_name ?? user.username ?? 'unknown'}`,
     };
   }
+
+  if (ctx.resolveUsername) {
+    const resolved = await ctx.resolveUsername(username);
+    if (resolved) {
+      return {
+        success: true,
+        output: `Found user via MTProto: telegram_id=${resolved.id}, name=${resolved.firstName ?? resolved.username ?? 'unknown'} (not a bot user yet — can only be reached via MTProto)`,
+      };
+    }
+  }
+
   return {
-    success: true,
-    output: `Found user: telegram_id=${user.telegram_id}, name=${user.first_name ?? user.username ?? 'unknown'}`,
+    success: false,
+    error: `User @${username} not found. They may not have used this bot yet.`,
   };
 }
 

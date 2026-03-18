@@ -103,6 +103,7 @@ export function createBot(
   stressDictionary?: StressDictionary,
   sileroTts?: SileroTtsService,
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'],
+  mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>,
 ) {
   const eventService = new EventService(
     db.events,
@@ -211,6 +212,7 @@ export function createBot(
       googleCalendarRepo: googleDeps?.calendarRepo,
       deepLinkService,
       botUsername: process.env.BOT_USERNAME,
+      resolveUsername: mtprotoResolveUsername,
     };
   }
 

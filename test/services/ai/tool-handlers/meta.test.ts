@@ -73,29 +73,51 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleFindUser', () => {
-    test('finds existing user by username', () => {
-      const result = handleFindUser(ctx, { username: 'testuser' });
+    test('finds existing user by username', async () => {
+      const result = await handleFindUser(ctx, { username: 'testuser' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('telegram_id=123');
     });
 
-    test('finds user with @ prefix', () => {
-      const result = handleFindUser(ctx, { username: '@testuser' });
+    test('finds user with @ prefix', async () => {
+      const result = await handleFindUser(ctx, { username: '@testuser' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('telegram_id=123');
     });
 
-    test('returns error for unknown username', () => {
-      const result = handleFindUser(ctx, { username: 'nobody' });
+    test('returns error for unknown username when no resolver', async () => {
+      const result = await handleFindUser(ctx, { username: 'nobody' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
 
-    test('error message includes cleaned username', () => {
-      const result = handleFindUser(ctx, { username: '@ghost_user' });
+    test('error message includes cleaned username', async () => {
+      const result = await handleFindUser(ctx, { username: '@ghost_user' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('ghost_user');
       expect(result.error).not.toContain('@@');
+    });
+
+    test('falls back to MTProto resolver when not in DB', async () => {
+      const ctxWithResolver = {
+        ...ctx,
+        resolveUsername: async (u: string) =>
+          u === 'ux_consul' ? { id: 999888, firstName: 'Alex', username: 'ux_consul' } : null,
+      };
+      const result = await handleFindUser(ctxWithResolver, { username: '@ux_consul' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('telegram_id=999888');
+      expect(result.output).toContain('MTProto');
+    });
+
+    test('returns error when MTProto resolver also fails', async () => {
+      const ctxWithResolver = {
+        ...ctx,
+        resolveUsername: async (_u: string) => null,
+      };
+      const result = await handleFindUser(ctxWithResolver, { username: 'ghost_user' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
     });
   });
 

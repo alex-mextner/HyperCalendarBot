@@ -30,6 +30,9 @@ let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
+let mtprotoResolveUsername:
+  | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
+  | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -344,6 +347,28 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       botLogger.info({ userId, ok }, 'MTProto message delivery');
       return ok;
     };
+    mtprotoResolveUsername = async (username: string) => {
+      const proc = Bun.spawn(['venv/bin/python', 'scripts/resolve-username.py', username], {
+        env: { ...process.env },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      if (exitCode !== 0) {
+        botLogger.warn({ username, stderr: stderr.slice(0, 200) }, 'resolve-username.py failed');
+        return null;
+      }
+      try {
+        return JSON.parse(stdout.trim()) as { id: number; firstName?: string; username?: string };
+      } catch {
+        botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
+        return null;
+      }
+    };
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
     botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
@@ -366,6 +391,7 @@ const { bot } = createBot(
   stressDictionary,
   sileroTts,
   kokoroTts,
+  mtprotoResolveUsername,
 );
 
 // Patch bot ref to use real bot API
