@@ -219,4 +219,10 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('@mention');
   });
+
+  test('instructs AI to add relative duration to message timestamp for future events', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('in 31 minutes');
+    expect(prompt).toContain('23:05');
+  });
 });

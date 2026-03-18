@@ -25,7 +25,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretaryForLine}` : ''}
 
 ## Context
-- Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as anchor for relative times like "in 1 hour" or "today". Convert to the user's local time by adding the offset (${utcOffset}).
+- Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as anchor for relative times like "in 1 hour" or "today". Convert to the user's local time by adding the offset (${utcOffset}). For relative future times ("in 30 min", "in 1 hour", "through N minutes"): ADD the duration to the message timestamp. Example: message at [2026-03-18 22:34], user says "in 31 minutes" → start_at = "2026-03-18T23:05:00Z". Never pass the message timestamp itself as start_at.
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.
 
