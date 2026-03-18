@@ -172,13 +172,11 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
     if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
       const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
       const groupLabel = groupTitle ?? String(ctx.groupChatId);
-      const creatorId = ctx.user.telegram_id;
       const sender = ctx.sender;
       ctx.groupMemberService
         .getRegisteredMembers(ctx.groupChatId)
         .then((memberIds) => {
           for (const userId of memberIds) {
-            if (userId === creatorId) continue;
             const recipientUser = ctx.userRepo.findByTelegramId(userId);
             const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
             sender
@@ -225,13 +223,11 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
     const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
     const groupLabel = groupTitle ?? String(ctx.groupChatId);
-    const updaterId = ctx.user.telegram_id;
     const sender = ctx.sender;
     ctx.groupMemberService
       .getRegisteredMembers(ctx.groupChatId)
       .then((memberIds) => {
         for (const userId of memberIds) {
-          if (userId === updaterId) continue;
           const recipientUser = ctx.userRepo.findByTelegramId(userId);
           const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
           sender

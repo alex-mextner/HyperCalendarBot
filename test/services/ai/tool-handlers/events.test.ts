@@ -547,7 +547,7 @@ describe('event tool handlers', () => {
       return { getRegisteredMembers: mock(async () => memberIds) } as unknown as GroupMemberService;
     }
 
-    test('handleCreateEvent notifies group members except creator', async () => {
+    test('handleCreateEvent notifies all group members including creator', async () => {
       const MEMBER_ID = 456;
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
 
@@ -570,10 +570,11 @@ describe('event tool handlers', () => {
 
       expect(result.success).toBe(true);
       await new Promise((r) => setTimeout(r, 10));
-      expect(sent.length).toBe(1);
-      expect(sent[0].chatId).toBe(MEMBER_ID);
-      expect(sent[0].text).toContain('Party');
-      expect(sent[0].parseMode).toBe('Markdown');
+      expect(sent.length).toBe(2);
+      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
+      expect(sent.every((s) => s.text.includes('Party'))).toBe(true);
+      expect(sent.every((s) => s.parseMode === 'Markdown')).toBe(true);
     });
 
     test('handleCreateEvent sends notification in recipient language', async () => {
@@ -599,9 +600,9 @@ describe('event tool handlers', () => {
       });
 
       await new Promise((r) => setTimeout(r, 10));
-      expect(sent.length).toBe(1);
-      expect(sent[0].chatId).toBe(RU_MEMBER_ID);
-      expect(sent[0].text).toContain('Новое событие');
+      expect(sent.length).toBe(2);
+      const ruNotification = sent.find((s) => s.chatId === RU_MEMBER_ID);
+      expect(ruNotification?.text).toContain('Новое событие');
     });
 
     test('handleUpdateEvent notifies group members on group update', async () => {
@@ -627,10 +628,11 @@ describe('event tool handlers', () => {
 
       expect(result.success).toBe(true);
       await new Promise((r) => setTimeout(r, 10));
-      expect(sent.length).toBe(1);
-      expect(sent[0].chatId).toBe(MEMBER_ID);
-      expect(sent[0].text).toContain('Sprint Planning Updated');
-      expect(sent[0].parseMode).toBe('Markdown');
+      expect(sent.length).toBe(2);
+      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
+      expect(sent.every((s) => s.text.includes('Sprint Planning Updated'))).toBe(true);
+      expect(sent.every((s) => s.parseMode === 'Markdown')).toBe(true);
     });
   });
 });
