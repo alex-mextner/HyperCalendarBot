@@ -38,7 +38,7 @@ async def send_with_retry(app):
             return False
         except Exception as e:
             msg = str(e)
-            if USERNAME and "not found" in msg.lower():
+            if USERNAME and ("not found" in msg.lower() or "peer_id_invalid" in msg.lower()):
                 break
             print(f"ERROR:{e}", file=sys.stderr, flush=True)
             return False
