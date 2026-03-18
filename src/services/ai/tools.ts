@@ -468,10 +468,17 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'get_contacts',
-    description: "List all contacts from the user's address book.",
+    description:
+      "List all contacts from the user's address book. PRIVATE DATA: in group chats, always use ask_user to clarify what the user wants before calling this (they may mean group members, not personal contacts). Only call with force: true after the user explicitly confirmed they want their private contacts shown in the group.",
     input_schema: {
       type: 'object' as const,
-      properties: {},
+      properties: {
+        force: {
+          type: 'boolean',
+          description:
+            'Set to true only after the user explicitly confirmed they want their private contact list shown in a group chat.',
+        },
+      },
       required: [],
     },
   },

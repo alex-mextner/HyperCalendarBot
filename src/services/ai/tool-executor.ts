@@ -133,7 +133,7 @@ export async function executeTool(
         return handlePickUsers(ctx, input as { event_id: number; prompt: string });
 
       case 'get_contacts':
-        return handleGetContacts(ctx);
+        return handleGetContacts(ctx, input as { force?: boolean });
 
       case 'add_contact':
         return handleAddContact(ctx, input as { name: string; username?: string });

@@ -185,4 +185,38 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).not.toContain('## Group Proposals');
   });
+
+  test('group context includes privacy rules when isGroup=true', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Dev Team';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Group Privacy');
+    expect(prompt).toContain('ask_user');
+    expect(prompt).toContain('private');
+  });
+
+  test('privacy rules absent in private chat', () => {
+    ctx.isGroup = false;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('## Group Privacy');
+  });
+
+  test('group context includes botUsername in help instruction when provided', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Dev Team';
+    ctx.groupChatId = -100;
+    ctx.botUsername = 'mycalbot';
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('@mycalbot');
+  });
+
+  test('group context falls back to @mention when botUsername absent', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Dev Team';
+    ctx.groupChatId = -100;
+    ctx.botUsername = undefined;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('@mention');
+  });
 });

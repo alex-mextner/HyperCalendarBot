@@ -46,8 +46,15 @@ export function handleFindUser(ctx: AgentContext, input: FindUserInput): ToolRes
   };
 }
 
-export function handleGetContacts(ctx: AgentContext): ToolResult {
+export function handleGetContacts(ctx: AgentContext, input: { force?: boolean }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
+  if (ctx.isGroup && !input.force) {
+    return {
+      success: false,
+      error:
+        "get_contacts exposes the user's private contact list. In a group this would reveal personal data to all members. Use ask_user to clarify what the user wants first. Only call get_contacts with force: true after the user explicitly confirmed they want their private contacts shown in the group.",
+    };
+  }
   const contacts = ctx.contactRepo.list(ctx.user.telegram_id);
   if (contacts.length === 0) return { success: true, output: 'Address book is empty.' };
   const lines = contacts.map((c) => {

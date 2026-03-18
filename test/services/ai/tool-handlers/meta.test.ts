@@ -102,7 +102,7 @@ describe('meta tool handlers', () => {
   describe('handleGetContacts', () => {
     test('returns empty message when no contacts', () => {
       ctx.contactRepo = new ContactRepository(db);
-      const result = handleGetContacts(ctx);
+      const result = handleGetContacts(ctx, {});
       expect(result.success).toBe(true);
       expect(result.output).toContain('empty');
     });
@@ -111,7 +111,7 @@ describe('meta tool handlers', () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
       ctx.contactRepo = contactRepo;
-      const result = handleGetContacts(ctx);
+      const result = handleGetContacts(ctx, {});
       expect(result.success).toBe(true);
       expect(result.output).toContain('Лена');
       expect(result.output).toContain('@larichkina_b');
@@ -119,8 +119,28 @@ describe('meta tool handlers', () => {
 
     test('returns error when contactRepo not configured', () => {
       ctx.contactRepo = undefined;
-      const result = handleGetContacts(ctx);
+      const result = handleGetContacts(ctx, {});
       expect(result.success).toBe(false);
+    });
+
+    test('blocks in group context without force', () => {
+      ctx.isGroup = true;
+      ctx.groupChatId = -100;
+      ctx.contactRepo = new ContactRepository(db);
+      const result = handleGetContacts(ctx, {});
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('force: true');
+    });
+
+    test('allows in group context with force: true', () => {
+      ctx.isGroup = true;
+      ctx.groupChatId = -100;
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
+      ctx.contactRepo = contactRepo;
+      const result = handleGetContacts(ctx, { force: true });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Лена');
     });
   });
 
