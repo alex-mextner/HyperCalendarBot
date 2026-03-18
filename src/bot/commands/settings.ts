@@ -6,7 +6,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { User } from '../../database/types.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
-import { countryPickerKeyboard } from '../keyboards.ts';
+import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export function settingsCategoryKeyboard(): InlineKeyboard {
@@ -62,7 +62,6 @@ function buildNotificationsView(
     '  Напоминания и звонки не беспокоят в это время.',
     `Напоминания: ${intervals.map(fmtInterval).join(', ')}`,
     '  За сколько до события бот присылает напоминание.',
-    '  Чтобы изменить — напишите AI: «напомни за 10 и 30 минут».',
   ].join('\n');
 
   const kb = backRow(
@@ -71,10 +70,23 @@ function buildNotificationsView(
       .row()
       .text(`${eveningEnabled ? '✅' : '❌'} Вечерний обзор`, 'stg:toggle_evening')
       .row()
-      .text(`${quietEnabled ? '✅' : '❌'} Тихие часы`, 'stg:toggle_quiet'),
+      .text(`${quietEnabled ? '✅' : '❌'} Тихие часы`, 'stg:toggle_quiet')
+      .row()
+      .text('⏰ Интервалы напоминаний', 'stg:edit_reminders'),
   );
 
   return { text, kb };
+}
+
+function buildReminderIntervalsView(intervals: number[]): { text: string; kb: InlineKeyboard } {
+  const fmtInterval = (m: number) => (m === 0 ? 'в начале' : m >= 60 ? `${m / 60}ч` : `${m}мин`);
+  const text = [
+    '⏰ Интервалы напоминаний',
+    '',
+    `Активные: ${intervals.length > 0 ? intervals.map(fmtInterval).join(', ') : 'не заданы'}`,
+    '  Выберите за сколько до события отправлять напоминание.',
+  ].join('\n');
+  return { text, kb: reminderIntervalsKeyboard(intervals) };
 }
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
@@ -239,6 +251,26 @@ export async function handleSettingsCallback(
   if (subAction === 'toggle_morning') prefsService.toggleMorningAgenda(user.telegram_id);
   else if (subAction === 'toggle_evening') prefsService.toggleEveningReview(user.telegram_id);
   else if (subAction === 'toggle_quiet') prefsService.toggleQuietHours(user.telegram_id);
+
+  if (subAction === 'edit_reminders' || subAction.startsWith('toggle_reminder:')) {
+    const prefs = prefsService.getOrCreate(user.telegram_id);
+    let intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+
+    if (subAction.startsWith('toggle_reminder:')) {
+      const val = Number.parseInt(subAction.split(':')[1]!, 10);
+      if (intervals.includes(val)) {
+        intervals = intervals.filter((x) => x !== val);
+      } else {
+        intervals = [...intervals, val].sort((a, b) => a - b);
+      }
+      prefsService.updateDefaultIntervals(user.telegram_id, intervals);
+    }
+
+    const { text, kb } = buildReminderIntervalsView(intervals);
+    await ctx.answer();
+    await ctx.editText(text, { reply_markup: kb });
+    return;
+  }
 
   if (
     subAction === 'notifications' ||

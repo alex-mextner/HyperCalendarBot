@@ -43,6 +43,7 @@ function makePrefsService(overrides: Record<string, unknown> = {}) {
     toggleMorningAgenda: mock(() => {}),
     toggleEveningReview: mock(() => {}),
     toggleQuietHours: mock(() => {}),
+    updateDefaultIntervals: mock(() => {}),
   };
 }
 
@@ -459,5 +460,63 @@ describe('stg:close', () => {
     await handleSettingsCallback(ctx, makeUser() as never, 'close', prefs as never);
 
     expect(deleteFn).toHaveBeenCalled();
+  });
+});
+
+describe('stg:notifications no AI text', () => {
+  test('does not contain "напишите AI" text', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'notifications', prefs as never);
+
+    const [text] = ctx.editText.mock.calls[0] as [string, unknown];
+    expect(text).not.toContain('напишите AI');
+    expect(text).not.toContain('Чтобы изменить');
+  });
+});
+
+describe('stg:edit_reminders', () => {
+  test('shows reminder intervals view', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService({ default_reminder_intervals: '[15, 30]' });
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'edit_reminders', prefs as never);
+
+    expect(ctx.editText).toHaveBeenCalled();
+    const [text] = ctx.editText.mock.calls[0] as [string, unknown];
+    expect(text).toContain('Интервалы');
+  });
+});
+
+describe('stg:toggle_reminder', () => {
+  test('adds interval when not present', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const updateFn = mock(() => {});
+    const prefs = {
+      ...makePrefsService({ default_reminder_intervals: '[30]' }),
+      updateDefaultIntervals: updateFn,
+    };
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_reminder:15', prefs as never);
+
+    expect(updateFn).toHaveBeenCalledWith(100, expect.arrayContaining([15, 30]));
+  });
+
+  test('removes interval when present', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const updateFn = mock(() => {});
+    const prefs = {
+      ...makePrefsService({ default_reminder_intervals: '[15, 30]' }),
+      updateDefaultIntervals: updateFn,
+    };
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_reminder:15', prefs as never);
+
+    expect(updateFn).toHaveBeenCalledWith(100, [30]);
   });
 });
