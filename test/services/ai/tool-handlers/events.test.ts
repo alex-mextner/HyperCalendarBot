@@ -523,9 +523,10 @@ describe('event tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('Team Drinks');
       expect(result.output).toContain('Test Group');
+      expect(result.output).toContain('created_by');
     });
 
-    test('handleGetEvent includes group title in output', () => {
+    test('handleGetEvent includes group title and created_by in output', () => {
       const groupChatRepo = new GroupChatRepository(db);
       groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
       const event = createGroupEvent('Group Detail Event', '2026-03-15T10:00:00Z');
@@ -539,6 +540,7 @@ describe('event tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('Group Detail Event');
       expect(result.output).toContain('Test Group');
+      expect(result.output).toContain('created_by');
     });
 
     test('handleCreateEvent notifies group members except creator', async () => {
@@ -547,10 +549,10 @@ describe('event tool handlers', () => {
       groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
       groupMemberRepo.upsert(GROUP_CHAT_ID, MEMBER_ID);
 
-      const sent: { chatId: number; text: string }[] = [];
+      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
       const sender = {
-        sendMessage: mock(async (chatId: number, text: string) => {
-          sent.push({ chatId, text });
+        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
+          sent.push({ chatId, text, parseMode });
           return { message_id: 1 };
         }),
         editMessageText: mock(async () => {}),
@@ -574,6 +576,7 @@ describe('event tool handlers', () => {
       expect(sent.length).toBe(1);
       expect(sent[0].chatId).toBe(MEMBER_ID);
       expect(sent[0].text).toContain('Party');
+      expect(sent[0].parseMode).toBe('Markdown');
     });
   });
 });
