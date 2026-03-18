@@ -1,7 +1,10 @@
 import type { EventOccurrence } from '../../../database/types.ts';
+import { logger } from '../../../utils/logger.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
+
+const eventsLogger = logger.child({ module: 'ai-tools' });
 
 type Scope = 'personal' | 'group';
 
@@ -172,7 +175,9 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
       const notifyText = `📅 Новое событие${groupLabel}:\n*${event.title}*`;
       for (const member of members) {
         if (member.user_id === ctx.user.telegram_id) continue;
-        ctx.sender.sendMessage(member.user_id, notifyText).catch(() => {});
+        ctx.sender.sendMessage(member.user_id, notifyText).catch((err) => {
+          eventsLogger.error({ error: String(err), userId: member.user_id }, 'Group event notification failed');
+        });
       }
     }
 

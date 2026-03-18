@@ -198,6 +198,8 @@ export const MSG = {
     call_post_snooze: '⏰ Snoozed for 10 min',
     call_post_cancel: '❌ Event cancelled',
     call_post_ack: '✅ Got it',
+    voice_response_enabled: '🎤 Voice responses enabled!',
+    voice_response_disabled: '🎤 Ok, text only.',
     feature_tour_btn: '📖 All Features',
     feature_tour: [
       '<b>🤖 AI Assistant</b>\nJust text me naturally: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". I understand context and execute commands.',
@@ -344,6 +346,8 @@ export const MSG = {
     call_post_snooze: '⏰ Отложено на 10 мин',
     call_post_cancel: '❌ Событие отменено',
     call_post_ack: '✅ Понятно',
+    voice_response_enabled: '🎤 Голосовые ответы включены!',
+    voice_response_disabled: '🎤 Ок, только текстом.',
     feature_tour_btn: '📖 Все функции',
     feature_tour: [
       '<b>🤖 AI-ассистент</b>\nПросто напишите мне: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Я понимаю контекст и выполняю команды.',

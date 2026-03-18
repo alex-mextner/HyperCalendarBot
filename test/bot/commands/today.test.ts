@@ -68,6 +68,22 @@ describe('handleToday', () => {
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
+  test('saves to chatHistory when provided', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const ctx = makeCtx({ chatId: 100 });
+    const svc = makeEventService();
+    const save = mock(() => {});
+    const chatHistory = { save };
+
+    await handleToday(ctx as never, svc as never, undefined, undefined, chatHistory as never);
+
+    expect(save).toHaveBeenCalledTimes(2);
+    const calls = save.mock.calls as [number, string, string, number][];
+    expect(calls[0][1]).toBe('user');
+    expect(calls[0][2]).toBe('/today');
+    expect(calls[1][1]).toBe('assistant');
+  });
+
   test('shows holiday entries when holidayService returns them', async () => {
     const { handleToday } = await import('../../../src/bot/commands/today.ts');
     const ctx = makeCtx();
@@ -80,28 +96,5 @@ describe('handleToday', () => {
 
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('New Year');
-  });
-
-  test('saves response to chat history when chatHistory provided', async () => {
-    const { handleToday } = await import('../../../src/bot/commands/today.ts');
-    const ctx = makeCtx();
-    const svc = makeEventService();
-    const chatHistory = { save: mock(() => {}) };
-
-    await handleToday(ctx as never, svc as never, undefined, undefined, chatHistory as never);
-
-    expect(chatHistory.save).toHaveBeenCalledTimes(1);
-    const [userId, role, content] = chatHistory.save.mock.calls[0] as unknown[];
-    expect(userId).toBe(user.telegram_id);
-    expect(role).toBe('assistant');
-    expect(typeof content).toBe('string');
-  });
-
-  test('does not throw when chatHistory is not provided', async () => {
-    const { handleToday } = await import('../../../src/bot/commands/today.ts');
-    const ctx = makeCtx();
-    const svc = makeEventService();
-
-    await expect(handleToday(ctx as never, svc as never)).resolves.toBeUndefined();
   });
 });

@@ -1028,31 +1028,39 @@ export function createCallbackHandler(
         userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
         await ctx.answer();
 
+        const lang = (user.language ?? 'en') as Lang;
+        const msgs = t(lang);
+
         if (!enabled) {
-          await ctx.editText('🎤 Ок, только текстом.');
+          await ctx.editText(msgs.voice_response_disabled);
           return;
         }
 
         // On opt-in: resend the last AI response as voice so user hears it immediately
         const isRu = user.language === 'ru';
-        const hasTts = voiceDeps && chatHistoryRepo && ctx.chatId && (isRu ? voiceDeps.sileroTts && voiceDeps.stressDictionary : voiceDeps.kokoroTts);
+        const chatIdNum = ctx.chatId ? Number(ctx.chatId) : null;
+        const ruReady = isRu && voiceDeps?.sileroTts && voiceDeps?.stressDictionary;
+        const enReady = !isRu && voiceDeps?.kokoroTts;
 
-        if (!hasTts) {
-          await ctx.editText('🎤 Голосовые ответы включены!');
+        if (!voiceDeps || !chatHistoryRepo || !chatIdNum || (!ruReady && !enReady)) {
+          await ctx.editText(msgs.voice_response_enabled);
           return;
         }
 
         await ctx.editText('⌛');
 
         try {
-          const recent = chatHistoryRepo!.getRecent(user.telegram_id, 10);
+          const recent = chatHistoryRepo.getRecent(user.telegram_id, 10);
           const lastAssistant = [...recent].reverse().find((m) => m.role === 'assistant');
           let responseText = '';
           if (lastAssistant) {
             try {
               const blocks = JSON.parse(lastAssistant.content) as { type: string; text?: string }[];
               responseText = Array.isArray(blocks)
-                ? blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+                ? blocks
+                    .filter((b) => b.type === 'text')
+                    .map((b) => b.text ?? '')
+                    .join('')
                 : lastAssistant.content;
             } catch {
               responseText = lastAssistant.content;
@@ -1066,12 +1074,12 @@ export function createCallbackHandler(
             if (isRu) {
               const withOrdinals = fixDateOrdinals(noLineBreaks);
               const withNumbers = numbersToWords(withOrdinals);
-              const withStress = markStress(withNumbers, voiceDeps!.stressDictionary!);
-              audio = await voiceDeps!.sileroTts!.synthesize(transliterateEnglish(withStress));
+              const withStress = markStress(withNumbers, voiceDeps.stressDictionary!);
+              audio = await voiceDeps.sileroTts!.synthesize(transliterateEnglish(withStress));
             } else {
-              audio = await voiceDeps!.kokoroTts!.synthesize(noLineBreaks);
+              audio = await voiceDeps.kokoroTts!.synthesize(noLineBreaks);
             }
-            await voiceDeps!.sendVoice(Number(ctx.chatId), audio);
+            await voiceDeps.sendVoice(chatIdNum, audio);
           }
         } catch (err) {
           cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');

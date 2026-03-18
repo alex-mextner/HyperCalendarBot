@@ -26,7 +26,12 @@ export async function handleToday(
   const text = formatDayAgenda(occurrences, now.toISOString(), user.timezone, user.language, holidays);
 
   await ctx.send(text, { parse_mode: 'HTML' });
-  chatHistory?.save(user.telegram_id, 'assistant', text);
+
+  if (chatHistory && ctx.chatId) {
+    const chatId = Number(ctx.chatId);
+    chatHistory.save(user.telegram_id, 'user', '/today', chatId);
+    chatHistory.save(user.telegram_id, 'assistant', text, chatId);
+  }
 
   if (renderService) {
     try {
