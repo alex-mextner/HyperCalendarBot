@@ -57,7 +57,6 @@ export const CB = {
   INV_RETIME: 'inv_retime',
   INV_CANCEL: 'inv_cancel',
   GROUP_SETTINGS_TZ: 'gst',
-  GROUP_SETTINGS_COUNTRY: 'gsc',
 } as const;
 
 // i18n messages
