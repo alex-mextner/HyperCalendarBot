@@ -28,7 +28,7 @@ test('deliverMessage: falls back to MTProto if bot API fails', async () => {
     botSend: fakeSend,
     mtprotoSend: fakeMtproto,
   });
-  expect(fakeMtproto).toHaveBeenCalledWith(100, 'hello', 'johndoe');
+  expect(fakeMtproto).toHaveBeenCalledWith(100, 'johndoe');
   expect(result).toEqual({ delivered: true });
 });
 
