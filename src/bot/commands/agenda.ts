@@ -1,10 +1,28 @@
 // src/bot/commands/agenda.ts
 
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
+import { enUS, ru } from 'date-fns/locale';
 import { InlineKeyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import { formatTimeRange } from '../../utils/date.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+
+function formatEventLine(
+  title: string,
+  startAt: string,
+  endAt: string | null | undefined,
+  timezone: string,
+  lang: 'en' | 'ru',
+): string {
+  const d = new TZDate(startAt, timezone);
+  const locale = lang === 'ru' ? ru : enUS;
+  const dateStr = format(d, 'd MMM, EEE', { locale });
+  const time = formatTimeRange(startAt, endAt ?? null, timezone);
+  return `📅 ${title} — ${dateStr}, ${time}`;
+}
 
 const PAGE_SIZE = 10;
 
@@ -38,7 +56,7 @@ export async function handleGroupAgenda(
   for (const s of items) {
     const event = eventRepo.findById(s.event_id, s.shared_by);
     if (!event) continue;
-    lines.push(`📅 ${event.title} — ${event.start_at}`);
+    lines.push(formatEventLine(event.title, event.start_at, event.end_at, user.timezone, lang));
   }
 
   if (lines.length === 0) {
@@ -74,6 +92,7 @@ export async function handleGroupAgendaCallback(
 ): Promise<void> {
   const user = ctx.dbUser;
   const lang = (user?.language ?? 'en') as 'en' | 'ru';
+  const timezone = user?.timezone ?? 'UTC';
   const chat = ctx.chat as ChatAccess | undefined;
 
   if (!chat) {
@@ -92,7 +111,7 @@ export async function handleGroupAgendaCallback(
   for (const s of items) {
     const event = eventRepo.findById(s.event_id, s.shared_by);
     if (!event) continue;
-    lines.push(`📅 ${event.title} — ${event.start_at}`);
+    lines.push(formatEventLine(event.title, event.start_at, event.end_at, timezone, lang));
   }
 
   if (lines.length === 0) {

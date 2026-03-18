@@ -24,7 +24,9 @@ function makeGroupRepo(items: Array<{ event_id: number; shared_by: number }> = [
   };
 }
 
-function makeEventRepo(events: Record<number, { id: number; title: string; start_at: string } | null> = {}) {
+function makeEventRepo(
+  events: Record<number, { id: number; title: string; start_at: string; end_at?: string | null } | null> = {},
+) {
   return {
     findById: mock((id: number) => events[id] ?? null),
   };
@@ -124,6 +126,19 @@ describe('handleGroupAgenda', () => {
     await handleGroupAgenda(ctx as never, groupRepo as never, eventRepo as never);
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('deleted');
+  });
+
+  test('formats date and time, not raw ISO', async () => {
+    const groupRepo = makeGroupRepo([{ event_id: 1, shared_by: 100 }], 1);
+    const eventRepo = makeEventRepo({
+      1: { id: 1, title: 'Standup', start_at: '2026-03-15T10:00:00Z', end_at: '2026-03-15T10:30:00Z' },
+    });
+    const ctx = makeCommandCtx('en', 'group', -999);
+    await handleGroupAgenda(ctx as never, groupRepo as never, eventRepo as never);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).not.toContain('2026-03-15T10:00:00Z');
+    expect(msg).toContain('10:00');
+    expect(msg).toContain('Mar');
   });
 
   test('works in supergroup chat type', async () => {
