@@ -48,4 +48,25 @@ describe('PlaywrightPool', () => {
     expect(p2).toBe(p1);
     await pool.release(p2);
   });
+
+  test('release does not throw when page context is already closed', async () => {
+    const page = await pool.acquire();
+    await page.context().close(); // simulate external close
+    await expect(pool.release(page)).resolves.toBeUndefined();
+  });
+
+  test('recovers after browser crash and serves new pages', async () => {
+    const page = await pool.acquire();
+    const browser = page.context().browser()!;
+    await pool.release(page);
+
+    // Simulate browser crash
+    await browser.close();
+
+    // Pool should reinitialize and return a working page
+    const recovered = await pool.acquire(5000);
+    expect(recovered).toBeDefined();
+    await recovered.setContent('<html><body>ok</body></html>');
+    await pool.release(recovered);
+  });
 });

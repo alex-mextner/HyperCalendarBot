@@ -1,4 +1,5 @@
 import { type Browser, chromium, type Page } from 'playwright';
+import { imageLogger } from '../utils/logger.ts';
 
 interface PoolOptions {
   maxPages?: number;
@@ -12,6 +13,7 @@ export class PlaywrightPool {
   private busyPages: Set<Page> = new Set();
   private pageUseCount: Map<Page, number> = new Map();
   private pageCreatedAt: Map<Page, number> = new Map();
+  private reinitPromise: Promise<void> | null = null;
 
   private readonly maxPages: number;
   private readonly maxUseCount: number;
@@ -27,12 +29,31 @@ export class PlaywrightPool {
     this.browser = await chromium.launch({
       args: ['--no-sandbox', '--disable-gpu'],
     });
+    this.browser.on('disconnected', () => {
+      this.freePages = [];
+      this.busyPages.clear();
+      this.pageUseCount.clear();
+      this.pageCreatedAt.clear();
+      this.browser = null;
+      this.reinitPromise = this.initialize()
+        .catch((err) => {
+          imageLogger.error({ err }, 'PlaywrightPool reinit failed after browser disconnect');
+          throw err;
+        })
+        .finally(() => {
+          this.reinitPromise = null;
+        });
+    });
   }
 
   async acquire(timeoutMs = 10_000): Promise<Page> {
     const deadline = Date.now() + timeoutMs;
 
     while (true) {
+      if (this.reinitPromise) {
+        await this.reinitPromise;
+      }
+
       // Return a free page if available
       if (this.freePages.length > 0) {
         const page = this.freePages.pop()!;
@@ -68,17 +89,30 @@ export class PlaywrightPool {
     const age = Date.now() - createdAt;
 
     if (useCount >= this.maxUseCount || age >= this.maxAgeMs) {
-      await page.context().close();
+      try {
+        await page.context().close();
+      } catch {
+        // context may already be closed (browser crash)
+      }
       this.pageUseCount.delete(page);
       this.pageCreatedAt.delete(page);
       return;
     }
 
-    await page.setContent('<html><body></body></html>');
-    this.freePages.push(page);
+    try {
+      await page.setContent('<html><body></body></html>');
+      this.freePages.push(page);
+    } catch {
+      // page is no longer usable; discard it
+      this.pageUseCount.delete(page);
+      this.pageCreatedAt.delete(page);
+    }
   }
 
   async shutdown(): Promise<void> {
+    if (this.reinitPromise) {
+      await this.reinitPromise.catch(() => {});
+    }
     const allPages = [...this.freePages, ...this.busyPages];
     for (const page of allPages) {
       try {
