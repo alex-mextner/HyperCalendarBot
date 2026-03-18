@@ -208,6 +208,40 @@ describe('handleDeleteCallback', () => {
   });
 });
 
+describe('handleDeleteConfirmCallback group context', () => {
+  test('uses deleteEventForGroup in group chat', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    const event = makeEvent();
+    const eventService = {
+      getEvent: mock(() => event),
+      deleteEvent: mock(() => true),
+      deleteEventForGroup: mock(() => true),
+    };
+
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 1);
+
+    expect(eventService.deleteEventForGroup).toHaveBeenCalledWith(1, -100);
+    expect(eventService.deleteEvent).not.toHaveBeenCalled();
+  });
+
+  test('uses deleteEvent in private chat', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCallbackCtx({ chat: { type: 'private', id: 1 } });
+    const event = makeEvent();
+    const eventService = {
+      getEvent: mock(() => event),
+      deleteEvent: mock(() => true),
+      deleteEventForGroup: mock(() => true),
+    };
+
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 1);
+
+    expect(eventService.deleteEvent).toHaveBeenCalledWith(1, 100);
+    expect(eventService.deleteEventForGroup).not.toHaveBeenCalled();
+  });
+});
+
 describe('handleDeleteConfirmCallback', () => {
   test('deletes event and shows success', async () => {
     const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');

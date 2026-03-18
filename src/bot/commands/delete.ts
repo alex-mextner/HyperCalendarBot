@@ -4,7 +4,7 @@ import { CB, t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { getGroupId, isGroup } from '../group-context.ts';
+import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
 import { deleteConfirmKeyboard, eventPickerKeyboard, recurrenceScopeKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -90,6 +90,21 @@ export async function handleDeleteConfirmCallback(
   eventId: number,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
+  const groupId = getGroupId(ctx as unknown as CtxWithChat);
+
+  if (groupId !== null) {
+    const event = eventService.getEvent(eventId, user.telegram_id);
+    const title = event?.title ?? '?';
+    const deleted = eventService.deleteEventForGroup(eventId, groupId);
+    await ctx.answer();
+    if (deleted) {
+      await ctx.editText(t(lang).event_deleted(title));
+    } else {
+      await ctx.editText(t(lang).something_wrong);
+    }
+    return;
+  }
+
   const event = eventService.getEvent(eventId, user.telegram_id);
   const title = event?.title ?? '?';
   const deleted = eventService.deleteEvent(eventId, user.telegram_id);
