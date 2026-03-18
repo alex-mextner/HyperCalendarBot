@@ -105,7 +105,8 @@ describe('createCallbackHandler', () => {
     const ctx = makeCtx('ai_btn:Да');
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-    expect(chatHistoryRepo.save).toHaveBeenCalledWith(100, 'user', 'Да');
+    // ai_btn does not save to history here — agent.run() → saveUserMessage() handles it
+    expect(chatHistoryRepo.save).not.toHaveBeenCalled();
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
@@ -131,7 +132,7 @@ describe('createCallbackHandler', () => {
     const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-    expect(chatHistoryRepo.save).toHaveBeenCalledWith(100, 'user', 'Да');
+    expect(chatHistoryRepo.save).not.toHaveBeenCalled();
   });
 
   test('ai_btn with userId restriction blocks wrong user', async () => {

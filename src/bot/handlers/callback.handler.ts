@@ -96,7 +96,9 @@ export function createCallbackHandler(
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');
 
-    // Log button press to chat history (skip ai_btn — handled separately below)
+    // Log button press to chat history.
+    // ai_btn is excluded: its answerText is saved as a button event just before onAiButtonClick,
+    // and saveUserMessage() inside agent.run() must NOT see a duplicate entry.
     if (chatHistoryRepo && user && action !== 'ai_btn') {
       chatHistoryRepo.save(
         user.telegram_id,
@@ -539,9 +541,7 @@ export function createCallbackHandler(
 
         await ctx.answer();
         await ctx.editText(`✅ ${answerText}`);
-        if (chatHistoryRepo) {
-          chatHistoryRepo.save(user.telegram_id, 'user', answerText);
-        }
+        // answerText is saved by agent.run() → saveUserMessage() — do not save here to avoid duplicates
         const cbChatId =
           (ctx as unknown as { chat?: { id: number } }).chat?.id ??
           (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
