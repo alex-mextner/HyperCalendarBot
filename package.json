@@ -24,6 +24,7 @@
     "@date-fns/tz": "1.4.1",
     "@gramio/scenes": "0.5.1",
     "@gramio/storage-sqlite": "0.0.2",
+    "@huggingface/inference": "^4.13.15",
     "@mtcute/bun": "^0.29.0",
     "@mtcute/tl": "^223.0.0",
     "bullmq": "^5.71.0",

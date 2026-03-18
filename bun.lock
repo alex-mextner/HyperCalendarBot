@@ -9,6 +9,7 @@
         "@date-fns/tz": "1.4.1",
         "@gramio/scenes": "0.5.1",
         "@gramio/storage-sqlite": "0.0.2",
+        "@huggingface/inference": "^4.13.15",
         "@mtcute/bun": "^0.29.0",
         "@mtcute/tl": "^223.0.0",
         "bullmq": "^5.71.0",
@@ -84,6 +85,12 @@
     "@gramio/storage-sqlite": ["@gramio/storage-sqlite@0.0.2", "", { "dependencies": { "@gramio/storage": "^2.0.1" } }, "sha512-F4I07s1GDb6uaLb/5cjTPjM9wQIF81/Xymvqu5Z70uR1q6ritnakbgfsWQ41crbbZoNvuWfi2WWLa56iz8/GqQ=="],
 
     "@gramio/types": ["@gramio/types@9.5.0", "", {}, "sha512-bpOxXjtsabZpm2TTvr0QA4XJKPVeIoN0scMFuViUaLb1FbtQ+yp4hGz0XUKHVUTr39TzPV4ICANNX5b5uMtTKw=="],
+
+    "@huggingface/inference": ["@huggingface/inference@4.13.15", "", { "dependencies": { "@huggingface/jinja": "^0.5.5", "@huggingface/tasks": "^0.19.90" } }, "sha512-V7B13KFDVhYkQqgx8vpMcmtEG+PoePlh65IUvpphTTItHAq6zRLcsS4torh1QavUaT+6nEwho4wFXzBQNGBwKQ=="],
+
+    "@huggingface/jinja": ["@huggingface/jinja@0.5.6", "", {}, "sha512-MyMWyLnjqo+KRJYSH7oWNbsOn5onuIvfXYPcc0WOGxU0eHUV7oAYUoQTl2BMdu7ml+ea/bu11UM+EshbeHwtIA=="],
+
+    "@huggingface/tasks": ["@huggingface/tasks@0.19.90", "", {}, "sha512-nfV9luJbvwGQ/5oKXkKhCV9h4X7mwh1YaGG3ORd6UMLDSwr1OFSSatcBX0O9OtBtmNK19aGSjbLFqqgcIR6+IA=="],
 
     "@ioredis/commands": ["@ioredis/commands@1.5.0", "", {}, "sha512-eUgLqrMf8nJkZxT24JvVRrQya1vZkQh8BBeYNwGDqa5I0VUi8ACx7uFvAaLxintokpTenkK6DASvo/bvNbBGow=="],
 

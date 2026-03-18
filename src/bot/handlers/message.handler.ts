@@ -34,6 +34,7 @@ import type { DeepLinkService } from '../../services/sharing/deep-link-service.t
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
+import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import {
   fixDateOrdinals,
@@ -91,6 +92,7 @@ export interface MessageHandlerDeps {
   botToken?: string;
   stressDictionary?: AgentContext['stressDictionary'];
   sileroTts?: SileroTtsService;
+  kokoroTts?: KokoroTtsService;
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
   // Pipeline: intent matching
   intentMatcher?: IntentMatcher;
@@ -253,31 +255,35 @@ async function handleVoiceMessage(
     const { responseText } = await deps.agent.run(agentContext);
 
     // Send voice reply if TTS is available and user has opted in
-    if (
-      responseText &&
-      user.voice_response_enabled === 1 &&
-      deps.sileroTts &&
-      deps.sendVoice &&
-      deps.stressDictionary
-    ) {
-      try {
-        // Telegram chat action: show "recording voice" indicator
-        await fetch(`${TG_API}/bot${deps.botToken!}/sendChatAction`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: Number(chatId), action: 'record_voice' }),
-        }).catch(() => {});
-        const plainText = stripMarkdown(responseText);
-        const noLineBreaks = fixLineBreaks(plainText);
-        const withOrdinals = fixDateOrdinals(noLineBreaks);
-        const withNumbers = numbersToWords(withOrdinals);
-        const withStress = markStress(withNumbers, deps.stressDictionary);
-        const stressedText = user.language === 'ru' ? transliterateEnglish(withStress) : withStress;
-        cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing voice reply');
-        const voiceBuffer = await deps.sileroTts.synthesize(stressedText);
-        await deps.sendVoice(Number(chatId), voiceBuffer);
-      } catch (ttsError) {
-        cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
+    if (responseText && user.voice_response_enabled === 1 && deps.sendVoice) {
+      const isRu = user.language === 'ru';
+      const hasRuTts = isRu && deps.sileroTts && deps.stressDictionary;
+      const hasEnTts = !isRu && deps.kokoroTts;
+      if (hasRuTts || hasEnTts) {
+        try {
+          await fetch(`${TG_API}/bot${deps.botToken!}/sendChatAction`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: Number(chatId), action: 'record_voice' }),
+          }).catch(() => {});
+          const plainText = stripMarkdown(responseText);
+          const noLineBreaks = fixLineBreaks(plainText);
+          let voiceBuffer: Buffer;
+          if (isRu) {
+            const withOrdinals = fixDateOrdinals(noLineBreaks);
+            const withNumbers = numbersToWords(withOrdinals);
+            const withStress = markStress(withNumbers, deps.stressDictionary!);
+            const stressedText = transliterateEnglish(withStress);
+            cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing RU voice reply');
+            voiceBuffer = await deps.sileroTts!.synthesize(stressedText);
+          } else {
+            cmdLogger.info({ userId: user.telegram_id, textLen: noLineBreaks.length }, 'Synthesizing EN voice reply');
+            voiceBuffer = await deps.kokoroTts!.synthesize(noLineBreaks);
+          }
+          await deps.sendVoice(Number(chatId), voiceBuffer);
+        } catch (ttsError) {
+          cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
+        }
       }
     }
 
