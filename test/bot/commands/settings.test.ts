@@ -374,7 +374,6 @@ describe('handleSettingsCallback', () => {
   });
 });
 
-
 describe('stg:general with buttons', () => {
   test('renders timezone, language, country without /timezone text', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
