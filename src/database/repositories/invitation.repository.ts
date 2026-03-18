@@ -114,4 +114,14 @@ export class InvitationRepository {
   clearProposedTime(id: number): void {
     this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
   }
+
+  clearProposedTimeAndAccept(id: number, expectedStatus: string): boolean {
+    const result = this.db.transaction(() => {
+      this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+      return this.db
+        .prepare("UPDATE invitations SET status = 'accepted', updated_at = datetime('now') WHERE id = ? AND status = ?")
+        .run(id, expectedStatus);
+    })();
+    return result.changes > 0;
+  }
 }

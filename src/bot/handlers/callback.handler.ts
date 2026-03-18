@@ -100,7 +100,7 @@ export function createCallbackHandler(
   secretaryDeps?: SecretaryDeps,
   proposalDeps?: ProposalDeps,
   snoozeDeps?: SnoozeDeps,
-  proposeTimeSessions?: Map<number, { invitationId: number; eventStart: string }>,
+  proposeTimeSessions?: Map<number, { invitationId: number }>,
   invitationRepo?: InvitationRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
@@ -462,19 +462,14 @@ export function createCallbackHandler(
             }
           } else {
             if (proposeTimeSessions) {
-              proposeTimeSessions.set(user.telegram_id, {
-                invitationId: invId,
-                eventStart: event?.start_at ?? new Date().toISOString(),
-              });
+              proposeTimeSessions.set(user.telegram_id, { invitationId: invId });
             }
             await ctx.answer();
             const msgs = t(lang);
             const quickKeyboard = new InlineKeyboard()
               .text(msgs.invite_propose_plus30, `${CB.INVITATION_ACTION}:propose:${invId}:+30`)
               .text(msgs.invite_propose_plus60, `${CB.INVITATION_ACTION}:propose:${invId}:+60`);
-            await (
-              ctx as unknown as { message?: { send: (text: string, opts: unknown) => Promise<unknown> } }
-            ).message?.send(msgs.invite_propose_ask, { reply_markup: quickKeyboard });
+            await ctx.message?.send(msgs.invite_propose_ask, { reply_markup: quickKeyboard });
           }
           return;
         }

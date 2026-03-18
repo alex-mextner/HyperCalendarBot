@@ -103,8 +103,7 @@ export interface MessageHandlerDeps {
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
   aiApiKey?: string;
-  // Propose-time flow: invitee typing a free-text proposed time
-  proposeTimeSessions?: Map<number, { invitationId: number; eventStart: string }>;
+  proposeTimeSessions?: Map<number, { invitationId: number }>;
   editMessage?: (chatId: number, messageId: number, text: string) => Promise<void>;
   notifyInviterProposal?: (
     invitationId: number,
@@ -449,7 +448,7 @@ async function handleProposeTimeInput(
   ctx: BotCommandContext,
   text: string,
   user: User,
-  session: { invitationId: number; eventStart: string },
+  session: { invitationId: number },
   deps: MessageHandlerDeps,
 ): Promise<void> {
   const lang = user.language as 'en' | 'ru';
@@ -459,7 +458,7 @@ async function handleProposeTimeInput(
   const parsed = parseSimpleDate(text, user.timezone);
 
   if (!parsed) {
-    deps.proposeTimeSessions!.set(user.telegram_id, session);
+    deps.proposeTimeSessions?.set(user.telegram_id, session);
     await ctx.send(lang === 'ru' ? 'Не могу распознать время. Попробуй ещё раз:' : 'Could not parse time. Try again:');
     return;
   }
@@ -546,21 +545,21 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const activeScene = await deps.sceneStorage.get(sceneKey);
     if (activeScene) return;
 
-    // Propose-time session: invitee typing a new time in response to an invite
-    if (deps.proposeTimeSessions) {
-      const proposeSession = deps.proposeTimeSessions.get(user.telegram_id);
-      if (proposeSession) {
-        deps.proposeTimeSessions.delete(user.telegram_id);
-        return handleProposeTimeInput(ctx, text, user, proposeSession, deps);
-      }
-    }
-
     const chatId = ctx.chatId;
     if (!chatId) return;
 
     // In groups: only respond to replies, mentions, or calendar keywords
     const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
     const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+
+    // Propose-time session: invitee typing a new time in response to an invite (private chats only)
+    if (!isGroup && deps.proposeTimeSessions) {
+      const proposeSession = deps.proposeTimeSessions.get(user.telegram_id);
+      if (proposeSession) {
+        deps.proposeTimeSessions.delete(user.telegram_id);
+        return handleProposeTimeInput(ctx, text, user, proposeSession, deps);
+      }
+    }
 
     if (isGroup) {
       const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;

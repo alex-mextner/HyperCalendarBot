@@ -18,8 +18,8 @@ function makeCtx(text: string, userId = 200) {
 
 describe('message handler: propose time session', () => {
   test('handles text input when proposeTimeSession exists', async () => {
-    const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
-    proposeTimeSessions.set(200, { invitationId: 5, eventStart: '2026-04-01T10:00:00Z' });
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
+    proposeTimeSessions.set(200, { invitationId: 5 });
 
     const inv = {
       id: 5,
@@ -62,8 +62,8 @@ describe('message handler: propose time session', () => {
   });
 
   test('notifies inviter after successful text time input', async () => {
-    const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
-    proposeTimeSessions.set(200, { invitationId: 5, eventStart: '2026-04-01T10:00:00Z' });
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
+    proposeTimeSessions.set(200, { invitationId: 5 });
 
     const inv = {
       id: 5,
@@ -102,8 +102,8 @@ describe('message handler: propose time session', () => {
   });
 
   test('re-asks on invalid time input', async () => {
-    const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
-    proposeTimeSessions.set(200, { invitationId: 5, eventStart: '2026-04-01T10:00:00Z' });
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
+    proposeTimeSessions.set(200, { invitationId: 5 });
 
     const ctx = makeCtx('not a time at all');
     const handler = createMessageHandler({
@@ -120,5 +120,35 @@ describe('message handler: propose time session', () => {
     await handler(ctx as never);
     expect(ctx.send).toHaveBeenCalled(); // error message sent
     expect(proposeTimeSessions.has(200)).toBe(true); // session kept for retry
+  });
+
+  test('ignores propose-time session in group chats', async () => {
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
+    proposeTimeSessions.set(200, { invitationId: 5 });
+    const invitationService = { proposeTime: mock(() => ({ success: true })) };
+
+    const handler = createMessageHandler({
+      agent: { run: mock(() => Promise.resolve({ responseText: '' })) } as never,
+      eventService: {} as never,
+      holidayService: {} as never,
+      chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
+      userRepo: {} as never,
+      reminderRepo: {} as never,
+      sceneStorage: { get: mock(() => Promise.resolve(null)) },
+      proposeTimeSessions,
+      invitationService: invitationService as never,
+    });
+
+    const ctx = {
+      text: 'tomorrow 15:00',
+      dbUser: makeUser({ telegram_id: 200 }),
+      chatId: 999,
+      send: mock(() => Promise.resolve()),
+      chat: { type: 'group', title: 'Team' },
+    };
+    await handler(ctx as never);
+
+    expect(invitationService.proposeTime).not.toHaveBeenCalled();
+    expect(proposeTimeSessions.has(200)).toBe(true); // session NOT consumed
   });
 });

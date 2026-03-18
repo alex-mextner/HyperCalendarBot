@@ -278,7 +278,7 @@ describe('inviter notification on response', () => {
 describe('propose-time callbacks', () => {
   function makeHandlerWithPropose(
     invitationService: Record<string, unknown>,
-    proposeTimeSessions?: Map<number, { invitationId: number; eventStart: string }>,
+    proposeTimeSessions?: Map<number, { invitationId: number }>,
     invitationRepo?: Record<string, unknown>,
     eventRepoArg?: Record<string, unknown>,
     notifyDeps?: Record<string, unknown>,
@@ -315,7 +315,7 @@ describe('propose-time callbacks', () => {
   }
 
   test('propose callback sets session and sends prompt', async () => {
-    const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
+    const proposeTimeSessions = new Map<number, { invitationId: number }>();
     const inv = { id: 5, invitee_id: 200, inviter_id: 100, event_id: 3, status: 'pending', proposed_time: null };
     const event = { id: 3, start_at: '2026-04-01T10:00:00Z' };
     const invitationRepo = { findById: mock(() => inv) };

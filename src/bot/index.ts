@@ -151,7 +151,7 @@ export function createBot(
   const workflowSessions = new Map<number, import('./pipeline/intent-matcher-layer.ts').WorkflowSession>();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
   const adminReplySession = new Map<number, { threadId: number; userId: number }>();
-  const proposeTimeSessions = new Map<number, { invitationId: number; eventStart: string }>();
+  const proposeTimeSessions = new Map<number, { invitationId: number }>();
 
   // Load approved intents into matcher on startup
   intentMatcher.load(intentRepo.getApproved());

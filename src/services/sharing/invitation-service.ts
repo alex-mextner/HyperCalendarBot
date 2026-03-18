@@ -110,8 +110,7 @@ export class InvitationService {
       return { success: false, error: 'No proposed time on this invitation' };
     }
     const proposedTime = invitation.proposed_time;
-    this.invRepo.clearProposedTime(invitationId);
-    const ok = this.invRepo.updateStatus(invitationId, 'accepted', invitation.status as InvitationStatus);
+    const ok = this.invRepo.clearProposedTimeAndAccept(invitationId, invitation.status);
     if (!ok) {
       return { success: false, error: 'Cannot update status — already changed' };
     }
