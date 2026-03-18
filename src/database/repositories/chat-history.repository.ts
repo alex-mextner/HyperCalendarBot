@@ -24,6 +24,27 @@ export class ChatHistoryRepository {
       .all(chatId, limit) as ChatHistoryMessage[];
   }
 
+  searchByChat(chatId: number, params: { limit?: number; search?: string }): ChatHistoryMessage[] {
+    const { limit = 50, search } = params;
+    const conditions: string[] = ['chat_id = ?'];
+    const args: (number | string)[] = [chatId];
+
+    if (search) {
+      conditions.push('content LIKE ?');
+      args.push(`%${search}%`);
+    }
+
+    const where = conditions.join(' AND ');
+    return this.db
+      .prepare(
+        `SELECT * FROM (
+          SELECT * FROM chat_history WHERE ${where}
+          ORDER BY created_at DESC, id DESC LIMIT ?
+        ) sub ORDER BY created_at ASC, id ASC`,
+      )
+      .all(...args, limit) as ChatHistoryMessage[];
+  }
+
   getRecent(userId: number, limit = 10): ChatHistoryMessage[] {
     return this.db
       .prepare(`

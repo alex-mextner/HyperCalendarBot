@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
+import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -19,24 +20,8 @@ interface MessageParam {
   content: string | Anthropic.ContentBlockParam[];
 }
 
-type ActivityEvent =
-  | { kind: 'button'; label: string; detail?: string }
-  | { kind: 'command'; name: string }
-  | { kind: 'bot'; text: string };
-
-function formatActivityEvent(event: ActivityEvent): string {
-  switch (event.kind) {
-    case 'button':
-      return `[Button: "${event.label}"]${event.detail ? ` (${event.detail})` : ''}`;
-    case 'command':
-      return `[Command: ${event.name}]`;
-    case 'bot':
-      return `[Bot: ${event.text}]`;
-  }
-}
-
 function withTimestamp(text: string, createdAt: string): string {
-  const ts = createdAt.slice(0, 16);
+  const ts = createdAt.slice(0, 19);
   return `[${ts}] ${text}`;
 }
 
@@ -96,7 +81,7 @@ export class CalendarBotAgent {
       messages.push({ role, content } as MessageParam);
     }
 
-    const nowUtc = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
     messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
 
     return { systemPrompt, messages };

@@ -118,4 +118,28 @@ describe('handleGetHistory', () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain('target message');
   });
+
+  test('accepts ISO 8601 with timezone offset', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'offset test message');
+    const after = new Date(Date.now() - 60000).toISOString().replace('Z', '+00:00');
+    const before = new Date(Date.now() + 60000).toISOString().replace('Z', '+00:00');
+
+    const result = handleGetHistory(ctx, { after, before });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('offset test message');
+  });
+
+  test('in group context search filter is applied', () => {
+    const GROUP_CHAT_ID = -100888;
+    ctx.chatHistory.save(USER_ID, 'user', 'встреча с клиентом', GROUP_CHAT_ID);
+    ctx.chatHistory.save(USER_ID, 'user', 'погода сегодня', GROUP_CHAT_ID);
+
+    ctx.isGroup = true;
+    ctx.groupChatId = GROUP_CHAT_ID;
+
+    const result = handleGetHistory(ctx, { search: 'встреч' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('клиентом');
+    expect(result.output).not.toContain('погода');
+  });
 });

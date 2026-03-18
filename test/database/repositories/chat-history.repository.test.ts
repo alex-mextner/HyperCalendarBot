@@ -106,12 +106,31 @@ describe('ChatHistoryRepository', () => {
   });
 
   test('search filters by before date', () => {
-    repo.save(USER_ID, 'user', 'old message');
+    db.exec(
+      `INSERT INTO chat_history (user_id, role, content, created_at) VALUES (${USER_ID}, 'user', 'old message', '2020-01-01 00:00:00')`,
+    );
     repo.save(USER_ID, 'user', 'new message');
-    const before = new Date(Date.now() + 1000).toISOString().slice(0, 19).replace('T', ' ');
-    // both messages are before "future", but limit to 1 to verify ordering
-    const results = repo.search(USER_ID, { before, limit: 1 });
+    const results = repo.search(USER_ID, { before: '2020-01-02 00:00:00' });
     expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('old message');
+  });
+
+  test('searchByChat returns messages for a chat filtered by search', () => {
+    const CHAT_ID = -100123;
+    repo.save(USER_ID, 'user', 'встреча завтра', CHAT_ID);
+    repo.save(USER_ID, 'user', 'погода сегодня', CHAT_ID);
+    const results = repo.searchByChat(CHAT_ID, { search: 'встреч' });
+    expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('встреча завтра');
+  });
+
+  test('searchByChat does not include DM messages', () => {
+    const CHAT_ID = -100456;
+    repo.save(USER_ID, 'user', 'dm message');
+    repo.save(USER_ID, 'user', 'group message', CHAT_ID);
+    const results = repo.searchByChat(CHAT_ID, {});
+    expect(results.length).toBe(1);
+    expect(results[0]!.content).toBe('group message');
   });
 
   test('clear removes all messages for user', () => {

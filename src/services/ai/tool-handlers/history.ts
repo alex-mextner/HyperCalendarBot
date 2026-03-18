@@ -1,5 +1,7 @@
 // src/services/ai/tool-handlers/history.ts
 
+import { isValid, parseISO } from 'date-fns';
+import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 interface GetHistoryInput {
@@ -9,31 +11,17 @@ interface GetHistoryInput {
   after?: string;
 }
 
-type ActivityEvent =
-  | { kind: 'button'; label: string; detail?: string }
-  | { kind: 'command'; name: string }
-  | { kind: 'bot'; text: string };
-
 function formatContent(content: string): string {
   try {
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed)) {
-      // ContentBlock array — extract text
       return parsed
         .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
         .map((b: { text: string }) => b.text)
         .join(' ');
     }
     if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
-      const event = parsed as ActivityEvent;
-      switch (event.kind) {
-        case 'button':
-          return `[Button: "${event.label}"]${event.detail ? ` (${event.detail})` : ''}`;
-        case 'command':
-          return `[Command: ${event.name}]`;
-        case 'bot':
-          return `[Bot: ${event.text}]`;
-      }
+      return formatActivityEvent(parsed as ActivityEvent);
     }
   } catch {
     // plain text
@@ -41,14 +29,20 @@ function formatContent(content: string): string {
   return content;
 }
 
-// Normalize ISO 8601 timestamp to SQLite datetime format "YYYY-MM-DD HH:MM:SS"
+// Normalize a datetime string to SQLite format "YYYY-MM-DD HH:MM:SS" (UTC).
+// Accepts ISO 8601 ("2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00", "2026-03-18"),
+// SQLite format ("2026-03-18 10:30:00"), or partial datetime ("2026-03-18 10:30").
 function toSqliteDateTime(ts: string): string {
-  // "2026-03-18T10:30:00Z" or "2026-03-18T10:30:00.000Z" → "2026-03-18 10:30:00"
-  return ts
-    .replace('T', ' ')
-    .replace(/\.\d+Z?$/, '')
-    .replace('Z', '')
-    .slice(0, 19);
+  // Already SQLite format (space separator) — return as-is, trimmed to 19 chars
+  if (/^\d{4}-\d{2}-\d{2} /.test(ts)) {
+    return ts.slice(0, 19);
+  }
+  // ISO 8601 — parseISO handles Z, offsets, date-only, milliseconds
+  const date = parseISO(ts);
+  if (isValid(date)) {
+    return date.toISOString().slice(0, 19).replace('T', ' ');
+  }
+  return ts.slice(0, 19);
 }
 
 export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): ToolResult {
@@ -56,9 +50,13 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
   const before = input.before ? toSqliteDateTime(input.before) : undefined;
   const after = input.after ? toSqliteDateTime(input.after) : undefined;
 
-  // In group context, scope to the group chat history to avoid leaking private DM messages
+  // In group context, scope to the group chat history to avoid leaking private DM messages.
+  // before/after filters are not supported for group history (group timestamps are shared context).
   if (ctx.isGroup && ctx.groupChatId) {
-    const messages = ctx.chatHistory.getRecentByChat(ctx.groupChatId, limit);
+    const messages = ctx.chatHistory.searchByChat(ctx.groupChatId, {
+      limit,
+      search: input.search,
+    });
     if (messages.length === 0) return { success: true, output: 'No history found.' };
     const lines = messages.map((msg) => {
       const ts = msg.created_at.slice(0, 16);

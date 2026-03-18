@@ -657,11 +657,13 @@ export const toolDefinitions: ToolDefinition[] = [
         },
         before: {
           type: 'string',
-          description: 'Return entries before this datetime (SQLite format: "YYYY-MM-DD HH:MM:SS")',
+          description:
+            'Return entries before this datetime. Accepts ISO 8601 (e.g. "2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00") or date only ("2026-03-18"). Ignored in group chats.',
         },
         after: {
           type: 'string',
-          description: 'Return entries after this datetime (SQLite format: "YYYY-MM-DD HH:MM:SS")',
+          description:
+            'Return entries after this datetime. Accepts ISO 8601 (e.g. "2026-03-18T10:30:00Z", "2026-03-18T10:30:00+05:00") or date only ("2026-03-18"). Ignored in group chats.',
         },
       },
       required: [],
