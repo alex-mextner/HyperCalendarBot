@@ -567,9 +567,9 @@ export function createBot(
     .on('chat_shared', async (ctx) => {
       const user = (ctx as unknown as { dbUser?: User }).dbUser;
       if (!user) return;
-      const eventId = (ctx as unknown as { requestId?: number }).requestId ?? 0;
+      const eventId = (ctx as unknown as { requestId?: number }).requestId;
       const chat = (ctx as unknown as { chat_shared?: { chat_id: number } }).chat_shared;
-      if (!chat) return;
+      if (!eventId || !chat) return;
       const inviteeId = chat.chat_id;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       if (invitationService) {
