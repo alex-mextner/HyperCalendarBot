@@ -35,6 +35,12 @@ function backRow(kb: InlineKeyboard): InlineKeyboard {
   return kb.row().text('🔙 Назад', 'stg:back');
 }
 
+function fmtReminderInterval(m: number): string {
+  if (m === 0) return 'в начале';
+  if (m >= 60) return `${m / 60}ч`;
+  return `${m}мин`;
+}
+
 // ─── Notifications ──────────────────────────────────────────────────────────
 
 function buildNotificationsView(
@@ -49,7 +55,6 @@ function buildNotificationsView(
 ): { text: string; kb: InlineKeyboard } {
   const fmtTime = (on: boolean, time: string) => (on ? `✅ ${time}` : '❌');
   const fmtQuiet = (on: boolean, s: string | null, e: string | null) => (on && s && e ? `✅ ${s}–${e}` : '❌');
-  const fmtInterval = (m: number) => (m === 0 ? 'в начале' : m >= 60 ? `${m / 60}ч` : `${m}мин`);
 
   const text = [
     '🔔 Уведомления',
@@ -60,7 +65,7 @@ function buildNotificationsView(
     '  Список событий на завтра — удобно проверить перед сном.',
     `Тихие часы: ${fmtQuiet(quietEnabled, quietStart, quietEnd)}`,
     '  Напоминания и звонки не беспокоят в это время.',
-    `Напоминания: ${intervals.map(fmtInterval).join(', ')}`,
+    `Напоминания: ${intervals.map(fmtReminderInterval).join(', ')}`,
     '  За сколько до события бот присылает напоминание.',
   ].join('\n');
 
@@ -79,11 +84,10 @@ function buildNotificationsView(
 }
 
 function buildReminderIntervalsView(intervals: number[]): { text: string; kb: InlineKeyboard } {
-  const fmtInterval = (m: number) => (m === 0 ? 'в начале' : m >= 60 ? `${m / 60}ч` : `${m}мин`);
   const text = [
     '⏰ Интервалы напоминаний',
     '',
-    `Активные: ${intervals.length > 0 ? intervals.map(fmtInterval).join(', ') : 'не заданы'}`,
+    `Активные: ${intervals.length > 0 ? intervals.map(fmtReminderInterval).join(', ') : 'не заданы'}`,
     '  Выберите за сколько до события отправлять напоминание.',
   ].join('\n');
   return { text, kb: reminderIntervalsKeyboard(intervals) };

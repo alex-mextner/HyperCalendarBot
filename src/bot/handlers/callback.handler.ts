@@ -989,7 +989,12 @@ export function createCallbackHandler(
 
       // Settings category picker
       if (action === 'stg') {
-        if (payload === 'change_tz' && timezoneScene) {
+        if (payload === 'change_tz') {
+          if (!timezoneScene) {
+            cmdLogger.error('timezoneScene not wired into createCallbackHandler');
+            await ctx.answer('Недоступно');
+            return;
+          }
           await ctx.answer();
           await ctx.scene.enter(timezoneScene);
           return;
