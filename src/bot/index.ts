@@ -317,7 +317,7 @@ export function createBot(
     )
     .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
+    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService, db.groupChats))
     .command('free', (ctx) =>
       handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
     )
