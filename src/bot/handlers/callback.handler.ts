@@ -1085,16 +1085,18 @@ export function createCallbackHandler(
           if (responseText.trim()) {
             const plainText = stripMarkdown(responseText);
             const noLineBreaks = fixLineBreaks(plainText);
-            let audio: Buffer;
-            if (isRu) {
+            let audio: Buffer | undefined;
+            if (isRu && voiceDeps.sileroTts) {
               const withOrdinals = fixDateOrdinals(noLineBreaks);
               const withNumbers = numbersToWords(withOrdinals);
               const withStress = markStress(withNumbers, voiceDeps.stressDictionary!);
-              audio = await voiceDeps.sileroTts!.synthesize(transliterateEnglish(withStress));
-            } else {
-              audio = await voiceDeps.kokoroTts!.synthesize(noLineBreaks);
+              audio = await voiceDeps.sileroTts.synthesize(transliterateEnglish(withStress));
+            } else if (!isRu && voiceDeps.kokoroTts) {
+              audio = await voiceDeps.kokoroTts.synthesize(noLineBreaks);
             }
-            await voiceDeps.sendVoice(chatIdNum, audio);
+            if (audio) {
+              await voiceDeps.sendVoice(chatIdNum, audio);
+            }
           }
         } catch (err) {
           cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');
