@@ -23,7 +23,7 @@ export class SecretaryRepository {
     if (active) return active;
 
     // Insert new pending row; reset revoked/expired/declined conflict to pending
-    const result = this.db
+    this.db
       .prepare(
         `INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
          VALUES (?, ?, ?, 'pending', datetime('now'), datetime('now'))
@@ -34,7 +34,7 @@ export class SecretaryRepository {
            updated_at = datetime('now')`,
       )
       .run(data.owner_id, data.secretary_id, data.permission);
-    return this.findById(Number(result.lastInsertRowid))!;
+    return this.findByOwnerAndSecretary(data.owner_id, data.secretary_id)!;
   }
 
   findById(id: number): CalendarSecretary | null {

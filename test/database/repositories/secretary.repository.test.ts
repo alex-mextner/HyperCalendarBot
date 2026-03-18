@@ -63,4 +63,20 @@ describe('SecretaryRepository', () => {
     repo.updateStatus(r.id, 'active');
     expect(repo.countActive(7)).toBe(1);
   });
+
+  test('upsert ON CONFLICT resets declined/revoked to pending and returns correct row', () => {
+    // Create initial record and decline it
+    const first = repo.upsert({ owner_id: 1, secretary_id: 2, permission: 'read' });
+    repo.updateStatus(first.id, 'declined');
+
+    // Insert another record so lastInsertRowid would point to a different id if the bug exists
+    repo.upsert({ owner_id: 5, secretary_id: 11, permission: 'read' });
+
+    // Upsert again — triggers ON CONFLICT DO UPDATE on the declined row
+    const reset = repo.upsert({ owner_id: 1, secretary_id: 2, permission: 'write' });
+
+    expect(reset.id).toBe(first.id);
+    expect(reset.status).toBe('pending');
+    expect(reset.permission).toBe('write');
+  });
 });
