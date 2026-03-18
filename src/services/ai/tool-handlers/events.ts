@@ -169,39 +169,27 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
     if (event.description) parts.push(`description: ${event.description}`);
     if (event.location) parts.push(`location: ${event.location}`);
 
-    if (scope === 'group' && ctx.groupChatId && ctx.groupMemberRepo && ctx.sender) {
+    if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
       const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
       const groupLabel = groupTitle ?? String(ctx.groupChatId);
-      const dbMembers = ctx.groupMemberRepo.getMembers(ctx.groupChatId);
-      const notifiedIds = new Set<number>();
-      for (const member of dbMembers) {
-        if (member.user_id === ctx.user.telegram_id) continue;
-        const recipientUser = ctx.userRepo.findByTelegramId(member.user_id);
-        const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-        ctx.sender
-          .sendMessage(member.user_id, t(recipientLang).group_event_created(event.title, groupLabel), 'Markdown')
-          .catch((err) => {
-            eventsLogger.error({ error: String(err), userId: member.user_id }, 'Group event notification failed');
-          });
-        notifiedIds.add(member.user_id);
-      }
-      // Fire-and-forget: fetch additional members via MTProto, upsert to DB, notify newcomers
-      fetchMtprotoGroupMembers(ctx.groupChatId)
-        .then((mtprotoIds) => {
-          for (const userId of mtprotoIds) {
-            ctx.groupMemberRepo!.upsert(ctx.groupChatId!, userId);
-            if (notifiedIds.has(userId) || userId === ctx.user.telegram_id) continue;
+      const creatorId = ctx.user.telegram_id;
+      const sender = ctx.sender;
+      ctx.groupMemberService
+        .getRegisteredMembers(ctx.groupChatId)
+        .then((memberIds) => {
+          for (const userId of memberIds) {
+            if (userId === creatorId) continue;
             const recipientUser = ctx.userRepo.findByTelegramId(userId);
             const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-            ctx
-              .sender!.sendMessage(userId, t(recipientLang).group_event_created(event.title, groupLabel), 'Markdown')
+            sender
+              .sendMessage(userId, t(recipientLang).group_event_created(event.title, groupLabel), 'Markdown')
               .catch((err) => {
-                eventsLogger.error({ error: String(err), userId }, 'MTProto group event notification failed');
+                eventsLogger.error({ error: String(err), userId }, 'Group event notification failed');
               });
           }
         })
         .catch((err) => {
-          eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'MTProto member fetch failed');
+          eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch failed');
         });
     }
 
@@ -234,41 +222,27 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.description) parts.push(`description: ${updated.description}`);
   if (updated.location) parts.push(`location: ${updated.location}`);
 
-  if (scope === 'group' && ctx.groupChatId && ctx.groupMemberRepo && ctx.sender) {
+  if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
     const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
     const groupLabel = groupTitle ?? String(ctx.groupChatId);
-    const dbMembers = ctx.groupMemberRepo.getMembers(ctx.groupChatId);
-    const notifiedIds = new Set<number>();
-    for (const member of dbMembers) {
-      if (member.user_id === ctx.user.telegram_id) continue;
-      const recipientUser = ctx.userRepo.findByTelegramId(member.user_id);
-      const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-      ctx.sender
-        .sendMessage(member.user_id, t(recipientLang).group_event_updated(updated.title, groupLabel), 'Markdown')
-        .catch((err) => {
-          eventsLogger.error({ error: String(err), userId: member.user_id }, 'Group event update notification failed');
-        });
-      notifiedIds.add(member.user_id);
-    }
-    fetchMtprotoGroupMembers(ctx.groupChatId)
-      .then((mtprotoIds) => {
-        for (const userId of mtprotoIds) {
-          ctx.groupMemberRepo!.upsert(ctx.groupChatId!, userId);
-          if (notifiedIds.has(userId) || userId === ctx.user.telegram_id) continue;
+    const updaterId = ctx.user.telegram_id;
+    const sender = ctx.sender;
+    ctx.groupMemberService
+      .getRegisteredMembers(ctx.groupChatId)
+      .then((memberIds) => {
+        for (const userId of memberIds) {
+          if (userId === updaterId) continue;
           const recipientUser = ctx.userRepo.findByTelegramId(userId);
           const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-          ctx
-            .sender!.sendMessage(userId, t(recipientLang).group_event_updated(updated.title, groupLabel), 'Markdown')
+          sender
+            .sendMessage(userId, t(recipientLang).group_event_updated(updated.title, groupLabel), 'Markdown')
             .catch((err) => {
-              eventsLogger.error({ error: String(err), userId }, 'MTProto group update notification failed');
+              eventsLogger.error({ error: String(err), userId }, 'Group event update notification failed');
             });
         }
       })
       .catch((err) => {
-        eventsLogger.error(
-          { error: String(err), groupChatId: ctx.groupChatId },
-          'MTProto member fetch (update) failed',
-        );
+        eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch (update) failed');
       });
   }
 
@@ -507,20 +481,4 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
     success: true,
     output: `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
   };
-}
-
-async function fetchMtprotoGroupMembers(groupChatId: number): Promise<number[]> {
-  try {
-    const proc = Bun.spawn(['venv/bin/python', 'scripts/get-group-members.py', String(groupChatId)], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const output = await new Response(proc.stdout).text();
-    const exitCode = await proc.exited;
-    if (exitCode !== 0) return [];
-    const members = JSON.parse(output.trim()) as { user_id: number }[];
-    return members.map((m) => m.user_id);
-  } catch {
-    return [];
-  }
 }

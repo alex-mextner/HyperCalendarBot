@@ -14,6 +14,7 @@ import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
+import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
@@ -171,6 +172,7 @@ export function createBot(
     sendAsUser: mtprotoSendAsUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
+  const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
 
   function buildAgentContext(
     user: User,
@@ -208,6 +210,7 @@ export function createBot(
       checkGroupMembership,
       groupChatRepo: db.groupChats,
       groupMemberRepo: db.groupMembers,
+      groupMemberService,
       googleCalendarRepo: googleDeps?.calendarRepo,
       deepLinkService,
       botUsername: process.env.BOT_USERNAME,

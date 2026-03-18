@@ -4,7 +4,6 @@ import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
-import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
@@ -23,6 +22,7 @@ import {
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
+import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 
 function createTestDb() {
@@ -543,11 +543,13 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('created_by');
     });
 
+    function makeMemberService(memberIds: number[]): GroupMemberService {
+      return { getRegisteredMembers: mock(async () => memberIds) } as unknown as GroupMemberService;
+    }
+
     test('handleCreateEvent notifies group members except creator', async () => {
       const MEMBER_ID = 456;
-      const groupMemberRepo = new GroupMemberRepository(db);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, MEMBER_ID);
+      const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
 
       const sent: { chatId: number; text: string; parseMode?: string }[] = [];
       const sender = {
@@ -558,11 +560,7 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      const gCtx: AgentContext = {
-        ...makeGroupCtx(),
-        groupMemberRepo,
-        sender,
-      };
+      const gCtx: AgentContext = { ...makeGroupCtx(), groupMemberService, sender };
       const result = handleCreateEvent(gCtx, {
         title: 'Party',
         start_at: '2026-03-20T18:00:00Z',
@@ -571,7 +569,6 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      // Give async notifications a tick to fire
       await new Promise((r) => setTimeout(r, 10));
       expect(sent.length).toBe(1);
       expect(sent[0].chatId).toBe(MEMBER_ID);
@@ -583,9 +580,7 @@ describe('event tool handlers', () => {
       const RU_MEMBER_ID = 789;
       const userRepo = ctx.userRepo as UserRepository;
       userRepo.create({ telegram_id: RU_MEMBER_ID, timezone: 'UTC', language: 'ru' });
-      const groupMemberRepo = new GroupMemberRepository(db);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, RU_MEMBER_ID);
+      const groupMemberService = makeMemberService([USER_ID, RU_MEMBER_ID]);
 
       const sent: { chatId: number; text: string }[] = [];
       const sender = {
@@ -596,10 +591,12 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      handleCreateEvent(
-        { ...makeGroupCtx(), groupMemberRepo, sender } as AgentContext,
-        { title: 'Встреча', start_at: '2026-03-20T10:00:00Z', scope: 'group', force: true },
-      );
+      handleCreateEvent({ ...makeGroupCtx(), groupMemberService, sender } as AgentContext, {
+        title: 'Встреча',
+        start_at: '2026-03-20T10:00:00Z',
+        scope: 'group',
+        force: true,
+      });
 
       await new Promise((r) => setTimeout(r, 10));
       expect(sent.length).toBe(1);
@@ -609,9 +606,7 @@ describe('event tool handlers', () => {
 
     test('handleUpdateEvent notifies group members on group update', async () => {
       const MEMBER_ID = 456;
-      const groupMemberRepo = new GroupMemberRepository(db);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
-      groupMemberRepo.upsert(GROUP_CHAT_ID, MEMBER_ID);
+      const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
 
       const event = createGroupEvent('Sprint Planning', '2026-03-21T09:00:00Z');
 
@@ -624,10 +619,11 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      const result = handleUpdateEvent(
-        { ...makeGroupCtx(), groupMemberRepo, sender } as AgentContext,
-        { event_id: event.id, title: 'Sprint Planning Updated', scope: 'group' },
-      );
+      const result = handleUpdateEvent({ ...makeGroupCtx(), groupMemberService, sender } as AgentContext, {
+        event_id: event.id,
+        title: 'Sprint Planning Updated',
+        scope: 'group',
+      });
 
       expect(result.success).toBe(true);
       await new Promise((r) => setTimeout(r, 10));

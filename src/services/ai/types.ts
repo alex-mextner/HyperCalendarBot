@@ -15,6 +15,7 @@ import type { SharingSettingsRepository } from '../../database/repositories/shar
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../event/event-service.ts';
+import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
@@ -64,6 +65,7 @@ export interface AgentContext {
   };
   groupChatRepo?: GroupChatRepository;
   groupMemberRepo?: GroupMemberRepository;
+  groupMemberService?: GroupMemberService;
   googleCalendarRepo?: GoogleCalendarRepository;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
