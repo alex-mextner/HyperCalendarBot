@@ -174,7 +174,8 @@ function buildVoiceView(voiceEnabled: number | null): { text: string; kb: Inline
 async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
-  const groupId = getGroupId(ctx)!;
+  const groupId = getGroupId(ctx);
+  if (groupId === null) return;
   const group = groupRepo.findByChatId(groupId);
 
   const tz = group?.timezone ?? (lang === 'ru' ? '❌ не задана' : '❌ not set');

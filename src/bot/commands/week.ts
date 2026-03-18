@@ -11,7 +11,7 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import { renderWeekImage } from '../../services/image/render-week.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
 import { imageLogger } from '../../utils/logger.ts';
-import { getGroupId, isGroup } from '../group-context.ts';
+import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export async function handleWeek(
@@ -24,8 +24,9 @@ export async function handleWeek(
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as never)) {
-    const groupId = getGroupId(ctx as never)!;
+  if (isGroup(ctx as unknown as CtxWithChat)) {
+    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+    if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
       await ctx.send(

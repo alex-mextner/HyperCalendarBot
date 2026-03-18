@@ -25,7 +25,8 @@ export async function handleHolidays(
   const args = (ctx.args as string)?.trim();
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx)!;
+    const groupId = getGroupId(ctx);
+    if (groupId === null) return;
     const group = groupRepo?.findByChatId(groupId);
     if (!group?.country) {
       await ctx.send(
