@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import type { NotificationLogRow } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
@@ -275,5 +276,57 @@ describe('NotificationScheduler', () => {
     // 14:45 UTC is outside quiet hours 22:00-08:00
     await callScheduler.tick(new Date('2026-03-15T14:45:30Z'));
     expect(callEnqueued.length).toBe(1);
+  });
+
+  test('morning_agenda payload is rendered text, not raw JSON', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_utc) VALUES (42, '08:00')");
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at) VALUES (1, 42, 'Standup', '2026-03-15T10:00:00Z', '2026-03-15T10:30:00Z')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedLogId = 0;
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'morning_agenda') capturedLogId = logId;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-15T08:00:30Z'));
+    expect(capturedLogId).toBeGreaterThan(0);
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    expect(log.payload).not.toContain('"eventCount"');
+    expect(log.payload).toContain('Standup');
+  });
+
+  test('evening_review payload is rendered text, not raw JSON', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run(
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+    );
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at) VALUES (1, 42, 'Planning', '2026-03-16T10:00:00Z', '2026-03-16T11:00:00Z')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedLogId = 0;
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'evening_review') capturedLogId = logId;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-15T21:00:30Z'));
+    expect(capturedLogId).toBeGreaterThan(0);
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    expect(log.payload).not.toContain('"eventCount"');
+    expect(log.payload).toContain('Planning');
   });
 });

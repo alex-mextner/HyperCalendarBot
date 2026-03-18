@@ -1,3 +1,6 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
+import { enUS, ru } from 'date-fns/locale';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
@@ -6,9 +9,42 @@ import type { HolidayRepository } from '../../database/repositories/holiday.repo
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
+import type { CalendarEvent } from '../../database/types.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+import type { AgendaEvent } from './renderer.ts';
+import { NotificationRenderer } from './renderer.ts';
 import { isQuietHours } from './timezone.ts';
+
+const renderer = new NotificationRenderer();
+
+function toAgendaEvents(events: CalendarEvent[], timezone: string, lang: string): AgendaEvent[] {
+  return events.map((e) => {
+    const startTime = format(new TZDate(e.start_at, timezone), 'HH:mm');
+    const endTime = e.end_at ? format(new TZDate(e.end_at, timezone), 'HH:mm') : startTime;
+    const durationMs = e.end_at ? new Date(e.end_at).getTime() - new Date(e.start_at).getTime() : 0;
+    const totalMin = Math.round(durationMs / 60000);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    let duration: string;
+    if (totalMin === 0) {
+      duration = lang === 'ru' ? '?' : '?';
+    } else if (hours === 0) {
+      duration = lang === 'ru' ? `${mins}мин` : `${mins}m`;
+    } else if (mins === 0) {
+      duration = lang === 'ru' ? `${hours}ч` : `${hours}h`;
+    } else {
+      duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
+    }
+    return { title: e.title, startTime, endTime, location: e.location, duration };
+  });
+}
+
+function makeDateLabel(dateStr: string, timezone: string, lang: string): string {
+  const d = new TZDate(`${dateStr}T12:00:00Z`, timezone);
+  const locale = lang === 'ru' ? ru : enUS;
+  return format(d, 'EEEE, MMMM d', { locale });
+}
 
 const DEFAULT_EVE_HOLIDAY_UTCHHMM = '21:00';
 
@@ -202,7 +238,11 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
       if (events.length === 0) continue;
       const refKey = `ma:${pref.user_id}:${todayDate}`;
-      const payload = JSON.stringify({ date: todayDate, eventCount: events.length });
+      const lang = user.language ?? 'ru';
+      const dateLabel = makeDateLabel(todayDate, user.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+      const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'morning_agenda',
@@ -256,7 +296,11 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
       if (events.length === 0) continue;
       const refKey = `ev:${pref.user_id}:${tomorrowDate}`;
-      const payload = JSON.stringify({ date: tomorrowDate, eventCount: events.length });
+      const lang = user.language ?? 'ru';
+      const dateLabel = makeDateLabel(tomorrowDate, user.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'evening_review',
