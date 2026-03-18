@@ -255,8 +255,11 @@ if (config.REDIS_URL) {
 }
 
 if (config.REDIS_URL) {
-  const { createBotTasksQueue, setupSecretaryExpiryCron } = await import('./worker/bot-tasks-queue.ts');
+  const { createBotTasksQueue, setupSecretaryExpiryCron, setupSharingCleanupCron } = await import(
+    './worker/bot-tasks-queue.ts'
+  );
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
+  const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
 
   const secretaryRepo = new SecretaryRepository(db.db);
 
@@ -268,9 +271,11 @@ if (config.REDIS_URL) {
         userRepo: db.users,
         notify: (userId, text) => botRef.sendMessage(userId, text),
       }),
+    onSharingCleanup: () => runSharingCleanup({ invitationRepo: db.invitations, deepLinkRepo: db.deepLinks }),
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
+  await setupSharingCleanupCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {
