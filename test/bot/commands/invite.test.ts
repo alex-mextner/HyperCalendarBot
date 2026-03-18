@@ -149,11 +149,19 @@ describe('handleInvite', () => {
     const deps = {
       invitationService: { sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })) },
       eventService: {
-        getEvent: mock(() => ({ id: 5, title: 'Party', start_at: '2026-03-20T10:00:00.000Z', end_at: '2026-03-20T11:00:00.000Z' })),
+        getEvent: mock(() => ({
+          id: 5,
+          title: 'Party',
+          start_at: '2026-03-20T10:00:00.000Z',
+          end_at: '2026-03-20T11:00:00.000Z',
+        })),
       },
       invRepo: { setMessageInfo: mock(() => {}) },
       deepLinkService: {},
-      sendMessage: mock((...args: unknown[]) => { capturedArgs.push(args); return Promise.resolve({ message_id: 1 }); }),
+      sendMessage: mock((...args: unknown[]) => {
+        capturedArgs.push(args);
+        return Promise.resolve({ message_id: 1 });
+      }),
     };
 
     await handleInvite(ctx as never, deps as never);
