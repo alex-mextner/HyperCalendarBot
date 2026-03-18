@@ -297,6 +297,68 @@ export function handleGetBotInfo(): ToolResult {
   };
 }
 
+function evalArithmetic(expr: string): number {
+  let pos = 0;
+
+  function skipWs(): void {
+    while (pos < expr.length && expr[pos] === ' ') pos++;
+  }
+
+  function parseNumber(): number {
+    skipWs();
+    const start = pos;
+    if (expr[pos] === '-') pos++;
+    while (pos < expr.length && /[\d.]/.test(expr[pos]!)) pos++;
+    const n = Number(expr.slice(start, pos));
+    if (Number.isNaN(n)) throw new Error(`Invalid number at position ${start}`);
+    return n;
+  }
+
+  function parseFactor(): number {
+    skipWs();
+    if (expr[pos] === '(') {
+      pos++;
+      const val = parseAddSub();
+      skipWs();
+      if (expr[pos] !== ')') throw new Error('Expected )');
+      pos++;
+      return val;
+    }
+    return parseNumber();
+  }
+
+  function parseMulDiv(): number {
+    let left = parseFactor();
+    while (true) {
+      skipWs();
+      const op = expr[pos];
+      if (op !== '*' && op !== '/') break;
+      pos++;
+      const right = parseFactor();
+      left = op === '*' ? left * right : left / right;
+    }
+    return left;
+  }
+
+  function parseAddSub(): number {
+    let left = parseMulDiv();
+    while (true) {
+      skipWs();
+      const op = expr[pos];
+      if (op !== '+' && op !== '-') break;
+      pos++;
+      const right = parseMulDiv();
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+
+  const result = parseAddSub();
+  skipWs();
+  if (pos !== expr.length) throw new Error(`Unexpected character at position ${pos}: ${expr[pos]}`);
+  return result;
+}
+
 export function handleCalculate(input: { expression: string }): ToolResult {
   const expr = input.expression.trim();
 
@@ -346,11 +408,11 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     return { success: true, output: `${rh}:${rm}` };
   }
 
-  // Safe numeric arithmetic: digits, whitespace, operators, parentheses only
+  // Numeric arithmetic: digits, whitespace, operators, parentheses only
   if (/^[\d\s+\-*/.()]+$/.test(expr)) {
     try {
-      const result = Function(`"use strict"; return (${expr})`)() as unknown;
-      if (typeof result !== 'number' || !Number.isFinite(result)) {
+      const result = evalArithmetic(expr);
+      if (!Number.isFinite(result)) {
         return { success: false, error: 'Result is not a finite number' };
       }
       return { success: true, output: String(result) };

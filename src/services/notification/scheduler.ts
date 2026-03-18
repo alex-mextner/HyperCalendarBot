@@ -294,6 +294,8 @@ export class NotificationScheduler {
     }
 
     // 3. Eve-holiday notifications
+    // TODO: tomorrowDate is UTC-based; for users past midnight locally (UTC+ with late evening_review_utc),
+    // their local tomorrow may differ. Fixing requires per-user local date in the repo query.
     if (this.deps.holidayRepo) {
       const usersWithHoliday = this.deps.holidayRepo.getUsersWithNotifyForDate(tomorrowDate);
       const seen = new Set<number>();
@@ -361,15 +363,16 @@ export class NotificationScheduler {
 
         // Next Monday = tomorrow (Sunday + 1 day)
         const nextMonDate = new Date(minute.getTime() + 86_400_000);
-        const weekYear = isoWeekYear(nextMonDate);
-        const weekNum = isoWeekNumber(nextMonDate);
+        const nextMonLocalIso = new TZDate(nextMonDate, user.timezone).toISOString().slice(0, 10);
+        const nextMonLocalDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
+        const weekYear = isoWeekYear(nextMonLocalDate);
+        const weekNum = isoWeekNumber(nextMonLocalDate);
         const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
         const refKey = `wd:${pref.user_id}:${weekStr}`;
 
         const lang = user.language ?? 'ru';
 
         // Build Mon–Sun local calendar dates for next week
-        const nextMonLocalIso = new TZDate(nextMonDate, user.timezone).toISOString().slice(0, 10);
         const days: WeeklyDigestDay[] = [];
         for (let i = 0; i < 7; i++) {
           const calDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
