@@ -29,6 +29,17 @@ export interface ReminderData {
   intervalLabel: string;
 }
 
+export interface WeeklyDigestEvent {
+  title: string;
+  startTime: string;
+}
+
+export interface WeeklyDigestDay {
+  date: string;
+  dayLabel: string;
+  events: WeeklyDigestEvent[];
+}
+
 const LABELS = {
   en: {
     morning: "Good morning! Here's your day:",
@@ -39,6 +50,8 @@ const LABELS = {
     goodNight: 'Good night!',
     haveADay: 'Have a productive day!',
     eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
+    weeklyDigest: (range: string) => `📅 Week ${range}:`,
+    noEvents: 'no events',
   },
   ru: {
     morning: 'Доброе утро! Ваш день:',
@@ -53,6 +66,8 @@ const LABELS = {
     goodNight: 'Спокойной ночи!',
     haveADay: 'Продуктивного дня!',
     eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
+    weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
+    noEvents: 'нет событий',
   },
 };
 
@@ -95,6 +110,22 @@ export class NotificationRenderer {
       language: input.language,
     });
     return { channel: 'telegram_voice_call', text };
+  }
+
+  renderWeeklyDigest(lang: string, weekRange: string, days: WeeklyDigestDay[]): RenderedNotification {
+    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const lines: string[] = [];
+    lines.push(l.weeklyDigest(weekRange));
+    lines.push('');
+    for (const day of days) {
+      if (day.events.length === 0) {
+        lines.push(`${day.dayLabel}: (${l.noEvents})`);
+      } else {
+        const eventList = day.events.map((e) => `${e.startTime} ${e.title}`).join(', ');
+        lines.push(`${day.dayLabel}: ${eventList}`);
+      }
+    }
+    return { channel: 'telegram_text', text: lines.join('\n') };
   }
 
   renderEveHoliday(lang: string, holidayName: string): RenderedNotification {

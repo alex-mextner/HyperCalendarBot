@@ -398,12 +398,19 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'send_invitation',
-    description: 'Send an invitation for an event to another user.',
+    description:
+      'Create an invitation record and attempt delivery to another user. ' +
+      'invitee_id MUST come from find_contact, find_user, or the pick_users callback in this conversation — never from memory or assumption. ' +
+      'Success means the record was created and delivery is in progress; it does NOT mean the message was received.',
     input_schema: {
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to invite to' },
-        invitee_id: { type: 'number', description: 'Telegram ID of the user to invite' },
+        invitee_id: {
+          type: 'number',
+          description:
+            'Telegram ID of the user to invite. Must be a value returned by find_contact, find_user, or pick_users in this conversation.',
+        },
         invitee_username: {
           type: 'string',
           description: 'Telegram @username of the invitee (without @). Pass if known from find_contact.',

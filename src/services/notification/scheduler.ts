@@ -1,3 +1,6 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
+import { enUS, ru } from 'date-fns/locale';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
@@ -6,9 +9,80 @@ import type { HolidayRepository } from '../../database/repositories/holiday.repo
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
+import type { CalendarEvent } from '../../database/types.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
+import { NotificationRenderer } from './renderer.ts';
 import { isQuietHours } from './timezone.ts';
+
+const renderer = new NotificationRenderer();
+
+function toAgendaEvents(events: CalendarEvent[], timezone: string, lang: string): AgendaEvent[] {
+  return events.map((e) => {
+    const startTime = format(new TZDate(e.start_at, timezone), 'HH:mm');
+    const endTime = e.end_at ? format(new TZDate(e.end_at, timezone), 'HH:mm') : startTime;
+    const durationMs = e.end_at ? new Date(e.end_at).getTime() - new Date(e.start_at).getTime() : 0;
+    const totalMin = Math.round(durationMs / 60000);
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    let duration: string;
+    if (totalMin === 0) {
+      duration = lang === 'ru' ? '?' : '?';
+    } else if (hours === 0) {
+      duration = lang === 'ru' ? `${mins}мин` : `${mins}m`;
+    } else if (mins === 0) {
+      duration = lang === 'ru' ? `${hours}ч` : `${hours}h`;
+    } else {
+      duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
+    }
+    return { title: e.title, startTime, endTime, location: e.location, duration };
+  });
+}
+
+function makeDateLabel(dateStr: string, timezone: string, lang: string): string {
+  const d = new TZDate(`${dateStr}T12:00:00Z`, timezone);
+  const locale = lang === 'ru' ? ru : enUS;
+  return format(d, 'EEEE, MMMM d', { locale });
+}
+
+function isoWeekNumber(date: Date): number {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  // ISO weeks start on Monday; adjust to nearest Thursday
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil(((d.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7);
+}
+
+function isoWeekYear(date: Date): number {
+  const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const dayOfWeek = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayOfWeek);
+  return d.getUTCFullYear();
+}
+
+function makeWeekRangeLabel(monDate: Date, sunDate: Date, lang: string): string {
+  const monDay = monDate.getUTCDate();
+  const sunDay = sunDate.getUTCDate();
+  const monMonth = monDate.getUTCMonth();
+  const sunMonth = sunDate.getUTCMonth();
+  const MONTHS_RU = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const MONTHS_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const months = lang === 'ru' ? MONTHS_RU : MONTHS_EN;
+  if (monMonth === sunMonth) {
+    return `${monDay}–${sunDay} ${months[sunMonth]}`;
+  }
+  return `${monDay} ${months[monMonth]}–${sunDay} ${months[sunMonth]}`;
+}
+
+function makeDayLabel(date: Date, lang: string): string {
+  const DAY_SHORT_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+  const DAY_SHORT_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const days = lang === 'ru' ? DAY_SHORT_RU : DAY_SHORT_EN;
+  const day = days[date.getUTCDay()]!;
+  return `${day} ${date.getUTCDate()}`;
+}
 
 const DEFAULT_EVE_HOLIDAY_UTCHHMM = '21:00';
 
@@ -202,7 +276,11 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
       if (events.length === 0) continue;
       const refKey = `ma:${pref.user_id}:${todayDate}`;
-      const payload = JSON.stringify({ date: todayDate, eventCount: events.length });
+      const lang = user.language ?? 'ru';
+      const dateLabel = makeDateLabel(todayDate, user.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+      const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'morning_agenda',
@@ -256,7 +334,11 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
       if (events.length === 0) continue;
       const refKey = `ev:${pref.user_id}:${tomorrowDate}`;
-      const payload = JSON.stringify({ date: tomorrowDate, eventCount: events.length });
+      const lang = user.language ?? 'ru';
+      const dateLabel = makeDateLabel(tomorrowDate, user.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
+      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'evening_review',
@@ -267,6 +349,58 @@ export class NotificationScheduler {
       if (logId === null) continue;
       this.deps.enqueue('evening_review', pref.user_id, logId, payload);
       notifyLogger.info({ userId: pref.user_id }, 'Evening review enqueued');
+    }
+
+    // 5. Weekly digest (Sunday only, at user's evening_review_utc)
+    if (minute.getUTCDay() === 0) {
+      const weeklyPrefs = this.deps.prefsRepo.getAllByEveningUtc(currentHHMM);
+      for (const pref of weeklyPrefs) {
+        const user = this.deps.userRepo.findByTelegramId(pref.user_id);
+        if (!user) continue;
+
+        // Next Monday = tomorrow (Sunday + 1 day)
+        const nextMonDate = new Date(minute.getTime() + 86_400_000);
+        const weekYear = isoWeekYear(nextMonDate);
+        const weekNum = isoWeekNumber(nextMonDate);
+        const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
+        const refKey = `wd:${pref.user_id}:${weekStr}`;
+
+        const lang = user.language ?? 'ru';
+
+        // Build Mon–Sun date strings for next week
+        const days: WeeklyDigestDay[] = [];
+        for (let i = 0; i < 7; i++) {
+          const dayDate = new Date(nextMonDate.getTime() + i * 86_400_000);
+          const dateStr = dayDate.toISOString().slice(0, 10);
+          const dayStart = `${dateStr}T00:00:00Z`;
+          const dayEnd = `${dateStr}T23:59:59Z`;
+          const dayEvents = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
+          const dayLabel = makeDayLabel(dayDate, lang);
+          days.push({
+            date: dateStr,
+            dayLabel,
+            events: dayEvents.map((e) => ({
+              title: e.title,
+              startTime: format(new TZDate(e.start_at, user.timezone), 'HH:mm'),
+            })),
+          });
+        }
+
+        const sunDate = new Date(nextMonDate.getTime() + 6 * 86_400_000);
+        const weekRange = makeWeekRangeLabel(nextMonDate, sunDate, lang);
+        const payload = renderer.renderWeeklyDigest(lang, weekRange, days).text;
+
+        const logId = this.deps.logRepo.insert({
+          user_id: pref.user_id,
+          type: 'weekly_digest',
+          reference_key: refKey,
+          channel: 'telegram_text',
+          payload,
+        });
+        if (logId === null) continue;
+        this.deps.enqueue('weekly_digest', pref.user_id, logId, payload);
+        notifyLogger.info({ userId: pref.user_id, week: weekStr }, 'Weekly digest enqueued');
+      }
     }
   }
 }

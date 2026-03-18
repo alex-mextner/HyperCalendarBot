@@ -207,6 +207,8 @@ export function createBot(
       calendarProposalRepo,
       checkGroupMembership,
       googleCalendarRepo: googleDeps?.calendarRepo,
+      deepLinkService,
+      botUsername: process.env.BOT_USERNAME,
     };
   }
 
@@ -455,6 +457,7 @@ export function createBot(
             await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
           },
         },
+        undefined,
         proposeTimeSessions,
         db.invitations,
       )(ctx as unknown as BotCallbackContext),
@@ -501,8 +504,15 @@ export function createBot(
         reply_markup: { remove_keyboard: true },
       });
       // Build context for AI: who was requested + what happened
-      const selectedNames = selected.map((s) => s.firstName ?? s.username ?? `id:${s.userId}`).join(', ');
-      const contextMsg = `[User picker result] Selected: ${selectedNames}. Results:\n${results.join('\n')}`;
+      const selectedDetails = selected
+        .map((s) => {
+          const name = s.firstName ?? s.username ?? `id:${s.userId}`;
+          const parts = [name, `id:${s.userId}`];
+          if (s.username) parts.push(`@${s.username}`);
+          return parts.join(' ');
+        })
+        .join(', ');
+      const contextMsg = `[User picker result] Invitations already sent by the bot — do NOT call send_invitation. Selected: ${selectedDetails}. Results:\n${results.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
       const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
       if (chatId) {

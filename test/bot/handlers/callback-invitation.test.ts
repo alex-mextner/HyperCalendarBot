@@ -309,6 +309,7 @@ describe('propose-time callbacks', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
       proposeTimeSessions,
       invitationRepo as never,
     );
@@ -423,6 +424,8 @@ describe('propose-time callbacks', () => {
       undefined,
       undefined,
       notifyDeps as never,
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,

@@ -12,7 +12,15 @@
       "Bash(uv pip:*)",
       "Bash(ffmpeg -version)",
       "Bash(node_modules/.bin/biome check:*)",
-      "Bash(/Users/ultra/xp/hypercalendarbot/node_modules/.bin/tsc --noEmit)"
+      "Bash(/Users/ultra/xp/hypercalendarbot/node_modules/.bin/tsc --noEmit)",
+      "Bash(/Users/ultra/xp/hypercalendarbot/node_modules/.bin/biome check:*)",
+      "Bash(for dir:*)",
+      "Bash(do ls:*)",
+      "Bash(done)",
+      "Read(//Users/ultra/.claude/projects/-Users-ultra-xp-hypercalendarbot/c47cad90-aa56-42c2-8712-ed97d58cfe0d/**)",
+      "Read(//Users/ultra/.claude/projects/-Users-ultra-xp-hypercalendarbot/**)",
+      "Write",
+      "Bash"
     ]
   }
 }

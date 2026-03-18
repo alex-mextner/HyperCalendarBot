@@ -61,7 +61,9 @@ ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secreta
   1. Create the event first.
   2. For EACH mentioned person: call find_contact to check the address book.
   3. After checking all contacts, use pick_users tool to let the user select who to invite via Telegram's native user picker.
-  4. The loop will stop after pick_users — invitations are sent automatically when the user selects people.
+  4. The loop will stop after pick_users — invitations are sent automatically when the user selects people. When you receive a [User picker result] message: do NOT call send_invitation (already done); call add_contact if the selected person's display name differs from the name the user used (use preferred_name = how the user referred to them); then acknowledge to the user.
+  NEVER skip pick_users and call send_invitation directly. NEVER use an invitee_id that was not returned by find_contact, find_user, or the pick_users callback in this conversation. Any telegram_id from memory, prior failed calls, or assumption is forbidden as invitee_id.
+- DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.
 - Use ask_user for yes/no questions with buttons (e.g., confirming destructive actions).
 - After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.
 

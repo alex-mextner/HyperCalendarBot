@@ -114,6 +114,37 @@ describe('ContactRepository', () => {
     expect(repo.findByUsername(USER_ID, '@larichkina_b')).not.toBeNull();
   });
 
+  test('findByName matches on preferred_name', () => {
+    repo.add(USER_ID, '⚡𝓐𝓷𝓽𝓸𝓷⚡', 'tikididu', 173850803, 'Антон');
+    const found = repo.findByName(USER_ID, 'Антон');
+    expect(found).not.toBeNull();
+    expect(found!.name).toBe('⚡𝓐𝓷𝓽𝓸𝓷⚡');
+    expect(found!.preferred_name).toBe('Антон');
+  });
+
+  test('findByName preferred_name is case-insensitive (Cyrillic)', () => {
+    repo.add(USER_ID, 'Ivan', undefined, undefined, 'Вася');
+    expect(repo.findByName(USER_ID, 'вася')).not.toBeNull();
+    expect(repo.findByName(USER_ID, 'ВАСЯ')).not.toBeNull();
+  });
+
+  test('findByName name is case-insensitive (Cyrillic)', () => {
+    repo.add(USER_ID, 'Антон');
+    expect(repo.findByName(USER_ID, 'антон')).not.toBeNull();
+  });
+
+  test('upsert sets preferred_name on new contact', () => {
+    const contact = repo.upsert(USER_ID, 'Vladimir', 'ikitheclaw', 999, 'Вова');
+    expect(contact.preferred_name).toBe('Вова');
+  });
+
+  test('upsert does not overwrite existing preferred_name', () => {
+    repo.add(USER_ID, 'Vladimir', 'ikitheclaw', 999, 'Вова');
+    repo.upsert(USER_ID, 'Vladimir', 'ikitheclaw', 999, 'Volodya');
+    const contact = repo.findByName(USER_ID, 'Vladimir');
+    expect(contact!.preferred_name).toBe('Вова');
+  });
+
   test('contacts are isolated per user', () => {
     new UserRepository(db).create({ telegram_id: 200 });
     repo.add(USER_ID, 'Лена');

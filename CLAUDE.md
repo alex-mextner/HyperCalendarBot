@@ -1,8 +1,6 @@
----
-description: Use Bun instead of Node.js, npm, pnpm, or vite.
-globs: "*.ts, *.tsx, *.html, *.css, *.js, *.jsx, package.json"
-alwaysApply: false
----
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 Default to using Bun instead of Node.js.
 
@@ -109,6 +107,62 @@ bun --hot ./index.ts
 ```
 
 For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+
+## Commands
+
+```sh
+bun run src/index.ts                        # start the bot
+bun test                                    # run all tests
+bun test test/services/intent/intent-learner.test.ts  # run a single test file
+bun test --coverage                         # coverage report
+bun run lint                                # check linting
+bun run lint:fix                            # auto-fix lint issues
+bun run format                              # format with Biome
+```
+
+## Architecture
+
+### Message Pipeline
+
+Every user message flows through a layered pipeline (`src/bot/pipeline/`):
+
+1. **FeedbackRouterLayer** — checks if the message is a reply inside an admin feedback thread; if so, routes it and stops.
+2. **IntentMatcherLayer** — tries to match against pre-approved intents (regex/keyword patterns). On match, executes the intent workflow directly — no AI call. Handles suspended workflows (ask_user mid-workflow) via an in-memory `workflowSessions` map with 5-min TTL.
+3. **AiAgentLayer** — falls through to `CalendarBotAgent` for everything else. After the agent completes, passes the interaction to `IntentLearner.analyze()` for potential intent extraction.
+
+Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false }` to continue.
+
+### AI Agent (`src/services/ai/`)
+
+- `agent.ts` — `CalendarBotAgent`: Anthropic SDK streaming, max 15 rounds, 90s timeout, 2 retries.
+- `tools.ts` — 40+ tool definitions (the Claude API schema).
+- `tool-executor.ts` — dispatches tool name → handler function.
+- `tool-handlers/` — one file per domain: `events`, `reminders`, `sharing`, `secretary`, `proposals`, `slots`, `settings`, `meta`, `feedback`, `history`.
+- `system-prompt.ts` — builds dynamic system prompt with user context (timezone, secretary access, group mode).
+- `telegram-sender.ts` — abstracts all Telegram API calls; injected as `AgentContext.sender`.
+
+### Intent Learning System (`src/services/intent/`)
+
+After every AI interaction (no `ask_user` calls, no contextual pronouns), `IntentLearner.analyze()` calls a secondary Haiku model to generate a candidate intent. Candidates are sent to the admin (`BOT_ADMIN_ID`) as inline-keyboard messages (Accept / Edit / Reject). Approved intents are stored in the `intents` table and matched by `IntentMatcher` in future requests, bypassing the AI entirely.
+
+### Workers (`src/worker/`)
+
+BullMQ on Redis, three queues:
+- **image-render** — Playwright renders weekly/monthly calendar images.
+- **call-reminders** — schedules voice call reminders via the Python bridge.
+- **bot-tasks** — periodic jobs: secretary expiry (daily), sharing cleanup (10min), proposal expiry (hourly).
+
+### GramIO Scenes (`src/bot/scenes/`)
+
+Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding`. Scene state is persisted in SQLite (not in-memory) so restarts don't break active flows.
+
+### Database
+
+`bun:sqlite` WAL mode. All access goes through repositories in `src/database/repositories/`. Schema defined as sequential migrations in `src/database/migrations.ts`. Key tables: `users`, `events`, `reminders`, `invitations`, `intents`, `chat_history`, `calendar_secretaries`, `calendar_proposals`, `contacts`, `event_participants`.
+
+### MTProto Bridge
+
+For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.
 
 ## Linting
 

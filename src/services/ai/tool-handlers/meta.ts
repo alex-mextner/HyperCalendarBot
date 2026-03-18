@@ -51,7 +51,8 @@ export function handleGetContacts(ctx: AgentContext): ToolResult {
   const contacts = ctx.contactRepo.list(ctx.user.telegram_id);
   if (contacts.length === 0) return { success: true, output: 'Address book is empty.' };
   const lines = contacts.map((c) => {
-    const parts = [c.name];
+    const parts = [c.preferred_name ?? c.name];
+    if (c.preferred_name) parts.push(`display:${c.name}`);
     if (c.username) parts.push(`@${c.username}`);
     if (c.telegram_id) parts.push(`id:${c.telegram_id}`);
     return parts.join(' — ');

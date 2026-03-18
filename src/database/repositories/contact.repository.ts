@@ -14,9 +14,11 @@ export class ContactRepository {
   constructor(private db: Database) {}
 
   findByName(userId: number, name: string): Contact | null {
-    return this.db
-      .prepare('SELECT * FROM contacts WHERE user_id = ? AND LOWER(name) = LOWER(?)')
-      .get(userId, name) as Contact | null;
+    const lower = name.toLowerCase();
+    const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
+    return (
+      contacts.find((c) => c.name.toLowerCase() === lower || (c.preferred_name?.toLowerCase() ?? '') === lower) ?? null
+    );
   }
 
   findByTelegramId(userId: number, contactTelegramId: number): Contact | null {

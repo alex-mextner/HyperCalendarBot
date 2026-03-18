@@ -98,4 +98,4 @@ export interface MonthlyCalendarData {
   locale: 'ru' | 'en';
 }
 
-export type ImageType = 'daily-agenda' | 'weekly-overview' | 'event-card' | 'monthly-calendar';
+export type ImageType = 'daily-agenda' | 'weekly-overview' | 'event-card' | 'monthly-calendar' | 'conflict-schedule';
