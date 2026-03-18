@@ -106,7 +106,9 @@ export class InvitationRepository {
   }
 
   setProposedTime(id: number, proposedTime: string): void {
-    this.db.prepare("UPDATE invitations SET proposed_time = ?, updated_at = datetime('now') WHERE id = ?").run(proposedTime, id);
+    this.db
+      .prepare("UPDATE invitations SET proposed_time = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(proposedTime, id);
   }
 
   clearProposedTime(id: number): void {

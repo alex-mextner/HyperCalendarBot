@@ -165,6 +165,21 @@ export const MSG = {
       `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+    invite_propose_btn: 'Other time 🕐',
+    invite_propose_ask: 'What time do you suggest?\nOr type: "tomorrow at 3pm"',
+    invite_propose_plus30: '+30 min',
+    invite_propose_plus60: '+1 hour',
+    invite_propose_sent: (time: string) => `⏰ You suggested: ${time}`,
+    invite_propose_notify: (name: string, event: string, time: string) =>
+      `📅 ${name} suggests rescheduling <b>${event}</b> to ${time}`,
+    invite_reschedule_btn: 'Reschedule 📅',
+    invite_keep_btn: 'Keep original',
+    invite_rescheduled_inviter: (time: string) => `✅ Event rescheduled to ${time}`,
+    invite_rescheduled_invitee: (event: string, time: string) =>
+      `✅ <b>${event}</b> rescheduled to ${time}. You are automatically accepted.`,
+    invite_kept_inviter: '❌ Suggestion declined',
+    invite_kept_invitee: (event: string, time: string) =>
+      `❌ Your suggestion for <b>${event}</b> was declined. It stays at ${time}.`,
     invitations_from: (name: string) => `from ${name}`,
     invitations_to: (name: string) => `to ${name}`,
     privacy_current: (level: string) => `🔒 Current visibility: <b>${level}</b>`,
@@ -296,6 +311,21 @@ export const MSG = {
       `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+    invite_propose_btn: 'Другое время 🕐',
+    invite_propose_ask: 'Какое время предлагаешь?\nИли напиши: "завтра в 15:00"',
+    invite_propose_plus30: '+30 мин',
+    invite_propose_plus60: '+1 час',
+    invite_propose_sent: (time: string) => `⏰ Вы предложили: ${time}`,
+    invite_propose_notify: (name: string, event: string, time: string) =>
+      `📅 ${name} предлагает перенести <b>${event}</b> на ${time}`,
+    invite_reschedule_btn: 'Перенести 📅',
+    invite_keep_btn: 'Оставить как есть',
+    invite_rescheduled_inviter: (time: string) => `✅ Событие перенесено на ${time}`,
+    invite_rescheduled_invitee: (event: string, time: string) =>
+      `✅ <b>${event}</b> перенесено на ${time}. Вы автоматически приняты.`,
+    invite_kept_inviter: '❌ Предложение отклонено',
+    invite_kept_invitee: (event: string, time: string) =>
+      `❌ Ваше предложение для <b>${event}</b> отклонено. Событие остаётся в ${time}.`,
     invitations_from: (name: string) => `от ${name}`,
     invitations_to: (name: string) => `для ${name}`,
     privacy_current: (level: string) => `🔒 Текущая видимость: <b>${level}</b>`,
