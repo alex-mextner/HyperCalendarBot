@@ -382,6 +382,20 @@ describe('stg:general with buttons', () => {
   });
 });
 
+describe('stg:show_countries', () => {
+  test('shows country picker', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'show_countries', prefs as never);
+
+    expect(ctx.editText).toHaveBeenCalled();
+    const [text] = ctx.editText.mock.calls[0] as [string, unknown];
+    expect(text).toContain('Выберите страну');
+  });
+});
+
 describe('stg:set_lang', () => {
   test('updates language and re-renders general view', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
