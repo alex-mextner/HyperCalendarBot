@@ -65,4 +65,19 @@ export class GroupChatRepository {
   setPinHintShown(chatId: number): void {
     this.db.prepare('UPDATE group_chats SET pin_hint_shown = 1 WHERE chat_id = ?').run(chatId);
   }
+
+  getTimezone(chatId: number): string | null {
+    const row = this.db.prepare('SELECT timezone FROM group_chats WHERE chat_id = ?').get(chatId) as {
+      timezone: string | null;
+    } | null;
+    return row?.timezone ?? null;
+  }
+
+  setTimezone(chatId: number, timezone: string): void {
+    this.db.prepare('UPDATE group_chats SET timezone = ? WHERE chat_id = ?').run(timezone, chatId);
+  }
+
+  setCountry(chatId: number, country: string): void {
+    this.db.prepare('UPDATE group_chats SET country = ? WHERE chat_id = ?').run(country, chatId);
+  }
 }
