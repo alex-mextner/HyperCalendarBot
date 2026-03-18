@@ -31,7 +31,6 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
-import { handleGroupAgenda } from './commands/agenda.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -50,7 +49,6 @@ import { handleShare } from './commands/share.ts';
 import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
-import { handleUnshare } from './commands/unshare.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
@@ -346,8 +344,6 @@ export function createBot(
     .command('share', (ctx) =>
       handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
     )
-    .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats, eventService))
-    .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {
       const calCtx = ctx as unknown as BotCommandContext;
@@ -404,7 +400,6 @@ export function createBot(
         googleDeps?.onCalendarsDone,
         renderService,
         invitationService,
-        db.groupChats,
         db.events,
         db.chatHistory,
         async (userId: number, chatId: number, text: string) => {

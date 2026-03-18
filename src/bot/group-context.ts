@@ -1,6 +1,6 @@
-type ChatType = 'group' | 'supergroup' | 'private' | 'channel';
+export type ChatType = 'group' | 'supergroup' | 'private' | 'channel';
 
-interface CtxWithChat {
+export interface CtxWithChat {
   chat?: { type: ChatType; id: number };
 }
 

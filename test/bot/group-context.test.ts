@@ -1,10 +1,8 @@
 import { expect, test } from 'bun:test';
-import { getGroupId, isGroup } from '../../src/bot/group-context.ts';
+import { type ChatType, type CtxWithChat, getGroupId, isGroup } from '../../src/bot/group-context.ts';
 
-type ChatType = 'group' | 'supergroup' | 'private' | 'channel';
-
-function makeCtx(type: ChatType, id: number) {
-  return { chat: { type, id } } as never;
+function makeCtx(type: ChatType, id: number): CtxWithChat {
+  return { chat: { type, id } };
 }
 
 test('isGroup returns true for group', () => {

@@ -14,7 +14,6 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
-import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
@@ -42,7 +41,6 @@ import { getWeekRangeUtc } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { handleGroupAgendaCallback } from '../commands/agenda.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
@@ -70,7 +68,6 @@ export function createCallbackHandler(
   onCalendarsDone?: (userId: number) => Promise<void>,
   renderService?: RenderService,
   invitationService?: InvitationService,
-  groupChatRepo?: GroupChatRepository,
   eventRepo?: EventRepository,
   chatHistoryRepo?: ChatHistoryRepository,
   onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>,
@@ -671,11 +668,6 @@ export function createCallbackHandler(
         return;
       }
 
-      // Group agenda pagination
-      if (action === CB.GROUP_AGENDA && groupChatRepo && eventRepo) {
-        return handleGroupAgendaCallback(ctx, groupChatRepo, eventRepo, Number(payload));
-      }
-
       // AI ask_user button responses — save answer and trigger AI continuation
       if (action === 'ai_btn') {
         // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
@@ -870,33 +862,6 @@ export function createCallbackHandler(
         } else {
           await ctx.answer({ text: 'Not configured' });
         }
-        return;
-      }
-
-      // Unshare: user picked an event to remove from group — unsp:{eventId|cancel}
-      if (action === CB.UNSHARE_PICK && groupChatRepo) {
-        if (payload === 'cancel') {
-          await ctx.answer();
-          await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
-          return;
-        }
-        const eventId = Number(payload);
-        const chat = (ctx as unknown as { chat?: { id: number } }).chat;
-        if (!chat) {
-          await ctx.answer();
-          return;
-        }
-        const removed = groupChatRepo.unshareEvent(chat.id, eventId, user.telegram_id);
-        await ctx.answer();
-        await ctx.editText(
-          removed
-            ? lang === 'ru'
-              ? '✅ Событие убрано из группы'
-              : '✅ Event removed from group'
-            : lang === 'ru'
-              ? '❌ Событие не найдено'
-              : '❌ Event not found',
-        );
         return;
       }
 

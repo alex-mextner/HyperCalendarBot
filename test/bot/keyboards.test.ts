@@ -31,7 +31,6 @@ import {
   timezoneConfirmKeyboard,
   timezoneManualKeyboard,
   timezoneMethodKeyboard,
-  unsharePickerKeyboard,
 } from '../../src/bot/keyboards';
 
 function kbData(kb: InlineKeyboard): Array<Array<{ text: string; callback_data?: string }>> {
@@ -617,45 +616,5 @@ describe('inviteContactPickerKeyboard', () => {
     expect(allText.some((t) => t.includes('Другой'))).toBe(true);
     expect(allText.some((t) => t.includes('Групповой'))).toBe(true);
     expect(allText.some((t) => t.includes('Отмена'))).toBe(true);
-  });
-});
-
-// ── unsharePickerKeyboard ──
-
-describe('unsharePickerKeyboard', () => {
-  test('creates button per item with correct callback', () => {
-    const items = [
-      { eventId: 10, title: 'Meeting' },
-      { eventId: 11, title: 'Lunch' },
-    ];
-    const kb = unsharePickerKeyboard(items, 'en');
-    const allButtons = kbData(kb).flat();
-    expect(allButtons.find((b) => b.callback_data === 'unsp:10')).toBeDefined();
-    expect(allButtons.find((b) => b.callback_data === 'unsp:11')).toBeDefined();
-  });
-
-  test('always includes Cancel button', () => {
-    const kb = unsharePickerKeyboard([], 'en');
-    const allData = kbData(kb)
-      .flat()
-      .map((b) => b.callback_data);
-    expect(allData).toContain('unsp:cancel');
-  });
-
-  test('ru cancel label', () => {
-    const kb = unsharePickerKeyboard([], 'ru');
-    const cancelBtn = kbData(kb)
-      .flat()
-      .find((b) => b.callback_data === 'unsp:cancel');
-    expect(cancelBtn?.text).toContain('Отмена');
-  });
-
-  test('truncates long titles to 40 chars', () => {
-    const longTitle = 'A'.repeat(60);
-    const kb = unsharePickerKeyboard([{ eventId: 1, title: longTitle }], 'en');
-    const btn = kbData(kb)
-      .flat()
-      .find((b) => b.callback_data === 'unsp:1');
-    expect(btn?.text.length).toBeLessThanOrEqual(40);
   });
 });
