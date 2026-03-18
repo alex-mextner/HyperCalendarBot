@@ -4,7 +4,7 @@ import { parseRedisUrl } from '../utils/redis.ts';
 
 const botTasksLogger = logger.child({ module: 'bot-tasks' });
 
-export type BotTaskJobType = 'cron-secretary-expiry';
+export type BotTaskJobType = 'cron-secretary-expiry' | 'cron-sharing-cleanup';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -13,6 +13,7 @@ export interface BotTaskJobData {
 interface BotTasksQueueDeps {
   redisUrl: string;
   onSecretaryExpiry?: () => Promise<void>;
+  onSharingCleanup?: () => void;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -35,6 +36,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
         if (deps.onSecretaryExpiry) await deps.onSecretaryExpiry();
         return;
       }
+      if (job.data.type === 'cron-sharing-cleanup') {
+        deps.onSharingCleanup?.();
+        return;
+      }
     },
     { connection, concurrency: 1 },
   );
@@ -45,6 +50,15 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
   });
 
   return { queue, worker };
+}
+
+export async function setupSharingCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'sharing-cleanup-tick',
+    { type: 'cron-sharing-cleanup' },
+    { repeat: { every: 10 * 60_000 }, removeOnComplete: true, jobId: 'sharing-cleanup-tick' },
+  );
+  botTasksLogger.info('Sharing cleanup cron scheduled (every 10min)');
 }
 
 export async function setupSecretaryExpiryCron(queue: Queue<BotTaskJobData>): Promise<void> {
