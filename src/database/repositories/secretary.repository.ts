@@ -83,13 +83,24 @@ export class SecretaryRepository {
     return row.cnt;
   }
 
-  expirePending(): number {
-    const result = this.db
+  expirePending(): CalendarSecretary[] {
+    const toExpire = this.getPendingExpired();
+    if (toExpire.length > 0) {
+      this.db
+        .prepare(
+          `UPDATE calendar_secretaries SET status = 'expired', updated_at = datetime('now')
+           WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
+        )
+        .run();
+    }
+    return toExpire;
+  }
+
+  getPendingExpired(): CalendarSecretary[] {
+    return this.db
       .prepare(
-        `UPDATE calendar_secretaries SET status = 'expired', updated_at = datetime('now')
-         WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
+        `SELECT * FROM calendar_secretaries WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
       )
-      .run();
-    return result.changes;
+      .all() as CalendarSecretary[];
   }
 }

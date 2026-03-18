@@ -20,7 +20,7 @@ describe('SecretaryRepository', () => {
     db = createTestDb();
     repo = new SecretaryRepository(db);
     const users = new UserRepository(db);
-    for (const id of [1, 2, 5, 7, 10, 11, 12, 20, 99]) {
+    for (const id of [1, 2, 5, 7, 8, 10, 11, 12, 20, 50, 51, 99]) {
       users.create({ telegram_id: id });
     }
   });
@@ -78,5 +78,25 @@ describe('SecretaryRepository', () => {
     expect(reset.id).toBe(first.id);
     expect(reset.status).toBe('pending');
     expect(reset.permission).toBe('write');
+  });
+
+  test('expirePending returns expired records and marks them expired', () => {
+    db.prepare(
+      `INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
+       VALUES (7, 8, 'read', 'pending', datetime('now', '-8 days'), datetime('now', '-8 days'))`,
+    ).run();
+    const result = repo.expirePending();
+    expect(result.length).toBeGreaterThan(0);
+    expect(repo.findByOwnerAndSecretary(7, 8)!.status).toBe('expired');
+  });
+
+  test('getPendingExpired returns pending records older than 7 days', () => {
+    db.prepare(
+      `INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
+       VALUES (50, 51, 'read', 'pending', datetime('now', '-8 days'), datetime('now', '-8 days'))`,
+    ).run();
+    const result = repo.getPendingExpired();
+    expect(result.length).toBeGreaterThan(0);
+    expect(result[0].owner_id).toBe(50);
   });
 });

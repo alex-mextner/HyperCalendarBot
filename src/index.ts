@@ -4,6 +4,7 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { SecretaryRepository } from './database/repositories/secretary.repository.ts';
 import { setupSharingCleanup } from './services/sharing/sharing-cleanup.ts';
 import { botLogger } from './utils/logger.ts';
 
@@ -29,6 +30,7 @@ let renderService: import('./services/image/render-service.ts').RenderService | 
 let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJobData): Promise<void> } | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
+let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string) => Promise<boolean>) | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
@@ -255,6 +257,34 @@ if (config.REDIS_URL) {
   botLogger.info('Notification scheduler initialized');
 }
 
+if (config.REDIS_URL) {
+  const { createBotTasksQueue, setupSecretaryExpiryCron } = await import('./worker/bot-tasks-queue.ts');
+  const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
+
+  const secretaryRepo = new SecretaryRepository(db.db);
+
+  const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
+    redisUrl: config.REDIS_URL,
+    onSecretaryExpiry: () =>
+      runSecretaryExpiry({
+        secretaryRepo,
+        userRepo: db.users,
+        notify: (userId, text) => botRef.sendMessage(userId, text),
+      }),
+  });
+
+  await setupSecretaryExpiryCron(botTasksQueue);
+
+  botTasksQueueCleanup = {
+    close: async () => {
+      await botTasksWorker.close();
+      await botTasksQueue.close();
+    },
+  };
+
+  botLogger.info('Bot tasks queue initialized');
+}
+
 let transcriptionService: import('./services/voice/transcription-service.ts').TranscriptionService | undefined;
 if (config.HF_TOKEN) {
   const { TranscriptionService } = await import('./services/voice/transcription-service.ts');
@@ -402,6 +432,7 @@ process.on('SIGINT', async () => {
   await bot.stop();
   sharingCleanup.stop();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();
+  if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
@@ -414,6 +445,7 @@ process.on('SIGTERM', async () => {
   await bot.stop();
   sharingCleanup.stop();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();
+  if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
