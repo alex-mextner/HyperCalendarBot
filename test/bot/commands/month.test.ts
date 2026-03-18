@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { handleMonth } from '../../../src/bot/commands/month.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -98,5 +99,56 @@ describe('handleMonth', () => {
     const callArgs = ctx.editText.mock.calls[0] as unknown[];
     const opts = callArgs[1] as Record<string, unknown>;
     expect(opts.reply_markup).toBeDefined();
+  });
+});
+
+describe('handleMonth group context', () => {
+  test('in group uses getEventsInRangeForGroup, not personal', async () => {
+    const eventService = {
+      getEventsInRange: mock(() => []),
+      getEventsInRangeForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    await handleMonth(ctx as never, eventService as never, undefined, undefined, groupRepo as never);
+    expect(eventService.getEventsInRangeForGroup).toHaveBeenCalled();
+    expect(eventService.getEventsInRange).not.toHaveBeenCalled();
+  });
+
+  test('in group with no timezone sends Russian prompt containing таймзону', async () => {
+    const groupRepo = { getTimezone: mock(() => null) };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+      editText: mock(() => Promise.resolve()),
+    };
+    await handleMonth(ctx as never, {} as never, undefined, undefined, groupRepo as never);
+    expect(sentText).toContain('таймзону');
+  });
+
+  test('in private chat uses personal calendar', async () => {
+    const eventService = {
+      getEventsInRange: mock(() => []),
+      getEventsInRangeForGroup: mock(() => []),
+    };
+    const ctx = {
+      chat: { type: 'private', id: 1 },
+      dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    await handleMonth(ctx as never, eventService as never);
+    expect(eventService.getEventsInRange).toHaveBeenCalled();
+    expect(eventService.getEventsInRangeForGroup).not.toHaveBeenCalled();
   });
 });

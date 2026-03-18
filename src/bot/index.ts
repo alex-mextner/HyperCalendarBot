@@ -301,15 +301,17 @@ export function createBot(
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) =>
-      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('week', (ctx) =>
-      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
-    .command('month', (ctx) => handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService))
+    .command('month', (ctx) =>
+      handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService, db.groupChats),
+    )
     .command('add', (ctx) =>
       handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
     )
