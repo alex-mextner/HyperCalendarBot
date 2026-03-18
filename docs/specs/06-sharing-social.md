@@ -786,5 +786,4 @@ set_event_visibility(params: {
 1. **Should invitations support +1 / guest count?** Probably overkill for v1. Revisit if users ask.
 2. **Should group chats have a "shared calendar" concept (persistent, not just individual shares)?** Deferred — adds significant complexity. The group_shared_events model is simpler and sufficient for launch.
 3. **Inline mode image generation — pre-generate or on-demand?** On-demand with caching seems right, but if image generation is consistently slow (>1.5s), consider pre-generating daily agenda images on event change.
-4. **Should the bot support channels (not just groups)?** Channels have different permissions model. Defer to v2.
-5. **Rate limiting on shares/invitations per user?** Probably needed to prevent spam, but exact limits TBD. Suggestion: max 50 invitations per day, max 20 shares per day.
+4. **Rate limiting on shares/invitations per user?** Probably needed to prevent spam, but exact limits TBD. Suggestion: max 50 invitations per day, max 20 shares per day.

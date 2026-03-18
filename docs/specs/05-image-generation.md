@@ -1230,9 +1230,7 @@ The bot command handler then calls `ctx.sendPhoto(buffer)`. No caching layer —
    - Pre-compute column assignments in TypeScript (like Google Calendar does) and pass `left`/`width` to each event block. **Recommended** -- it's ~30 lines of code and makes the image look professional.
    - Accept overlap and just layer them with slight offset + transparency. Simpler, less polished.
 
-2. **Avatar/profile photo** -- The spec mentions "User's name/avatar (optional)." Fetching the Telegram avatar requires an API call + storing the file. Defer to v2 -- the header already shows enough context.
-
-3. **Weather** -- Marked as "future, optional slot." Leave a visual placeholder in the template (an empty `<div>` with a comment) so adding weather later doesn't require redesigning the header.
+2. **Weather** -- Marked as "future, optional slot." Leave a visual placeholder in the template (an empty `<div>` with a comment) so adding weather later doesn't require redesigning the header.
 
 4. **Notification images** -- Morning notifications (sub-project #4) will likely want to send a daily agenda image. Should the notification system call `ImageService.renderDailyAgenda()` directly, or should it enqueue its own batch job? Batch job is better -- it can pre-render all user agendas at 06:50 and have them ready by 07:00.
 
