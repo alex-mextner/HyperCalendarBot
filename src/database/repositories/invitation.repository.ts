@@ -104,4 +104,12 @@ export class InvitationRepository {
   setMessageInfo(id: number, messageId: number, chatId: number): void {
     this.db.prepare('UPDATE invitations SET message_id = ?, chat_id = ? WHERE id = ?').run(messageId, chatId, id);
   }
+
+  setProposedTime(id: number, proposedTime: string): void {
+    this.db.prepare("UPDATE invitations SET proposed_time = ?, updated_at = datetime('now') WHERE id = ?").run(proposedTime, id);
+  }
+
+  clearProposedTime(id: number): void {
+    this.db.prepare("UPDATE invitations SET proposed_time = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  }
 }
