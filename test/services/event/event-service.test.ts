@@ -389,6 +389,34 @@ describe('EventService', () => {
       expect(occurrences.length).toBeGreaterThan(0);
       expect(occurrences.every((o) => o.event.title === 'Daily Group Standup')).toBe(true);
     });
+
+    test('getFreeSlotsForGroup() returns free slots based on group events', () => {
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Morning',
+        start_at: '2026-04-05T09:00:00Z',
+        end_at: '2026-04-05T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      // Personal event should not affect group free slots
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Blocker',
+        start_at: '2026-04-05T12:00:00Z',
+        end_at: '2026-04-05T18:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const slots = service.getFreeSlotsForGroup(GROUP_ID, new Date('2026-04-05T12:00:00Z'), 'UTC');
+      // Group calendar only has 1h busy (09-10), so most of the day is free
+      expect(slots.length).toBeGreaterThan(0);
+      // Personal blocker should not reduce group free slots
+      const totalFreeMinutes = slots.reduce((sum, s) => sum + s.durationMinutes, 0);
+      expect(totalFreeMinutes).toBeGreaterThan(20 * 60); // at least 20h free
+    });
   });
 
   describe('event lifecycle hooks', () => {

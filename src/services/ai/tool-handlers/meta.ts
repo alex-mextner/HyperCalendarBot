@@ -125,7 +125,7 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string; s
     return { success: false, error: 'Image rendering not available.' };
   }
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const dateObj = new Date(`${input.date}T12:00:00Z`);

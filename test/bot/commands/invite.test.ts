@@ -1,101 +1,141 @@
 // test/bot/commands/invite.test.ts
 import { describe, expect, mock, test } from 'bun:test';
-import { deliverInvitation, handleInvite } from '../../../src/bot/commands/invite.ts';
+import { handleInvite } from '../../../src/bot/commands/invite.ts';
 
 describe('handleInvite', () => {
-  test('shows no-events message when getUpcoming returns empty', async () => {
+  test('shows usage when args are missing', async () => {
     const ctx = {
       dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
+      args: '',
       send: mock(() => Promise.resolve()),
     };
-    const eventService = {
-      getUpcoming: mock(() => []),
+    const deps = {
+      invitationService: {},
+      eventService: {},
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     };
-    await handleInvite(ctx as never, eventService as never);
-    expect(ctx.send).toHaveBeenCalled();
-    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('no upcoming events');
-  });
 
-  test('shows event picker when events exist', async () => {
-    const ctx = {
-      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
-      send: mock(() => Promise.resolve()),
-    };
-    const eventService = {
-      getUpcoming: mock(() => [{ event: { id: 5, title: 'Party' } }, { event: { id: 6, title: 'Meeting' } }]),
-    };
-    await handleInvite(ctx as never, eventService as never);
-    expect(ctx.send).toHaveBeenCalled();
-    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('Choose an event');
-  });
-
-  test('deduplicates events by id', async () => {
-    const ctx = {
-      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
-      send: mock(() => Promise.resolve()),
-    };
-    const eventService = {
-      getUpcoming: mock(() => [
-        { event: { id: 5, title: 'Party' } },
-        { event: { id: 5, title: 'Party' } },
-        { event: { id: 6, title: 'Meeting' } },
-      ]),
-    };
-    await handleInvite(ctx as never, eventService as never);
-    expect(eventService.getUpcoming).toHaveBeenCalledWith(100, 20, 'UTC');
-    // Should be called — we just verify it doesn't crash with duplicate IDs
+    await handleInvite(ctx as never, deps as never);
     expect(ctx.send).toHaveBeenCalled();
   });
 
-  test('shows Russian message for ru language', async () => {
+  test('shows usage when args are invalid', async () => {
     const ctx = {
-      dbUser: { telegram_id: 100, language: 'ru', timezone: 'Europe/Moscow' },
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC' },
+      args: 'abc xyz',
       send: mock(() => Promise.resolve()),
     };
-    const eventService = {
-      getUpcoming: mock(() => []),
+    const deps = {
+      invitationService: {},
+      eventService: {},
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     };
-    await handleInvite(ctx as never, eventService as never);
-    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('нет предстоящих');
+
+    await handleInvite(ctx as never, deps as never);
+    expect(ctx.send).toHaveBeenCalled();
   });
-});
 
-describe('deliverInvitation', () => {
-  test('sends message and stores message info on success', async () => {
-    const sendMessage = mock(() => Promise.resolve({ message_id: 555 }));
-    const invRepo = { setMessageInfo: mock(() => {}) };
+  test('shows error when sendInvitation fails', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex' },
+      args: '200 1',
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {
+        sendInvitation: mock(() => ({ success: false, error: 'Already invited' })),
+      },
+      eventService: {},
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
 
-    const result = await deliverInvitation(200, 1, 'Party', 'Alex', 'en', invRepo as never, sendMessage as never);
+    await handleInvite(ctx as never, deps as never);
+    expect(ctx.send).toHaveBeenCalled();
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Already invited');
+  });
 
-    expect(result).toBe(true);
-    expect(sendMessage).toHaveBeenCalled();
-    const [chatId, text] = sendMessage.mock.calls[0] as unknown[];
+  test('sends invitation and delivers message on success', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex', username: 'alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {
+        sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })),
+      },
+      eventService: {
+        getEvent: mock(() => ({ id: 5, title: 'Party' })),
+      },
+      invRepo: {
+        setMessageInfo: mock(() => {}),
+      },
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 555 })),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+    expect(deps.sendMessage).toHaveBeenCalled();
+    const [chatId] = deps.sendMessage.mock.calls[0] as unknown[];
     expect(chatId).toBe(200);
-    expect(text).toContain('Party');
-    expect(invRepo.setMessageInfo).toHaveBeenCalledWith(1, 555, 200);
+    expect(deps.invRepo.setMessageInfo).toHaveBeenCalledWith(42, 555, 200);
+    // Should confirm delivery to the sender
+    expect(ctx.send).toHaveBeenCalled();
   });
 
-  test('returns false when sendMessage throws (user blocked bot)', async () => {
-    const forbidden = new Error('Forbidden: bot was blocked by the user');
-    const sendMessage = mock(() => Promise.reject(forbidden));
-    const invRepo = { setMessageInfo: mock(() => {}) };
+  test('sends deep link when user blocked bot (403)', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+    };
+    const forbidden = Object.assign(new Error('Forbidden'), { statusCode: 403 });
+    const deps = {
+      invitationService: {
+        sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })),
+      },
+      eventService: {
+        getEvent: mock(() => ({ id: 5, title: 'Party' })),
+      },
+      invRepo: {},
+      deepLinkService: {
+        createInvitationLink: mock(() => ({ code: 'abc123' })),
+        generateUrl: mock(() => 'https://t.me/bot?start=abc123'),
+      },
+      sendMessage: mock(() => Promise.reject(forbidden)),
+    };
 
-    const result = await deliverInvitation(200, 1, 'Party', 'Alex', 'en', invRepo as never, sendMessage as never);
-
-    expect(result).toBe(false);
-    expect(invRepo.setMessageInfo).not.toHaveBeenCalled();
+    await handleInvite(ctx as never, deps as never);
+    expect(deps.deepLinkService.createInvitationLink).toHaveBeenCalledWith(42, 5, 100);
+    expect(ctx.send).toHaveBeenCalled();
   });
 
-  test('sends invitation text in Russian', async () => {
-    const sendMessage = mock(() => Promise.resolve({ message_id: 1 }));
-    const invRepo = { setMessageInfo: mock(() => {}) };
+  test('re-throws non-403 errors', async () => {
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', first_name: 'Alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+    };
+    const serverError = Object.assign(new Error('Server Error'), { statusCode: 500 });
+    const deps = {
+      invitationService: {
+        sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })),
+      },
+      eventService: {
+        getEvent: mock(() => ({ id: 5, title: 'Party' })),
+      },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.reject(serverError)),
+    };
 
-    await deliverInvitation(200, 1, 'Встреча', 'Алекс', 'ru', invRepo as never, sendMessage as never);
-
-    const [, text] = sendMessage.mock.calls[0] as unknown[];
-    expect(text).toContain('Встреча');
+    await expect(handleInvite(ctx as never, deps as never)).rejects.toThrow('Server Error');
   });
 });

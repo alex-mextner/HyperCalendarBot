@@ -137,11 +137,8 @@ export class EventService {
     return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
   }
 
-  getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {
-    const { start: dayStart, end: dayEnd } = getDayRangeUtc(date, timezone);
-    const events = this.getEventsInRange(userId, dayStart, dayEnd);
-
-    const busy = events
+  private computeFreeSlots(occurrences: EventOccurrence[], dayStart: string, dayEnd: string): FreeSlot[] {
+    const busy = occurrences
       .filter((o) => o.occurrence_end)
       .map((o) => ({
         start: new Date(o.occurrence_start).getTime(),
@@ -177,6 +174,18 @@ export class EventService {
     }
 
     return slots;
+  }
+
+  getFreeSlots(userId: number, date: Date, timezone: string): FreeSlot[] {
+    const { start: dayStart, end: dayEnd } = getDayRangeUtc(date, timezone);
+    const events = this.getEventsInRange(userId, dayStart, dayEnd);
+    return this.computeFreeSlots(events, dayStart, dayEnd);
+  }
+
+  getFreeSlotsForGroup(groupId: number, date: Date, timezone: string): FreeSlot[] {
+    const { start: dayStart, end: dayEnd } = getDayRangeUtc(date, timezone);
+    const events = this.getEventsInRangeForGroup(groupId, dayStart, dayEnd);
+    return this.computeFreeSlots(events, dayStart, dayEnd);
   }
 
   searchEvents(userId: number, query: string): CalendarEvent[] {

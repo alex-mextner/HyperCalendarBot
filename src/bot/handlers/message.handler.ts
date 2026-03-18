@@ -266,7 +266,17 @@ async function handleVoiceMessage(
 }
 
 function buildAgentContextFactory(deps: MessageHandlerDeps) {
-  return (user: User, chatId: number, messageText: string, groupInfo?: { isGroup: boolean; groupChatId?: number; groupTitle?: string; onBotResponse?: (messageId: number) => void }): AgentContext => ({
+  return (
+    user: User,
+    chatId: number,
+    messageText: string,
+    groupInfo?: {
+      isGroup: boolean;
+      groupChatId?: number;
+      groupTitle?: string;
+      onBotResponse?: (messageId: number) => void;
+    },
+  ): AgentContext => ({
     user,
     chatId,
     messageText,

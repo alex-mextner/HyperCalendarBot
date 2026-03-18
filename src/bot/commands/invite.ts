@@ -19,14 +19,16 @@ type SendMessageFn = (
   options: { parse_mode: string; reply_markup?: unknown },
 ) => Promise<TelegramSendResult>;
 
-export async function handleInvite(
-  ctx: BotCommandContext,
-  invitationService: InvitationService,
-  eventService: EventService,
-  invRepo: InvitationRepository,
-  deepLinkService: DeepLinkService,
-  sendMessage: SendMessageFn,
-): Promise<void> {
+export interface InviteDeps {
+  invitationService: InvitationService;
+  eventService: EventService;
+  invRepo: InvitationRepository;
+  deepLinkService: DeepLinkService;
+  sendMessage: SendMessageFn;
+}
+
+export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Promise<void> {
+  const { invitationService, eventService, invRepo, deepLinkService, sendMessage } = deps;
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const messages = t(lang);

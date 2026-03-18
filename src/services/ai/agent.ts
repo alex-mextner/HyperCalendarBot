@@ -260,8 +260,8 @@ export class CalendarBotAgent {
 
     await writer.finalize();
 
-    if (ctx.onBotResponse) {
-      const msgId = writer.getMessageId() ?? 0;
+    const msgId = writer.getMessageId();
+    if (ctx.onBotResponse && msgId !== null) {
       ctx.onBotResponse(msgId);
     }
 

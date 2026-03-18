@@ -1,4 +1,3 @@
-import { getDayRangeUtc } from '../../../utils/date.ts';
 import type { FreeSlot } from '../../event/event-service.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { resolveScope } from './shared.ts';
@@ -10,62 +9,17 @@ interface GetFreeSlotsInput {
   scope?: Scope;
 }
 
-function computeFreeSlotsFromOccurrences(
-  occurrences: { occurrence_start: string; occurrence_end: string | null }[],
-  dayStart: string,
-  dayEnd: string,
-): FreeSlot[] {
-  const busy = occurrences
-    .filter((o) => o.occurrence_end)
-    .map((o) => ({
-      start: new Date(o.occurrence_start).getTime(),
-      end: new Date(o.occurrence_end!).getTime(),
-    }))
-    .sort((a, b) => a.start - b.start);
-
-  const slots: FreeSlot[] = [];
-  let cursor = new Date(dayStart).getTime();
-  const dayEndMs = new Date(dayEnd).getTime();
-
-  for (const interval of busy) {
-    if (interval.start > cursor) {
-      const durationMinutes = Math.round((interval.start - cursor) / 60000);
-      if (durationMinutes > 0) {
-        slots.push({
-          start: new Date(cursor).toISOString(),
-          end: new Date(interval.start).toISOString(),
-          durationMinutes,
-        });
-      }
-    }
-    cursor = Math.max(cursor, interval.end);
-  }
-
-  if (cursor < dayEndMs) {
-    const durationMinutes = Math.round((dayEndMs - cursor) / 60000);
-    slots.push({
-      start: new Date(cursor).toISOString(),
-      end: new Date(dayEndMs).toISOString(),
-      durationMinutes,
-    });
-  }
-
-  return slots;
-}
-
 export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput): ToolResult {
   const date = new Date(input.date);
   const scope = resolveScope(input, ctx);
 
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
 
   let slots: FreeSlot[];
   if (scope === 'group') {
-    const { start, end } = getDayRangeUtc(date, ctx.user.timezone);
-    const occurrences = ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
-    slots = computeFreeSlotsFromOccurrences(occurrences, start, end);
+    slots = ctx.eventService.getFreeSlotsForGroup(ctx.groupChatId!, date, ctx.user.timezone);
   } else {
     slots = ctx.eventService.getFreeSlots(ctx.user.telegram_id, date, ctx.user.timezone);
   }

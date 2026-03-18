@@ -1,5 +1,6 @@
 const SESSION_WINDOW = 10;
 const SESSION_TTL_MS = 5 * 24 * 60 * 60 * 1000; // 5 days
+const SWEEP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
 export interface GroupSession {
   chatId: number;
@@ -11,6 +12,23 @@ export interface GroupSession {
 
 export class GroupSessionManager {
   private sessions = new Map<number, GroupSession>();
+  private sweepTimer: ReturnType<typeof setInterval>;
+
+  constructor() {
+    this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
+    if (typeof this.sweepTimer === 'object' && 'unref' in this.sweepTimer) {
+      this.sweepTimer.unref();
+    }
+  }
+
+  private sweep(): void {
+    const now = Date.now();
+    for (const [chatId, session] of this.sessions) {
+      if (session.expiresAt <= now || session.remainingMessages <= 0) {
+        this.sessions.delete(chatId);
+      }
+    }
+  }
 
   activate(chatId: number, userId: number, botMessageId: number): void {
     this.sessions.set(chatId, {

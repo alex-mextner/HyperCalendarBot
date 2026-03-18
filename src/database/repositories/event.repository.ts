@@ -196,15 +196,19 @@ export class EventRepository {
     return row != null;
   }
 
+  private escapeLike(query: string): string {
+    return query.replace(/[%_\\]/g, '\\$&');
+  }
+
   search(userId: number, query: string, limit = 20): CalendarEvent[] {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE user_id = ? AND title LIKE ? AND is_cancelled = 0
+      WHERE user_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0
       ORDER BY start_at ASC
       LIMIT ?
     `)
-      .all(userId, `%${query}%`, limit) as CalendarEvent[];
+      .all(userId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -439,11 +443,11 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? AND is_cancelled = 0
+      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0
       ORDER BY start_at ASC
       LIMIT ?
     `)
-      .all(groupId, `%${query}%`, limit) as CalendarEvent[];
+      .all(groupId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
   }
 
   getUpcomingForGroup(groupId: number, limit = 10, now?: Date): CalendarEvent[] {

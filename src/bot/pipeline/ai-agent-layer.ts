@@ -10,7 +10,17 @@ import type { FeedbackThreadContext, GroupContext, PipelineResult } from './type
 
 export interface AgentLayerDeps {
   agent: CalendarBotAgent;
-  agentContextBuilder: (user: User, chatId: number, messageText: string, groupInfo?: { isGroup: boolean; groupChatId?: number; groupTitle?: string; onBotResponse?: (messageId: number) => void }) => AgentContext;
+  agentContextBuilder: (
+    user: User,
+    chatId: number,
+    messageText: string,
+    groupInfo?: {
+      isGroup: boolean;
+      groupChatId?: number;
+      groupTitle?: string;
+      onBotResponse?: (messageId: number) => void;
+    },
+  ) => AgentContext;
   intentLearner?: IntentLearner;
 }
 

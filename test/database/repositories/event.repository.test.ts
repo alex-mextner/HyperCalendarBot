@@ -239,6 +239,24 @@ describe('EventRepository', () => {
       expect(remaining[0]!.title).toBe('E1');
     });
 
+    test('search escapes LIKE wildcards in query', () => {
+      events.create({ user_id: USER_ID, title: '50% off sale', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: '50 items left', start_at: '2026-03-11T11:00:00Z', timezone: 'UTC' });
+
+      const results = events.search(USER_ID, '50%');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('50% off sale');
+    });
+
+    test('search escapes underscore wildcard', () => {
+      events.create({ user_id: USER_ID, title: 'test_case', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
+      events.create({ user_id: USER_ID, title: 'testXcase', start_at: '2026-03-11T11:00:00Z', timezone: 'UTC' });
+
+      const results = events.search(USER_ID, 'test_case');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('test_case');
+    });
+
     test('setRecurrenceUntil appends UNTIL to rrule', () => {
       const template = events.create({
         user_id: USER_ID,
@@ -353,6 +371,15 @@ describe('EventRepository', () => {
       const results = events.searchForGroup(GROUP_ID, 'planning');
       expect(results.length).toBe(1);
       expect(results[0]!.title).toBe('Planning Meeting');
+    });
+
+    test('searchForGroup() escapes LIKE wildcards', () => {
+      createGroupEvent({ title: '50% off sale' });
+      createGroupEvent({ title: '50 items left' });
+
+      const results = events.searchForGroup(GROUP_ID, '50%');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('50% off sale');
     });
 
     test('getUpcomingForGroup() returns upcoming group events', () => {

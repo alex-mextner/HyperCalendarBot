@@ -3,7 +3,12 @@
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineLayer } from './types.ts';
 
-export async function runPipeline(ctx: BotCommandContext, messageText: string, layers: PipelineLayer[], groupContext?: GroupContext): Promise<void> {
+export async function runPipeline(
+  ctx: BotCommandContext,
+  messageText: string,
+  layers: PipelineLayer[],
+  groupContext?: GroupContext,
+): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
 
   for (const layer of layers) {

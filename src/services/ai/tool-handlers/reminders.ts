@@ -11,7 +11,7 @@ interface SetReminderInput {
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const event =
@@ -50,7 +50,7 @@ interface GetRemindersInput {
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const event =

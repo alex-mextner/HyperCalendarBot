@@ -62,7 +62,7 @@ interface SearchEventsInput {
 
 export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const occurrences =
@@ -115,7 +115,7 @@ export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): T
 function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
   try {
     const scope = resolveScope(input, ctx);
-    if (scope === 'group' && !ctx.groupChatId) {
+    if (scope === 'group' && ctx.groupChatId === undefined) {
       return { success: false, error: 'Group context required for group scope' };
     }
     const event = ctx.eventService.createEvent({
@@ -150,7 +150,7 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolRes
 export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
   const scope = resolveScope(input, ctx);
   const { event_id, scope: _, ...updates } = input;
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const updated =
@@ -185,10 +185,10 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   const scope = resolveScope(input, ctx);
 
   if (scope === 'group') {
-    if (!ctx.groupChatId) {
+    if (ctx.groupChatId === undefined) {
       return { success: false, error: 'Group context required for group scope' };
     }
-    const event = ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!);
+    const event = ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId);
     if (!event) {
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
@@ -219,7 +219,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const events =
@@ -245,7 +245,7 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
   const limit = input.limit ?? 5;
   const scope = resolveScope(input, ctx);
 
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
 
@@ -277,7 +277,7 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const event =
@@ -314,7 +314,7 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
 
 export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
   const scope = resolveScope(input, ctx);
-  if (scope === 'group' && !ctx.groupChatId) {
+  if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
   const event =

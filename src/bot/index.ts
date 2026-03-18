@@ -159,6 +159,41 @@ export function createBot(
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
 
+  function buildAgentContext(
+    user: User,
+    chatId: number,
+    messageText: string,
+    groupInfo?: {
+      isGroup: boolean;
+      groupChatId?: number;
+      groupTitle?: string;
+      onBotResponse?: (messageId: number) => void;
+    },
+  ): import('../services/ai/types.ts').AgentContext {
+    return {
+      user,
+      chatId,
+      messageText,
+      isGroup: groupInfo?.isGroup ?? false,
+      groupChatId: groupInfo?.groupChatId,
+      groupTitle: groupInfo?.groupTitle,
+      onBotResponse: groupInfo?.onBotResponse,
+      eventService,
+      holidayService,
+      chatHistory: db.chatHistory,
+      userRepo: db.users,
+      reminderRepo: db.reminders,
+      contactRepo: db.contacts,
+      invitationService,
+      invitationRepo: db.invitations,
+      sharingService,
+      sharingSettingsRepo: db.sharingSettings,
+      sharedEventRepo: db.sharedEvents,
+      privacyService,
+      googleCalendarRepo: googleDeps?.calendarRepo,
+    };
+  }
+
   const botAdminId = process.env.BOT_ADMIN_ID ? Number.parseInt(process.env.BOT_ADMIN_ID, 10) : undefined;
   const intentLearnerDailyLimit = process.env.INTENT_LEARNER_DAILY_LIMIT
     ? Number.parseInt(process.env.INTENT_LEARNER_DAILY_LIMIT, 10)
@@ -237,13 +272,12 @@ export function createBot(
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     // Sharing commands
     .command('invite', (ctx) =>
-      handleInvite(
-        ctx as unknown as BotCommandContext,
+      handleInvite(ctx as unknown as BotCommandContext, {
         invitationService,
         eventService,
-        db.invitations,
+        invRepo: db.invitations,
         deepLinkService,
-        async (chatId, text, options) => {
+        sendMessage: async (chatId, text, options) => {
           const sent = await bot.api.sendMessage({
             chat_id: chatId,
             text,
@@ -252,7 +286,7 @@ export function createBot(
           });
           return { message_id: sent.message_id };
         },
-      ),
+      }),
     )
     .command('invitations', (ctx) =>
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
@@ -290,36 +324,21 @@ export function createBot(
         messagePrefix = `[Group: ${groupName}, From: ${senderName}] `;
       }
 
-      await agent.run({
-        user,
-        chatId: Number(chatId),
-        messageText: messagePrefix + text,
-        isGroup,
-        groupChatId: isGroup ? Number(chatId) : undefined,
-        groupTitle: isGroup ? (chat?.title ?? undefined) : undefined,
-        onBotResponse: isGroup
-          ? (messageId: number) => {
+      const groupInfo = isGroup
+        ? {
+            isGroup: true as const,
+            groupChatId: Number(chatId),
+            groupTitle: chat?.title ?? undefined,
+            onBotResponse: (messageId: number) => {
               if (groupSessions.hasActiveSession(Number(chatId))) {
                 groupSessions.refresh(Number(chatId), messageId);
               } else {
                 groupSessions.activate(Number(chatId), user.telegram_id, messageId);
               }
-            }
-          : undefined,
-        eventService,
-        holidayService,
-        chatHistory: db.chatHistory,
-        userRepo: db.users,
-        reminderRepo: db.reminders,
-        contactRepo: db.contacts,
-        invitationService,
-        invitationRepo: db.invitations,
-        sharingService,
-        sharingSettingsRepo: db.sharingSettings,
-        sharedEventRepo: db.sharedEvents,
-        privacyService,
-        googleCalendarRepo: googleDeps?.calendarRepo,
-      });
+            },
+          }
+        : undefined;
+      await agent.run(buildAgentContext(user, Number(chatId), messagePrefix + text, groupInfo));
     })
     // Callback queries
     .on('callback_query', (ctx) =>
@@ -339,25 +358,7 @@ export function createBot(
         async (userId: number, chatId: number, text: string) => {
           const user = db.users.findByTelegramId(userId);
           if (!user) return;
-          await agent.run({
-            user,
-            chatId,
-            messageText: text,
-            isGroup: false,
-            eventService,
-            holidayService,
-            chatHistory: db.chatHistory,
-            userRepo: db.users,
-            reminderRepo: db.reminders,
-            contactRepo: db.contacts,
-            invitationService,
-            invitationRepo: db.invitations,
-            sharingService,
-            sharingSettingsRepo: db.sharingSettings,
-            sharedEventRepo: db.sharedEvents,
-            privacyService,
-            googleCalendarRepo: googleDeps?.calendarRepo,
-          });
+          await agent.run(buildAgentContext(user, chatId, text));
         },
         googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
         {
@@ -434,25 +435,7 @@ export function createBot(
       const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
       if (chatId) {
         agent
-          .run({
-            user,
-            chatId,
-            messageText: contextMsg,
-            isGroup: false,
-            eventService,
-            holidayService,
-            chatHistory: db.chatHistory,
-            userRepo: db.users,
-            reminderRepo: db.reminders,
-            contactRepo: db.contacts,
-            invitationService,
-            invitationRepo: db.invitations,
-            sharingService,
-            sharingSettingsRepo: db.sharingSettings,
-            sharedEventRepo: db.sharedEvents,
-            privacyService,
-            googleCalendarRepo: googleDeps?.calendarRepo,
-          })
+          .run(buildAgentContext(user, chatId, contextMsg))
           .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
       }
     })
