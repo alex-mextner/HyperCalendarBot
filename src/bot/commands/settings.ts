@@ -6,6 +6,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { User } from '../../database/types.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import { countryPickerKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export function settingsCategoryKeyboard(): InlineKeyboard {
@@ -16,7 +17,9 @@ export function settingsCategoryKeyboard(): InlineKeyboard {
     .text('📞 Звонки', 'stg:calls')
     .text('🔒 Приватность', 'stg:privacy')
     .row()
-    .text('🎤 Голос', 'stg:voice');
+    .text('🎤 Голос', 'stg:voice')
+    .row()
+    .text('✖️ Закрыть', 'stg:close');
 }
 
 const VISIBILITIES = ['private', 'free_busy', 'full'] as const;
@@ -166,27 +169,68 @@ export async function handleSettingsCallback(
   sharingSettingsRepo?: SharingSettingsRepository,
   userRepo?: UserRepository,
 ): Promise<void> {
+  if (subAction === 'close') {
+    await ctx.answer();
+    await (ctx as unknown as { message?: { delete: () => Promise<void> } }).message?.delete();
+    return;
+  }
+
   if (subAction === 'back') {
     await ctx.answer();
     await ctx.editText('⚙️ Настройки / Settings', { reply_markup: settingsCategoryKeyboard() });
     return;
   }
 
-  if (subAction === 'general') {
-    const tzDisplay = getTimezoneDisplay(user.timezone);
-    const lang = user.language ?? 'en';
-    const country = user.country_code ?? '—';
+  if (
+    subAction === 'general' ||
+    subAction.startsWith('set_lang:') ||
+    subAction.startsWith('set_country:') ||
+    subAction === 'show_countries'
+  ) {
+    let currentUser = user;
+
+    if (subAction.startsWith('set_lang:') && userRepo) {
+      const lang = subAction.split(':')[1] as 'en' | 'ru';
+      const updated = userRepo.update(currentUser.telegram_id, { language: lang });
+      if (updated) currentUser = updated;
+    }
+    if (subAction.startsWith('set_country:') && userRepo) {
+      const code = subAction.split(':')[1]!;
+      const updated = userRepo.update(currentUser.telegram_id, { country_code: code });
+      if (updated) currentUser = updated;
+    }
+
+    if (subAction === 'show_countries') {
+      await ctx.answer();
+      await ctx.editText('🏳️ Выберите страну:', {
+        reply_markup: countryPickerKeyboard(currentUser.country_code),
+      });
+      return;
+    }
+
+    const tzDisplay = getTimezoneDisplay(currentUser.timezone);
+    const lang = currentUser.language ?? 'en';
+    const country = currentUser.country_code ?? '—';
     const text = [
       '🌍 Основные настройки',
       '',
       `Часовой пояс: ${tzDisplay}`,
-      `Язык: ${lang}`,
+      `Язык: ${lang === 'ru' ? '🇷🇺 Русский' : '🇬🇧 English'}`,
       `Страна: ${country}`,
-      '',
-      'Изменить часовой пояс: /timezone',
     ].join('\n');
+
+    const kb = new InlineKeyboard()
+      .text('🕐 Часовой пояс', 'stg:change_tz')
+      .row()
+      .text(lang === 'ru' ? '✅ 🇷🇺 Русский' : '🇷🇺 Русский', 'stg:set_lang:ru')
+      .text(lang === 'en' ? '✅ 🇬🇧 English' : '🇬🇧 English', 'stg:set_lang:en')
+      .row()
+      .text('🏳️ Страна', 'stg:show_countries')
+      .row()
+      .text('🔙 Назад', 'stg:back');
+
     await ctx.answer();
-    await ctx.editText(text, { reply_markup: new InlineKeyboard().text('🔙 Назад', 'stg:back') });
+    await ctx.editText(text, { reply_markup: kb });
     return;
   }
 

@@ -94,7 +94,7 @@ describe('handleSettingsCallback', () => {
 
     const [text] = ctx.editText.mock.calls[0] as [string];
     expect(text).toContain('Europe/Moscow');
-    expect(text).toContain('ru');
+    expect(text).toContain('Русский');
     expect(text).toContain('RU');
   });
 
@@ -363,5 +363,87 @@ describe('handleSettingsCallback', () => {
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.editText).not.toHaveBeenCalled();
+  });
+});
+
+describe('stg:general with buttons', () => {
+  test('renders timezone, language, country without /timezone text', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'general', prefs as never);
+
+    const [text] = ctx.editText.mock.calls[0] as [string, unknown];
+    expect(text).not.toContain('/timezone');
+    expect(text).toContain('Часовой пояс');
+    expect(text).toContain('Язык');
+    expect(text).toContain('Страна');
+  });
+});
+
+describe('stg:set_lang', () => {
+  test('updates language and re-renders general view', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService();
+    const userRepo = {
+      update: mock(() => ({ ...makeUser(), language: 'en' })),
+      findByTelegramId: mock(() => makeUser()),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'set_lang:en',
+      prefs as never,
+      undefined,
+      undefined,
+      userRepo as never,
+    );
+
+    expect(userRepo.update).toHaveBeenCalledWith(100, { language: 'en' });
+    expect(ctx.editText).toHaveBeenCalled();
+  });
+});
+
+describe('stg:set_country', () => {
+  test('updates country_code and re-renders general view', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const ctx = makeCallbackCtx();
+    const prefs = makePrefsService();
+    const userRepo = {
+      update: mock(() => ({ ...makeUser(), country_code: 'DE' })),
+      findByTelegramId: mock(() => makeUser()),
+    };
+
+    await handleSettingsCallback(
+      ctx,
+      makeUser() as never,
+      'set_country:DE',
+      prefs as never,
+      undefined,
+      undefined,
+      userRepo as never,
+    );
+
+    expect(userRepo.update).toHaveBeenCalledWith(100, { country_code: 'DE' });
+    expect(ctx.editText).toHaveBeenCalled();
+  });
+});
+
+describe('stg:close', () => {
+  test('deletes the message', async () => {
+    const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
+    const deleteFn = mock(() => Promise.resolve());
+    const ctx = {
+      ...makeCallbackCtx(),
+      message: { delete: deleteFn },
+    } as unknown as BotCallbackContext;
+    const prefs = makePrefsService();
+
+    await handleSettingsCallback(ctx, makeUser() as never, 'close', prefs as never);
+
+    expect(deleteFn).toHaveBeenCalled();
   });
 });
