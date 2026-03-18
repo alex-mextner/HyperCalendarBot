@@ -161,6 +161,17 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - **Before every commit**: run `codex exec review --uncommitted` and address any issues found.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
+## MTProto / Pyrogram
+
+All MTProto userbot functionality uses **one pyrogram session**: `data/voice_caller.session`.
+Auth: `venv/bin/python scripts/pyrogram-auth.py` (one-time, interactive).
+
+- **Voice calls**: `scripts/voice-call-bridge.py <user_id> <audio_file> [duration]` — spawned per call
+- **Message delivery** (users who haven't started the bot): `scripts/send-message.py <user_id> <text> [username]` — spawned per message
+
+Both scripts are called from TS via `Bun.spawn(['venv/bin/python', ...])`.
+No `@mtcute/bun` — pyrogram handles everything.
+
 ## Debugging
 
 - Read error messages carefully — they often contain the exact solution.

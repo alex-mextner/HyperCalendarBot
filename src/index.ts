@@ -29,7 +29,7 @@ let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJ
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
-let mtprotoSendAsUser: ((userId: number, text: string) => Promise<boolean>) | undefined;
+let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -319,24 +319,27 @@ let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService
 }
 
 // MTProto userbot for delivering messages to users who haven't started the bot
+// Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
 if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
-  try {
-    const { existsSync } = await import('node:fs');
-    if (existsSync('data/mtproto-session')) {
-      const { createMtprotoClient } = await import('./services/voice/mtproto-client.ts');
-      const { createMtprotoMessenger } = await import('./services/mtproto-messenger.ts');
-      const client = await createMtprotoClient({
-        apiId: config.MTPROTO_API_ID,
-        apiHash: config.MTPROTO_API_HASH,
-        sessionString: '',
-      });
-      mtprotoSendAsUser = createMtprotoMessenger(client);
-      botLogger.info('MTProto messenger initialized for invitation delivery');
-    } else {
-      botLogger.info('MTProto session not found, invitation delivery via userbot disabled');
-    }
-  } catch (error) {
-    botLogger.warn({ error: String(error) }, 'MTProto messenger init failed');
+  const { existsSync } = await import('node:fs');
+  if (existsSync('data/voice_caller.session')) {
+    mtprotoSendAsUser = async (userId: number, text: string, username?: string): Promise<boolean> => {
+      const args = ['venv/bin/python', 'scripts/send-message.py', String(userId), text];
+      if (username) args.push(username);
+      const proc = Bun.spawn(args, { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr, exitCode] = await Promise.all([
+        new Response(proc.stdout).text(),
+        new Response(proc.stderr).text(),
+        proc.exited,
+      ]);
+      if (stderr) botLogger.warn({ userId, stderr: stderr.slice(0, 200) }, 'send-message.py stderr');
+      const ok = exitCode === 0 && stdout.includes('OK');
+      botLogger.info({ userId, ok }, 'MTProto message delivery');
+      return ok;
+    };
+    botLogger.info('MTProto messenger initialized (pyrogram)');
+  } else {
+    botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
   }
 }
 
