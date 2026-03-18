@@ -10,6 +10,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import { decrypt } from '../../utils/crypto.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export interface DisconnectDeps {
@@ -23,6 +24,16 @@ export interface DisconnectDeps {
 }
 
 export async function handleDisconnectGoogle(ctx: BotCommandContext): Promise<void> {
+  if (isGroup(ctx)) {
+    const lang = (ctx.dbUser?.language ?? 'en') as Lang;
+    await ctx.send(
+      lang === 'ru'
+        ? '🔗 Google Calendar отключается только в личном чате'
+        : '🔗 Disconnect Google Calendar in private chat with the bot',
+    );
+    return;
+  }
+
   const lang = (ctx.dbUser.language ?? 'en') as Lang;
 
   if (!ctx.dbUser.google_refresh_token_enc) {

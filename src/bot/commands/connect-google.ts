@@ -4,6 +4,7 @@ import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface OAuthStateStore {
@@ -16,6 +17,16 @@ interface ConnectGoogleDeps {
 }
 
 export async function handleConnectGoogle(ctx: BotCommandContext, deps: ConnectGoogleDeps): Promise<void> {
+  if (isGroup(ctx)) {
+    const lang = (ctx.dbUser?.language ?? 'en') as Lang;
+    await ctx.send(
+      lang === 'ru'
+        ? '🔗 Google Calendar подключается только в личном чате'
+        : '🔗 Connect Google Calendar in private chat with the bot',
+    );
+    return;
+  }
+
   const lang = (ctx.dbUser.language ?? 'en') as Lang;
   const userId = ctx.dbUser.telegram_id;
 
