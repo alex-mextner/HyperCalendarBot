@@ -85,6 +85,23 @@ describe('INVITE_CONTACT callback', () => {
     expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: 'Not found' }));
   });
 
+  test('direct contact — answers Not found when event deleted (ownerId null)', async () => {
+    const eventService = {
+      getEvent: mock(() => null),
+      getEventOwnerId: mock(() => null),
+    };
+    const forceInviteDeps = {
+      invitationService: { sendInvitation: mock(() => ({ success: true })) },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+    const ctx = makeCtx('invc:5:300');
+    await makeHandler(eventService, forceInviteDeps)(ctx as never);
+    expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: 'Not found' }));
+    expect(forceInviteDeps.invitationService.sendInvitation).not.toHaveBeenCalled();
+  });
+
   test('direct contact — ownership check denies non-owner', async () => {
     const eventService = {
       getEvent: mock(() => ({ id: 5, title: 'Meeting' })),

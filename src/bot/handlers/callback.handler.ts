@@ -637,6 +637,10 @@ export function createCallbackHandler(
         }
 
         const ownerId = eventService.getEventOwnerId(proposal.event_id);
+        if (!ownerId) {
+          await ctx.answer({ text: 'Not found' });
+          return;
+        }
         if (ownerId !== user.telegram_id) {
           await ctx.answer({ text: 'Not authorized' });
           return;
@@ -829,6 +833,10 @@ export function createCallbackHandler(
         if (forceInviteDeps) {
           const inviteeId = Number(sub);
           const ownerId = eventService.getEventOwnerId(eventId);
+          if (!ownerId) {
+            await ctx.answer({ text: 'Not found' });
+            return;
+          }
           if (ownerId !== user.telegram_id) {
             await ctx.answer({ text: 'Not authorized' });
             return;
@@ -900,6 +908,10 @@ export function createCallbackHandler(
 
         // Security: verify user is event owner
         const ownerId = eventService.getEventOwnerId(eventId);
+        if (!ownerId) {
+          await ctx.answer({ text: 'Not found' });
+          return;
+        }
         if (ownerId !== user.telegram_id) {
           await ctx.answer({ text: 'Not authorized' });
           return;
@@ -944,6 +956,10 @@ export function createCallbackHandler(
         const invLang = (user.language ?? 'en') as Lang;
         const eventId = Number(payload);
         const ownerId = eventService.getEventOwnerId(eventId);
+        if (!ownerId) {
+          await ctx.answer({ text: 'Not found' });
+          return;
+        }
         if (ownerId !== user.telegram_id) {
           await ctx.answer({ text: 'Not authorized' });
           return;
