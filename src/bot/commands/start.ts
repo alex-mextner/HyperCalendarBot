@@ -67,7 +67,8 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
               .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
               .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
               .row()
-              .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
+              .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
+              .text(t(lang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
 
             await ctx.send(text, { parse_mode: 'HTML', reply_markup: kb });
           } else {

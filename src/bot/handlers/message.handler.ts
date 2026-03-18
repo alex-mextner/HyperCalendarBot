@@ -1,6 +1,7 @@
 // src/bot/handlers/message.handler.ts
 
 import { InlineKeyboard } from 'gramio';
+import { t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -36,6 +37,8 @@ import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
+import { parseSimpleDate } from '../../utils/date.ts';
+import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -100,6 +103,14 @@ export interface MessageHandlerDeps {
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
   aiApiKey?: string;
+  proposeTimeSessions?: Map<number, { invitationId: number }>;
+  editMessage?: (chatId: number, messageId: number, text: string) => Promise<void>;
+  notifyInviterProposal?: (
+    invitationId: number,
+    inviteeUser: User,
+    formattedTime: string,
+    eventTitle: string,
+  ) => Promise<void>;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -433,6 +444,54 @@ async function handleIntentEditInstruction(
   }
 }
 
+async function handleProposeTimeInput(
+  ctx: BotCommandContext,
+  text: string,
+  user: User,
+  session: { invitationId: number },
+  deps: MessageHandlerDeps,
+): Promise<void> {
+  const lang = user.language as 'en' | 'ru';
+  const chatId = ctx.chatId;
+  if (!chatId) return;
+
+  const parsed = parseSimpleDate(text, user.timezone);
+
+  if (!parsed) {
+    deps.proposeTimeSessions?.set(user.telegram_id, session);
+    await ctx.send(lang === 'ru' ? 'Не могу распознать время. Попробуй ещё раз:' : 'Could not parse time. Try again:');
+    return;
+  }
+
+  const proposedTime = parsed.toISOString().replace(/\.\d{3}Z$/, 'Z');
+  const result = deps.invitationService?.proposeTime(session.invitationId, user.telegram_id, proposedTime);
+
+  if (!result?.success) {
+    await ctx.send(result?.error ?? (lang === 'ru' ? 'Ошибка' : 'Error'));
+    return;
+  }
+
+  const formattedTime = formatProposedTime(proposedTime, user.timezone, lang);
+  await ctx.send(t(lang).invite_propose_sent(formattedTime), { parse_mode: 'HTML' });
+
+  const invitation = deps.invitationRepo?.findById(session.invitationId);
+  if (invitation?.message_id && invitation.chat_id && deps.editMessage) {
+    deps
+      .editMessage(invitation.chat_id, invitation.message_id, t(lang).invite_propose_sent(formattedTime))
+      .catch((e: unknown) => {
+        cmdLogger.error({ error: String(e) }, 'Failed to edit invitation message after propose');
+      });
+  }
+
+  if (deps.notifyInviterProposal) {
+    const event = deps.eventService.getEvent?.(invitation?.event_id ?? 0, user.telegram_id);
+    const eventTitle = (event as { title?: string } | undefined)?.title ?? '';
+    deps.notifyInviterProposal(session.invitationId, user, formattedTime, eventTitle).catch((e: unknown) => {
+      cmdLogger.error({ error: String(e) }, 'Failed to notify inviter of time proposal');
+    });
+  }
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
@@ -492,6 +551,15 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     // In groups: only respond to replies, mentions, or calendar keywords
     const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
     const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+
+    // Propose-time session: invitee typing a new time in response to an invite (private chats only)
+    if (!isGroup && deps.proposeTimeSessions) {
+      const proposeSession = deps.proposeTimeSessions.get(user.telegram_id);
+      if (proposeSession) {
+        deps.proposeTimeSessions.delete(user.telegram_id);
+        return handleProposeTimeInput(ctx, text, user, proposeSession, deps);
+      }
+    }
 
     if (isGroup) {
       const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;

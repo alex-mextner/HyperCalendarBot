@@ -141,6 +141,38 @@ describe('handleInvite', () => {
     await expect(handleInvite(ctx as never, deps as never)).rejects.toThrow('Server Error');
   });
 
+  test('invite keyboard includes propose button', async () => {
+    const capturedArgs: unknown[][] = [];
+    const ctx = {
+      dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', first_name: 'Alex', username: 'alex' },
+      args: '200 5',
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: { sendInvitation: mock(() => ({ success: true, invitation: { id: 42 } })) },
+      eventService: {
+        getEvent: mock(() => ({
+          id: 5,
+          title: 'Party',
+          start_at: '2026-03-20T10:00:00.000Z',
+          end_at: '2026-03-20T11:00:00.000Z',
+        })),
+      },
+      invRepo: { setMessageInfo: mock(() => {}) },
+      deepLinkService: {},
+      sendMessage: mock((...args: unknown[]) => {
+        capturedArgs.push(args);
+        return Promise.resolve({ message_id: 1 });
+      }),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+    expect(capturedArgs.length).toBeGreaterThan(0);
+    const opts = capturedArgs[0][2] as { reply_markup?: unknown };
+    const markupStr = JSON.stringify(opts?.reply_markup ?? {});
+    expect(markupStr).toContain(`inv:propose:42`);
+  });
+
   test('shows conflict UI when invitee has schedule conflict', async () => {
     const photo = mock(() => Promise.resolve());
     const ctx = {

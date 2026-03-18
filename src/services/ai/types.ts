@@ -105,7 +105,12 @@ export interface TelegramSender {
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<void>;
-  sendInvitation?(inviteeId: number, text: string, invitationId: number): Promise<{ message_id: number } | null>;
+  sendInvitation?(
+    inviteeId: number,
+    text: string,
+    invitationId: number,
+    lang?: string,
+  ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;

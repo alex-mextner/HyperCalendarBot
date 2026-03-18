@@ -1,6 +1,6 @@
 import type { Bot } from 'gramio';
 import { InlineKeyboard, Keyboard } from 'gramio';
-import { CB } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
@@ -50,12 +50,14 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     async sendPhoto(chatId: number, photo: File) {
       await bot.api.sendPhoto({ chat_id: chatId, photo });
     },
-    async sendInvitation(inviteeId: number, text: string, invitationId: number) {
+    async sendInvitation(inviteeId: number, text: string, invitationId: number, lang?: string) {
+      const msgs = t((lang ?? 'en') as 'en' | 'ru');
       const kb = new InlineKeyboard()
         .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitationId}`)
         .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitationId}`)
         .row()
-        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitationId}`);
+        .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitationId}`)
+        .text(msgs.invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitationId}`);
       try {
         const result = await bot.api.sendMessage({
           chat_id: inviteeId,
