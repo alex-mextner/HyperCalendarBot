@@ -81,4 +81,27 @@ describe('handleToday', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('New Year');
   });
+
+  test('saves response to chat history when chatHistory provided', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const chatHistory = { save: mock(() => {}) };
+
+    await handleToday(ctx as never, svc as never, undefined, undefined, chatHistory as never);
+
+    expect(chatHistory.save).toHaveBeenCalledTimes(1);
+    const [userId, role, content] = chatHistory.save.mock.calls[0] as unknown[];
+    expect(userId).toBe(user.telegram_id);
+    expect(role).toBe('assistant');
+    expect(typeof content).toBe('string');
+  });
+
+  test('does not throw when chatHistory is not provided', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+
+    await expect(handleToday(ctx as never, svc as never)).resolves.toBeUndefined();
+  });
 });
