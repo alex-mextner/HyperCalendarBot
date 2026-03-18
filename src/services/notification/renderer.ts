@@ -38,6 +38,7 @@ const LABELS = {
     eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
     goodNight: 'Good night!',
     haveADay: 'Have a productive day!',
+    eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
   },
   ru: {
     morning: 'Доброе утро! Ваш день:',
@@ -51,6 +52,7 @@ const LABELS = {
     },
     goodNight: 'Спокойной ночи!',
     haveADay: 'Продуктивного дня!',
+    eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
   },
 };
 
@@ -93,6 +95,11 @@ export class NotificationRenderer {
       language: input.language,
     });
     return { channel: 'telegram_voice_call', text };
+  }
+
+  renderEveHoliday(lang: string, holidayName: string): RenderedNotification {
+    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    return { channel: 'telegram_text', text: l.eveHoliday(holidayName) };
   }
 
   renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {

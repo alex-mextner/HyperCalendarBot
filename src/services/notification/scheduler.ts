@@ -2,12 +2,15 @@ import type { CallLogRepository } from '../../database/repositories/call-log.rep
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
+import type { HolidayRepository } from '../../database/repositories/holiday.repository.ts';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 import { isQuietHours } from './timezone.ts';
+
+const DEFAULT_EVE_HOLIDAY_UTCHHMM = '21:00';
 
 function truncateToMinute(d: Date): Date {
   const r = new Date(d);
@@ -33,6 +36,7 @@ export interface SchedulerDeps {
   userRepo: UserRepository;
   eventRepo: EventRepository;
   enqueue: (type: string, userId: number, logId: number, payload: string) => void;
+  holidayRepo?: HolidayRepository;
   callSettingsRepo?: CallSettingsRepository;
   callLogRepo?: CallLogRepository;
   enqueueCall?: (data: EnqueueCallData) => void;
@@ -160,7 +164,32 @@ export class NotificationScheduler {
       notifyLogger.info({ userId: pref.user_id }, 'Morning agenda enqueued');
     }
 
-    // 3. Evening reviews
+    // 3. Eve-holiday notifications
+    if (this.deps.holidayRepo) {
+      const usersWithHoliday = this.deps.holidayRepo.getUsersWithNotifyForDate(tomorrowDate);
+      const seen = new Set<number>();
+      for (const row of usersWithHoliday) {
+        if (seen.has(row.user_id)) continue;
+        seen.add(row.user_id);
+        const prefs = this.deps.prefsRepo.get(row.user_id);
+        const targetUtc = prefs?.evening_review_utc ?? DEFAULT_EVE_HOLIDAY_UTCHHMM;
+        if (currentHHMM !== targetUtc) continue;
+        const refKey = `eh:${row.user_id}:${tomorrowDate}`;
+        const payload = JSON.stringify({ date: tomorrowDate, holidayName: row.holiday_name });
+        const logId = this.deps.logRepo.insert({
+          user_id: row.user_id,
+          type: 'eve_holiday',
+          reference_key: refKey,
+          channel: 'telegram_text',
+          payload,
+        });
+        if (logId === null) continue;
+        this.deps.enqueue('eve_holiday', row.user_id, logId, payload);
+        notifyLogger.info({ userId: row.user_id, holiday: row.holiday_name }, 'Eve-holiday notification enqueued');
+      }
+    }
+
+    // 4. Evening reviews
     const eveningPrefs = this.deps.prefsRepo.getAllByEveningUtc(currentHHMM);
     for (const pref of eveningPrefs) {
       const user = this.deps.userRepo.findByTelegramId(pref.user_id);

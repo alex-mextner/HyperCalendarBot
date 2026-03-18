@@ -171,4 +171,16 @@ export class HolidayRepository {
       .get(userId) as { country_code: string } | null;
     return row?.country_code ?? null;
   }
+
+  getUsersWithNotifyForDate(date: string): { user_id: number; country_code: string; holiday_name: string }[] {
+    return this.db
+      .prepare(`
+        SELECT hs.user_id, hs.country_code, h.name AS holiday_name
+        FROM holiday_subscriptions hs
+        JOIN holidays h ON h.country_code = hs.country_code AND h.date = ?
+        WHERE hs.notify = 1
+        ORDER BY hs.user_id, hs.is_primary DESC
+      `)
+      .all(date) as { user_id: number; country_code: string; holiday_name: string }[];
+  }
 }
