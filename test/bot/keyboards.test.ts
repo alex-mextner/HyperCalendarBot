@@ -12,6 +12,7 @@ import {
   holidayManageListKeyboard,
   holidayRegionKeyboard,
   holidaysMenuKeyboard,
+  inviteContactPickerKeyboard,
   languageKeyboard,
   monthNavKeyboard,
   notifyEveningKeyboard,
@@ -30,6 +31,7 @@ import {
   timezoneConfirmKeyboard,
   timezoneManualKeyboard,
   timezoneMethodKeyboard,
+  unsharePickerKeyboard,
 } from '../../src/bot/keyboards';
 
 function kbData(kb: InlineKeyboard): Array<Array<{ text: string; callback_data?: string }>> {
@@ -549,5 +551,111 @@ describe('removeKeyboard', () => {
   test('returns remove_keyboard: true', () => {
     const result = removeKeyboard();
     expect(result).toEqual({ reply_markup: { remove_keyboard: true } });
+  });
+});
+
+// ── inviteContactPickerKeyboard ──
+
+describe('inviteContactPickerKeyboard', () => {
+  const makeContact = (id: number, name: string, telegramId: number | null, username?: string, preferred?: string) => ({
+    id,
+    user_id: 1,
+    name,
+    username: username ?? null,
+    telegram_id: telegramId,
+    preferred_name: preferred ?? null,
+    created_at: '2026-01-01T00:00:00Z',
+  });
+
+  test('includes only contacts with telegram_id', () => {
+    const contacts = [makeContact(1, 'Alice', 100), makeContact(2, 'Bob', null)];
+    const kb = inviteContactPickerKeyboard(contacts, 5, 'en');
+    const rows = kbData(kb);
+    const allButtons = rows.flat();
+    const contactButtons = allButtons.filter(
+      (b) =>
+        b.callback_data?.startsWith('invc:5:') &&
+        !['picker', 'chat', 'cancel'].some((s) => b.callback_data?.endsWith(s)),
+    );
+    expect(contactButtons).toHaveLength(1);
+    expect(contactButtons[0]!.callback_data).toBe('invc:5:100');
+  });
+
+  test('uses preferred_name when set', () => {
+    const contacts = [makeContact(1, 'Alice Smith', 100, undefined, 'Alice')];
+    const kb = inviteContactPickerKeyboard(contacts, 5, 'en');
+    const rows = kbData(kb);
+    const allButtons = rows.flat();
+    const btn = allButtons.find((b) => b.callback_data === 'invc:5:100');
+    expect(btn?.text).toContain('Alice');
+    expect(btn?.text).not.toContain('Smith');
+  });
+
+  test('appends @username when present', () => {
+    const contacts = [makeContact(1, 'Bob', 200, 'bobov')];
+    const kb = inviteContactPickerKeyboard(contacts, 7, 'en');
+    const rows = kbData(kb);
+    const btn = rows.flat().find((b) => b.callback_data === 'invc:7:200');
+    expect(btn?.text).toContain('@bobov');
+  });
+
+  test('always includes Other user, Group chat, Cancel buttons', () => {
+    const kb = inviteContactPickerKeyboard([], 3, 'en');
+    const allData = kbData(kb)
+      .flat()
+      .map((b) => b.callback_data);
+    expect(allData).toContain('invc:3:picker');
+    expect(allData).toContain('invc:3:chat');
+    expect(allData).toContain('invc:cancel');
+  });
+
+  test('ru locale uses Russian labels', () => {
+    const kb = inviteContactPickerKeyboard([], 3, 'ru');
+    const allText = kbData(kb)
+      .flat()
+      .map((b) => b.text);
+    expect(allText.some((t) => t.includes('Другой'))).toBe(true);
+    expect(allText.some((t) => t.includes('Групповой'))).toBe(true);
+    expect(allText.some((t) => t.includes('Отмена'))).toBe(true);
+  });
+});
+
+// ── unsharePickerKeyboard ──
+
+describe('unsharePickerKeyboard', () => {
+  test('creates button per item with correct callback', () => {
+    const items = [
+      { eventId: 10, title: 'Meeting' },
+      { eventId: 11, title: 'Lunch' },
+    ];
+    const kb = unsharePickerKeyboard(items, 'en');
+    const allButtons = kbData(kb).flat();
+    expect(allButtons.find((b) => b.callback_data === 'unsp:10')).toBeDefined();
+    expect(allButtons.find((b) => b.callback_data === 'unsp:11')).toBeDefined();
+  });
+
+  test('always includes Cancel button', () => {
+    const kb = unsharePickerKeyboard([], 'en');
+    const allData = kbData(kb)
+      .flat()
+      .map((b) => b.callback_data);
+    expect(allData).toContain('unsp:cancel');
+  });
+
+  test('ru cancel label', () => {
+    const kb = unsharePickerKeyboard([], 'ru');
+    const cancelBtn = kbData(kb)
+      .flat()
+      .find((b) => b.callback_data === 'unsp:cancel');
+    expect(cancelBtn?.text).toContain('Отмена');
+  });
+
+  test('truncates long titles to 40 chars', () => {
+    const longTitle = 'A'.repeat(60);
+    const kb = unsharePickerKeyboard([{ eventId: 1, title: longTitle }], 'en');
+    const btn = kbData(kb)
+      .flat()
+      .find((b) => b.callback_data === 'unsp:1');
+    expect(btn?.text.length).toBeLessThanOrEqual(40);
   });
 });

@@ -255,8 +255,13 @@ export function createBot(
     })
     .use(createSceneCommandEscape(scenesSetup.storage) as never)
     .use(createCallbackFallback(scenesSetup.storage) as never)
-    .use((context, next) => {
-      const ctx = context as unknown as { text?: string; dbUser?: User; chatId?: number };
+    .use(async (context, next) => {
+      const ctx = context as unknown as {
+        text?: string;
+        dbUser?: User;
+        chatId?: number;
+        send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+      };
       const text = ctx.text;
       if (text?.startsWith('/') && ctx.dbUser && ctx.chatId) {
         const commandName = text.split(' ')[0] ?? text;
@@ -264,6 +269,20 @@ export function createBot(
         // Only log private chat commands (group commands have chat_id != user_id)
         if (chatId === ctx.dbUser.telegram_id) {
           db.chatHistory.save(ctx.dbUser.telegram_id, 'user', JSON.stringify({ kind: 'command', name: commandName }));
+          // Capture the first text response from any command as assistant message
+          const userId = ctx.dbUser.telegram_id;
+          const originalSend = ctx.send?.bind(ctx);
+          if (originalSend) {
+            let responseSaved = false;
+            ctx.send = async (responseText: string, opts?: Record<string, unknown>) => {
+              const result = await originalSend(responseText, opts);
+              if (!responseSaved) {
+                db.chatHistory.save(userId, 'assistant', responseText);
+                responseSaved = true;
+              }
+              return result;
+            };
+          }
         }
       }
       return next();
@@ -496,7 +515,13 @@ export function createBot(
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
-    .on('my_chat_member', (ctx) => createChatMemberHandler(db.groupChats)(ctx as never))
+    .on('my_chat_member', (ctx) =>
+      createChatMemberHandler(
+        db.groupChats,
+        (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+        (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru',
+      )(ctx as never),
+    )
     // Users shared from picker modal → send invitations
     .on('users_shared', async (ctx) => {
       const user = (ctx as unknown as { dbUser?: User }).dbUser;
@@ -576,7 +601,7 @@ export function createBot(
             .then((sent) => {
               if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);
             })
-            .catch(() => {});
+            .catch((e) => botLogger.error({ error: String(e), inviteeId }, 'chat_shared invitation delivery failed'));
         }
         const resultText = inv.success
           ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
@@ -642,12 +667,13 @@ export function createBot(
         stressDictionary,
         sileroTts,
         kokoroTts,
-        sendVoice: sileroTts || kokoroTts
-          ? async (chatId: number, audio: Buffer) => {
-              const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
-              await bot.api.sendVoice({ chat_id: chatId, voice: file });
-            }
-          : undefined,
+        sendVoice:
+          sileroTts || kokoroTts
+            ? async (chatId: number, audio: Buffer) => {
+                const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
+                await bot.api.sendVoice({ chat_id: chatId, voice: file });
+              }
+            : undefined,
         intentMatcher,
         intentRepo,
         intentExecutor,
