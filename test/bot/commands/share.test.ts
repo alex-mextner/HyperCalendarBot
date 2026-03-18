@@ -282,6 +282,47 @@ describe('handleShare', () => {
     expect(msg).toContain('today');
   });
 
+  test('in group shows group events picker', async () => {
+    const { handleShare } = await import('../../../src/bot/commands/share.ts');
+    const occ = {
+      event: { id: 3, title: 'Demo Day', start_at: '2026-03-20T10:00:00Z' },
+      occurrence_start: '2026-03-20T10:00:00Z',
+      occurrence_end: null,
+      is_exception: false,
+    };
+    const eventService = {
+      getUpcomingForGroup: mock(() => [occ]),
+      getUpcoming: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      args: null,
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    await handleShare(ctx as never, eventService as never, {} as never, {} as never, groupRepo as never);
+    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(eventService.getUpcoming).not.toHaveBeenCalled();
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Поделиться');
+  });
+
+  test('in group with no events shows empty message', async () => {
+    const { handleShare } = await import('../../../src/bot/commands/share.ts');
+    const eventService = { getUpcomingForGroup: mock(() => []), getUpcoming: mock(() => []) };
+    const groupRepo = { getTimezone: mock(() => 'UTC') };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      args: null,
+      dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    await handleShare(ctx as never, eventService as never, {} as never, {} as never, groupRepo as never);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('No group events');
+  });
+
   test('creates deep link for event sharing with full visibility', async () => {
     const { handleShare } = await import('../../../src/bot/commands/share.ts');
     const ctx = {

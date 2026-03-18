@@ -331,6 +331,7 @@ export function createBot(
         eventService,
         invRepo: db.invitations,
         deepLinkService,
+        groupRepo: db.groupChats,
         sendMessage: async (chatId, text, options) => {
           const sent = await bot.api.sendMessage({
             chat_id: chatId,
@@ -346,7 +347,7 @@ export function createBot(
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )
     .command('share', (ctx) =>
-      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService),
+      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService, db.groupChats),
     )
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {

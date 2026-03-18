@@ -114,4 +114,55 @@ describe('handleInvite', () => {
     await handleInvite(ctx as never, deps as never);
     expect(getUpcoming).toHaveBeenCalledWith(42, 10);
   });
+
+  test('in group shows group events picker using getUpcomingForGroup', async () => {
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    const getUpcomingForGroup = mock(() => [
+      {
+        event: makeEvent(5),
+        occurrence_start: makeEvent(5).start_at,
+        occurrence_end: makeEvent(5).end_at,
+        is_exception: false,
+      },
+    ]);
+    const getUpcoming = mock(() => []);
+    const deps = {
+      invitationService: {},
+      eventService: { getUpcoming, getUpcomingForGroup },
+      invRepo: {},
+      deepLinkService: {},
+      groupRepo: { getTimezone: mock(() => 'Europe/Moscow') },
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+    await handleInvite(ctx as never, deps as never);
+    expect(getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(getUpcoming).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith(
+      expect.stringContaining('Выберите событие'),
+      expect.objectContaining({ reply_markup: expect.anything() }),
+    );
+  });
+
+  test('in group with no events shows empty message', async () => {
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {},
+      eventService: { getUpcoming: mock(() => []), getUpcomingForGroup: mock(() => []) },
+      invRepo: {},
+      deepLinkService: {},
+      groupRepo: { getTimezone: mock(() => null) },
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+    await handleInvite(ctx as never, deps as never);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('no upcoming events');
+  });
 });

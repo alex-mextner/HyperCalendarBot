@@ -2,12 +2,14 @@
 
 import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import { formatTime, formatTimeRange } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 type Period = 'today' | 'tomorrow' | 'week';
@@ -22,11 +24,30 @@ export async function handleShare(
   eventService: EventService,
   privacyService: PrivacyService,
   deepLinkService: DeepLinkService,
+  groupRepo?: GroupChatRepository,
 ): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
   const messages = t(lang);
   const userId = user.telegram_id;
+
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx)!;
+    const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
+    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+    if (occurrences.length === 0) {
+      await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
+      return;
+    }
+    const kb = new InlineKeyboard();
+    for (const occ of occurrences) {
+      const time = formatTime(occ.occurrence_start, timezone);
+      kb.text(`${time} ${occ.event.title.slice(0, 20)}`, `${CB.SHARE_EVENT}:evt:${occ.event.id}`).row();
+    }
+    const header = lang === 'ru' ? '📤 <b>Поделиться</b>\n\nВыберите событие:' : '📤 <b>Share</b>\n\nSelect an event:';
+    await ctx.send(header, { parse_mode: 'HTML', reply_markup: kb });
+    return;
+  }
 
   if (!ctx.args || ctx.args.trim() === '') {
     await showShareNavigator(ctx, eventService, user);
