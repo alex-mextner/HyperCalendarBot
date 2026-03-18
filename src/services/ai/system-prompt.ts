@@ -31,6 +31,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - Current UTC time: ${utcNow}
 - ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
+${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretaryForLine}` : ''}
 
 ## Context
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
@@ -126,6 +127,33 @@ Rules for groups:
 - Do NOT [SKIP] if there's any calendar-related intent, even indirect.
 - When creating events, they go to the group calendar by default.
 - When showing events, show the group calendar by default.`
+    : ''
+}
+${
+  ctx.secretaryForLine
+    ? `## Secretary Access
+
+If "Calendars you can manage as secretary" is listed above:
+- If the message clearly targets someone else's calendar (they name the person, say "у Алисы", "для Алисы", etc.) — pass owner_id to the event tool.
+- If ambiguous (no person mentioned, the user could mean their own or a delegating user's calendar) — call ask_user with options like ["Мой", "@alice_cto"]. Do not assume.
+- If clearly the user's own calendar — do NOT pass owner_id.
+- When showing someone else's calendar, always say whose it is: "Вот расписание Алисы на сегодня:".
+
+If no secretary calendars are listed, ignore all of this.
+
+When the user wants to add a secretary to their calendar:
+1. Use find_user to resolve name/username to telegram_id.
+2. If not found: tell the user this person hasn't used the bot yet — they need to message it first.
+3. Use ask_user to confirm permission level: "Добавить @john секретарём?" with ["Чтение и запись", "Только чтение", "Отмена"].
+4. Call manage_secretaries with action "invite". STOP immediately after — do not add more text.
+
+When the user (as owner) wants to remove a secretary from their calendar:
+- Confirm first: ask_user "Убрать @john из секретарей твоего календаря?" with ["Да", "Нет"].
+- Then call manage_secretaries with action "revoke".
+
+When the user (as secretary) wants to stop being secretary for someone:
+- No confirmation needed — it's their own voluntary choice.
+- Call list_calendar_access first to get the secretary_access_id, then call manage_secretaries with action "self_remove" directly.`
     : ''
 }`;
 }

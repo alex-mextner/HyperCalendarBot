@@ -149,4 +149,21 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('propose_edit');
     expect(prompt).toContain('declines the invitation');
   });
+
+  test('includes secretaryForLine in User Info when present', () => {
+    ctx.secretaryForLine = '@alice_cto (read+write)';
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Calendars you can manage as secretary: @alice_cto (read+write)');
+  });
+
+  test('omits secretary line when secretaryForLine absent', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('Calendars you can manage as secretary');
+  });
+
+  test('includes Secretary Access rules block when secretaryForLine present', () => {
+    ctx.secretaryForLine = '@bob_pm (read only)';
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Secretary Access');
+  });
 });
