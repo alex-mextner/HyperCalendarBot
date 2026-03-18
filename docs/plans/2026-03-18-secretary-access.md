@@ -100,7 +100,7 @@ test('deliverMessage: sends deeplink to fallback recipient if all fail', async (
     fallbackText: 'They have not started the bot.',
     botSend: fakeSend,
   });
-  expect(fakeSend).toHaveBeenCalledWith(999, 'They have not started the bot.', undefined);
+  expect(fakeSend).toHaveBeenCalledWith(999, 'They have not started the bot.');
   expect(result).toEqual({ delivered: false });
 });
 ```
@@ -235,6 +235,7 @@ Append to the migrations array (check current count — use next number after la
         secretary_id   INTEGER NOT NULL,
         permission     TEXT NOT NULL DEFAULT 'read',
         status         TEXT NOT NULL DEFAULT 'pending',
+        dm_message_id  INTEGER,
         created_at     TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
         UNIQUE(owner_id, secretary_id),
@@ -260,6 +261,7 @@ export interface CalendarSecretary {
   secretary_id: number;
   permission: SecretaryPermission;
   status: SecretaryStatus;
+  dm_message_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -364,15 +366,22 @@ export class SecretaryRepository {
   constructor(private db: Database) {}
 
   upsert(data: CreateSecretaryData): CalendarSecretary {
-    // Reuse pending < 7 days; otherwise INSERT OR REPLACE
-    const existing = this.db
+    // Reuse pending < 7 days
+    const pending = this.db
       .prepare(`SELECT * FROM calendar_secretaries
                 WHERE owner_id = ? AND secretary_id = ?
                 AND status = 'pending'
                 AND created_at > datetime('now', '-7 days')`)
       .get(data.owner_id, data.secretary_id) as CalendarSecretary | null;
-    if (existing) return existing;
+    if (pending) return pending;
 
+    // Never demote an active record — return it as-is
+    const active = this.db
+      .prepare(`SELECT * FROM calendar_secretaries WHERE owner_id = ? AND secretary_id = ? AND status = 'active'`)
+      .get(data.owner_id, data.secretary_id) as CalendarSecretary | null;
+    if (active) return active;
+
+    // Insert new pending row; if a revoked/expired/declined conflict exists, reset it to pending
     const result = this.db
       .prepare(`INSERT INTO calendar_secretaries (owner_id, secretary_id, permission, status, created_at, updated_at)
                 VALUES (?, ?, ?, 'pending', datetime('now'), datetime('now'))
@@ -400,6 +409,10 @@ export class SecretaryRepository {
       .prepare(`UPDATE calendar_secretaries SET status = ?, updated_at = datetime('now') WHERE id = ?`)
       .run(status, id);
     return result.changes > 0;
+  }
+
+  setDmMessageId(id: number, messageId: number): void {
+    this.db.prepare(`UPDATE calendar_secretaries SET dm_message_id = ? WHERE id = ?`).run(messageId, id);
   }
 
   /** Active secretary relationships where secretaryId is the secretary */
@@ -671,7 +684,7 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
 }
 ```
 
-`sendSecretaryInvite` builds the invite message text + [Принять]/[Отклонить] keyboard and calls `deliverMessage`.
+`sendSecretaryInvite` builds the invite message text + [Принять `sec:accept:{id}`]/[Отклонить `sec:decline:{id}`] keyboard and calls `deliverMessage`. After delivery, if `result.messageId` is set, call `ctx.secretaryRepo!.setDmMessageId(record.id, result.messageId)` so callbacks can edit the invite later.
 
 - [ ] **Step 4: Add tool def to `tools.ts`** (see spec section 2 for full description + input_schema)
 
@@ -830,7 +843,7 @@ import { handleSecretaryAccept, handleSecretaryDecline } from '../../../src/bot/
 
 const pendingRecord = {
   id: 5, owner_id: 10, secretary_id: 20, permission: 'write' as const,
-  status: 'pending' as const, created_at: '', updated_at: '',
+  status: 'pending' as const, dm_message_id: 777, created_at: '', updated_at: '',
 };
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
@@ -838,6 +851,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     secretaryRepo: {
       findById: mock(() => pendingRecord),
       updateStatus: mock(() => true),
+      setDmMessageId: mock(() => {}),
     },
     userRepo: { findByTelegramId: mock(() => ({ first_name: 'Alice', username: 'alice', telegram_id: 10 })) },
     sendMessage: mock(async () => {}),
@@ -863,7 +877,7 @@ test('sec:accept: edits invitation message at secretary', async () => {
 
   expect(deps.editMessage).toHaveBeenCalledWith(
     pendingRecord.secretary_id,
-    expect.any(Number),
+    pendingRecord.dm_message_id,
     expect.stringContaining('Принято')
   );
 });
@@ -915,7 +929,7 @@ if (data.startsWith('sec:decline:')) {
 1. `secretaryRepo.findById(id)` — if null, skip
 2. `secretaryRepo.updateStatus(id, 'active')`
 3. Notify owner: `Пользователь @{secretary_username} принял приглашение и теперь является секретарём твоего календаря.`
-4. Edit original invitation message at secretary: `✅ Принято. Ты теперь секретарь {owner_name} (@{owner_username}). Напиши мне, чтобы управлять её/его календарём.`
+4. Edit original invitation message at secretary using `record.dm_message_id` (if not null): `✅ Принято. Ты теперь секретарь {owner_name} (@{owner_username}). Напиши мне, чтобы управлять её/его календарём.`
 
 `handleSecretaryDecline`:
 1. `secretaryRepo.findById(id)` — if null, skip
@@ -1175,15 +1189,11 @@ git commit -m "feat: add secretary access section to system prompt"
 
 **Files:**
 - Create: `src/worker/secretary-expiry.ts`
+- Create: `src/worker/bot-tasks-queue.ts`
+- Modify: `src/bot/index.ts`
 - Test: `test/worker/secretary-expiry.test.ts`
 
-- [ ] **Step 1: Find existing cron pattern**
-
-Check how holidays cron job is implemented:
-```bash
-grep -r "cron\|setInterval\|schedule\|agenda" src/ --include="*.ts" -l
-```
-Follow the same pattern exactly.
+**Pattern:** BullMQ `queue.add(..., { repeat: { every: ... } })` — same as `src/services/google/sync-cron.ts`. Do NOT use `setInterval`.
 
 Also add `getPendingExpired()` to `SecretaryRepository` and a corresponding test in `test/database/repositories/secretary.repository.test.ts`:
 
@@ -1291,7 +1301,84 @@ export async function runSecretaryExpiry(deps: {
 }
 ```
 
-Wire into cron using the same pattern as existing cron jobs.
+Then create `src/worker/bot-tasks-queue.ts` — a BullMQ queue for bot maintenance crons, following the exact pattern of `src/services/google/sync-queue.ts`:
+
+```typescript
+// src/worker/bot-tasks-queue.ts
+import { Queue, Worker } from 'bullmq';
+import { parseRedisUrl } from '../utils/redis.ts';
+import { logger } from '../utils/logger.ts';
+
+const botTasksLogger = logger.child({ module: 'bot-tasks' });
+
+export type BotTaskJobType = 'cron-secretary-expiry';
+
+export interface BotTaskJobData {
+  type: BotTaskJobType;
+}
+
+interface BotTasksQueueDeps {
+  redisUrl: string;
+  onSecretaryExpiry?: () => Promise<void>;
+}
+
+export function createBotTasksQueue(deps: BotTasksQueueDeps) {
+  const connection = parseRedisUrl(deps.redisUrl);
+
+  const queue = new Queue<BotTaskJobData>('bot-tasks', {
+    connection,
+    defaultJobOptions: {
+      attempts: 3,
+      backoff: { type: 'exponential', delay: 10_000 },
+      removeOnComplete: { count: 100 },
+      removeOnFail: { count: 500 },
+    },
+  });
+
+  const worker = new Worker<BotTaskJobData>(
+    'bot-tasks',
+    async (job) => {
+      if (job.data.type === 'cron-secretary-expiry') {
+        if (deps.onSecretaryExpiry) await deps.onSecretaryExpiry();
+        return;
+      }
+    },
+    { connection, concurrency: 1 },
+  );
+
+  worker.on('failed', (job, err) => {
+    if (!job) return;
+    botTasksLogger.error({ jobId: job.id, type: job.data.type, error: err.message }, 'Bot task job failed');
+  });
+
+  return { queue, worker };
+}
+
+export async function setupSecretaryExpiryCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'secretary-expiry-tick',
+    { type: 'cron-secretary-expiry' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'secretary-expiry-tick' },
+  );
+  botTasksLogger.info('Secretary expiry cron scheduled (daily)');
+}
+```
+
+Wire in `src/bot/index.ts`:
+```typescript
+import { createBotTasksQueue, setupSecretaryExpiryCron } from '../worker/bot-tasks-queue.ts';
+import { runSecretaryExpiry } from '../worker/secretary-expiry.ts';
+
+const { queue: botTasksQueue } = createBotTasksQueue({
+  redisUrl: config.REDIS_URL,
+  onSecretaryExpiry: () => runSecretaryExpiry({
+    secretaryRepo,
+    userRepo: db.users,
+    notify: (userId, text) => bot.api.sendMessage(userId, text),
+  }),
+});
+await setupSecretaryExpiryCron(botTasksQueue);
+```
 
 - [ ] **Step 4: Run — verify PASS**
 
@@ -1302,8 +1389,8 @@ bun test test/worker/secretary-expiry.test.ts
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/worker/secretary-expiry.ts src/database/repositories/secretary.repository.ts test/worker/secretary-expiry.test.ts
-git commit -m "feat: add secretary invite expiry cron job"
+git add src/worker/secretary-expiry.ts src/worker/bot-tasks-queue.ts src/database/repositories/secretary.repository.ts src/bot/index.ts test/worker/secretary-expiry.test.ts
+git commit -m "feat: add secretary invite expiry cron job via BullMQ"
 ```
 
 ---

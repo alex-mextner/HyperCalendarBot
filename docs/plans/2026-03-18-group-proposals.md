@@ -167,6 +167,7 @@ git commit -m "feat: add calendar_proposals migration and types"
 // test/database/repositories/calendar-proposal.repository.test.ts
 import { test, expect, beforeEach } from 'bun:test';
 import { CalendarProposalRepository } from '../../../src/database/repositories/calendar-proposal.repository.ts';
+import type { CreateProposalData } from '../../../src/database/types.ts';
 import { createTestDb } from '../../helpers/test-db.ts';
 
 let repo: CalendarProposalRepository;
@@ -435,7 +436,7 @@ export async function handleProposeCalendarChange(ctx: AgentContext, input: Prop
   // Notify group chat
   notifyGroupChat(ctx, proposal, input.target_telegram_id).catch(err =>
     logger.error({ err }, 'proposal group notification failed')
-  );;
+  );
 
   return { success: true, output: { status: 'awaiting_confirmation', proposal_id: proposal.id } };
 }
@@ -834,14 +835,11 @@ git commit -m "feat: wire CalendarProposalRepository and group membership check"
 
 **Files:**
 - Create: `src/worker/proposal-expiry.ts`
+- Modify: `src/worker/bot-tasks-queue.ts`
+- Modify: `src/bot/index.ts`
 - Test: `test/worker/proposal-expiry.test.ts`
 
-- [ ] **Step 1: Find existing cron pattern**
-
-```bash
-grep -r "cron\|setInterval\|schedule\|agenda" src/ --include="*.ts" -l
-```
-Follow the exact same pattern.
+**Pattern:** BullMQ `queue.add(..., { repeat: { every: ... } })` — same as `src/services/google/sync-cron.ts`. Do NOT use `setInterval`. `bot-tasks-queue.ts` was created in the Secretary Access plan — extend it here.
 
 - [ ] **Step 2: Write failing test**
 
@@ -944,7 +942,33 @@ export async function runProposalExpiry(deps: {
 }
 ```
 
-Wire into cron using the existing pattern. Run hourly.
+Extend `src/worker/bot-tasks-queue.ts` — add `'cron-proposal-expiry'` to the `BotTaskJobType` union, add `onProposalExpiry?` to deps, handle the type in the worker, and export `setupProposalExpiryCron`:
+
+```typescript
+// Additions to bot-tasks-queue.ts:
+export type BotTaskJobType = 'cron-secretary-expiry' | 'cron-proposal-expiry';
+
+// In deps interface add:
+onProposalExpiry?: () => Promise<void>;
+
+// In worker handler add:
+if (job.data.type === 'cron-proposal-expiry') {
+  if (deps.onProposalExpiry) await deps.onProposalExpiry();
+  return;
+}
+
+// New export:
+export async function setupProposalExpiryCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'proposal-expiry-tick',
+    { type: 'cron-proposal-expiry' },
+    { repeat: { every: 60 * 60_000 }, removeOnComplete: true, jobId: 'proposal-expiry-tick' },
+  );
+  botTasksLogger.info('Proposal expiry cron scheduled (hourly)');
+}
+```
+
+Wire in `src/bot/index.ts` — pass `onProposalExpiry` to `createBotTasksQueue` and call `setupProposalExpiryCron(botTasksQueue)`.
 
 - [ ] **Step 4: Run — verify PASS**
 
@@ -955,8 +979,8 @@ bun test test/worker/proposal-expiry.test.ts
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/worker/proposal-expiry.ts test/worker/proposal-expiry.test.ts
-git commit -m "feat: add proposal expiry cron job"
+git add src/worker/proposal-expiry.ts src/worker/bot-tasks-queue.ts src/bot/index.ts test/worker/proposal-expiry.test.ts
+git commit -m "feat: add proposal expiry cron job via BullMQ"
 ```
 
 ---
