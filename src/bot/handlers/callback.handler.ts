@@ -5,6 +5,7 @@ import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
+import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -16,7 +17,7 @@ import type { IntentRepository } from '../../database/repositories/intent.reposi
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { Invitation, UpdateEventData, User } from '../../database/types.ts';
+import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
@@ -88,6 +89,7 @@ export function createCallbackHandler(
     adminEditSessions?: Map<number, AdminEditSession>;
   },
   secretaryDeps?: SecretaryDeps,
+  proposalDeps?: ProposalDeps,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -731,6 +733,19 @@ export function createCallbackHandler(
         return;
       }
 
+      if (data.startsWith('prop:accept:') && proposalDeps) {
+        const id = Number(data.slice('prop:accept:'.length));
+        await handleProposalAccept(id, proposalDeps);
+        await ctx.answer();
+        return;
+      }
+      if (data.startsWith('prop:decline:') && proposalDeps) {
+        const id = Number(data.slice('prop:decline:'.length));
+        await handleProposalDecline(id, proposalDeps);
+        await ctx.answer();
+        return;
+      }
+
       cmdLogger.warn({ action, payload }, 'Unknown callback action');
       await ctx.answer();
     } catch (error) {
@@ -797,6 +812,102 @@ export async function handleSecretaryDecline(id: number, deps: SecretaryDeps): P
 
   if (record.dm_message_id !== null) {
     await deps.editMessage(record.secretary_id, record.dm_message_id, 'Приглашение отклонено.');
+  }
+}
+
+export interface ProposalDeps {
+  proposalRepo: Pick<CalendarProposalRepository, 'findById' | 'updateStatus'>;
+  eventService: {
+    createEvent: (userId: number, data: Omit<CreateEventData, 'user_id'>) => { id: number; title?: string } | null;
+    updateEvent: (id: number, userId: number, data: UpdateEventData) => { id: number } | null;
+    deleteEvent: (id: number, userId: number) => boolean;
+  };
+  userRepo: Pick<UserRepository, 'findByTelegramId'>;
+  sendMessage: (chatId: number, text: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+}
+
+export async function handleProposalAccept(id: number, deps: ProposalDeps): Promise<void> {
+  const proposal = deps.proposalRepo.findById(id);
+  if (!proposal) return;
+
+  if (proposal.status !== 'pending') {
+    if (proposal.dm_message_id !== null) {
+      await deps.editMessage(proposal.target_id, proposal.dm_message_id, 'Предложение истекло или уже обработано.');
+    }
+    return;
+  }
+
+  deps.proposalRepo.updateStatus(id, 'accepted');
+
+  const payloadData = JSON.parse(proposal.payload) as {
+    action: string;
+    event?: Omit<CreateEventData, 'user_id'>;
+    event_id?: number;
+    changes?: UpdateEventData;
+  };
+
+  let result: { id: number; title?: string } | boolean | null | undefined;
+  if (proposal.action === 'create' && payloadData.event) {
+    result = deps.eventService.createEvent(proposal.target_id, payloadData.event);
+  } else if (proposal.action === 'update' && payloadData.event_id !== undefined && payloadData.changes) {
+    result = deps.eventService.updateEvent(payloadData.event_id, proposal.target_id, payloadData.changes);
+  } else if (proposal.action === 'delete' && payloadData.event_id !== undefined) {
+    result = deps.eventService.deleteEvent(payloadData.event_id, proposal.target_id);
+  }
+
+  if (result === null || result === undefined || result === false) {
+    deps.proposalRepo.updateStatus(id, 'expired');
+    await deps.sendMessage(proposal.target_id, 'Событие больше не существует — предложение аннулировано.');
+    await deps.sendMessage(proposal.proposer_id, 'Событие больше не существует — предложение аннулировано.');
+    return;
+  }
+
+  const proposer = deps.userRepo.findByTelegramId(proposal.proposer_id);
+  const proposerRef = proposer ? formatUserRef(proposer) : `User ${proposal.proposer_id}`;
+  const target = deps.userRepo.findByTelegramId(proposal.target_id);
+  const targetRef = target ? formatUserRef(target) : `User ${proposal.target_id}`;
+
+  if (proposal.dm_message_id !== null) {
+    await deps.editMessage(
+      proposal.target_id,
+      proposal.dm_message_id,
+      '✅ Принято. Изменение применено к твоему календарю.',
+    );
+  }
+
+  if (proposal.group_message_id !== null) {
+    await deps.editMessage(
+      proposal.group_chat_id,
+      proposal.group_message_id,
+      `✅ ${targetRef} принял(а) предложение от ${proposerRef}: ${proposal.summary}`,
+    );
+  }
+
+  await deps.sendMessage(proposal.proposer_id, `✅ ${targetRef} принял(а) твоё предложение: ${proposal.summary}`);
+}
+
+export async function handleProposalDecline(id: number, deps: ProposalDeps): Promise<void> {
+  const proposal = deps.proposalRepo.findById(id);
+  if (!proposal) return;
+
+  deps.proposalRepo.updateStatus(id, 'declined');
+
+  const proposer = deps.userRepo.findByTelegramId(proposal.proposer_id);
+  const proposerRef = proposer ? formatUserRef(proposer) : `User ${proposal.proposer_id}`;
+  const target = deps.userRepo.findByTelegramId(proposal.target_id);
+  const targetRef = target ? formatUserRef(target) : `User ${proposal.target_id}`;
+
+  if (proposal.dm_message_id !== null) {
+    await deps.editMessage(proposal.target_id, proposal.dm_message_id, 'Предложение отклонено.');
+  }
+
+  if (proposal.group_message_id !== null) {
+    await deps.editMessage(
+      proposal.group_chat_id,
+      proposal.group_message_id,
+      `❌ ${targetRef} отклонил(а) предложение от ${proposerRef}: ${proposal.summary}`,
+    );
   }
 }
 

@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
 import {
   createCallbackHandler,
+  handleProposalAccept,
+  handleProposalDecline,
   handleSecretaryAccept,
   handleSecretaryDecline,
 } from '../../../src/bot/handlers/callback.handler.ts';
@@ -237,4 +239,86 @@ test('sec:decline: sets status declined and notifies owner', async () => {
 
   expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'declined');
   expect(deps.sendMessage).toHaveBeenCalledWith(pendingRecord.owner_id, expect.stringContaining('отклонил'));
+});
+
+const basePendingProposal = {
+  id: 10,
+  proposer_id: 1,
+  target_id: 2,
+  status: 'pending' as const,
+  action: 'create' as const,
+  payload: JSON.stringify({
+    action: 'create',
+    event: { title: 'Ретро', start_at: '2099-03-20T15:00:00Z', end_at: '2099-03-20T16:00:00Z' },
+  }),
+  summary: 'добавить Ретро',
+  group_chat_id: -100,
+  group_message_id: 555,
+  dm_message_id: 777,
+  expires_at: '2099-12-31T00:00:00Z',
+  group_chat_title: 'Dev Team',
+  created_at: '',
+  updated_at: '',
+};
+
+function makeProposalDeps(overrides: Record<string, unknown> = {}) {
+  return {
+    proposalRepo: {
+      findById: mock(() => basePendingProposal),
+      updateStatus: mock(() => true),
+    },
+    eventService: {
+      createEvent: mock(() => ({ id: 99, title: 'Ретро' })),
+      updateEvent: mock(() => ({ id: 1 })),
+      deleteEvent: mock(() => true),
+    },
+    userRepo: { findByTelegramId: mock(() => ({ first_name: 'Alice', username: 'alice', telegram_id: 1 })) },
+    editMessage: mock(async () => {}),
+    sendMessage: mock(async () => {}),
+    ...overrides,
+  };
+}
+
+test('prop:accept: executes create payload as target_id=2, edits DM and group', async () => {
+  const deps = makeProposalDeps();
+  await handleProposalAccept(10, deps as never);
+
+  expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'accepted');
+  expect(deps.eventService.createEvent).toHaveBeenCalledWith(2, expect.objectContaining({ title: 'Ретро' }));
+  expect(deps.editMessage).toHaveBeenCalledTimes(2); // DM + group
+});
+
+test('prop:accept: event gone → notifies both parties, does not crash', async () => {
+  const deps = makeProposalDeps({
+    eventService: { createEvent: mock(() => null) },
+  });
+  await handleProposalAccept(10, deps as never);
+
+  expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'expired');
+  expect(deps.sendMessage).toHaveBeenCalledTimes(2); // proposer + target notified
+});
+
+test('prop:accept: no-op if status != pending, edits DM only', async () => {
+  const deps = makeProposalDeps({
+    proposalRepo: {
+      findById: mock(() => ({ ...basePendingProposal, status: 'expired' })),
+      updateStatus: mock(() => true),
+    },
+  });
+  await handleProposalAccept(10, deps as never);
+
+  expect(deps.eventService.createEvent).not.toHaveBeenCalled();
+  expect(deps.editMessage).toHaveBeenCalledWith(
+    basePendingProposal.target_id,
+    basePendingProposal.dm_message_id,
+    expect.stringContaining('истекло'),
+  );
+});
+
+test('prop:decline: sets declined and edits DM + group', async () => {
+  const deps = makeProposalDeps();
+  await handleProposalDecline(10, deps as never);
+
+  expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'declined');
+  expect(deps.editMessage).toHaveBeenCalledTimes(2);
 });
