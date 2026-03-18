@@ -721,7 +721,15 @@ export function createCallbackHandler(
 
       // Settings category picker
       if (action === 'stg') {
-        return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo);
+        return handleSettingsCallback(
+          ctx,
+          user,
+          payload,
+          prefsService,
+          callSettingsRepo,
+          sharingSettingsRepo,
+          userRepo,
+        );
       }
 
       // Feedback: admin closes a thread

@@ -144,7 +144,7 @@ describe('handleSettingsCallback', () => {
 
     const [text] = ctx.editText.mock.calls[0] as [string];
     expect(text).toContain('✅');
-    expect(text).toContain('ru');
+    expect(text).toContain('Голосовые звонки');
   });
 
   test('stg:privacy without repo shows defaults', async () => {
@@ -156,7 +156,7 @@ describe('handleSettingsCallback', () => {
 
     const [text] = ctx.editText.mock.calls[0] as [string];
     expect(text).toContain('Приватность');
-    expect(text).toContain('private');
+    expect(text).toContain('Приватно');
   });
 
   test('stg:privacy with repo shows actual values', async () => {
@@ -182,7 +182,7 @@ describe('handleSettingsCallback', () => {
     );
 
     const [text] = ctx.editText.mock.calls[0] as [string];
-    expect(text).toContain('full');
+    expect(text).toContain('Полный доступ');
     expect(text).toContain('✅'); // inline_mode_enabled
     expect(text).toContain('❌'); // allow_invitations false
   });
