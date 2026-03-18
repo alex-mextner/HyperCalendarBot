@@ -185,19 +185,19 @@ async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatR
       ? `⚙️ <b>Настройки группы</b>\n\n🌍 Таймзона: <code>${tz}</code>\n🏳️ Страна: <code>${country}</code>`
       : `⚙️ <b>Group settings</b>\n\n🌍 Timezone: <code>${tz}</code>\n🏳️ Country: <code>${country}</code>`;
 
-  const kb = new InlineKeyboard()
-    .text(lang === 'ru' ? '🌍 Изменить таймзону' : '🌍 Change timezone', `${CB.GROUP_SETTINGS_TZ}:select`)
-    .row()
-    .text(lang === 'ru' ? '🏳️ Изменить страну' : '🏳️ Change country', `${CB.GROUP_SETTINGS_COUNTRY}:select`);
+  const kb = new InlineKeyboard().text(
+    lang === 'ru' ? '🌍 Изменить таймзону' : '🌍 Change timezone',
+    `${CB.GROUP_SETTINGS_TZ}:select`,
+  );
 
   await ctx.send(text, { parse_mode: 'HTML', reply_markup: kb });
 }
 
 // ─── Command entry point ─────────────────────────────────────────────────────
 
-export async function handleSettings(ctx: BotCommandContext, groupRepo?: GroupChatRepository): Promise<void> {
+export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
   if (isGroup(ctx)) {
-    await handleGroupSettings(ctx, groupRepo!);
+    await handleGroupSettings(ctx, groupRepo);
     return;
   }
   await ctx.send('⚙️ Настройки / Settings', {

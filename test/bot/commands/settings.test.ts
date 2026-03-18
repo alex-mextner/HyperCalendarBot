@@ -47,12 +47,19 @@ function makePrefsService(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function makeGroupRepo(overrides: Record<string, unknown> = {}) {
+  return {
+    findByChatId: mock(() => null),
+    ...overrides,
+  };
+}
+
 describe('handleSettings', () => {
   test('sends category picker keyboard', async () => {
     const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
     const ctx = makeCommandCtx();
 
-    await handleSettings(ctx);
+    await handleSettings(ctx, makeGroupRepo() as never);
 
     expect(ctx.send).toHaveBeenCalledTimes(1);
     const [text, opts] = ctx.send.mock.calls[0] as [string, { reply_markup: unknown }];
