@@ -505,6 +505,24 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'update_contact',
+    description:
+      "Update an existing contact's name, preferred_name, or username. Use when user wants to rename or correct a contact.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        search: { type: 'string', description: 'Current name or @username to find the contact' },
+        name: { type: 'string', description: 'New display name (optional)' },
+        preferred_name: {
+          type: 'string',
+          description: 'New preferred name — how the user refers to this person (optional)',
+        },
+        username: { type: 'string', description: 'New Telegram @username without @ (optional)' },
+      },
+      required: ['search'],
+    },
+  },
+  {
     name: 'ask_user',
     description:
       'Send a question to the user with clickable button options. Use when you need a yes/no or choice answer. After calling, STOP and wait for the user to respond.',

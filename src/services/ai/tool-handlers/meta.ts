@@ -98,6 +98,32 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
   return { success: true, output: parts.join(', ') };
 }
 
+export function handleUpdateContact(
+  ctx: AgentContext,
+  input: { search: string; name?: string; preferred_name?: string; username?: string },
+): ToolResult {
+  if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
+  const userId = ctx.user.telegram_id;
+  const query = input.search;
+  const contact = query.startsWith('@')
+    ? (ctx.contactRepo.findByUsername(userId, query) ?? ctx.contactRepo.findByName(userId, query.slice(1)))
+    : (ctx.contactRepo.findByName(userId, query) ?? ctx.contactRepo.findByUsername(userId, query));
+  if (!contact) return { success: false, error: `No contact named "${input.search}" in address book.` };
+  const patch: { name?: string; preferred_name?: string; username?: string } = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.preferred_name !== undefined) patch.preferred_name = input.preferred_name;
+  if (input.username !== undefined) patch.username = input.username;
+  if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
+  ctx.contactRepo.update(contact.id, patch);
+  const updatedName = patch.name ?? contact.name;
+  const updated = ctx.contactRepo.findByName(userId, updatedName);
+  const displayName = updated?.preferred_name ?? updated?.name ?? updatedName;
+  return {
+    success: true,
+    output: `Contact updated: "${displayName}"${updated?.username ? ` (@${updated.username})` : ''}`,
+  };
+}
+
 export function handleAskUser(ctx: AgentContext, input: { question: string; options: string[] }): ToolResult {
   if (!ctx.sender?.sendButtons) {
     return { success: false, error: 'Buttons not supported.' };

@@ -27,6 +27,7 @@ import {
   handlePickUsers,
   handleRenderDayImage,
   handleRenderWeekImage,
+  handleUpdateContact,
 } from './tool-handlers/meta.ts';
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
@@ -139,6 +140,12 @@ export async function executeTool(
 
       case 'find_contact':
         return handleFindContact(ctx, input as { name: string });
+
+      case 'update_contact':
+        return handleUpdateContact(
+          ctx,
+          input as { search: string; name?: string; preferred_name?: string; username?: string },
+        );
 
       case 'render_day_image':
         return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group'; owner_id?: number });

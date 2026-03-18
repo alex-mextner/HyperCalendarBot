@@ -18,6 +18,7 @@ import {
   handleGetHolidays,
   handlePickUsers,
   handleRenderDayImage,
+  handleUpdateContact,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -195,6 +196,60 @@ describe('meta tool handlers', () => {
       const result = handleAddContact(ctx, { name: 'Вова' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Вова');
+    });
+  });
+
+  describe('handleUpdateContact', () => {
+    test('updates preferred_name by current name', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Антон Tikididu', 'Tikididu');
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Антон Tikididu', preferred_name: 'Антон' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Антон');
+      const updated = contactRepo.findByName(USER_ID, 'Антон Tikididu');
+      expect(updated?.preferred_name).toBe('Антон');
+    });
+
+    test('renames contact display name', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'OldName');
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'OldName', name: 'NewName' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('NewName');
+      expect(contactRepo.findByName(USER_ID, 'NewName')).not.toBeNull();
+    });
+
+    test('finds contact by @username', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Вова', 'vova123');
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: '@vova123', preferred_name: 'Вовка' });
+      expect(result.success).toBe(true);
+      const updated = contactRepo.findByName(USER_ID, 'Вова');
+      expect(updated?.preferred_name).toBe('Вовка');
+    });
+
+    test('returns error for unknown contact', () => {
+      ctx.contactRepo = new ContactRepository(db);
+      const result = handleUpdateContact(ctx, { search: 'Nobody', name: 'Someone' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Nobody');
+    });
+
+    test('returns error when no fields provided', () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена');
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Лена' });
+      expect(result.success).toBe(false);
+    });
+
+    test('returns error when contactRepo not configured', () => {
+      ctx.contactRepo = undefined;
+      const result = handleUpdateContact(ctx, { search: 'Лена', name: 'Лена2' });
+      expect(result.success).toBe(false);
     });
   });
 
