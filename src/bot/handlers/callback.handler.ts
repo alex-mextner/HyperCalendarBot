@@ -119,6 +119,7 @@ export function createCallbackHandler(
     stressDictionary?: { lookup: (word: string) => string | null };
   },
   contactRepo?: ContactRepository,
+  timezoneScene?: AnyScene,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -988,6 +989,11 @@ export function createCallbackHandler(
 
       // Settings category picker
       if (action === 'stg') {
+        if (payload === 'change_tz' && timezoneScene) {
+          await ctx.answer();
+          await ctx.scene.enter(timezoneScene);
+          return;
+        }
         return handleSettingsCallback(
           ctx,
           user,

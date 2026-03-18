@@ -48,7 +48,6 @@ import { handleSearch } from './commands/search.ts';
 import { handleSettings } from './commands/settings.ts';
 import { handleShare } from './commands/share.ts';
 import { handleStart } from './commands/start.ts';
-import { handleTimezone } from './commands/timezone.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleUnshare } from './commands/unshare.ts';
@@ -320,7 +319,6 @@ export function createBot(
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
     .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService, holidayService))
-    .command('timezone', (ctx) => handleTimezone(ctx as unknown as BotCommandContext, scenesSetup.scenes.timezoneScene))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
@@ -515,6 +513,7 @@ export function createBot(
             }
           : undefined,
         db.contacts,
+        scenesSetup.scenes.timezoneScene,
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
