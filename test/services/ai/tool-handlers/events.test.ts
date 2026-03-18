@@ -1,8 +1,10 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
@@ -501,6 +503,77 @@ describe('event tool handlers', () => {
       const result = handleDeleteEvent(gCtx, { event_id: 9999, scope: 'group' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
+    });
+
+    test('handleGetEvents includes group title and created_by in output', () => {
+      const groupChatRepo = new GroupChatRepository(db);
+      groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
+      createGroupEvent('Team Drinks', '2026-03-15T20:00:00Z');
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        groupChatRepo,
+      };
+      const result = handleGetEvents(gCtx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+        scope: 'group',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Team Drinks');
+      expect(result.output).toContain('Test Group');
+    });
+
+    test('handleGetEvent includes group title in output', () => {
+      const groupChatRepo = new GroupChatRepository(db);
+      groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
+      const event = createGroupEvent('Group Detail Event', '2026-03-15T10:00:00Z');
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        groupChatRepo,
+      };
+      const result = handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Group Detail Event');
+      expect(result.output).toContain('Test Group');
+    });
+
+    test('handleCreateEvent notifies group members except creator', async () => {
+      const MEMBER_ID = 456;
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, MEMBER_ID);
+
+      const sent: { chatId: number; text: string }[] = [];
+      const sender = {
+        sendMessage: mock(async (chatId: number, text: string) => {
+          sent.push({ chatId, text });
+          return { message_id: 1 };
+        }),
+        editMessageText: mock(async () => {}),
+      };
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        groupMemberRepo,
+        sender,
+      };
+      const result = handleCreateEvent(gCtx, {
+        title: 'Party',
+        start_at: '2026-03-20T18:00:00Z',
+        scope: 'group',
+        force: true,
+      });
+
+      expect(result.success).toBe(true);
+      // Give async notifications a tick to fire
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sent.length).toBe(1);
+      expect(sent[0].chatId).toBe(MEMBER_ID);
+      expect(sent[0].text).toContain('Party');
     });
   });
 });

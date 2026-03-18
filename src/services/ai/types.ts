@@ -4,6 +4,8 @@ import type { ContactRepository } from '../../database/repositories/contact.repo
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
@@ -60,6 +62,8 @@ export interface AgentContext {
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
   };
+  groupChatRepo?: GroupChatRepository;
+  groupMemberRepo?: GroupMemberRepository;
   googleCalendarRepo?: GoogleCalendarRepository;
   deepLinkService?: DeepLinkService;
   botUsername?: string;

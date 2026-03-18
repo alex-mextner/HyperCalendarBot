@@ -93,6 +93,15 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
     if (e.description) parts.push(`description: ${e.description}`);
     if (e.location) parts.push(`location: ${e.location}`);
     if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
+    if (e.owner_type === 'group' && e.group_id) {
+      const groupTitle = ctx.groupChatRepo?.findByChatId(e.group_id)?.title;
+      parts.push(`group: ${groupTitle ?? e.group_id}`);
+    }
+    if (e.created_by) {
+      const creator = ctx.userRepo.findByTelegramId(e.created_by);
+      const creatorLabel = creator?.username ? `@${creator.username}` : `id:${e.created_by}`;
+      parts.push(`created_by: ${creatorLabel}`);
+    }
     return parts.join(', ');
   });
 
@@ -155,6 +164,17 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
     if (event.end_at) parts.push(`end: ${event.end_at}`);
     if (event.description) parts.push(`description: ${event.description}`);
     if (event.location) parts.push(`location: ${event.location}`);
+
+    if (scope === 'group' && ctx.groupChatId && ctx.groupMemberRepo && ctx.sender) {
+      const members = ctx.groupMemberRepo.getMembers(ctx.groupChatId);
+      const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
+      const groupLabel = groupTitle ? ` в группе "${groupTitle}"` : ' в группе';
+      const notifyText = `📅 Новое событие${groupLabel}:\n*${event.title}*`;
+      for (const member of members) {
+        if (member.user_id === ctx.user.telegram_id) continue;
+        ctx.sender.sendMessage(member.user_id, notifyText).catch(() => {});
+      }
+    }
 
     return { success: true, output: `Event created: ${parts.join(', ')}` };
   } catch (error) {
@@ -365,6 +385,15 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
   if (event.location) parts.push(`location: ${event.location}`);
   if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);
   if (event.all_day) parts.push('all_day: true');
+  if (event.owner_type === 'group' && event.group_id) {
+    const groupTitle = ctx.groupChatRepo?.findByChatId(event.group_id)?.title;
+    parts.push(`group: ${groupTitle ?? event.group_id}`);
+  }
+  if (event.created_by) {
+    const creator = ctx.userRepo.findByTelegramId(event.created_by);
+    const creatorLabel = creator?.username ? `@${creator.username}` : `id:${event.created_by}`;
+    parts.push(`created_by: ${creatorLabel}`);
+  }
 
   const reminders = ctx.reminderRepo.getByEventId(input.event_id);
   if (reminders.length > 0) {
