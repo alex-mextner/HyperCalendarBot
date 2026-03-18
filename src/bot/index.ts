@@ -2,6 +2,7 @@
 import { Bot } from 'gramio';
 import { RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
+import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import { IntentRepository } from '../database/repositories/intent.repository.ts';
@@ -144,6 +145,7 @@ export function createBot(
 
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
+  const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const workflowSessions = new Map<number, import('./pipeline/intent-matcher-layer.ts').WorkflowSession>();
@@ -154,6 +156,16 @@ export function createBot(
   intentMatcher.load(intentRepo.getApproved());
 
   const bot = new Bot(token);
+
+  const checkGroupMembership = async (chatId: number, userId: number): Promise<boolean> => {
+    try {
+      const member = await bot.api.getChatMember(chatId, userId);
+      return !['left', 'kicked'].includes(member.status);
+    } catch {
+      return false;
+    }
+  };
+
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
   });
@@ -190,6 +202,9 @@ export function createBot(
       sharingSettingsRepo: db.sharingSettings,
       sharedEventRepo: db.sharedEvents,
       privacyService,
+      secretaryRepo: db.secretaries,
+      calendarProposalRepo,
+      checkGroupMembership,
       googleCalendarRepo: googleDeps?.calendarRepo,
     };
   }
@@ -398,6 +413,27 @@ export function createBot(
           },
           adminEditSessions,
         },
+        {
+          secretaryRepo: db.secretaries,
+          userRepo: db.users,
+          sendMessage: async (chatId: number, text: string) => {
+            await bot.api.sendMessage({ chat_id: chatId, text });
+          },
+          editMessage: async (chatId: number, messageId: number, text: string) => {
+            await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
+          },
+        },
+        {
+          proposalRepo: calendarProposalRepo,
+          eventService,
+          userRepo: db.users,
+          sendMessage: async (chatId: number, text: string) => {
+            await bot.api.sendMessage({ chat_id: chatId, text });
+          },
+          editMessage: async (chatId: number, messageId: number, text: string) => {
+            await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
+          },
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
@@ -464,6 +500,9 @@ export function createBot(
         contactRepo: db.contacts,
         participantRepo: db.participants,
         editProposalRepo: db.editProposals,
+        secretaryRepo: db.secretaries,
+        calendarProposalRepo,
+        checkGroupMembership,
         invitationService,
         invitationRepo: db.invitations,
         sharingService,

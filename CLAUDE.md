@@ -128,6 +128,8 @@ For more information, read the Bun API docs in `node_modules/bun-types/docs/**.m
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
+- **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).
+- **Multi-step DB operations are atomic**: SELECT followed by UPDATE on the same rows must be wrapped in `db.transaction(...)`. Without it, concurrent writes can cause notifications to fire for rows that changed state between the two queries.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
 - **Fix broken things immediately** when you find them.
 - **Never add temporal context comments**: "improved", "better", "new", "refactored from".

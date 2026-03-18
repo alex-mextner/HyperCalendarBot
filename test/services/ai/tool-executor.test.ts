@@ -52,17 +52,17 @@ describe('executeTool', () => {
     };
   });
 
-  test('routes get_events to handler', () => {
-    const result = executeTool(ctx, 'get_events', {
+  test('routes get_events to handler', async () => {
+    const result = await executeTool(ctx, 'get_events', {
       start_date: '2026-03-15T00:00:00Z',
       end_date: '2026-03-15T23:59:59Z',
     });
     expect(result.success).toBe(true);
   });
 
-  test('routes create_event to handler', () => {
+  test('routes create_event to handler', async () => {
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
-    const result = executeTool(ctx, 'create_event', {
+    const result = await executeTool(ctx, 'create_event', {
       title: 'Test',
       start_at: `${tomorrow}14:00:00Z`,
     });
@@ -70,69 +70,69 @@ describe('executeTool', () => {
     expect(result.output).toContain('Test');
   });
 
-  test('routes update_event to handler', () => {
+  test('routes update_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Old',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'update_event', {
+    const result = await executeTool(ctx, 'update_event', {
       event_id: event.id,
       title: 'New',
     });
     expect(result.success).toBe(true);
   });
 
-  test('routes delete_event to handler', () => {
+  test('routes delete_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Del',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'delete_event', { event_id: event.id });
+    const result = await executeTool(ctx, 'delete_event', { event_id: event.id });
     expect(result.success).toBe(true);
   });
 
-  test('routes get_free_slots to handler', () => {
-    const result = executeTool(ctx, 'get_free_slots', {
+  test('routes get_free_slots to handler', async () => {
+    const result = await executeTool(ctx, 'get_free_slots', {
       date: '2026-03-15T00:00:00Z',
     });
     expect(result.success).toBe(true);
   });
 
-  test('routes search_events to handler', () => {
-    const result = executeTool(ctx, 'search_events', { query: 'test' });
+  test('routes search_events to handler', async () => {
+    const result = await executeTool(ctx, 'search_events', { query: 'test' });
     expect(result.success).toBe(true);
   });
 
-  test('routes set_reminder to handler', () => {
+  test('routes set_reminder to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Meeting',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'set_reminder', {
+    const result = await executeTool(ctx, 'set_reminder', {
       event_id: event.id,
       minutes_before: [15],
     });
     expect(result.success).toBe(true);
   });
 
-  test('routes get_holidays to handler', () => {
-    const result = executeTool(ctx, 'get_holidays', {});
+  test('routes get_holidays to handler', async () => {
+    const result = await executeTool(ctx, 'get_holidays', {});
     expect(result.success).toBe(true);
   });
 
-  test('routes manage_settings get to handler', () => {
-    const result = executeTool(ctx, 'manage_settings', { action: 'get' });
+  test('routes manage_settings get to handler', async () => {
+    const result = await executeTool(ctx, 'manage_settings', { action: 'get' });
     expect(result.success).toBe(true);
   });
 
-  test('routes manage_settings update to handler', () => {
-    const result = executeTool(ctx, 'manage_settings', {
+  test('routes manage_settings update to handler', async () => {
+    const result = await executeTool(ctx, 'manage_settings', {
       action: 'update',
       category: 'general',
       updates: { timezone: 'Europe/London' },
@@ -140,48 +140,48 @@ describe('executeTool', () => {
     expect(result.success).toBe(true);
   });
 
-  test('routes get_upcoming to handler', () => {
-    const result = executeTool(ctx, 'get_upcoming', {});
+  test('routes get_upcoming to handler', async () => {
+    const result = await executeTool(ctx, 'get_upcoming', {});
     expect(result.success).toBe(true);
   });
 
-  test('routes snooze_event to handler', () => {
+  test('routes snooze_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Snooze Me',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'snooze_event', { event_id: event.id, minutes: 15 });
+    const result = await executeTool(ctx, 'snooze_event', { event_id: event.id, minutes: 15 });
     expect(result.success).toBe(true);
     expect(result.output).toContain('snoozed');
   });
 
-  test('routes get_event to handler', () => {
+  test('routes get_event to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Get Me',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'get_event', { event_id: event.id });
+    const result = await executeTool(ctx, 'get_event', { event_id: event.id });
     expect(result.success).toBe(true);
     expect(result.output).toContain('Get Me');
   });
 
-  test('routes get_reminders to handler', () => {
+  test('routes get_reminders to handler', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Remind Me',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    const result = executeTool(ctx, 'get_reminders', { event_id: event.id });
+    const result = await executeTool(ctx, 'get_reminders', { event_id: event.id });
     expect(result.success).toBe(true);
   });
 
-  test('returns error for unknown tool', () => {
-    const result = executeTool(ctx, 'unknown_tool', {});
+  test('returns error for unknown tool', async () => {
+    const result = await executeTool(ctx, 'unknown_tool', {});
     expect(result.success).toBe(false);
     expect(result.error).toContain('Unknown tool');
   });
@@ -228,8 +228,8 @@ describe('executeTool', () => {
       };
     });
 
-    test('share_event returns error when sharing not configured', () => {
-      const result = executeTool(ctx, 'share_event', {
+    test('share_event returns error when sharing not configured', async () => {
+      const result = await executeTool(ctx, 'share_event', {
         event_id: 1,
         target_type: 'user',
         target_id: 456,
@@ -238,14 +238,14 @@ describe('executeTool', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('share_event shares an existing event', () => {
+    test('share_event shares an existing event', async () => {
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Shared Meeting',
         start_at: '2026-03-15T14:00:00Z',
         timezone: 'UTC',
       });
-      const result = executeTool(sharingCtx, 'share_event', {
+      const result = await executeTool(sharingCtx, 'share_event', {
         event_id: event.id,
         target_type: 'user',
         target_id: 456,
@@ -255,8 +255,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('456');
     });
 
-    test('share_event returns error for non-existent event', () => {
-      const result = executeTool(sharingCtx, 'share_event', {
+    test('share_event returns error for non-existent event', async () => {
+      const result = await executeTool(sharingCtx, 'share_event', {
         event_id: 9999,
         target_type: 'user',
         target_id: 456,
@@ -265,8 +265,8 @@ describe('executeTool', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('send_invitation returns error when invitations not configured', () => {
-      const result = executeTool(ctx, 'send_invitation', {
+    test('send_invitation returns error when invitations not configured', async () => {
+      const result = await executeTool(ctx, 'send_invitation', {
         event_id: 1,
         invitee_id: 456,
       });
@@ -274,14 +274,14 @@ describe('executeTool', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('send_invitation sends invitation for existing event', () => {
+    test('send_invitation sends invitation for existing event', async () => {
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Invite Test',
         start_at: '2026-03-15T14:00:00Z',
         timezone: 'UTC',
       });
-      const result = executeTool(sharingCtx, 'send_invitation', {
+      const result = await executeTool(sharingCtx, 'send_invitation', {
         event_id: event.id,
         invitee_id: 456,
       });
@@ -290,8 +290,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('456');
     });
 
-    test('send_invitation returns error for non-existent event', () => {
-      const result = executeTool(sharingCtx, 'send_invitation', {
+    test('send_invitation returns error for non-existent event', async () => {
+      const result = await executeTool(sharingCtx, 'send_invitation', {
         event_id: 9999,
         invitee_id: 456,
       });
@@ -299,25 +299,25 @@ describe('executeTool', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('get_invitation_status returns error when invitations not configured', () => {
-      const result = executeTool(ctx, 'get_invitation_status', { event_id: 1 });
+    test('get_invitation_status returns error when invitations not configured', async () => {
+      const result = await executeTool(ctx, 'get_invitation_status', { event_id: 1 });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
     });
 
-    test('get_invitation_status returns no invitations for event without any', () => {
+    test('get_invitation_status returns no invitations for event without any', async () => {
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Status Test',
         start_at: '2026-03-15T14:00:00Z',
         timezone: 'UTC',
       });
-      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
+      const result = await executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No invitations');
     });
 
-    test('get_invitation_status lists pending and accepted invitations', () => {
+    test('get_invitation_status lists pending and accepted invitations', async () => {
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Party',
@@ -328,7 +328,7 @@ describe('executeTool', () => {
       const inv2 = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: 789 });
       invitationRepo.updateStatus(inv2.id, 'accepted', 'pending');
 
-      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
+      const result = await executeTool(sharingCtx, 'get_invitation_status', { event_id: event.id });
       expect(result.success).toBe(true);
       expect(result.output).toContain('456');
       expect(result.output).toContain('789');
@@ -336,14 +336,14 @@ describe('executeTool', () => {
       expect(result.output).toContain('pending');
     });
 
-    test('get_invitation_status returns error for non-existent event', () => {
-      const result = executeTool(sharingCtx, 'get_invitation_status', { event_id: 9999 });
+    test('get_invitation_status returns error for non-existent event', async () => {
+      const result = await executeTool(sharingCtx, 'get_invitation_status', { event_id: 9999 });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
 
-    test('manage_settings update privacy returns error when not configured', () => {
-      const result = executeTool(ctx, 'manage_settings', {
+    test('manage_settings update privacy returns error when not configured', async () => {
+      const result = await executeTool(ctx, 'manage_settings', {
         action: 'update',
         category: 'privacy',
         updates: { default_visibility: 'full' },
@@ -352,8 +352,8 @@ describe('executeTool', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('manage_settings update privacy updates visibility setting', () => {
-      const result = executeTool(sharingCtx, 'manage_settings', {
+    test('manage_settings update privacy updates visibility setting', async () => {
+      const result = await executeTool(sharingCtx, 'manage_settings', {
         action: 'update',
         category: 'privacy',
         updates: { default_visibility: 'full' },
@@ -363,8 +363,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('full');
     });
 
-    test('manage_settings update privacy updates multiple settings', () => {
-      const result = executeTool(sharingCtx, 'manage_settings', {
+    test('manage_settings update privacy updates multiple settings', async () => {
+      const result = await executeTool(sharingCtx, 'manage_settings', {
         action: 'update',
         category: 'privacy',
         updates: { default_visibility: 'free_busy', inline_mode_enabled: false, allow_invitations: false },
@@ -375,8 +375,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('allow_invitations');
     });
 
-    test('manage_settings update privacy returns error when no updates provided', () => {
-      const result = executeTool(sharingCtx, 'manage_settings', {
+    test('manage_settings update privacy returns error when no updates provided', async () => {
+      const result = await executeTool(sharingCtx, 'manage_settings', {
         action: 'update',
         category: 'privacy',
         updates: {},
@@ -385,8 +385,8 @@ describe('executeTool', () => {
       expect(result.error).toContain('updates');
     });
 
-    test('share_agenda returns error when sharing not configured', () => {
-      const result = executeTool(ctx, 'share_agenda', {
+    test('share_agenda returns error when sharing not configured', async () => {
+      const result = await executeTool(ctx, 'share_agenda', {
         period: 'today',
         target_type: 'user',
         target_id: 456,
@@ -395,8 +395,8 @@ describe('executeTool', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('share_agenda returns no events when agenda is empty', () => {
-      const result = executeTool(sharingCtx, 'share_agenda', {
+    test('share_agenda returns no events when agenda is empty', async () => {
+      const result = await executeTool(sharingCtx, 'share_agenda', {
         period: 'today',
         target_type: 'user',
         target_id: 456,
@@ -405,7 +405,7 @@ describe('executeTool', () => {
       expect(result.output).toContain('No visible events');
     });
 
-    test('share_agenda shares visible events for today', () => {
+    test('share_agenda shares visible events for today', async () => {
       // Set visibility to full so events are shareable
       sharingSettingsRepo.ensureDefaults(USER_ID);
       sharingSettingsRepo.update(USER_ID, { default_visibility: 'full' });
@@ -418,7 +418,7 @@ describe('executeTool', () => {
         timezone: 'UTC',
       });
 
-      const result = executeTool(sharingCtx, 'share_agenda', {
+      const result = await executeTool(sharingCtx, 'share_agenda', {
         period: 'today',
         target_type: 'user',
         target_id: 456,
@@ -428,8 +428,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('456');
     });
 
-    test('set_event_visibility returns error when not configured', () => {
-      const result = executeTool(ctx, 'set_event_visibility', {
+    test('set_event_visibility returns error when not configured', async () => {
+      const result = await executeTool(ctx, 'set_event_visibility', {
         event_id: 1,
         visibility: 'full',
       });
@@ -437,14 +437,14 @@ describe('executeTool', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('set_event_visibility sets visibility on existing event', () => {
+    test('set_event_visibility sets visibility on existing event', async () => {
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Visible Event',
         start_at: '2026-03-15T14:00:00Z',
         timezone: 'UTC',
       });
-      const result = executeTool(sharingCtx, 'set_event_visibility', {
+      const result = await executeTool(sharingCtx, 'set_event_visibility', {
         event_id: event.id,
         visibility: 'full',
       });
@@ -453,8 +453,8 @@ describe('executeTool', () => {
       expect(result.output).toContain('full');
     });
 
-    test('set_event_visibility returns error for non-existent event', () => {
-      const result = executeTool(sharingCtx, 'set_event_visibility', {
+    test('set_event_visibility returns error for non-existent event', async () => {
+      const result = await executeTool(sharingCtx, 'set_event_visibility', {
         event_id: 9999,
         visibility: 'full',
       });

@@ -193,4 +193,48 @@ describe('production migrations', () => {
       expect(cols.some((c) => c.name === 'pin_hint_shown')).toBe(true);
     });
   });
+
+  test('calendar_secretaries table exists', () => {
+    const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_secretaries'").get();
+    expect(row).toBeTruthy();
+  });
+
+  test('calendar_secretaries has required columns', () => {
+    const cols = db.prepare('PRAGMA table_info(calendar_secretaries)').all() as { name: string }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toContain('owner_id');
+    expect(names).toContain('secretary_id');
+    expect(names).toContain('permission');
+    expect(names).toContain('status');
+    expect(names).toContain('created_at');
+    expect(names).toContain('updated_at');
+  });
+
+  test('calendar_proposals table exists', () => {
+    const db2 = new Database(':memory:');
+    db2.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db2, migrations);
+    const row = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_proposals'").get();
+    expect(row).toBeTruthy();
+  });
+
+  test('calendar_proposals has required columns', () => {
+    const db2 = new Database(':memory:');
+    db2.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db2, migrations);
+    const cols = db2.prepare('PRAGMA table_info(calendar_proposals)').all() as { name: string }[];
+    const names = cols.map((c) => c.name);
+    for (const col of [
+      'group_chat_id',
+      'proposer_id',
+      'target_id',
+      'action',
+      'payload',
+      'summary',
+      'status',
+      'expires_at',
+    ]) {
+      expect(names).toContain(col);
+    }
+  });
 });

@@ -2,6 +2,7 @@ import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
 type Scope = 'personal' | 'group';
@@ -120,10 +121,16 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
 }
 
-export function handleRenderDayImage(ctx: AgentContext, input: { date: string; scope?: Scope }): ToolResult {
+export function handleRenderDayImage(
+  ctx: AgentContext,
+  input: { date: string; scope?: Scope; owner_id?: number },
+): ToolResult {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
@@ -135,20 +142,12 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string; s
           const { start, end } = getDayRangeUtc(dateObj, ctx.user.timezone);
           return ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, start, end);
         })()
-      : ctx.eventService.getEventsForDay(ctx.user.telegram_id, dateObj, ctx.user.timezone);
-  const holidays = ctx.holidayService?.getHolidaysForDate(ctx.user.telegram_id, input.date) ?? [];
+      : ctx.eventService.getEventsForDay(userId, dateObj, ctx.user.timezone);
+  const holidays = ctx.holidayService?.getHolidaysForDate(userId, input.date) ?? [];
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
 
-  renderDayImage(
-    ctx.renderService as never,
-    occurrences,
-    input.date,
-    ctx.user.timezone,
-    lang,
-    ctx.user.telegram_id,
-    holidays,
-  )
+  renderDayImage(ctx.renderService as never, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
     .then((buffer) => {
       const file = new File([buffer], 'day.png', { type: 'image/png' });
       return sender.sendPhoto!(ctx.chatId, file);
@@ -160,10 +159,15 @@ export function handleRenderDayImage(ctx: AgentContext, input: { date: string; s
   return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };
 }
 
-export function handleRenderWeekImage(ctx: AgentContext, input: { week_start: string }): ToolResult {
+export function handleRenderWeekImage(
+  ctx: AgentContext,
+  input: { week_start: string; scope?: Scope; owner_id?: number },
+): ToolResult {
   if (!ctx.renderService) {
     return { success: false, error: 'Image rendering not available.' };
   }
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  if (!access.ok) return { success: false, error: access.error };
   return { success: true, output: `Week image rendering for ${input.week_start} is not yet implemented via AI tools.` };
 }
 

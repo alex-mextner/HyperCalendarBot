@@ -578,4 +578,53 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '022_calendar_secretaries',
+    up(db) {
+      db.exec(`
+        CREATE TABLE calendar_secretaries (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          owner_id       INTEGER NOT NULL,
+          secretary_id   INTEGER NOT NULL,
+          permission     TEXT NOT NULL DEFAULT 'read',
+          status         TEXT NOT NULL DEFAULT 'pending',
+          dm_message_id  INTEGER,
+          created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(owner_id, secretary_id),
+          FOREIGN KEY (owner_id)     REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (secretary_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_secretaries_owner     ON calendar_secretaries(owner_id);
+        CREATE INDEX idx_secretaries_secretary ON calendar_secretaries(secretary_id, status);
+      `);
+    },
+  },
+  {
+    name: '023_calendar_proposals',
+    up(db) {
+      db.exec(`
+        CREATE TABLE calendar_proposals (
+          id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+          group_chat_id      INTEGER NOT NULL,
+          group_chat_title   TEXT,
+          proposer_id        INTEGER NOT NULL,
+          target_id          INTEGER NOT NULL,
+          action             TEXT NOT NULL,
+          payload            TEXT NOT NULL,
+          summary            TEXT NOT NULL,
+          status             TEXT NOT NULL DEFAULT 'pending',
+          group_message_id   INTEGER,
+          dm_message_id      INTEGER,
+          expires_at         TEXT NOT NULL,
+          created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (proposer_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (target_id)   REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_proposals_target  ON calendar_proposals(target_id, status);
+        CREATE INDEX idx_proposals_expires ON calendar_proposals(expires_at, status);
+      `);
+    },
+  },
 ];

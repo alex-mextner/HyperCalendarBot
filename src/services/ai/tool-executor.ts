@@ -28,7 +28,10 @@ import {
   handleRenderDayImage,
   handleRenderWeekImage,
 } from './tool-handlers/meta.ts';
+import type { ProposeInput } from './tool-handlers/proposals.ts';
+import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import { handleManageSettings } from './tool-handlers/settings.ts';
 import {
   handleCancelInvitation,
@@ -45,7 +48,11 @@ import type { AgentContext, ToolResult } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai' });
 
-export function executeTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): ToolResult {
+export async function executeTool(
+  ctx: AgentContext,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   try {
@@ -134,10 +141,10 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleFindContact(ctx, input as { name: string });
 
       case 'render_day_image':
-        return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group' });
+        return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group'; owner_id?: number });
 
       case 'render_week_image':
-        return handleRenderWeekImage(ctx, input as { week_start: string });
+        return handleRenderWeekImage(ctx, input as { week_start: string; owner_id?: number });
 
       case 'make_call':
         return handleMakeCall(ctx, input as { text: string });
@@ -173,7 +180,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'set_event_visibility':
         return handleSetEventVisibility(
           ctx,
-          input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
+          input as { event_id: number; visibility: 'private' | 'free_busy' | 'full'; owner_id?: number },
         );
 
       case 'propose_edit':
@@ -202,6 +209,23 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'get_bot_info':
         return handleGetBotInfo();
+
+      case 'list_calendar_access':
+        return handleListCalendarAccess(ctx);
+
+      case 'manage_secretaries':
+        return handleManageSecretaries(
+          ctx,
+          input as {
+            action: 'invite' | 'revoke' | 'self_remove';
+            secretary_telegram_id?: number;
+            permission?: 'read' | 'write';
+            secretary_access_id?: number;
+          },
+        );
+
+      case 'propose_calendar_change':
+        return handleProposeCalendarChange(ctx, input as ProposeInput);
 
       case 'get_history':
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });

@@ -22,6 +22,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['start_date', 'end_date'],
     },
@@ -68,6 +73,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['title', 'start_at'],
     },
@@ -105,6 +115,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['event_id'],
     },
@@ -124,6 +139,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
       required: ['event_id'],
@@ -160,6 +180,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['date'],
     },
@@ -178,6 +203,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
       required: ['query'],
@@ -202,6 +232,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
       required: ['event_id', 'minutes_before'],
@@ -271,6 +306,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: [],
     },
@@ -288,6 +328,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['event_id'],
     },
@@ -304,6 +349,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['event_id'],
     },
@@ -319,6 +369,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
       required: ['event_id'],
@@ -492,6 +547,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['date'],
     },
@@ -512,6 +572,11 @@ export const toolDefinitions: ToolDefinition[] = [
           enum: ['personal', 'group'],
           description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
       },
       required: ['week_start'],
     },
@@ -527,6 +592,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           enum: ['private', 'free_busy', 'full'],
           description: 'Visibility level for the event',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
       required: ['event_id', 'visibility'],
@@ -638,6 +708,70 @@ export const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {},
       required: [],
+    },
+  },
+  {
+    name: 'list_calendar_access',
+    description:
+      'List all calendars this user has access to. Returns their own calendar and any ' +
+      'calendars they can manage as a secretary. Also returns secretaries the user has ' +
+      'added to their own calendar. Call when the user asks about their secretaries or asks ' +
+      'about calendars they manage as secretary for someone else, or when context is ambiguous.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'manage_secretaries',
+    description:
+      'Manage secretary access to your calendar. Actions: ' +
+      '"invite" — send an invite to a user to become your secretary; ' +
+      '"revoke" — remove a secretary (you are the owner); ' +
+      '"self_remove" — remove yourself from being a secretary for someone else. ' +
+      'For "invite", requires secretary_telegram_id and permission ("read" or "write"). ' +
+      'For "revoke" and "self_remove", requires secretary_access_id (from list_calendar_access).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['invite', 'revoke', 'self_remove'] },
+        secretary_telegram_id: {
+          type: 'number',
+          description: 'Telegram ID of the user to invite as secretary. Required for invite.',
+        },
+        permission: { type: 'string', enum: ['read', 'write'], description: 'Access level. Required for invite.' },
+        secretary_access_id: {
+          type: 'number',
+          description: 'ID of the secretary access record. Required for revoke and self_remove.',
+        },
+      },
+      required: ['action'],
+    },
+  },
+  {
+    name: 'propose_calendar_change',
+    description:
+      'Propose a calendar change to another member of this group chat. ' +
+      'The target receives a DM with Accept/Decline buttons — you cannot modify their calendar directly. ' +
+      'Supported actions: "create" (new event), "update" (change fields of existing event), "delete" (remove event). ' +
+      'For "update" and "delete", event_id must be known from a calendar view shared earlier in the chat. ' +
+      'Use find_user first to resolve @username/name to telegram_id. ' +
+      'After calling, STOP — the group chat will be notified of the outcome automatically.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        target_telegram_id: {
+          type: 'number',
+          description: 'telegram_id of the group member to propose the change to.',
+        },
+        action: { type: 'string', enum: ['create', 'update', 'delete'] },
+        event: { type: 'object', description: 'Full event data. Required for action "create".' },
+        event_id: { type: 'number', description: 'ID of the existing event. Required for "update" and "delete".' },
+        changes: { type: 'object', description: 'Fields to change. Required for action "update".' },
+        summary: {
+          type: 'string',
+          description:
+            'Human-readable description shown in the DM. Example: "добавить встречу «Ретро» — пятница 15:00–16:00".',
+        },
+      },
+      required: ['target_telegram_id', 'action', 'summary'],
     },
   },
   {

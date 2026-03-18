@@ -1,6 +1,7 @@
 // src/bot/handlers/message.handler.ts
 
 import { InlineKeyboard } from 'gramio';
+import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -11,6 +12,7 @@ import type { IntentRepository } from '../../database/repositories/intent.reposi
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
+import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -55,6 +57,9 @@ export interface MessageHandlerDeps {
   contactRepo?: ContactRepository;
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
+  secretaryRepo?: SecretaryRepository;
+  calendarProposalRepo?: CalendarProposalRepository;
+  checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
   invitationService?: InvitationService;
   invitationRepo?: InvitationRepository;
   sharingService?: SharingService;
@@ -276,37 +281,55 @@ function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupTitle?: string;
       onBotResponse?: (messageId: number) => void;
     },
-  ): AgentContext => ({
-    user,
-    chatId,
-    messageText,
-    isGroup: groupInfo?.isGroup ?? false,
-    groupChatId: groupInfo?.groupChatId,
-    groupTitle: groupInfo?.groupTitle,
-    onBotResponse: groupInfo?.onBotResponse,
-    eventService: deps.eventService,
-    holidayService: deps.holidayService,
-    chatHistory: deps.chatHistory,
-    userRepo: deps.userRepo,
-    reminderRepo: deps.reminderRepo,
-    contactRepo: deps.contactRepo,
-    participantRepo: deps.participantRepo,
-    editProposalRepo: deps.editProposalRepo,
-    invitationService: deps.invitationService,
-    invitationRepo: deps.invitationRepo,
-    sharingService: deps.sharingService,
-    sharingSettingsRepo: deps.sharingSettingsRepo,
-    sharedEventRepo: deps.sharedEventRepo,
-    privacyService: deps.privacyService,
-    renderService: deps.renderService,
-    notificationPrefs: deps.notificationPrefs,
-    callQueue: deps.callQueue,
-    callSettingsRepo: deps.callSettingsRepo,
-    googleCalendarRepo: deps.googleCalendarRepo,
-    deepLinkService: deps.deepLinkService,
-    botUsername: deps.botUsername,
-    stressDictionary: deps.stressDictionary,
-  });
+  ): AgentContext => {
+    const activeFor = deps.secretaryRepo?.getActiveSecretaryFor(user.telegram_id) ?? [];
+    const secretaryForLine =
+      activeFor.length > 0
+        ? activeFor
+            .map((r) => {
+              const owner = deps.userRepo.findByTelegramId(r.owner_id);
+              const name = owner?.username ? `@${owner.username}` : `User ${r.owner_id}`;
+              return `${name} (${r.permission === 'write' ? 'read+write' : 'read only'})`;
+            })
+            .join(', ')
+        : undefined;
+
+    return {
+      user,
+      chatId,
+      messageText,
+      isGroup: groupInfo?.isGroup ?? false,
+      groupChatId: groupInfo?.groupChatId,
+      groupTitle: groupInfo?.groupTitle,
+      onBotResponse: groupInfo?.onBotResponse,
+      eventService: deps.eventService,
+      holidayService: deps.holidayService,
+      chatHistory: deps.chatHistory,
+      userRepo: deps.userRepo,
+      reminderRepo: deps.reminderRepo,
+      contactRepo: deps.contactRepo,
+      participantRepo: deps.participantRepo,
+      editProposalRepo: deps.editProposalRepo,
+      secretaryRepo: deps.secretaryRepo,
+      secretaryForLine,
+      calendarProposalRepo: deps.calendarProposalRepo,
+      checkGroupMembership: deps.checkGroupMembership,
+      invitationService: deps.invitationService,
+      invitationRepo: deps.invitationRepo,
+      sharingService: deps.sharingService,
+      sharingSettingsRepo: deps.sharingSettingsRepo,
+      sharedEventRepo: deps.sharedEventRepo,
+      privacyService: deps.privacyService,
+      renderService: deps.renderService,
+      notificationPrefs: deps.notificationPrefs,
+      callQueue: deps.callQueue,
+      callSettingsRepo: deps.callSettingsRepo,
+      googleCalendarRepo: deps.googleCalendarRepo,
+      deepLinkService: deps.deepLinkService,
+      botUsername: deps.botUsername,
+      stressDictionary: deps.stressDictionary,
+    };
+  };
 }
 
 const INTENT_EDIT_SYSTEM_PROMPT = `You are a JSON editor for intent objects.

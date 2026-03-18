@@ -2,7 +2,9 @@ import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, Visibility } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { formatInvitation } from '../../event/formatters.ts';
+import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { checkSecretaryAccess } from './secretary-access.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
 
@@ -59,46 +61,59 @@ function deliverInvitationAsync(params: DeliveryParams): void {
   const deepLinkSvc = ctx.deepLinkService;
   const botUsername = ctx.botUsername;
 
-  sender
-    .sendInvitation(inviteeId, text, invitationId)
-    .then(async (sent) => {
-      if (sent) {
-        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
-        invRepo.setMessageInfo(invitationId, sent.message_id, inviteeId);
-        return;
-      }
+  if (!deepLinkSvc || !botUsername) {
+    deliveryLogger.warn(
+      { invitationId, hasDeepLink: !!deepLinkSvc, hasBotUsername: !!botUsername },
+      'No fallback available — deepLinkService or botUsername missing',
+    );
+  }
 
-      deliveryLogger.warn({ invitationId, inviteeId }, 'Bot API delivery failed');
+  const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
+  const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
+  const fallbackMsg =
+    url !== null
+      ? lang === 'ru'
+        ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
+        : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`
+      : lang === 'ru'
+        ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`
+        : `⚠️ Could not deliver invitation for "${eventTitle}" directly.`;
 
-      if (deepLinkSvc && botUsername) {
-        const link = deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId);
-        const url = deepLinkSvc.generateUrl(link.code, botUsername);
-
-        if (sender.sendAsUser) {
-          deliveryLogger.info({ invitationId, inviteeId }, 'Trying MTProto fallback');
+  const mtprotoSend =
+    sender.sendAsUser && url !== null
+      ? (userId: number, username?: string): Promise<boolean> => {
           const mtprotoText =
             lang === 'ru'
               ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
               : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
-          const delivered = await sender.sendAsUser(inviteeId, mtprotoText, inviteeUsername);
-          if (delivered) {
-            deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
-            return;
-          }
-          deliveryLogger.warn({ invitationId, inviteeId }, 'MTProto delivery failed');
+          return sender.sendAsUser!(userId, mtprotoText, username);
         }
+      : undefined;
 
-        deliveryLogger.info({ invitationId, chatId }, 'Sending deep link fallback to inviter');
-        const fallbackMsg =
-          lang === 'ru'
-            ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
-            : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`;
-        await sender.sendMessage(chatId, fallbackMsg);
+  deliverMessage({
+    targetId: inviteeId,
+    targetUsername: inviteeUsername,
+    text,
+    fallbackRecipientId: chatId,
+    fallbackText: fallbackMsg,
+    botSend: async (recipientId, msgText) => {
+      if (recipientId === inviteeId) {
+        const sent = await sender.sendInvitation(recipientId, msgText, invitationId);
+        if (!sent) throw new Error('Bot API delivery failed');
+        return sent;
+      }
+      return sender.sendMessage(recipientId, msgText);
+    },
+    mtprotoSend,
+  })
+    .then((result) => {
+      if (result.delivered && result.messageId !== undefined) {
+        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
+        invRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
+      } else if (result.delivered) {
+        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
       } else {
-        deliveryLogger.warn(
-          { invitationId, hasDeepLink: !!deepLinkSvc, hasBotUsername: !!botUsername },
-          'No fallback available — deepLinkService or botUsername missing',
-        );
+        deliveryLogger.info({ invitationId, chatId }, 'Sending deep link fallback to inviter');
       }
     })
     .catch((error) => {
@@ -151,6 +166,7 @@ interface ShareAgendaInput {
 interface SetEventVisibilityInput {
   event_id: number;
   visibility: Visibility;
+  owner_id?: number;
 }
 
 export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): ToolResult {
@@ -365,7 +381,11 @@ export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisib
     return { success: false, error: 'Sharing settings are not configured.' };
   }
 
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  if (!access.ok) return { success: false, error: access.error };
+  const userId = access.effectiveUserId;
+
+  const event = ctx.eventService.getEvent(input.event_id, userId);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }

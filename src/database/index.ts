@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
+import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
 import { CallLogRepository } from './repositories/call-log.repository.ts';
 import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
 import { ChatHistoryRepository } from './repositories/chat-history.repository.ts';
@@ -22,6 +23,7 @@ import { NotificationLogRepository } from './repositories/notification-log.repos
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from './repositories/participant.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
+import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
@@ -50,6 +52,8 @@ export class DatabaseService {
   readonly contacts: ContactRepository;
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
+  readonly secretaries: SecretaryRepository;
+  readonly calendarProposals: CalendarProposalRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -83,6 +87,8 @@ export class DatabaseService {
     this.contacts = new ContactRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);
+    this.secretaries = new SecretaryRepository(this.db);
+    this.calendarProposals = new CalendarProposalRepository(this.db);
   }
 
   close(): void {

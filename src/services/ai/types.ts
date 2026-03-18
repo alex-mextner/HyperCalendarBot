@@ -1,3 +1,4 @@
+import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -6,6 +7,7 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
+import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -40,6 +42,10 @@ export interface AgentContext {
   contactRepo?: ContactRepository;
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
+  secretaryRepo?: SecretaryRepository;
+  secretaryForLine?: string;
+  calendarProposalRepo?: CalendarProposalRepository;
+  checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
@@ -84,6 +90,11 @@ export interface AgentConfig {
 
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: string): Promise<{ message_id: number }>;
+  sendMessageWithKeyboard?(
+    chatId: number,
+    text: string,
+    keyboard: import('gramio').InlineKeyboard,
+  ): Promise<{ message_id: number }>;
   editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void>;
   sendButtons?(
     chatId: number,

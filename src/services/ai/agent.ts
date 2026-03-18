@@ -205,7 +205,7 @@ export class CalendarBotAgent {
             writer.setToolLabel(block.name, block.input as Record<string, unknown>);
             await writer.flush(true);
 
-            const result = executeTool(ctx, block.name, block.input as Record<string, unknown>);
+            const result = await executeTool(ctx, block.name, block.input as Record<string, unknown>);
 
             writer.markToolResult(result.success);
             aiLogger.info({ tool: block.name, success: result.success, userId: ctx.user.telegram_id }, 'Tool result');
