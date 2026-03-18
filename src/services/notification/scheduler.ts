@@ -10,6 +10,7 @@ import type { NotificationLogRepository } from '../../database/repositories/noti
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent } from '../../database/types.ts';
+import { getDayRangeUtc } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
@@ -128,7 +129,6 @@ export class NotificationScheduler {
     const currentHHMM = formatHHMM(minute);
     const windowStart = minute.toISOString();
     const windowEnd = new Date(minute.getTime() + 60_000).toISOString();
-    const todayDate = minute.toISOString().slice(0, 10);
     const tomorrowDate = new Date(minute.getTime() + 86_400_000).toISOString().slice(0, 10);
 
     // Weekly cleanup: Sundays at 03:00 UTC
@@ -271,13 +271,13 @@ export class NotificationScheduler {
         user.timezone,
       );
       if (quiet) continue;
-      const dayStart = `${todayDate}T00:00:00Z`;
-      const dayEnd = `${todayDate}T23:59:59Z`;
+      const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
+      const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, user.timezone);
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
       if (events.length === 0) continue;
-      const refKey = `ma:${pref.user_id}:${todayDate}`;
+      const refKey = `ma:${pref.user_id}:${localTodayIso}`;
       const lang = user.language ?? 'ru';
-      const dateLabel = makeDateLabel(todayDate, user.timezone, lang);
+      const dateLabel = makeDateLabel(localTodayIso, user.timezone, lang);
       const agendaEvents = toAgendaEvents(events, user.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
@@ -329,13 +329,14 @@ export class NotificationScheduler {
         user.timezone,
       );
       if (quiet) continue;
-      const tmStart = `${tomorrowDate}T00:00:00Z`;
-      const tmEnd = `${tomorrowDate}T23:59:59Z`;
+      const tomorrowUtc = new Date(nowUtc.getTime() + 86_400_000);
+      const localTomorrowIso = new TZDate(tomorrowUtc, user.timezone).toISOString().slice(0, 10);
+      const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), user.timezone);
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
       if (events.length === 0) continue;
-      const refKey = `ev:${pref.user_id}:${tomorrowDate}`;
+      const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
       const lang = user.language ?? 'ru';
-      const dateLabel = makeDateLabel(tomorrowDate, user.timezone, lang);
+      const dateLabel = makeDateLabel(localTomorrowIso, user.timezone, lang);
       const agendaEvents = toAgendaEvents(events, user.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
@@ -367,15 +368,16 @@ export class NotificationScheduler {
 
         const lang = user.language ?? 'ru';
 
-        // Build Mon–Sun date strings for next week
+        // Build Mon–Sun local calendar dates for next week
+        const nextMonLocalIso = new TZDate(nextMonDate, user.timezone).toISOString().slice(0, 10);
         const days: WeeklyDigestDay[] = [];
         for (let i = 0; i < 7; i++) {
-          const dayDate = new Date(nextMonDate.getTime() + i * 86_400_000);
-          const dateStr = dayDate.toISOString().slice(0, 10);
-          const dayStart = `${dateStr}T00:00:00Z`;
-          const dayEnd = `${dateStr}T23:59:59Z`;
+          const calDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
+          calDate.setUTCDate(calDate.getUTCDate() + i);
+          const dateStr = calDate.toISOString().slice(0, 10);
+          const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, user.timezone);
           const dayEvents = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
-          const dayLabel = makeDayLabel(dayDate, lang);
+          const dayLabel = makeDayLabel(calDate, lang);
           days.push({
             date: dateStr,
             dayLabel,
@@ -386,8 +388,9 @@ export class NotificationScheduler {
           });
         }
 
-        const sunDate = new Date(nextMonDate.getTime() + 6 * 86_400_000);
-        const weekRange = makeWeekRangeLabel(nextMonDate, sunDate, lang);
+        const sunCalDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
+        sunCalDate.setUTCDate(sunCalDate.getUTCDate() + 6);
+        const weekRange = makeWeekRangeLabel(new Date(`${nextMonLocalIso}T12:00:00Z`), sunCalDate, lang);
         const payload = renderer.renderWeeklyDigest(lang, weekRange, days).text;
 
         const logId = this.deps.logRepo.insert({

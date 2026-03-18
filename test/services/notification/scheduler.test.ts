@@ -329,4 +329,26 @@ describe('NotificationScheduler', () => {
     expect(log.payload).not.toContain('"eventCount"');
     expect(log.payload).toContain('Planning');
   });
+
+  test('morning agenda includes event at 00:30 local (22:30 UTC previous day) for UTC+2 user', async () => {
+    // Tick: 2026-03-19T06:00:30Z = 08:00 local in Europe/Kyiv (UTC+2)
+    // Event at 2026-03-18T22:30:00Z = 00:30 local on March 19 — should appear in today's agenda
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Kyiv', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_utc) VALUES (42, '06:00')");
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Night standup', '2026-03-18T22:30:00Z')");
+    await scheduler.tick(new Date('2026-03-19T06:00:30Z'));
+    expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
+  });
+
+  test('evening review includes event at 00:30 local tomorrow (22:30 UTC today) for UTC+2 user', async () => {
+    // Tick: 2026-03-18T19:00:30Z = 21:00 local in Europe/Kyiv (UTC+2)
+    // Event at 2026-03-18T22:30:00Z = 00:30 local on March 19 — that is "tomorrow" → should appear
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Kyiv', 'en')");
+    db.run(
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '19:00')",
+    );
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Early birds', '2026-03-18T22:30:00Z')");
+    await scheduler.tick(new Date('2026-03-18T19:00:30Z'));
+    expect(enqueued.some((e) => e.type === 'evening_review')).toBe(true);
+  });
 });
