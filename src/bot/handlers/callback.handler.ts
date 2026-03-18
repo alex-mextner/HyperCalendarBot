@@ -113,9 +113,10 @@ export function createCallbackHandler(
   proposeTimeSessions?: Map<number, { invitationId: number }>,
   invitationRepo?: InvitationRepository,
   voiceDeps?: {
-    sileroTts: { synthesize: (text: string) => Promise<Buffer> };
+    sileroTts?: { synthesize: (text: string) => Promise<Buffer> };
+    kokoroTts?: { synthesize: (text: string) => Promise<Buffer> };
     sendVoice: (chatId: number, audio: Buffer) => Promise<void>;
-    stressDictionary: { lookup: (word: string) => string | null };
+    stressDictionary?: { lookup: (word: string) => string | null };
   },
   contactRepo?: ContactRepository,
 ) {
@@ -1026,39 +1027,57 @@ export function createCallbackHandler(
         const enabled = payload === 'yes' ? 1 : 0;
         userRepo.update(user.telegram_id, { voice_response_enabled: enabled });
         await ctx.answer();
-        await ctx.editText(enabled ? '🎤 Голосовые ответы включены!' : '🎤 Ок, только текстом.');
+
+        if (!enabled) {
+          await ctx.editText('🎤 Ок, только текстом.');
+          return;
+        }
 
         // On opt-in: resend the last AI response as voice so user hears it immediately
-        if (enabled && voiceDeps && chatHistoryRepo && ctx.chatId) {
-          const recent = chatHistoryRepo.getRecent(user.telegram_id, 10);
+        const isRu = user.language === 'ru';
+        const hasTts = voiceDeps && chatHistoryRepo && ctx.chatId && (isRu ? voiceDeps.sileroTts && voiceDeps.stressDictionary : voiceDeps.kokoroTts);
+
+        if (!hasTts) {
+          await ctx.editText('🎤 Голосовые ответы включены!');
+          return;
+        }
+
+        await ctx.editText('⌛');
+
+        try {
+          const recent = chatHistoryRepo!.getRecent(user.telegram_id, 10);
           const lastAssistant = [...recent].reverse().find((m) => m.role === 'assistant');
+          let responseText = '';
           if (lastAssistant) {
-            let responseText = lastAssistant.content;
             try {
               const blocks = JSON.parse(lastAssistant.content) as { type: string; text?: string }[];
-              if (Array.isArray(blocks)) {
-                responseText = blocks
-                  .filter((b) => b.type === 'text')
-                  .map((b) => b.text ?? '')
-                  .join('');
-              }
+              responseText = Array.isArray(blocks)
+                ? blocks.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('')
+                : lastAssistant.content;
             } catch {
-              // content is plain string, use as-is
-            }
-            if (responseText.trim()) {
-              const plainText = stripMarkdown(responseText);
-              const noLineBreaks = fixLineBreaks(plainText);
-              const withOrdinals = fixDateOrdinals(noLineBreaks);
-              const withNumbers = numbersToWords(withOrdinals);
-              const withStress = markStress(withNumbers, voiceDeps.stressDictionary);
-              const stressedText = user.language === 'ru' ? transliterateEnglish(withStress) : withStress;
-              voiceDeps.sileroTts
-                .synthesize(stressedText)
-                .then((audio) => voiceDeps.sendVoice(Number(ctx.chatId), audio))
-                .catch(() => {});
+              responseText = lastAssistant.content;
             }
           }
+
+          if (responseText.trim()) {
+            const plainText = stripMarkdown(responseText);
+            const noLineBreaks = fixLineBreaks(plainText);
+            let audio: Buffer;
+            if (isRu) {
+              const withOrdinals = fixDateOrdinals(noLineBreaks);
+              const withNumbers = numbersToWords(withOrdinals);
+              const withStress = markStress(withNumbers, voiceDeps!.stressDictionary!);
+              audio = await voiceDeps!.sileroTts!.synthesize(transliterateEnglish(withStress));
+            } else {
+              audio = await voiceDeps!.kokoroTts!.synthesize(noLineBreaks);
+            }
+            await voiceDeps!.sendVoice(Number(ctx.chatId), audio);
+          }
+        } catch (err) {
+          cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');
         }
+
+        await ctx.editText('🎤 Голосовые ответы включены!');
         return;
       }
 

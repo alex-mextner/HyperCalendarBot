@@ -104,6 +104,7 @@ export function createBot(
   mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>,
   stressDictionary?: StressDictionary,
   sileroTts?: SileroTtsService,
+  kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'],
 ) {
   const eventService = new EventService(
     db.events,
@@ -205,6 +206,8 @@ export function createBot(
       secretaryRepo: db.secretaries,
       calendarProposalRepo,
       checkGroupMembership,
+      groupChatRepo: db.groupChats,
+      groupMemberRepo: db.groupMembers,
       googleCalendarRepo: googleDeps?.calendarRepo,
       deepLinkService,
       botUsername: process.env.BOT_USERNAME,
@@ -279,7 +282,7 @@ export function createBot(
     .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
     .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
     .command('today', (ctx) =>
-      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
+      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.chatHistory),
     )
     .command('tomorrow', (ctx) =>
       handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService),
@@ -478,9 +481,10 @@ export function createBot(
           : undefined,
         proposeTimeSessions,
         db.invitations,
-        sileroTts && stressDictionary
+        sileroTts || kokoroTts
           ? {
               sileroTts,
+              kokoroTts,
               sendVoice: async (chatId: number, audio: Buffer) => {
                 const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
                 await bot.api.sendVoice({ chat_id: chatId, voice: file });
@@ -637,7 +641,8 @@ export function createBot(
         botToken: token,
         stressDictionary,
         sileroTts,
-        sendVoice: sileroTts
+        kokoroTts,
+        sendVoice: sileroTts || kokoroTts
           ? async (chatId: number, audio: Buffer) => {
               const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
               await bot.api.sendVoice({ chat_id: chatId, voice: file });
