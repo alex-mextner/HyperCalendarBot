@@ -4,6 +4,7 @@ import { CB, t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventListItem } from '../../services/event/formatters.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { eventPickerKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -19,7 +20,9 @@ export async function handleSearch(ctx: BotCommandContext, eventService: EventSe
     return;
   }
 
-  const results = eventService.searchEvents(user.telegram_id, query);
+  const results = isGroup(ctx as never)
+    ? eventService.searchEventsForGroup(getGroupId(ctx as never)!, query)
+    : eventService.searchEvents(user.telegram_id, query);
 
   if (results.length === 0) {
     await ctx.send(t(lang).search_no_results);

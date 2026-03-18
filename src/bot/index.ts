@@ -318,10 +318,12 @@ export function createBot(
     .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
     .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
-    .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService, holidayService))
+    .command('free', (ctx) =>
+      handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
+    )
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
-    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
+    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx as unknown as BotCommandContext, {

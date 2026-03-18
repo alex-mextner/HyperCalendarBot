@@ -112,4 +112,38 @@ describe('handleSearch', () => {
 
     expect(svc.searchEvents).toHaveBeenCalledWith(100, 'meeting');
   });
+
+  test('in group calls searchEventsForGroup and not searchEvents', async () => {
+    const { handleSearch } = await import('../../../src/bot/commands/search.ts');
+    const ctx = makeCtx({
+      chat: { type: 'group', id: -100 },
+      args: 'встреча',
+    });
+    const svc = {
+      searchEvents: mock(() => []),
+      searchEventsForGroup: mock(() => [makeEvent({ title: 'Встреча' })]),
+    };
+
+    await handleSearch(ctx as never, svc as never);
+
+    expect(svc.searchEventsForGroup).toHaveBeenCalledWith(-100, 'встреча');
+    expect(svc.searchEvents).not.toHaveBeenCalled();
+  });
+
+  test('in private calls searchEvents and not searchEventsForGroup', async () => {
+    const { handleSearch } = await import('../../../src/bot/commands/search.ts');
+    const ctx = makeCtx({
+      chat: { type: 'private', id: 1 },
+      args: 'встреча',
+    });
+    const svc = {
+      searchEvents: mock(() => []),
+      searchEventsForGroup: mock(() => []),
+    };
+
+    await handleSearch(ctx as never, svc as never);
+
+    expect(svc.searchEvents).toHaveBeenCalled();
+    expect(svc.searchEventsForGroup).not.toHaveBeenCalled();
+  });
 });
