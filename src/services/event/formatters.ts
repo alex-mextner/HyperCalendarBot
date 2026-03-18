@@ -1,4 +1,5 @@
 // src/services/event/formatters.ts
+import { TZDate } from '@date-fns/tz';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -48,19 +49,23 @@ export function formatWeekAgenda(
 ): string {
   const byDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
-    const dayKey = occ.occurrence_start.slice(0, 10);
+    const dayKey = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
     const arr = byDay.get(dayKey) ?? [];
     arr.push(occ);
     byDay.set(dayKey, arr);
   }
 
-  const start = new Date(startDateIso);
+  // Derive the local calendar start date (e.g. "2026-03-16") from the UTC week start.
+  const calendarStart = new TZDate(new Date(startDateIso), timezone).toISOString().slice(0, 10);
   const lines: string[] = [];
 
   for (let i = 0; i < 7; i++) {
-    const d = new Date(start.getTime() + i * 86400000);
-    const dayKey = d.toISOString().slice(0, 10);
-    const dayLabel = formatDateShort(d.toISOString(), timezone, lang);
+    // Build a noon-UTC Date for calendar day i so formatDateShort stays on the right date
+    // for any UTC offset (covers UTC-12 to UTC+14).
+    const calDate = new Date(`${calendarStart}T12:00:00Z`);
+    calDate.setUTCDate(calDate.getUTCDate() + i);
+    const dayKey = calDate.toISOString().slice(0, 10);
+    const dayLabel = formatDateShort(`${dayKey}T12:00:00Z`, timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
     const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
 

@@ -236,6 +236,53 @@ describe('formatWeekAgenda', () => {
     expect(result).toContain('Party');
     expect(result).toContain('1 event');
   });
+
+  // Events must appear on their LOCAL calendar day, not UTC day.
+  // Week Mon 16–Sun 22, timezone Europe/Kyiv (UTC+2 in March 2026).
+  // UTC week start: 2026-03-15T22:00:00Z = Mon 16 00:00 local.
+  describe('timezone-aware day grouping (UTC+2)', () => {
+    const TZ = 'Europe/Kyiv';
+    const weekStart = '2026-03-15T22:00:00.000Z';
+    const weekEnd = '2026-03-22T21:59:59.999Z';
+
+    test('Wed 18 morning event (08:00 UTC = 10:00 local) shows under Wed 18', () => {
+      const events = [makeOccurrence('Morning meeting', '2026-03-18T08:00:00Z', null)];
+      const result = formatWeekAgenda(events, weekStart, weekEnd, TZ, 'en');
+      const lines = result.split('\n');
+      const wedLine = lines.find((l) => l.includes('Wed') && l.includes('18'));
+      expect(wedLine).toBeDefined();
+      expect(wedLine).toContain('1 event');
+      const thuLine = lines.find((l) => l.includes('Thu') && l.includes('19'));
+      expect(thuLine).toContain('no events');
+    });
+
+    test('Thu 19 early morning event (23:05 UTC on Wed = 01:05 local Thu) shows under Thu 19', () => {
+      const events = [makeOccurrence('Late night', '2026-03-18T23:05:00Z', null)];
+      const result = formatWeekAgenda(events, weekStart, weekEnd, TZ, 'en');
+      const lines = result.split('\n');
+      const thuLine = lines.find((l) => l.includes('Thu') && l.includes('19'));
+      expect(thuLine).toBeDefined();
+      expect(thuLine).toContain('1 event');
+      const wedLine = lines.find((l) => l.includes('Wed') && l.includes('18'));
+      expect(wedLine).toContain('no events');
+    });
+
+    test('holiday with local calendar date key shows on the correct day', () => {
+      const holidaysByDate = new Map<string, HolidayEntry[]>([
+        [
+          '2026-03-18',
+          [{ date: '2026-03-18', name: 'Test Holiday', type: 'public', countryCode: 'UA', countryName: 'Ukraine' }],
+        ],
+      ]);
+      const result = formatWeekAgenda([], weekStart, weekEnd, TZ, 'en', holidaysByDate);
+      // The holiday line format is "Wed 18  🎉 Test Holiday" — day label is the prefix
+      const lines = result.split('\n');
+      const holidayLine = lines.find((l) => l.includes('Test Holiday'));
+      expect(holidayLine).toBeDefined();
+      expect(holidayLine).toContain('Wed');
+      expect(holidayLine).toContain('18');
+    });
+  });
 });
 
 // ── formatEventDetail edge cases (lines 91, 97, 112) ──

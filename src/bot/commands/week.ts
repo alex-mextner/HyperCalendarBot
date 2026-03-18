@@ -26,9 +26,11 @@ export async function handleWeek(
   let holidaysByDate: Map<string, HolidayEntry[]> | undefined;
   if (holidayService) {
     holidaysByDate = new Map();
-    const startD = new Date(start);
+    // Use local calendar dates so holiday keys match the formatter's day grouping.
+    const calendarStart = new TZDate(new Date(start), user.timezone).toISOString().slice(0, 10);
     for (let i = 0; i < 7; i++) {
-      const d = new Date(startD.getTime() + i * 86400000);
+      const d = new Date(`${calendarStart}T12:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + i);
       const dayKey = d.toISOString().slice(0, 10);
       const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
       if (holidays.length > 0) {
