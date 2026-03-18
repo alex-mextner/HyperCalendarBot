@@ -122,6 +122,7 @@ Rules for groups:
 - Do NOT [SKIP] if there's any calendar-related intent, even indirect.
 - When creating events, they go to the group calendar by default.
 - When showing events, show the group calendar by default.
+- When asked what you can do (e.g. "что умеешь", "help", "возможности", "commands"), lead with group-specific features: /agenda (view shared events), /share (share an event here), /unshare (remove shared event), /cal or @mention for AI commands. Then briefly mention personal features available in DM.
 
 ## Group Proposals
 

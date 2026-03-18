@@ -1,26 +1,36 @@
 import { describe, expect, mock, test } from 'bun:test';
 
+function makeGroupRepo() {
+  return {
+    upsertGroup: mock(() => {}),
+    deactivate: mock(() => {}),
+  };
+}
+
+function makeDeps(lang: 'en' | 'ru' = 'en') {
+  return {
+    groupRepo: makeGroupRepo(),
+    sendMessage: mock(() => Promise.resolve()),
+    getUserLanguage: mock(() => lang),
+  };
+}
+
 describe('createChatMemberHandler', () => {
   test('upserts group when bot added to group', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps();
 
-    const groupRepo = {
-      upsertGroup: mock(() => {}),
-      deactivate: mock(() => {}),
-    };
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
 
-    const handler = createChatMemberHandler(groupRepo as never);
-
-    const ctx = {
+    await handler({
       myChatMember: {
         chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
         from: { id: 100 },
         new_chat_member: { status: 'member' },
         old_chat_member: { status: 'left' },
       },
-    };
+    });
 
-    await handler(ctx);
     expect(groupRepo.upsertGroup).toHaveBeenCalledWith({
       chat_id: -1001234,
       title: 'Dev Team',
@@ -28,72 +38,117 @@ describe('createChatMemberHandler', () => {
     });
   });
 
+  test('sends welcome message in EN when bot added', async () => {
+    const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps('en');
+
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
+
+    await handler({
+      myChatMember: {
+        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+        from: { id: 100 },
+        new_chat_member: { status: 'member' },
+        old_chat_member: { status: 'left' },
+      },
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
+    const text = (sendMessage.mock.calls[0] as unknown[])[1] as string;
+    expect(text).not.toContain('/agenda — события');
+  });
+
+  test('sends welcome message in RU when adder language is ru', async () => {
+    const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps('ru');
+
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
+
+    await handler({
+      myChatMember: {
+        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+        from: { id: 100 },
+        new_chat_member: { status: 'member' },
+        old_chat_member: { status: 'left' },
+      },
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
+    const text = (sendMessage.mock.calls[0] as unknown[])[1] as string;
+    expect(text).toContain('Групповые');
+  });
+
+  test('does not send welcome on re-join when already active', async () => {
+    const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps();
+
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
+
+    await handler({
+      myChatMember: {
+        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+        from: { id: 100 },
+        new_chat_member: { status: 'administrator' },
+        old_chat_member: { status: 'member' },
+      },
+    });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
   test('deactivates group when bot removed', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps();
 
-    const groupRepo = {
-      upsertGroup: mock(() => {}),
-      deactivate: mock(() => {}),
-    };
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
 
-    const handler = createChatMemberHandler(groupRepo as never);
-
-    const ctx = {
+    await handler({
       myChatMember: {
         chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
         from: { id: 100 },
         new_chat_member: { status: 'left' },
         old_chat_member: { status: 'member' },
       },
-    };
+    });
 
-    await handler(ctx);
     expect(groupRepo.deactivate).toHaveBeenCalledWith(-1001234);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   test('handles kicked status as deactivation', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps();
 
-    const groupRepo = {
-      upsertGroup: mock(() => {}),
-      deactivate: mock(() => {}),
-    };
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
 
-    const handler = createChatMemberHandler(groupRepo as never);
-
-    const ctx = {
+    await handler({
       myChatMember: {
         chat: { id: -1001234, type: 'supergroup' },
         from: { id: 100 },
         new_chat_member: { status: 'kicked' },
         old_chat_member: { status: 'member' },
       },
-    };
+    });
 
-    await handler(ctx);
     expect(groupRepo.deactivate).toHaveBeenCalledWith(-1001234);
   });
 
   test('ignores private chats', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps();
 
-    const groupRepo = {
-      upsertGroup: mock(() => {}),
-      deactivate: mock(() => {}),
-    };
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
 
-    const handler = createChatMemberHandler(groupRepo as never);
-
-    const ctx = {
+    await handler({
       myChatMember: {
         chat: { id: 100, type: 'private' },
         from: { id: 100 },
         new_chat_member: { status: 'member' },
         old_chat_member: { status: 'left' },
       },
-    };
+    });
 
-    await handler(ctx);
     expect(groupRepo.upsertGroup).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });
