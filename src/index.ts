@@ -4,7 +4,6 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
-import { SecretaryRepository } from './database/repositories/secretary.repository.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
@@ -263,13 +262,11 @@ if (config.REDIS_URL) {
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
 
-  const secretaryRepo = new SecretaryRepository(db.db);
-
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
     onSecretaryExpiry: () =>
       runSecretaryExpiry({
-        secretaryRepo,
+        secretaryRepo: db.secretaries,
         userRepo: db.users,
         notify: (userId, text) => botRef.sendMessage(userId, text),
       }),

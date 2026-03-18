@@ -8,7 +8,7 @@ export interface DeliverMessageParams {
   fallbackRecipientId: number;
   fallbackText: string;
   botSend: (recipientId: number, text: string, keyboard?: InlineKeyboard) => Promise<{ message_id: number }>;
-  mtprotoSend?: (userId: number, username?: string) => Promise<boolean>;
+  mtprotoSend?: (userId: number, text: string, username?: string) => Promise<boolean>;
 }
 
 export async function deliverMessage(
@@ -27,7 +27,7 @@ export async function deliverMessage(
   // 2. MTProto
   if (mtprotoSend) {
     try {
-      const ok = await mtprotoSend(targetId, targetUsername);
+      const ok = await mtprotoSend(targetId, text, targetUsername);
       if (ok) return { delivered: true };
     } catch {
       // continue to fallback

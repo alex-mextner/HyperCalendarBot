@@ -731,26 +731,26 @@ export function createCallbackHandler(
       // Secretary accept/decline
       if (data.startsWith('sec:accept:') && secretaryDeps) {
         const id = Number(data.slice('sec:accept:'.length));
-        await handleSecretaryAccept(id, secretaryDeps);
+        await handleSecretaryAccept(id, user.telegram_id, secretaryDeps);
         await ctx.answer();
         return;
       }
       if (data.startsWith('sec:decline:') && secretaryDeps) {
         const id = Number(data.slice('sec:decline:'.length));
-        await handleSecretaryDecline(id, secretaryDeps);
+        await handleSecretaryDecline(id, user.telegram_id, secretaryDeps);
         await ctx.answer();
         return;
       }
 
       if (data.startsWith('prop:accept:') && proposalDeps) {
         const id = Number(data.slice('prop:accept:'.length));
-        await handleProposalAccept(id, proposalDeps);
+        await handleProposalAccept(id, user.telegram_id, proposalDeps);
         await ctx.answer();
         return;
       }
       if (data.startsWith('prop:decline:') && proposalDeps) {
         const id = Number(data.slice('prop:decline:'.length));
-        await handleProposalDecline(id, proposalDeps);
+        await handleProposalDecline(id, user.telegram_id, proposalDeps);
         await ctx.answer();
         return;
       }
@@ -785,9 +785,9 @@ function formatUserRef(user: { first_name?: string | null; username?: string | n
   return `User ${user.telegram_id}`;
 }
 
-export async function handleSecretaryAccept(id: number, deps: SecretaryDeps): Promise<void> {
+export async function handleSecretaryAccept(id: number, callerId: number, deps: SecretaryDeps): Promise<void> {
   const record = deps.secretaryRepo.findById(id);
-  if (!record) return;
+  if (!record || record.secretary_id !== callerId || record.status !== 'pending') return;
 
   deps.secretaryRepo.updateStatus(id, 'active');
 
@@ -809,9 +809,9 @@ export async function handleSecretaryAccept(id: number, deps: SecretaryDeps): Pr
   }
 }
 
-export async function handleSecretaryDecline(id: number, deps: SecretaryDeps): Promise<void> {
+export async function handleSecretaryDecline(id: number, callerId: number, deps: SecretaryDeps): Promise<void> {
   const record = deps.secretaryRepo.findById(id);
-  if (!record) return;
+  if (!record || record.secretary_id !== callerId || record.status !== 'pending') return;
 
   deps.secretaryRepo.updateStatus(id, 'declined');
 
@@ -836,9 +836,9 @@ export interface ProposalDeps {
   editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
 }
 
-export async function handleProposalAccept(id: number, deps: ProposalDeps): Promise<void> {
+export async function handleProposalAccept(id: number, callerId: number, deps: ProposalDeps): Promise<void> {
   const proposal = deps.proposalRepo.findById(id);
-  if (!proposal) return;
+  if (!proposal || proposal.target_id !== callerId) return;
 
   if (proposal.status !== 'pending') {
     if (proposal.dm_message_id !== null) {
@@ -846,8 +846,6 @@ export async function handleProposalAccept(id: number, deps: ProposalDeps): Prom
     }
     return;
   }
-
-  deps.proposalRepo.updateStatus(id, 'accepted');
 
   const payloadData = JSON.parse(proposal.payload) as {
     action: string;
@@ -893,12 +891,13 @@ export async function handleProposalAccept(id: number, deps: ProposalDeps): Prom
     );
   }
 
+  deps.proposalRepo.updateStatus(id, 'accepted');
   await deps.sendMessage(proposal.proposer_id, `✅ ${targetRef} принял(а) твоё предложение: ${proposal.summary}`);
 }
 
-export async function handleProposalDecline(id: number, deps: ProposalDeps): Promise<void> {
+export async function handleProposalDecline(id: number, callerId: number, deps: ProposalDeps): Promise<void> {
   const proposal = deps.proposalRepo.findById(id);
-  if (!proposal) return;
+  if (!proposal || proposal.target_id !== callerId) return;
 
   deps.proposalRepo.updateStatus(id, 'declined');
 
@@ -918,6 +917,8 @@ export async function handleProposalDecline(id: number, deps: ProposalDeps): Pro
       `❌ ${targetRef} отклонил(а) предложение от ${proposerRef}: ${proposal.summary}`,
     );
   }
+
+  await deps.sendMessage(proposal.proposer_id, `❌ ${targetRef} отклонил(а) твоё предложение: ${proposal.summary}`);
 }
 
 async function notifyInviter(

@@ -763,7 +763,7 @@ export const toolDefinitions: ToolDefinition[] = [
         },
         action: { type: 'string', enum: ['create', 'update', 'delete'] },
         event: { type: 'object', description: 'Full event data. Required for action "create".' },
-        event_id: { type: 'string', description: 'ID of the existing event. Required for "update" and "delete".' },
+        event_id: { type: 'number', description: 'ID of the existing event. Required for "update" and "delete".' },
         changes: { type: 'object', description: 'Fields to change. Required for action "update".' },
         summary: {
           type: 'string',

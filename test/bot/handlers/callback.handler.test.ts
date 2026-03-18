@@ -209,7 +209,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
 
 test('sec:accept: sets status active and notifies owner', async () => {
   const deps = makeDeps();
-  await handleSecretaryAccept(5, deps as never);
+  await handleSecretaryAccept(5, pendingRecord.secretary_id, deps as never);
 
   expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'active');
   expect(deps.sendMessage).toHaveBeenCalledWith(pendingRecord.owner_id, expect.stringContaining('принял'));
@@ -217,7 +217,7 @@ test('sec:accept: sets status active and notifies owner', async () => {
 
 test('sec:accept: edits invitation message at secretary', async () => {
   const deps = makeDeps();
-  await handleSecretaryAccept(5, deps as never);
+  await handleSecretaryAccept(5, pendingRecord.secretary_id, deps as never);
 
   expect(deps.editMessage).toHaveBeenCalledWith(
     pendingRecord.secretary_id,
@@ -230,16 +230,42 @@ test('sec:accept: no-op if record not found', async () => {
   const deps = makeDeps({
     secretaryRepo: { findById: mock(() => null), updateStatus: mock(() => true) },
   });
-  await expect(handleSecretaryAccept(5, deps as never)).resolves.toBeUndefined();
+  await expect(handleSecretaryAccept(5, pendingRecord.secretary_id, deps as never)).resolves.toBeUndefined();
+  expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+test('sec:accept: no-op if caller is not the secretary', async () => {
+  const deps = makeDeps();
+  await handleSecretaryAccept(5, 999, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+test('sec:accept: no-op if record is not pending', async () => {
+  const deps = makeDeps({
+    secretaryRepo: {
+      findById: mock(() => ({ ...pendingRecord, status: 'active' })),
+      updateStatus: mock(() => true),
+    },
+  });
+  await handleSecretaryAccept(5, pendingRecord.secretary_id, deps as never);
+
   expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
 });
 
 test('sec:decline: sets status declined and notifies owner', async () => {
   const deps = makeDeps();
-  await handleSecretaryDecline(5, deps as never);
+  await handleSecretaryDecline(5, pendingRecord.secretary_id, deps as never);
 
   expect(deps.secretaryRepo.updateStatus).toHaveBeenCalledWith(5, 'declined');
   expect(deps.sendMessage).toHaveBeenCalledWith(pendingRecord.owner_id, expect.stringContaining('отклонил'));
+});
+
+test('sec:decline: no-op if caller is not the secretary', async () => {
+  const deps = makeDeps();
+  await handleSecretaryDecline(5, 999, deps as never);
+
+  expect(deps.secretaryRepo.updateStatus).not.toHaveBeenCalled();
 });
 
 const basePendingProposal = {
@@ -282,7 +308,7 @@ function makeProposalDeps(overrides: Record<string, unknown> = {}) {
 
 test('prop:accept: executes create payload as target_id=2, edits DM and group', async () => {
   const deps = makeProposalDeps();
-  await handleProposalAccept(10, deps as never);
+  await handleProposalAccept(10, basePendingProposal.target_id, deps as never);
 
   expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'accepted');
   expect(deps.eventService.createEvent).toHaveBeenCalledWith(2, expect.objectContaining({ title: 'Ретро' }));
@@ -293,7 +319,7 @@ test('prop:accept: event gone → notifies both parties, does not crash', async 
   const deps = makeProposalDeps({
     eventService: { createEvent: mock(() => null) },
   });
-  await handleProposalAccept(10, deps as never);
+  await handleProposalAccept(10, basePendingProposal.target_id, deps as never);
 
   expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'expired');
   expect(deps.sendMessage).toHaveBeenCalledTimes(2); // proposer + target notified
@@ -306,7 +332,7 @@ test('prop:accept: no-op if status != pending, edits DM only', async () => {
       updateStatus: mock(() => true),
     },
   });
-  await handleProposalAccept(10, deps as never);
+  await handleProposalAccept(10, basePendingProposal.target_id, deps as never);
 
   expect(deps.eventService.createEvent).not.toHaveBeenCalled();
   expect(deps.editMessage).toHaveBeenCalledWith(
@@ -316,10 +342,26 @@ test('prop:accept: no-op if status != pending, edits DM only', async () => {
   );
 });
 
-test('prop:decline: sets declined and edits DM + group', async () => {
+test('prop:accept: no-op if caller is not the target', async () => {
   const deps = makeProposalDeps();
-  await handleProposalDecline(10, deps as never);
+  await handleProposalAccept(10, 999, deps as never);
+
+  expect(deps.proposalRepo.updateStatus).not.toHaveBeenCalled();
+  expect(deps.eventService.createEvent).not.toHaveBeenCalled();
+});
+
+test('prop:decline: sets declined, edits DM + group, notifies proposer', async () => {
+  const deps = makeProposalDeps();
+  await handleProposalDecline(10, basePendingProposal.target_id, deps as never);
 
   expect(deps.proposalRepo.updateStatus).toHaveBeenCalledWith(10, 'declined');
   expect(deps.editMessage).toHaveBeenCalledTimes(2);
+  expect(deps.sendMessage).toHaveBeenCalledWith(basePendingProposal.proposer_id, expect.stringContaining('отклонил'));
+});
+
+test('prop:decline: no-op if caller is not the target', async () => {
+  const deps = makeProposalDeps();
+  await handleProposalDecline(10, 999, deps as never);
+
+  expect(deps.proposalRepo.updateStatus).not.toHaveBeenCalled();
 });

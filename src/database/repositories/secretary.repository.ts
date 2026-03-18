@@ -84,16 +84,18 @@ export class SecretaryRepository {
   }
 
   expirePending(): CalendarSecretary[] {
-    const toExpire = this.getPendingExpired();
-    if (toExpire.length > 0) {
-      this.db
-        .prepare(
-          `UPDATE calendar_secretaries SET status = 'expired', updated_at = datetime('now')
-           WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
-        )
-        .run();
-    }
-    return toExpire;
+    return this.db.transaction(() => {
+      const toExpire = this.getPendingExpired();
+      if (toExpire.length > 0) {
+        this.db
+          .prepare(
+            `UPDATE calendar_secretaries SET status = 'expired', updated_at = datetime('now')
+             WHERE status = 'pending' AND created_at < datetime('now', '-7 days')`,
+          )
+          .run();
+      }
+      return toExpire;
+    })();
   }
 
   getPendingExpired(): CalendarSecretary[] {

@@ -52,17 +52,19 @@ export class CalendarProposalRepository {
   }
 
   expirePending(): CalendarProposal[] {
-    const toExpire = this.db
-      .prepare(`SELECT * FROM calendar_proposals WHERE status = 'pending' AND expires_at < datetime('now')`)
-      .all() as CalendarProposal[];
-    if (toExpire.length > 0) {
-      this.db
-        .prepare(
-          `UPDATE calendar_proposals SET status = 'expired', updated_at = datetime('now')
-           WHERE status = 'pending' AND expires_at < datetime('now')`,
-        )
-        .run();
-    }
-    return toExpire;
+    return this.db.transaction(() => {
+      const toExpire = this.db
+        .prepare(`SELECT * FROM calendar_proposals WHERE status = 'pending' AND expires_at < datetime('now')`)
+        .all() as CalendarProposal[];
+      if (toExpire.length > 0) {
+        this.db
+          .prepare(
+            `UPDATE calendar_proposals SET status = 'expired', updated_at = datetime('now')
+             WHERE status = 'pending' AND expires_at < datetime('now')`,
+          )
+          .run();
+      }
+      return toExpire;
+    })();
   }
 }

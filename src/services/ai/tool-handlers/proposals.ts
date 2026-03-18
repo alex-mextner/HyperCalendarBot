@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'gramio';
 import type { CalendarProposalRepository } from '../../../database/repositories/calendar-proposal.repository.ts';
+import type { CreateEventData, UpdateEventData } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
 import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -10,17 +11,20 @@ export interface ProposeInput {
   target_telegram_id: number;
   action: 'create' | 'update' | 'delete';
   summary: string;
-  event?: Record<string, unknown>;
-  event_id?: string;
-  changes?: Record<string, unknown>;
+  event?: Omit<CreateEventData, 'user_id'>;
+  event_id?: number;
+  changes?: UpdateEventData;
 }
 
 export async function handleProposeCalendarChange(ctx: AgentContext, input: ProposeInput): Promise<ToolResult> {
-  if (!ctx.calendarProposalRepo) {
+  const calendarProposalRepo = ctx.calendarProposalRepo;
+  if (!calendarProposalRepo) {
     return { success: false, error: 'Proposals feature not configured.' };
   }
 
-  const inChat = ctx.checkGroupMembership ? await ctx.checkGroupMembership(ctx.chatId, input.target_telegram_id) : true;
+  const inChat = ctx.checkGroupMembership
+    ? await ctx.checkGroupMembership(ctx.chatId, input.target_telegram_id)
+    : false;
   if (!inChat) {
     return { success: false, error: 'PROPOSAL_TARGET_NOT_IN_CHAT' };
   }
@@ -28,7 +32,7 @@ export async function handleProposeCalendarChange(ctx: AgentContext, input: Prop
   const expiresAt = computeExpiresAt(input);
   const payload = buildPayload(input);
 
-  const proposal = ctx.calendarProposalRepo.create({
+  const proposal = calendarProposalRepo.create({
     group_chat_id: ctx.chatId,
     group_chat_title: ctx.groupTitle ?? undefined,
     proposer_id: ctx.user.telegram_id,
@@ -39,11 +43,11 @@ export async function handleProposeCalendarChange(ctx: AgentContext, input: Prop
     expires_at: expiresAt,
   });
 
-  deliverProposalDm(ctx, proposal, input.target_telegram_id).catch((err) =>
+  deliverProposalDm(ctx, calendarProposalRepo, proposal, input.target_telegram_id).catch((err) =>
     proposalLogger.error({ err }, 'proposal DM delivery failed'),
   );
 
-  notifyGroupChat(ctx, proposal, input.target_telegram_id).catch((err) =>
+  notifyGroupChat(ctx, calendarProposalRepo, proposal, input.target_telegram_id).catch((err) =>
     proposalLogger.error({ err }, 'proposal group notification failed'),
   );
 
@@ -63,6 +67,7 @@ function buildPayload(input: ProposeInput): unknown {
 
 async function deliverProposalDm(
   ctx: AgentContext,
+  repo: CalendarProposalRepository,
   proposal: { id: number; summary: string },
   targetId: number,
 ): Promise<void> {
@@ -80,7 +85,6 @@ async function deliverProposalDm(
     .text('Отклонить ❌', `prop:decline:${proposal.id}`);
 
   const targetUser = ctx.userRepo.findByTelegramId(targetId);
-  const calendarProposalRepo = ctx.calendarProposalRepo as CalendarProposalRepository;
   const sender = ctx.sender;
 
   const result = await deliverMessage({
@@ -100,11 +104,16 @@ async function deliverProposalDm(
   });
 
   if (result.messageId) {
-    calendarProposalRepo.setDmMessageId(proposal.id, result.messageId);
+    repo.setDmMessageId(proposal.id, result.messageId);
   }
 }
 
-async function notifyGroupChat(ctx: AgentContext, proposal: { id: number }, targetId: number): Promise<void> {
+async function notifyGroupChat(
+  ctx: AgentContext,
+  repo: CalendarProposalRepository,
+  proposal: { id: number },
+  targetId: number,
+): Promise<void> {
   if (!ctx.sendMessageToChat) return;
   const targetUser = ctx.userRepo.findByTelegramId(targetId);
   const targetName = targetUser?.first_name ?? targetUser?.username ?? `User ${targetId}`;
@@ -117,6 +126,6 @@ async function notifyGroupChat(ctx: AgentContext, proposal: { id: number }, targ
   )) as { message_id: number };
 
   if (msg?.message_id) {
-    (ctx.calendarProposalRepo as CalendarProposalRepository).setGroupMessageId(proposal.id, msg.message_id);
+    repo.setGroupMessageId(proposal.id, msg.message_id);
   }
 }

@@ -214,9 +214,7 @@ describe('production migrations', () => {
     const db2 = new Database(':memory:');
     db2.exec('PRAGMA foreign_keys = ON');
     runMigrations(db2, migrations);
-    const row = db2
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_proposals'")
-      .get();
+    const row = db2.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='calendar_proposals'").get();
     expect(row).toBeTruthy();
   });
 

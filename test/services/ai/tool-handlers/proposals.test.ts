@@ -1,4 +1,4 @@
-import { mock, test, expect } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { handleProposeCalendarChange } from '../../../../src/services/ai/tool-handlers/proposals.ts';
 
 function makeCtx(overrides: Record<string, unknown> = {}) {
