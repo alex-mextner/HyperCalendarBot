@@ -101,6 +101,68 @@ export function markStress(text: string, dict: StressDictionary): string {
   });
 }
 
+const DATE_ORDINALS: Record<number, string> = {
+  1: 'первого',
+  2: 'второго',
+  3: 'третьего',
+  4: 'четвёртого',
+  5: 'пятого',
+  6: 'шестого',
+  7: 'седьмого',
+  8: 'восьмого',
+  9: 'девятого',
+  10: 'десятого',
+  11: 'одиннадцатого',
+  12: 'двенадцатого',
+  13: 'тринадцатого',
+  14: 'четырнадцатого',
+  15: 'пятнадцатого',
+  16: 'шестнадцатого',
+  17: 'семнадцатого',
+  18: 'восемнадцатого',
+  19: 'девятнадцатого',
+  20: 'двадцатого',
+  21: 'двадцать первого',
+  22: 'двадцать второго',
+  23: 'двадцать третьего',
+  24: 'двадцать четвёртого',
+  25: 'двадцать пятого',
+  26: 'двадцать шестого',
+  27: 'двадцать седьмого',
+  28: 'двадцать восьмого',
+  29: 'двадцать девятого',
+  30: 'тридцатого',
+  31: 'тридцать первого',
+};
+
+const MONTH_GENITIVE =
+  /(\d{1,2})\s+(января|февраля|марта|апреля|мая|июня|июля|августа|сентября|октября|ноября|декабря)/g;
+
+/**
+ * Replaces "N месяца" date patterns with ordinal form before numbersToWords.
+ * E.g. "17 марта" → "семнадцатого марта".
+ */
+export function fixDateOrdinals(text: string): string {
+  return text.replace(MONTH_GENITIVE, (_, day, month) => {
+    const n = Number.parseInt(day, 10);
+    const ordinal = DATE_ORDINALS[n];
+    return ordinal ? `${ordinal} ${month}` : `${day} ${month}`;
+  });
+}
+
+/**
+ * Converts line breaks to TTS-friendly pauses.
+ * Double newline → ". " (sentence boundary), single newline → ", " (short pause).
+ * Skips conversion if the line already ends with punctuation to avoid doubling.
+ */
+export function fixLineBreaks(text: string): string {
+  return text
+    .replace(/(?<![.!?,])\n\n/g, '. ')
+    .replace(/(?<![.!?,])\n/g, ', ')
+    .replace(/([.!?,])\n\n/g, '$1 ')
+    .replace(/([.!?,])\n/g, '$1 ');
+}
+
 /**
  * Strips markdown formatting and non-speech content from AI response text for TTS.
  */

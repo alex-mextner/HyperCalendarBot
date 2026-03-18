@@ -35,7 +35,14 @@ import type { InvitationService } from '../../services/sharing/invitation-servic
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
-import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../../services/voice/stress-marker.ts';
+import {
+  fixDateOrdinals,
+  fixLineBreaks,
+  markStress,
+  numbersToWords,
+  stripMarkdown,
+  transliterateEnglish,
+} from '../../services/voice/stress-marker.ts';
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
@@ -254,10 +261,18 @@ async function handleVoiceMessage(
       deps.stressDictionary
     ) {
       try {
+        // Telegram chat action: show "recording voice" indicator
+        await fetch(`${TG_API}/bot${deps.botToken!}/sendChatAction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: Number(chatId), action: 'record_voice' }),
+        }).catch(() => {});
         const plainText = stripMarkdown(responseText);
-        const withNumbers = numbersToWords(plainText);
+        const noLineBreaks = fixLineBreaks(plainText);
+        const withOrdinals = fixDateOrdinals(noLineBreaks);
+        const withNumbers = numbersToWords(withOrdinals);
         const withStress = markStress(withNumbers, deps.stressDictionary);
-        const stressedText = transliterateEnglish(withStress);
+        const stressedText = user.language === 'ru' ? transliterateEnglish(withStress) : withStress;
         cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing voice reply');
         const voiceBuffer = await deps.sileroTts.synthesize(stressedText);
         await deps.sendVoice(Number(chatId), voiceBuffer);

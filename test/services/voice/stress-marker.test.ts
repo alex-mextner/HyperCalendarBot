@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { StressDictionary } from '../../../src/services/voice/stress-dictionary.ts';
-import { markStress, numbersToWords, stripMarkdown } from '../../../src/services/voice/stress-marker.ts';
+import {
+  fixDateOrdinals,
+  fixLineBreaks,
+  markStress,
+  numbersToWords,
+  stripMarkdown,
+} from '../../../src/services/voice/stress-marker.ts';
 
 describe('markStress', () => {
   const dict = new StressDictionary({
@@ -43,6 +49,35 @@ describe('numbersToWords', () => {
 
   test('leaves non-number text unchanged', () => {
     expect(numbersToWords('привет мир')).toBe('привет мир');
+  });
+});
+
+describe('fixDateOrdinals', () => {
+  test('converts day+month to ordinal form', () => {
+    expect(fixDateOrdinals('17 марта')).toBe('семнадцатого марта');
+    expect(fixDateOrdinals('1 января')).toBe('первого января');
+    expect(fixDateOrdinals('31 декабря')).toBe('тридцать первого декабря');
+    expect(fixDateOrdinals('21 апреля')).toBe('двадцать первого апреля');
+  });
+
+  test('does not change standalone numbers', () => {
+    expect(fixDateOrdinals('встреча в 17:00')).toBe('встреча в 17:00');
+    expect(fixDateOrdinals('позови 5 человек')).toBe('позови 5 человек');
+  });
+});
+
+describe('fixLineBreaks', () => {
+  test('converts double newlines to period+space', () => {
+    expect(fixLineBreaks('строка одна\n\nстрока два')).toBe('строка одна. строка два');
+  });
+
+  test('converts single newlines to comma+space', () => {
+    expect(fixLineBreaks('строка одна\nстрока два')).toBe('строка одна, строка два');
+  });
+
+  test('does not duplicate punctuation before newline', () => {
+    expect(fixLineBreaks('хорошо.\nстрока два')).toBe('хорошо. строка два');
+    expect(fixLineBreaks('хорошо!\nстрока два')).toBe('хорошо! строка два');
   });
 });
 
