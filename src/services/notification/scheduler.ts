@@ -53,12 +53,32 @@ export class NotificationScheduler {
     const todayDate = minute.toISOString().slice(0, 10);
     const tomorrowDate = new Date(minute.getTime() + 86_400_000).toISOString().slice(0, 10);
 
+    // Weekly cleanup: Sundays at 03:00 UTC
+    if (minute.getUTCDay() === 0 && minute.getUTCHours() === 3) {
+      const deleted = this.deps.logRepo.cleanup(30);
+      notifyLogger.info({ deleted }, 'Notification log cleanup ran');
+    }
+
     // 1. Event reminders
     const dueReminders = this.deps.reminderRepo.getDue(windowStart, windowEnd);
+
+    // Group by (user_id, remind_at_utc) to detect batches
+    const byKey = new Map<string, typeof dueReminders>();
     for (const reminder of dueReminders) {
-      const user = this.deps.userRepo.findByTelegramId(reminder.user_id);
+      const key = `${reminder.user_id}:${reminder.remind_at_utc}`;
+      const group = byKey.get(key);
+      if (group) {
+        group.push(reminder);
+      } else {
+        byKey.set(key, [reminder]);
+      }
+    }
+
+    for (const group of byKey.values()) {
+      const firstReminder = group[0]!;
+      const user = this.deps.userRepo.findByTelegramId(firstReminder.user_id);
       if (!user) continue;
-      const prefs = this.deps.prefsRepo.get(reminder.user_id);
+      const prefs = this.deps.prefsRepo.get(firstReminder.user_id);
       if (prefs) {
         const quiet = isQuietHours(
           { enabled: !!prefs.quiet_hours_enabled, start: prefs.quiet_hours_start, end: prefs.quiet_hours_end },
@@ -67,8 +87,39 @@ export class NotificationScheduler {
         );
         if (quiet) continue;
       }
+
+      if (group.length > 1) {
+        // Batch: one combined job for all reminders in this group
+        const batchItems = group.map((r) => ({
+          event_id: r.event_id,
+          event_title: r.event_title,
+          event_start_at: r.event_start_at,
+          event_location: r.event_location,
+          interval_label: r.interval_label,
+        }));
+        const refKey = `erb:${firstReminder.user_id}:${firstReminder.remind_at_utc}`;
+        const payload = JSON.stringify({ items: batchItems });
+        const logId = this.deps.logRepo.insert({
+          user_id: firstReminder.user_id,
+          type: 'event_reminder_batch',
+          reference_key: refKey,
+          channel: 'telegram_text',
+          payload,
+        });
+        if (logId === null) continue;
+        for (const r of group) {
+          this.deps.reminderRepo.markSent(r.id);
+        }
+        this.deps.enqueue('event_reminder_batch', firstReminder.user_id, logId, payload);
+        notifyLogger.info({ userId: firstReminder.user_id, count: group.length }, 'Batch event reminder enqueued');
+        continue;
+      }
+
+      // Single reminder
+      const reminder = firstReminder;
       const refKey = `er:${reminder.id}`;
       const payload = JSON.stringify({
+        event_id: reminder.event_id,
         event_title: reminder.event_title,
         event_start_at: reminder.event_start_at,
         event_location: reminder.event_location,
