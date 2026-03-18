@@ -1,7 +1,6 @@
 // src/bot/commands/today.ts
 
 import { TZDate } from '@date-fns/tz';
-import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
@@ -16,7 +15,6 @@ export async function handleToday(
   eventService: EventService,
   holidayService?: HolidayService,
   renderService?: RenderService,
-  chatHistory?: ChatHistoryRepository,
 ): Promise<void> {
   const user = ctx.dbUser as User;
   const now = new Date();
@@ -26,9 +24,6 @@ export async function handleToday(
   const text = formatDayAgenda(occurrences, now.toISOString(), user.timezone, user.language, holidays);
 
   await ctx.send(text, { parse_mode: 'HTML' });
-  // Save response so AI can reference it when user asks follow-up questions.
-  // No chatId: getRecent queries chat_id IS NULL for personal DM context.
-  chatHistory?.save(user.telegram_id, 'assistant', text);
 
   if (renderService) {
     try {
