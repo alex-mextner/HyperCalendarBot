@@ -134,10 +134,10 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleFindContact(ctx, input as { name: string });
 
       case 'render_day_image':
-        return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group' });
+        return handleRenderDayImage(ctx, input as { date: string; scope?: 'personal' | 'group'; owner_id?: number });
 
       case 'render_week_image':
-        return handleRenderWeekImage(ctx, input as { week_start: string });
+        return handleRenderWeekImage(ctx, input as { week_start: string; owner_id?: number });
 
       case 'make_call':
         return handleMakeCall(ctx, input as { text: string });
@@ -173,7 +173,7 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'set_event_visibility':
         return handleSetEventVisibility(
           ctx,
-          input as { event_id: number; visibility: 'private' | 'free_busy' | 'full' },
+          input as { event_id: number; visibility: 'private' | 'free_busy' | 'full'; owner_id?: number },
         );
 
       case 'propose_edit':
