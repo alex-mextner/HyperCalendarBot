@@ -28,7 +28,7 @@ import {
   handleRenderWeekImage,
 } from './tool-handlers/meta.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
-import { handleListCalendarAccess } from './tool-handlers/secretary.ts';
+import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import { handleManageSettings } from './tool-handlers/settings.ts';
 import {
   handleCancelInvitation,
@@ -205,6 +205,17 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'list_calendar_access':
         return handleListCalendarAccess(ctx);
+
+      case 'manage_secretaries':
+        return handleManageSecretaries(
+          ctx,
+          input as {
+            action: 'invite' | 'revoke' | 'self_remove';
+            secretary_telegram_id?: number;
+            permission?: 'read' | 'write';
+            secretary_access_id?: number;
+          },
+        );
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

@@ -649,4 +649,30 @@ export const toolDefinitions: ToolDefinition[] = [
       'about calendars they manage as secretary for someone else, or when context is ambiguous.',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
+  {
+    name: 'manage_secretaries',
+    description:
+      'Manage secretary access to your calendar. Actions: ' +
+      '"invite" — send an invite to a user to become your secretary; ' +
+      '"revoke" — remove a secretary (you are the owner); ' +
+      '"self_remove" — remove yourself from being a secretary for someone else. ' +
+      'For "invite", requires secretary_telegram_id and permission ("read" or "write"). ' +
+      'For "revoke" and "self_remove", requires secretary_access_id (from list_calendar_access).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['invite', 'revoke', 'self_remove'] },
+        secretary_telegram_id: {
+          type: 'number',
+          description: 'Telegram ID of the user to invite as secretary. Required for invite.',
+        },
+        permission: { type: 'string', enum: ['read', 'write'], description: 'Access level. Required for invite.' },
+        secretary_access_id: {
+          type: 'number',
+          description: 'ID of the secretary access record. Required for revoke and self_remove.',
+        },
+      },
+      required: ['action'],
+    },
+  },
 ];

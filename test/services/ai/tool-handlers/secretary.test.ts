@@ -1,5 +1,8 @@
-import { expect, test } from 'bun:test';
-import { handleListCalendarAccess } from '../../../../src/services/ai/tool-handlers/secretary.ts';
+import { expect, mock, test } from 'bun:test';
+import {
+  handleListCalendarAccess,
+  handleManageSecretaries,
+} from '../../../../src/services/ai/tool-handlers/secretary.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
@@ -49,4 +52,38 @@ test('list_calendar_access: returns own info + empty lists when no relations', (
   expect(out.own.telegram_id).toBe(1);
   expect(out.my_secretaries).toHaveLength(0);
   expect(out.secretary_for).toHaveLength(0);
+});
+
+test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing', () => {
+  const ctx = makeCtx({
+    secretaryRepo: { upsert: () => ({}) } as never,
+    userRepo: { findByTelegramId: () => null } as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('SECRETARY_NOT_FOUND');
+});
+
+test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', () => {
+  const ctx = makeCtx({
+    secretaryRepo: { countActive: () => 10, upsert: () => ({}) } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 999 }) } as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  expect(result.error).toContain('SECRETARY_LIMIT_REACHED');
+});
+
+test('manage_secretaries invite: success returns awaiting_confirmation', () => {
+  const ctx = makeCtx({
+    secretaryRepo: {
+      countActive: () => 0,
+      upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+    } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
+    sender: { sendMessage: mock(async () => ({ message_id: 1 })) } as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  expect(result.success).toBe(true);
+  const out = JSON.parse(result.output!) as { status: string };
+  expect(out.status).toBe('awaiting_confirmation');
 });
