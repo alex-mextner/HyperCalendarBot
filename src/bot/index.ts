@@ -190,6 +190,7 @@ export function createBot(
       sharingSettingsRepo: db.sharingSettings,
       sharedEventRepo: db.sharedEvents,
       privacyService,
+      secretaryRepo: db.secretaries,
       googleCalendarRepo: googleDeps?.calendarRepo,
     };
   }
@@ -385,6 +386,16 @@ export function createBot(
           },
           adminEditSessions,
         },
+        {
+          secretaryRepo: db.secretaries,
+          userRepo: db.users,
+          sendMessage: async (chatId: number, text: string) => {
+            await bot.api.sendMessage({ chat_id: chatId, text });
+          },
+          editMessage: async (chatId: number, messageId: number, text: string) => {
+            await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
+          },
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
@@ -451,6 +462,7 @@ export function createBot(
         contactRepo: db.contacts,
         participantRepo: db.participants,
         editProposalRepo: db.editProposals,
+        secretaryRepo: db.secretaries,
         invitationService,
         invitationRepo: db.invitations,
         sharingService,

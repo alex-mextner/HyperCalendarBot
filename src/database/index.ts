@@ -22,6 +22,7 @@ import { NotificationLogRepository } from './repositories/notification-log.repos
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from './repositories/participant.repository.ts';
 import { ReminderRepository } from './repositories/reminder.repository.ts';
+import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
@@ -50,6 +51,7 @@ export class DatabaseService {
   readonly contacts: ContactRepository;
   readonly participants: ParticipantRepository;
   readonly editProposals: EditProposalRepository;
+  readonly secretaries: SecretaryRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -83,6 +85,7 @@ export class DatabaseService {
     this.contacts = new ContactRepository(this.db);
     this.participants = new ParticipantRepository(this.db);
     this.editProposals = new EditProposalRepository(this.db);
+    this.secretaries = new SecretaryRepository(this.db);
   }
 
   close(): void {
