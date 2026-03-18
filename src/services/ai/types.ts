@@ -42,6 +42,7 @@ export interface AgentContext {
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
   secretaryRepo?: SecretaryRepository;
+  secretaryForLine?: string;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
