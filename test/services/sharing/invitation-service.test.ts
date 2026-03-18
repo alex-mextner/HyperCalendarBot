@@ -147,4 +147,81 @@ describe('InvitationService', () => {
     const result = service.sendInvitation(event.id, INVITER, INVITEE);
     expect(result.success).toBe(true);
   });
+
+  describe('proposeTime', () => {
+    test('sets proposed_time and returns success', () => {
+      const { service, invRepo, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      const result = service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      expect(result.success).toBe(true);
+      const updated = invRepo.findById(inv.id)!;
+      expect(updated.proposed_time).toBe('2026-04-01T16:00:00Z');
+    });
+
+    test('proposeTime rejects non-invitee', () => {
+      const { service, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      const result = service.proposeTime(inv.id, INVITER, '2026-04-01T16:00:00Z');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('authorized');
+    });
+
+    test('proposeTime rejects unknown invitation', () => {
+      const { service } = setup();
+      const result = service.proposeTime(9999, INVITEE, '2026-04-01T16:00:00Z');
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+  });
+
+  describe('rescheduleFromProposal', () => {
+    test('clears proposed_time and returns proposedTime in result', () => {
+      const { service, invRepo, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      expect(result.success).toBe(true);
+      expect(result.proposedTime).toBe('2026-04-01T16:00:00Z');
+      const updated = invRepo.findById(inv.id)!;
+      expect(updated.proposed_time).toBeNull();
+      expect(updated.status).toBe('accepted');
+    });
+
+    test('rescheduleFromProposal rejects non-inviter', () => {
+      const { service, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const result = service.rescheduleFromProposal(inv.id, INVITEE);
+      expect(result.success).toBe(false);
+    });
+
+    test('rescheduleFromProposal rejects if no proposed_time', () => {
+      const { service, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      const result = service.rescheduleFromProposal(inv.id, INVITER);
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('No proposed time');
+    });
+  });
+
+  describe('keepOriginalTime', () => {
+    test('clears proposed_time, invitation stays pending', () => {
+      const { service, invRepo, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const result = service.keepOriginalTime(inv.id, INVITER);
+      expect(result.success).toBe(true);
+      const updated = invRepo.findById(inv.id)!;
+      expect(updated.proposed_time).toBeNull();
+      expect(updated.status).toBe('pending');
+    });
+
+    test('keepOriginalTime rejects non-inviter', () => {
+      const { service, event } = setup();
+      const inv = service.sendInvitation(event.id, INVITER, INVITEE).invitation!;
+      service.proposeTime(inv.id, INVITEE, '2026-04-01T16:00:00Z');
+      const result = service.keepOriginalTime(inv.id, INVITEE);
+      expect(result.success).toBe(false);
+    });
+  });
 });

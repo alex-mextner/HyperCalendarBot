@@ -12,6 +12,7 @@ export interface InvitationResult {
   invitation?: Invitation;
   error?: string;
   conflicts?: CalendarEvent[];
+  proposedTime?: string;
 }
 
 export class InvitationService {
@@ -82,6 +83,50 @@ export class InvitationService {
     if (!ok) {
       return { success: false, error: 'Cannot cancel — status already changed' };
     }
+    return { success: true, invitation: this.invRepo.findById(invitationId)! };
+  }
+
+  proposeTime(invitationId: number, userId: number, proposedTime: string): InvitationResult {
+    const invitation = this.invRepo.findById(invitationId);
+    if (!invitation) {
+      return { success: false, error: 'Invitation not found' };
+    }
+    if (invitation.invitee_id !== userId) {
+      return { success: false, error: 'Not authorized to propose' };
+    }
+    this.invRepo.setProposedTime(invitationId, proposedTime);
+    return { success: true, invitation: this.invRepo.findById(invitationId)! };
+  }
+
+  rescheduleFromProposal(invitationId: number, userId: number): InvitationResult {
+    const invitation = this.invRepo.findById(invitationId);
+    if (!invitation) {
+      return { success: false, error: 'Invitation not found' };
+    }
+    if (invitation.inviter_id !== userId) {
+      return { success: false, error: 'Not authorized to reschedule' };
+    }
+    if (!invitation.proposed_time) {
+      return { success: false, error: 'No proposed time on this invitation' };
+    }
+    const proposedTime = invitation.proposed_time;
+    this.invRepo.clearProposedTime(invitationId);
+    const ok = this.invRepo.updateStatus(invitationId, 'accepted', invitation.status as InvitationStatus);
+    if (!ok) {
+      return { success: false, error: 'Cannot update status — already changed' };
+    }
+    return { success: true, invitation: this.invRepo.findById(invitationId)!, proposedTime };
+  }
+
+  keepOriginalTime(invitationId: number, userId: number): InvitationResult {
+    const invitation = this.invRepo.findById(invitationId);
+    if (!invitation) {
+      return { success: false, error: 'Invitation not found' };
+    }
+    if (invitation.inviter_id !== userId) {
+      return { success: false, error: 'Not authorized' };
+    }
+    this.invRepo.clearProposedTime(invitationId);
     return { success: true, invitation: this.invRepo.findById(invitationId)! };
   }
 
