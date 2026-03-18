@@ -59,7 +59,8 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
     .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
     .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
     .row()
-    .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
+    .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
+    .text(messages.invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
 
   try {
     const sent = await sendMessage(inviteeId, inviteeText, {
