@@ -1,6 +1,19 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { CallManager, type CallManagerDeps } from '../../../src/services/voice/call-manager';
 
+function makeSpawn(output = 'PLAYING\nCALL_DONE\n') {
+  return mock(() => ({
+    stdout: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode(output));
+        c.close();
+      },
+    }),
+    stderr: new ReadableStream<Uint8Array>({ start(c) { c.close(); } }),
+    exited: Promise.resolve(0),
+  }));
+}
+
 function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
   return {
     ttsService: { synthesize: mock(() => Promise.resolve(Buffer.from('fake-audio'))) },
@@ -10,6 +23,7 @@ function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
     },
     sendPostCallButtons: mock(() => Promise.resolve()),
     pyBridgePath: 'scripts/voice-call-bridge.py',
+    spawnProcess: makeSpawn(),
     ...overrides,
   };
 }

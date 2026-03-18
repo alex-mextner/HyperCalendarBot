@@ -3,6 +3,12 @@ import type { CallStatus } from '../../database/types';
 import type { CallReminderJobData } from './types';
 import { voiceLogger } from './types';
 
+type SpawnResult = {
+  stdout: ReadableStream<Uint8Array> | null;
+  stderr: ReadableStream<Uint8Array> | null;
+  exited: Promise<number>;
+};
+
 export interface CallManagerDeps {
   ttsService: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   callLogRepo: {
@@ -12,6 +18,7 @@ export interface CallManagerDeps {
   sendPostCallButtons: (userId: number, eventId: number) => Promise<void>;
   sendVoiceMessage?: (userId: number, audio: Buffer) => Promise<void>;
   pyBridgePath: string;
+  spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
 }
 
 export class CallManager {
@@ -33,7 +40,8 @@ export class CallManager {
 
       // Duration: estimate from audio length + buffer
       const audioDurationSec = Math.ceil(audioBuffer.length / 8000) + 5;
-      const proc = Bun.spawn(
+      const spawn = this.deps.spawnProcess ?? Bun.spawn;
+      const proc = spawn(
         ['venv/bin/python', this.deps.pyBridgePath, String(job.userId), tmpFile, String(audioDurationSec)],
         { env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' },
       );
