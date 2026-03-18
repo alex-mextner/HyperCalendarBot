@@ -313,10 +313,10 @@ export function createBot(
       handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService, db.groupChats),
     )
     .command('add', (ctx) =>
-      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene),
+      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene, db.groupChats),
     )
-    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService))
-    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService))
+    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
+    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
     .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService))
     .command('free', (ctx) => handleFree(ctx as unknown as BotCommandContext, eventService, holidayService))
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
