@@ -36,7 +36,9 @@ export class EventRepository {
 
   findById(id: number, userId: number): CalendarEvent | null {
     return this.db
-      .prepare('SELECT * FROM events WHERE id = ? AND user_id = ? AND is_cancelled = 0')
+      .prepare(
+        "SELECT * FROM events WHERE id = ? AND user_id = ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user')",
+      )
       .get(id, userId) as CalendarEvent | null;
   }
 
@@ -81,6 +83,7 @@ export class EventRepository {
       WHERE e.recurrence_rule IS NOT NULL
         AND e.parent_event_id IS NULL
         AND e.is_cancelled = 0
+        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
           e.user_id = ?
           OR e.id IN (
@@ -102,6 +105,7 @@ export class EventRepository {
       WHERE e.is_cancelled = 0
         AND e.parent_event_id IS NULL
         AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
+        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
           e.user_id = ?
           OR e.id IN (
@@ -163,7 +167,9 @@ export class EventRepository {
   }
 
   remove(id: number, userId: number): boolean {
-    const result = this.db.prepare('DELETE FROM events WHERE id = ? AND user_id = ?').run(id, userId);
+    const result = this.db
+      .prepare("DELETE FROM events WHERE id = ? AND user_id = ? AND (owner_type IS NULL OR owner_type = 'user')")
+      .run(id, userId);
     return result.changes > 0;
   }
 
@@ -176,6 +182,7 @@ export class EventRepository {
         AND e.is_cancelled = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
+        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
           e.user_id = ?
           OR e.id IN (

@@ -635,4 +635,74 @@ describe('event tool handlers', () => {
       expect(sent.every((s) => s.parseMode === 'Markdown')).toBe(true);
     });
   });
+
+  describe('personal scope isolation from group events', () => {
+    const GROUP_ID = -100888;
+
+    test('handleGetEvents (personal) does not return group-owned events', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Drinks',
+        start_at: '2026-03-18T18:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Dinner',
+        start_at: '2026-03-18T19:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-18T00:00:00Z',
+        end_date: '2026-03-18T23:59:59Z',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Personal Dinner');
+      expect(result.output).not.toContain('Group Drinks');
+    });
+
+    test('handleDeleteEvent (personal) refuses to delete group-owned events', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+
+      const result = handleDeleteEvent(ctx, { event_id: event.id });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+
+      // Verify the group event still exists
+      const groupCtx = { ...ctx, isGroup: true, groupChatId: GROUP_ID };
+      const groupResult = handleDeleteEvent(groupCtx as AgentContext, { event_id: event.id, scope: 'group' });
+      expect(groupResult.success).toBe(true);
+    });
+
+    test('handleUpdateEvent (personal) refuses to update group-owned events', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+
+      const result = handleUpdateEvent(ctx, { event_id: event.id, title: 'Tampered' });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+  });
 });

@@ -62,6 +62,31 @@ describe('IntentLearner', () => {
     expect(result).toBeNull();
   });
 
+  test('parses JSON wrapped in markdown code fences', async () => {
+    const intentPayload = {
+      canonical_name: 'show_today',
+      phrases: ['что сегодня', 'events today'],
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{today}}' } }] },
+      format: 'events_list',
+    };
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: `\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\`` }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result?.canonical_name).toBe('show_today');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('resets daily counter on new day', () => {
     for (let i = 0; i < 50; i++) {
       learner.incrementCounter();

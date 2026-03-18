@@ -390,6 +390,103 @@ describe('EventService', () => {
       expect(occurrences.every((o) => o.event.title === 'Daily Group Standup')).toBe(true);
     });
 
+    test('getEventsInRange() does not return group-owned events', () => {
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Drinks',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Task',
+        start_at: '2026-04-01T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-01T23:59:59Z');
+      const titles = occurrences.map((o) => o.event.title);
+      expect(titles).toContain('Personal Task');
+      expect(titles).not.toContain('Group Drinks');
+    });
+
+    test('getEvent() returns null for group-owned events', () => {
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+
+      const found = service.getEvent(event.id, USER_ID);
+      expect(found).toBeNull();
+    });
+
+    test('deleteEvent() returns false for group-owned events', () => {
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+
+      const deleted = service.deleteEvent(event.id, USER_ID);
+      expect(deleted).toBe(false);
+
+      // Group event must still exist
+      const found = service.getEventForGroup(event.id, GROUP_ID);
+      expect(found).not.toBeNull();
+    });
+
+    test('getEventsInRange() does not expand group-owned recurring events in personal context', () => {
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Weekly',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+
+      const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-30T23:59:59Z');
+      expect(occurrences.some((o) => o.event.title === 'Group Weekly')).toBe(false);
+    });
+
+    test('getUpcoming() does not include group-owned recurring events', () => {
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Standup',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=DAILY',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Yoga',
+        start_at: '2026-04-01T07:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const upcoming = service.getUpcoming(USER_ID, 10);
+      const titles = upcoming.map((e) => e.title);
+      expect(titles).not.toContain('Group Standup');
+      expect(titles).toContain('Personal Yoga');
+    });
+
     test('getFreeSlotsForGroup() returns free slots based on group events', () => {
       service.createEvent({
         user_id: USER_ID,

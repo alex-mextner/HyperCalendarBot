@@ -157,8 +157,14 @@ export class IntentLearner {
     const text = data.content.find((c) => c.type === 'text')?.text;
     if (!text) return null;
 
+    // Strip markdown code fences if model ignored "no markdown" instruction
+    const json = text
+      .replace(/^\s*```(?:json)?\s*/i, '')
+      .replace(/\s*```\s*$/, '')
+      .trim();
+
     // Parse JSON response
-    const parsed = JSON.parse(text) as {
+    const parsed = JSON.parse(json) as {
       skip?: boolean;
       canonical_name: string;
       phrases: string[];
