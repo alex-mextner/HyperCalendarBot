@@ -94,7 +94,6 @@ describe('intent_accept callback handler', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
       { intentRepo: intentRepoArg, intentMatcher },
     );
   }
@@ -165,7 +164,6 @@ describe('intent_accept callback handler', () => {
       {} as never,
       {} as never,
       {} as never,
-      undefined,
       undefined,
       undefined,
       undefined,

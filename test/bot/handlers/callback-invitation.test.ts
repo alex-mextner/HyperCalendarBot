@@ -138,7 +138,6 @@ describe('inviter notification on response', () => {
       undefined, // onCalendarsDone
       undefined, // renderService
       invitationService as never, // invitationService
-      undefined, // groupChatRepo
       eventRepo as never, // eventRepo
       undefined, // chatHistoryRepo
       undefined, // onAiButtonClick
@@ -293,7 +292,6 @@ describe('propose-time callbacks', () => {
       undefined,
       undefined,
       invitationService as never,
-      undefined,
       eventRepoArg as never,
       undefined,
       undefined,
@@ -418,7 +416,6 @@ describe('propose-time callbacks', () => {
       undefined,
       undefined,
       invitationService as never,
-      undefined,
       eventRepoMock as never,
       undefined,
       undefined,
@@ -488,7 +485,6 @@ describe('propose-time callbacks', () => {
       undefined,
       undefined,
       invitationService as never,
-      undefined,
       eventRepoMock as never,
       undefined,
       undefined,

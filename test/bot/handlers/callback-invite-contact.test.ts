@@ -23,7 +23,6 @@ function makeHandler(eventService: Record<string, unknown>, forceInviteDeps?: Re
     undefined, // onCalendarsDone
     undefined, // renderService
     undefined, // invitationService
-    undefined, // groupChatRepo
     undefined, // eventRepo
     undefined, // chatHistoryRepo
     undefined, // onAiButtonClick

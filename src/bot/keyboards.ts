@@ -410,17 +410,6 @@ export function inviteContactPickerKeyboard(contacts: Contact[], eventId: number
   return kb;
 }
 
-// ── Unshare keyboards ──
-
-export function unsharePickerKeyboard(items: { eventId: number; title: string }[], lang: 'en' | 'ru'): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  for (const item of items) {
-    kb.text(item.title.slice(0, 40), `${CB.UNSHARE_PICK}:${item.eventId}`).row();
-  }
-  kb.text(lang === 'ru' ? '❌ Отмена' : '❌ Cancel', `${CB.UNSHARE_PICK}:cancel`);
-  return kb;
-}
-
 // ── Remove keyboard helper ──
 export function removeKeyboard(): { reply_markup: { remove_keyboard: true } } {
   return { reply_markup: { remove_keyboard: true } };
