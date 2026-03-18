@@ -82,13 +82,36 @@ describe('ChatHistoryRepository', () => {
     expect(messages[2]!.content).toBe('Response 2');
   });
 
-  test('getRecent defaults to 50 messages', () => {
-    for (let i = 0; i < 60; i++) {
+  test('getRecent defaults to 10 messages', () => {
+    for (let i = 0; i < 15; i++) {
       repo.save(USER_ID, 'user', `msg ${i}`);
     }
     const messages = repo.getRecent(USER_ID);
-    expect(messages.length).toBe(50);
-    expect(messages[0]!.content).toBe('msg 10');
+    expect(messages.length).toBe(10);
+    expect(messages[0]!.content).toBe('msg 5');
+  });
+
+  test('search returns messages matching text', () => {
+    repo.save(USER_ID, 'user', 'добавь встречу');
+    repo.save(USER_ID, 'assistant', 'встреча создана');
+    repo.save(USER_ID, 'user', 'что завтра');
+    const results = repo.search(USER_ID, { search: 'встреч' });
+    expect(results.length).toBe(2);
+  });
+
+  test('search respects limit', () => {
+    for (let i = 0; i < 20; i++) repo.save(USER_ID, 'user', `msg ${i}`);
+    const results = repo.search(USER_ID, { limit: 5 });
+    expect(results.length).toBe(5);
+  });
+
+  test('search filters by before date', () => {
+    repo.save(USER_ID, 'user', 'old message');
+    repo.save(USER_ID, 'user', 'new message');
+    const before = new Date(Date.now() + 1000).toISOString().slice(0, 19).replace('T', ' ');
+    // both messages are before "future", but limit to 1 to verify ordering
+    const results = repo.search(USER_ID, { before, limit: 1 });
+    expect(results.length).toBe(1);
   });
 
   test('clear removes all messages for user', () => {

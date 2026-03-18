@@ -11,6 +11,7 @@ import {
   handleUpdateEvent,
 } from './tool-handlers/events.ts';
 import { handleSendFeedback } from './tool-handlers/feedback.ts';
+import { handleGetHistory } from './tool-handlers/history.ts';
 import {
   handleAddContact,
   handleAskUser,
@@ -201,6 +202,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'get_bot_info':
         return handleGetBotInfo();
+
+      case 'get_history':
+        return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

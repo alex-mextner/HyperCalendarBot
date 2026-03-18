@@ -19,6 +19,27 @@ interface MessageParam {
   content: string | Anthropic.ContentBlockParam[];
 }
 
+type ActivityEvent =
+  | { kind: 'button'; label: string; detail?: string }
+  | { kind: 'command'; name: string }
+  | { kind: 'bot'; text: string };
+
+function formatActivityEvent(event: ActivityEvent): string {
+  switch (event.kind) {
+    case 'button':
+      return `[Button: "${event.label}"]${event.detail ? ` (${event.detail})` : ''}`;
+    case 'command':
+      return `[Command: ${event.name}]`;
+    case 'bot':
+      return `[Bot: ${event.text}]`;
+  }
+}
+
+function withTimestamp(text: string, createdAt: string): string {
+  const ts = createdAt.slice(0, 16);
+  return `[${ts}] ${text}`;
+}
+
 export interface AgentToolCallRecord {
   name: string;
   input: Record<string, unknown>;
@@ -61,15 +82,22 @@ export class CalendarBotAgent {
       let content: string | Anthropic.ContentBlockParam[];
       try {
         const parsed = JSON.parse(msg.content);
-        content = Array.isArray(parsed) ? (parsed as Anthropic.ContentBlockParam[]) : msg.content;
+        if (Array.isArray(parsed)) {
+          content = parsed as Anthropic.ContentBlockParam[];
+        } else if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
+          content = withTimestamp(formatActivityEvent(parsed as ActivityEvent), msg.created_at);
+        } else {
+          content = withTimestamp(msg.content, msg.created_at);
+        }
       } catch {
-        content = msg.content;
+        content = withTimestamp(msg.content, msg.created_at);
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
       messages.push({ role, content } as MessageParam);
     }
 
-    messages.push({ role: 'user', content: ctx.messageText });
+    const nowUtc = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
 
     return { systemPrompt, messages };
   }

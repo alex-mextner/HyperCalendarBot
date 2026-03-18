@@ -640,4 +640,31 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'get_history',
+    description:
+      'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Max number of entries to return (default 50)',
+        },
+        search: {
+          type: 'string',
+          description: 'Filter entries containing this text',
+        },
+        before: {
+          type: 'string',
+          description: 'Return entries before this datetime (SQLite format: "YYYY-MM-DD HH:MM:SS")',
+        },
+        after: {
+          type: 'string',
+          description: 'Return entries after this datetime (SQLite format: "YYYY-MM-DD HH:MM:SS")',
+        },
+      },
+      required: [],
+    },
+  },
 ];

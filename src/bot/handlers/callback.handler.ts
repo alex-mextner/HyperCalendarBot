@@ -96,6 +96,15 @@ export function createCallbackHandler(
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');
 
+    // Log button press to chat history (skip ai_btn — handled separately below)
+    if (chatHistoryRepo && user && action !== 'ai_btn') {
+      chatHistoryRepo.save(
+        user.telegram_id,
+        'user',
+        JSON.stringify({ kind: 'button', label: action, detail: payload }),
+      );
+    }
+
     try {
       // Event view
       if (action === CB.EVENT_VIEW) {
