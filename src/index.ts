@@ -307,6 +307,13 @@ try {
   botLogger.warn({ error: String(error) }, 'Stress dictionary not loaded');
 }
 
+let kokoroTts: import('./services/voice/kokoro-tts-service.ts').KokoroTtsService | undefined;
+if (config.HF_TOKEN) {
+  const { KokoroTtsService } = await import('./services/voice/kokoro-tts-service.ts');
+  kokoroTts = new KokoroTtsService(config.HF_TOKEN);
+  botLogger.info('Kokoro TTS initialized');
+}
+
 let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService | undefined;
 {
   const pythonPath = '/tmp/tts-test/bin/python3';
@@ -358,6 +365,7 @@ const { bot } = createBot(
   mtprotoSendAsUser,
   stressDictionary,
   sileroTts,
+  kokoroTts,
 );
 
 // Patch bot ref to use real bot API

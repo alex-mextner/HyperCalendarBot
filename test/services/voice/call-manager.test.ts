@@ -9,7 +9,11 @@ function makeSpawn(output = 'PLAYING\nCALL_DONE\n') {
         c.close();
       },
     }),
-    stderr: new ReadableStream<Uint8Array>({ start(c) { c.close(); } }),
+    stderr: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.close();
+      },
+    }),
     exited: Promise.resolve(0),
   }));
 }

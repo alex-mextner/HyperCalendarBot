@@ -50,6 +50,7 @@ function makeVoiceCtx(userOverrides: Record<string, unknown> = {}, ctxOverrides:
 function makeCallbackCtx(data: string, userOverrides: Record<string, unknown> = {}) {
   return {
     data,
+    chatId: 100,
     dbUser: {
       telegram_id: 100,
       language: 'ru',

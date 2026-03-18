@@ -240,6 +240,32 @@ Auth: `venv/bin/python scripts/pyrogram-auth.py` (one-time, interactive).
 Both scripts are called from TS via `Bun.spawn(['venv/bin/python', ...])`.
 No `@mtcute/bun` — pyrogram handles everything.
 
+## ntgcalls — Deploy Setup
+
+ntgcalls has a bug in v2.1.0: P2P calls connect but audio is silent.
+Fix: `NativeNetworkInterface::UpdateAggregateStates_n()` never calls `OnNetworkAvailability(true)`.
+Patch: `scripts/ntgcalls-fix-network-state.patch`.
+
+**The compiled `.so` is NOT in git (venv/ is gitignored). Must rebuild on each server.**
+
+On every new Linux server:
+
+```bash
+# 1. Create Python venv and install deps
+python3.12 -m venv venv
+venv/bin/pip install py-tgcalls pyrofork
+
+# 2. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
+./scripts/build-patched-ntgcalls.sh python3.12 venv
+
+# 3. Authenticate Pyrogram session (one-time interactive)
+venv/bin/python scripts/pyrogram-auth.py
+```
+
+- macOS arm64 `.dylib` ≠ Linux x86_64 `.so` — binaries are platform-specific, not portable
+- `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it, audio will be silent
+- Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
+
 ## Debugging
 
 - Read error messages carefully — they often contain the exact solution.

@@ -68,20 +68,21 @@ describe('handleToday', () => {
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
-  test('saves to chatHistory when provided', async () => {
+  test('saves assistant response to chatHistory when provided', async () => {
     const { handleToday } = await import('../../../src/bot/commands/today.ts');
-    const ctx = makeCtx({ chatId: 100 });
+    const ctx = makeCtx();
     const svc = makeEventService();
     const save = mock(() => {});
     const chatHistory = { save };
 
     await handleToday(ctx as never, svc as never, undefined, undefined, chatHistory as never);
 
-    expect(save).toHaveBeenCalledTimes(2);
-    const calls = save.mock.calls as [number, string, string, number][];
-    expect(calls[0][1]).toBe('user');
-    expect(calls[0][2]).toBe('/today');
-    expect(calls[1][1]).toBe('assistant');
+    expect(save).toHaveBeenCalledTimes(1);
+    const [userId, role, content, chatId] = save.mock.calls[0] as [number, string, string, unknown];
+    expect(userId).toBe(user.telegram_id);
+    expect(role).toBe('assistant');
+    expect(typeof content).toBe('string');
+    expect(chatId).toBeUndefined();
   });
 
   test('shows holiday entries when holidayService returns them', async () => {

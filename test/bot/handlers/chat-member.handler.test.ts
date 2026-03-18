@@ -78,6 +78,24 @@ describe('createChatMemberHandler', () => {
     expect(text).toContain('Групповые');
   });
 
+  test('sends welcome when restricted member joins (restricted → member)', async () => {
+    const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
+    const { groupRepo, sendMessage, getUserLanguage } = makeDeps('en');
+
+    const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage);
+
+    await handler({
+      myChatMember: {
+        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+        from: { id: 100 },
+        new_chat_member: { status: 'member' },
+        old_chat_member: { status: 'restricted' },
+      },
+    });
+
+    expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
+  });
+
   test('does not send welcome on re-join when already active', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
     const { groupRepo, sendMessage, getUserLanguage } = makeDeps();

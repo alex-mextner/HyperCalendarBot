@@ -26,12 +26,9 @@ export async function handleToday(
   const text = formatDayAgenda(occurrences, now.toISOString(), user.timezone, user.language, holidays);
 
   await ctx.send(text, { parse_mode: 'HTML' });
-
-  if (chatHistory && ctx.chatId) {
-    const chatId = Number(ctx.chatId);
-    chatHistory.save(user.telegram_id, 'user', '/today', chatId);
-    chatHistory.save(user.telegram_id, 'assistant', text, chatId);
-  }
+  // Save response so AI can reference it when user asks follow-up questions.
+  // No chatId: getRecent queries chat_id IS NULL for personal DM context.
+  chatHistory?.save(user.telegram_id, 'assistant', text);
 
   if (renderService) {
     try {
