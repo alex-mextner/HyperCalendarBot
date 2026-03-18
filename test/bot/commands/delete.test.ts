@@ -38,12 +38,16 @@ describe('handleDelete group context', () => {
   test('uses getUpcomingForGroup in group chat', async () => {
     const groupOccurrences = [
       {
-        id: 5,
-        title: 'Sprint review',
-        start_at: new Date().toISOString(),
-        end_at: null,
-        owner_type: 'group',
-        group_id: -100,
+        event: {
+          id: 5,
+          title: 'Sprint review',
+          start_at: new Date().toISOString(),
+          end_at: null,
+          recurrence_rule: null,
+        },
+        occurrence_start: new Date().toISOString(),
+        occurrence_end: null,
+        is_exception: false,
       },
     ];
     const eventService = {
@@ -51,14 +55,22 @@ describe('handleDelete group context', () => {
       getUpcomingForGroup: mock(() => groupOccurrences),
     };
     const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    let sentOpts: Record<string, unknown> = {};
     const ctx = {
       chat: { type: 'group', id: -100 },
       dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
-      send: mock(() => Promise.resolve()),
+      send: mock((_text: string, opts: Record<string, unknown>) => {
+        sentOpts = opts ?? {};
+        return Promise.resolve();
+      }),
     };
     await handleDelete(ctx as never, eventService as never, groupRepo as never);
     expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
     expect(eventService.getUpcoming).not.toHaveBeenCalled();
+    // Keyboard callback data must contain the real event id, not 'undefined'
+    const kb = JSON.stringify(sentOpts.reply_markup ?? '');
+    expect(kb).toContain('5');
+    expect(kb).not.toContain(':undefined');
   });
 
   test('prompts timezone setup when group has no timezone', async () => {
@@ -128,6 +140,38 @@ describe('handleDelete', () => {
     const args = ctx.send.mock.calls[0] as unknown[];
     expect(args[0]).toContain('Which event to delete');
     expect(args[1]).toHaveProperty('reply_markup');
+  });
+});
+
+describe('handleDeleteCallback group context', () => {
+  test('uses getEventForGroup when in group (allows non-creator to delete)', async () => {
+    const { handleDeleteCallback } = await import('../../../src/bot/commands/delete.ts');
+    const groupEvent = makeEvent({ id: 7, title: 'Group Meeting' });
+    const eventService = {
+      getEvent: mock(() => null), // non-creator: getEvent returns null
+      getEventForGroup: mock(() => groupEvent),
+    };
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    await handleDeleteCallback(ctx as never, eventService as never, user as never, 7);
+    expect(eventService.getEventForGroup).toHaveBeenCalledWith(7, -100);
+    expect(eventService.getEvent).not.toHaveBeenCalled();
+    const msg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Group Meeting');
+  });
+
+  test('uses getEventForGroup title in group confirm callback', async () => {
+    const { handleDeleteConfirmCallback } = await import('../../../src/bot/commands/delete.ts');
+    const groupEvent = makeEvent({ id: 7, title: 'Group Event' });
+    const eventService = {
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => groupEvent),
+      deleteEventForGroup: mock(() => true),
+    };
+    const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
+    await handleDeleteConfirmCallback(ctx as never, eventService as never, user as never, 7);
+    expect(eventService.getEventForGroup).toHaveBeenCalledWith(7, -100);
+    const msg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('Group Event');
   });
 });
 
@@ -214,7 +258,8 @@ describe('handleDeleteConfirmCallback group context', () => {
     const ctx = makeCallbackCtx({ chat: { type: 'group', id: -100 } });
     const event = makeEvent();
     const eventService = {
-      getEvent: mock(() => event),
+      getEvent: mock(() => null),
+      getEventForGroup: mock(() => event),
       deleteEvent: mock(() => true),
       deleteEventForGroup: mock(() => true),
     };

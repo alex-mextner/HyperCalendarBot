@@ -6,7 +6,7 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { getGroupId, isGroup } from '../group-context.ts';
+import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -18,8 +18,9 @@ export async function handleEdit(
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as never)) {
-    const groupId = getGroupId(ctx as never)!;
+  if (isGroup(ctx as unknown as CtxWithChat)) {
+    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+    if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
       await ctx.send(
@@ -32,8 +33,9 @@ export async function handleEdit(
       await ctx.send(t(lang).no_events);
       return;
     }
+    const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
     await ctx.send(t(lang).edit_pick, {
-      reply_markup: eventPickerKeyboard(occurrences, timezone, CB.EVENT_EDIT),
+      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_EDIT),
     });
     return;
   }

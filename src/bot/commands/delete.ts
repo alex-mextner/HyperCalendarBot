@@ -16,8 +16,9 @@ export async function handleDelete(
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as never)) {
-    const groupId = getGroupId(ctx as never)!;
+  if (isGroup(ctx as unknown as CtxWithChat)) {
+    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+    if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
       await ctx.send(
@@ -30,8 +31,9 @@ export async function handleDelete(
       await ctx.send(t(lang).no_events);
       return;
     }
+    const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
     await ctx.send(t(lang).delete_pick, {
-      reply_markup: eventPickerKeyboard(occurrences, timezone, CB.EVENT_DELETE),
+      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_DELETE),
     });
     return;
   }
@@ -60,6 +62,27 @@ export async function handleDeleteCallback(
   if (eventId === 0) {
     await ctx.answer();
     await ctx.editText(t(lang).cancelled);
+    return;
+  }
+
+  const groupId = getGroupId(ctx as unknown as CtxWithChat);
+
+  if (groupId !== null) {
+    const event = eventService.getEventForGroup(eventId, groupId);
+    if (!event) {
+      await ctx.answer({ text: 'Event not found' });
+      return;
+    }
+    await ctx.answer();
+    if (event.recurrence_rule && occurrenceDate) {
+      await ctx.editText(t(lang).confirm_delete(event.title), {
+        reply_markup: recurrenceScopeKeyboard(CB.RECURRENCE_DELETE, eventId, occurrenceDate, lang),
+      });
+      return;
+    }
+    await ctx.editText(t(lang).confirm_delete(event.title), {
+      reply_markup: deleteConfirmKeyboard(eventId, lang),
+    });
     return;
   }
 
@@ -93,7 +116,7 @@ export async function handleDeleteConfirmCallback(
   const groupId = getGroupId(ctx as unknown as CtxWithChat);
 
   if (groupId !== null) {
-    const event = eventService.getEvent(eventId, user.telegram_id);
+    const event = eventService.getEventForGroup(eventId, groupId);
     const title = event?.title ?? '?';
     const deleted = eventService.deleteEventForGroup(eventId, groupId);
     await ctx.answer();

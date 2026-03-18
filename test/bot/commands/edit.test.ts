@@ -86,20 +86,40 @@ describe('handleEdit', () => {
 
 describe('handleEdit group context', () => {
   test('handleEdit in group uses getUpcomingForGroup', async () => {
-    const groupOccurrences = [{ id: 5, title: 'Sprint review', start_at: new Date().toISOString(), end_at: null }];
+    const groupOccurrences = [
+      {
+        event: {
+          id: 5,
+          title: 'Sprint review',
+          start_at: new Date().toISOString(),
+          end_at: null,
+          recurrence_rule: null,
+        },
+        occurrence_start: new Date().toISOString(),
+        occurrence_end: null,
+        is_exception: false,
+      },
+    ];
     const eventService = {
       getUpcoming: mock(() => []),
       getUpcomingForGroup: mock(() => groupOccurrences),
     };
     const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    let sentOpts: Record<string, unknown> = {};
     const ctx = {
       chat: { type: 'group', id: -100 },
       dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
-      send: mock(() => Promise.resolve()),
+      send: mock((_text: string, opts: Record<string, unknown>) => {
+        sentOpts = opts ?? {};
+        return Promise.resolve();
+      }),
     };
     await handleEdit(ctx as never, eventService as never, groupRepo as never);
     expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
     expect(eventService.getUpcoming).not.toHaveBeenCalled();
+    const kb = JSON.stringify(sentOpts.reply_markup ?? '');
+    expect(kb).toContain('5');
+    expect(kb).not.toContain(':undefined');
   });
 
   test('handleEdit in group with no timezone prompts', async () => {
