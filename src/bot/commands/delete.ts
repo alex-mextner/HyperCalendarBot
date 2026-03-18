@@ -1,14 +1,41 @@
 // src/bot/commands/delete.ts
 
 import { CB, t } from '../../config/constants.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { deleteConfirmKeyboard, eventPickerKeyboard, recurrenceScopeKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
-export async function handleDelete(ctx: BotCommandContext, eventService: EventService): Promise<void> {
+export async function handleDelete(
+  ctx: BotCommandContext,
+  eventService: EventService,
+  groupRepo?: GroupChatRepository,
+): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
+
+  if (isGroup(ctx as never)) {
+    const groupId = getGroupId(ctx as never)!;
+    const timezone = groupRepo?.getTimezone(groupId) ?? null;
+    if (!timezone) {
+      await ctx.send(
+        lang === 'ru' ? '⚙️ Сначала задайте таймзону через /settings' : '⚙️ Set group timezone via /settings',
+      );
+      return;
+    }
+    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+    if (occurrences.length === 0) {
+      await ctx.send(t(lang).no_events);
+      return;
+    }
+    await ctx.send(t(lang).delete_pick, {
+      reply_markup: eventPickerKeyboard(occurrences, timezone, CB.EVENT_DELETE),
+    });
+    return;
+  }
+
   const upcoming = eventService.getUpcoming(user.telegram_id, 10);
 
   if (upcoming.length === 0) {

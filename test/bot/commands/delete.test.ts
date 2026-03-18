@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { handleDelete } from '../../../src/bot/commands/delete.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -32,6 +33,64 @@ function makeEvent(overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+
+describe('handleDelete group context', () => {
+  test('uses getUpcomingForGroup in group chat', async () => {
+    const groupOccurrences = [
+      {
+        id: 5,
+        title: 'Sprint review',
+        start_at: new Date().toISOString(),
+        end_at: null,
+        owner_type: 'group',
+        group_id: -100,
+      },
+    ];
+    const eventService = {
+      getUpcoming: mock(() => []),
+      getUpcomingForGroup: mock(() => groupOccurrences),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    await handleDelete(ctx as never, eventService as never, groupRepo as never);
+    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(eventService.getUpcoming).not.toHaveBeenCalled();
+  });
+
+  test('prompts timezone setup when group has no timezone', async () => {
+    const groupRepo = { getTimezone: mock(() => null) };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+    };
+    await handleDelete(ctx as never, {} as never, groupRepo as never);
+    expect(sentText).toContain('таймзону');
+  });
+
+  test('in private chat uses getUpcoming not group method', async () => {
+    const eventService = {
+      getUpcoming: mock(() => []),
+      getUpcomingForGroup: mock(() => []),
+    };
+    const ctx = {
+      chat: { type: 'private', id: 1 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    await handleDelete(ctx as never, eventService as never);
+    expect(eventService.getUpcoming).toHaveBeenCalled();
+    expect(eventService.getUpcomingForGroup).not.toHaveBeenCalled();
+  });
+});
 
 describe('handleDelete', () => {
   test('sends no_events when list is empty', async () => {
