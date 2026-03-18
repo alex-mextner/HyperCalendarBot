@@ -1,5 +1,6 @@
 // src/bot/pipeline/ai-agent-layer.ts
 
+import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
@@ -52,9 +53,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     } catch (error) {
       cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'AI agent error');
       const lang = user.language as 'en' | 'ru';
-      await ctx.send(
-        lang === 'ru' ? 'Что-то пошло не так. Попробуйте ещё раз.' : 'Something went wrong. Please try again.',
-      );
+      await ctx.send(t(lang).something_wrong);
     }
 
     return { handled: true };

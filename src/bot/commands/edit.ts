@@ -69,7 +69,7 @@ export async function handleEditFieldCallback(
   const lang = user.language as 'en' | 'ru';
 
   if (field === 'cancel') {
-    await ctx.editText(lang === 'ru' ? 'Отменено.' : 'Cancelled.');
+    await ctx.editText(t(lang).cancelled);
     return;
   }
 

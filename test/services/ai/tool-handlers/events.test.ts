@@ -578,5 +578,63 @@ describe('event tool handlers', () => {
       expect(sent[0].text).toContain('Party');
       expect(sent[0].parseMode).toBe('Markdown');
     });
+
+    test('handleCreateEvent sends notification in recipient language', async () => {
+      const RU_MEMBER_ID = 789;
+      const userRepo = ctx.userRepo as UserRepository;
+      userRepo.create({ telegram_id: RU_MEMBER_ID, timezone: 'UTC', language: 'ru' });
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, RU_MEMBER_ID);
+
+      const sent: { chatId: number; text: string }[] = [];
+      const sender = {
+        sendMessage: mock(async (chatId: number, text: string) => {
+          sent.push({ chatId, text });
+          return { message_id: 1 };
+        }),
+        editMessageText: mock(async () => {}),
+      };
+
+      handleCreateEvent(
+        { ...makeGroupCtx(), groupMemberRepo, sender } as AgentContext,
+        { title: 'Встреча', start_at: '2026-03-20T10:00:00Z', scope: 'group', force: true },
+      );
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sent.length).toBe(1);
+      expect(sent[0].chatId).toBe(RU_MEMBER_ID);
+      expect(sent[0].text).toContain('Новое событие');
+    });
+
+    test('handleUpdateEvent notifies group members on group update', async () => {
+      const MEMBER_ID = 456;
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, MEMBER_ID);
+
+      const event = createGroupEvent('Sprint Planning', '2026-03-21T09:00:00Z');
+
+      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
+      const sender = {
+        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
+          sent.push({ chatId, text, parseMode });
+          return { message_id: 1 };
+        }),
+        editMessageText: mock(async () => {}),
+      };
+
+      const result = handleUpdateEvent(
+        { ...makeGroupCtx(), groupMemberRepo, sender } as AgentContext,
+        { event_id: event.id, title: 'Sprint Planning Updated', scope: 'group' },
+      );
+
+      expect(result.success).toBe(true);
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sent.length).toBe(1);
+      expect(sent[0].chatId).toBe(MEMBER_ID);
+      expect(sent[0].text).toContain('Sprint Planning Updated');
+      expect(sent[0].parseMode).toBe('Markdown');
+    });
   });
 });

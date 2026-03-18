@@ -32,7 +32,7 @@ export async function handleDeleteCallback(
 
   if (eventId === 0) {
     await ctx.answer();
-    await ctx.editText(lang === 'ru' ? 'Отменено.' : 'Cancelled.');
+    await ctx.editText(t(lang).cancelled);
     return;
   }
 

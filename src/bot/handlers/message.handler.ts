@@ -216,7 +216,7 @@ async function handleVoiceMessage(
     const transcription = await deps.transcriptionService!.transcribe(audioBuffer);
 
     if (!transcription) {
-      await ctx.send(lang === 'ru' ? 'Не удалось распознать речь.' : 'Could not recognize speech.');
+      await ctx.send(t(lang).voice_stt_error);
       return;
     }
 
@@ -290,15 +290,13 @@ async function handleVoiceMessage(
     // One-time opt-in prompt for users who have never been asked
     if (user.voice_response_enabled === null) {
       const keyboard = new InlineKeyboard()
-        .text('Да, хочу', 'voice_prompt:yes')
-        .text('Нет, только текстом', 'voice_prompt:no');
-      await ctx.send('🎤 Хочешь получать голосовые ответы?\nУдобно за рулём, на кухне или на ходу.', {
-        reply_markup: keyboard,
-      });
+        .text(t(lang).voice_prompt_yes, 'voice_prompt:yes')
+        .text(t(lang).voice_prompt_no, 'voice_prompt:no');
+      await ctx.send(t(lang).voice_prompt, { reply_markup: keyboard });
     }
   } catch (error) {
     cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'Voice transcription error');
-    await ctx.send(lang === 'ru' ? 'Не удалось обработать голосовое сообщение.' : 'Could not process voice message.');
+    await ctx.send(t(lang).voice_error);
   }
 }
 
