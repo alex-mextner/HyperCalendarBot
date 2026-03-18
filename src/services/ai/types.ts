@@ -87,6 +87,11 @@ export interface AgentConfig {
 
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: string): Promise<{ message_id: number }>;
+  sendMessageWithKeyboard?(
+    chatId: number,
+    text: string,
+    keyboard: import('gramio').InlineKeyboard,
+  ): Promise<{ message_id: number }>;
   editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void>;
   sendButtons?(
     chatId: number,

@@ -87,3 +87,25 @@ test('manage_secretaries invite: success returns awaiting_confirmation', () => {
   const out = JSON.parse(result.output!) as { status: string };
   expect(out.status).toBe('awaiting_confirmation');
 });
+
+test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', async () => {
+  const sendMessageWithKeyboard = mock(async () => ({ message_id: 42 }));
+  const setDmMessageId = mock(() => {});
+  const ctx = makeCtx({
+    secretaryRepo: {
+      countActive: () => 0,
+      upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+      setDmMessageId,
+    } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
+    sender: { sendMessageWithKeyboard } as never,
+  });
+  handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  // Allow the fire-and-forget promise to settle
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(sendMessageWithKeyboard).toHaveBeenCalledTimes(1);
+  const [recipientId, , keyboard] = sendMessageWithKeyboard.mock.calls[0] as [number, string, unknown];
+  expect(recipientId).toBe(999);
+  expect(keyboard).toBeDefined();
+  expect(setDmMessageId).toHaveBeenCalledWith(7, 42);
+});

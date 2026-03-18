@@ -41,9 +41,11 @@ async function sendSecretaryInvite(
     keyboard,
     fallbackRecipientId: ctx.user.telegram_id,
     fallbackText: `Не удалось доставить приглашение — пользователь ещё не запускал бота.`,
-    botSend: async (recipientId, msg) => {
-      const sent = await sender.sendMessage(recipientId, msg);
-      return { message_id: sent.message_id };
+    botSend: async (recipientId, msg, kb) => {
+      if (kb && sender.sendMessageWithKeyboard) {
+        return sender.sendMessageWithKeyboard(recipientId, msg, kb);
+      }
+      return sender.sendMessage(recipientId, msg);
     },
     mtprotoSend: sender.sendAsUser?.bind(sender),
   });

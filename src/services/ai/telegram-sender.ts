@@ -17,6 +17,14 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
+    async sendMessageWithKeyboard(chatId: number, text: string, keyboard: InlineKeyboard) {
+      const result = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        reply_markup: keyboard,
+      });
+      return { message_id: result.message_id };
+    },
     async editMessageText(chatId: number, messageId: number, text: string, parseMode?: string) {
       await bot.api.editMessageText({
         chat_id: chatId,
