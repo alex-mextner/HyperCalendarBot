@@ -163,6 +163,6 @@ describe('handleInvite', () => {
     };
     await handleInvite(ctx as never, deps as never);
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-    expect(msg).toContain('no upcoming events');
+    expect(msg).toContain('No group events');
   });
 });

@@ -32,14 +32,15 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
   const lang = user.language as 'en' | 'ru';
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx)!;
+    const groupId = getGroupId(ctx);
+    if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
     const occurrences = eventService.getUpcomingForGroup(groupId, 10);
     if (occurrences.length === 0) {
-      await ctx.send(lang === 'ru' ? '📅 У вас нет предстоящих событий.' : '📅 You have no upcoming events.');
+      await ctx.send(lang === 'ru' ? '📭 Нет событий в группе' : '📭 No group events');
       return;
     }
-    const events = occurrences.map((o) => o.event);
+    const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
     await ctx.send(
       lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:',
       {

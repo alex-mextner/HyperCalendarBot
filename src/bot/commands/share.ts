@@ -32,7 +32,8 @@ export async function handleShare(
   const userId = user.telegram_id;
 
   if (isGroup(ctx)) {
-    const groupId = getGroupId(ctx)!;
+    const groupId = getGroupId(ctx);
+    if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? 'UTC';
     const occurrences = eventService.getUpcomingForGroup(groupId, 10);
     if (occurrences.length === 0) {
