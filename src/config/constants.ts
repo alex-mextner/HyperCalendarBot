@@ -123,7 +123,7 @@ export const MSG = {
     notify_pick_minute: 'Pick minute:',
     notify_updated: 'Settings updated',
     notify_intervals_label: (intervals: number[]) =>
-      `Default reminders: ${intervals.map((m) => (m >= 60 ? `${m / 60}hr` : `${m}min`)).join(', ')}`,
+      `Default reminders: ${intervals.map((m) => (m === 0 ? 'at start' : m >= 60 ? `${m / 60}hr` : `${m}min`)).join(', ')}`,
     gcal_onboarding:
       'Want to sync with Google Calendar?\n\nYour events will stay in the bot either way. Google Calendar sync is optional but gives you:\n- See bot events in your phone calendar\n- Changes in Google Calendar auto-sync to the bot\n- Two-way sync keeps everything up to date',
     gcal_onboarding_maybe_later: 'Maybe Later',
@@ -254,7 +254,7 @@ export const MSG = {
     notify_pick_minute: 'Выберите минуту:',
     notify_updated: 'Настройки обновлены',
     notify_intervals_label: (intervals: number[]) =>
-      `Напоминания: ${intervals.map((m) => (m >= 60 ? `${m / 60}ч` : `${m}мин`)).join(', ')}`,
+      `Напоминания: ${intervals.map((m) => (m === 0 ? 'в начале' : m >= 60 ? `${m / 60}ч` : `${m}мин`)).join(', ')}`,
     gcal_onboarding:
       'Хотите синхронизировать с Google Calendar?\n\nСобытия останутся в боте в любом случае. Синхронизация даёт:\n- Просмотр событий бота в Google Calendar\n- Изменения в Google Calendar авто-синхронизируются\n- Двусторонняя синхронизация',
     gcal_onboarding_maybe_later: 'Позже',

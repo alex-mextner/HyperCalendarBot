@@ -58,13 +58,14 @@ export async function handleSettingsCallback(
     const morning = prefs.morning_agenda_enabled ? `✅ ${prefs.morning_agenda_time}` : '❌';
     const evening = prefs.evening_review_enabled ? `✅ ${prefs.evening_review_time}` : '❌';
     const quiet = prefs.quiet_hours_enabled ? `✅ ${prefs.quiet_hours_start}–${prefs.quiet_hours_end}` : '❌';
+    const formatInterval = (m: number) => (m === 0 ? 'в начале' : m >= 60 ? `${m / 60}ч` : `${m}мин`);
     const text = [
       '🔔 Уведомления',
       '',
       `Утренняя сводка: ${morning}`,
       `Вечерний обзор: ${evening}`,
       `Тихие часы: ${quiet}`,
-      `Напоминания: [${intervals.join(', ')}] мин`,
+      `Напоминания: ${intervals.map(formatInterval).join(', ')}`,
     ].join('\n');
     await ctx.answer();
     await ctx.editText(text, { reply_markup: backKeyboard() });

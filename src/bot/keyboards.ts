@@ -285,8 +285,15 @@ export function notifyMinutePickerKeyboard(section: string, hour: string): Inlin
 }
 
 export function notifyReminderIntervalsKeyboard(activeIntervals: number[]): InlineKeyboard {
-  const ALL = [5, 15, 30, 60, 1440];
-  const labels: Record<number, string> = { 5: '5min', 15: '15min', 30: '30min', 60: '1hr', 1440: '1day' };
+  const ALL = [0, 5, 15, 30, 60, 1440];
+  const labels: Record<number, string> = {
+    0: 'at start',
+    5: '5min',
+    15: '15min',
+    30: '30min',
+    60: '1hr',
+    1440: '1day',
+  };
   const kb = new InlineKeyboard();
   for (let i = 0; i < ALL.length; i++) {
     const m = ALL[i]!;

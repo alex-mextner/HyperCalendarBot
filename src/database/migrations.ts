@@ -151,7 +151,7 @@ export const migrations: Migration[] = [
           morning_agenda_time        TEXT NOT NULL DEFAULT '08:00',
           morning_agenda_utc         TEXT,
           morning_agenda_format      TEXT NOT NULL DEFAULT 'text',
-          default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
+          default_reminder_intervals TEXT NOT NULL DEFAULT '[30, 0]',
           evening_review_enabled     INTEGER NOT NULL DEFAULT 0,
           evening_review_time        TEXT NOT NULL DEFAULT '21:00',
           evening_review_utc         TEXT,
@@ -625,6 +625,14 @@ export const migrations: Migration[] = [
         CREATE INDEX idx_proposals_target  ON calendar_proposals(target_id, status);
         CREATE INDEX idx_proposals_expires ON calendar_proposals(expires_at, status);
       `);
+    },
+  },
+  {
+    name: '024_default_reminder_intervals',
+    up: (db) => {
+      db.exec(
+        `UPDATE notification_preferences SET default_reminder_intervals = '[30, 0]' WHERE default_reminder_intervals = '[15]'`,
+      );
     },
   },
 ];

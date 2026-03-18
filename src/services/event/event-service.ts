@@ -39,7 +39,13 @@ export class EventService {
     }
     if (this.materializer) {
       this.materializer.materialize(
-        { id: event.id, start_at: event.start_at, reminder_overrides: event.reminder_overrides ?? null },
+        {
+          id: event.id,
+          start_at: event.start_at,
+          reminder_overrides: event.reminder_overrides ?? null,
+          all_day: event.all_day,
+          user_timezone: event.timezone,
+        },
         event.user_id,
       );
     }
@@ -54,7 +60,13 @@ export class EventService {
     const updated = this.eventRepo.update(id, userId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
-        { id: updated.id, start_at: updated.start_at, reminder_overrides: updated.reminder_overrides ?? null },
+        {
+          id: updated.id,
+          start_at: updated.start_at,
+          reminder_overrides: updated.reminder_overrides ?? null,
+          all_day: updated.all_day,
+          user_timezone: updated.timezone,
+        },
         updated.user_id,
       );
     }
@@ -298,7 +310,13 @@ export class EventService {
     const updated = this.eventRepo.updateInGroup(eventId, groupId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
-        { id: updated.id, start_at: updated.start_at, reminder_overrides: updated.reminder_overrides ?? null },
+        {
+          id: updated.id,
+          start_at: updated.start_at,
+          reminder_overrides: updated.reminder_overrides ?? null,
+          all_day: updated.all_day,
+          user_timezone: updated.timezone,
+        },
         updated.user_id,
       );
     }
