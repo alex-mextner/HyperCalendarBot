@@ -220,9 +220,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('@mention');
   });
 
-  test('instructs AI to add relative duration to message timestamp for future events', () => {
+  test('requires AI to use calculate tool for any arithmetic', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('in 31 minutes');
-    expect(prompt).toContain('23:05');
+    expect(prompt).toContain('CALCULATE RULE');
+    expect(prompt).toContain('calculate');
+    expect(prompt).toContain('Never compute in your head');
   });
 });

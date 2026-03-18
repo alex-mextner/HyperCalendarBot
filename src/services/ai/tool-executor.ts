@@ -15,6 +15,7 @@ import { handleGetHistory } from './tool-handlers/history.ts';
 import {
   handleAddContact,
   handleAskUser,
+  handleCalculate,
   handleFindContact,
   handleFindUser,
   handleGetBotInfo,
@@ -216,6 +217,9 @@ export async function executeTool(
 
       case 'get_bot_info':
         return handleGetBotInfo();
+
+      case 'calculate':
+        return handleCalculate(input as { expression: string });
 
       case 'list_calendar_access':
         return handleListCalendarAccess(ctx);

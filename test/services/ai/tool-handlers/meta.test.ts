@@ -11,6 +11,7 @@ import { runMigrations } from '../../../../src/database/schema.ts';
 import {
   handleAddContact,
   handleAskUser,
+  handleCalculate,
   handleFindContact,
   handleFindUser,
   handleGetBotInfo,
@@ -400,5 +401,79 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(true);
       // Just verifying it doesn't crash — scope resolved to group
     });
+  });
+});
+
+describe('handleCalculate', () => {
+  test('adds two integers', () => {
+    const r = handleCalculate({ expression: '2 + 31' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('33');
+  });
+
+  test('complex arithmetic expression', () => {
+    const r = handleCalculate({ expression: '22 * 60 + 34' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('1354');
+  });
+
+  test('adds minutes to HH:MM', () => {
+    const r = handleCalculate({ expression: '22:34 + 31min' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('23:05');
+  });
+
+  test('HH:MM wraps around midnight', () => {
+    const r = handleCalculate({ expression: '23:50 + 30min' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('00:20');
+  });
+
+  test('subtracts minutes from HH:MM', () => {
+    const r = handleCalculate({ expression: '22:34 - 10min' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('22:24');
+  });
+
+  test('adds hours to HH:MM', () => {
+    const r = handleCalculate({ expression: '09:00 + 2h' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('11:00');
+  });
+
+  test('adds minutes to ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 31min' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-03-18T23:05:00.000Z');
+  });
+
+  test('ISO datetime crosses midnight', () => {
+    const r = handleCalculate({ expression: '2026-03-18T23:50:00Z + 20min' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-03-19T00:10:00.000Z');
+  });
+
+  test('adds hours to ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 2hours' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-03-19T00:34:00.000Z');
+  });
+
+  test('subtracts from ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-19T00:05:00Z - 1hour' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-03-18T23:05:00.000Z');
+  });
+
+  test('adds days to ISO date', () => {
+    const r = handleCalculate({ expression: '2026-03-18 + 7days' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-03-25');
+  });
+
+  test('returns error for unparseable expression', () => {
+    const r = handleCalculate({ expression: 'hello world' });
+    expect(r.success).toBe(false);
+    expect(r.error).toBeDefined();
   });
 });

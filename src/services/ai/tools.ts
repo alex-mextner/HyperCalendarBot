@@ -807,6 +807,22 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'calculate',
+    description:
+      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days, YYYY-MM-DD ± N days.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        expression: {
+          type: 'string',
+          description:
+            'Expression to evaluate. Examples: "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 31min", "2026-03-18 + 7days", "23:50 - 1hour"',
+        },
+      },
+      required: ['expression'],
+    },
+  },
+  {
     name: 'get_history',
     description:
       'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
