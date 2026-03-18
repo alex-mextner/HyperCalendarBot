@@ -88,6 +88,48 @@ test('manage_secretaries invite: success returns awaiting_confirmation', () => {
   expect(out.status).toBe('awaiting_confirmation');
 });
 
+test('manage_secretaries revoke: updates status to revoked', () => {
+  const mockUpdate = mock(() => true);
+  const ctx = makeCtx({
+    secretaryRepo: {
+      findById: () => ({ id: 5, owner_id: 1, secretary_id: 99, status: 'active', permission: 'write' }),
+      updateStatus: mockUpdate,
+    } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) } as never,
+    sender: {} as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
+  expect(result.success).toBe(true);
+  expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+});
+
+test('manage_secretaries self_remove: fails if caller is not the secretary', () => {
+  const ctx = makeCtx({
+    secretaryRepo: {
+      findById: () => ({ id: 5, owner_id: 10, secretary_id: 999, status: 'active' }), // secretary_id != ctx.user.telegram_id (1)
+      updateStatus: mock(() => true),
+    } as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('SECRETARY_ACCESS_DENIED');
+});
+
+test('manage_secretaries self_remove: succeeds when caller matches secretary_id', () => {
+  const mockUpdate = mock(() => true);
+  const ctx = makeCtx({
+    secretaryRepo: {
+      findById: () => ({ id: 5, owner_id: 10, secretary_id: 1, status: 'active' }), // secretary_id == ctx.user.telegram_id (1)
+      updateStatus: mockUpdate,
+    } as never,
+    userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) } as never,
+    sender: {} as never,
+  });
+  const result = handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
+  expect(result.success).toBe(true);
+  expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+});
+
 test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', async () => {
   const sendMessageWithKeyboard = mock(async () => ({ message_id: 42 }));
   const setDmMessageId = mock(() => {});

@@ -55,6 +55,27 @@ async function sendSecretaryInvite(
   }
 }
 
+async function sendSecretaryNotification(
+  ctx: AgentContext,
+  targetId: number,
+  targetUsername: string | null | undefined,
+  text: string,
+): Promise<void> {
+  if (!ctx.sender) return;
+  await deliverMessage({
+    targetId,
+    targetUsername: targetUsername ?? undefined,
+    text,
+    fallbackRecipientId: ctx.user.telegram_id,
+    fallbackText: text,
+    botSend: async (id, msg) => {
+      const sent = await ctx.sender!.sendMessage(id, msg);
+      return { message_id: sent.message_id };
+    },
+    mtprotoSend: ctx.sender.sendAsUser?.bind(ctx.sender),
+  });
+}
+
 export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): ToolResult {
   if (!ctx.secretaryRepo || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
 
@@ -85,7 +106,50 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
     };
   }
 
-  // revoke and self_remove handled in Task 6
+  if (input.action === 'revoke') {
+    if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for revoke.' };
+    const record = ctx.secretaryRepo.findById(input.secretary_access_id);
+    if (!record || record.owner_id !== ctx.user.telegram_id)
+      return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
+
+    ctx.secretaryRepo.updateStatus(record.id, 'revoked');
+
+    const secUser = ctx.userRepo!.findByTelegramId(record.secretary_id);
+    if (secUser && ctx.sender) {
+      const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+      const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
+      sendSecretaryNotification(
+        ctx,
+        record.secretary_id,
+        secUser.username,
+        `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
+      ).catch((err: unknown) => secretaryLogger.error({ err }, 'failed to send revoke notification'));
+    }
+    return { success: true, output: JSON.stringify({ ok: true }) };
+  }
+
+  if (input.action === 'self_remove') {
+    if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for self_remove.' };
+    const record = ctx.secretaryRepo.findById(input.secretary_access_id);
+    if (!record) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
+    if (record.secretary_id !== ctx.user.telegram_id) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
+
+    ctx.secretaryRepo.updateStatus(record.id, 'revoked');
+
+    const secName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+    const secHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
+    const ownerUser = ctx.userRepo!.findByTelegramId(record.owner_id);
+    if (ownerUser && ctx.sender) {
+      sendSecretaryNotification(
+        ctx,
+        record.owner_id,
+        ownerUser.username,
+        `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
+      ).catch((err: unknown) => secretaryLogger.error({ err }, 'failed to send self_remove notification'));
+    }
+    return { success: true, output: JSON.stringify({ ok: true }) };
+  }
+
   return { success: false, error: `Unknown action: ${(input as { action: string }).action}` };
 }
 
