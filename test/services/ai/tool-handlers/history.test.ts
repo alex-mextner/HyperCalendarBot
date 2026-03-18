@@ -92,4 +92,30 @@ describe('handleGetHistory', () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain('[Button: "Удалить"]');
   });
+
+  test('in group context returns group chat history, not private DM history', () => {
+    const GROUP_CHAT_ID = -100999;
+    // Private DM message — must NOT appear in group response
+    ctx.chatHistory.save(USER_ID, 'user', 'private message');
+    // Group message
+    ctx.chatHistory.save(USER_ID, 'user', 'group message', GROUP_CHAT_ID);
+
+    ctx.isGroup = true;
+    ctx.groupChatId = GROUP_CHAT_ID;
+
+    const result = handleGetHistory(ctx, {});
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('group message');
+    expect(result.output).not.toContain('private message');
+  });
+
+  test('accepts ISO 8601 before/after timestamps and converts to SQLite format', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'target message');
+    const after = new Date(Date.now() - 60000).toISOString(); // 1 min ago in ISO format
+    const before = new Date(Date.now() + 60000).toISOString(); // 1 min ahead
+
+    const result = handleGetHistory(ctx, { after, before });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('target message');
+  });
 });
