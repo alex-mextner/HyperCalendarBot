@@ -1085,7 +1085,7 @@ export function createCallbackHandler(
           cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');
         }
 
-        await ctx.editText('🎤 Голосовые ответы включены!');
+        await ctx.editText(msgs.voice_response_enabled);
         return;
       }
 

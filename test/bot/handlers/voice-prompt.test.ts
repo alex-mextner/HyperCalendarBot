@@ -308,7 +308,7 @@ describe('voice_prompt callback', () => {
     expect((editCalls[0] as unknown[])[0]).toBe('⌛');
     expect(synthesize).toHaveBeenCalledTimes(1);
     expect(sendVoice).toHaveBeenCalledTimes(1);
-    expect((editCalls[editCalls.length - 1] as unknown[])[0]).toBe('🎤 Голосовые ответы включены!');
+    expect((editCalls[editCalls.length - 1] as unknown[])[0]).toBe('🎤 Voice responses enabled!');
     expect(ctx.answer).toHaveBeenCalledTimes(1);
   });
 
