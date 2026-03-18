@@ -53,6 +53,69 @@ export function countryKeyboard(countryCode: string | null, lang: 'en' | 'ru'): 
   return kb;
 }
 
+// ── Settings keyboards ──
+
+const TOP_COUNTRIES: [string, string][] = [
+  ['RU', '🇷🇺 Россия'],
+  ['US', '🇺🇸 США'],
+  ['DE', '🇩🇪 Германия'],
+  ['GB', '🇬🇧 Великобритания'],
+  ['FR', '🇫🇷 Франция'],
+  ['UA', '🇺🇦 Украина'],
+  ['BY', '🇧🇾 Беларусь'],
+  ['KZ', '🇰🇿 Казахстан'],
+  ['PL', '🇵🇱 Польша'],
+  ['RS', '🇷🇸 Сербия'],
+  ['TR', '🇹🇷 Турция'],
+  ['IL', '🇮🇱 Израиль'],
+  ['ES', '🇪🇸 Испания'],
+  ['IT', '🇮🇹 Италия'],
+  ['NL', '🇳🇱 Нидерланды'],
+  ['SE', '🇸🇪 Швеция'],
+  ['NO', '🇳🇴 Норвегия'],
+  ['FI', '🇫🇮 Финляндия'],
+  ['CZ', '🇨🇿 Чехия'],
+  ['AT', '🇦🇹 Австрия'],
+  ['CH', '🇨🇭 Швейцария'],
+  ['PT', '🇵🇹 Португалия'],
+  ['GR', '🇬🇷 Греция'],
+  ['RO', '🇷🇴 Румыния'],
+  ['HU', '🇭🇺 Венгрия'],
+  ['CA', '🇨🇦 Канада'],
+  ['AU', '🇦🇺 Австралия'],
+  ['JP', '🇯🇵 Япония'],
+  ['CN', '🇨🇳 Китай'],
+  ['IN', '🇮🇳 Индия'],
+];
+
+export function countryPickerKeyboard(currentCode?: string | null): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  TOP_COUNTRIES.forEach(([code, label], i) => {
+    const mark = code === currentCode ? '✅ ' : '';
+    kb.text(`${mark}${label}`, `stg:set_country:${code}`);
+    if (i % 2 === 1) kb.row();
+  });
+  return kb.row().text('🔙 Назад', 'stg:general');
+}
+
+const REMINDER_PRESETS = [0, 5, 10, 15, 30, 60, 120] as const;
+
+function fmtReminderPreset(m: number): string {
+  if (m === 0) return 'в начале';
+  if (m >= 60) return `${m / 60}ч`;
+  return `${m}мин`;
+}
+
+export function reminderIntervalsKeyboard(activeIntervals: number[]): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  REMINDER_PRESETS.forEach((m, i) => {
+    const active = activeIntervals.includes(m);
+    kb.text(`${active ? '✅' : '☐'} ${fmtReminderPreset(m)}`, `stg:toggle_reminder:${m}`);
+    if (i % 2 === 1) kb.row();
+  });
+  return kb.row().text('🔙 Назад', 'stg:notifications');
+}
+
 // ── Event actions ──
 
 export function eventActionsKeyboard(eventId: number, lang: 'en' | 'ru'): InlineKeyboard {
