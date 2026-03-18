@@ -15,6 +15,7 @@ import type { FeedbackRepository } from '../../database/repositories/feedback.re
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
+import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -29,6 +30,7 @@ import type { AdminEditSession } from '../../services/intent/admin-edit-session.
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { getWeekRangeUtc } from '../../utils/date.ts';
+import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { handleGroupAgendaCallback } from '../commands/agenda.ts';
@@ -69,7 +71,12 @@ export function createCallbackHandler(
   },
   invitationNotifyDeps?: {
     userRepo: UserRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendMessage: (
+      chatId: number,
+      text: string,
+      options: { parse_mode: string; reply_markup?: unknown },
+    ) => Promise<void>;
+    editMessage?: (chatId: number, messageId: number, text: string, markup?: unknown) => Promise<void>;
   },
   onboardingScene?: AnyScene,
   editProposalDeps?: {
@@ -93,6 +100,8 @@ export function createCallbackHandler(
   secretaryDeps?: SecretaryDeps,
   proposalDeps?: ProposalDeps,
   snoozeDeps?: SnoozeDeps,
+  proposeTimeSessions?: Map<number, { invitationId: number; eventStart: string }>,
+  invitationRepo?: InvitationRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -418,6 +427,134 @@ export function createCallbackHandler(
 
         if (subAction === 'keep') {
           await ctx.answer(t(lang).invitation_accepted);
+          return;
+        }
+
+        if (subAction === 'propose') {
+          const offsetStr = parts[3];
+          const inv = invitationRepo?.findById(invId);
+          if (!inv) {
+            await ctx.answer({ text: t(lang).invitation_not_found });
+            return;
+          }
+          const event = eventRepo?.findById(inv.event_id, inv.inviter_id);
+
+          if (offsetStr === '+30' || offsetStr === '+60') {
+            const offsetMs = offsetStr === '+30' ? 30 * 60_000 : 60 * 60_000;
+            const baseTime = event?.start_at ? new Date(event.start_at).getTime() : Date.now();
+            const proposedTime = new Date(baseTime + offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
+            const propResult = invitationService.proposeTime(invId, user.telegram_id, proposedTime);
+            if (!propResult.success) {
+              await ctx.answer({ text: propResult.error ?? 'Error' });
+              return;
+            }
+            const formatted = formatProposedTime(proposedTime, user.timezone, lang);
+            await ctx.answer();
+            await ctx.editText(t(lang).invite_propose_sent(formatted), { parse_mode: 'HTML' }).catch(() => {});
+            if (invitationNotifyDeps && event) {
+              notifyInviterProposal(
+                inv,
+                user,
+                formatted,
+                event.title ?? `Event #${inv.event_id}`,
+                invitationNotifyDeps,
+              ).catch(() => {});
+            }
+          } else {
+            if (proposeTimeSessions) {
+              proposeTimeSessions.set(user.telegram_id, {
+                invitationId: invId,
+                eventStart: event?.start_at ?? new Date().toISOString(),
+              });
+            }
+            await ctx.answer();
+            const msgs = t(lang);
+            const quickKeyboard = new InlineKeyboard()
+              .text(msgs.invite_propose_plus30, `${CB.INVITATION_ACTION}:propose:${invId}:+30`)
+              .text(msgs.invite_propose_plus60, `${CB.INVITATION_ACTION}:propose:${invId}:+60`);
+            await (
+              ctx as unknown as { message?: { send: (text: string, opts: unknown) => Promise<unknown> } }
+            ).message?.send(msgs.invite_propose_ask, { reply_markup: quickKeyboard });
+          }
+          return;
+        }
+
+        if (subAction === 'reschedule') {
+          const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
+          if (!reschedResult.success) {
+            await ctx.answer({ text: reschedResult.error ?? 'Error' });
+            return;
+          }
+          const invitation = reschedResult.invitation!;
+          const proposedTime = reschedResult.proposedTime!;
+          const event = eventRepo?.findById(invitation.event_id, user.telegram_id);
+          if (event && eventService) {
+            const durationMs = event.end_at ? new Date(event.end_at).getTime() - new Date(event.start_at).getTime() : 0;
+            const newEnd =
+              durationMs > 0 ? new Date(new Date(proposedTime).getTime() + durationMs).toISOString() : undefined;
+            eventService.updateEvent(event.id, user.telegram_id, {
+              start_at: proposedTime,
+              ...(newEnd ? { end_at: newEnd } : {}),
+            });
+          }
+          const formattedTimeInviter = formatProposedTime(proposedTime, user.timezone, lang);
+          await ctx.answer();
+          await ctx
+            .editText(t(lang).invite_rescheduled_inviter(formattedTimeInviter), { parse_mode: 'HTML' })
+            .catch(() => {});
+          if (invitationNotifyDeps) {
+            const eventTitle = event?.title ?? `Event #${invitation.event_id}`;
+            const inviteeUser = invitationNotifyDeps.userRepo.findByTelegramId(invitation.invitee_id);
+            const inviteeLang = (inviteeUser?.language ?? 'en') as Lang;
+            const inviteeTz = inviteeUser?.timezone ?? 'UTC';
+            const formattedTimeInvitee = formatProposedTime(proposedTime, inviteeTz, inviteeLang);
+            invitationNotifyDeps
+              .sendMessage(
+                invitation.invitee_id,
+                t(inviteeLang).invite_rescheduled_invitee(eventTitle, formattedTimeInvitee),
+                { parse_mode: 'HTML' },
+              )
+              .catch(() => {});
+          }
+          return;
+        }
+
+        if (subAction === 'dismiss') {
+          const keepResult = invitationService.keepOriginalTime(invId, user.telegram_id);
+          if (!keepResult.success) {
+            await ctx.answer({ text: keepResult.error ?? 'Error' });
+            return;
+          }
+          const invitation = keepResult.invitation!;
+          const event = eventRepo?.findById(invitation.event_id, user.telegram_id);
+          const inviteeUser = invitationNotifyDeps?.userRepo.findByTelegramId(invitation.invitee_id);
+          const inviteeLang = (inviteeUser?.language ?? 'en') as Lang;
+          const inviteeTz = inviteeUser?.timezone ?? 'UTC';
+          const formattedOriginal = event?.start_at ? formatProposedTime(event.start_at, inviteeTz, inviteeLang) : '';
+          await ctx.answer();
+          await ctx.editText(t(lang).invite_kept_inviter, { parse_mode: 'HTML' }).catch(() => {});
+          if (invitationNotifyDeps) {
+            const eventTitle = event?.title ?? `Event #${invitation.event_id}`;
+            invitationNotifyDeps
+              .sendMessage(invitation.invitee_id, t(inviteeLang).invite_kept_invitee(eventTitle, formattedOriginal), {
+                parse_mode: 'HTML',
+              })
+              .catch(() => {});
+            if (invitationNotifyDeps.editMessage && invitation.message_id && invitation.chat_id) {
+              const inviterUser = invitationNotifyDeps.userRepo.findByTelegramId(invitation.inviter_id);
+              const inviterName = inviterUser?.first_name ?? inviterUser?.username ?? `#${invitation.inviter_id}`;
+              const originalText = t(inviteeLang).invitation_received(eventTitle, inviterName);
+              const keyboard = new InlineKeyboard()
+                .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+                .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+                .row()
+                .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
+                .text(t(inviteeLang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
+              invitationNotifyDeps
+                .editMessage(invitation.chat_id, invitation.message_id, originalText, keyboard)
+                .catch(() => {});
+            }
+          }
           return;
         }
 
@@ -942,6 +1079,31 @@ export async function handleProposalDecline(id: number, callerId: number, deps: 
   }
 
   await deps.sendMessage(proposal.proposer_id, `❌ ${targetRef} отклонил(а) твоё предложение: ${proposal.summary}`);
+}
+
+async function notifyInviterProposal(
+  invitation: Invitation,
+  respondent: User,
+  formattedTime: string,
+  eventTitle: string,
+  deps: {
+    userRepo: UserRepository;
+    sendMessage: (
+      chatId: number,
+      text: string,
+      options: { parse_mode: string; reply_markup?: unknown },
+    ) => Promise<void>;
+  },
+): Promise<void> {
+  const inviter = deps.userRepo.findByTelegramId(invitation.inviter_id);
+  if (!inviter) return;
+  const inviterLang = (inviter.language ?? 'en') as Lang;
+  const name = respondent.first_name ?? respondent.username ?? `#${respondent.telegram_id}`;
+  const text = t(inviterLang).invite_propose_notify(name, eventTitle, formattedTime);
+  const keyboard = new InlineKeyboard()
+    .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitation.id}`)
+    .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitation.id}`);
+  await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML', reply_markup: keyboard });
 }
 
 async function notifyInviter(
