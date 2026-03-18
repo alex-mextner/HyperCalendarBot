@@ -1100,6 +1100,8 @@ export function createCallbackHandler(
           }
         } catch (err) {
           cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');
+          await ctx.editText(msgs.voice_demo_failed);
+          return;
         }
 
         await ctx.editText(msgs.voice_response_enabled);

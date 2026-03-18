@@ -312,6 +312,29 @@ describe('voice_prompt callback', () => {
     expect(ctx.answer).toHaveBeenCalledTimes(1);
   });
 
+  test('voice_prompt:yes shows demo_failed message when TTS throws', async () => {
+    const userRepo = { update: mock(() => {}) };
+    const chatHistoryRepo = {
+      save: mock(() => {}),
+      getRecent: mock(() => [
+        { role: 'assistant', content: JSON.stringify([{ type: 'text', text: 'Your meeting is set' }]) },
+      ]),
+    };
+    const synthesize = mock(() => Promise.reject(new Error('TTS unavailable')));
+    const sendVoice = mock(() => Promise.resolve());
+    const voiceDeps = { kokoroTts: { synthesize }, sendVoice };
+
+    const handler = makeCallbackHandlerWithVoice({ userRepo, chatHistoryRepo, voiceDeps });
+    const ctx = makeCallbackCtx('voice_prompt:yes', { language: 'en' });
+    await handler(ctx as never);
+
+    expect(userRepo.update).toHaveBeenCalledWith(100, { voice_response_enabled: 1 });
+    expect(sendVoice).not.toHaveBeenCalled();
+    const editCalls = ctx.editText.mock.calls;
+    const lastEdit = (editCalls[editCalls.length - 1] as unknown[])[0] as string;
+    expect(lastEdit).toContain('Demo playback failed');
+  });
+
   test('voice_prompt without userRepo does nothing gracefully', async () => {
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
     const ctx = makeCallbackCtx('voice_prompt:yes');

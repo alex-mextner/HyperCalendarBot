@@ -268,19 +268,21 @@ async function handleVoiceMessage(
           }).catch(() => {});
           const plainText = stripMarkdown(responseText);
           const noLineBreaks = fixLineBreaks(plainText);
-          let voiceBuffer: Buffer;
-          if (isRu) {
+          let voiceBuffer: Buffer | undefined;
+          if (isRu && deps.sileroTts) {
             const withOrdinals = fixDateOrdinals(noLineBreaks);
             const withNumbers = numbersToWords(withOrdinals);
             const withStress = markStress(withNumbers, deps.stressDictionary!);
             const stressedText = transliterateEnglish(withStress);
             cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing RU voice reply');
-            voiceBuffer = await deps.sileroTts!.synthesize(stressedText);
-          } else {
+            voiceBuffer = await deps.sileroTts.synthesize(stressedText);
+          } else if (!isRu && deps.kokoroTts) {
             cmdLogger.info({ userId: user.telegram_id, textLen: noLineBreaks.length }, 'Synthesizing EN voice reply');
-            voiceBuffer = await deps.kokoroTts!.synthesize(noLineBreaks);
+            voiceBuffer = await deps.kokoroTts.synthesize(noLineBreaks);
           }
-          await deps.sendVoice(Number(chatId), voiceBuffer);
+          if (voiceBuffer) {
+            await deps.sendVoice(Number(chatId), voiceBuffer);
+          }
         } catch (ttsError) {
           cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
         }
