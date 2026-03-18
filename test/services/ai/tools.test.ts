@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { toolDefinitions } from '../../../src/services/ai/tools.ts';
 
 describe('toolDefinitions', () => {
-  test('exports 38 tool definitions', () => {
-    expect(toolDefinitions.length).toBe(38);
+  test('exports 39 tool definitions', () => {
+    expect(toolDefinitions.length).toBe(39);
   });
 
   test('each tool has name, description, and input_schema', () => {

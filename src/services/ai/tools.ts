@@ -745,4 +745,33 @@ export const toolDefinitions: ToolDefinition[] = [
       required: ['action'],
     },
   },
+  {
+    name: 'propose_calendar_change',
+    description:
+      'Propose a calendar change to another member of this group chat. ' +
+      'The target receives a DM with Accept/Decline buttons — you cannot modify their calendar directly. ' +
+      'Supported actions: "create" (new event), "update" (change fields of existing event), "delete" (remove event). ' +
+      'For "update" and "delete", event_id must be known from a calendar view shared earlier in the chat. ' +
+      'Use find_user first to resolve @username/name to telegram_id. ' +
+      'After calling, STOP — the group chat will be notified of the outcome automatically.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        target_telegram_id: {
+          type: 'number',
+          description: 'telegram_id of the group member to propose the change to.',
+        },
+        action: { type: 'string', enum: ['create', 'update', 'delete'] },
+        event: { type: 'object', description: 'Full event data. Required for action "create".' },
+        event_id: { type: 'string', description: 'ID of the existing event. Required for "update" and "delete".' },
+        changes: { type: 'object', description: 'Fields to change. Required for action "update".' },
+        summary: {
+          type: 'string',
+          description:
+            'Human-readable description shown in the DM. Example: "добавить встречу «Ретро» — пятница 15:00–16:00".',
+        },
+      },
+      required: ['target_telegram_id', 'action', 'summary'],
+    },
+  },
 ];

@@ -27,6 +27,8 @@ import {
   handleRenderDayImage,
   handleRenderWeekImage,
 } from './tool-handlers/meta.ts';
+import type { ProposeInput } from './tool-handlers/proposals.ts';
+import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
 import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import { handleManageSettings } from './tool-handlers/settings.ts';
@@ -45,7 +47,11 @@ import type { AgentContext, ToolResult } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai' });
 
-export function executeTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): ToolResult {
+export async function executeTool(
+  ctx: AgentContext,
+  toolName: string,
+  input: Record<string, unknown>,
+): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   try {
@@ -216,6 +222,9 @@ export function executeTool(ctx: AgentContext, toolName: string, input: Record<s
             secretary_access_id?: number;
           },
         );
+
+      case 'propose_calendar_change':
+        return handleProposeCalendarChange(ctx, input as ProposeInput);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

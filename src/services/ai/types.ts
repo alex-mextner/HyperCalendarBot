@@ -1,3 +1,4 @@
+import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -43,6 +44,8 @@ export interface AgentContext {
   editProposalRepo?: EditProposalRepository;
   secretaryRepo?: SecretaryRepository;
   secretaryForLine?: string;
+  calendarProposalRepo?: CalendarProposalRepository;
+  checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
