@@ -52,9 +52,14 @@ function buildNotificationsView(
     '🔔 Уведомления',
     '',
     `Утренняя сводка: ${fmtTime(morningEnabled, morningTime)}`,
+    '  Краткая повестка дня отправляется каждое утро.',
     `Вечерний обзор: ${fmtTime(eveningEnabled, eveningTime)}`,
+    '  Список событий на завтра — удобно проверить перед сном.',
     `Тихие часы: ${fmtQuiet(quietEnabled, quietStart, quietEnd)}`,
+    '  Напоминания и звонки не беспокоят в это время.',
     `Напоминания: ${intervals.map(fmtInterval).join(', ')}`,
+    '  За сколько до события бот присылает напомининание.',
+    '  Чтобы изменить — напишите AI: «напомни за 10 и 30 минут».',
   ].join('\n');
 
   const kb = backRow(
@@ -72,7 +77,14 @@ function buildNotificationsView(
 // ─── Calls ──────────────────────────────────────────────────────────────────
 
 function buildCallsView(enabled: boolean): { text: string; kb: InlineKeyboard } {
-  const text = `📞 Голосовые звонки\n\nВходящие звонки-напоминания: ${enabled ? '✅ Включены' : '❌ Отключены'}`;
+  const text = [
+    '📞 Голосовые звонки',
+    '',
+    `Звонки-напоминания: ${enabled ? '✅ Включены' : '❌ Отключены'}`,
+    '  Бот позвонит вам перед событием и зачитает название.',
+    '  Работает через Telegram-звонок — не нужен номер телефона.',
+    '  Тихие часы распространяются и на звонки.',
+  ].join('\n');
   const kb = backRow(
     new InlineKeyboard().text(enabled ? '❌ Отключить звонки' : '✅ Включить звонки', 'stg:toggle_calls'),
   );
@@ -86,12 +98,20 @@ function buildPrivacyView(
   inlineEnabled: boolean,
   invitations: boolean,
 ): { text: string; kb: InlineKeyboard } {
+  const visDesc: Record<string, string> = {
+    private: 'Только вы видите свои события.',
+    free_busy: 'Другие видят что вы заняты, но не что именно.',
+    full: 'Другие видят названия и детали ваших событий.',
+  };
   const text = [
     '🔒 Приватность',
     '',
     `Видимость событий: ${visLabel(visibility)}`,
+    `  ${visDesc[visibility] ?? ''}`,
     `Инлайн-поиск: ${inlineEnabled ? '✅' : '❌'}`,
+    '  Позволяет @HyperCalendarBot находить вас через inline-режим.',
     `Приглашения: ${invitations ? '✅' : '❌'}`,
+    '  Разрешить другим пользователям приглашать вас на события.',
   ].join('\n');
 
   const kb = backRow(
@@ -110,7 +130,14 @@ function buildPrivacyView(
 
 function buildVoiceView(voiceEnabled: number | null): { text: string; kb: InlineKeyboard } {
   const status = voiceEnabled === null ? '❓ Не задано' : voiceEnabled === 1 ? '✅ Включены' : '❌ Отключены';
-  const text = `🎤 Голосовые ответы\n\nГолосовые ответы на сообщения: ${status}`;
+  const text = [
+    '🎤 Голосовые ответы',
+    '',
+    `Голосовые ответы: ${status}`,
+    '  Когда включено — бот отвечает на сообщения голосом (TTS).',
+    '  Работает на русском и английском в зависимости от языка бота.',
+    '  Текстовый ответ отправляется всегда, голос — дополнительно.',
+  ].join('\n');
   const kb = backRow(
     new InlineKeyboard().text(
       voiceEnabled === 1 ? '❌ Отключить голосовые ответы' : '✅ Включить голосовые ответы',
