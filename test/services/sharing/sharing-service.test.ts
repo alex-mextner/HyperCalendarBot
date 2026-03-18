@@ -30,6 +30,32 @@ describe('SharingService', () => {
     return { db, service, eventRepo, settingsRepo };
   }
 
+  test('getAgendaForSharing does not return group-owned events', () => {
+    const { service, eventRepo } = setup();
+    const GROUP_ID = -100777;
+    eventRepo.create({
+      user_id: USER_ID,
+      title: 'Group Standup',
+      start_at: '2026-03-15T09:00:00Z',
+      timezone: TZ,
+      owner_type: 'group',
+      group_id: GROUP_ID,
+      created_by: USER_ID,
+    });
+    eventRepo.create({
+      user_id: USER_ID,
+      title: 'Personal Lunch',
+      start_at: '2026-03-15T12:00:00Z',
+      timezone: TZ,
+    });
+
+    const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
+
+    const titles = result.map((e) => e.displayTitle);
+    expect(titles).toContain('Personal Lunch');
+    expect(titles).not.toContain('Group Standup');
+  });
+
   test('getAgendaForSharing returns empty when no events', () => {
     const { service } = setup();
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);

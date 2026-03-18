@@ -688,6 +688,30 @@ describe('event tool handlers', () => {
       expect(groupResult.success).toBe(true);
     });
 
+    test('handleSearchEvents (personal) does not return group-owned events', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Planning',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: USER_ID,
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Planning',
+        start_at: '2026-03-18T11:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const result = handleSearchEvents(ctx, { query: 'Planning' });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Personal Planning');
+      expect(result.output).not.toContain('Group Planning');
+    });
+
     test('handleUpdateEvent (personal) refuses to update group-owned events', () => {
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,

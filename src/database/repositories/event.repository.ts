@@ -50,7 +50,7 @@ export class EventRepository {
   getByDateRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(
-        'SELECT * FROM events WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 ORDER BY start_at',
+        "SELECT * FROM events WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user') ORDER BY start_at",
       )
       .all(userId, startUtc, endUtc) as CalendarEvent[];
   }
@@ -61,6 +61,7 @@ export class EventRepository {
       SELECT * FROM events
       WHERE user_id = ? AND start_at >= ? AND start_at <= ?
         AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
+        AND (owner_type IS NULL OR owner_type = 'user')
       ORDER BY start_at
     `)
       .all(userId, startUtc, endUtc) as CalendarEvent[];
@@ -71,6 +72,7 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE user_id = ? AND recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+        AND (owner_type IS NULL OR owner_type = 'user')
     `)
       .all(userId) as CalendarEvent[];
   }
@@ -212,6 +214,7 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE user_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0
+        AND (owner_type IS NULL OR owner_type = 'user')
       ORDER BY start_at ASC
       LIMIT ?
     `)
@@ -407,6 +410,7 @@ export class EventRepository {
       .prepare(`
       SELECT COUNT(*) as count FROM events
       WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0
+        AND (owner_type IS NULL OR owner_type = 'user')
     `)
       .get(userId, startUtc, endUtc) as { count: number };
     return row.count;
