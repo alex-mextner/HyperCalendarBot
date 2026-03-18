@@ -387,12 +387,9 @@ const COMMANDS_EN = [
   { command: 'settings', description: 'Settings' },
   { command: 'import', description: 'Import .ics' },
   { command: 'export', description: 'Export .ics' },
-  { command: 'notify', description: 'Notification settings' },
   { command: 'share', description: 'Share agenda or event' },
   { command: 'invite', description: 'Invite user to event' },
   { command: 'invitations', description: 'View invitations' },
-  { command: 'privacy', description: 'Privacy & visibility' },
-  { command: 'callsettings', description: 'Voice call settings' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -410,12 +407,9 @@ const COMMANDS_RU = [
   { command: 'settings', description: 'Настройки' },
   { command: 'import', description: 'Импорт .ics' },
   { command: 'export', description: 'Экспорт .ics' },
-  { command: 'notify', description: 'Настройки уведомлений' },
   { command: 'share', description: 'Поделиться повесткой/событием' },
   { command: 'invite', description: 'Пригласить на событие' },
   { command: 'invitations', description: 'Просмотр приглашений' },
-  { command: 'privacy', description: 'Приватность и видимость' },
-  { command: 'callsettings', description: 'Голосовые звонки' },
   { command: 'help', description: 'Справка' },
 ];
 
