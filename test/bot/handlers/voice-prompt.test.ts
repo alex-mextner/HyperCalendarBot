@@ -91,6 +91,47 @@ function makeCallbackHandler(userRepo: { update: ReturnType<typeof mock> }) {
   );
 }
 
+function makeCallbackHandlerWithVoice(deps: {
+  userRepo: { update: ReturnType<typeof mock> };
+  chatHistoryRepo: { getRecent: ReturnType<typeof mock>; save: ReturnType<typeof mock> };
+  voiceDeps: {
+    kokoroTts?: { synthesize: ReturnType<typeof mock> };
+    sendVoice: ReturnType<typeof mock>;
+  };
+}) {
+  return createCallbackHandler(
+    {} as never, // eventService
+    {} as never, // editValueScene
+    {} as never, // holidayService
+    {} as never, // prefsService
+    undefined, // calendarRepo
+    undefined, // disconnectDeps
+    undefined, // onCalendarsDone
+    undefined, // renderService
+    undefined, // invitationService
+    undefined, // groupChatRepo
+    undefined, // eventRepo
+    deps.chatHistoryRepo as never, // chatHistoryRepo
+    undefined, // onAiButtonClick
+    undefined, // oauthDeps
+    undefined, // invitationNotifyDeps
+    undefined, // onboardingScene
+    undefined, // editProposalDeps
+    undefined, // callSettingsRepo
+    undefined, // sharingSettingsRepo
+    undefined, // feedbackDeps
+    deps.userRepo as never, // userRepo
+    undefined, // intentDeps
+    undefined, // secretaryDeps
+    undefined, // proposalDeps
+    undefined, // snoozeDeps
+    undefined, // forceInviteDeps
+    undefined, // proposeTimeSessions
+    undefined, // invitationRepo
+    deps.voiceDeps as never, // voiceDeps
+  );
+}
+
 // ── Tests: voice response prompt ──────────────────────────────────────────────
 
 describe('voice response prompt', () => {
@@ -243,6 +284,31 @@ describe('voice_prompt callback', () => {
     expect(userRepo.update).toHaveBeenCalledWith(100, { voice_response_enabled: 0 });
     const editArg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
     expect(editArg).toContain('текстом');
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+  });
+
+  test('voice_prompt:yes with voiceDeps sends TTS then shows enabled', async () => {
+    const userRepo = { update: mock(() => {}) };
+    const chatHistoryRepo = {
+      save: mock(() => {}),
+      getRecent: mock(() => [
+        { role: 'assistant', content: JSON.stringify([{ type: 'text', text: 'Your meeting is set' }]) },
+      ]),
+    };
+    const synthesize = mock(() => Promise.resolve(Buffer.from('audio')));
+    const sendVoice = mock(() => Promise.resolve());
+    const voiceDeps = { kokoroTts: { synthesize }, sendVoice };
+
+    const handler = makeCallbackHandlerWithVoice({ userRepo, chatHistoryRepo, voiceDeps });
+    const ctx = makeCallbackCtx('voice_prompt:yes', { language: 'en' });
+    await handler(ctx as never);
+
+    expect(userRepo.update).toHaveBeenCalledWith(100, { voice_response_enabled: 1 });
+    const editCalls = ctx.editText.mock.calls;
+    expect((editCalls[0] as unknown[])[0]).toBe('⌛');
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    expect(sendVoice).toHaveBeenCalledTimes(1);
+    expect((editCalls[editCalls.length - 1] as unknown[])[0]).toBe('🎤 Голосовые ответы включены!');
     expect(ctx.answer).toHaveBeenCalledTimes(1);
   });
 

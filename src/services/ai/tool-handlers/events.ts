@@ -175,7 +175,7 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
       const notifyText = `📅 Новое событие${groupLabel}:\n*${event.title}*`;
       for (const member of members) {
         if (member.user_id === ctx.user.telegram_id) continue;
-        ctx.sender.sendMessage(member.user_id, notifyText).catch((err) => {
+        ctx.sender.sendMessage(member.user_id, notifyText, 'Markdown').catch((err) => {
           eventsLogger.error({ error: String(err), userId: member.user_id }, 'Group event notification failed');
         });
       }
@@ -435,7 +435,9 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
     const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
     for (const p of accepted) {
-      ctx.sender.sendMessage(p.user_id, text).catch(() => {});
+      ctx.sender.sendMessage(p.user_id, text).catch((err) => {
+        eventsLogger.error({ error: String(err), userId: p.user_id }, 'Participant notification failed');
+      });
     }
   }
 
