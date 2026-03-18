@@ -6,6 +6,7 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
+import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -40,6 +41,7 @@ export interface AgentContext {
   contactRepo?: ContactRepository;
   participantRepo?: ParticipantRepository;
   editProposalRepo?: EditProposalRepository;
+  secretaryRepo?: SecretaryRepository;
   sender?: TelegramSender;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {

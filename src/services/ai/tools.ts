@@ -640,4 +640,13 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'list_calendar_access',
+    description:
+      'List all calendars this user has access to. Returns their own calendar and any ' +
+      'calendars they can manage as a secretary. Also returns secretaries the user has ' +
+      'added to their own calendar. Call when the user asks about their secretaries or asks ' +
+      'about calendars they manage as secretary for someone else, or when context is ambiguous.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
 ];
