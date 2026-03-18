@@ -39,6 +39,7 @@ describe('CalendarBotAgent', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: 'What do I have today?',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,

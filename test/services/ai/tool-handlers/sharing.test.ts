@@ -59,6 +59,7 @@ describe('sharing tool handlers', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService: new HolidayService(new HolidayRepository(db)),
       chatHistory: new ChatHistoryRepository(db),

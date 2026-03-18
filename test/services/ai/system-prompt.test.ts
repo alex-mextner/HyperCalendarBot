@@ -44,6 +44,7 @@ describe('buildSystemPrompt', () => {
       user,
       chatId: USER_ID,
       messageText: 'hello',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
@@ -111,6 +112,25 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('pick_users');
     expect(prompt).toContain('find_contact');
     expect(prompt).toContain('EXACT sequence');
+  });
+
+  test('includes group context block when isGroup is true', () => {
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Dev Team';
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Group Context');
+    expect(prompt).toContain('Dev Team');
+    expect(prompt).toContain('-100999');
+    expect(prompt).toContain('[SKIP]');
+    expect(prompt).toContain('group calendar');
+  });
+
+  test('does NOT include group context block in DM', () => {
+    ctx.isGroup = false;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('## Group Context');
+    expect(prompt).not.toContain('[SKIP]');
   });
 
   test('includes language instruction for ru user', () => {

@@ -25,10 +25,11 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
         ...(parseMode ? { parse_mode: parseMode } : {}),
       });
     },
-    async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: string) {
+    async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: string, userId?: number) {
       const kb = new InlineKeyboard();
       for (const btn of buttons) {
-        kb.text(btn, `ai_btn:${btn}`).row();
+        const cbData = userId ? `ai_btn:${userId}:${btn}` : `ai_btn:${btn}`;
+        kb.text(btn, cbData).row();
       }
       const result = await bot.api.sendMessage({
         chat_id: chatId,
@@ -95,5 +96,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     sendAsUser: options?.sendAsUser
       ? async (userId: number, text: string, username?: string) => options.sendAsUser!(userId, text, username)
       : undefined,
+    async deleteMessage(chatId: number, messageId: number) {
+      await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });
+    },
   };
 }

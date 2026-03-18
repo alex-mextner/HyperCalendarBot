@@ -13,8 +13,15 @@ export type PipelineResult =
   | { handled: false }
   | { handled: false; feedbackContext: FeedbackThreadContext };
 
+export interface GroupContext {
+  isGroup: boolean;
+  groupChatId?: number;
+  groupTitle?: string;
+  onBotResponse?: (messageId: number) => void;
+}
+
 export type PipelineLayer = (
   ctx: BotCommandContext,
   messageText: string,
-  extra?: { feedbackContext?: FeedbackThreadContext },
+  extra?: { feedbackContext?: FeedbackThreadContext; groupContext?: GroupContext },
 ) => Promise<PipelineResult>;

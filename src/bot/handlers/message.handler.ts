@@ -6,6 +6,7 @@ import type { ContactRepository } from '../../database/repositories/contact.repo
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
@@ -19,6 +20,7 @@ import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
+import type { GroupSessionManager } from '../../services/group/group-session.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
@@ -67,6 +69,9 @@ export interface MessageHandlerDeps {
   deepLinkService?: DeepLinkService;
   sceneStorage: SceneStorage;
   botUsername?: string;
+  botId?: number;
+  groupSessions?: GroupSessionManager;
+  groupMemberRepo?: GroupMemberRepository;
   transcriptionService?: TranscriptionService;
   botToken?: string;
   stressDictionary?: AgentContext['stressDictionary'];
@@ -196,6 +201,7 @@ async function handleVoiceMessage(
       user,
       chatId: Number(chatId),
       messageText: transcription,
+      isGroup: false,
       isVoiceMessage: true,
       eventService: deps.eventService,
       holidayService: deps.holidayService,
@@ -260,10 +266,14 @@ async function handleVoiceMessage(
 }
 
 function buildAgentContextFactory(deps: MessageHandlerDeps) {
-  return (user: User, chatId: number, messageText: string): AgentContext => ({
+  return (user: User, chatId: number, messageText: string, groupInfo?: { isGroup: boolean; groupChatId?: number; groupTitle?: string; onBotResponse?: (messageId: number) => void }): AgentContext => ({
     user,
     chatId,
     messageText,
+    isGroup: groupInfo?.isGroup ?? false,
+    groupChatId: groupInfo?.groupChatId,
+    groupTitle: groupInfo?.groupTitle,
+    onBotResponse: groupInfo?.onBotResponse,
     eventService: deps.eventService,
     holidayService: deps.holidayService,
     chatHistory: deps.chatHistory,
@@ -451,11 +461,20 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
     if (isGroup) {
       const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;
-      const isReplyToBot = reply?.from?.id !== undefined && deps.botUsername !== undefined;
+      const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
 
+      // Track member for fallback reminders
+      if (deps.groupMemberRepo) {
+        deps.groupMemberRepo.upsert(Number(chatId), user.telegram_id);
+      }
+
+      const hasSession = deps.groupSessions?.hasActiveSession(Number(chatId)) ?? false;
+
       if (!isReplyToBot && !isGroupRelevant(text, botMention)) {
-        return; // Skip irrelevant group messages
+        if (!hasSession) return; // No trigger, no session — skip
+        // Session active but no keyword — tick and continue to AI
+        deps.groupSessions!.tick(Number(chatId));
       }
     }
 
@@ -529,6 +548,23 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
     const layers = [...(intentLayer ? [intentLayer] : []), ...staticLayers];
 
-    await runPipeline(ctx, messageText, layers);
+    const groupContext = isGroup
+      ? {
+          isGroup: true as const,
+          groupChatId: Number(chatId),
+          groupTitle: chat?.title ?? undefined,
+          onBotResponse: deps.groupSessions
+            ? (messageId: number) => {
+                if (deps.groupSessions!.hasActiveSession(Number(chatId))) {
+                  deps.groupSessions!.refresh(Number(chatId), messageId);
+                } else {
+                  deps.groupSessions!.activate(Number(chatId), user.telegram_id, messageId);
+                }
+              }
+            : undefined,
+        }
+      : undefined;
+
+    await runPipeline(ctx, messageText, layers, groupContext);
   };
 }

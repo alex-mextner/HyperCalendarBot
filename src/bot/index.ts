@@ -12,6 +12,7 @@ import type { AgentConfig } from '../services/ai/types.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
+import { GroupSessionManager } from '../services/group/group-session.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
@@ -120,6 +121,7 @@ export function createBot(
   );
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
+  const groupSessions = new GroupSessionManager();
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
   const rateLimiter = new RateLimiter({
     perMinute: RATE_LIMIT.MESSAGES_PER_MINUTE,
@@ -234,7 +236,24 @@ export function createBot(
     .command('export', (ctx) => handleExport(ctx as unknown as BotCommandContext, eventService))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService))
     // Sharing commands
-    .command('invite', (ctx) => handleInvite(ctx as unknown as BotCommandContext, eventService))
+    .command('invite', (ctx) =>
+      handleInvite(
+        ctx as unknown as BotCommandContext,
+        invitationService,
+        eventService,
+        db.invitations,
+        deepLinkService,
+        async (chatId, text, options) => {
+          const sent = await bot.api.sendMessage({
+            chat_id: chatId,
+            text,
+            parse_mode: options.parse_mode as 'HTML',
+            reply_markup: options.reply_markup as never,
+          });
+          return { message_id: sent.message_id };
+        },
+      ),
+    )
     .command('invitations', (ctx) =>
       handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
     )
@@ -243,6 +262,65 @@ export function createBot(
     )
     .command('unshare', (ctx) => handleUnshare(ctx as unknown as BotCommandContext, db.groupChats))
     .command('agenda', (ctx) => handleGroupAgenda(ctx as unknown as BotCommandContext, db.groupChats, db.events))
+    // AI agent via /cal command (works in groups and DMs)
+    .command('cal', async (ctx) => {
+      const calCtx = ctx as unknown as BotCommandContext;
+      const user = calCtx.dbUser as User | undefined;
+      if (!user) return;
+      const text = (calCtx.args ?? '').trim();
+      if (!text) {
+        const lang = (user.language ?? 'en') as 'en' | 'ru';
+        await calCtx.send(
+          lang === 'ru'
+            ? 'Напиши после /cal что хочешь. Например: /cal что завтра?'
+            : "Type after /cal what you want. Example: /cal what's tomorrow?",
+        );
+        return;
+      }
+      const chat = (calCtx as unknown as { chat?: { type: string; title?: string } }).chat;
+      const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+      const chatId = calCtx.chatId;
+      if (!chatId) return;
+
+      const from = (calCtx as unknown as { from?: { first_name?: string; username?: string } }).from;
+      let messagePrefix = '';
+      if (isGroup && from) {
+        const senderName = from.first_name ?? from.username ?? 'Unknown';
+        const groupName = chat?.title ?? 'group';
+        messagePrefix = `[Group: ${groupName}, From: ${senderName}] `;
+      }
+
+      await agent.run({
+        user,
+        chatId: Number(chatId),
+        messageText: messagePrefix + text,
+        isGroup,
+        groupChatId: isGroup ? Number(chatId) : undefined,
+        groupTitle: isGroup ? (chat?.title ?? undefined) : undefined,
+        onBotResponse: isGroup
+          ? (messageId: number) => {
+              if (groupSessions.hasActiveSession(Number(chatId))) {
+                groupSessions.refresh(Number(chatId), messageId);
+              } else {
+                groupSessions.activate(Number(chatId), user.telegram_id, messageId);
+              }
+            }
+          : undefined,
+        eventService,
+        holidayService,
+        chatHistory: db.chatHistory,
+        userRepo: db.users,
+        reminderRepo: db.reminders,
+        contactRepo: db.contacts,
+        invitationService,
+        invitationRepo: db.invitations,
+        sharingService,
+        sharingSettingsRepo: db.sharingSettings,
+        sharedEventRepo: db.sharedEvents,
+        privacyService,
+        googleCalendarRepo: googleDeps?.calendarRepo,
+      });
+    })
     // Callback queries
     .on('callback_query', (ctx) =>
       createCallbackHandler(
@@ -265,6 +343,7 @@ export function createBot(
             user,
             chatId,
             messageText: text,
+            isGroup: false,
             eventService,
             holidayService,
             chatHistory: db.chatHistory,
@@ -307,8 +386,6 @@ export function createBot(
         },
       )(ctx as unknown as BotCallbackContext),
     )
-    // Inline queries (sharing via inline mode)
-    .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) => createChatMemberHandler(db.groupChats)(ctx as never))
     // Users shared from picker modal → send invitations
@@ -361,6 +438,7 @@ export function createBot(
             user,
             chatId,
             messageText: contextMsg,
+            isGroup: false,
             eventService,
             holidayService,
             chatHistory: db.chatHistory,
@@ -422,6 +500,9 @@ export function createBot(
         deepLinkService,
         sceneStorage: scenesSetup.storage,
         botUsername: process.env.BOT_USERNAME,
+        botId: Number(token.split(':')[0]),
+        groupSessions,
+        groupMemberRepo: db.groupMembers,
         transcriptionService,
         botToken: token,
         stressDictionary,
@@ -470,8 +551,25 @@ export function createBot(
       .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
   }
 
+  // Inline bot: separate bot instance for inline queries (or fallback to main bot)
+  const inlineBotToken = process.env.INLINE_BOT_TOKEN;
+  let inlineBot: Bot | undefined;
+  if (inlineBotToken) {
+    inlineBot = new Bot(inlineBotToken);
+    inlineBot
+      .derive(createUserResolver(db))
+      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
+      .onError(({ error }) => {
+        botLogger.error({ error: String(error) }, 'Inline bot error');
+      });
+  } else {
+    // No separate inline bot — register on main bot
+    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never));
+  }
+
   return {
     bot,
+    inlineBot,
     eventService,
     holidayService,
     prefsService,
@@ -480,6 +578,7 @@ export function createBot(
     invitationService,
     sharingService,
     inlineService,
+    groupSessions,
     db,
     renderService,
   };

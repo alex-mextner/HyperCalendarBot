@@ -43,6 +43,7 @@ describe('executeTool', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,

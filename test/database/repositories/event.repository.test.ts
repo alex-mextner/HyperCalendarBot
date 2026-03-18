@@ -254,4 +254,146 @@ describe('EventRepository', () => {
       expect(updated!.recurrence_rule).toBe('FREQ=WEEKLY;UNTIL=20260314T000000Z');
     });
   });
+
+  describe('group calendar', () => {
+    const GROUP_ID = 999;
+    const CREATOR_ID = USER_ID;
+
+    function createGroupEvent(overrides: { title?: string; start_at?: string; recurrence_rule?: string } = {}) {
+      return events.create({
+        user_id: CREATOR_ID,
+        title: overrides.title ?? 'Group Meeting',
+        start_at: overrides.start_at ?? '2026-03-12T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: CREATOR_ID,
+        ...(overrides.recurrence_rule ? { recurrence_rule: overrides.recurrence_rule } : {}),
+      });
+    }
+
+    test('create() stores owner_type, group_id, created_by', () => {
+      const event = createGroupEvent();
+      const row = db.prepare('SELECT * FROM events WHERE id = ?').get(event.id) as CalendarEvent;
+      expect(row.owner_type).toBe('group');
+      expect(row.group_id).toBe(GROUP_ID);
+      expect(row.created_by).toBe(CREATOR_ID);
+    });
+
+    test('findByIdInGroup() finds group event without user_id check', () => {
+      const event = createGroupEvent();
+      const found = events.findByIdInGroup(event.id, GROUP_ID);
+      expect(found).not.toBeNull();
+      expect(found!.title).toBe('Group Meeting');
+    });
+
+    test('findByIdInGroup() returns null for wrong group', () => {
+      const event = createGroupEvent();
+      expect(events.findByIdInGroup(event.id, 888)).toBeNull();
+    });
+
+    test('getByDateRangeForGroup() returns only group events, not personal', () => {
+      createGroupEvent({ title: 'Group Event', start_at: '2026-03-12T10:00:00Z' });
+      events.create({
+        user_id: USER_ID,
+        title: 'Personal Event',
+        start_at: '2026-03-12T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const results = events.getByDateRangeForGroup(GROUP_ID, '2026-03-12T00:00:00Z', '2026-03-12T23:59:59Z');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Group Event');
+    });
+
+    test('getByDateRangeForGroup() returns only events for specified group', () => {
+      createGroupEvent({ title: 'Group1 Event', start_at: '2026-03-12T10:00:00Z' });
+      events.create({
+        user_id: CREATOR_ID,
+        title: 'Group2 Event',
+        start_at: '2026-03-12T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: 777,
+        created_by: CREATOR_ID,
+      });
+
+      const results = events.getByDateRangeForGroup(GROUP_ID, '2026-03-12T00:00:00Z', '2026-03-12T23:59:59Z');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Group1 Event');
+    });
+
+    test('getInRangeForGroup() returns non-recurring group events in range', () => {
+      createGroupEvent({ title: 'InRange', start_at: '2026-03-12T10:00:00Z' });
+      createGroupEvent({ title: 'OutOfRange', start_at: '2026-03-20T10:00:00Z' });
+
+      const results = events.getInRangeForGroup(GROUP_ID, '2026-03-12T00:00:00Z', '2026-03-12T23:59:59Z');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('InRange');
+    });
+
+    test('getRecurringTemplatesForGroup() returns group recurring events', () => {
+      createGroupEvent({ title: 'Weekly Standup', recurrence_rule: 'FREQ=WEEKLY' });
+      createGroupEvent({ title: 'One-off' });
+
+      const templates = events.getRecurringTemplatesForGroup(GROUP_ID);
+      expect(templates.length).toBe(1);
+      expect(templates[0]!.title).toBe('Weekly Standup');
+    });
+
+    test('searchForGroup() searches within group events only', () => {
+      createGroupEvent({ title: 'Planning Meeting' });
+      events.create({
+        user_id: USER_ID,
+        title: 'Planning Session',
+        start_at: '2026-03-12T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const results = events.searchForGroup(GROUP_ID, 'planning');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Planning Meeting');
+    });
+
+    test('getUpcomingForGroup() returns upcoming group events', () => {
+      createGroupEvent({ title: 'Future Group', start_at: '2099-06-01T10:00:00Z' });
+      events.create({
+        user_id: USER_ID,
+        title: 'Future Personal',
+        start_at: '2099-06-01T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const results = events.getUpcomingForGroup(GROUP_ID, 10, new Date('2026-01-01T00:00:00Z'));
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Future Group');
+    });
+
+    test('updateInGroup() updates event by group', () => {
+      const event = createGroupEvent({ title: 'Old Title' });
+      const updated = events.updateInGroup(event.id, GROUP_ID, { title: 'New Title' });
+      expect(updated).not.toBeNull();
+      expect(updated!.title).toBe('New Title');
+    });
+
+    test('updateInGroup() returns null for wrong group', () => {
+      const event = createGroupEvent();
+      const result = events.updateInGroup(event.id, 888, { title: 'Hacked' });
+      expect(result).toBeNull();
+    });
+
+    test('removeFromGroup() deletes event by group', () => {
+      const event = createGroupEvent();
+      const removed = events.removeFromGroup(event.id, GROUP_ID);
+      expect(removed).toBe(true);
+      expect(events.findByIdInGroup(event.id, GROUP_ID)).toBeNull();
+    });
+
+    test('removeFromGroup() returns false for wrong group', () => {
+      const event = createGroupEvent();
+      const removed = events.removeFromGroup(event.id, 888);
+      expect(removed).toBe(false);
+      expect(events.findByIdInGroup(event.id, GROUP_ID)).not.toBeNull();
+    });
+  });
 });

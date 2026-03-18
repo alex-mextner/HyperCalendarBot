@@ -17,6 +17,7 @@ import {
   handleGetContacts,
   handleGetHolidays,
   handlePickUsers,
+  handleRenderDayImage,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -53,6 +54,7 @@ describe('meta tool handlers', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
@@ -236,6 +238,92 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('group');
       expect(result.output).toContain('@mxtnr');
       expect(result.output).toContain('feedback');
+    });
+  });
+
+  describe('handleRenderDayImage', () => {
+    const GROUP_CHAT_ID = -100999;
+    let renderCalls: Record<string, unknown>[];
+    let photoCalls: { chatId: number }[];
+
+    beforeEach(() => {
+      renderCalls = [];
+      photoCalls = [];
+      ctx.renderService = {
+        renderDirect(opts: Record<string, unknown>) {
+          renderCalls.push(opts);
+          return Promise.resolve(Buffer.from('png'));
+        },
+      };
+      ctx.sender = {
+        sendMessage: (() => Promise.resolve({ message_id: 1 })) as never,
+        editMessageText: (() => Promise.resolve()) as never,
+        sendPhoto(chatId: number) {
+          photoCalls.push({ chatId });
+          return Promise.resolve();
+        },
+      };
+    });
+
+    test('returns error when renderService not available', () => {
+      ctx.renderService = undefined;
+      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not available');
+    });
+
+    test('fetches personal events by default when isGroup=false', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Event',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('2026-03-15');
+    });
+
+    test('fetches group events when scope=group', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Only',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: '2026-03-15T14:00:00Z',
+        end_at: '2026-03-15T15:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+      const gCtx: AgentContext = {
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_CHAT_ID,
+        chatId: GROUP_CHAT_ID,
+      };
+      const result = handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('2026-03-15');
+    });
+
+    test('scope defaults to group when isGroup=true', () => {
+      const gCtx: AgentContext = {
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_CHAT_ID,
+        chatId: GROUP_CHAT_ID,
+      };
+      const result = handleRenderDayImage(gCtx, { date: '2026-03-15' });
+      expect(result.success).toBe(true);
+      // Just verifying it doesn't crash — scope resolved to group
     });
   });
 });

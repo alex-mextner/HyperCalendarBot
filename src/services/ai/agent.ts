@@ -51,9 +51,13 @@ export class CalendarBotAgent {
 
   buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
     const systemPrompt = buildSystemPrompt(ctx);
+
+    const relevantHistory =
+      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 10) : history;
+
     const messages: MessageParam[] = [];
 
-    for (const msg of history) {
+    for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
       try {
         const parsed = JSON.parse(msg.content);
@@ -71,15 +75,18 @@ export class CalendarBotAgent {
   }
 
   saveUserMessage(ctx: AgentContext): void {
-    ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText);
+    const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
+    ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText, chatId);
   }
 
   saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
-    ctx.chatHistory.save(ctx.user.telegram_id, 'assistant', JSON.stringify(contentBlocks));
+    const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
+    ctx.chatHistory.save(ctx.user.telegram_id, 'assistant', JSON.stringify(contentBlocks), chatId);
   }
 
   saveToolResults(ctx: AgentContext, toolResults: Anthropic.ToolResultBlockParam[]): void {
-    ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults));
+    const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
+    ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults), chatId);
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
@@ -245,7 +252,19 @@ export class CalendarBotAgent {
       writer.appendText(errorMsg);
     }
 
+    const finalText = writer.getText().trim();
+    if (ctx.isGroup && finalText === '[SKIP]') {
+      await writer.discard();
+      return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+    }
+
     await writer.finalize();
+
+    if (ctx.onBotResponse) {
+      const msgId = writer.getMessageId() ?? 0;
+      ctx.onBotResponse(msgId);
+    }
+
     return { responseText: writer.getText(), toolCalls: allToolCalls, toolResults: allToolResults };
   }
 }

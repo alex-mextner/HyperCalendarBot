@@ -13,12 +13,14 @@ export interface EnvConfig {
   OAUTH_SERVER_PORT?: number;
   ENCRYPTION_KEY?: string;
   PUBLIC_DOMAIN?: string;
-  HF_TOKEN?: string;
-  BOT_ADMIN_ID?: number;
-  INTENT_LEARNER_DAILY_LIMIT: number;
   BOT_USERNAME?: string;
   MTPROTO_API_ID?: number;
   MTPROTO_API_HASH?: string;
+  HF_TOKEN?: string;
+  BOT_ADMIN_ID?: number;
+  INTENT_LEARNER_DAILY_LIMIT: number;
+  INLINE_BOT_TOKEN?: string;
+  INLINE_BOT_USERNAME?: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -92,5 +94,7 @@ export function loadConfig(): EnvConfig {
     HF_TOKEN: process.env.HF_TOKEN || undefined,
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
+    INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
+    INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,
   };
 }

@@ -37,6 +37,7 @@ describe('handleGetFreeSlots', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
@@ -62,5 +63,76 @@ describe('handleGetFreeSlots', () => {
     const result = handleGetFreeSlots(ctx, { date: '2026-03-15T00:00:00Z' });
     expect(result.success).toBe(true);
     expect(result.output).toBeDefined();
+  });
+
+  describe('group scope', () => {
+    const GROUP_CHAT_ID = -100999;
+
+    function makeGroupCtx(): AgentContext {
+      return {
+        ...ctx,
+        isGroup: true,
+        groupChatId: GROUP_CHAT_ID,
+        chatId: GROUP_CHAT_ID,
+      };
+    }
+
+    test('returns free slots for group calendar with scope=group', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Morning',
+        start_at: '2026-03-15T09:00:00Z',
+        end_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleGetFreeSlots(gCtx, { date: '2026-03-15T00:00:00Z', scope: 'group' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Free slots');
+    });
+
+    test('scope defaults to group when isGroup=true', () => {
+      // Personal event should not affect group free slots
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal All Day',
+        start_at: '2026-03-15T00:00:00Z',
+        end_at: '2026-03-15T23:59:59Z',
+        timezone: 'UTC',
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleGetFreeSlots(gCtx, { date: '2026-03-15T00:00:00Z' });
+      expect(result.success).toBe(true);
+      // Group has no events, so full day free
+      expect(result.output).toContain('Free slots');
+    });
+
+    test('group scope ignores personal events', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Personal Blocker',
+        start_at: '2026-03-15T09:00:00Z',
+        end_at: '2026-03-15T17:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Short',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_CHAT_ID,
+        created_by: USER_ID,
+      });
+      const gCtx = makeGroupCtx();
+      const result = handleGetFreeSlots(gCtx, { date: '2026-03-15T00:00:00Z', scope: 'group' });
+      expect(result.success).toBe(true);
+      // Group only has 1h busy, so there should be free slots before and after
+      expect(result.output).toContain('Free slots');
+    });
   });
 });

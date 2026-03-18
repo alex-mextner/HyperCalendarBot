@@ -1,8 +1,13 @@
+import type { EventOccurrence } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { resolveScope } from './shared.ts';
+
+type Scope = 'personal' | 'group';
 
 interface GetEventsInput {
   start_date: string;
   end_date: string;
+  scope?: Scope;
 }
 
 interface CreateEventInput {
@@ -15,6 +20,7 @@ interface CreateEventInput {
   recurrence_rule?: string;
   reminder_minutes?: number[];
   force?: boolean;
+  scope?: Scope;
 }
 
 interface UpdateEventInput {
@@ -25,31 +31,44 @@ interface UpdateEventInput {
   description?: string | null;
   location?: string | null;
   recurrence_rule?: string | null;
+  scope?: Scope;
 }
 
 interface DeleteEventInput {
   event_id: number;
+  scope?: Scope;
 }
 
 interface GetUpcomingInput {
   limit?: number;
+  scope?: Scope;
 }
 
 interface SnoozeEventInput {
   event_id: number;
   minutes?: number;
+  scope?: Scope;
 }
 
 interface GetEventInput {
   event_id: number;
+  scope?: Scope;
 }
 
 interface SearchEventsInput {
   query: string;
+  scope?: Scope;
 }
 
 export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
-  const occurrences = ctx.eventService.getEventsInRange(ctx.user.telegram_id, input.start_date, input.end_date);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+  const occurrences =
+    scope === 'group'
+      ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, input.start_date, input.end_date)
+      : ctx.eventService.getEventsInRange(ctx.user.telegram_id, input.start_date, input.end_date);
 
   if (occurrences.length === 0) {
     return { success: true, output: 'No events found in this range.' };
@@ -95,6 +114,10 @@ export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): T
 
 function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
   try {
+    const scope = resolveScope(input, ctx);
+    if (scope === 'group' && !ctx.groupChatId) {
+      return { success: false, error: 'Group context required for group scope' };
+    }
     const event = ctx.eventService.createEvent({
       user_id: ctx.user.telegram_id,
       title: input.title,
@@ -106,6 +129,11 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolRes
       timezone: ctx.user.timezone,
       recurrence_rule: input.recurrence_rule,
       reminder_minutes: input.reminder_minutes,
+      ...(scope === 'group' && {
+        owner_type: 'group' as const,
+        group_id: ctx.groupChatId!,
+        created_by: ctx.user.telegram_id,
+      }),
     });
 
     const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
@@ -120,8 +148,15 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolRes
 }
 
 export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
-  const { event_id, ...updates } = input;
-  const updated = ctx.eventService.updateEvent(event_id, ctx.user.telegram_id, updates);
+  const scope = resolveScope(input, ctx);
+  const { event_id, scope: _, ...updates } = input;
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+  const updated =
+    scope === 'group'
+      ? ctx.eventService.updateEventForGroup(event_id, ctx.groupChatId!, updates)
+      : ctx.eventService.updateEvent(event_id, ctx.user.telegram_id, updates);
 
   if (!updated) {
     return { success: false, error: `Event ${event_id} not found or not owned by you.` };
@@ -147,6 +182,20 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
+  const scope = resolveScope(input, ctx);
+
+  if (scope === 'group') {
+    if (!ctx.groupChatId) {
+      return { success: false, error: 'Group context required for group scope' };
+    }
+    const event = ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!);
+    if (!event) {
+      return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
+    }
+    ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
+    return { success: true, output: `Event "${event.title}" (id: ${event.id}) deleted.` };
+  }
+
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
 
   if (!event && ctx.participantRepo) {
@@ -169,7 +218,14 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
 }
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
-  const events = ctx.eventService.searchEvents(ctx.user.telegram_id, input.query);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+  const events =
+    scope === 'group'
+      ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
+      : ctx.eventService.searchEvents(ctx.user.telegram_id, input.query);
 
   if (events.length === 0) {
     return { success: true, output: 'No events found matching the query.' };
@@ -187,11 +243,23 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
   const limit = input.limit ?? 5;
-  const now = new Date().toISOString();
-  const farFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
-  const occurrences = ctx.eventService.getEventsInRange(ctx.user.telegram_id, now, farFuture);
+  const scope = resolveScope(input, ctx);
 
-  const upcoming = occurrences.slice(0, limit);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+
+  let upcoming: EventOccurrence[];
+
+  if (scope === 'group') {
+    upcoming = ctx.eventService.getUpcomingForGroup(ctx.groupChatId!, limit);
+  } else {
+    const now = new Date().toISOString();
+    const farFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const occurrences = ctx.eventService.getEventsInRange(ctx.user.telegram_id, now, farFuture);
+    upcoming = occurrences.slice(0, limit);
+  }
+
   if (upcoming.length === 0) {
     return { success: true, output: 'No upcoming events.' };
   }
@@ -208,7 +276,15 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
 }
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+  const event =
+    scope === 'group'
+      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
@@ -221,7 +297,11 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     updates.end_at = new Date(new Date(event.end_at).getTime() + minutes * 60_000).toISOString();
   }
 
-  const updated = ctx.eventService.updateEvent(input.event_id, ctx.user.telegram_id, updates);
+  const updated =
+    scope === 'group'
+      ? ctx.eventService.updateEventForGroup(input.event_id, ctx.groupChatId!, updates)
+      : ctx.eventService.updateEvent(input.event_id, ctx.user.telegram_id, updates);
+
   if (!updated) {
     return { success: false, error: 'Failed to snooze event.' };
   }
@@ -233,7 +313,15 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
 }
 
 export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
-  const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+  const scope = resolveScope(input, ctx);
+  if (scope === 'group' && !ctx.groupChatId) {
+    return { success: false, error: 'Group context required for group scope' };
+  }
+  const event =
+    scope === 'group'
+      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+      : ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
+
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }

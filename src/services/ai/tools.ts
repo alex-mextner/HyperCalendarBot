@@ -17,6 +17,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'End date in ISO 8601 UTC (e.g., "2026-03-15T23:59:59Z")',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['start_date', 'end_date'],
     },
@@ -58,6 +63,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'boolean',
           description: 'Set to true to create event in the past after user confirmed. Do NOT set without asking first.',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['title', 'start_at'],
     },
@@ -90,6 +100,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'New RRULE string. Pass null to remove recurrence. Optional.',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['event_id'],
     },
@@ -104,6 +119,11 @@ export const toolDefinitions: ToolDefinition[] = [
         event_id: {
           type: 'number',
           description: 'ID of the event to delete',
+        },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
       },
       required: ['event_id'],
@@ -135,6 +155,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'Date in ISO 8601 UTC (e.g., "2026-03-15T00:00:00Z")',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['date'],
     },
@@ -148,6 +173,11 @@ export const toolDefinitions: ToolDefinition[] = [
         query: {
           type: 'string',
           description: 'Search query to match against event titles',
+        },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
       },
       required: ['query'],
@@ -167,6 +197,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'array',
           items: { type: 'number' },
           description: 'Array of minutes before event to send reminders (e.g., [15, 60])',
+        },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
       },
       required: ['event_id', 'minutes_before'],
@@ -231,6 +266,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'number',
           description: 'Maximum number of events to return. Default: 5.',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: [],
     },
@@ -243,6 +283,11 @@ export const toolDefinitions: ToolDefinition[] = [
       properties: {
         event_id: { type: 'number', description: 'ID of the event to snooze' },
         minutes: { type: 'number', description: 'Minutes to postpone by. Default: 10.' },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['event_id'],
     },
@@ -254,6 +299,11 @@ export const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event' },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['event_id'],
     },
@@ -265,6 +315,11 @@ export const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event' },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['event_id'],
     },
@@ -432,6 +487,11 @@ export const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'Date in YYYY-MM-DD format (e.g., "2026-03-17")',
         },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
       },
       required: ['date'],
     },
@@ -446,6 +506,11 @@ export const toolDefinitions: ToolDefinition[] = [
         week_start: {
           type: 'string',
           description: 'Monday date in YYYY-MM-DD format (e.g., "2026-03-16")',
+        },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
         },
       },
       required: ['week_start'],

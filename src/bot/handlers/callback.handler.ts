@@ -506,16 +506,38 @@ export function createCallbackHandler(
 
       // AI ask_user button responses — save answer and trigger AI continuation
       if (action === 'ai_btn') {
+        // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
+        // Check if the second segment is a numeric userId (group restriction)
+        const firstColon = data.indexOf(':');
+        const rest = data.slice(firstColon + 1);
+        const secondColon = rest.indexOf(':');
+        let answerText: string;
+        let restrictedToUserId: number | undefined;
+
+        if (secondColon !== -1 && /^\d+$/.test(rest.slice(0, secondColon))) {
+          restrictedToUserId = Number(rest.slice(0, secondColon));
+          answerText = rest.slice(secondColon + 1);
+        } else {
+          answerText = rest;
+        }
+
+        // In groups, only the user who triggered the question can answer
+        const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+        if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
+          await ctx.answer({ text: 'Не твой вопрос', show_alert: false });
+          return;
+        }
+
         await ctx.answer();
-        await ctx.editText(`✅ ${payload}`);
+        await ctx.editText(`✅ ${answerText}`);
         if (chatHistoryRepo) {
-          chatHistoryRepo.save(user.telegram_id, 'user', payload);
+          chatHistoryRepo.save(user.telegram_id, 'user', answerText);
         }
         const cbChatId =
           (ctx as unknown as { chat?: { id: number } }).chat?.id ??
           (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
         if (onAiButtonClick && cbChatId) {
-          onAiButtonClick(user.telegram_id, cbChatId, payload).catch((e) => {
+          onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
             cmdLogger.error({ error: String(e) }, 'AI button continuation failed');
           });
         }

@@ -27,6 +27,10 @@ export class EventService {
     private onParticipantsNotify?: (userIds: number[], text: string) => void,
   ) {}
 
+  private getSyncUserId(event: CalendarEvent): number {
+    return event.owner_type === 'group' && event.created_by ? event.created_by : event.user_id;
+  }
+
   createEvent(data: CreateEventData): CalendarEvent {
     const event = this.eventRepo.create(data);
     const reminderMinutes = data.reminder_minutes ?? [DEFAULTS.REMINDER_MINUTES];
@@ -40,7 +44,7 @@ export class EventService {
       );
     }
     if (this.pushSync && event.google_calendar_id) {
-      this.pushSync(event.user_id, event.id, 'create');
+      this.pushSync(this.getSyncUserId(event), event.id, 'create');
     }
     return event;
   }
@@ -55,7 +59,7 @@ export class EventService {
       );
     }
     if (this.pushSync && updated?.google_calendar_id) {
-      this.pushSync(updated.user_id, updated.id, 'update');
+      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
     }
     if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
       this.onEventTimeChanged(id, userId, data.start_at);
@@ -66,7 +70,7 @@ export class EventService {
   deleteEvent(id: number, userId: number): boolean {
     const event = this.eventRepo.findById(id, userId);
     if (this.pushSync && event?.google_calendar_id) {
-      this.pushSync(userId, id, 'delete');
+      this.pushSync(this.getSyncUserId(event), id, 'delete');
     }
     if (this.onParticipantsNotify && this.participantRepo && event) {
       const accepted = this.participantRepo
@@ -252,6 +256,97 @@ export class EventService {
 
     // Delete all exceptions >= occurrenceDate
     this.eventRepo.deleteExceptionsFrom(templateId, occurrenceDate);
+  }
+
+  getEventsInRangeForGroup(groupId: number, startUtc: string, endUtc: string): EventOccurrence[] {
+    const oneOff = this.eventRepo.getInRangeForGroup(groupId, startUtc, endUtc).map(
+      (event) =>
+        ({
+          event,
+          occurrence_start: event.start_at,
+          occurrence_end: event.end_at,
+          is_exception: false,
+        }) satisfies EventOccurrence,
+    );
+
+    const templates = this.eventRepo.getRecurringTemplatesForGroup(groupId);
+    const recurring: EventOccurrence[] = [];
+    for (const template of templates) {
+      const exceptions = this.eventRepo.getExceptions(template.id);
+      const expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      recurring.push(...expanded);
+    }
+
+    return [...oneOff, ...recurring].sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+  }
+
+  getEventForGroup(eventId: number, groupId: number): CalendarEvent | null {
+    return this.eventRepo.findByIdInGroup(eventId, groupId);
+  }
+
+  updateEventForGroup(eventId: number, groupId: number, data: UpdateEventData): CalendarEvent | null {
+    const existing = data.start_at && this.onEventTimeChanged ? this.eventRepo.findByIdInGroup(eventId, groupId) : null;
+    const updated = this.eventRepo.updateInGroup(eventId, groupId, data);
+    if (this.materializer && updated) {
+      this.materializer.materialize(
+        { id: updated.id, start_at: updated.start_at, reminder_overrides: updated.reminder_overrides ?? null },
+        updated.user_id,
+      );
+    }
+    if (this.pushSync && updated?.google_calendar_id) {
+      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
+    }
+    if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
+      this.onEventTimeChanged(eventId, updated.user_id, data.start_at);
+    }
+    return updated;
+  }
+
+  deleteEventForGroup(eventId: number, groupId: number): boolean {
+    const event = this.eventRepo.findByIdInGroup(eventId, groupId);
+    if (event) {
+      if (this.pushSync && event.google_calendar_id) {
+        this.pushSync(this.getSyncUserId(event), eventId, 'delete');
+      }
+      if (this.onEventDeleted) {
+        this.onEventDeleted(eventId, event.user_id);
+      }
+      if (this.materializer) {
+        this.materializer.deleteForEvent(eventId);
+      }
+    }
+    return this.eventRepo.removeFromGroup(eventId, groupId);
+  }
+
+  searchEventsForGroup(groupId: number, query: string): CalendarEvent[] {
+    return this.eventRepo.searchForGroup(groupId, query);
+  }
+
+  getUpcomingForGroup(groupId: number, limit = 10): EventOccurrence[] {
+    const now = new Date().toISOString();
+    const farFuture = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
+    const events = this.eventRepo.getUpcomingForGroup(groupId, limit);
+
+    const oneOff: EventOccurrence[] = events
+      .filter((e) => !e.recurrence_rule)
+      .map((event) => ({
+        event,
+        occurrence_start: event.start_at,
+        occurrence_end: event.end_at,
+        is_exception: false,
+      }));
+
+    const recurring: EventOccurrence[] = [];
+    const templates = events.filter((e) => e.recurrence_rule);
+    for (const template of templates) {
+      const exceptions = this.eventRepo.getExceptions(template.id);
+      const expanded = expandRecurrence(template, exceptions, now, farFuture);
+      recurring.push(...expanded.slice(0, limit));
+    }
+
+    return [...oneOff, ...recurring]
+      .sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start))
+      .slice(0, limit);
   }
 
   cancelOccurrence(templateId: number, userId: number, originalStartAt: string): CalendarEvent | null {

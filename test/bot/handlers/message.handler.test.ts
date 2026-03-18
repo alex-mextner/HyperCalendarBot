@@ -128,6 +128,133 @@ describe('createMessageHandler', () => {
       );
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
     });
+
+    test('fixes isReplyToBot — only matches actual bot ID, not any reply', async () => {
+      const deps = makeDeps({ botId: 999 });
+      const handler = createMessageHandler(deps as never);
+      // Reply to some random user (id=500) — should NOT activate
+      await handler(
+        makeCtx({
+          text: 'ок буду',
+          chat: { type: 'group', title: 'Chat' },
+          replyToMessage: { from: { id: 500 } },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('routes reply to bot by matching botId', async () => {
+      const deps = makeDeps({ botId: 999 });
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'ок буду',
+          chat: { type: 'group', title: 'Chat' },
+          replyToMessage: { from: { id: 999 } },
+        }) as never,
+      );
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('tracks group member when groupMemberRepo is provided', async () => {
+      const groupMemberRepo = { upsert: mock(() => {}) };
+      const deps = makeDeps({ groupMemberRepo });
+      const handler = createMessageHandler(deps as never);
+      await handler(
+        makeCtx({
+          text: 'встреча завтра',
+          chat: { type: 'group', title: 'Work' },
+        }) as never,
+      );
+      expect(groupMemberRepo.upsert).toHaveBeenCalledWith(100, 100);
+    });
+
+    describe('group sessions', () => {
+      function makeGroupSessions(active = false) {
+        return {
+          hasActiveSession: mock(() => active),
+          tick: mock(() => {}),
+          activate: mock(() => {}),
+          refresh: mock(() => {}),
+        };
+      }
+
+      test('routes irrelevant message when session is active', async () => {
+        const groupSessions = makeGroupSessions(true);
+        const deps = makeDeps({ groupSessions });
+        const handler = createMessageHandler(deps as never);
+        await handler(
+          makeCtx({
+            text: 'да конечно',
+            chat: { type: 'group', title: 'Work' },
+          }) as never,
+        );
+        expect(deps.agent.run).toHaveBeenCalledTimes(1);
+        expect(groupSessions.tick).toHaveBeenCalledWith(100);
+      });
+
+      test('skips irrelevant message when no session', async () => {
+        const groupSessions = makeGroupSessions(false);
+        const deps = makeDeps({ groupSessions });
+        const handler = createMessageHandler(deps as never);
+        await handler(
+          makeCtx({
+            text: 'да конечно',
+            chat: { type: 'group', title: 'Work' },
+          }) as never,
+        );
+        expect(deps.agent.run).toHaveBeenCalledTimes(0);
+        expect(groupSessions.tick).not.toHaveBeenCalled();
+      });
+
+      test('passes onBotResponse that activates session', async () => {
+        const groupSessions = makeGroupSessions(false);
+        const deps = makeDeps({ groupSessions });
+        const handler = createMessageHandler(deps as never);
+        await handler(
+          makeCtx({
+            text: 'встреча завтра',
+            chat: { type: 'group', title: 'Work' },
+          }) as never,
+        );
+        // Extract onBotResponse from the AgentContext passed to agent.run
+        const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as {
+          onBotResponse?: (messageId: number) => void;
+        };
+        expect(call.onBotResponse).toBeDefined();
+        // Call it — should activate since hasActiveSession returns false
+        call.onBotResponse!(42);
+        expect(groupSessions.activate).toHaveBeenCalledWith(100, 100, 42);
+      });
+
+      test('onBotResponse refreshes existing session', async () => {
+        const groupSessions = makeGroupSessions(true);
+        const deps = makeDeps({ groupSessions });
+        const handler = createMessageHandler(deps as never);
+        await handler(
+          makeCtx({
+            text: 'встреча завтра',
+            chat: { type: 'group', title: 'Work' },
+          }) as never,
+        );
+        const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as {
+          onBotResponse?: (messageId: number) => void;
+        };
+        call.onBotResponse!(55);
+        expect(groupSessions.refresh).toHaveBeenCalledWith(100, 55);
+      });
+
+      test('onBotResponse is undefined in private chats', async () => {
+        const groupSessions = makeGroupSessions(false);
+        const deps = makeDeps({ groupSessions });
+        const handler = createMessageHandler(deps as never);
+        await handler(makeCtx() as never);
+        const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as {
+          onBotResponse?: (messageId: number) => void;
+        };
+        expect(call.onBotResponse).toBeUndefined();
+      });
+    });
   });
 
   describe('voice messages', () => {
