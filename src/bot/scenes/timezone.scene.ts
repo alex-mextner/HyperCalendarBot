@@ -4,7 +4,7 @@ import { CB } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { timezoneCitiesKeyboard, timezoneManualKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
-import { getSceneUser } from './helpers.ts';
+import { getSceneLang, getSceneUser } from './helpers.ts';
 
 export function createTimezoneScene(db: DatabaseService) {
   return (
