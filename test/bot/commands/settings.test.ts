@@ -367,6 +367,7 @@ describe('handleSettingsCallback', () => {
   });
 });
 
+
 describe('stg:general with buttons', () => {
   test('renders timezone, language, country without /timezone text', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
@@ -518,5 +519,62 @@ describe('stg:toggle_reminder', () => {
     await handleSettingsCallback(ctx, makeUser() as never, 'toggle_reminder:15', prefs as never);
 
     expect(updateFn).toHaveBeenCalledWith(100, [30]);
+  });
+});
+
+describe('handleSettings in group context', () => {
+  test('shows group settings with timezone', async () => {
+    const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
+    const groupRepo = {
+      findByChatId: mock(() => ({
+        chat_id: -100,
+        timezone: 'Europe/Moscow',
+        country: 'RU',
+        title: null,
+        added_by: 1,
+        added_at: '',
+        is_active: 1,
+        pin_hint_shown: 0,
+      })),
+    };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+    };
+    await handleSettings(ctx as never, groupRepo as never);
+    expect(sentText).toContain('Настройки группы');
+    expect(sentText).toContain('Europe/Moscow');
+  });
+
+  test('shows not-set when no timezone', async () => {
+    const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
+    const groupRepo = {
+      findByChatId: mock(() => ({
+        chat_id: -100,
+        timezone: null,
+        country: null,
+        title: null,
+        added_by: 1,
+        added_at: '',
+        is_active: 1,
+        pin_hint_shown: 0,
+      })),
+    };
+    let sentText = '';
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
+    };
+    await handleSettings(ctx as never, groupRepo as never);
+    expect(sentText).toContain('не задана');
   });
 });

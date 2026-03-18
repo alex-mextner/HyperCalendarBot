@@ -4,7 +4,7 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
-import { CB, t } from '../../config/constants.ts';
+import { CB, TZ_REGIONS, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -14,6 +14,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
@@ -49,7 +50,13 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback } from '../commands/settings.ts';
-import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import {
+  editFieldKeyboard,
+  eventActionsKeyboard,
+  groupTimezoneCitiesKeyboard,
+  groupTimezoneRegionKeyboard,
+  inviteContactPickerKeyboard,
+} from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -117,6 +124,7 @@ export function createCallbackHandler(
   },
   contactRepo?: ContactRepository,
   timezoneScene?: AnyScene,
+  groupRepo?: GroupChatRepository,
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -973,6 +981,38 @@ export function createCallbackHandler(
           sharingSettingsRepo,
           userRepo,
         );
+      }
+
+      // Group settings: timezone picker
+      if (action === CB.GROUP_SETTINGS_TZ && groupRepo) {
+        const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        if (!chatId) {
+          await ctx.answer();
+          return;
+        }
+        if (payload === 'select') {
+          await ctx.answer();
+          await ctx.editText(user.language === 'ru' ? 'Выберите регион:' : 'Choose a region:', {
+            reply_markup: groupTimezoneRegionKeyboard(),
+          });
+          return;
+        }
+        if (Object.keys(TZ_REGIONS).includes(payload)) {
+          await ctx.answer();
+          await ctx.editText(user.language === 'ru' ? 'Выберите город:' : 'Choose a city:', {
+            reply_markup: groupTimezoneCitiesKeyboard(payload),
+          });
+          return;
+        }
+        groupRepo.setTimezone(chatId, payload);
+        await ctx.answer();
+        await ctx.editText(
+          user.language === 'ru'
+            ? `✅ Таймзона группы: <code>${payload}</code>`
+            : `✅ Group timezone: <code>${payload}</code>`,
+          { parse_mode: 'HTML' },
+        );
+        return;
       }
 
       // Feedback: admin closes a thread

@@ -1,11 +1,14 @@
 // src/bot/commands/settings.ts
 import { InlineKeyboard } from 'gramio';
+import { CB } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -166,9 +169,37 @@ function buildVoiceView(voiceEnabled: number | null): { text: string; kb: Inline
   return { text, kb };
 }
 
+// ─── Group settings ──────────────────────────────────────────────────────────
+
+async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
+  const user = ctx.dbUser as User;
+  const lang = (user.language ?? 'en') as 'en' | 'ru';
+  const groupId = getGroupId(ctx)!;
+  const group = groupRepo.findByChatId(groupId);
+
+  const tz = group?.timezone ?? (lang === 'ru' ? '❌ не задана' : '❌ not set');
+  const country = group?.country ?? (lang === 'ru' ? '❌ не задана' : '❌ not set');
+
+  const text =
+    lang === 'ru'
+      ? `⚙️ <b>Настройки группы</b>\n\n🌍 Таймзона: <code>${tz}</code>\n🏳️ Страна: <code>${country}</code>`
+      : `⚙️ <b>Group settings</b>\n\n🌍 Timezone: <code>${tz}</code>\n🏳️ Country: <code>${country}</code>`;
+
+  const kb = new InlineKeyboard()
+    .text(lang === 'ru' ? '🌍 Изменить таймзону' : '🌍 Change timezone', `${CB.GROUP_SETTINGS_TZ}:select`)
+    .row()
+    .text(lang === 'ru' ? '🏳️ Изменить страну' : '🏳️ Change country', `${CB.GROUP_SETTINGS_COUNTRY}:select`);
+
+  await ctx.send(text, { parse_mode: 'HTML', reply_markup: kb });
+}
+
 // ─── Command entry point ─────────────────────────────────────────────────────
 
-export async function handleSettings(ctx: BotCommandContext): Promise<void> {
+export async function handleSettings(ctx: BotCommandContext, groupRepo?: GroupChatRepository): Promise<void> {
+  if (isGroup(ctx)) {
+    await handleGroupSettings(ctx, groupRepo!);
+    return;
+  }
   await ctx.send('⚙️ Настройки / Settings', {
     reply_markup: settingsCategoryKeyboard(),
   });

@@ -43,6 +43,27 @@ export function timezoneConfirmKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Нет, вручную' : 'No, choose manually', `${CB.ONBOARD_TZ}:manual`);
 }
 
+export function groupTimezoneRegionKeyboard(): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  const regions = Object.keys(TZ_REGIONS);
+  for (const region of regions) {
+    kb.text(region, `${CB.GROUP_SETTINGS_TZ}:${region}`);
+  }
+  return kb;
+}
+
+export function groupTimezoneCitiesKeyboard(region: string): InlineKeyboard {
+  const cities = TZ_REGIONS[region] ?? [];
+  const kb = new InlineKeyboard();
+  for (let i = 0; i < cities.length; i++) {
+    const tz = cities[i]!;
+    const city = tz.split('/').pop()!.replace(/_/g, ' ');
+    kb.text(city, `${CB.GROUP_SETTINGS_TZ}:${tz}`);
+    if (i % 2 === 1) kb.row();
+  }
+  return kb;
+}
+
 export function countryKeyboard(countryCode: string | null, lang: 'en' | 'ru'): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (countryCode) {

@@ -321,7 +321,7 @@ export function createBot(
     .command('free', (ctx) =>
       handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
     )
-    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext))
+    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext, db.groupChats))
     .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
     // Sharing commands
@@ -513,6 +513,7 @@ export function createBot(
           : undefined,
         db.contacts,
         scenesSetup.scenes.timezoneScene,
+        db.groupChats,
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
