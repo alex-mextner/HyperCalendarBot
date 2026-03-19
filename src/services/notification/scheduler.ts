@@ -21,7 +21,7 @@ import {
 } from '../voice/tts-renderer.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
-import { isQuietHours } from './timezone.ts';
+import { isLocalTimeInWindow, isQuietHours } from './timezone.ts';
 
 const renderer = new NotificationRenderer();
 
@@ -253,24 +253,23 @@ export class NotificationScheduler {
     }
 
     // 2. Morning agendas
-    const morningPrefs = this.deps.prefsRepo.getAllByMorningUtc(currentHHMM);
+    const morningPrefs = this.deps.prefsRepo.getAllMorningEnabled();
     for (const pref of morningPrefs) {
-      const user = this.deps.userRepo.findByTelegramId(pref.user_id);
-      if (!user) continue;
+      if (!isLocalTimeInWindow(nowUtc, pref.timezone, pref.morning_agenda_time, 5)) continue;
       const quiet = isQuietHours(
         { enabled: !!pref.quiet_hours_enabled, start: pref.quiet_hours_start, end: pref.quiet_hours_end },
         nowUtc,
-        user.timezone,
+        pref.timezone,
       );
       if (quiet) continue;
-      const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
-      const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, user.timezone);
+      const localTodayIso = new TZDate(nowUtc, pref.timezone).toISOString().slice(0, 10);
+      const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, pref.timezone);
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
       if (events.length === 0) continue;
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
-      const lang = user.language ?? 'ru';
-      const dateLabel = makeDateLabel(localTodayIso, user.timezone, lang);
-      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      const lang = pref.language ?? 'ru';
+      const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
@@ -330,25 +329,24 @@ export class NotificationScheduler {
     }
 
     // 4. Evening reviews
-    const eveningPrefs = this.deps.prefsRepo.getAllByEveningUtc(currentHHMM);
+    const eveningPrefs = this.deps.prefsRepo.getAllEveningEnabled();
     for (const pref of eveningPrefs) {
-      const user = this.deps.userRepo.findByTelegramId(pref.user_id);
-      if (!user) continue;
+      if (!isLocalTimeInWindow(nowUtc, pref.timezone, pref.evening_review_time, 5)) continue;
       const quiet = isQuietHours(
         { enabled: !!pref.quiet_hours_enabled, start: pref.quiet_hours_start, end: pref.quiet_hours_end },
         nowUtc,
-        user.timezone,
+        pref.timezone,
       );
       if (quiet) continue;
       const tomorrowUtc = new Date(nowUtc.getTime() + 86_400_000);
-      const localTomorrowIso = new TZDate(tomorrowUtc, user.timezone).toISOString().slice(0, 10);
-      const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), user.timezone);
+      const localTomorrowIso = new TZDate(tomorrowUtc, pref.timezone).toISOString().slice(0, 10);
+      const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), pref.timezone);
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
       if (events.length === 0) continue;
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
-      const lang = user.language ?? 'ru';
-      const dateLabel = makeDateLabel(localTomorrowIso, user.timezone, lang);
-      const agendaEvents = toAgendaEvents(events, user.timezone, lang);
+      const lang = pref.language ?? 'ru';
+      const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
+      const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
@@ -369,23 +367,22 @@ export class NotificationScheduler {
       }
     }
 
-    // 5. Weekly digest (Sunday only, at user's evening_review_utc)
+    // 5. Weekly digest (Sunday only, at user's evening_review_time)
     if (minute.getUTCDay() === 0) {
-      const weeklyPrefs = this.deps.prefsRepo.getAllByEveningUtc(currentHHMM);
+      const weeklyPrefs = this.deps.prefsRepo.getAllEveningEnabled();
       for (const pref of weeklyPrefs) {
-        const user = this.deps.userRepo.findByTelegramId(pref.user_id);
-        if (!user) continue;
+        if (!isLocalTimeInWindow(nowUtc, pref.timezone, pref.evening_review_time, 5)) continue;
 
         // Next Monday = tomorrow (Sunday + 1 day)
         const nextMonDate = new Date(minute.getTime() + 86_400_000);
-        const nextMonLocalIso = new TZDate(nextMonDate, user.timezone).toISOString().slice(0, 10);
+        const nextMonLocalIso = new TZDate(nextMonDate, pref.timezone).toISOString().slice(0, 10);
         const nextMonLocalDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
         const weekYear = isoWeekYear(nextMonLocalDate);
         const weekNum = isoWeekNumber(nextMonLocalDate);
         const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
         const refKey = `wd:${pref.user_id}:${weekStr}`;
 
-        const lang = user.language ?? 'ru';
+        const lang = pref.language ?? 'ru';
 
         // Build Mon–Sun local calendar dates for next week
         const days: WeeklyDigestDay[] = [];
@@ -393,7 +390,7 @@ export class NotificationScheduler {
           const calDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
           calDate.setUTCDate(calDate.getUTCDate() + i);
           const dateStr = calDate.toISOString().slice(0, 10);
-          const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, user.timezone);
+          const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, pref.timezone);
           const dayEvents = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
           const dayLabel = makeDayLabel(calDate, lang);
           days.push({
@@ -401,7 +398,7 @@ export class NotificationScheduler {
             dayLabel,
             events: dayEvents.map((e) => ({
               title: e.title,
-              startTime: format(new TZDate(e.start_at, user.timezone), 'HH:mm'),
+              startTime: format(new TZDate(e.start_at, pref.timezone), 'HH:mm'),
             })),
           });
         }

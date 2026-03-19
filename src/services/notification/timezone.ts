@@ -26,6 +26,20 @@ export function localTimeToUtcHHMM(localHHMM: string, timezone: string): string 
   return `${String(utcH).padStart(2, '0')}:${String(utcM).padStart(2, '0')}`;
 }
 
+export function isLocalTimeInWindow(
+  nowUtc: Date,
+  timezone: string,
+  targetHHMM: string,
+  windowMinutes: number,
+): boolean {
+  const local = getUserLocalTime(nowUtc, timezone);
+  const localMinutes = local.hours * 60 + local.minutes;
+  const [th, tm] = targetHHMM.split(':').map(Number);
+  const targetMinutes = th! * 60 + tm!;
+  const diff = (localMinutes - targetMinutes + 1440) % 1440;
+  return diff < windowMinutes;
+}
+
 export interface QuietHoursConfig {
   enabled: boolean;
   start: string | null;

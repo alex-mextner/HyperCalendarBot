@@ -60,6 +60,28 @@ export class NotificationPreferencesRepository {
       .all(utcHHMM) as NotificationPreferencesRow[];
   }
 
+  getAllMorningEnabled(): Array<NotificationPreferencesRow & { timezone: string; language: string }> {
+    return this.db
+      .prepare(
+        `SELECT np.*, u.timezone, u.language
+         FROM notification_preferences np
+         JOIN users u ON np.user_id = u.telegram_id
+         WHERE np.morning_agenda_enabled = 1`,
+      )
+      .all() as Array<NotificationPreferencesRow & { timezone: string; language: string }>;
+  }
+
+  getAllEveningEnabled(): Array<NotificationPreferencesRow & { timezone: string; language: string }> {
+    return this.db
+      .prepare(
+        `SELECT np.*, u.timezone, u.language
+         FROM notification_preferences np
+         JOIN users u ON np.user_id = u.telegram_id
+         WHERE np.evening_review_enabled = 1`,
+      )
+      .all() as Array<NotificationPreferencesRow & { timezone: string; language: string }>;
+  }
+
   getAll(): NotificationPreferencesRow[] {
     return this.db.prepare('SELECT * FROM notification_preferences').all() as NotificationPreferencesRow[];
   }
