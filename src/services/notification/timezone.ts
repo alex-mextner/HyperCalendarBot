@@ -11,21 +11,6 @@ export function isTimeMatch(utcNow: Date, timezone: string, targetHHMM: string):
   return local.hours === targetH && local.minutes === targetM;
 }
 
-export function localTimeToUtcHHMM(localHHMM: string, timezone: string): string {
-  const [h, m] = localHHMM.split(':').map(Number);
-  const refDate = new Date();
-  const localDate = new TZDate(refDate, timezone);
-  const offsetMs = localDate.getTimezoneOffset() * -60_000;
-  const localMinutes = h! * 60 + m!;
-  const offsetMinutes = offsetMs / 60_000;
-  let utcMinutes = localMinutes - offsetMinutes;
-  if (utcMinutes < 0) utcMinutes += 1440;
-  if (utcMinutes >= 1440) utcMinutes -= 1440;
-  const utcH = Math.floor(utcMinutes / 60);
-  const utcM = utcMinutes % 60;
-  return `${String(utcH).padStart(2, '0')}:${String(utcM).padStart(2, '0')}`;
-}
-
 export function isLocalTimeInWindow(
   nowUtc: Date,
   timezone: string,

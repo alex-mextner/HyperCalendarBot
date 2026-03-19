@@ -4,12 +4,10 @@ export interface NotificationPreferencesRow {
   user_id: number;
   morning_agenda_enabled: number;
   morning_agenda_time: string;
-  morning_agenda_utc: string | null;
   morning_agenda_format: string;
   default_reminder_intervals: string;
   evening_review_enabled: number;
   evening_review_time: string;
-  evening_review_utc: string | null;
   evening_review_format: string;
   quiet_hours_enabled: number;
   quiet_hours_start: string | null;
@@ -40,24 +38,6 @@ export class NotificationPreferencesRepository {
     this.db
       .prepare(`UPDATE notification_preferences SET ${sets}, updated_at = datetime('now') WHERE user_id = ?`)
       .run(...values, userId);
-  }
-
-  getAllByMorningUtc(utcHHMM: string): NotificationPreferencesRow[] {
-    return this.db
-      .prepare(
-        `SELECT * FROM notification_preferences
-         WHERE morning_agenda_enabled = 1 AND morning_agenda_utc = ?`,
-      )
-      .all(utcHHMM) as NotificationPreferencesRow[];
-  }
-
-  getAllByEveningUtc(utcHHMM: string): NotificationPreferencesRow[] {
-    return this.db
-      .prepare(
-        `SELECT * FROM notification_preferences
-         WHERE evening_review_enabled = 1 AND evening_review_utc = ?`,
-      )
-      .all(utcHHMM) as NotificationPreferencesRow[];
   }
 
   getAllMorningEnabled(): Array<NotificationPreferencesRow & { timezone: string; language: string }> {

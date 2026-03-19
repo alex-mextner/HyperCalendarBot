@@ -2,7 +2,6 @@ import type {
   NotificationPreferencesRepository,
   NotificationPreferencesRow,
 } from '../../database/repositories/notification-preferences.repository.ts';
-import { localTimeToUtcHHMM } from './timezone.ts';
 
 export class NotificationPreferencesService {
   constructor(private repo: NotificationPreferencesRepository) {}
@@ -17,14 +16,12 @@ export class NotificationPreferencesService {
     return JSON.parse(prefs.default_reminder_intervals) as number[];
   }
 
-  updateMorningTime(userId: number, time: string, timezone: string): void {
-    const utc = localTimeToUtcHHMM(time, timezone);
-    this.repo.update(userId, { morning_agenda_time: time, morning_agenda_utc: utc });
+  updateMorningTime(userId: number, time: string): void {
+    this.repo.update(userId, { morning_agenda_time: time });
   }
 
-  updateEveningTime(userId: number, time: string, timezone: string): void {
-    const utc = localTimeToUtcHHMM(time, timezone);
-    this.repo.update(userId, { evening_review_time: time, evening_review_utc: utc });
+  updateEveningTime(userId: number, time: string): void {
+    this.repo.update(userId, { evening_review_time: time });
   }
 
   toggleMorningAgenda(userId: number): void {
@@ -52,12 +49,5 @@ export class NotificationPreferencesService {
 
   updateDefaultIntervals(userId: number, intervals: number[]): void {
     this.repo.update(userId, { default_reminder_intervals: JSON.stringify(intervals) });
-  }
-
-  recomputeUtcTimes(userId: number, timezone: string): void {
-    const prefs = this.getOrCreate(userId);
-    const morningUtc = localTimeToUtcHHMM(prefs.morning_agenda_time, timezone);
-    const eveningUtc = localTimeToUtcHHMM(prefs.evening_review_time, timezone);
-    this.repo.update(userId, { morning_agenda_utc: morningUtc, evening_review_utc: eveningUtc });
   }
 }

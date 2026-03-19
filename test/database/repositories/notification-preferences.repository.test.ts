@@ -24,12 +24,10 @@ describe('NotificationPreferencesRepository', () => {
       user_id INTEGER PRIMARY KEY,
       morning_agenda_enabled INTEGER NOT NULL DEFAULT 1,
       morning_agenda_time TEXT NOT NULL DEFAULT '08:00',
-      morning_agenda_utc TEXT,
       morning_agenda_format TEXT NOT NULL DEFAULT 'text',
       default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
       evening_review_enabled INTEGER NOT NULL DEFAULT 0,
       evening_review_time TEXT NOT NULL DEFAULT '21:00',
-      evening_review_utc TEXT,
       evening_review_format TEXT NOT NULL DEFAULT 'text',
       quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
       quiet_hours_start TEXT,
@@ -60,27 +58,25 @@ describe('NotificationPreferencesRepository', () => {
     repo.ensureDefaults(42);
     repo.update(42, {
       morning_agenda_time: '09:00',
-      morning_agenda_utc: '06:00',
       evening_review_enabled: 1,
     });
     const prefs = repo.get(42);
     expect(prefs!.morning_agenda_time).toBe('09:00');
-    expect(prefs!.morning_agenda_utc).toBe('06:00');
     expect(prefs!.evening_review_enabled).toBe(1);
   });
 
-  test('getAllByMorningUtc returns enabled users', () => {
+  test('getAllMorningEnabled returns users with morning enabled', () => {
     repo.ensureDefaults(42);
-    repo.update(42, { morning_agenda_utc: '05:00' });
-    const users = repo.getAllByMorningUtc('05:00');
+    const users = repo.getAllMorningEnabled();
     expect(users.length).toBe(1);
     expect(users[0]!.user_id).toBe(42);
   });
 
-  test('getAllByEveningUtc returns enabled users', () => {
+  test('getAllEveningEnabled returns users with evening enabled', () => {
     repo.ensureDefaults(42);
-    repo.update(42, { evening_review_enabled: 1, evening_review_utc: '18:00' });
-    const users = repo.getAllByEveningUtc('18:00');
+    repo.update(42, { evening_review_enabled: 1 });
+    const users = repo.getAllEveningEnabled();
     expect(users.length).toBe(1);
+    expect(users[0]!.user_id).toBe(42);
   });
 });

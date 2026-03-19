@@ -129,7 +129,7 @@ async function handleMorningSection(
     const hour = parts[2]!;
     const minute = parts[3]!;
     const time = `${hour}:${minute}`;
-    prefsService.updateMorningTime(user.telegram_id, time, user.timezone);
+    prefsService.updateMorningTime(user.telegram_id, time);
     await ctx.answer({ text: msgs.notify_updated });
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
@@ -190,7 +190,7 @@ async function handleEveningSection(
     const hour = parts[2]!;
     const minute = parts[3]!;
     const time = `${hour}:${minute}`;
-    prefsService.updateEveningTime(user.telegram_id, time, user.timezone);
+    prefsService.updateEveningTime(user.telegram_id, time);
     await ctx.answer({ text: msgs.notify_updated });
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(

@@ -13,6 +13,7 @@ import {
   resolveTimezone,
 } from '../../services/timezone/timezone-service.ts';
 import {
+  cityInputPrompt,
   countryKeyboard,
   languageKeyboard,
   removeKeyboard,
@@ -68,11 +69,7 @@ export function createOnboardingScene(
         const l = lang ?? 'en';
 
         if (context.scene.step.firstTime) {
-          const prompt =
-            l === 'ru'
-              ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
-              : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
-          await context.send(prompt, { reply_markup: timezoneMethodKeyboard(l) });
+          await context.send(cityInputPrompt(l), { reply_markup: timezoneMethodKeyboard(l) });
           return;
         }
 
@@ -139,11 +136,7 @@ export function createOnboardingScene(
 
           if (action === CB.ONBOARD_TZ_RETRY) {
             await cbCtx.answer();
-            const prompt =
-              l === 'ru'
-                ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
-                : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
-            await context.send(prompt, { reply_markup: timezoneMethodKeyboard(l) });
+            await context.send(cityInputPrompt(l), { reply_markup: timezoneMethodKeyboard(l) });
             return;
           }
 
@@ -210,7 +203,7 @@ export function createOnboardingScene(
         // Save morning agenda preference if user selected a time (not "no")
         if (selectedTime !== 'no' && prefsService && timezone) {
           prefsService.getOrCreate(context.from.id);
-          prefsService.updateMorningTime(context.from.id, selectedTime, timezone);
+          prefsService.updateMorningTime(context.from.id, selectedTime);
           db.notificationPreferences.update(context.from.id, { morning_agenda_enabled: 1 });
         }
 

@@ -22,12 +22,10 @@ describe('NotificationPreferencesService', () => {
       user_id INTEGER PRIMARY KEY,
       morning_agenda_enabled INTEGER NOT NULL DEFAULT 1,
       morning_agenda_time TEXT NOT NULL DEFAULT '08:00',
-      morning_agenda_utc TEXT,
       morning_agenda_format TEXT NOT NULL DEFAULT 'text',
       default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
       evening_review_enabled INTEGER NOT NULL DEFAULT 0,
       evening_review_time TEXT NOT NULL DEFAULT '21:00',
-      evening_review_utc TEXT,
       evening_review_format TEXT NOT NULL DEFAULT 'text',
       quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
       quiet_hours_start TEXT,
@@ -58,12 +56,11 @@ describe('NotificationPreferencesService', () => {
     expect(intervals).toEqual([15]);
   });
 
-  test('updateMorningTime updates time and recomputes UTC', () => {
+  test('updateMorningTime updates time', () => {
     service.getOrCreate(42);
-    service.updateMorningTime(42, '09:00', 'Europe/Moscow');
+    service.updateMorningTime(42, '09:00');
     const prefs = service.getOrCreate(42);
     expect(prefs.morning_agenda_time).toBe('09:00');
-    expect(prefs.morning_agenda_utc).toBe('06:00');
   });
 
   test('toggleMorningAgenda flips enabled flag', () => {
@@ -73,12 +70,11 @@ describe('NotificationPreferencesService', () => {
     expect(prefs.morning_agenda_enabled).toBe(0);
   });
 
-  test('updateEveningTime updates time and recomputes UTC', () => {
+  test('updateEveningTime updates time', () => {
     service.getOrCreate(42);
-    service.updateEveningTime(42, '22:30', 'Europe/Moscow');
+    service.updateEveningTime(42, '22:30');
     const prefs = service.getOrCreate(42);
     expect(prefs.evening_review_time).toBe('22:30');
-    expect(prefs.evening_review_utc).toBe('19:30');
   });
 
   test('toggleEveningReview flips enabled flag', () => {
@@ -120,17 +116,4 @@ describe('NotificationPreferencesService', () => {
     expect(intervals).toEqual([5, 10, 30]);
   });
 
-  test('recomputeUtcTimes recalculates both morning and evening UTC', () => {
-    service.getOrCreate(42);
-    service.updateMorningTime(42, '09:00', 'Europe/Moscow');
-    service.updateEveningTime(42, '21:00', 'Europe/Moscow');
-
-    // Recompute with Asia/Tokyo (UTC+9, no DST — stable offset year-round)
-    service.recomputeUtcTimes(42, 'Asia/Tokyo');
-    const prefs = service.getOrCreate(42);
-    // Morning 09:00 in Asia/Tokyo (UTC+9) => 00:00 UTC
-    expect(prefs.morning_agenda_utc).toBe('00:00');
-    // Evening 21:00 in Asia/Tokyo (UTC+9) => 12:00 UTC
-    expect(prefs.evening_review_utc).toBe('12:00');
-  });
 });

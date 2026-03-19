@@ -4,7 +4,6 @@ import {
   isLocalTimeInWindow,
   isQuietHours,
   isTimeMatch,
-  localTimeToUtcHHMM,
 } from '../../../src/services/notification/timezone.ts';
 
 describe('timezone utilities', () => {
@@ -33,33 +32,6 @@ describe('timezone utilities', () => {
     test('does not match different time', () => {
       const utc = new Date('2026-03-15T05:00:00Z');
       expect(isTimeMatch(utc, 'Europe/Moscow', '09:00')).toBe(false);
-    });
-  });
-
-  describe('localTimeToUtcHHMM', () => {
-    test('converts Moscow 08:00 to UTC 05:00', () => {
-      expect(localTimeToUtcHHMM('08:00', 'Europe/Moscow')).toBe('05:00');
-    });
-
-    test('handles UTC+0 timezone', () => {
-      expect(localTimeToUtcHHMM('08:00', 'UTC')).toBe('08:00');
-    });
-
-    test('handles wrap-around past midnight', () => {
-      expect(localTimeToUtcHHMM('02:00', 'Asia/Tokyo')).toBe('17:00');
-    });
-
-    test('round-trips correctly for DST-affected timezone (Europe/Belgrade)', () => {
-      const localHHMM = '09:00';
-      const utcHHMM = localTimeToUtcHHMM(localHHMM, 'Europe/Belgrade');
-
-      // Reconstruct what UTC time the function produced and verify round-trip
-      const [utcH, utcM] = utcHHMM.split(':').map(Number);
-      const utcDate = new Date();
-      utcDate.setUTCHours(utcH!, utcM!, 0, 0);
-
-      const result = isTimeMatch(utcDate, 'Europe/Belgrade', localHHMM);
-      expect(result).toBe(true);
     });
   });
 

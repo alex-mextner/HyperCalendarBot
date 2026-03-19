@@ -1,5 +1,4 @@
 import type { UpdateUserData } from '../../../database/types.ts';
-import { localTimeToUtcHHMM } from '../../notification/timezone.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 interface ManageSettingsInput {
@@ -121,16 +120,10 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
   const patch: Record<string, unknown> = {};
   if (updates.morning_agenda_enabled !== undefined)
     patch.morning_agenda_enabled = updates.morning_agenda_enabled ? 1 : 0;
-  if (updates.morning_agenda_time !== undefined) {
-    patch.morning_agenda_time = updates.morning_agenda_time;
-    patch.morning_agenda_utc = localTimeToUtcHHMM(updates.morning_agenda_time as string, ctx.user.timezone);
-  }
+  if (updates.morning_agenda_time !== undefined) patch.morning_agenda_time = updates.morning_agenda_time;
   if (updates.evening_review_enabled !== undefined)
     patch.evening_review_enabled = updates.evening_review_enabled ? 1 : 0;
-  if (updates.evening_review_time !== undefined) {
-    patch.evening_review_time = updates.evening_review_time;
-    patch.evening_review_utc = localTimeToUtcHHMM(updates.evening_review_time as string, ctx.user.timezone);
-  }
+  if (updates.evening_review_time !== undefined) patch.evening_review_time = updates.evening_review_time;
   if (updates.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = updates.quiet_hours_enabled ? 1 : 0;
   if (updates.quiet_hours_start !== undefined) patch.quiet_hours_start = updates.quiet_hours_start;
   if (updates.quiet_hours_end !== undefined) patch.quiet_hours_end = updates.quiet_hours_end;

@@ -37,12 +37,10 @@ function setupDb(): Database {
     user_id INTEGER PRIMARY KEY,
     morning_agenda_enabled INTEGER NOT NULL DEFAULT 1,
     morning_agenda_time TEXT NOT NULL DEFAULT '08:00',
-    morning_agenda_utc TEXT,
     morning_agenda_format TEXT NOT NULL DEFAULT 'text',
     default_reminder_intervals TEXT NOT NULL DEFAULT '[15]',
     evening_review_enabled INTEGER NOT NULL DEFAULT 0,
     evening_review_time TEXT NOT NULL DEFAULT '21:00',
-    evening_review_utc TEXT,
     evening_review_format TEXT NOT NULL DEFAULT 'text',
     quiet_hours_enabled INTEGER NOT NULL DEFAULT 0,
     quiet_hours_start TEXT, quiet_hours_end TEXT,
@@ -121,11 +119,11 @@ describe('NotificationScheduler – eve_holiday', () => {
     });
   });
 
-  test('sends eve_holiday when tomorrow is a holiday and notify=1 with evening_review_utc set', async () => {
-    // User 42, UTC timezone, evening_review_utc = 21:00
+  test('sends eve_holiday when tomorrow is a holiday and notify=1 with evening_review_time set', async () => {
+    // User 42, UTC timezone, evening_review_time = 21:00 (default)
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
     );
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
@@ -141,7 +139,7 @@ describe('NotificationScheduler – eve_holiday', () => {
   test('does not send eve_holiday when notify=0', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
     );
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
@@ -157,7 +155,7 @@ describe('NotificationScheduler – eve_holiday', () => {
   test('does not send eve_holiday when tomorrow has no holiday', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
     );
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run("INSERT INTO holiday_subscriptions (user_id, country_code, is_primary, notify) VALUES (42, 'UA', 1, 1)");
@@ -170,7 +168,7 @@ describe('NotificationScheduler – eve_holiday', () => {
   test('deduplicates eve_holiday (does not send twice for same date)', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
     );
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
@@ -184,7 +182,7 @@ describe('NotificationScheduler – eve_holiday', () => {
     expect(holidayNotifs.length).toBe(1);
   });
 
-  test('uses default 21:00 UTC when evening_review_utc is null', async () => {
+  test('fires at default 21:00 local when no notification_preferences row exists', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     // No notification_preferences row → scheduler must handle users without prefs
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
@@ -201,7 +199,7 @@ describe('NotificationScheduler – eve_holiday', () => {
   test('payload contains holiday name', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '21:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
     );
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
