@@ -39,6 +39,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # SQLite data — exclude dictionaries
 data/*
 !data/dictionaries/
+data/thinking-phrases/
 *.db
 *.db-shm
 *.db-wal
