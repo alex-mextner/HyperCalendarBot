@@ -244,11 +244,33 @@ Never hardcode a single word form next to a variable number.
 All MTProto userbot functionality uses **one pyrogram session**: `data/voice_caller.session`.
 Auth: `venv/bin/python scripts/pyrogram-auth.py` (one-time, interactive).
 
-- **Voice calls**: `scripts/voice-call-bridge.py <user_id> <audio_file> [duration]` — spawned per call
+- **Voice calls**: `scripts/voice-call-bridge.py <user_id> <session_id> <language>` — spawned per call
 - **Message delivery** (users who haven't started the bot): `scripts/send-message.py <user_id> <text> [username]` — spawned per message
 
 Both scripts are called from TS via `Bun.spawn(['venv/bin/python', ...])`.
 No `@mtcute/bun` — pyrogram handles everything.
+
+## Python / uv
+
+Python dependencies are declared in `pyproject.toml`. Use `uv` — never `pip` directly.
+
+```bash
+# Install all dependencies into venv
+uv pip install -r pyproject.toml --python venv/bin/python
+
+# Add a new package
+uv pip install <package> --python venv/bin/python
+
+# List installed packages
+uv pip list --python venv/bin/python
+```
+
+Create venv:
+```bash
+uv venv --python 3.12 venv
+```
+
+ntgcalls is NOT in `pyproject.toml` — it must be built from source with a patch (see below).
 
 ## ntgcalls — Deploy Setup
 
@@ -261,14 +283,17 @@ Patch: `scripts/ntgcalls-fix-network-state.patch`.
 On every new Linux server:
 
 ```bash
-# 1. Create Python venv and install deps
-python3.12 -m venv venv
-venv/bin/pip install py-tgcalls pyrofork
+# 1. Install uv (if not present)
+curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
+# 2. Create Python venv and install deps
+uv venv --python 3.12 venv
+uv pip install -r pyproject.toml --python venv/bin/python
+
+# 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
 ./scripts/build-patched-ntgcalls.sh python3.12 venv
 
-# 3. Authenticate Pyrogram session (one-time interactive)
+# 4. Authenticate Pyrogram session (one-time interactive)
 venv/bin/python scripts/pyrogram-auth.py
 ```
 
@@ -297,6 +322,27 @@ When summarising completed work or suggesting next steps, always scan the conver
 for items that were explicitly deferred, noted as "pending", or silently dropped mid-discussion.
 Surface them as concrete suggestions — not vague hints. If something was discussed but not implemented,
 name it and ask whether to pick it up.
+
+## Tone of Voice (bot messages)
+
+All user-facing bot messages must follow these rules:
+
+- Address the user as **"ты"** (informal singular), never "вы", never "пользователь".
+- Speak directly to the person: "Ты получишь звонок", not "The user will receive a call".
+- `ToolResult.output` strings have **two consumers**: the AI agent (which reformulates them) AND the
+  intent engine (`IntentMatcherLayer`), which sends `output` **directly to the user** via `ctx.send()`
+  when bypassing the AI. Write them as if they will be shown verbatim.
+- Make `output` strings **bilingual**. Use the `t(lang).aiTools.*` catalog from `src/config/constants.ts`:
+  ```ts
+  import { t } from '../../../config/constants.ts';
+  // static string:
+  output: t(ctx.user.language).aiTools.history.notFound
+  // dynamic string (function):
+  output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id)
+  ```
+  Add new strings to the `aiTools` namespace in `MSG.en` and `MSG.ru` in `constants.ts`.
+  Inline ternaries (`lang === 'ru' ? ... : ...`) are only acceptable for strings that use `ruPlural`
+  at the call site and cannot be expressed as simple catalog functions.
 
 ## Documentation
 

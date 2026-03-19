@@ -1,0 +1,21 @@
+[project]
+name = "hypercalendarbot"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "pyrofork>=2.3",
+    "py-tgcalls>=2.2",
+    "tgcrypto>=1.2",
+    "torch>=2.0",
+    "torchaudio>=2.0",
+    "silero-vad>=6.0",
+    "numpy>=1.24",
+    "omegaconf>=2.3",
+    "scipy>=1.10",
+    "websockets>=14.0",
+]
+
+[tool.uv]
+# ntgcalls must be built from source with patch (see CLAUDE.md — ntgcalls section)
+# Run: ./scripts/build-patched-ntgcalls.sh python3.12 venv
+# After build, install editable: uv pip install -e /path/to/patched-ntgcalls
