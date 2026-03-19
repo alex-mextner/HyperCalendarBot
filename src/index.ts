@@ -176,13 +176,13 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
       botLogger.warn('Pyrogram session not found (data/voice_caller.session). Run: bun run auth:voice');
     }
 
+    const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
+    const ttsTranslationService = new TtsTranslationService();
     const ttsService = new TtsService();
     const callManager = new CallManager({
       ttsService,
       callLogRepo: db.callLog,
-      sendPostCallButtons: async (userId, eventId) => {
-        botLogger.info({ userId, eventId }, 'Post-call buttons (not yet wired to bot)');
-      },
+      translateText: (text, lang) => ttsTranslationService.translate(text, lang),
       sendVoiceMessage: async (userId, audio) => {
         await botRef.sendVoice(userId, audio);
       },

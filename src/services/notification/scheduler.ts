@@ -12,7 +12,13 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { CalendarEvent } from '../../database/types.ts';
 import { getDayRangeUtc } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
-import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+import {
+  renderBatchReminderForSpeech,
+  renderEveningReviewForSpeech,
+  renderMorningAgendaForSpeech,
+  renderReminderForSpeech,
+  renderWeeklyDigestForSpeech,
+} from '../voice/tts-renderer.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
 import { isQuietHours } from './timezone.ts';
@@ -99,7 +105,7 @@ function formatHHMM(d: Date): string {
 
 export interface EnqueueCallData {
   userId: number;
-  eventId: number;
+  eventId?: number;
   ttsText: string;
   language: string;
 }
@@ -190,6 +196,19 @@ export class NotificationScheduler {
         }
         this.deps.enqueue('event_reminder_batch', firstReminder.user_id, logId, payload);
         notifyLogger.info({ userId: firstReminder.user_id, count: group.length }, 'Batch event reminder enqueued');
+
+        if (this.isCallAllowed(firstReminder.user_id, nowUtc)) {
+          const ttsText = renderBatchReminderForSpeech({
+            lang: user.language ?? 'ru',
+            items: batchItems.map((item) => ({
+              event_title: item.event_title,
+              event_start_at: item.event_start_at,
+              timezone: user.timezone,
+            })),
+          });
+          this.deps.enqueueCall?.({ userId: firstReminder.user_id, ttsText, language: user.language ?? 'ru' });
+          notifyLogger.info({ userId: firstReminder.user_id, count: group.length }, 'Batch voice call enqueued');
+        }
         continue;
       }
 
@@ -215,48 +234,21 @@ export class NotificationScheduler {
       this.deps.enqueue('event_reminder', reminder.user_id, logId, payload);
       notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Event reminder enqueued');
 
-      if (this.deps.callSettingsRepo?.isEnabled(reminder.user_id)) {
-        const callSettings = this.deps.callSettingsRepo.get(reminder.user_id);
-
-        // Check call-specific quiet hours
-        if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
-          const hours = nowUtc.getUTCHours();
-          const mins = nowUtc.getUTCMinutes();
-          const currentTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
-          const start = callSettings.quiet_hours_start;
-          const end = callSettings.quiet_hours_end;
-
-          // Handle wrap-around (e.g., 22:00 - 08:00)
-          const inQuietHours =
-            start <= end ? currentTime >= start && currentTime < end : currentTime >= start || currentTime < end;
-
-          if (inQuietHours) {
-            notifyLogger.info(
-              { userId: reminder.user_id, eventId: reminder.event_id },
-              'Voice call skipped (quiet hours)',
-            );
-            continue;
-          }
-        }
-
-        const dailyCount = this.deps.callLogRepo?.countTodayCalls(reminder.user_id) ?? 0;
-        const maxDaily = callSettings?.max_daily_calls ?? 5;
-        if (dailyCount < maxDaily) {
-          const ttsText = renderReminderForSpeech({
-            title: reminder.event_title,
-            startAt: reminder.event_start_at,
-            timezone: user.timezone,
-            location: reminder.event_location,
-            language: user.language,
-          });
-          this.deps.enqueueCall?.({
-            userId: reminder.user_id,
-            eventId: reminder.event_id,
-            ttsText,
-            language: user.language,
-          });
-          notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Voice call enqueued');
-        }
+      if (this.isCallAllowed(reminder.user_id, nowUtc)) {
+        const ttsText = renderReminderForSpeech({
+          title: reminder.event_title,
+          startAt: reminder.event_start_at,
+          timezone: user.timezone,
+          location: reminder.event_location,
+          language: user.language,
+        });
+        this.deps.enqueueCall?.({
+          userId: reminder.user_id,
+          eventId: reminder.event_id,
+          ttsText,
+          language: user.language,
+        });
+        notifyLogger.info({ userId: reminder.user_id, eventId: reminder.event_id }, 'Voice call enqueued');
       }
     }
 
@@ -291,6 +283,12 @@ export class NotificationScheduler {
       if (logId === null) continue;
       this.deps.enqueue('morning_agenda', pref.user_id, logId, payload);
       notifyLogger.info({ userId: pref.user_id }, 'Morning agenda enqueued');
+
+      if (this.isCallAllowed(pref.user_id, nowUtc)) {
+        const ttsText = renderMorningAgendaForSpeech({ lang, dateLabel, events: agendaEvents });
+        this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
+        notifyLogger.info({ userId: pref.user_id }, 'Morning agenda voice call enqueued');
+      }
     }
 
     // 3. Eve-holiday notifications (per-user local tomorrow date)
@@ -363,6 +361,12 @@ export class NotificationScheduler {
       if (logId === null) continue;
       this.deps.enqueue('evening_review', pref.user_id, logId, payload);
       notifyLogger.info({ userId: pref.user_id }, 'Evening review enqueued');
+
+      if (this.isCallAllowed(pref.user_id, nowUtc)) {
+        const ttsText = renderEveningReviewForSpeech({ lang, dateLabel, events: agendaEvents });
+        this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
+        notifyLogger.info({ userId: pref.user_id }, 'Evening review voice call enqueued');
+      }
     }
 
     // 5. Weekly digest (Sunday only, at user's evening_review_utc)
@@ -417,7 +421,41 @@ export class NotificationScheduler {
         if (logId === null) continue;
         this.deps.enqueue('weekly_digest', pref.user_id, logId, payload);
         notifyLogger.info({ userId: pref.user_id, week: weekStr }, 'Weekly digest enqueued');
+
+        if (this.isCallAllowed(pref.user_id, nowUtc)) {
+          const digestDays = days.map((d) => ({
+            dayLabel: d.dayLabel,
+            events: d.events.map((e) => ({ title: e.title, startTime: e.startTime })),
+          }));
+          const ttsText = renderWeeklyDigestForSpeech({ lang, weekRange, days: digestDays });
+          this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
+          notifyLogger.info({ userId: pref.user_id, week: weekStr }, 'Weekly digest voice call enqueued');
+        }
       }
     }
+  }
+
+  private isCallAllowed(userId: number, nowUtc: Date): boolean {
+    if (!this.deps.callSettingsRepo?.isEnabled(userId)) return false;
+
+    const callSettings = this.deps.callSettingsRepo.get(userId);
+
+    if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
+      const hours = nowUtc.getUTCHours();
+      const mins = nowUtc.getUTCMinutes();
+      const currentTime = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+      const start = callSettings.quiet_hours_start;
+      const end = callSettings.quiet_hours_end;
+      const inQuietHours =
+        start <= end ? currentTime >= start && currentTime < end : currentTime >= start || currentTime < end;
+      if (inQuietHours) {
+        notifyLogger.info({ userId }, 'Voice call skipped (quiet hours)');
+        return false;
+      }
+    }
+
+    const dailyCount = this.deps.callLogRepo?.countTodayCalls(userId) ?? 0;
+    const maxDaily = callSettings?.max_daily_calls ?? 5;
+    return dailyCount < maxDaily;
   }
 }

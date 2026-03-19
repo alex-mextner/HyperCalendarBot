@@ -15,7 +15,7 @@ export interface CallManagerDeps {
     updateStatus: (id: number, status: CallStatus) => void;
     complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
-  sendPostCallButtons: (userId: number, eventId: number) => Promise<void>;
+  translateText?: (text: string, lang: string) => Promise<string>;
   sendVoiceMessage?: (userId: number, audio: Buffer) => Promise<void>;
   pyBridgePath: string;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
@@ -28,13 +28,18 @@ export class CallManager {
     const startTime = Date.now();
 
     try {
-      // Step 1: Synthesize TTS audio to temp file
+      // Step 1: Translate TTS text to target language if translator is available
+      const textToSpeak = this.deps.translateText
+        ? await this.deps.translateText(job.ttsText, job.language)
+        : job.ttsText;
+
+      // Step 2: Synthesize TTS audio to temp file
       voiceLogger.info({ userId: job.userId, eventId: job.eventId }, 'Synthesizing TTS');
-      const audioBuffer = await this.deps.ttsService.synthesize(job.ttsText, job.language);
+      const audioBuffer = await this.deps.ttsService.synthesize(textToSpeak, job.language);
       const tmpFile = `/tmp/call-${job.callLogId}.mp3`;
       await Bun.write(tmpFile, audioBuffer);
 
-      // Step 2: Ring + send voice message via Python bridge
+      // Step 3: Ring + send voice message via Python bridge
       this.deps.callLogRepo.updateStatus(job.callLogId, 'ringing');
       voiceLogger.info({ userId: job.userId }, 'Calling via Python bridge');
 
@@ -66,9 +71,6 @@ export class CallManager {
       const duration = Math.floor((Date.now() - startTime) / 1000);
       this.deps.callLogRepo.complete(job.callLogId, hasPlaying ? 'completed' : 'failed', duration);
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
-
-      // Step 4: Send post-call buttons in chat
-      await this.deps.sendPostCallButtons(job.userId, job.eventId);
     } catch (error) {
       const duration = Math.floor((Date.now() - startTime) / 1000);
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
@@ -78,9 +80,6 @@ export class CallManager {
       );
 
       this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, errorMsg);
-
-      // Still send buttons so user can snooze/cancel from chat
-      await this.deps.sendPostCallButtons(job.userId, job.eventId).catch(() => {});
     }
   }
 }

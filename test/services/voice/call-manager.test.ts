@@ -25,7 +25,6 @@ function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
       updateStatus: mock(() => {}),
       complete: mock(() => {}),
     },
-    sendPostCallButtons: mock(() => Promise.resolve()),
     pyBridgePath: 'scripts/voice-call-bridge.py',
     spawnProcess: makeSpawn(),
     ...overrides,
@@ -38,12 +37,37 @@ describe('CallManager', () => {
     const manager = new CallManager(deps);
     await manager.executeCall({
       userId: 100,
-      eventId: 1,
       callLogId: 1,
       ttsText: 'Meeting in 10 minutes',
       language: 'en',
     });
     expect(deps.ttsService.synthesize).toHaveBeenCalledWith('Meeting in 10 minutes', 'en');
+  });
+
+  test('executeCall calls translateText before synthesis when provided', async () => {
+    const translateText = mock(() => Promise.resolve('Translated text'));
+    const deps = makeDeps({ translateText });
+    const manager = new CallManager(deps);
+    await manager.executeCall({
+      userId: 100,
+      callLogId: 1,
+      ttsText: 'Meeting in 10 minutes',
+      language: 'ru',
+    });
+    expect(translateText).toHaveBeenCalledWith('Meeting in 10 minutes', 'ru');
+    expect(deps.ttsService.synthesize).toHaveBeenCalledWith('Translated text', 'ru');
+  });
+
+  test('executeCall uses original text when translateText is not provided', async () => {
+    const deps = makeDeps();
+    const manager = new CallManager(deps);
+    await manager.executeCall({
+      userId: 100,
+      callLogId: 1,
+      ttsText: 'Hello',
+      language: 'en',
+    });
+    expect(deps.ttsService.synthesize).toHaveBeenCalledWith('Hello', 'en');
   });
 
   test('executeCall logs failure on TTS error', async () => {
@@ -53,7 +77,6 @@ describe('CallManager', () => {
     const manager = new CallManager(deps);
     await manager.executeCall({
       userId: 100,
-      eventId: 1,
       callLogId: 1,
       ttsText: 'Test',
       language: 'en',
@@ -68,12 +91,25 @@ describe('CallManager', () => {
     const manager = new CallManager(deps);
     await manager.executeCall({
       userId: 100,
-      eventId: 1,
       callLogId: 1,
       ttsText: 'Hello',
       language: 'en',
     });
     expect(deps.callLogRepo.complete).toHaveBeenCalled();
-    expect(deps.sendPostCallButtons).toHaveBeenCalledWith(100, 1);
+    const call = (deps.callLogRepo.complete as ReturnType<typeof mock>).mock.calls[0]!;
+    expect(call[1]).toBe('completed');
+  });
+
+  test('executeCall does not call sendPostCallButtons', async () => {
+    const postCallButtons = mock(() => Promise.resolve());
+    const deps = makeDeps();
+    const manager = new CallManager(deps);
+    await manager.executeCall({
+      userId: 100,
+      callLogId: 1,
+      ttsText: 'Hello',
+      language: 'en',
+    });
+    expect(postCallButtons).not.toHaveBeenCalled();
   });
 });

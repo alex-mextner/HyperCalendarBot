@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { renderReminderForSpeech } from '../../../src/services/voice/tts-renderer';
+import {
+  renderBatchReminderForSpeech,
+  renderEveningReviewForSpeech,
+  renderMorningAgendaForSpeech,
+  renderReminderForSpeech,
+  renderWeeklyDigestForSpeech,
+} from '../../../src/services/voice/tts-renderer';
 
 describe('renderReminderForSpeech', () => {
   test('renders basic event reminder in English', () => {
@@ -58,5 +64,164 @@ describe('renderReminderForSpeech', () => {
     expect(text).not.toContain('<b>');
     expect(text).not.toContain('&amp;');
     expect(text).toContain('&');
+  });
+});
+
+describe('renderMorningAgendaForSpeech', () => {
+  const events = [
+    { title: 'Team standup', startTime: '09:00', duration: '30m' },
+    { title: 'Lunch meeting', startTime: '13:00', duration: '1h' },
+  ];
+
+  test('renders morning agenda in English', () => {
+    const text = renderMorningAgendaForSpeech({ lang: 'en', dateLabel: 'Thursday, March 19', events });
+    expect(text).toContain('Good morning');
+    expect(text).toContain('Thursday, March 19');
+    expect(text).toContain('Team standup');
+    expect(text).toContain('09:00');
+    expect(text).toContain('Lunch meeting');
+    expect(text).toContain('13:00');
+    expect(text).toContain('productive day');
+  });
+
+  test('renders morning agenda in Russian', () => {
+    const text = renderMorningAgendaForSpeech({ lang: 'ru', dateLabel: 'четверг, 19 марта', events });
+    expect(text).toContain('Доброе утро');
+    expect(text).toContain('четверг, 19 марта');
+    expect(text).toContain('Team standup');
+    expect(text).toContain('09:00');
+    expect(text).toContain('Продуктивного дня');
+  });
+
+  test('output has no emoji or markdown', () => {
+    const text = renderMorningAgendaForSpeech({ lang: 'en', dateLabel: 'Friday, March 20', events });
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
+    expect(text).not.toContain('**');
+    expect(text).not.toContain('__');
+    expect(text).not.toContain('#');
+  });
+});
+
+describe('renderEveningReviewForSpeech', () => {
+  const events = [{ title: 'Dentist', startTime: '10:00', duration: '1h' }];
+
+  test('renders evening review in English', () => {
+    const text = renderEveningReviewForSpeech({ lang: 'en', dateLabel: 'Friday, March 20', events });
+    expect(text).toContain('Good evening');
+    expect(text).toContain('Friday, March 20');
+    expect(text).toContain('Dentist');
+    expect(text).toContain('10:00');
+    expect(text).toContain('Good night');
+  });
+
+  test('renders evening review in Russian', () => {
+    const text = renderEveningReviewForSpeech({ lang: 'ru', dateLabel: 'пятница, 20 марта', events });
+    expect(text).toContain('Добрый вечер');
+    expect(text).toContain('пятница, 20 марта');
+    expect(text).toContain('Dentist');
+    expect(text).toContain('10:00');
+    expect(text).toContain('Спокойной ночи');
+  });
+
+  test('output has no emoji or markdown', () => {
+    const text = renderEveningReviewForSpeech({ lang: 'en', dateLabel: 'Friday, March 20', events });
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
+    expect(text).not.toContain('**');
+  });
+});
+
+describe('renderWeeklyDigestForSpeech', () => {
+  const days = [
+    { dayLabel: 'Mon', events: [{ title: 'Standup', startTime: '09:00' }] },
+    { dayLabel: 'Tue', events: [] },
+    { dayLabel: 'Wed', events: [{ title: 'Review', startTime: '14:00' }] },
+  ];
+
+  test('renders weekly digest in English', () => {
+    const text = renderWeeklyDigestForSpeech({ lang: 'en', weekRange: 'Mar 20-26', days });
+    expect(text).toContain('Weekly digest');
+    expect(text).toContain('Mar 20-26');
+    expect(text).toContain('Mon');
+    expect(text).toContain('Standup');
+    expect(text).toContain('09:00');
+    expect(text).toContain('Tue');
+    expect(text).toContain('no events');
+    expect(text).toContain('Review');
+    expect(text).toContain('14:00');
+  });
+
+  test('renders weekly digest in Russian', () => {
+    const text = renderWeeklyDigestForSpeech({ lang: 'ru', weekRange: '20-26 мар', days });
+    expect(text).toContain('дайджест');
+    expect(text).toContain('20-26 мар');
+    expect(text).toContain('нет событий');
+    expect(text).toContain('Standup');
+  });
+
+  test('output has no emoji or markdown', () => {
+    const text = renderWeeklyDigestForSpeech({ lang: 'en', weekRange: 'Mar 20-26', days });
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
+    expect(text).not.toContain('**');
+  });
+});
+
+describe('renderBatchReminderForSpeech', () => {
+  const items = [
+    { event_title: 'Meeting with John', event_start_at: '2026-03-19T09:00:00Z', timezone: 'UTC' },
+    { event_title: 'Team sync', event_start_at: '2026-03-19T14:00:00Z', timezone: 'UTC' },
+    { event_title: 'Dentist', event_start_at: '2026-03-19T15:00:00Z', timezone: 'UTC' },
+  ];
+
+  test('renders batch reminder in English', () => {
+    const text = renderBatchReminderForSpeech({ lang: 'en', items });
+    expect(text).toContain('Calendar reminder');
+    expect(text).toContain('3 events');
+    expect(text).toContain('Meeting with John');
+    expect(text).toContain('09:00');
+    expect(text).toContain('Team sync');
+    expect(text).toContain('14:00');
+    expect(text).toContain('Dentist');
+    expect(text).toContain('15:00');
+  });
+
+  test('renders batch reminder in Russian', () => {
+    const text = renderBatchReminderForSpeech({ lang: 'ru', items });
+    expect(text).toContain('напоминание');
+    expect(text).toContain('Meeting with John');
+    expect(text).toContain('09:00');
+  });
+
+  test('uses correct Russian plural for 1 event', () => {
+    const text = renderBatchReminderForSpeech({
+      lang: 'ru',
+      items: [{ event_title: 'Solo event', event_start_at: '2026-03-19T10:00:00Z', timezone: 'UTC' }],
+    });
+    expect(text).toContain('событие');
+  });
+
+  test('uses correct Russian plural for 2 events', () => {
+    const text = renderBatchReminderForSpeech({
+      lang: 'ru',
+      items: [
+        { event_title: 'Event A', event_start_at: '2026-03-19T10:00:00Z', timezone: 'UTC' },
+        { event_title: 'Event B', event_start_at: '2026-03-19T11:00:00Z', timezone: 'UTC' },
+      ],
+    });
+    expect(text).toContain('события');
+  });
+
+  test('uses correct English singular for 1 event', () => {
+    const text = renderBatchReminderForSpeech({
+      lang: 'en',
+      items: [{ event_title: 'Solo event', event_start_at: '2026-03-19T10:00:00Z', timezone: 'UTC' }],
+    });
+    expect(text).toContain('1 event starting');
+    expect(text).not.toContain('1 events');
+  });
+
+  test('output has no emoji or markdown', () => {
+    const text = renderBatchReminderForSpeech({ lang: 'en', items });
+    expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
+    expect(text).not.toContain('**');
   });
 });

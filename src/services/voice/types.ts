@@ -15,7 +15,7 @@ export interface VoiceCallConfig {
 
 export interface CallReminderJobData {
   userId: number;
-  eventId: number;
+  eventId?: number;
   callLogId: number;
   ttsText: string;
   language: string;
