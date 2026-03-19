@@ -1,11 +1,47 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
+import type { EventSummary } from '../../intent/variable-resolver.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
+
+function occurrenceToSummary(occ: EventOccurrence, timezone: string): EventSummary {
+  const d = new TZDate(new Date(occ.occurrence_start), timezone);
+  const e = occ.event;
+  const summary: EventSummary = {
+    id: e.id,
+    title: e.title,
+    date: format(d, 'yyyy-MM-dd'),
+    all_day: Boolean(e.all_day),
+  };
+  if (!e.all_day) summary.time = format(d, 'HH:mm');
+  if (occ.occurrence_end) summary.end_at = occ.occurrence_end;
+  if (e.description) summary.description = e.description;
+  if (e.location) summary.location = e.location;
+  if (e.recurrence_rule) summary.recurrence_rule = e.recurrence_rule;
+  return summary;
+}
+
+function eventToSummary(event: CalendarEvent, timezone: string): EventSummary {
+  const d = new TZDate(new Date(event.start_at), timezone);
+  const summary: EventSummary = {
+    id: event.id,
+    title: event.title,
+    date: format(d, 'yyyy-MM-dd'),
+    all_day: Boolean(event.all_day),
+  };
+  if (!event.all_day) summary.time = format(d, 'HH:mm');
+  if (event.end_at) summary.end_at = event.end_at;
+  if (event.description) summary.description = event.description;
+  if (event.location) summary.location = event.location;
+  if (event.recurrence_rule) summary.recurrence_rule = event.recurrence_rule;
+  return summary;
+}
 
 function buildOrganizerLink(user: AgentContext['user']): string {
   if (user.username) return `@${escapeHtml(user.username)}`;
@@ -151,8 +187,11 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
       ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, input.start_date, input.end_date)
       : ctx.eventService.getEventsInRange(userId, input.start_date, input.end_date);
 
+  const tz = ctx.user.timezone;
+  const data = occurrences.map((occ) => occurrenceToSummary(occ, tz));
+
   if (occurrences.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange, data };
   }
 
   const lines = occurrences.map((occ) => {
@@ -174,7 +213,7 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
     return parts.join(', ');
   });
 
-  return { success: true, output: lines.join('\n') };
+  return { success: true, output: lines.join('\n'), data };
 }
 
 export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
@@ -333,8 +372,16 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
       ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
       : ctx.eventService.searchEvents(userId, input.query);
 
+  const tz = ctx.user.timezone;
+  const data = events.map((e) =>
+    occurrenceToSummary(
+      { event: e, occurrence_start: e.start_at, occurrence_end: e.end_at ?? null, is_exception: false },
+      tz,
+    ),
+  );
+
   if (events.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsMatching };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsMatching, data };
   }
 
   const lines = events.map((e) => {
@@ -344,7 +391,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     return parts.join(', ');
   });
 
-  return { success: true, output: lines.join('\n') };
+  return { success: true, output: lines.join('\n'), data };
 }
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
@@ -369,8 +416,11 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
     upcoming = occurrences.slice(0, limit);
   }
 
+  const tz = ctx.user.timezone;
+  const data = upcoming.map((occ) => occurrenceToSummary(occ, tz));
+
   if (upcoming.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noUpcomingEvents };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noUpcomingEvents, data };
   }
 
   const lines = upcoming.map((occ) => {
@@ -384,6 +434,7 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
   return {
     success: true,
     output: t(ctx.user.language).aiTools.events.upcomingEvents(upcoming.length, lines.join('\n')),
+    data,
   };
 }
 
@@ -465,7 +516,7 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     parts.push(`reminders: ${reminders.map((r) => `${r.minutes_before}min`).join(', ')}`);
   }
 
-  return { success: true, output: parts.join(', ') };
+  return { success: true, output: parts.join(', '), data: eventToSummary(event, ctx.user.timezone) };
 }
 
 interface NotifyParticipantsInput {

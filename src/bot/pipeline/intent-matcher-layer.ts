@@ -35,6 +35,7 @@ export function createIntentMatcherLayer(
     userId: number,
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
+  onEventMentioned?: (userId: number, eventId: number) => void,
 ) {
   return async (
     ctx: BotCommandContext,
@@ -144,7 +145,12 @@ export function createIntentMatcherLayer(
       return { handled: false };
     }
 
-    // 7. Format and send response
+    // 7. Persist last mentioned event for cross-request workflows
+    if (result.mentionedEventId !== undefined) {
+      onEventMentioned?.(userId, result.mentionedEventId);
+    }
+
+    // 8. Format and send response
     if (result.response) {
       const formatted =
         intent.format !== 'text'

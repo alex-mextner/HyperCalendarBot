@@ -85,6 +85,37 @@ describe('event tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
     });
+
+    test('populates data with EventSummary array', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Standup',
+        start_at: '2026-03-15T09:00:00Z',
+        end_at: '2026-03-15T09:30:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(result.success).toBe(true);
+      expect(Array.isArray(result.data)).toBe(true);
+      const data = result.data as Array<{ id: number; title: string; date: string; time: string }>;
+      expect(data).toHaveLength(1);
+      expect(data[0].title).toBe('Standup');
+      expect(data[0].date).toBe('2026-03-15');
+      expect(data[0].time).toBe('09:00');
+      expect(typeof data[0].id).toBe('number');
+    });
+
+    test('data is empty array when no events found', () => {
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual([]);
+    });
   });
 
   describe('handleCreateEvent', () => {

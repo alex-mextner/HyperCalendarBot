@@ -106,6 +106,11 @@ export interface ToolResult {
    * Never shown to the user — the intent engine ignores this field entirely.
    */
   agentHint?: string;
+  /**
+   * Structured data for intent executor consumption.
+   * Never sent to AI or user directly — side-channel for workflows.
+   */
+  data?: unknown;
 }
 
 export interface AgentConfig {

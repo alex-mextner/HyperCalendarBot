@@ -78,6 +78,8 @@ interface ExecutorResult {
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: Record<string, unknown>;
+  /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
+  mentionedEventId?: number;
 }
 
 interface ResumeState {
@@ -141,6 +143,15 @@ async function runLevel1(
 /**
  * Execute a Level 2 workflow: { steps: [...] }
  */
+function extractEventSummary(data: unknown): { id: number; title: string } | null {
+  if (data === null || typeof data !== 'object') return null;
+  const first = Array.isArray(data) ? data[0] : data;
+  if (first === null || typeof first !== 'object') return null;
+  const r = first as Record<string, unknown>;
+  if (typeof r.id === 'number' && typeof r.title === 'string') return { id: r.id, title: r.title };
+  return null;
+}
+
 async function runLevel2(
   steps: Level2Step[],
   captures: Record<string, string>,
@@ -184,6 +195,8 @@ async function runLevel2(
     startIndex = resumeState.stepIndex + 1;
   }
 
+  let mentionedEventId: number | undefined;
+
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
 
@@ -196,7 +209,7 @@ async function runLevel2(
     // Respond with text and optionally stop
     if (step.respond !== undefined) {
       const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n) as string;
-      return { success: true, response: text };
+      return { success: true, response: text, mentionedEventId };
     }
 
     // No call — nothing to execute in this step
@@ -230,12 +243,28 @@ async function runLevel2(
       return { success: false, response: result.error };
     }
 
+    // If result carries structured event data, update last_mentioned_event in-workflow
+    // and track the ID for cross-request persistence via mentionedEventId.
+    if (result.data !== undefined) {
+      const event = extractEventSummary(result.data);
+      if (event !== null) {
+        stepResults.last_mentioned_event = Array.isArray(result.data) ? result.data[0] : result.data;
+        mentionedEventId = event.id;
+      }
+    }
+
     if (step.as !== undefined) {
-      storeResult(step.as, result.output !== undefined ? parseToolOutput(result.output) : undefined, stepResults);
+      const valueToStore =
+        result.data !== undefined
+          ? result.data
+          : result.output !== undefined
+            ? parseToolOutput(result.output)
+            : undefined;
+      storeResult(step.as, valueToStore, stepResults);
     }
   }
 
-  return { success: true, stepResults };
+  return { success: true, stepResults, mentionedEventId };
 }
 
 export class IntentExecutor {

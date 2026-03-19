@@ -813,6 +813,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             deps.chatHistory,
             notifyAdmin,
             getEventContext,
+            (uid, eventId) => {
+              Promise.resolve(eventMentionStore.set(uid, eventId)).catch((err: unknown) => {
+                cmdLogger.error({ err: err, userId: uid }, 'Failed to persist last mentioned event from intent');
+              });
+            },
           )
         : undefined;
 

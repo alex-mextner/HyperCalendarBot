@@ -17,7 +17,7 @@ const intents: Array<{
   {
     canonical_name: 'show_today',
     pattern:
-      "^(?:что\\s+у\\s+меня\\s+сегодня|что\\s+сегодня|мои\\s+события\\s+сегодня|покажи\\s+сегодня|what's?\\s+today|show\\s+today|events?\\s+today)\\??$",
+      "^(?:что\\s+у\\s+(?:меня|нас)\\s+сегодня|что\\s+сегодня|мои\\s+события\\s+сегодня|покажи\\s+сегодня|what's?\\s+today|show\\s+today|events?\\s+today)\\??$",
     workflow: {
       steps: [
         {
@@ -26,7 +26,7 @@ const intents: Array<{
         },
       ],
     },
-    phrases: ['что у меня сегодня', 'что сегодня', "what's today", 'show today'],
+    phrases: ['что у меня сегодня', 'что у нас сегодня', 'что сегодня', "what's today", 'show today'],
     trigger_words: ['сегодня', 'today'],
     source_message: 'что у меня сегодня',
   },
@@ -132,24 +132,6 @@ const intents: Array<{
     phrases: ['создай стендап завтра в 10', 'make standup tomorrow at 10', 'schedule meeting tomorrow at 15'],
     trigger_words: ['завтра', 'tomorrow'],
     source_message: 'создай стендап завтра в 10',
-  },
-
-  // ─── show_group_today ───────────────────────────────────────────────────────
-  {
-    canonical_name: 'show_group_today',
-    pattern:
-      "^(?:что\\s+у\\s+нас\\s+сегодня|что\\s+в\\s+группе\\s+сегодня|групповые?\\s+события\\s+сегодня|group\\s+events?\\s+today|what's?\\s+(?:our|group)\\s+events?\\s+today)\\??$",
-    workflow: {
-      tools: [
-        {
-          name: 'get_events',
-          input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}', scope: 'group' },
-        },
-      ],
-    },
-    phrases: ['что у нас сегодня', 'что в группе сегодня', 'group events today'],
-    trigger_words: ['нас', 'группе', 'group'],
-    source_message: 'что у нас сегодня',
   },
 ];
 
