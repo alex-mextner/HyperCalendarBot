@@ -84,11 +84,28 @@ export interface AgentContext {
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
 }
 
+/**
+ * Result returned by every tool handler.
+ *
+ * IMPORTANT: `output` has two consumers:
+ *   1. The AI agent, which reformulates it in natural language.
+ *   2. The intent engine (IntentMatcherLayer), which sends it **directly** to the user
+ *      via ctx.send() — no AI reformulation in between.
+ *
+ * Write `output` strings as if they will be shown verbatim to the user:
+ *   - Address the user as "you" (second person), never "the user".
+ *   - Keep them bilingual: use ctx.user.language to pick ru/en.
+ */
 export interface ToolResult {
   success: boolean;
   output?: string;
   error?: string;
   stopLoop?: boolean;
+  /**
+   * Agent-only instruction appended to the tool result seen by the AI.
+   * Never shown to the user — the intent engine ignores this field entirely.
+   */
+  agentHint?: string;
 }
 
 export interface AgentConfig {

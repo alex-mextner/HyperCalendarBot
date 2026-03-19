@@ -220,7 +220,9 @@ export class CalendarBotAgent {
             toolResults.push({
               type: 'tool_result',
               tool_use_id: block.id,
-              content: result.success ? (result.output ?? 'OK') : `Error: ${result.error}`,
+              content: result.success
+                ? `${result.output ?? 'OK'}${result.agentHint ? `\n[AGENT: ${result.agentHint}]` : ''}`
+                : `Error: ${result.error}`,
               is_error: !result.success,
             });
 

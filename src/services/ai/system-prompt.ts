@@ -105,13 +105,13 @@ The transcription may contain errors — words can be replaced with similar-soun
 Use conversation context and common sense to infer what the user actually meant.
 Do NOT ask the user to repeat themselves unless the message is completely unintelligible.`
     : ctx.inputMode === 'live_call'
-    ? `## Live Phone Call
+      ? `## Live Phone Call
 This is a live voice call via Telegram.
 Speech recognition may produce artifacts: homophones, merged words, background noise.
 When something seems off, make your best guess and ask for confirmation rather than asking to repeat.
 Ask multiple questions in a single response to minimize round-trips — the user is on a call and each exchange takes time.
 Keep responses short and spoken-word friendly: no bullet points, no markdown, no lists.`
-    : ''
+      : ''
 }
 ${
   ctx.isGroup && ctx.groupTitle
