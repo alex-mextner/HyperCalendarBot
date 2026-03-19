@@ -140,7 +140,7 @@ export class IntentLearner {
       },
       body: JSON.stringify({
         model: this.config.model ?? 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
+        max_tokens: 2048,
         system: LEARNER_SYSTEM_PROMPT,
         messages: [{ role: 'user', content: userMessage }],
       }),
@@ -152,7 +152,13 @@ export class IntentLearner {
 
     const data = (await response.json()) as {
       content: { type: string; text: string }[];
+      stop_reason?: string;
     };
+
+    if (data.stop_reason === 'max_tokens') {
+      cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
+      return null;
+    }
 
     const text = data.content.find((c) => c.type === 'text')?.text;
     if (!text) return null;

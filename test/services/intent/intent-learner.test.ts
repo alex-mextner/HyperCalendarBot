@@ -5,6 +5,7 @@ import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { IntentLearner } from '../../../src/services/intent/intent-learner.ts';
+import { cmdLogger } from '../../../src/utils/logger.ts';
 
 describe('IntentLearner', () => {
   let db: Database;
@@ -51,8 +52,8 @@ describe('IntentLearner', () => {
   });
 
   test('deduplicates within 1 hour window', async () => {
-    // First call - will try to call API (and fail, which is fine for dedup test)
-    await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]).catch(() => {});
+    // First call - will try to call API and return null (connection error), which is fine for dedup test
+    await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
 
     // Reset counter since first call incremented it
     learner.resetDailyCounter();
@@ -84,6 +85,48 @@ describe('IntentLearner', () => {
       expect(result?.canonical_name).toBe('show_today');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('returns null silently when API response is truncated (stop_reason: max_tokens)', async () => {
+    const truncatedJson = '{"canonical_name":"show_today","phrases":["что сегодня"],"workflow":{';
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: truncatedJson }],
+          stop_reason: 'max_tokens',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+
+    const originalWarn = cmdLogger.warn.bind(cmdLogger);
+    const originalError = cmdLogger.error.bind(cmdLogger);
+    let warnCalled = false;
+    let errorCalled = false;
+    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
+    (cmdLogger as any).warn = (...args: unknown[]) => {
+      warnCalled = true;
+      return originalWarn(...(args as Parameters<typeof originalWarn>));
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
+    (cmdLogger as any).error = (...args: unknown[]) => {
+      errorCalled = true;
+      return originalError(...(args as Parameters<typeof originalError>));
+    };
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result).toBeNull();
+      expect(warnCalled).toBe(true); // took the silent-skip path
+      expect(errorCalled).toBe(false); // did NOT fall through to JSON.parse error
+    } finally {
+      globalThis.fetch = originalFetch;
+      // biome-ignore lint/suspicious/noExplicitAny: restore spy
+      (cmdLogger as any).warn = originalWarn;
+      // biome-ignore lint/suspicious/noExplicitAny: restore spy
+      (cmdLogger as any).error = originalError;
     }
   });
 
