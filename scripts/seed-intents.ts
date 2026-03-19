@@ -19,9 +19,9 @@ const intents: Array<{
     pattern:
       "^(?:что\\s+у\\s+меня\\s+сегодня|что\\s+сегодня|мои\\s+события\\s+сегодня|покажи\\s+сегодня|what's?\\s+today|show\\s+today|events?\\s+today)\\??$",
     workflow: {
-      tools: [
+      steps: [
         {
-          name: 'get_events',
+          call: 'get_events',
           input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}', scope: '{{env.scope}}' },
         },
       ],
@@ -37,9 +37,9 @@ const intents: Array<{
     pattern:
       "^(?:что\\s+у\\s+меня\\s+завтра|что\\s+завтра|мои\\s+события\\s+завтра|покажи\\s+завтра|what's?\\s+tomorrow|show\\s+tomorrow|events?\\s+tomorrow)\\??$",
     workflow: {
-      tools: [
+      steps: [
         {
-          name: 'get_events',
+          call: 'get_events',
           input: { start_date: '{{dates.tomorrow}}', end_date: '{{dates.tomorrow}}', scope: '{{env.scope}}' },
         },
       ],
@@ -55,14 +55,10 @@ const intents: Array<{
     pattern:
       "^(?:что\\s+у\\s+меня\\s+(?:на\\s+)?(?:этой\\s+)?неделе|расписание\\s+(?:на\\s+)?(?:эту\\s+)?неделю|what's?\\s+this\\s+week|show\\s+(?:this\\s+)?week|this\\s+week)\\??$",
     workflow: {
-      tools: [
+      steps: [
         {
-          name: 'get_events',
-          input: {
-            start_date: '{{dates.week_start}}',
-            end_date: '{{dates.week_end}}',
-            scope: '{{env.scope}}',
-          },
+          call: 'get_events',
+          input: { start_date: '{{dates.week_start}}', end_date: '{{dates.week_end}}', scope: '{{env.scope}}' },
         },
       ],
     },
@@ -77,12 +73,7 @@ const intents: Array<{
     pattern:
       '^(?:когда\\s+(?:я\\s+)?свободен(?:\\s+сегодня)?|свободные\\s+(?:окна|слоты)(?:\\s+сегодня)?|free\\s+slots?(?:\\s+today)?|when\\s+am\\s+i\\s+free(?:\\s+today)?)\\??$',
     workflow: {
-      tools: [
-        {
-          name: 'get_free_slots',
-          input: { date: '{{dates.today}}', scope: '{{env.scope}}' },
-        },
-      ],
+      steps: [{ call: 'get_free_slots', input: { date: '{{dates.today}}', scope: '{{env.scope}}' } }],
     },
     phrases: ['когда я свободен', 'свободные окна сегодня', 'free slots today', 'when am I free'],
     trigger_words: ['свободен', 'свободные', 'free', 'slots'],
@@ -95,12 +86,7 @@ const intents: Array<{
     pattern:
       '^(?:найди|поищи|find|search)\\s+(?:событи[ея]|встреч[иу]|events?|meetings?)\\s+(?:про|о|by|about|with\\s+)?(.+)$',
     workflow: {
-      tools: [
-        {
-          name: 'search_events',
-          input: { query: '{{$1}}', scope: '{{env.scope}}' },
-        },
-      ],
+      steps: [{ call: 'search_events', input: { query: '{{$1}}', scope: '{{env.scope}}' } }],
     },
     phrases: ['найди встречи про стендап', 'search events about standup', 'find events by project'],
     trigger_words: ['найди', 'поищи', 'find', 'search'],

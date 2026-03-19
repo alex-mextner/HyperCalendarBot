@@ -6,16 +6,17 @@ Output a single JSON object with these fields:
 - phrases: string[] — 3-8 exact phrases that should trigger this intent (lowercase, no punctuation). Include the original message and common variations in both Russian and English.
 - trigger_words: string[] — words that MUST be present for regex matching (only if pattern is needed)
 - pattern: string | null — regex pattern for parameterized intents. Use real capturing groups (not (?:...)) to capture values you need in the workflow. Example: "^(?:найди|search)\\\\s+(.+)$" captures the query in $1. null for exact-match-only intents.
-- workflow: object — JSON workflow for executing the intent:
-  - For single tool call: { "tools": [{ "name": "tool_name", "input": { ... } }], "format": "format_type" }
-  - For multi-step: { "steps": [...], "i18n": { "ru": { "key": "..." }, "en": { "key": "..." } } }
-  - i18n: optional bilingual string dictionary. Define text keys under "ru" and "en". Use {{t.key}} in any string field to insert the correct language at runtime. Values inside i18n can contain {{}} template variables (e.g. {{$1}}, {{user.first_name}}). Fallback is "en". ALWAYS add i18n when the workflow contains user-facing text (ask_user questions, respond messages). Example: "i18n": { "ru": { "q1": "«{{$1}}» — дата или время?" }, "en": { "q1": "Is «{{$1}}» a date or time?" } } and use "question": "{{t.q1}}" in the step.
-  - Level 2 step types:
-    - Tool call: { "call": "tool_name", "input": {...}, "as": "result_var" }
-    - Conditional: add "when": "expr" to any step — skip if expression is false. Expressions support ==, !=, >, <, >=, <=, &&, ||, .length, property access, function calls. Context helpers available in "when": isPastHour(h) — true if hour h (0-23) has already passed today in the user's timezone; isPastHourPM(h) — true if PM hour h (1-12, mapped to h+12 in 24h) has already passed; isPastDay(d) — true if day-of-month d has already passed this month; isAmPmAmbiguous(h) — true if h is in range 1-12 (could be AM or PM). Use these to avoid asking unnecessary questions (e.g. if isPastHour($1), automatically schedule for tomorrow).
-    - Clarifying question: { "call": "ask_user", "input": { "question": "..." }, "as": "descriptive_var_name" } — suspends workflow, sends question to user, resumes when user replies. The user's text reply is stored in the named variable for subsequent steps. Use descriptive names that reflect the question (e.g. "date_or_time", "ampm", "confirm_next_month") — never generic "choice" or "answer", since a workflow can have multiple ask_user steps and the name must identify which question it belongs to.
-    - "as" field syntax: "varname" stores to a named variable. "varname|filter" applies a filter before storing (e.g. "date_or_time|lower" stores lowercased). ask_user answers are stored under the "ask" namespace: as: "date_or_time|lower" → accessible as ask.date_or_time in "when" expressions and {{ask.date_or_time}} in templates. Regular tool as fields (e.g. as: "results") stay flat in the context. Every ask_user answer is AUTOMATICALLY appended to choices[] (choices[0], choices[1], …) — no explicit syntax needed.
-    - Respond and stop: { "respond": "text {{var}}", "stop": true }
+- workflow: object — always use { "steps": [...] } format. Every workflow is a list of steps, whether one step or many.
+  - Simple single-tool example (show today's events):
+    { "steps": [{ "call": "get_events", "input": { "start_date": "{{dates.today}}", "end_date": "{{dates.today}}", "scope": "{{env.scope}}" } }] }
+  - Multi-step example with ask_user (ambiguous input — see AMBIGUITY RULE below):
+    { "steps": [{ "call": "ask_user", ... }, { "when": "...", "call": "create_event", ... }], "i18n": {...} }
+  - Step types:
+    - Tool call: { "call": "tool_name", "input": {...} }. Add "as": "var_name" to save the output for later steps.
+    - Conditional: add "when": "expr" to any step — skip if false. Expressions support ==, !=, >, <, >=, <=, &&, ||, property access, function calls. Context helpers: isPastHour(h) — true if hour h (0-23) already passed today; isPastHourPM(h) — true if PM hour h (1-12, mapped to h+12) already passed; isPastDay(d) — true if day-of-month d already passed this month; isAmPmAmbiguous(h) — true if h is 1-12 (ambiguous AM/PM). Use these to avoid unnecessary questions.
+    - Clarifying question: { "call": "ask_user", "input": { "question": "{{t.q}}", "options": ["{{t.opt1}}", "{{t.opt2}}"] }, "as": "descriptive_name|lower" } — suspends, sends buttons to user, resumes when replied. Use descriptive names (e.g. "date_or_time", "ampm", "confirm") — never "choice" or "answer". ask_user answers go to ask.name namespace: as: "confirm|lower" → check as ask.confirm == 'да' || ask.confirm == 'yes'.
+    - Respond and stop: { "respond": "{{t.msg}}" } — sends text and stops the workflow.
+  - i18n: always add when workflow has user-facing text. Define keys under "ru" and "en". Use {{t.key}} in any string. Values inside i18n can contain {{}} variables. Fallback is "en".
   - AMBIGUITY RULE: when a single captured number ($1) could be either a day-of-month (1-31) OR an hour (0-23) — i.e. any value in range 1-23 — ALWAYS generate a Level 2 workflow with an ask_user clarification step. Do NOT assume. Example workflow for "встреча на 22":
     { "steps": [
         { "call": "ask_user", "input": { "question": "{{t.q}}" }, "as": "date_or_time|lower" },
