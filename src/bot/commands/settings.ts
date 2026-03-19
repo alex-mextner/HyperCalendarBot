@@ -12,6 +12,8 @@ import { getGroupId, isGroup } from '../group-context.ts';
 import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
+export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
+
 export function settingsCategoryKeyboard(): InlineKeyboard {
   return new InlineKeyboard()
     .text('🌍 Основные', 'stg:general')
@@ -42,6 +44,45 @@ function fmtReminderInterval(m: number): string {
   if (m === 0) return 'в начале';
   if (m >= 60) return `${m / 60}ч`;
   return `${m}мин`;
+}
+
+// ─── General ─────────────────────────────────────────────────────────────────
+
+export function buildGeneralText(
+  tzDisplay: string,
+  lang: string,
+  country: string,
+  defaultDurationMinutes: number,
+): string {
+  const durationLabel =
+    defaultDurationMinutes >= 60 ? `${defaultDurationMinutes / 60}ч` : `${defaultDurationMinutes} мин`;
+  return [
+    '🌍 Основные настройки',
+    '',
+    `Часовой пояс: ${tzDisplay}`,
+    `Язык: ${lang === 'ru' ? '🇷🇺 Русский' : '🇬🇧 English'}`,
+    `Страна: ${country}`,
+    `Длительность встреч: ${durationLabel}`,
+    '  По умолчанию, если не указано время окончания.',
+  ].join('\n');
+}
+
+export function buildDurationView(currentMinutes: number): { text: string; kb: InlineKeyboard } {
+  const fmt = (m: number) => (m >= 60 ? `${m / 60}ч` : `${m} мин`);
+  const mark = (m: number) => (m === currentMinutes ? `✅ ${fmt(m)}` : fmt(m));
+  const text = [
+    '⏱ Длительность встреч по умолчанию',
+    '',
+    `Текущая: ${fmt(currentMinutes)}`,
+    'Выберите или введите число минут:',
+  ].join('\n');
+  const kb = new InlineKeyboard()
+    .text(mark(15), 'stg:set_duration:15')
+    .text(mark(30), 'stg:set_duration:30')
+    .text(mark(60), 'stg:set_duration:60')
+    .row()
+    .text('🔙 Назад', 'stg:general');
+  return { text, kb };
 }
 
 // ─── Notifications ──────────────────────────────────────────────────────────
@@ -259,13 +300,9 @@ export async function handleSettingsCallback(
     const tzDisplay = getTimezoneDisplay(currentUser.timezone);
     const lang = currentUser.language ?? 'en';
     const country = currentUser.country_code ?? '—';
-    const text = [
-      '🌍 Основные настройки',
-      '',
-      `Часовой пояс: ${tzDisplay}`,
-      `Язык: ${lang === 'ru' ? '🇷🇺 Русский' : '🇬🇧 English'}`,
-      `Страна: ${country}`,
-    ].join('\n');
+    const duration = currentUser.default_event_duration_minutes ?? 60;
+    const durationLabel = duration >= 60 ? `${duration / 60}ч` : `${duration} мин`;
+    const text = buildGeneralText(tzDisplay, lang, country, duration);
 
     const kb = new InlineKeyboard()
       .text('🕐 Часовой пояс', 'stg:change_tz')
@@ -274,6 +311,8 @@ export async function handleSettingsCallback(
       .text(lang === 'en' ? '✅ 🇬🇧 English' : '🇬🇧 English', 'stg:set_lang:en')
       .row()
       .text('🏳️ Страна', 'stg:show_countries')
+      .row()
+      .text(`⏱ Длительность: ${durationLabel}`, 'stg:edit_duration')
       .row()
       .text('🔙 Назад', 'stg:back');
 
@@ -400,6 +439,28 @@ export async function handleSettingsCallback(
 
   if (subAction === 'voice' || subAction === 'toggle_voice') {
     const { text, kb } = buildVoiceView(currentUser.voice_response_enabled);
+    await ctx.answer();
+    await ctx.editText(text, { reply_markup: kb });
+    return;
+  }
+
+  if (subAction === 'edit_duration') {
+    const duration = user.default_event_duration_minutes ?? 60;
+    const { text, kb } = buildDurationView(duration);
+    pendingDurationInput.set(user.telegram_id, Date.now());
+    await ctx.answer();
+    await ctx.editText(text, { reply_markup: kb });
+    return;
+  }
+
+  if (subAction.startsWith('set_duration:') && userRepo) {
+    const mins = Number.parseInt(subAction.split(':')[1]!, 10);
+    if (mins > 0) {
+      userRepo.update(user.telegram_id, { default_event_duration_minutes: mins });
+      pendingDurationInput.delete(user.telegram_id);
+    }
+    const updated = userRepo.findByTelegramId(user.telegram_id) ?? user;
+    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
