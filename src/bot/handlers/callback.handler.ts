@@ -699,7 +699,7 @@ export function createCallbackHandler(
           (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
         if (onAiButtonClick && cbChatId) {
           onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
-            cmdLogger.error({ error: String(e) }, 'AI button continuation failed');
+            cmdLogger.error({ err: e }, 'AI button continuation failed');
           });
         }
         return;
@@ -856,7 +856,7 @@ export function createCallbackHandler(
               forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
             })
             .catch((err: unknown) => {
-              cmdLogger.error({ error: String(err), inviteeId }, 'Invite contact send failed');
+              cmdLogger.error({ err: err, inviteeId }, 'Invite contact send failed');
             });
         } else {
           await ctx.answer({ text: 'Not configured' });
@@ -908,7 +908,7 @@ export function createCallbackHandler(
               forceInviteDeps.invRepo.setMessageInfo(invitation.id, sent.message_id, inviteeId);
             })
             .catch((err: unknown) => {
-              cmdLogger.error({ error: String(err), inviteeId }, 'Force invite send failed');
+              cmdLogger.error({ err: err, inviteeId }, 'Force invite send failed');
             });
         }
 
@@ -1012,7 +1012,7 @@ export function createCallbackHandler(
         await ctx.answer({ text: 'Thread closed' });
         await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
         feedbackDeps.sendMessage(thread.user_id, 'Your feedback thread has been resolved.').catch((e: unknown) => {
-          cmdLogger.error({ error: String(e) }, 'Failed to notify user of thread close');
+          cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
         });
         return;
       }
@@ -1096,7 +1096,7 @@ export function createCallbackHandler(
             }
           }
         } catch (err) {
-          cmdLogger.error({ error: String(err) }, 'Voice opt-in TTS error');
+          cmdLogger.error({ err: err }, 'Voice opt-in TTS error');
           await ctx.editText(msgs.voice_demo_failed);
           return;
         }
@@ -1188,13 +1188,11 @@ export function createCallbackHandler(
       const errStr = String(error);
       // Duplicate click — message already updated, silently acknowledge
       if (errStr.includes('message is not modified')) {
-        await ctx.answer().catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() after duplicate click'));
+        await ctx.answer().catch((e) => cmdLogger.debug({ err: e }, 'answer() after duplicate click'));
         return;
       }
       cmdLogger.error({ error: errStr, action }, 'Callback handler error');
-      await ctx
-        .answer({ text: 'Error' })
-        .catch((e) => cmdLogger.debug({ error: String(e) }, 'answer() in error handler'));
+      await ctx.answer({ text: 'Error' }).catch((e) => cmdLogger.debug({ err: e }, 'answer() in error handler'));
     }
   };
 }

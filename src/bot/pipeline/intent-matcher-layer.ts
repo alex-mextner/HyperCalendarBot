@@ -131,7 +131,7 @@ export function createIntentMatcherLayer(
         notifyAdmin(
           `⚠️ Intent failed: ${intent.canonical_name} (id=${match.intentId})\nMessage: "${messageText}"\nError: ${result.response ?? 'no response'}`,
         ).catch((err: unknown) => {
-          cmdLogger.error({ error: String(err) }, 'Failed to send intent fail report to admin');
+          cmdLogger.error({ err: err }, 'Failed to send intent fail report to admin');
         });
       }
       return { handled: false };

@@ -115,7 +115,7 @@ export class GoogleOAuthService {
     try {
       await client.revokeToken(refreshToken);
     } catch (err) {
-      syncLogger.warn({ error: String(err) }, 'Token revocation failed (may already be revoked)');
+      syncLogger.warn({ err: err }, 'Token revocation failed (may already be revoked)');
     }
   }
 

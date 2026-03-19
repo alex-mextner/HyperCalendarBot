@@ -73,7 +73,7 @@ export function createChatMemberHandler(
             if (link) groupRepo.setInviteLink(chat.id, link);
           })
           .catch((err: unknown) => {
-            cmdLogger.error({ chatId: chat.id, error: String(err) }, 'Failed to export invite link');
+            cmdLogger.error({ chatId: chat.id, err: err }, 'Failed to export invite link');
           });
       }
     } else if (INACTIVE_STATUSES.has(newMember.status)) {

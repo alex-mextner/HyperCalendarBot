@@ -151,7 +151,7 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
   ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch((err) => {
-    metaLogger.error({ error: String(err) }, 'Failed to send buttons');
+    metaLogger.error({ err: err }, 'Failed to send buttons');
   });
   return { success: true, output: 'Question sent. Waiting for user response.', stopLoop: true };
 }
@@ -162,7 +162,7 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   }
   // Use event_id as request_id so we can match the response
   ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch((err) => {
-    metaLogger.error({ error: String(err) }, 'Failed to send user picker');
+    metaLogger.error({ err: err }, 'Failed to send user picker');
   });
   return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
 }
@@ -199,7 +199,7 @@ export function handleRenderDayImage(
       return sender.sendPhoto!(ctx.chatId, file);
     })
     .catch((err) => {
-      metaLogger.error({ error: String(err) }, 'Day image render failed');
+      metaLogger.error({ err: err }, 'Day image render failed');
     });
 
   return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };

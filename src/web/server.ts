@@ -56,7 +56,7 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
 
         if ((resourceState === 'exists' || resourceState === 'sync') && deps.onWebhook) {
           deps.onWebhook(channelId, resourceId).catch((err) => {
-            webLogger.error({ error: String(err), channelId }, 'Webhook processing error');
+            webLogger.error({ err: err, channelId }, 'Webhook processing error');
           });
         }
 

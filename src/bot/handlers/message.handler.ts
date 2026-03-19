@@ -301,7 +301,7 @@ async function handleVoiceMessage(
             await deps.sendVoice(Number(chatId), voiceBuffer);
           }
         } catch (ttsError) {
-          cmdLogger.error({ error: String(ttsError), userId: user.telegram_id }, 'Voice reply TTS error');
+          cmdLogger.error({ err: ttsError, userId: user.telegram_id }, 'Voice reply TTS error');
         }
       }
     }
@@ -521,7 +521,7 @@ async function handleProposeTimeInput(
     deps
       .editMessage(invitation.chat_id, invitation.message_id, t(lang).invite_propose_sent(formattedTime))
       .catch((e: unknown) => {
-        cmdLogger.error({ error: String(e) }, 'Failed to edit invitation message after propose');
+        cmdLogger.error({ err: e }, 'Failed to edit invitation message after propose');
       });
   }
 
@@ -529,7 +529,7 @@ async function handleProposeTimeInput(
     const event = deps.eventService.getEvent?.(invitation?.event_id ?? 0, user.telegram_id);
     const eventTitle = (event as { title?: string } | undefined)?.title ?? '';
     deps.notifyInviterProposal(session.invitationId, user, formattedTime, eventTitle).catch((e: unknown) => {
-      cmdLogger.error({ error: String(e) }, 'Failed to notify inviter of time proposal');
+      cmdLogger.error({ err: e }, 'Failed to notify inviter of time proposal');
     });
   }
 }
@@ -630,7 +630,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       const ctx = agentContextBuilder(user, chatId, messageText, groupInfo);
       ctx.onEventMentioned = (eventId) => {
         Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
-          cmdLogger.error({ error: String(err), userId: user.telegram_id }, 'Failed to persist last mentioned event');
+          cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
         });
       };
       return ctx;
@@ -755,7 +755,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           });
           sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject).catch(
             (e: unknown) => {
-              cmdLogger.error({ error: String(e) }, 'Failed to deliver admin reply to user');
+              cmdLogger.error({ err: e }, 'Failed to deliver admin reply to user');
             },
           );
           await ctx.send('Reply sent.');
@@ -795,10 +795,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               // Track which events the intent touches
               agentCtx.onEventMentioned = (eventId) => {
                 Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
-                  cmdLogger.error(
-                    { error: String(err), userId: user.telegram_id },
-                    'Failed to persist last mentioned event',
-                  );
+                  cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
                 });
               };
               return executeTool(agentCtx, toolName, input);

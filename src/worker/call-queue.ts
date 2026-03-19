@@ -34,7 +34,7 @@ export function createCallWorker(connection: ConnectionOptions, callManager: Cal
   );
 
   worker.on('failed', (job, err) => {
-    voiceLogger.error({ jobId: job?.id, error: String(err) }, 'Call job failed');
+    voiceLogger.error({ jobId: job?.id, err: err }, 'Call job failed');
   });
 
   return worker;

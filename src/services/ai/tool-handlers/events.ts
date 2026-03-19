@@ -61,12 +61,12 @@ function sendGroupNotifications(ctx: AgentContext, event: CalendarEvent, action:
           action,
         );
         sender.sendMessage(userId, message, 'HTML').catch((err) => {
-          eventsLogger.error({ error: String(err), userId }, errorLabel);
+          eventsLogger.error({ err: err, userId }, errorLabel);
         });
       }
     })
     .catch((err) => {
-      eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch failed');
+      eventsLogger.error({ err: err, groupChatId: ctx.groupChatId }, 'Group member fetch failed');
     });
 }
 
@@ -493,7 +493,7 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
     const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
     for (const p of accepted) {
       ctx.sender.sendMessage(p.user_id, text).catch((err) => {
-        eventsLogger.error({ error: String(err), userId: p.user_id }, 'Participant notification failed');
+        eventsLogger.error({ err: err, userId: p.user_id }, 'Participant notification failed');
       });
     }
   }

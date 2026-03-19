@@ -42,7 +42,7 @@ export async function processNotification(
     logRepo.markSent(data.logId);
     notifyLogger.info({ logId: data.logId, type: data.type }, 'Notification sent');
   } catch (err) {
-    notifyLogger.error({ logId: data.logId, error: String(err) }, 'Notification delivery failed');
+    notifyLogger.error({ logId: data.logId, err: err }, 'Notification delivery failed');
     throw err;
   }
 }

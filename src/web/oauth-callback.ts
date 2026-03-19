@@ -72,7 +72,7 @@ export async function handleOAuthCallback(req: Request, deps: OAuthCallbackDeps)
       { status: 200, headers: { 'Content-Type': 'text/html' } },
     );
   } catch (err) {
-    webLogger.error({ error: String(err), userId }, 'OAuth token exchange failed');
+    webLogger.error({ err: err, userId }, 'OAuth token exchange failed');
     return new Response('Authorization failed. Please try again.', { status: 500 });
   }
 }

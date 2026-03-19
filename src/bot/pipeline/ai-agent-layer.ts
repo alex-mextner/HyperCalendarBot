@@ -47,7 +47,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       const result = await deps.agent.run(agentContext);
       if (deps.intentLearner && result.toolCalls.length > 0) {
         deps.intentLearner.analyze(messageText, result.toolCalls, result.toolResults).catch((err: unknown) => {
-          cmdLogger.error({ error: String(err) }, 'IntentLearner error');
+          cmdLogger.error({ err: err }, 'IntentLearner error');
         });
       }
     } catch (error) {

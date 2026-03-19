@@ -183,7 +183,7 @@ export class CalendarBotAgent {
             const isRetryable = String(err).includes('Network') || String(err).includes('overloaded');
             if (!isRetryable || attempt >= MAX_API_RETRIES) break;
             aiLogger.warn(
-              { attempt: attempt + 1, error: String(err), userId: ctx.user.telegram_id },
+              { attempt: attempt + 1, err: err, userId: ctx.user.telegram_id },
               'API call failed, retrying',
             );
             await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));

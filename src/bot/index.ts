@@ -591,7 +591,7 @@ export function createBot(
         db.groupChats,
         (chatId, text) =>
           bot.api.sendMessage({ chat_id: chatId, text }).catch((err: unknown) => {
-            botLogger.error({ chatId, error: String(err) }, 'Failed to send group welcome');
+            botLogger.error({ chatId, err: err }, 'Failed to send group welcome');
           }),
         (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru',
         async (chatId) => {
@@ -657,7 +657,7 @@ export function createBot(
       if (chatId) {
         agent
           .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
-          .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
+          .catch((e) => botLogger.error({ err: e }, 'AI continuation after users_shared failed'));
       }
     })
     // Group chat shared from picker → send invitation to group chat
@@ -679,7 +679,7 @@ export function createBot(
             .then((sent) => {
               if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);
             })
-            .catch((e) => botLogger.error({ error: String(e), inviteeId }, 'chat_shared invitation delivery failed'));
+            .catch((e) => botLogger.error({ err: e, inviteeId }, 'chat_shared invitation delivery failed'));
         }
         const resultText = inv.success
           ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)

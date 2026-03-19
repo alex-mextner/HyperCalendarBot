@@ -30,7 +30,7 @@ export async function autoPin(chatId: number, messageId: number, deps: AutoPinDe
     await deps
       .sendMessage(chatId, 'Если дать мне права админа, я буду закреплять актуальный календарь автоматически 📌')
       .catch((err: unknown) => {
-        cmdLogger.error({ error: String(err) }, 'Failed to send pin hint');
+        cmdLogger.error({ err: err }, 'Failed to send pin hint');
       });
   }
 }

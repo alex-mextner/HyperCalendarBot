@@ -105,7 +105,7 @@ export class GoogleCalendarApi {
         requestBody: { id: channelId, resourceId },
       });
     } catch (err) {
-      syncLogger.warn({ channelId, error: String(err) }, 'Failed to stop watch channel (may be expired)');
+      syncLogger.warn({ channelId, err: err }, 'Failed to stop watch channel (may be expired)');
     }
   }
 }

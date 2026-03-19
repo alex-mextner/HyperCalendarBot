@@ -254,7 +254,7 @@ export class IntentLearner {
     };
 
     this.config.sendToAdmin(text, replyMarkup).catch((err: unknown) => {
-      cmdLogger.error({ error: String(err) }, 'Failed to send intent verification to admin');
+      cmdLogger.error({ err: err }, 'Failed to send intent verification to admin');
     });
   }
 

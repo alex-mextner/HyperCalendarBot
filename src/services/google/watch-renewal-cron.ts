@@ -50,7 +50,7 @@ export async function renewExpiringChannels(
 
       syncLogger.info({ userId: channel.user_id, calendarId: channel.google_calendar_id }, 'Watch channel renewed');
     } catch (err) {
-      syncLogger.error({ error: String(err), channelId: channel.channel_id }, 'Watch channel renewal failed');
+      syncLogger.error({ err: err, channelId: channel.channel_id }, 'Watch channel renewal failed');
     }
   }
 }

@@ -56,7 +56,7 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
         },
       })
       .catch((err: unknown) => {
-        cmdLogger.error({ error: String(err) }, 'Failed to send feedback notification to admin');
+        cmdLogger.error({ err: err }, 'Failed to send feedback notification to admin');
       });
   }
 

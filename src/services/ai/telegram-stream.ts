@@ -151,7 +151,7 @@ export class TelegramStreamWriter {
           this.lastFlushedLength = this.text.length;
           this.lastFlushTime = Date.now();
         } catch (retryError) {
-          aiLogger.error({ error: String(retryError) }, 'Fallback plain text edit also failed');
+          aiLogger.error({ err: retryError }, 'Fallback plain text edit also failed');
         }
         return;
       }
@@ -191,7 +191,7 @@ export class TelegramStreamWriter {
         try {
           await this.sender.editMessageText(this.chatId, this.messageId, this.text);
         } catch (e) {
-          aiLogger.error({ error: String(e) }, 'Finalize edit failed');
+          aiLogger.error({ err: e }, 'Finalize edit failed');
         }
       }
     }

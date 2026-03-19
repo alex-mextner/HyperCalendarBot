@@ -72,7 +72,7 @@ export async function executeTool(
 
     return result;
   } catch (outerError) {
-    aiLogger.error({ tool: toolName, error: String(outerError) }, 'Tool execution error');
+    aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
     return { success: false, error: `Tool execution failed: ${String(outerError)}` };
   }
 }
