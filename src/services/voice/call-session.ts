@@ -139,6 +139,7 @@ export class CallSession {
   }
 
   private onVadEnd(): void {
+    if (!this.speaking) return;
     this.speaking = false;
     if (this.cfg.language === 'ru') {
       this.novaStt?.close();

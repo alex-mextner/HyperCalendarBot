@@ -1,4 +1,4 @@
-import { beforeEach, expect, mock, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 import { CallSession } from '../../../src/services/voice/call-session.ts';
 
 function makeWsMock() {
@@ -35,7 +35,7 @@ function makeTtsMock(audio = Buffer.from('audio')) {
   };
 }
 
-function makeSession(overrides: Partial<Parameters<typeof CallSession['create']>[0]> = {}) {
+function makeSession(overrides: Partial<Parameters<(typeof CallSession)['create']>[0]> = {}) {
   const ws = makeWsMock();
   const nova = makeNovaMock();
   const thinking = makeThinkingMock();
@@ -48,7 +48,7 @@ function makeSession(overrides: Partial<Parameters<typeof CallSession['create']>
     language: 'ru',
     ws: ws as never,
     createNovaStt: () => nova as never,
-    createFluxStt: () => ({ connect: mock(() => {}), sendAudio: mock(() => {}), close: mock(() => {}) } as never),
+    createFluxStt: () => ({ connect: mock(() => {}), sendAudio: mock(() => {}), close: mock(() => {}) }) as never,
     createThinkingPlayer: () => thinking as never,
     agent: agent as never,
     tts,
@@ -105,4 +105,29 @@ test('CALL_ENDED triggers cleanup', async () => {
   await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
   await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
   expect(session.isEnded()).toBe(true);
+});
+
+test('agent runs only once when VAD_END follows classify respond', async () => {
+  const nova = makeNovaMock();
+  let interimCallback: ((t: string) => void) | null = null;
+  nova.connect = mock((events: { onInterim: (t: string) => void }) => {
+    interimCallback = events.onInterim;
+  });
+  const agent = makeAgentMock();
+  const { session } = makeSession({ createNovaStt: () => nova as never, agent: agent as never });
+
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+
+  // Fire an interim that classifies as 'respond' (3+ words, not all fillers)
+  interimCallback?.('добавь встречу на завтра');
+  // Small delay to let any async work settle
+  await new Promise((r) => setTimeout(r, 10));
+
+  // VAD_END arrives — should be ignored since we already responded
+  await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
+  await new Promise((r) => setTimeout(r, 10));
+
+  // Agent should have been called exactly once
+  expect(agent.run).toHaveBeenCalledTimes(1);
 });
