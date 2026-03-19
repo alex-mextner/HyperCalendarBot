@@ -183,9 +183,6 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
       fallbackTts: ttsService,
       callLogRepo: db.callLog,
       translateText: (text, lang) => ttsTranslationService.translate(text, lang),
-      sendVoiceMessage: async (userId, audio) => {
-        await botRef.sendVoice(userId, audio);
-      },
       pyBridgePath,
     });
 

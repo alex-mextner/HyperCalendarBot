@@ -1,4 +1,6 @@
 // src/services/voice/call-manager.ts
+
+import { unlink } from 'node:fs/promises';
 import type { CallStatus } from '../../database/types';
 import type { CallReminderJobData } from './types';
 import { voiceLogger } from './types';
@@ -17,7 +19,6 @@ export interface CallManagerDeps {
     complete: (id: number, status: CallStatus, duration: number, error?: string) => void;
   };
   translateText?: (text: string, lang: string) => Promise<string>;
-  sendVoiceMessage?: (userId: number, audio: Buffer) => Promise<void>;
   pyBridgePath: string;
   registerSession?: (sessionId: string, userId: number, language: string) => void;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
@@ -58,22 +59,17 @@ export class CallManager {
         // TtsService returns MP3 — convert to OGG Opus for pytgcalls
         const mp3File = `/tmp/call-${job.callLogId}-raw.mp3`;
         await Bun.write(mp3File, audioBuffer);
-        const ffmpeg = Bun.spawn([
-          'ffmpeg',
-          '-y',
-          '-i',
-          mp3File,
-          '-c:a',
-          'libopus',
-          '-ar',
-          '48000',
-          '-ac',
-          '1',
-          oggFile,
-        ]);
-        await ffmpeg.exited;
+        const ffmpeg = Bun.spawn(
+          ['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile],
+          { stderr: 'pipe' },
+        );
+        const ffmpegExit = await ffmpeg.exited;
+        if (ffmpegExit !== 0) {
+          const ffmpegErr = await new Response(ffmpeg.stderr).text();
+          voiceLogger.warn({ exitCode: ffmpegExit, stderr: ffmpegErr.slice(0, 200) }, 'ffmpeg conversion failed');
+        }
         try {
-          await (await import('node:fs/promises')).unlink(mp3File);
+          await unlink(mp3File);
         } catch {}
       } else {
         // Silero/Kokoro already output OGG Opus
@@ -102,7 +98,7 @@ export class CallManager {
 
       // Cleanup
       try {
-        await (await import('node:fs/promises')).unlink(oggFile);
+        await unlink(oggFile);
       } catch {}
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
