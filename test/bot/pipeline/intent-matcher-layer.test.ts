@@ -231,4 +231,31 @@ describe('createIntentMatcherLayer', () => {
     expect(result.handled).toBe(true);
     expect(ctx.send).not.toHaveBeenCalled();
   });
+
+  test('passes groupContext to executor as groupIsGroup and groupChatId', async () => {
+    const match = { intentId: 10, captures: {} };
+    const intent = {
+      id: 10,
+      workflow: JSON.stringify({ tools: [{ name: 'create_event', input: { scope: 'group' } }] }),
+      format: 'text',
+    };
+    const executor = makeExecutor({ success: true, response: 'event created' });
+
+    const layer = createIntentMatcherLayer(
+      makeMatcher(match),
+      makeIntentRepo(intent),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    await layer(makeCtx(), 'сделай пьянку сегодня на 23', {
+      groupContext: { isGroup: true, groupChatId: -100555, groupTitle: 'Test group' },
+    });
+
+    const runCall = (executor.run as ReturnType<typeof mock>).mock.calls[0] as unknown[];
+    const userCtx = runCall[2] as { groupIsGroup: boolean; groupChatId: number };
+    expect(userCtx.groupIsGroup).toBe(true);
+    expect(userCtx.groupChatId).toBe(-100555);
+  });
 });

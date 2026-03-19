@@ -206,8 +206,10 @@ export const MSG = {
     voice_prompt_no: 'No, text only',
     voice_stt_error: 'Could not recognize speech.',
     voice_error: 'Could not process voice message.',
-    group_event_created: (title: string, group: string) => `📅 New event in "${group}":\n*${title}*`,
-    group_event_updated: (title: string, group: string) => `✏️ Event updated in "${group}":\n*${title}*`,
+    group_event_created: (groupRef: string, organizerLink: string) =>
+      `📅 New event in ${groupRef}\n👤 Organizer: ${organizerLink}`,
+    group_event_updated: (groupRef: string, organizerLink: string) =>
+      `✏️ Event updated in ${groupRef}\n👤 Updated by: ${organizerLink}`,
     feature_tour_btn: '📖 All Features',
     feature_tour: [
       '<b>🤖 AI Assistant</b>\nJust text me naturally: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". I understand context and execute commands.',
@@ -363,8 +365,10 @@ export const MSG = {
     voice_prompt_no: 'Нет, только текстом',
     voice_stt_error: 'Не удалось распознать речь.',
     voice_error: 'Не удалось обработать голосовое сообщение.',
-    group_event_created: (title: string, group: string) => `📅 Новое событие в "${group}":\n*${title}*`,
-    group_event_updated: (title: string, group: string) => `✏️ Событие обновлено в "${group}":\n*${title}*`,
+    group_event_created: (groupRef: string, organizerLink: string) =>
+      `📅 Новое событие в ${groupRef}\n👤 Организатор: ${organizerLink}`,
+    group_event_updated: (groupRef: string, organizerLink: string) =>
+      `✏️ Событие обновлено в ${groupRef}\n👤 Изменил: ${organizerLink}`,
     feature_tour_btn: '📖 Все функции',
     feature_tour: [
       '<b>🤖 AI-ассистент</b>\nПросто напишите мне: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Я понимаю контекст и выполняю команды.',

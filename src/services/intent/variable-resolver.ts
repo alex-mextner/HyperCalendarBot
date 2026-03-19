@@ -35,6 +35,10 @@ export interface UserContext {
   lastAddedEvent?: EventSummary;
   /** Most recently referenced event in this conversation. Available as {{last_mentioned_event.id}}, .title, .date, .time */
   lastMentionedEvent?: EventSummary;
+  /** True when the message was sent from a group/supergroup chat. */
+  groupIsGroup?: boolean;
+  /** Telegram chat ID of the group, if applicable. Available as {{group.chat_id}}. */
+  groupChatId?: number;
 }
 
 /**
@@ -107,6 +111,10 @@ function resolveVar(
       return userCtx.firstName;
     case 'user.id':
       return userCtx.userId;
+    case 'group.is_group':
+      return userCtx.groupIsGroup ?? false;
+    case 'group.chat_id':
+      return userCtx.groupChatId;
     default:
       break;
   }

@@ -23,7 +23,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { CalendarEvent, User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
-import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
+import type { AgentContext } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
@@ -110,7 +110,6 @@ export interface MessageHandlerDeps {
   intentMatcher?: IntentMatcher;
   intentRepo?: IntentRepository;
   intentExecutor?: IntentExecutor;
-  intentToolExecutor?: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
   workflowSessions?: Map<number, WorkflowSession>;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
@@ -618,22 +617,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     };
   };
 
-  // Intent layer is built statically when a custom tool executor is provided,
-  // or dynamically per-message using agentContextBuilder when it's absent.
-  const staticIntentLayer =
-    deps.intentMatcher && deps.intentRepo && deps.intentExecutor && deps.intentToolExecutor
-      ? createIntentMatcherLayer(
-          deps.intentMatcher,
-          deps.intentRepo,
-          deps.intentExecutor,
-          deps.intentToolExecutor,
-          workflowSessions,
-          deps.chatHistory,
-          notifyAdmin,
-          getEventContext,
-        )
-      : undefined;
-
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
@@ -749,16 +732,18 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       }
     }
 
-    // Build per-message intent layer if no static one exists (tool executor requires user context)
     const intentLayer =
-      staticIntentLayer ??
-      (deps.intentMatcher && deps.intentRepo && deps.intentExecutor
+      deps.intentMatcher && deps.intentRepo && deps.intentExecutor
         ? createIntentMatcherLayer(
             deps.intentMatcher,
             deps.intentRepo,
             deps.intentExecutor,
             (toolName, input) => {
-              const agentCtx = agentContextBuilder(user, Number(ctx.chatId!), messageText);
+              const agentCtx = agentContextBuilder(user, Number(ctx.chatId!), messageText, {
+                isGroup,
+                groupChatId: isGroup ? Number(chatId) : undefined,
+                groupTitle: chat?.title ?? undefined,
+              });
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
               // Track which events the intent touches
@@ -777,7 +762,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             notifyAdmin,
             getEventContext,
           )
-        : undefined);
+        : undefined;
 
     const layers = [...(intentLayer ? [intentLayer] : []), ...staticLayers];
 

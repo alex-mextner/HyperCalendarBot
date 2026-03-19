@@ -171,4 +171,25 @@ describe('resolveVariables', () => {
       '{{last_added_event.description}}',
     );
   });
+
+  // --- Group context variables ---
+
+  test('{{group.is_group}} resolves to true when groupIsGroup is set', () => {
+    const ctx = { ...userCtx, groupIsGroup: true, groupChatId: -100123456 };
+    expect(resolveVariables('{{group.is_group}}', {}, ctx)).toBe(true);
+  });
+
+  test('{{group.is_group}} resolves to false when groupIsGroup is absent', () => {
+    expect(resolveVariables('{{group.is_group}}', {}, userCtx)).toBe(false);
+  });
+
+  test('{{group.chat_id}} resolves to group chat ID number', () => {
+    const ctx = { ...userCtx, groupIsGroup: true, groupChatId: -100999 };
+    expect(resolveVariables('{{group.chat_id}}', {}, ctx)).toBe(-100999);
+  });
+
+  test('{{group.chat_id}} stays as literal when not in a group', () => {
+    // groupChatId is undefined → resolveVar returns undefined → template stays unreplaced
+    expect(resolveVariables('{{group.chat_id}}', {}, userCtx)).toBe('{{group.chat_id}}');
+  });
 });

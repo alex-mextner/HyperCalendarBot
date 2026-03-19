@@ -10,7 +10,7 @@ import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type { PipelineResult } from './types.ts';
+import type { GroupContext, PipelineResult } from './types.ts';
 
 export interface WorkflowSession {
   intentId: number;
@@ -36,9 +36,14 @@ export function createIntentMatcherLayer(
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
 ) {
-  return async (ctx: BotCommandContext, messageText: string): Promise<PipelineResult> => {
+  return async (
+    ctx: BotCommandContext,
+    messageText: string,
+    extra?: { groupContext?: GroupContext },
+  ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const userId = user.telegram_id;
+    const groupCtx = extra?.groupContext;
 
     // 1. Check for active workflow session (resuming from ask_user)
     const session = workflowSessions.get(userId);
@@ -55,6 +60,8 @@ export function createIntentMatcherLayer(
             username: user.username ?? undefined,
             firstName: user.first_name ?? undefined,
             userId: user.telegram_id,
+            groupIsGroup: groupCtx?.isGroup ?? false,
+            groupChatId: groupCtx?.groupChatId,
             ...eventCtx,
           },
           toolExecutor,
@@ -94,6 +101,8 @@ export function createIntentMatcherLayer(
         username: user.username ?? undefined,
         firstName: user.first_name ?? undefined,
         userId: user.telegram_id,
+        groupIsGroup: groupCtx?.isGroup ?? false,
+        groupChatId: groupCtx?.groupChatId,
         ...eventCtx,
       },
       toolExecutor,

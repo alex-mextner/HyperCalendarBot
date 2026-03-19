@@ -260,6 +260,7 @@ export interface GroupChat {
   pin_hint_shown: number;
   timezone: string | null;
   country: string | null;
+  invite_link: string | null;
 }
 
 export interface GroupSharedEvent {

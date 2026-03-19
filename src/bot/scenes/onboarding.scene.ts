@@ -4,6 +4,7 @@ import { Scene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
+import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import {
   getTimezoneDisplay,
@@ -33,6 +34,7 @@ export function createOnboardingScene(
   db: DatabaseService,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
+  holidayService?: HolidayService,
 ) {
   return (
     new Scene('onboarding')
@@ -121,7 +123,7 @@ export function createOnboardingScene(
             if (payload === 'confirm') {
               const tz = context.scene.state.detectedTz;
               if (!tz) return;
-              db.users.update(context.from.id, { timezone: tz });
+              db.users.update(context.from.id, { timezone: tz, country_code: guessCountryFromTimezone(tz) });
               await context.send(`\u2705 ${getTimezoneDisplay(tz)}`, removeKeyboard());
               await cbCtx.answer();
               await context.scene.update({ timezone: tz });
@@ -137,7 +139,7 @@ export function createOnboardingScene(
             }
 
             // City selected directly
-            db.users.update(context.from.id, { timezone: payload });
+            db.users.update(context.from.id, { timezone: payload, country_code: guessCountryFromTimezone(payload) });
             await context.send(`\u2705 ${getTimezoneDisplay(payload)}`, removeKeyboard());
             await cbCtx.answer();
             await context.scene.update({ timezone: payload });
@@ -168,7 +170,7 @@ export function createOnboardingScene(
 
         const payload = parts.slice(1).join(':');
         if (payload !== 'skip') {
-          db.users.update(context.from.id, { country_code: payload });
+          holidayService?.subscribeUser(context.from.id, payload, true);
         }
 
         const cbCtx = context as unknown as {

@@ -1,9 +1,74 @@
 import { t } from '../../../config/constants.ts';
-import type { EventOccurrence } from '../../../database/types.ts';
+import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
+import { escapeHtml } from '../../../utils/telegram.ts';
+import { formatEventDetail } from '../../event/formatters.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
+
+function buildOrganizerLink(user: AgentContext['user']): string {
+  if (user.username) return `@${escapeHtml(user.username)}`;
+  const name = user.first_name ?? String(user.telegram_id);
+  return `<a href="tg://user?id=${user.telegram_id}">${escapeHtml(name)}</a>`;
+}
+
+function buildGroupEventNotification(
+  event: CalendarEvent,
+  lang: 'en' | 'ru',
+  timezone: string,
+  groupLabel: string,
+  inviteLink: string | null,
+  organizerLink: string,
+  action: 'created' | 'updated',
+): string {
+  const safeLink = inviteLink?.replace(/[<>"]/g, encodeURIComponent);
+  const groupRef = safeLink
+    ? `<a href="${safeLink}">${escapeHtml(groupLabel)}</a>`
+    : `<b>${escapeHtml(groupLabel)}</b>`;
+  const translations = t(lang);
+  const header =
+    action === 'created'
+      ? translations.group_event_created(groupRef, organizerLink)
+      : translations.group_event_updated(groupRef, organizerLink);
+  const body = formatEventDetail(event, timezone, lang);
+  return `${header}\n\n${body}`;
+}
+
+function sendGroupNotifications(ctx: AgentContext, event: CalendarEvent, action: 'created' | 'updated'): void {
+  if (!ctx.groupChatId || !ctx.groupMemberService || !ctx.sender) return;
+  const groupChat = ctx.groupChatRepo?.findByChatId(ctx.groupChatId);
+  const groupLabel = ctx.groupTitle ?? groupChat?.title ?? String(ctx.groupChatId);
+  const inviteLink = groupChat?.invite_link ?? null;
+  const organizerLink = buildOrganizerLink(ctx.user);
+  const sender = ctx.sender;
+  const errorLabel =
+    action === 'created' ? 'Group event notification failed' : 'Group event update notification failed';
+  ctx.groupMemberService
+    .getRegisteredMembers(ctx.groupChatId)
+    .then((memberIds) => {
+      for (const userId of memberIds) {
+        const recipientUser = ctx.userRepo.findByTelegramId(userId);
+        const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
+        const recipientTimezone = recipientUser?.timezone ?? ctx.user.timezone;
+        const message = buildGroupEventNotification(
+          event,
+          recipientLang,
+          recipientTimezone,
+          groupLabel,
+          inviteLink,
+          organizerLink,
+          action,
+        );
+        sender.sendMessage(userId, message, 'HTML').catch((err) => {
+          eventsLogger.error({ error: String(err), userId }, errorLabel);
+        });
+      }
+    })
+    .catch((err) => {
+      eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch failed');
+    });
+}
 
 const eventsLogger = logger.child({ module: 'ai-tools' });
 
@@ -169,27 +234,7 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
     if (event.description) parts.push(`description: ${event.description}`);
     if (event.location) parts.push(`location: ${event.location}`);
 
-    if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
-      const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
-      const groupLabel = groupTitle ?? String(ctx.groupChatId);
-      const sender = ctx.sender;
-      ctx.groupMemberService
-        .getRegisteredMembers(ctx.groupChatId)
-        .then((memberIds) => {
-          for (const userId of memberIds) {
-            const recipientUser = ctx.userRepo.findByTelegramId(userId);
-            const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-            sender
-              .sendMessage(userId, t(recipientLang).group_event_created(event.title, groupLabel), 'Markdown')
-              .catch((err) => {
-                eventsLogger.error({ error: String(err), userId }, 'Group event notification failed');
-              });
-          }
-        })
-        .catch((err) => {
-          eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch failed');
-        });
-    }
+    if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
     return { success: true, output: `Event created: ${parts.join(', ')}` };
   } catch (error) {
@@ -220,27 +265,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.description) parts.push(`description: ${updated.description}`);
   if (updated.location) parts.push(`location: ${updated.location}`);
 
-  if (scope === 'group' && ctx.groupChatId && ctx.groupMemberService && ctx.sender) {
-    const groupTitle = ctx.groupChatRepo?.findByChatId(ctx.groupChatId)?.title;
-    const groupLabel = groupTitle ?? String(ctx.groupChatId);
-    const sender = ctx.sender;
-    ctx.groupMemberService
-      .getRegisteredMembers(ctx.groupChatId)
-      .then((memberIds) => {
-        for (const userId of memberIds) {
-          const recipientUser = ctx.userRepo.findByTelegramId(userId);
-          const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-          sender
-            .sendMessage(userId, t(recipientLang).group_event_updated(updated.title, groupLabel), 'Markdown')
-            .catch((err) => {
-              eventsLogger.error({ error: String(err), userId }, 'Group event update notification failed');
-            });
-        }
-      })
-      .catch((err) => {
-        eventsLogger.error({ error: String(err), groupChatId: ctx.groupChatId }, 'Group member fetch (update) failed');
-      });
-  }
+  if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
   let output = `Event updated: ${parts.join(', ')}`;
 

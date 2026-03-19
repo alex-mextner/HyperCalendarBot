@@ -18,6 +18,9 @@ const ALLOWED_VARS = new Set([
   'user.first_name',
   'user.timezone',
   'user.language',
+  // Group context (false / null in private chats)
+  'group.is_group',
+  'group.chat_id',
 ]);
 
 const CAPTURE_VAR_RE = /^\$(\d+)$/;

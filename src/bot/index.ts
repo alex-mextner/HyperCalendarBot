@@ -142,7 +142,7 @@ export function createBot(
   );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
-  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService);
+  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService, holidayService);
 
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
@@ -594,6 +594,13 @@ export function createBot(
             botLogger.error({ chatId, error: String(err) }, 'Failed to send group welcome');
           }),
         (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru',
+        async (chatId) => {
+          try {
+            return await bot.api.exportChatInviteLink({ chat_id: chatId });
+          } catch {
+            return null;
+          }
+        },
       )(ctx as never),
     )
     // Users shared from picker modal → send invitations

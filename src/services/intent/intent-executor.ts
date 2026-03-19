@@ -5,11 +5,15 @@ import { type UserContext as ExecutorUserContext, resolveVariables } from './var
 
 type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
 
-/** Build the initial step-results map pre-populated with event context from UserContext. */
+/** Build the initial step-results map pre-populated with event and group context from UserContext. */
 function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {
   const pre: Record<string, unknown> = {};
   if (userCtx.lastAddedEvent) pre.last_added_event = userCtx.lastAddedEvent;
   if (userCtx.lastMentionedEvent) pre.last_mentioned_event = userCtx.lastMentionedEvent;
+  pre.group = {
+    is_group: userCtx.groupIsGroup ?? false,
+    chat_id: userCtx.groupChatId ?? null,
+  };
   return pre;
 }
 

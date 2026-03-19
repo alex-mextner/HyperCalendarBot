@@ -654,4 +654,10 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE users ADD COLUMN default_event_duration_minutes INTEGER NOT NULL DEFAULT 60`);
     },
   },
+  {
+    name: '028_group_chats_invite_link',
+    up: (db) => {
+      db.exec('ALTER TABLE group_chats ADD COLUMN invite_link TEXT');
+    },
+  },
 ];

@@ -80,4 +80,8 @@ export class GroupChatRepository {
   setCountry(chatId: number, country: string): void {
     this.db.prepare('UPDATE group_chats SET country = ? WHERE chat_id = ?').run(country, chatId);
   }
+
+  setInviteLink(chatId: number, link: string): void {
+    this.db.prepare('UPDATE group_chats SET invite_link = ? WHERE chat_id = ?').run(link, chatId);
+  }
 }

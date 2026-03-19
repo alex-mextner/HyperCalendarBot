@@ -332,6 +332,7 @@ describe('event tool handlers', () => {
         isGroup: true,
         groupChatId: GROUP_CHAT_ID,
         chatId: GROUP_CHAT_ID,
+        groupTitle: 'Test Group',
       };
     }
 
@@ -574,7 +575,9 @@ describe('event tool handlers', () => {
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
       expect(sent.every((s) => s.text.includes('Party'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'Markdown')).toBe(true);
+      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
+      expect(sent.every((s) => s.text.includes('18:00'))).toBe(true);
+      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
     });
 
     test('handleCreateEvent sends notification in recipient language', async () => {
@@ -632,7 +635,33 @@ describe('event tool handlers', () => {
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
       expect(sent.every((s) => s.text.includes('Sprint Planning Updated'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'Markdown')).toBe(true);
+      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
+      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
+    });
+
+    test('handleCreateEvent uses invite link as clickable group link when available', async () => {
+      const INVITE_LINK = 'https://t.me/+abc123';
+      const groupChatRepo = new GroupChatRepository(db);
+      groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
+      groupChatRepo.setInviteLink(GROUP_CHAT_ID, INVITE_LINK);
+
+      const groupMemberService = makeMemberService([USER_ID]);
+      const sent: { text: string }[] = [];
+      const sender = {
+        sendMessage: mock(async (_chatId: number, text: string) => {
+          sent.push({ text });
+          return { message_id: 1 };
+        }),
+        editMessageText: mock(async () => {}),
+      };
+
+      const gCtx: AgentContext = { ...makeGroupCtx(), groupMemberService, sender, groupChatRepo };
+      handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
+
+      await new Promise((r) => setTimeout(r, 10));
+      expect(sent.length).toBe(1);
+      expect(sent[0].text).toContain(`href="${INVITE_LINK}"`);
+      expect(sent[0].text).toContain('Test Group');
     });
   });
 

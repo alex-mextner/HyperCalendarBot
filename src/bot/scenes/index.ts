@@ -2,6 +2,7 @@
 import { scenes } from '@gramio/scenes';
 import type { DatabaseService } from '../../database/index.ts';
 import type { EventService } from '../../services/event/event-service.ts';
+import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { createAddEventScene } from './add-event.scene.ts';
 import { createEditValueScene } from './edit-value.scene.ts';
@@ -16,6 +17,7 @@ export function createScenesPlugin(
   botToken: string,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
+  holidayService?: HolidayService,
 ) {
   const storage = createSceneStorage(db.db);
 
@@ -23,7 +25,7 @@ export function createScenesPlugin(
   const editValueScene = createEditValueScene(eventService);
   const importScene = createImportScene(eventService, botToken);
   const timezoneScene = createTimezoneScene(db);
-  const onboardingScene = createOnboardingScene(db, gcalConfigured, prefsService);
+  const onboardingScene = createOnboardingScene(db, gcalConfigured, prefsService, holidayService);
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
 
   return {
