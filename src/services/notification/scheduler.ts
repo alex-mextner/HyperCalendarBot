@@ -311,8 +311,9 @@ export class NotificationScheduler {
         if (currentHHMM !== targetUtc) continue;
         const user = this.deps.userRepo.findByTelegramId(userId);
         if (!user) continue;
-        const tomorrowUtc = new Date(nowUtc.getTime() + 86_400_000);
-        const localTomorrowIso = new TZDate(tomorrowUtc, user.timezone).toISOString().slice(0, 10);
+        const localTomorrowIso = new TZDate(new Date(minute.getTime() + 86_400_000), user.timezone)
+          .toISOString()
+          .slice(0, 10);
         const holiday = this.deps.holidayRepo.getHolidayForUser(userId, localTomorrowIso);
         if (!holiday) continue;
         const refKey = `eh:${userId}:${localTomorrowIso}`;
