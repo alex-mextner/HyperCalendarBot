@@ -59,7 +59,7 @@ describe('handleSetReminder', () => {
     });
     expect(result.success).toBe(true);
     expect(result.output).toContain('15');
-    expect(result.output).toContain('60');
+    expect(result.output).toContain('1h');
   });
 
   test('returns error for non-existent event', () => {
