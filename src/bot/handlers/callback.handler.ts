@@ -38,7 +38,7 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
-import { getWeekRangeUtc } from '../../utils/date.ts';
+import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
@@ -393,10 +393,7 @@ export function createCallbackHandler(
         const occurrences = eventService.getEventsInRange(user.telegram_id, start, end);
 
         const occurrencesByDay = new Map<string, typeof occurrences>();
-        const startD = new Date(start);
-        for (let i = 0; i < 7; i++) {
-          const d = new Date(startD.getTime() + i * 86400000);
-          const dayKey = d.toISOString().slice(0, 10);
+        for (const dayKey of localCalendarWeekDays(start, user.timezone)) {
           occurrencesByDay.set(dayKey, []);
         }
         for (const occ of occurrences) {

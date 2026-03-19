@@ -1,4 +1,5 @@
 // src/services/event/formatters.ts
+import { TZDate } from '@date-fns/tz';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -7,6 +8,7 @@ import {
   formatTime,
   formatTimeRange,
   formatTimeWithTimezones,
+  localCalendarWeekDays,
 } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
@@ -48,19 +50,17 @@ export function formatWeekAgenda(
 ): string {
   const byDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
-    const dayKey = occ.occurrence_start.slice(0, 10);
+    const dayKey = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
     const arr = byDay.get(dayKey) ?? [];
     arr.push(occ);
     byDay.set(dayKey, arr);
   }
 
-  const start = new Date(startDateIso);
+  const days = localCalendarWeekDays(startDateIso, timezone);
   const lines: string[] = [];
 
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(start.getTime() + i * 86400000);
-    const dayKey = d.toISOString().slice(0, 10);
-    const dayLabel = formatDateShort(d.toISOString(), timezone, lang);
+  for (const dayKey of days) {
+    const dayLabel = formatDateShort(`${dayKey}T12:00:00Z`, timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
     const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
 

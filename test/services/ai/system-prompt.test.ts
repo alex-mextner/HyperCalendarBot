@@ -219,4 +219,11 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('@mention');
   });
+
+  test('requires AI to use calculate tool for any arithmetic', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('CALCULATE RULE');
+    expect(prompt).toContain('calculate');
+    expect(prompt).toContain('Never compute in your head');
+  });
 });

@@ -53,6 +53,15 @@ export function getNDayRangeUtc(date: Date, days: number, timezone: string): { s
   return { start: new Date(start.getTime()).toISOString(), end: new Date(end.getTime()).toISOString() };
 }
 
+export function localCalendarWeekDays(utcStartIso: string, timezone: string): string[] {
+  const calendarStart = new TZDate(new Date(utcStartIso), timezone).toISOString().slice(0, 10);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(`${calendarStart}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + i);
+    return d.toISOString().slice(0, 10);
+  });
+}
+
 export function parseSimpleDate(input: string, timezone: string, refDate?: Date): Date | null {
   const ref = refDate ? new TZDate(refDate.getTime(), timezone) : TZDate.tz(timezone);
   const trimmed = input.trim().toLowerCase();

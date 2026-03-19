@@ -5,6 +5,7 @@ import {
   formatTimeWithTimezones,
   getDayRangeUtc,
   getWeekRangeUtc,
+  localCalendarWeekDays,
   parseDuration,
   parseSimpleDate,
   toUserTime,
@@ -360,5 +361,30 @@ describe('formatTimeWithTimezones', () => {
   test('recipient timezone null and not onboarded — shows only sender timezone', () => {
     const result = formatTimeWithTimezones(startAt, 'UTC', null, false);
     expect(result).toBe('12:00 (UTC)');
+  });
+});
+
+describe('localCalendarWeekDays', () => {
+  test('returns 7 consecutive local calendar dates starting from the UTC week start', () => {
+    // Mon 16 Mar 2026 00:00 Europe/Kyiv = 2026-03-15T22:00:00Z
+    const days = localCalendarWeekDays('2026-03-15T22:00:00.000Z', 'Europe/Kyiv');
+    expect(days).toHaveLength(7);
+    expect(days[0]).toBe('2026-03-16');
+    expect(days[6]).toBe('2026-03-22');
+  });
+
+  test('handles UTC-5: Mon 16 00:00 local = 2026-03-16T05:00:00Z', () => {
+    const days = localCalendarWeekDays('2026-03-16T05:00:00Z', 'America/New_York');
+    expect(days[0]).toBe('2026-03-16');
+    expect(days[6]).toBe('2026-03-22');
+  });
+
+  test('consecutive days increment correctly', () => {
+    const days = localCalendarWeekDays('2026-03-15T22:00:00Z', 'Europe/Kyiv');
+    for (let i = 1; i < 7; i++) {
+      const prev = new Date(`${days[i - 1]}T12:00:00Z`);
+      const curr = new Date(`${days[i]}T12:00:00Z`);
+      expect(curr.getTime() - prev.getTime()).toBe(86400000);
+    }
   });
 });

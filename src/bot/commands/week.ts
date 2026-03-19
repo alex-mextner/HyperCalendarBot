@@ -9,7 +9,7 @@ import { formatWeekAgenda } from '../../services/event/formatters.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { renderWeekImage } from '../../services/image/render-week.ts';
-import { getWeekRangeUtc } from '../../utils/date.ts';
+import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -66,10 +66,7 @@ export async function handleWeek(
   let holidaysByDate: Map<string, HolidayEntry[]> | undefined;
   if (holidayService) {
     holidaysByDate = new Map();
-    const startD = new Date(start);
-    for (let i = 0; i < 7; i++) {
-      const d = new Date(startD.getTime() + i * 86400000);
-      const dayKey = d.toISOString().slice(0, 10);
+    for (const dayKey of localCalendarWeekDays(start, user.timezone)) {
       const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
       if (holidays.length > 0) {
         holidaysByDate.set(dayKey, holidays);

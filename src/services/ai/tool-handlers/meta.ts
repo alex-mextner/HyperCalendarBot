@@ -308,3 +308,133 @@ export function handleGetBotInfo(): ToolResult {
     ].join('\n'),
   };
 }
+
+function evalArithmetic(expr: string): number {
+  let pos = 0;
+
+  function skipWs(): void {
+    while (pos < expr.length && expr[pos] === ' ') pos++;
+  }
+
+  function parseNumber(): number {
+    skipWs();
+    const start = pos;
+    if (expr[pos] === '-') pos++;
+    while (pos < expr.length && /[\d.]/.test(expr[pos]!)) pos++;
+    const n = Number(expr.slice(start, pos));
+    if (Number.isNaN(n)) throw new Error(`Invalid number at position ${start}`);
+    return n;
+  }
+
+  function parseFactor(): number {
+    skipWs();
+    if (expr[pos] === '(') {
+      pos++;
+      const val = parseAddSub();
+      skipWs();
+      if (expr[pos] !== ')') throw new Error('Expected )');
+      pos++;
+      return val;
+    }
+    return parseNumber();
+  }
+
+  function parseMulDiv(): number {
+    let left = parseFactor();
+    while (true) {
+      skipWs();
+      const op = expr[pos];
+      if (op !== '*' && op !== '/') break;
+      pos++;
+      const right = parseFactor();
+      left = op === '*' ? left * right : left / right;
+    }
+    return left;
+  }
+
+  function parseAddSub(): number {
+    let left = parseMulDiv();
+    while (true) {
+      skipWs();
+      const op = expr[pos];
+      if (op !== '+' && op !== '-') break;
+      pos++;
+      const right = parseMulDiv();
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+
+  const result = parseAddSub();
+  skipWs();
+  if (pos !== expr.length) throw new Error(`Unexpected character at position ${pos}: ${expr[pos]}`);
+  return result;
+}
+
+export function handleCalculate(input: { expression: string }): ToolResult {
+  const expr = input.expression.trim();
+
+  // ISO datetime + duration: "2026-03-18T22:34:00Z + 31min"
+  const isoDatetimeMatch = expr.match(
+    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?|d|days?)\b/i,
+  );
+  if (isoDatetimeMatch) {
+    const [, dateStr, op, amtStr, unit] = isoDatetimeMatch;
+    const date = new Date(dateStr!);
+    if (Number.isNaN(date.getTime())) return { success: false, error: `Cannot parse datetime: ${dateStr}` };
+    const amt = parseFloat(amtStr!);
+    const sign = op === '+' ? 1 : -1;
+    const unitL = unit!.toLowerCase();
+    let deltaMs: number;
+    if (unitL.startsWith('min')) deltaMs = amt * 60_000;
+    else if (unitL.startsWith('h')) deltaMs = amt * 3_600_000;
+    else deltaMs = amt * 86_400_000;
+    return { success: true, output: new Date(date.getTime() + sign * deltaMs).toISOString() };
+  }
+
+  // Date only + days: "2026-03-18 + 7days"
+  const dateOnlyMatch = expr.match(/^(\d{4}-\d{2}-\d{2})\s*([+-])\s*(\d+)\s*(d|days?)\b/i);
+  if (dateOnlyMatch) {
+    const [, dateStr, op, amtStr] = dateOnlyMatch;
+    const date = new Date(`${dateStr}T12:00:00Z`);
+    if (Number.isNaN(date.getTime())) return { success: false, error: `Cannot parse date: ${dateStr}` };
+    const sign = op === '+' ? 1 : -1;
+    const result = new Date(date.getTime() + sign * Number.parseInt(amtStr!, 10) * 86_400_000);
+    return { success: true, output: result.toISOString().slice(0, 10) };
+  }
+
+  // HH:MM + duration: "22:34 + 31min"
+  const timeMatch = expr.match(/^(\d{1,2}):(\d{2})\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?)\b/i);
+  if (timeMatch) {
+    const [, h, m, op, amtStr, unit] = timeMatch;
+    let totalMin = Number.parseInt(h!, 10) * 60 + Number.parseInt(m!, 10);
+    const amt = parseFloat(amtStr!);
+    const sign = op === '+' ? 1 : -1;
+    if (unit!.toLowerCase().startsWith('min')) totalMin += sign * amt;
+    else totalMin += sign * amt * 60;
+    totalMin = ((totalMin % 1440) + 1440) % 1440;
+    const rh = Math.floor(totalMin / 60)
+      .toString()
+      .padStart(2, '0');
+    const rm = (totalMin % 60).toString().padStart(2, '0');
+    return { success: true, output: `${rh}:${rm}` };
+  }
+
+  // Numeric arithmetic: digits, whitespace, operators, parentheses only
+  if (/^[\d\s+\-*/.()]+$/.test(expr)) {
+    try {
+      const result = evalArithmetic(expr);
+      if (!Number.isFinite(result)) {
+        return { success: false, error: 'Result is not a finite number' };
+      }
+      return { success: true, output: String(result) };
+    } catch {
+      return { success: false, error: `Cannot evaluate: ${expr}` };
+    }
+  }
+
+  return {
+    success: false,
+    error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days, YYYY-MM-DD ± N days`,
+  };
+}
