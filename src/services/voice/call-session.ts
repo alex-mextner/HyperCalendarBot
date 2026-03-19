@@ -181,18 +181,27 @@ export class CallSession {
         isGroup: false,
       } as AgentContext;
 
-      const { responseText } = await this.cfg.agent.run(ctx);
-      this.thinking?.cancel();
-      this.thinking = null;
+      let responseText: string | undefined;
+      try {
+        ({ responseText } = await this.cfg.agent.run(ctx));
+      } catch (err) {
+        voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'Agent error during call');
+        return;
+      } finally {
+        this.thinking?.cancel();
+        this.thinking = null;
+      }
 
       if (!responseText) return;
 
-      const audio = await this.cfg.tts.synthesize(responseText, this.cfg.language);
-      const file = this.tempFile();
-      await Bun.write(file, audio);
-      this.sendPlay(file);
-    } catch (err) {
-      voiceLogger.error({ err }, 'TTS synthesis failed during call');
+      try {
+        const audio = await this.cfg.tts.synthesize(responseText, this.cfg.language);
+        const file = this.tempFile();
+        await Bun.write(file, audio);
+        this.sendPlay(file);
+      } catch (err) {
+        voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'TTS synthesis failed during call');
+      }
     } finally {
       this.agentRunning = false;
     }
