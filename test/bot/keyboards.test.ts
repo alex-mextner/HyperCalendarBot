@@ -27,9 +27,7 @@ import {
   recurrenceScopeKeyboard,
   removeKeyboard,
   skipKeyboard,
-  timezoneCitiesKeyboard,
   timezoneConfirmKeyboard,
-  timezoneManualKeyboard,
   timezoneMethodKeyboard,
 } from '../../src/bot/keyboards';
 
@@ -66,31 +64,6 @@ describe('timezoneMethodKeyboard', () => {
   test('returns Keyboard instance for ru', () => {
     const kb = timezoneMethodKeyboard('ru');
     expect(kb).toBeInstanceOf(Keyboard);
-  });
-});
-
-describe('timezoneManualKeyboard', () => {
-  test('returns keyboard with region buttons', () => {
-    const kb = timezoneManualKeyboard();
-    expect(kb).toBeInstanceOf(InlineKeyboard);
-    const buttons = kbData(kb).flat();
-    expect(buttons.length).toBeGreaterThan(0);
-    expect(buttons[0]?.callback_data).toMatch(/^otr:/);
-  });
-});
-
-describe('timezoneCitiesKeyboard', () => {
-  test('returns cities for Europe region', () => {
-    const kb = timezoneCitiesKeyboard('Europe');
-    expect(kb).toBeInstanceOf(InlineKeyboard);
-    const buttons = kbData(kb).flat();
-    expect(buttons.length).toBeGreaterThan(0);
-    expect(buttons[0]?.callback_data).toMatch(/^ot:Europe\//);
-  });
-
-  test('returns empty keyboard for unknown region', () => {
-    const kb = timezoneCitiesKeyboard('Narnia');
-    expect(kb).toBeInstanceOf(InlineKeyboard);
   });
 });
 

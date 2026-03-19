@@ -1,6 +1,6 @@
 // src/bot/keyboards.ts
 import { InlineKeyboard, Keyboard } from 'gramio';
-import { CB, TZ_REGIONS, t } from '../config/constants.ts';
+import { CB, t } from '../config/constants.ts';
 import type { Contact } from '../database/repositories/contact.repository.ts';
 import type { CalendarEvent } from '../database/types.ts';
 import { formatTime } from '../utils/date.ts';
@@ -16,52 +16,10 @@ export function timezoneMethodKeyboard(lang: 'en' | 'ru'): Keyboard {
   return new Keyboard().requestLocation(locationText).resized().oneTime();
 }
 
-export function timezoneManualKeyboard(): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  const regions = Object.keys(TZ_REGIONS);
-  for (const region of regions) {
-    kb.text(region, `${CB.ONBOARD_TZ_RETRY}:${region}`);
-  }
-  return kb;
-}
-
-export function timezoneCitiesKeyboard(region: string): InlineKeyboard {
-  const cities = TZ_REGIONS[region] ?? [];
-  const kb = new InlineKeyboard();
-  for (let i = 0; i < cities.length; i++) {
-    const tz = cities[i]!;
-    const city = tz.split('/').pop()!.replace(/_/g, ' ');
-    kb.text(city, `${CB.ONBOARD_TZ}:${tz}`);
-    if (i % 2 === 1) kb.row();
-  }
-  return kb;
-}
-
 export function timezoneConfirmKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
   return new InlineKeyboard()
     .text(lang === 'ru' ? 'Да ✓' : 'Yes ✓', `${CB.ONBOARD_TZ}:confirm`)
     .text(lang === 'ru' ? 'Нет, другой город' : 'No, different city', `${CB.ONBOARD_TZ_RETRY}:`);
-}
-
-export function groupTimezoneRegionKeyboard(): InlineKeyboard {
-  const kb = new InlineKeyboard();
-  const regions = Object.keys(TZ_REGIONS);
-  for (const region of regions) {
-    kb.text(region, `${CB.GROUP_SETTINGS_TZ}:${region}`);
-  }
-  return kb;
-}
-
-export function groupTimezoneCitiesKeyboard(region: string): InlineKeyboard {
-  const cities = TZ_REGIONS[region] ?? [];
-  const kb = new InlineKeyboard();
-  for (let i = 0; i < cities.length; i++) {
-    const tz = cities[i]!;
-    const city = tz.split('/').pop()!.replace(/_/g, ' ');
-    kb.text(city, `${CB.GROUP_SETTINGS_TZ}:${tz}`);
-    if (i % 2 === 1) kb.row();
-  }
-  return kb;
 }
 
 export function countryKeyboard(countryCode: string | null, lang: 'en' | 'ru'): InlineKeyboard {
