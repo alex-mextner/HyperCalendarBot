@@ -8,6 +8,7 @@ import type { ContactRepository } from '../../database/repositories/contact.repo
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
+import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
@@ -24,6 +25,7 @@ import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
+import type { GroupMemberService } from '../../services/group/member-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
@@ -88,6 +90,8 @@ export interface MessageHandlerDeps {
   botId?: number;
   groupSessions?: GroupSessionManager;
   groupMemberRepo?: GroupMemberRepository;
+  groupChatRepo?: GroupChatRepository;
+  groupMemberService?: GroupMemberService;
   transcriptionService?: TranscriptionService;
   botToken?: string;
   stressDictionary?: AgentContext['stressDictionary'];
@@ -332,7 +336,7 @@ async function handleVoiceMessage(
   }
 }
 
-function buildAgentContextFactory(deps: MessageHandlerDeps) {
+export function buildAgentContextFactory(deps: MessageHandlerDeps) {
   return (
     user: User,
     chatId: number,
@@ -391,6 +395,9 @@ function buildAgentContextFactory(deps: MessageHandlerDeps) {
       botUsername: deps.botUsername,
       stressDictionary: deps.stressDictionary,
       resolveUsername: deps.resolveUsername,
+      groupChatRepo: deps.groupChatRepo,
+      groupMemberRepo: deps.groupMemberRepo,
+      groupMemberService: deps.groupMemberService,
     };
   };
 }

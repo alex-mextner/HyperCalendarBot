@@ -53,7 +53,7 @@ import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
-import { createMessageHandler } from './handlers/message.handler.ts';
+import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -172,50 +172,6 @@ export function createBot(
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
 
-  function buildAgentContext(
-    user: User,
-    chatId: number,
-    messageText: string,
-    groupInfo?: {
-      isGroup: boolean;
-      groupChatId?: number;
-      groupTitle?: string;
-      onBotResponse?: (messageId: number) => void;
-    },
-  ): import('../services/ai/types.ts').AgentContext {
-    return {
-      user,
-      chatId,
-      messageText,
-      isGroup: groupInfo?.isGroup ?? false,
-      groupChatId: groupInfo?.groupChatId,
-      groupTitle: groupInfo?.groupTitle,
-      onBotResponse: groupInfo?.onBotResponse,
-      eventService,
-      holidayService,
-      chatHistory: db.chatHistory,
-      userRepo: db.users,
-      reminderRepo: db.reminders,
-      contactRepo: db.contacts,
-      invitationService,
-      invitationRepo: db.invitations,
-      sharingService,
-      sharingSettingsRepo: db.sharingSettings,
-      sharedEventRepo: db.sharedEvents,
-      privacyService,
-      secretaryRepo: db.secretaries,
-      calendarProposalRepo,
-      checkGroupMembership,
-      groupChatRepo: db.groupChats,
-      groupMemberRepo: db.groupMembers,
-      groupMemberService,
-      googleCalendarRepo: googleDeps?.calendarRepo,
-      deepLinkService,
-      botUsername: process.env.BOT_USERNAME,
-      resolveUsername: mtprotoResolveUsername,
-    };
-  }
-
   const botAdminId = process.env.BOT_ADMIN_ID ? Number.parseInt(process.env.BOT_ADMIN_ID, 10) : undefined;
   const intentLearnerDailyLimit = process.env.INTENT_LEARNER_DAILY_LIMIT
     ? Number.parseInt(process.env.INTENT_LEARNER_DAILY_LIMIT, 10)
@@ -237,6 +193,111 @@ export function createBot(
             }),
         })
       : undefined;
+
+  const msgDeps = {
+    agent,
+    eventService,
+    holidayService,
+    chatHistory: db.chatHistory,
+    userRepo: db.users,
+    reminderRepo: db.reminders,
+    contactRepo: db.contacts,
+    participantRepo: db.participants,
+    editProposalRepo: db.editProposals,
+    secretaryRepo: db.secretaries,
+    calendarProposalRepo,
+    checkGroupMembership,
+    invitationService,
+    invitationRepo: db.invitations,
+    sharingService,
+    sharingSettingsRepo: db.sharingSettings,
+    sharedEventRepo: db.sharedEvents,
+    privacyService,
+    renderService,
+    callSettingsRepo: db.callSettings as never,
+    callQueue: callQueue
+      ? {
+          enqueue: (userId: number, text: string) => {
+            const callLog = db.callLog.create({ user_id: userId, tts_text: text });
+            const user = db.users.findByTelegramId(userId);
+            return callQueue.enqueue({
+              userId,
+              eventId: 0,
+              callLogId: callLog.id,
+              ttsText: text,
+              language: user?.language ?? 'ru',
+            });
+          },
+        }
+      : undefined,
+    notificationPrefs: {
+      getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
+      update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
+      ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
+    },
+    googleCalendarRepo: googleDeps?.calendarRepo,
+    deepLinkService,
+    sceneStorage: scenesSetup.storage,
+    botUsername: process.env.BOT_USERNAME,
+    botId: Number(token.split(':')[0]),
+    groupSessions,
+    groupMemberRepo: db.groupMembers,
+    groupChatRepo: db.groupChats,
+    groupMemberService,
+    transcriptionService,
+    botToken: token,
+    stressDictionary,
+    resolveUsername: mtprotoResolveUsername,
+    sileroTts,
+    kokoroTts,
+    sendVoice:
+      sileroTts || kokoroTts
+        ? async (chatId: number, audio: Buffer) => {
+            const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
+            await bot.api.sendVoice({ chat_id: chatId, voice: file });
+          }
+        : undefined,
+    intentMatcher,
+    intentRepo,
+    intentExecutor,
+    feedbackRepo,
+    workflowSessions,
+    adminEditSessions,
+    adminReplySession,
+    intentLearner,
+    botAdminId,
+    aiBaseUrl: aiConfig.baseUrl,
+    aiApiKey: aiConfig.apiKey,
+    sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
+    proposeTimeSessions,
+    editMessage: async (chatId: number, messageId: number, text: string) => {
+      await bot.api
+        .editMessageText({ chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' })
+        .catch(() => {});
+    },
+    notifyInviterProposal: async (
+      invitationId: number,
+      inviteeUser: User,
+      formattedTime: string,
+      eventTitle: string,
+    ) => {
+      const inv = db.invitations.findById(invitationId);
+      if (!inv) return;
+      const inviter = db.users.findByTelegramId(inv.inviter_id);
+      if (!inviter) return;
+      const inviterLang = (inviter.language ?? 'en') as 'en' | 'ru';
+      const keyboard = new InlineKeyboard()
+        .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitationId}`)
+        .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitationId}`);
+      const name = inviteeUser.first_name ?? inviteeUser.username ?? `#${inviteeUser.telegram_id}`;
+      await bot.api.sendMessage({
+        chat_id: inv.inviter_id,
+        text: t(inviterLang).invite_propose_notify(name, eventTitle, formattedTime),
+        parse_mode: 'HTML',
+        reply_markup: keyboard,
+      });
+    },
+  };
 
   bot
     .derive(createUserResolver(db))
@@ -395,7 +456,7 @@ export function createBot(
             },
           }
         : undefined;
-      await agent.run(buildAgentContext(user, Number(chatId), messagePrefix + text, groupInfo));
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), messagePrefix + text, groupInfo));
     })
     // Callback queries
     .on('callback_query', (ctx) =>
@@ -414,7 +475,7 @@ export function createBot(
         async (userId: number, chatId: number, text: string) => {
           const user = db.users.findByTelegramId(userId);
           if (!user) return;
-          await agent.run(buildAgentContext(user, chatId, text));
+          await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
         },
         googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
         {
@@ -585,7 +646,7 @@ export function createBot(
       const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
       if (chatId) {
         agent
-          .run(buildAgentContext(user, chatId, contextMsg))
+          .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
           .catch((e) => botLogger.error({ error: String(e) }, 'AI continuation after users_shared failed'));
       }
     })
@@ -620,110 +681,7 @@ export function createBot(
       }
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
-    .on('message', (ctx) =>
-      createMessageHandler({
-        agent,
-        eventService,
-        holidayService,
-        chatHistory: db.chatHistory,
-        userRepo: db.users,
-        reminderRepo: db.reminders,
-        contactRepo: db.contacts,
-        participantRepo: db.participants,
-        editProposalRepo: db.editProposals,
-        secretaryRepo: db.secretaries,
-        calendarProposalRepo,
-        checkGroupMembership,
-        invitationService,
-        invitationRepo: db.invitations,
-        sharingService,
-        sharingSettingsRepo: db.sharingSettings,
-        sharedEventRepo: db.sharedEvents,
-        privacyService,
-        renderService,
-        callSettingsRepo: db.callSettings as never,
-        callQueue: callQueue
-          ? {
-              enqueue: (userId: number, text: string) => {
-                const callLog = db.callLog.create({ user_id: userId, tts_text: text });
-                const user = db.users.findByTelegramId(userId);
-                return callQueue.enqueue({
-                  userId,
-                  eventId: 0,
-                  callLogId: callLog.id,
-                  ttsText: text,
-                  language: user?.language ?? 'ru',
-                });
-              },
-            }
-          : undefined,
-        notificationPrefs: {
-          getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
-          update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
-          ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
-        },
-        googleCalendarRepo: googleDeps?.calendarRepo,
-        deepLinkService,
-        sceneStorage: scenesSetup.storage,
-        botUsername: process.env.BOT_USERNAME,
-        botId: Number(token.split(':')[0]),
-        groupSessions,
-        groupMemberRepo: db.groupMembers,
-        transcriptionService,
-        botToken: token,
-        stressDictionary,
-        resolveUsername: mtprotoResolveUsername,
-        sileroTts,
-        kokoroTts,
-        sendVoice:
-          sileroTts || kokoroTts
-            ? async (chatId: number, audio: Buffer) => {
-                const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
-                await bot.api.sendVoice({ chat_id: chatId, voice: file });
-              }
-            : undefined,
-        intentMatcher,
-        intentRepo,
-        intentExecutor,
-        feedbackRepo,
-        workflowSessions,
-        adminEditSessions,
-        adminReplySession,
-        intentLearner,
-        botAdminId,
-        aiBaseUrl: aiConfig.baseUrl,
-        aiApiKey: aiConfig.apiKey,
-        sendMessageToUser: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
-        proposeTimeSessions,
-        editMessage: async (chatId: number, messageId: number, text: string) => {
-          await bot.api
-            .editMessageText({ chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' })
-            .catch(() => {});
-        },
-        notifyInviterProposal: async (
-          invitationId: number,
-          inviteeUser: User,
-          formattedTime: string,
-          eventTitle: string,
-        ) => {
-          const inv = db.invitations.findById(invitationId);
-          if (!inv) return;
-          const inviter = db.users.findByTelegramId(inv.inviter_id);
-          if (!inviter) return;
-          const inviterLang = (inviter.language ?? 'en') as 'en' | 'ru';
-          const keyboard = new InlineKeyboard()
-            .text(t(inviterLang).invite_reschedule_btn, `${CB.INVITATION_ACTION}:reschedule:${invitationId}`)
-            .text(t(inviterLang).invite_keep_btn, `${CB.INVITATION_ACTION}:dismiss:${invitationId}`);
-          const name = inviteeUser.first_name ?? inviteeUser.username ?? `#${inviteeUser.telegram_id}`;
-          await bot.api.sendMessage({
-            chat_id: inv.inviter_id,
-            text: t(inviterLang).invite_propose_notify(name, eventTitle, formattedTime),
-            parse_mode: 'HTML',
-            reply_markup: keyboard,
-          });
-        },
-      })(ctx as unknown as BotCommandContext),
-    )
+    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, error: String(error) }, 'Bot error');
