@@ -257,33 +257,8 @@ async function handleVoiceMessage(
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
 
     const agentContext: AgentContext = {
-      user,
-      chatId: Number(chatId),
-      messageText: transcription,
-      isGroup: false,
+      ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
       isVoiceMessage: true,
-      eventService: deps.eventService,
-      holidayService: deps.holidayService,
-      chatHistory: deps.chatHistory,
-      userRepo: deps.userRepo,
-      reminderRepo: deps.reminderRepo,
-      contactRepo: deps.contactRepo,
-      participantRepo: deps.participantRepo,
-      editProposalRepo: deps.editProposalRepo,
-      invitationService: deps.invitationService,
-      invitationRepo: deps.invitationRepo,
-      sharingService: deps.sharingService,
-      sharingSettingsRepo: deps.sharingSettingsRepo,
-      sharedEventRepo: deps.sharedEventRepo,
-      privacyService: deps.privacyService,
-      renderService: deps.renderService,
-      notificationPrefs: deps.notificationPrefs,
-      callQueue: deps.callQueue,
-      callSettingsRepo: deps.callSettingsRepo,
-      googleCalendarRepo: deps.googleCalendarRepo,
-      deepLinkService: deps.deepLinkService,
-      botUsername: deps.botUsername,
-      stressDictionary: deps.stressDictionary,
     };
 
     const { responseText } = await deps.agent.run(agentContext);
