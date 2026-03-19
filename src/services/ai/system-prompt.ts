@@ -9,10 +9,8 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     ? `Last timezone update: ${tzUpdatedAt}`
     : 'Timezone was never set by the user (default UTC). Ask them to share location for accurate times.';
 
-  const langInstruction =
-    ctx.user.language === 'ru'
-      ? 'The user speaks Russian. Always respond in Russian.'
-      : 'The user speaks English. Always respond in English.';
+  const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
+  const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
 
   return `You are a calendar assistant for a Telegram bot. You help users manage their schedule.
 

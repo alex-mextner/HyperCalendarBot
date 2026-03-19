@@ -120,6 +120,39 @@ describe('handleManageSettings', () => {
       expect(ctx.user.language).toBe('ru');
     });
 
+    test('language change to ru includes directive to respond in Russian', () => {
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'general',
+        updates: { language: 'ru' },
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('LANGUAGE CHANGED');
+      expect(result.output).toContain('Russian');
+    });
+
+    test('language change to en includes directive to respond in English', () => {
+      ctx.user = { ...ctx.user, language: 'ru' };
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'general',
+        updates: { language: 'en' },
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('LANGUAGE CHANGED');
+      expect(result.output).toContain('English');
+    });
+
+    test('no language directive when language is not changed', () => {
+      const result = handleManageSettings(ctx, {
+        action: 'update',
+        category: 'general',
+        updates: { timezone: 'Asia/Tokyo' },
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).not.toContain('LANGUAGE CHANGED');
+    });
+
     test('updates country_code', () => {
       const result = handleManageSettings(ctx, {
         action: 'update',

@@ -226,4 +226,24 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('calculate');
     expect(prompt).toContain('Never compute in your head');
   });
+
+  test('language instruction uses interface language framing, not user-speaks framing', () => {
+    ctx.user = { ...ctx.user, language: 'ru' };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Bot interface language is Russian');
+    expect(prompt).not.toContain('The user speaks Russian');
+  });
+
+  test('language instruction tells AI to respond in configured language regardless of input language', () => {
+    ctx.user = { ...ctx.user, language: 'en' };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('even if the user writes in a different language');
+  });
+
+  test('language instruction tells AI to call manage_settings for language change requests', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('manage_settings');
+    expect(prompt).toContain('"ru"');
+    expect(prompt).toContain('"en"');
+  });
 });

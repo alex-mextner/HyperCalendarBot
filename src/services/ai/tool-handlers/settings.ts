@@ -96,7 +96,14 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
   ctx.user = updated;
 
   const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: `General settings updated: ${lines.join(', ')}` };
+  let output = `General settings updated: ${lines.join(', ')}`;
+
+  if (patch.language !== undefined) {
+    const newLang = patch.language === 'ru' ? 'Russian' : 'English';
+    output += `. LANGUAGE CHANGED: respond in ${newLang} from this point forward`;
+  }
+
+  return { success: true, output };
 }
 
 function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
