@@ -6,6 +6,7 @@ import { CB, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import {
   getTimezoneDisplay,
   guessCountryFromTimezone,
@@ -15,9 +16,7 @@ import {
   countryKeyboard,
   languageKeyboard,
   removeKeyboard,
-  timezoneCitiesKeyboard,
   timezoneConfirmKeyboard,
-  timezoneManualKeyboard,
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
 
@@ -63,18 +62,37 @@ export function createOnboardingScene(
         await context.scene.update({ lang });
       })
 
-      // Step 1: Timezone (callback + location)
-      .step(['callback_query', 'location'], async (context) => {
+      // Step 1: Timezone (message + location + callback)
+      .step(['message', 'location', 'callback_query'], async (context) => {
         const { lang } = context.scene.state;
         const l = lang ?? 'en';
 
         if (context.scene.step.firstTime) {
-          await context.send(t(l).tz_prompt, {
-            reply_markup: timezoneManualKeyboard(),
-          });
-          await context.send(t(l).tz_prompt, {
-            reply_markup: timezoneMethodKeyboard(l),
-          });
+          const prompt =
+            l === 'ru'
+              ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
+              : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
+          await context.send(prompt, { reply_markup: timezoneMethodKeyboard(l) });
+          return;
+        }
+
+        // Handle typed city name
+        if (context.is('message')) {
+          const text = (context as unknown as { text?: string }).text?.trim();
+          if (!text) return;
+          const tz = await resolveCity(text);
+          if (tz) {
+            await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
+              reply_markup: timezoneConfirmKeyboard(l),
+            });
+            await context.scene.update({ detectedTz: tz }, { step: undefined });
+          } else {
+            const msg =
+              l === 'ru'
+                ? 'Не удалось определить таймзону. Попробуйте ещё раз или:\n• Отправьте 📍 геолокацию\n• Введите код напрямую, например: <code>Europe/Belgrade</code>\n  Список кодов: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
+                : 'Could not determine timezone. Try again or:\n• Share 📍 location\n• Enter timezone code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
+            await context.send(msg, { parse_mode: 'HTML' });
+          }
           return;
         }
 
@@ -87,13 +105,10 @@ export function createOnboardingScene(
           ).eventLocation;
           const tz = resolveTimezone(latitude, longitude);
           const display = getTimezoneDisplay(tz);
-
-          // Show confirmation buttons, stay on this step
           await context.send(t(l).tz_detected(tz, display), {
             ...removeKeyboard(),
             reply_markup: timezoneConfirmKeyboard(l),
           });
-          // Save detected TZ in state without advancing
           await context.scene.update({ detectedTz: tz }, { step: undefined });
           return;
         }
@@ -105,44 +120,30 @@ export function createOnboardingScene(
 
           const parts = data.split(':');
           const action = parts[0];
-          const payload = parts.slice(1).join(':');
           const cbCtx = context as unknown as {
             answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-            editText: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
           };
 
-          // Region selection
-          if (action === CB.ONBOARD_TZ_REGION) {
-            await cbCtx.editText('Select city:', { reply_markup: timezoneCitiesKeyboard(payload) });
-            await cbCtx.answer();
-            return; // Stay on same step
-          }
-
-          // Timezone confirm/manual/city
           if (action === CB.ONBOARD_TZ) {
+            const payload = parts.slice(1).join(':');
             if (payload === 'confirm') {
               const tz = context.scene.state.detectedTz;
               if (!tz) return;
               db.users.update(context.from.id, { timezone: tz, country_code: guessCountryFromTimezone(tz) });
-              await context.send(`\u2705 ${getTimezoneDisplay(tz)}`, removeKeyboard());
+              await context.send(`✅ ${getTimezoneDisplay(tz)}`, removeKeyboard());
               await cbCtx.answer();
               await context.scene.update({ timezone: tz });
               return;
             }
+          }
 
-            if (payload === 'manual') {
-              await cbCtx.editText('Select region:', {
-                reply_markup: timezoneManualKeyboard(),
-              });
-              await cbCtx.answer();
-              return; // Stay on same step
-            }
-
-            // City selected directly
-            db.users.update(context.from.id, { timezone: payload, country_code: guessCountryFromTimezone(payload) });
-            await context.send(`\u2705 ${getTimezoneDisplay(payload)}`, removeKeyboard());
+          if (action === CB.ONBOARD_TZ_RETRY) {
             await cbCtx.answer();
-            await context.scene.update({ timezone: payload });
+            const prompt =
+              l === 'ru'
+                ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
+                : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
+            await context.send(prompt, { reply_markup: timezoneMethodKeyboard(l) });
             return;
           }
 
