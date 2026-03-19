@@ -30,7 +30,6 @@ export class FluxStreamingSTT {
       eot_timeout_ms: '5000',
       encoding: 'linear16',
       sample_rate: '16000',
-      channels: '1',
       interim_results: 'true',
     });
     const url = `wss://api.deepgram.com/v2/listen?${params}`;

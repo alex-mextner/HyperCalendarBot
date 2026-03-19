@@ -166,8 +166,8 @@ describe('IntentRepository', () => {
     });
 
     repo.update(id, {
-      phrases: ['new1', 'new2'] as unknown as string,
-      trigger_words: ['new_word1', 'new_word2'] as unknown as string,
+      phrases: ['new1', 'new2'],
+      trigger_words: ['new_word1', 'new_word2'],
       pattern: 'new_pattern',
       format: 'html',
     });
@@ -189,7 +189,7 @@ describe('IntentRepository', () => {
     });
 
     repo.update(id, {
-      phrases: ['updated'] as unknown as string,
+      phrases: ['updated'],
     });
 
     const intent = repo.getById(id);

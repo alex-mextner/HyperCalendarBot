@@ -56,7 +56,16 @@ export class IntentRepository {
 
   update(
     id: number,
-    data: Partial<Pick<Intent, 'phrases' | 'trigger_words' | 'pattern' | 'workflow' | 'format'>>,
+    data: Partial<
+      Omit<
+        Pick<Intent, 'phrases' | 'trigger_words' | 'pattern' | 'workflow' | 'format'>,
+        'phrases' | 'trigger_words' | 'workflow'
+      > & {
+        phrases?: string | string[];
+        trigger_words?: string | string[];
+        workflow?: string | object;
+      }
+    >,
   ): void {
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
