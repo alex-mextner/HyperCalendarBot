@@ -660,4 +660,11 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE group_chats ADD COLUMN invite_link TEXT');
     },
   },
+  {
+    name: '029_drop_notification_utc_columns',
+    up: (db) => {
+      db.exec('ALTER TABLE notification_preferences DROP COLUMN morning_agenda_utc');
+      db.exec('ALTER TABLE notification_preferences DROP COLUMN evening_review_utc');
+    },
+  },
 ];
