@@ -3,20 +3,15 @@
 
 // Inter v20 — latin + cyrillic subsets
 // URLs obtained from: https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap
-const INTER_REGULAR_LATIN_URL =
-  "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2";
+const INTER_REGULAR_LATIN_URL = 'https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2';
 const INTER_REGULAR_CYRILLIC_URL =
-  "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7SUc.woff2";
-const INTER_BOLD_LATIN_URL =
-  "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2";
-const INTER_BOLD_CYRILLIC_URL =
-  "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7SUc.woff2";
+  'https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7SUc.woff2';
 
 async function downloadBase64(url: string): Promise<string> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`);
   const buf = await res.arrayBuffer();
-  return Buffer.from(buf).toString("base64");
+  return Buffer.from(buf).toString('base64');
 }
 
 const [regularLatin, regularCyrillic] = await Promise.all([
@@ -71,5 +66,5 @@ export const fontFaceCSS = \`
 \`;
 `;
 
-await Bun.write("src/worker/templates/fonts.ts", output);
-console.log("fonts.ts generated");
+await Bun.write('src/worker/templates/fonts.ts', output);
+console.log('fonts.ts generated');

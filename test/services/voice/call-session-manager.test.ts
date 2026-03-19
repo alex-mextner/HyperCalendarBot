@@ -11,7 +11,7 @@ function makeFakeSession() {
 }
 
 test('creates a session and retrieves it by sessionId', () => {
-  const manager = new CallSessionManager({ createSession: (_id, _ws) => makeFakeSession() as never });
+  const manager = new CallSessionManager({ createSession: (_id, _userId, _lang, _ws) => makeFakeSession() as never });
   const ws = { send: mock(() => {}), close: mock(() => {}) };
   manager.onWebSocketOpen('abc123', ws as never);
   expect(manager.getSession('abc123')).toBeDefined();
@@ -62,4 +62,21 @@ test('enforces 30-minute timeout', async () => {
   manager.onWebSocketOpen('s4', ws as never);
   await new Promise((r) => setTimeout(r, 80));
   expect(session.forceEnd).toHaveBeenCalled();
+});
+
+test('registerSession passes userId and language to createSession', () => {
+  let capturedUserId = -1;
+  let capturedLang = '';
+  const manager = new CallSessionManager({
+    createSession: (_id, userId, lang, _ws) => {
+      capturedUserId = userId;
+      capturedLang = lang;
+      return makeFakeSession() as never;
+    },
+  });
+  const ws = { send: mock(() => {}), close: mock(() => {}) };
+  manager.registerSession('sess5', 42, 'en');
+  manager.onWebSocketOpen('sess5', ws as never);
+  expect(capturedUserId).toBe(42);
+  expect(capturedLang).toBe('en');
 });

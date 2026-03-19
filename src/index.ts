@@ -11,11 +11,11 @@ const db = createDatabase(config.DATABASE_PATH);
 
 // Mutable ref — patched after bot creation
 const botRef: {
-  sendMessage: (telegramId: number, text: string) => Promise<void>;
+  sendMessage: (telegramId: number, text: string) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
   editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
 } = {
-  sendMessage: async () => {},
+  sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
   editMessage: async () => {},
 };
@@ -164,6 +164,14 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
     const { TtsService } = await import('./services/voice/tts-service.ts');
     const { CallManager } = await import('./services/voice/call-manager.ts');
+    const { CallSessionManager } = await import('./services/voice/call-session-manager.ts');
+    const { CallSession } = await import('./services/voice/call-session.ts');
+    const { NovaStreamingSTT } = await import('./services/voice/nova-streaming-stt.ts');
+    const { FluxStreamingSTT } = await import('./services/voice/flux-streaming-stt.ts');
+    const { ThinkingPhrasePlayer } = await import('./services/voice/thinking-phrase-player.ts');
+    const { CalendarBotAgent } = await import('./services/ai/agent.ts');
+    const { EventService } = await import('./services/event/event-service.ts');
+    const { HolidayService } = await import('./services/holiday/holiday-service.ts');
     const { existsSync } = await import('node:fs');
 
     const cq = createCallQueue({ url: config.REDIS_URL });
@@ -179,11 +187,54 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
     const ttsTranslationService = new TtsTranslationService();
     const ttsService = new TtsService();
+
+    const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY ?? '';
+
+    // Minimal TelegramSender for voice calls — text responses go through TTS,
+    // but tools that send Telegram messages (ask_user, etc.) still need a real sender.
+    const voiceSender: import('./services/ai/types.ts').TelegramSender = {
+      sendMessage: (chatId: number, text: string) => botRef.sendMessage(chatId, text),
+      editMessageText: async () => {},
+    };
+    const voiceAgent = new CalendarBotAgent(
+      { apiKey: config.ANTHROPIC_API_KEY, baseUrl: config.AI_BASE_URL, model: config.AI_MODEL },
+      voiceSender,
+    );
+
+    const voiceEventService = new EventService(db.events, db.reminders);
+    const voiceHolidayService = new HolidayService(db.holidays);
+
+    const callSessionManager = new CallSessionManager({
+      createSession: (sessionId, userId, language, ws) =>
+        CallSession.create({
+          sessionId,
+          userId,
+          language,
+          ws,
+          createNovaStt: () => new NovaStreamingSTT(DEEPGRAM_API_KEY),
+          createFluxStt: () => new FluxStreamingSTT(DEEPGRAM_API_KEY),
+          createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
+          agent: voiceAgent,
+          tts: fallbackTts,
+          openerText: language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?',
+          agentContextBase: {
+            eventService: voiceEventService,
+            chatHistory: db.chatHistory,
+            userRepo: db.users,
+            reminderRepo: db.reminders,
+            holidayService: voiceHolidayService,
+          },
+        }),
+    });
+
+    callSessionManager.startServer();
+
     const callManager = new CallManager({
       fallbackTts: ttsService,
       callLogRepo: db.callLog,
       translateText: (text, lang) => ttsTranslationService.translate(text, lang),
       pyBridgePath,
+      registerSession: (sessionId, userId, language) => callSessionManager.registerSession(sessionId, userId, language),
     });
 
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
@@ -410,7 +461,8 @@ const { bot } = createBot(
 
 // Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text) => {
-  await bot.api.sendMessage({ chat_id: telegramId, text });
+  const msg = await bot.api.sendMessage({ chat_id: telegramId, text });
+  return { message_id: msg.message_id };
 };
 botRef.editMessage = async (chatId, messageId, text) => {
   await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
