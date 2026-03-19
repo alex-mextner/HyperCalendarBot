@@ -55,6 +55,10 @@ export class CalendarBotAgent {
     this.sender = sender;
   }
 
+  getSender(): TelegramSender {
+    return this.sender;
+  }
+
   buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
     const systemPrompt = buildSystemPrompt(ctx);
 

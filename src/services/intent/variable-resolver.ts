@@ -1,9 +1,40 @@
 import { TZDate } from '@date-fns/tz';
-import { addDays, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-fns';
+import { addDays, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays } from 'date-fns';
+import { cmdLogger } from '../../utils/logger.ts';
 
-interface UserContext {
+/** Event summary available as template variables in intent workflows. */
+export interface EventSummary {
+  id: number;
+  title: string;
+  /** YYYY-MM-DD in user's timezone */
+  date: string;
+  /** HH:MM in user's timezone, absent for all-day events */
+  time?: string;
+  /** True if event spans entire day (no specific start time) */
+  all_day: boolean;
+  /** UTC ISO end datetime — use to compute duration */
+  end_at?: string;
+  /** Event description or notes */
+  description?: string;
+  /** Venue, address, or room */
+  location?: string;
+  /** RFC 5545 recurrence rule — present only for recurring events */
+  recurrence_rule?: string;
+}
+
+export interface UserContext {
   timezone: string;
   language: string;
+  /** Telegram @username of the message sender (without @). Undefined if the user has no username. */
+  username?: string;
+  /** First name of the message sender. */
+  firstName?: string;
+  /** Telegram user ID of the message sender. */
+  userId?: number;
+  /** Most recently created event by this user. Available as {{last_added_event.id}}, .title, .date, .time */
+  lastAddedEvent?: EventSummary;
+  /** Most recently referenced event in this conversation. Available as {{last_mentioned_event.id}}, .title, .date, .time */
+  lastMentionedEvent?: EventSummary;
 }
 
 /**
@@ -58,10 +89,24 @@ function resolveVar(
       return format(startOfMonth(now), 'yyyy-MM-dd');
     case 'month_end':
       return format(endOfMonth(now), 'yyyy-MM-dd');
+    case 'yesterday':
+      return format(subDays(now, 1), 'yyyy-MM-dd');
+    case 'next_week_start':
+      return format(startOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    case 'next_week_end':
+      return format(endOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    case 'now':
+      return format(now, "yyyy-MM-dd'T'HH:mm:ssxxx");
     case 'user.timezone':
       return userCtx.timezone;
     case 'user.language':
       return userCtx.language;
+    case 'user.username':
+      return userCtx.username;
+    case 'user.first_name':
+      return userCtx.firstName;
+    case 'user.id':
+      return userCtx.userId;
     default:
       break;
   }
@@ -77,6 +122,7 @@ function resolveVar(
     if (value !== undefined) return value;
   }
 
+  cmdLogger.warn({ varName: name }, 'Intent template variable could not be resolved');
   return undefined;
 }
 

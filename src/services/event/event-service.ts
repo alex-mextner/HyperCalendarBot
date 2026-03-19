@@ -108,6 +108,10 @@ export class EventService {
     return this.eventRepo.findById(id, userId);
   }
 
+  getLatestCreated(userId: number): CalendarEvent | null {
+    return this.eventRepo.findLatestCreatedByUser(userId);
+  }
+
   getEventOwnerId(eventId: number): number | null {
     return this.eventRepo.getOwnerId(eventId);
   }

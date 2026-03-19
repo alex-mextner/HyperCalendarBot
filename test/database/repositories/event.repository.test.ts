@@ -60,6 +60,40 @@ describe('EventRepository', () => {
     expect(events.findById(created.id, 999)).toBeNull();
   });
 
+  test('findLatestCreatedByUser returns null when no events', () => {
+    expect(events.findLatestCreatedByUser(USER_ID)).toBeNull();
+  });
+
+  test('findLatestCreatedByUser returns the most recently inserted event', () => {
+    events.create({ user_id: USER_ID, title: 'First', start_at: '2026-03-10T10:00:00Z', timezone: 'UTC' });
+    const second = events.create({
+      user_id: USER_ID,
+      title: 'Second',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+    });
+    expect(events.findLatestCreatedByUser(USER_ID)!.id).toBe(second.id);
+  });
+
+  test('findLatestCreatedByUser excludes group-owned events for the same user', () => {
+    // Group event stored under USER_ID but with owner_type='group' — must be excluded
+    events.create({
+      user_id: USER_ID,
+      title: 'GroupEvent',
+      start_at: '2026-03-12T10:00:00Z',
+      timezone: 'UTC',
+      owner_type: 'group',
+      group_id: 1,
+    });
+    const personal = events.create({
+      user_id: USER_ID,
+      title: 'Personal',
+      start_at: '2026-03-10T10:00:00Z',
+      timezone: 'UTC',
+    });
+    expect(events.findLatestCreatedByUser(USER_ID)!.id).toBe(personal.id);
+  });
+
   test('getInRange returns events within date range', () => {
     events.create({ user_id: USER_ID, title: 'E1', start_at: '2026-03-11T10:00:00Z', timezone: 'UTC' });
     events.create({ user_id: USER_ID, title: 'E2', start_at: '2026-03-12T10:00:00Z', timezone: 'UTC' });

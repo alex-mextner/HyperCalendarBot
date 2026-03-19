@@ -1,5 +1,7 @@
 // src/bot/handlers/message.handler.ts
 
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
@@ -18,7 +20,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { CalendarEvent, User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext, ToolResult } from '../../services/ai/types.ts';
@@ -29,9 +31,11 @@ import type { GroupMemberService } from '../../services/group/member-service.ts'
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { type AdminEditSession, isSessionExpired } from '../../services/intent/admin-edit-session.ts';
+import { type EventMentionStore, InMemoryEventMentionStore } from '../../services/intent/event-mention-store.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
+import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
@@ -99,11 +103,13 @@ export interface MessageHandlerDeps {
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
+  // Persistent store for last-mentioned event context (Redis-backed or in-memory)
+  eventMentionStore?: EventMentionStore;
   // Pipeline: intent matching
   intentMatcher?: IntentMatcher;
   intentRepo?: IntentRepository;
   intentExecutor?: IntentExecutor;
-  intentToolExecutor?: (toolName: string, input: Record<string, unknown>) => ToolResult;
+  intentToolExecutor?: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
   workflowSessions?: Map<number, WorkflowSession>;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
@@ -526,18 +532,58 @@ async function handleProposeTimeInput(
   }
 }
 
+export function toEventSummary(event: CalendarEvent, timezone: string): EventSummary {
+  const d = new TZDate(new Date(event.start_at), timezone);
+  const summary: EventSummary = {
+    id: event.id,
+    title: event.title,
+    date: format(d, 'yyyy-MM-dd'),
+    all_day: Boolean(event.all_day),
+  };
+  if (!event.all_day) summary.time = format(d, 'HH:mm');
+  if (event.end_at) summary.end_at = event.end_at;
+  if (event.description) summary.description = event.description;
+  if (event.location) summary.location = event.location;
+  if (event.recurrence_rule) summary.recurrence_rule = event.recurrence_rule;
+  return summary;
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
+  const eventMentionStore: EventMentionStore = deps.eventMentionStore ?? new InMemoryEventMentionStore();
 
   const aiAgentLayer = createAiAgentLayer({
     agent: deps.agent,
-    agentContextBuilder,
+    agentContextBuilder: (user, chatId, messageText, groupInfo) => {
+      const ctx = agentContextBuilder(user, chatId, messageText, groupInfo);
+      ctx.onEventMentioned = (eventId) => {
+        Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
+          cmdLogger.error({ error: String(err), userId: user.telegram_id }, 'Failed to persist last mentioned event');
+        });
+      };
+      return ctx;
+    },
     intentLearner: deps.intentLearner,
   });
 
   // Static layers that don't require per-message context
   const staticLayers = [...(deps.feedbackRepo ? [createFeedbackRouterLayer(deps.feedbackRepo)] : []), aiAgentLayer];
+
+  const notifyAdmin =
+    deps.botAdminId && deps.sendMessageToUser
+      ? (text: string) => deps.sendMessageToUser!(deps.botAdminId!, text)
+      : undefined;
+
+  const getEventContext = async (userId: number, timezone: string) => {
+    const lastAdded = deps.eventService.getLatestCreated(userId);
+    const mentionedId = await eventMentionStore.get(userId);
+    const lastMentioned = mentionedId ? deps.eventService.getEvent(mentionedId, userId) : null;
+    return {
+      lastAddedEvent: lastAdded ? toEventSummary(lastAdded, timezone) : undefined,
+      lastMentionedEvent: lastMentioned ? toEventSummary(lastMentioned, timezone) : undefined,
+    };
+  };
 
   // Intent layer is built statically when a custom tool executor is provided,
   // or dynamically per-message using agentContextBuilder when it's absent.
@@ -550,6 +596,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           deps.intentToolExecutor,
           workflowSessions,
           deps.chatHistory,
+          notifyAdmin,
+          getEventContext,
         )
       : undefined;
 
@@ -676,10 +724,25 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             deps.intentMatcher,
             deps.intentRepo,
             deps.intentExecutor,
-            (toolName, input) =>
-              executeTool(agentContextBuilder(user, Number(ctx.chatId!), messageText), toolName, input),
+            (toolName, input) => {
+              const agentCtx = agentContextBuilder(user, Number(ctx.chatId!), messageText);
+              // Inject sender so pick_users / ask_user / send_invitation work in intent context
+              agentCtx.sender = deps.agent.getSender();
+              // Track which events the intent touches
+              agentCtx.onEventMentioned = (eventId) => {
+                Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
+                  cmdLogger.error(
+                    { error: String(err), userId: user.telegram_id },
+                    'Failed to persist last mentioned event',
+                  );
+                });
+              };
+              return executeTool(agentCtx, toolName, input);
+            },
             workflowSessions,
             deps.chatHistory,
+            notifyAdmin,
+            getEventContext,
           )
         : undefined);
 

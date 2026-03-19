@@ -375,6 +375,18 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
   }
 }
 
+let eventMentionStore: import('./services/intent/event-mention-store.ts').EventMentionStore | undefined;
+if (config.REDIS_URL) {
+  const { RedisEventMentionStore } = await import('./services/intent/event-mention-store.ts');
+  const redisClient = new Bun.Redis(config.REDIS_URL);
+  eventMentionStore = new RedisEventMentionStore(redisClient);
+  botLogger.info('Event mention store: Redis (7-day TTL)');
+} else {
+  const { InMemoryEventMentionStore } = await import('./services/intent/event-mention-store.ts');
+  eventMentionStore = new InMemoryEventMentionStore();
+  botLogger.info('Event mention store: in-memory (no REDIS_URL)');
+}
+
 const { bot } = createBot(
   config.BOT_TOKEN,
   db,
@@ -392,6 +404,7 @@ const { bot } = createBot(
   sileroTts,
   kokoroTts,
   mtprotoResolveUsername,
+  eventMentionStore,
 );
 
 // Patch bot ref to use real bot API

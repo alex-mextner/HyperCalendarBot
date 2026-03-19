@@ -41,7 +41,9 @@ function makeHolidayService(overrides: Record<string, unknown> = {}) {
     getSubscriptions: mock(() => []),
     getCountryName: mock((code: string) => `Country-${code}`),
     getUpcomingHolidays: mock(() => []),
-    getUpcomingForCountry: mock(() => [{ date: '2026-01-01', name: 'New Year', type: 'public', countryCode: 'RU', countryName: 'Russia' }]),
+    getUpcomingForCountry: mock(() => [
+      { date: '2026-01-01', name: 'New Year', type: 'public', countryCode: 'RU', countryName: 'Russia' },
+    ]),
     getAvailableRegions: mock(() => ['Europe', 'Asia']),
     getCountriesForRegion: mock(() => [{ code: 'US', name: 'United States' }]),
     subscribeUser: mock(() => {}),

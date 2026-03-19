@@ -50,6 +50,8 @@ export interface AgentContext {
   calendarProposalRepo?: CalendarProposalRepository;
   checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
   sender?: TelegramSender;
+  /** Called after any successful tool call that references an event (by ID or creation). */
+  onEventMentioned?: (eventId: number) => void;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
   notificationPrefs?: {
     getPrefs(userId: number): Record<string, unknown>;

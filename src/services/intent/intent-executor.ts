@@ -1,13 +1,17 @@
+import { cmdLogger } from '../../utils/logger.ts';
 import type { ToolResult } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
-import { resolveVariables } from './variable-resolver.ts';
+import { type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
 
-interface ExecutorUserContext {
-  timezone: string;
-  language: string;
+type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
+
+/** Build the initial step-results map pre-populated with event context from UserContext. */
+function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {
+  const pre: Record<string, unknown> = {};
+  if (userCtx.lastAddedEvent) pre.last_added_event = userCtx.lastAddedEvent;
+  if (userCtx.lastMentionedEvent) pre.last_mentioned_event = userCtx.lastMentionedEvent;
+  return pre;
 }
-
-type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult;
 
 interface ExecutorResult {
   success: boolean;
@@ -59,10 +63,13 @@ async function runLevel1(
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
 
+  const eventCtx = buildEventStepResults(userCtx);
+
   for (const tool of tools) {
-    const resolvedInput = resolveVariables(tool.input, captures, userCtx) as Record<string, unknown>;
-    const result = executeTool(tool.name, resolvedInput);
+    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx) as Record<string, unknown>;
+    const result = await executeTool(tool.name, resolvedInput);
     if (!result.success) {
+      cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
       return { success: false, response: result.error };
     }
     lastOutput = result.output;
@@ -81,7 +88,10 @@ async function runLevel2(
   executeTool: ToolExecutorFn,
   resumeState?: ResumeState,
 ): Promise<ExecutorResult> {
-  const stepResults: Record<string, unknown> = resumeState?.stepResults ?? {};
+  const stepResults: Record<string, unknown> = {
+    ...buildEventStepResults(userCtx),
+    ...(resumeState?.stepResults ?? {}),
+  };
 
   // When resuming, set the user answer for the suspended ask_user step
   let startIndex = 0;
@@ -124,8 +134,9 @@ async function runLevel2(
     // Execute tool
     const resolvedInput = resolveVariables(step.input ?? {}, captures, userCtx, stepResults) as Record<string, unknown>;
 
-    const result = executeTool(step.call, resolvedInput);
+    const result = await executeTool(step.call, resolvedInput);
     if (!result.success) {
+      cmdLogger.warn({ step: step.call, error: result.error }, 'Intent L2 tool step failed');
       return { success: false, response: result.error };
     }
 

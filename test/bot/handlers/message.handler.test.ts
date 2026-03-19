@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { createMessageHandler } from '../../../src/bot/handlers/message.handler.ts';
+import { createMessageHandler, toEventSummary } from '../../../src/bot/handlers/message.handler.ts';
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
@@ -418,5 +418,84 @@ describe('createMessageHandler', () => {
     expect(ctx.send).toHaveBeenCalledTimes(1);
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('пошло не так');
+  });
+});
+
+describe('toEventSummary', () => {
+  const BASE_EVENT = {
+    id: 1,
+    user_id: 100,
+    title: 'Team standup',
+    description: null,
+    category: null,
+    start_at: '2026-03-20T07:00:00Z', // 10:00 MSK (UTC+3)
+    end_at: '2026-03-20T07:30:00Z',
+    all_day: 0,
+    timezone: 'Europe/Moscow',
+    location: null,
+    recurrence_rule: null,
+    recurrence_end_at: null,
+    parent_event_id: null,
+    original_start_at: null,
+    is_cancelled: 0,
+    reminder_overrides: null,
+    google_event_id: null,
+    google_calendar_id: null,
+    google_etag: null,
+    sync_status: 'local_only' as const,
+    sync_version: 0,
+    owner_type: 'user' as const,
+    group_id: null,
+    created_by: null,
+    last_synced_at: null,
+    created_at: '2026-03-19T10:00:00Z',
+    updated_at: '2026-03-19T10:00:00Z',
+  };
+
+  test('sets date and time in user timezone for timed event', () => {
+    const summary = toEventSummary(BASE_EVENT, 'Europe/Moscow');
+    expect(summary.id).toBe(1);
+    expect(summary.title).toBe('Team standup');
+    expect(summary.date).toBe('2026-03-20');
+    expect(summary.time).toBe('10:00');
+    expect(summary.all_day).toBe(false);
+  });
+
+  test('omits time for all-day event', () => {
+    const event = { ...BASE_EVENT, all_day: 1 };
+    const summary = toEventSummary(event, 'UTC');
+    expect(summary.time).toBeUndefined();
+    expect(summary.all_day).toBe(true);
+  });
+
+  test('includes end_at when present', () => {
+    const summary = toEventSummary(BASE_EVENT, 'UTC');
+    expect(summary.end_at).toBe('2026-03-20T07:30:00Z');
+  });
+
+  test('omits end_at when null', () => {
+    const event = { ...BASE_EVENT, end_at: null };
+    const summary = toEventSummary(event, 'UTC');
+    expect(summary.end_at).toBeUndefined();
+  });
+
+  test('includes optional fields when present', () => {
+    const event = {
+      ...BASE_EVENT,
+      description: 'Daily sync',
+      location: 'Room 3',
+      recurrence_rule: 'FREQ=DAILY',
+    };
+    const summary = toEventSummary(event, 'UTC');
+    expect(summary.description).toBe('Daily sync');
+    expect(summary.location).toBe('Room 3');
+    expect(summary.recurrence_rule).toBe('FREQ=DAILY');
+  });
+
+  test('omits optional fields when null', () => {
+    const summary = toEventSummary(BASE_EVENT, 'UTC');
+    expect(summary.description).toBeUndefined();
+    expect(summary.location).toBeUndefined();
+    expect(summary.recurrence_rule).toBeUndefined();
   });
 });

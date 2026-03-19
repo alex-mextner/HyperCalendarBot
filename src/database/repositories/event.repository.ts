@@ -42,6 +42,14 @@ export class EventRepository {
       .get(id, userId) as CalendarEvent | null;
   }
 
+  findLatestCreatedByUser(userId: number): CalendarEvent | null {
+    return this.db
+      .prepare(
+        "SELECT * FROM events WHERE user_id = ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user') ORDER BY id DESC LIMIT 1",
+      )
+      .get(userId) as CalendarEvent | null;
+  }
+
   getOwnerId(eventId: number): number | null {
     const row = this.db.prepare('SELECT user_id FROM events WHERE id = ?').get(eventId) as { user_id: number } | null;
     return row?.user_id ?? null;

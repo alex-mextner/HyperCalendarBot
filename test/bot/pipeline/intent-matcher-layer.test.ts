@@ -181,6 +181,35 @@ describe('createIntentMatcherLayer', () => {
     expect(matcher.match).toHaveBeenCalled();
   });
 
+  test('returns handled:false and calls notifyAdmin when executor fails', async () => {
+    const match = { intentId: 3, captures: {} };
+    const intent = {
+      id: 3,
+      canonical_name: 'invite_user',
+      workflow: JSON.stringify({ tools: [{ name: 'find_user', input: {} }] }),
+      format: 'text',
+    };
+    const notifyAdmin = mock(() => Promise.resolve());
+
+    const layer = createIntentMatcherLayer(
+      makeMatcher(match),
+      makeIntentRepo(intent),
+      makeExecutor({ success: false, response: 'tool error: user not found' }),
+      makeToolExecutor(),
+      workflowSessions,
+      undefined,
+      notifyAdmin,
+    );
+
+    const result = await layer(makeCtx(), 'invite @bob');
+    expect(result.handled).toBe(false);
+    expect(notifyAdmin).toHaveBeenCalledTimes(1);
+    const msg = (notifyAdmin.mock.calls[0] as string[])[0];
+    expect(msg).toContain('invite_user');
+    expect(msg).toContain('id=3');
+    expect(msg).toContain('tool error: user not found');
+  });
+
   test('does not send response when executor returns no response', async () => {
     const match = { intentId: 2, captures: {} };
     const intent = {

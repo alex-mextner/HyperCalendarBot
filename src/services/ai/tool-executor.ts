@@ -58,6 +58,27 @@ export async function executeTool(
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   try {
+    const result = await dispatchTool(ctx, toolName, input);
+
+    // Track which event was touched, for last_mentioned_event resolution in intents
+    if (result.success) {
+      if (typeof input.event_id === 'number') {
+        ctx.onEventMentioned?.(input.event_id);
+      } else if (toolName === 'create_event' && result.output) {
+        const m = /^id:\s*(\d+)/m.exec(result.output);
+        if (m) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
+      }
+    }
+
+    return result;
+  } catch (outerError) {
+    aiLogger.error({ tool: toolName, error: String(outerError) }, 'Tool execution error');
+    return { success: false, error: `Tool execution failed: ${String(outerError)}` };
+  }
+}
+
+async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
+  try {
     switch (toolName) {
       case 'get_events':
         return handleGetEvents(ctx, input as { start_date: string; end_date: string; scope?: 'personal' | 'group' });

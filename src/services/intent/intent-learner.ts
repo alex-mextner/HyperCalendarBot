@@ -4,6 +4,7 @@ import type { CreateIntentData } from '../../database/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
+import { validateWorkflowVariables } from './workflow-validator.ts';
 
 interface ToolCallRecord {
   name: string;
@@ -129,73 +130,104 @@ export class IntentLearner {
     toolCalls: ToolCallRecord[],
     toolResults: ToolResultRecord[],
   ): Promise<CreateIntentData | null> {
-    const userMessage = JSON.stringify({ message, toolCalls, toolResults });
+    const firstUserMessage = JSON.stringify({ message, toolCalls, toolResults });
+    const conversationMessages: { role: 'user' | 'assistant'; content: string }[] = [
+      { role: 'user', content: firstUserMessage },
+    ];
 
-    const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: this.config.model ?? 'claude-haiku-4-5-20251001',
-        max_tokens: 2048,
-        system: LEARNER_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: userMessage }],
-      }),
-    });
+    const MAX_RETRIES = 5;
 
-    if (!response.ok) {
-      throw new Error(`Learner API error: ${response.status}`);
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': this.config.apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: this.config.model ?? 'claude-haiku-4-5-20251001',
+          max_tokens: 2048,
+          system: LEARNER_SYSTEM_PROMPT,
+          messages: conversationMessages,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Learner API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as {
+        content: { type: string; text: string }[];
+        stop_reason?: string;
+      };
+
+      if (data.stop_reason === 'max_tokens') {
+        cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
+        return null;
+      }
+
+      const text = data.content.find((c) => c.type === 'text')?.text;
+      if (!text) return null;
+
+      // Strip markdown code fences if model ignored "no markdown" instruction
+      const json = text
+        .replace(/^\s*```(?:json)?\s*/i, '')
+        .replace(/\s*```\s*$/, '')
+        .trim();
+
+      // Parse JSON response
+      const parsed = JSON.parse(json) as {
+        skip?: boolean;
+        canonical_name: string;
+        phrases: string[];
+        trigger_words?: string[];
+        pattern?: string;
+        workflow: Record<string, unknown>;
+        format: string;
+      };
+
+      if (parsed.skip) return null;
+
+      // Validate required fields
+      if (!parsed.canonical_name || !parsed.phrases?.length || !parsed.workflow) {
+        return null;
+      }
+
+      // Validate template variables in workflow
+      const varErrors = validateWorkflowVariables(parsed.workflow, parsed.pattern ?? null);
+      if (varErrors.length > 0) {
+        cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow has invalid variables');
+
+        if (attempt < MAX_RETRIES) {
+          // Feed the errors back and retry
+          const errorFeedback = [
+            'The workflow contains invalid template variables. Fix them and return corrected JSON.',
+            'Errors:',
+            ...varErrors.map((e) => `- ${e}`),
+          ].join('\n');
+          conversationMessages.push({ role: 'assistant', content: text });
+          conversationMessages.push({ role: 'user', content: errorFeedback });
+          continue;
+        }
+
+        // After all retries failed — skip this intent
+        cmdLogger.error({ errors: varErrors }, 'IntentLearner: workflow still invalid after retries, skipping');
+        return null;
+      }
+
+      return {
+        canonical_name: parsed.canonical_name,
+        phrases: parsed.phrases,
+        trigger_words: parsed.trigger_words,
+        pattern: parsed.pattern,
+        workflow: parsed.workflow,
+        format: parsed.format || 'text',
+        source_message: message,
+      };
     }
 
-    const data = (await response.json()) as {
-      content: { type: string; text: string }[];
-      stop_reason?: string;
-    };
-
-    if (data.stop_reason === 'max_tokens') {
-      cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
-      return null;
-    }
-
-    const text = data.content.find((c) => c.type === 'text')?.text;
-    if (!text) return null;
-
-    // Strip markdown code fences if model ignored "no markdown" instruction
-    const json = text
-      .replace(/^\s*```(?:json)?\s*/i, '')
-      .replace(/\s*```\s*$/, '')
-      .trim();
-
-    // Parse JSON response
-    const parsed = JSON.parse(json) as {
-      skip?: boolean;
-      canonical_name: string;
-      phrases: string[];
-      trigger_words?: string[];
-      pattern?: string;
-      workflow: Record<string, unknown>;
-      format: string;
-    };
-
-    if (parsed.skip) return null;
-
-    // Validate required fields
-    if (!parsed.canonical_name || !parsed.phrases?.length || !parsed.workflow) {
-      return null;
-    }
-
-    return {
-      canonical_name: parsed.canonical_name,
-      phrases: parsed.phrases,
-      trigger_words: parsed.trigger_words,
-      pattern: parsed.pattern,
-      workflow: parsed.workflow,
-      format: parsed.format || 'text',
-      source_message: message,
-    };
+    return null;
   }
 
   private sendToAdminForVerification(intentId: number, data: CreateIntentData): void {

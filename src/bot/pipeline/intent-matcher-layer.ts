@@ -7,6 +7,7 @@ import type { ToolResult } from '../../services/ai/types.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
+import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { PipelineResult } from './types.ts';
@@ -26,9 +27,14 @@ export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
   executor: IntentExecutor,
-  toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult,
+  toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
   workflowSessions: Map<number, WorkflowSession>,
   chatHistoryRepo?: ChatHistoryRepository,
+  notifyAdmin?: (text: string) => Promise<unknown>,
+  getEventContext?: (
+    userId: number,
+    timezone: string,
+  ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
 ) {
   return async (ctx: BotCommandContext, messageText: string): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
@@ -39,10 +45,18 @@ export function createIntentMatcherLayer(
     if (session) {
       workflowSessions.delete(userId);
       if (Date.now() - session.createdAt < WORKFLOW_SESSION_TTL) {
+        const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};
         const result = await executor.run(
           session.workflow,
           session.captures,
-          { timezone: user.timezone, language: user.language },
+          {
+            timezone: user.timezone,
+            language: user.language,
+            username: user.username ?? undefined,
+            firstName: user.first_name ?? undefined,
+            userId: user.telegram_id,
+            ...eventCtx,
+          },
           toolExecutor,
           { stepIndex: session.stepIndex, stepResults: session.stepResults, userAnswer: messageText },
         );
@@ -70,10 +84,18 @@ export function createIntentMatcherLayer(
     }
 
     // 4. Execute
+    const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};
     const result = await executor.run(
       workflow,
       match.captures,
-      { timezone: user.timezone, language: user.language },
+      {
+        timezone: user.timezone,
+        language: user.language,
+        username: user.username ?? undefined,
+        firstName: user.first_name ?? undefined,
+        userId: user.telegram_id,
+        ...eventCtx,
+      },
       toolExecutor,
     );
 
@@ -90,7 +112,23 @@ export function createIntentMatcherLayer(
       return { handled: true };
     }
 
-    // 6. Format and send response
+    // 6. Fall through to AI agent on failure (e.g. unresolved variables, tool error)
+    if (!result.success) {
+      cmdLogger.warn(
+        { intentId: match.intentId, userId, error: result.response },
+        'Intent workflow step failed, falling through to AI agent',
+      );
+      if (notifyAdmin) {
+        notifyAdmin(
+          `⚠️ Intent failed: ${intent.canonical_name} (id=${match.intentId})\nMessage: "${messageText}"\nError: ${result.response ?? 'no response'}`,
+        ).catch((err: unknown) => {
+          cmdLogger.error({ error: String(err) }, 'Failed to send intent fail report to admin');
+        });
+      }
+      return { handled: false };
+    }
+
+    // 7. Format and send response
     if (result.response) {
       const formatted =
         intent.format !== 'text'

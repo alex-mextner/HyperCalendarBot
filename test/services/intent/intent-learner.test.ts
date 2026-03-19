@@ -130,6 +130,67 @@ describe('IntentLearner', () => {
     }
   });
 
+  test('retries when first response has invalid variables, succeeds on second', async () => {
+    const invalidPayload = {
+      canonical_name: 'show_today',
+      phrases: ['что сегодня'],
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{unknown_var}}' } }] },
+      format: 'events_list',
+    };
+    const validPayload = {
+      canonical_name: 'show_today',
+      phrases: ['что сегодня'],
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{today}}' } }] },
+      format: 'events_list',
+    };
+
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      callCount++;
+      const payload = callCount === 1 ? invalidPayload : validPayload;
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(payload) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result?.canonical_name).toBe('show_today');
+      expect(callCount).toBe(2); // one retry was needed
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('returns null after all 5 retries fail with invalid variables', async () => {
+    const invalidPayload = {
+      canonical_name: 'show_today',
+      phrases: ['что сегодня'],
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{bad_var}}' } }] },
+      format: 'events_list',
+    };
+
+    let callCount = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      callCount++;
+      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(invalidPayload) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result).toBeNull();
+      expect(callCount).toBe(6); // 1 initial + 5 retries, all returned invalid variables
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('resets daily counter on new day', () => {
     for (let i = 0; i < 50; i++) {
       learner.incrementCounter();

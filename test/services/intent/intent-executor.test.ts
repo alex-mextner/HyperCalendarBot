@@ -91,6 +91,31 @@ describe('IntentExecutor', () => {
     expect(result.success).toBe(false);
   });
 
+  test('async tool executor is awaited', async () => {
+    const workflow = {
+      steps: [{ call: 'find_user', input: { username: '{{$1}}' }, as: 'found' }],
+    };
+    const mockExecutor = async (_name: string) => ({
+      success: true as const,
+      output: 'telegram_id=123',
+    });
+    const result = await executor.run(workflow, { $1: 'testuser' }, userCtx, mockExecutor);
+    expect(result.success).toBe(true);
+  });
+
+  test('async tool failure propagates correctly', async () => {
+    const workflow = {
+      steps: [{ call: 'find_user', input: { username: '{{$1}}' }, as: 'found' }],
+    };
+    const mockExecutor = async () => ({
+      success: false as const,
+      error: 'User not found',
+    });
+    const result = await executor.run(workflow, { $1: 'ghost' }, userCtx, mockExecutor);
+    expect(result.success).toBe(false);
+    expect(result.response).toBe('User not found');
+  });
+
   test('resume from suspended workflow', async () => {
     const workflow = {
       steps: [

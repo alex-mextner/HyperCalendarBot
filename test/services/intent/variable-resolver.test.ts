@@ -2,7 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { resolveVariables } from '../../../src/services/intent/variable-resolver.ts';
 
 describe('resolveVariables', () => {
-  const userCtx = { timezone: 'Europe/Moscow', language: 'ru' };
+  const userCtx = {
+    timezone: 'Europe/Moscow',
+    language: 'ru',
+    username: 'ultra',
+    firstName: 'Alex',
+    userId: 5153477378,
+  };
 
   test('resolves {{today}} to YYYY-MM-DD in user timezone', () => {
     const result = resolveVariables('{{today}}', {}, userCtx);
@@ -76,5 +82,93 @@ describe('resolveVariables', () => {
 
   test('resolves {{user.language}}', () => {
     expect(resolveVariables('{{user.language}}', {}, userCtx)).toBe('ru');
+  });
+
+  // --- New user variables ---
+
+  test('resolves {{user.username}} to sender username without @', () => {
+    expect(resolveVariables('{{user.username}}', {}, userCtx)).toBe('ultra');
+  });
+
+  test('resolves {{user.first_name}} to sender first name', () => {
+    expect(resolveVariables('{{user.first_name}}', {}, userCtx)).toBe('Alex');
+  });
+
+  test('resolves {{user.id}} to sender Telegram ID as number', () => {
+    expect(resolveVariables('{{user.id}}', {}, userCtx)).toBe(5153477378);
+  });
+
+  test('{{user.username}} stays unresolved when username not set', () => {
+    const ctx = { timezone: 'UTC', language: 'en' };
+    // no username — should stay as literal
+    expect(resolveVariables('{{user.username}}', {}, ctx)).toBe('{{user.username}}');
+  });
+
+  // --- New date variables ---
+
+  test('resolves {{yesterday}} to date before today', () => {
+    const today = resolveVariables('{{today}}', {}, userCtx) as string;
+    const yesterday = resolveVariables('{{yesterday}}', {}, userCtx) as string;
+    expect(yesterday).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(yesterday < today).toBe(true);
+  });
+
+  test('resolves {{next_week_start}} and {{next_week_end}} after this week', () => {
+    const weekEnd = resolveVariables('{{week_end}}', {}, userCtx) as string;
+    const nextStart = resolveVariables('{{next_week_start}}', {}, userCtx) as string;
+    const nextEnd = resolveVariables('{{next_week_end}}', {}, userCtx) as string;
+    expect(nextStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(nextEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(nextStart > weekEnd).toBe(true);
+    expect(nextEnd >= nextStart).toBe(true);
+  });
+
+  test('resolves {{now}} to ISO datetime string with time component', () => {
+    const now = resolveVariables('{{now}}', {}, userCtx) as string;
+    // e.g. "2026-03-19T14:32:00+03:00" — must contain T
+    expect(now).toContain('T');
+  });
+
+  // --- EventSummary fields via step results ---
+
+  test('resolves expanded last_added_event fields from stepResults', () => {
+    const stepResults = {
+      last_added_event: {
+        id: 42,
+        title: 'Team standup',
+        date: '2026-03-20',
+        time: '10:00',
+        all_day: false,
+        end_at: '2026-03-20T08:00:00.000Z',
+        description: 'Daily sync',
+        location: 'Room 3',
+        recurrence_rule: 'FREQ=DAILY',
+      },
+    };
+    expect(resolveVariables('{{last_added_event.id}}', {}, userCtx, stepResults)).toBe(42);
+    expect(resolveVariables('{{last_added_event.title}}', {}, userCtx, stepResults)).toBe('Team standup');
+    expect(resolveVariables('{{last_added_event.all_day}}', {}, userCtx, stepResults)).toBe(false);
+    expect(resolveVariables('{{last_added_event.end_at}}', {}, userCtx, stepResults)).toBe('2026-03-20T08:00:00.000Z');
+    expect(resolveVariables('{{last_added_event.description}}', {}, userCtx, stepResults)).toBe('Daily sync');
+    expect(resolveVariables('{{last_added_event.location}}', {}, userCtx, stepResults)).toBe('Room 3');
+    expect(resolveVariables('{{last_added_event.recurrence_rule}}', {}, userCtx, stepResults)).toBe('FREQ=DAILY');
+  });
+
+  test('optional EventSummary fields absent when not set', () => {
+    const stepResults = {
+      last_added_event: {
+        id: 7,
+        title: 'Day off',
+        date: '2026-04-01',
+        all_day: true,
+      },
+    };
+    // absent optional fields stay as literal template
+    expect(resolveVariables('{{last_added_event.location}}', {}, userCtx, stepResults)).toBe(
+      '{{last_added_event.location}}',
+    );
+    expect(resolveVariables('{{last_added_event.description}}', {}, userCtx, stepResults)).toBe(
+      '{{last_added_event.description}}',
+    );
   });
 });
