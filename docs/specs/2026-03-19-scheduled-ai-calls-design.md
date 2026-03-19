@@ -10,7 +10,7 @@ Two complementary systems that allow time-based and event-based invocation of th
 - **Scheduled AI Calls** — inject a message into the pipeline at a specific time or on a recurring schedule (via BullMQ delayed/repeat jobs).
 - **Triggers** — inject a message into the pipeline when a domain event occurs (optionally filtered by a condition expression).
 
-Both systems share a single `ai-messages` BullMQ queue and a synthetic pipeline runner that replicates the normal IntentMatcher → AiAgent priority chain.
+Both systems share a single `ai-messages` BullMQ queue and a `SyntheticPipelineRunner` that replicates the normal IntentMatcher → AiAgent priority chain without requiring a GramIO context.
 
 ---
 
@@ -25,8 +25,7 @@ CREATE TABLE scheduled_ai_calls (
   message     TEXT NOT NULL,           -- injected into pipeline as user message
   label       TEXT,                    -- human-readable description
   run_at      TEXT,                    -- ISO 8601 UTC: one-time execution
-  cron        TEXT,                    -- cron expression: recurring execution
-  job_id      TEXT,                    -- BullMQ job ID for cancellation
+  cron        TEXT,                    -- cron expression in UTC: recurring execution
   enabled     INTEGER DEFAULT 1,
   run_count   INTEGER DEFAULT 0,
   last_run_at TEXT,
@@ -34,7 +33,7 @@ CREATE TABLE scheduled_ai_calls (
 );
 ```
 
-Exactly one of `run_at` or `cron` must be set.
+Exactly one of `run_at` or `cron` must be set. BullMQ job IDs are not stored — cancellation of one-time jobs uses `queue.getDelayed()` + match by schedule id in job data; cancellation of repeat jobs uses `queue.removeRepeatable(name, { pattern: cron })`.
 
 ### Table: `ai_triggers`
 
@@ -44,7 +43,7 @@ CREATE TABLE ai_triggers (
   user_id       INTEGER NOT NULL,
   topic         TEXT NOT NULL,         -- dot-path topic e.g. 'myCalendar.newEvent'
   condition     TEXT,                  -- optional expression evaluated against event payload
-  action        TEXT NOT NULL,         -- message injected into pipeline when trigger fires
+  action        TEXT NOT NULL,         -- message injected into pipeline when fired
   label         TEXT,
   once          INTEGER DEFAULT 0,     -- if 1: auto-disable after first fire
   enabled       INTEGER DEFAULT 1,
@@ -54,11 +53,27 @@ CREATE TABLE ai_triggers (
 );
 ```
 
+### Table: `event_starting_log`
+
+```sql
+CREATE TABLE event_starting_log (
+  event_id   INTEGER PRIMARY KEY,
+  notified_at TEXT NOT NULL
+);
+```
+
+Used by `EventStartingChecker` to prevent duplicate `myCalendar.eventStarting` emissions across restarts.
+
+### Per-user limits
+
+- Max 50 active `scheduled_ai_calls` per user (enforced at create time, error returned to AI tool)
+- Max 50 active `ai_triggers` per user (same)
+
 ---
 
 ## Domain Event Bus
 
-`DomainEventBus` — typed wrapper over Node.js `EventEmitter`. Singleton, injected into services that emit domain events.
+`DomainEventBus` — typed wrapper over Node.js `EventEmitter`. Singleton created at startup, passed to services that emit domain events.
 
 ```ts
 type DomainEventMap = {
@@ -73,24 +88,35 @@ type DomainEventMap = {
 }
 ```
 
-Future namespaces (`group.*`, `delegated.*`) are reserved but not implemented.
+`userId` in every payload = the user whose triggers are evaluated. For `myGroup.newEvent`, `userId` = the user who created the event (not all group members — triggers fire for the creator only in v1). Future namespaces (`group.*`, `delegated.*`) reserved but not implemented.
 
-**Emission points:**
+**Known limitation:** `DomainEventBus` is in-process synchronous. If the process crashes between a domain event emission and `TriggerService` pushing to BullMQ, that event is silently lost. At-most-once delivery is the accepted guarantee.
+
+### Emission points
 
 | Domain event | Emitted from |
 |---|---|
-| `myCalendar.newEvent` | `EventService.createEvent()` |
+| `myCalendar.newEvent` | `EventService.createEvent()` — new 9th optional param `domainEvents` |
 | `myCalendar.updatedEvent` | `EventService.updateEvent()` |
 | `myCalendar.deletedEvent` | `EventService.deleteEvent()` |
-| `myCalendar.conflictDetected` | `EventService.createEvent()` + `updateEvent()` when overlap detected |
+| `myCalendar.conflictDetected` | `tool-handlers/events.ts` — after `create_event` / `update_event` tool call detects overlap via existing `ConflictChecker` |
 | `myCalendar.eventStarting` | `EventStartingChecker` BullMQ cron worker |
 | `myInvitations.accepted` | `InvitationService.accept()` |
 | `myInvitations.rejected` | `InvitationService.reject()` |
-| `myGroup.newEvent` | `EventService.createGroupEvent()` |
+| `myGroup.newEvent` | `EventService.createEvent()` when `owner_type === 'group'` |
 
-### `myCalendar.eventStarting` implementation
+`conflictDetected` is emitted from the tool handler layer (not from `EventService`) because `ConflictChecker` is already instantiated separately in `src/bot/index.ts` and injected into tool handlers. This avoids adding `ConflictChecker` as a 10th dependency to `EventService`.
 
-Not a pure domain event — emitted by a dedicated cron worker (`event-starting-checker`) that runs every minute, finds events starting within the next 60 seconds, emits `myCalendar.eventStarting` for each, and marks them as notified in a `event_starting_notified` set to prevent duplicates.
+### `myCalendar.eventStarting` — deduplication
+
+`EventStartingChecker` is a BullMQ cron job (every 1 minute). It:
+1. Queries events starting in the next 60 seconds
+2. Filters out `all_day = 1` events (no fixed time)
+3. Filters out event IDs already in `event_starting_log`
+4. Emits `myCalendar.eventStarting` for each remaining event
+5. Inserts those IDs into `event_starting_log`
+
+`event_starting_log` persists across restarts, preventing duplicate emissions.
 
 ---
 
@@ -110,32 +136,58 @@ class DomainEventBus {
 Subscribes to all topics at startup. On each event:
 
 1. Finds all enabled triggers for `payload.userId` with matching `topic`
-2. Evaluates optional `condition` expression using existing `expression-evaluator.ts`, with the full event payload as context
-3. If condition passes (or absent): pushes `{ userId, message: trigger.action }` to `ai-messages` queue
-4. Increments `fire_count`, updates `last_fired_at`
-5. If `trigger.once`: disables the trigger
+2. Evaluates optional `condition` using `expression-evaluator.ts` with the full event payload as context
+3. If condition passes (or absent):
+   - In a DB transaction: increment `fire_count`, update `last_fired_at`, and if `trigger.once` set `enabled = 0`
+   - Push `{ userId, message: trigger.action, source: 'trigger', triggerId: trigger.id }` to `ai-messages` queue
+   - If BullMQ push fails: log error, action is lost (trigger is already disabled if `once` — acceptable trade-off: no double-fire over no-fire)
+
+Condition eval errors → log warning, skip trigger (fail-closed, same as intent `when` conditions).
+
+Condition expressions are validated at trigger creation time (`add_trigger` tool) via a dry-run through the evaluator with an empty context object. If the expression throws a parse error, the tool returns an error before saving.
 
 ### `ScheduledAiCallService`
 
-- `create(userId, message, runAt|cron, label?)` → saves to DB + adds BullMQ job (delayed or repeat), stores `job_id`
-- `list(userId)` → returns all schedules with next run time
-- `cancel(id)` → removes BullMQ job by `job_id`, marks disabled in DB
+- `create(userId, message, runAt|cron, label?)`:
+  - Enforce per-user limit (50)
+  - Save to DB
+  - Add BullMQ job: one-time uses `{ delay: ms }`, recurring uses `{ repeat: { pattern: cron } }`
+  - Job data includes `scheduleId` for matching on cancel
+- `list(userId)` → returns all schedules with id, label, next run time, run count
+- `cancel(id)`:
+  - For one-time: iterate `queue.getDelayed()`, find job with matching `scheduleId`, remove it
+  - For recurring: `queue.removeRepeatable('ai-schedule', { pattern: schedule.cron })`
+  - Mark `enabled = 0` in DB
 
 ---
 
 ## `ai-messages` Queue & Worker
 
 **Queue name:** `ai-messages`
-**Job data:** `{ userId: number; message: string; source: 'scheduled' | 'trigger'; scheduleId?: string; triggerId?: string }`
+**Job data:**
+```ts
+{
+  userId: number
+  message: string
+  source: 'scheduled' | 'trigger'
+  scheduleId?: string
+  triggerId?: string
+}
+```
 
-**Worker:**
+### `SyntheticPipelineRunner`
 
-1. Looks up user by `userId`
-2. Calls `buildAgentContext(user, message, deps)` — shared factory (also used by GramIO handlers)
-3. Runs `syntheticPipeline(agentCtx, message)`: IntentMatcher → AiAgent, same priority order as live messages
-4. Response is delivered to the user's Telegram chat via normal `TelegramSender`
+The worker does not create a GramIO `BotCommandContext` shim. Instead, it runs pipeline logic directly at the service layer:
 
-The user sees no "sent message" — only the bot's response/action.
+1. Look up user by `userId`
+2. Call `agentContextBuilder(user, userId /* chatId = DM */, message)` — the same builder function used by `createAiAgentLayer`, extracted and shared
+3. Try IntentMatcher: `matcher.match(message)` → if match, run `IntentExecutor.run(...)` → send result via `agentContext.sender`
+4. If no intent match: `agent.run(agentContext)`
+5. Response is delivered to the user via `TelegramSender` targeting `userId` as chatId (DM)
+
+`agentContextBuilder` is already defined as a function passed to `AgentLayerDeps.agentContextBuilder`. It is extracted to a shared location (e.g., `src/bot/agent-context-factory.ts`) so the worker can import it without depending on the GramIO bot instance.
+
+Worker error handling: errors are caught per-job, logged with `{ userId, source, scheduleId?, triggerId? }`, not rethrown (prevents poison-pill). BullMQ retries: 3 attempts, exponential backoff.
 
 ---
 
@@ -153,7 +205,7 @@ label?: string    — human-readable description
 Exactly one of `run_at` or `cron` required. AI converts user's local time to UTC using `user.timezone` before calling.
 
 **`schedule_ai_calls_list`**
-Returns all active schedules with id, label, next run time, run count.
+Returns all active schedules: id, label, run_at or cron, run_count, last_run_at.
 
 **`schedule_ai_call_cancel`**
 ```
@@ -166,13 +218,13 @@ id: string
 ```
 topic: string      — one of the DomainEventMap keys
 action: string     — message to inject into pipeline when fired
-condition?: string — expression evaluated against event payload
+condition?: string — expression evaluated against event payload (validated at create time)
 label?: string
-once?: boolean     — auto-disable after first fire
+once?: boolean     — auto-disable after first fire (default false)
 ```
 
 **`list_triggers`**
-Returns all triggers with id, topic, condition, label, enabled, fire_count, last_fired_at.
+Returns all triggers: id, topic, condition, label, once, enabled, fire_count, last_fired_at.
 
 **`remove_trigger`**
 ```
@@ -193,8 +245,10 @@ src/
       scheduled-ai-call.repository.ts
       scheduled-ai-call.service.ts
   worker/
-    ai-messages-queue.ts          ← queue + worker + syntheticPipeline
+    ai-messages-queue.ts          ← queue + worker + SyntheticPipelineRunner
     event-starting-checker.ts     ← cron for myCalendar.eventStarting
+  bot/
+    agent-context-factory.ts      ← extracted from ai-agent-layer, shared with worker
   services/ai/
     tool-handlers/scheduled.ts    ← 6 new tool handlers
 ```
@@ -203,29 +257,36 @@ src/
 
 | File | Change |
 |---|---|
-| `src/database/migrations.ts` | +2 tables |
-| `src/services/event/event-service.ts` | emit domain events after mutations |
-| `src/services/sharing/invitation-service.ts` | emit `myInvitations.*` |
+| `src/database/migrations.ts` | +3 tables: `scheduled_ai_calls`, `ai_triggers`, `event_starting_log` |
+| `src/services/event/event-service.ts` | +optional `domainEvents?: DomainEventBus` param (9th), emit on create/update/delete |
+| `src/services/sharing/invitation-service.ts` | +optional `domainEvents?: DomainEventBus` param, emit `myInvitations.*` |
 | `src/services/ai/tools.ts` | +6 tool definitions |
 | `src/services/ai/tool-executor.ts` | route 6 new tool names |
+| `src/services/ai/tool-handlers/events.ts` | emit `myCalendar.conflictDetected` after conflict check |
 | `src/services/ai/types.ts` | +`scheduledCallService`, `triggerService` to `AgentContext` |
-| `src/index.ts` | init worker, TriggerService, event-starting-checker |
+| `src/bot/pipeline/ai-agent-layer.ts` | `agentContextBuilder` moved to `agent-context-factory.ts`, re-exported |
+| `src/bot/index.ts` | wire `DomainEventBus`, `TriggerService`, pass to `EventService` + `InvitationService` |
+| `src/index.ts` | init `ai-messages` worker, `EventStartingChecker` cron |
 
 ---
 
 ## Error Handling & Safety
 
-- Condition eval errors → log warning, skip trigger (fail-closed)
-- BullMQ job failure → standard retry (attempts: 3, exponential backoff)
-- `syntheticPipeline` errors → log with `{ userId, source, scheduleId/triggerId }`, do not rethrow (prevents queue poison-pill)
-- `once` triggers: disable happens atomically in the same DB transaction as `fire_count` increment to prevent double-fire on retry
+- Condition eval errors at runtime → log warning, skip trigger (fail-closed)
+- Condition expression validated at `add_trigger` time — invalid expressions rejected before saving
+- BullMQ job failure → 3 attempts, exponential backoff
+- Worker errors → caught per-job, logged, not rethrown (no poison-pill)
+- `once` triggers: DB transaction (fire_count + disable) commits *before* BullMQ push — no double-fire; a failed push after disable means the action is lost (acceptable: no double-fire preferred over no-fire)
+- In-process event bus: at-most-once delivery — crash between emit and queue push loses the event (documented limitation)
 
 ---
 
 ## Testing
 
-- Unit: `TriggerService` — condition evaluation, `once` flag, disabled triggers skipped
-- Unit: `ScheduledAiCallService` — create/cancel/list, BullMQ job lifecycle
-- Unit: `DomainEventBus` — typed emit/on
-- Integration: `ai-messages` worker — synthetic pipeline runs correctly, response delivered
-- Regression: `once` trigger fires exactly once even if job retries
+- Unit: `TriggerService` — condition evaluation, `once` flag (DB disabled before push), disabled triggers skipped, condition eval error → skip
+- Unit: `ScheduledAiCallService` — create/cancel/list, one-time vs repeat BullMQ lifecycle
+- Unit: `DomainEventBus` — typed emit/on, multiple subscribers
+- Unit: `SyntheticPipelineRunner` — intent match path, AI fallback path
+- Unit: `EventStartingChecker` — all_day skipped, already-notified skipped, log inserted
+- Regression: `once` trigger: if BullMQ push throws after DB disable, trigger stays disabled (action lost, no second fire)
+- Regression: per-user limit enforced — 51st schedule/trigger returns error
