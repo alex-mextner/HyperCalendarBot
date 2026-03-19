@@ -65,7 +65,11 @@ export function createIntentMatcherLayer(
             ...eventCtx,
           },
           toolExecutor,
-          { stepIndex: session.stepIndex, stepResults: session.stepResults, userAnswer: messageText },
+          {
+            stepIndex: session.stepIndex,
+            stepResults: session.stepResults,
+            userAnswer: messageText.trim(),
+          },
         );
         if (result.response) {
           await ctx.send(result.response);
@@ -118,6 +122,9 @@ export function createIntentMatcherLayer(
         captures: match.captures,
         createdAt: Date.now(),
       });
+      if (result.response) {
+        await ctx.send(result.response);
+      }
       return { handled: true };
     }
 

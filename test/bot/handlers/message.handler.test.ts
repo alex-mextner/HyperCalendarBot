@@ -569,7 +569,9 @@ describe('voice reply TTS fallback', () => {
     const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
     const deps = makeVoiceDeps({ kokoroTts, fallbackTts });
     const handler = createMessageHandler(deps as never);
-    await handler(makeVoiceCtx({ dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC', voice_response_enabled: 1 } }) as never);
+    await handler(
+      makeVoiceCtx({ dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC', voice_response_enabled: 1 } }) as never,
+    );
     expect(fallbackTts.synthesize).toHaveBeenCalledWith(expect.any(String), 'en');
     expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
   });

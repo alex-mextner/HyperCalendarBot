@@ -232,6 +232,95 @@ describe('createIntentMatcherLayer', () => {
     expect(ctx.send).not.toHaveBeenCalled();
   });
 
+  test('sends ask_user question to user when workflow suspends', async () => {
+    const userId = 13;
+    const match = { intentId: 5, captures: {} };
+    const intent = {
+      id: 5,
+      workflow: JSON.stringify({ steps: [{ call: 'ask_user', input: { question: 'Date or time?' }, as: 'ans' }] }),
+      format: 'text',
+    };
+    const executor = makeExecutor({
+      success: false,
+      suspended: true,
+      suspendedAt: 0,
+      stepResults: {},
+      response: 'Date or time?',
+    });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    const layer = createIntentMatcherLayer(
+      makeMatcher(match),
+      makeIntentRepo(intent),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    const result = await layer(ctx, 'create event');
+    expect(result.handled).toBe(true);
+    expect(ctx.send).toHaveBeenCalledWith('Date or time?');
+    expect(workflowSessions.has(userId)).toBe(true);
+  });
+
+  test('normalizes user answer to lowercase+trim when resuming workflow', async () => {
+    const userId = 15;
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice' },
+        { when: 'choice == "время"', call: 'create_event', input: { title: 'Встреча' } },
+      ],
+    };
+    const executor = makeExecutor({ success: true, response: 'created' });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, {
+      intentId: 7,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = createIntentMatcherLayer(
+      makeMatcher(null),
+      makeIntentRepo(null),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    await layer(ctx, '  Время  ');
+
+    const runCall = (executor.run as ReturnType<typeof mock>).mock.calls[0] as unknown[];
+    const resumeState = runCall[4] as { userAnswer: string };
+    expect(resumeState.userAnswer).toBe('Время');
+  });
+
+  test('does not send message when ask_user has no question text', async () => {
+    const userId = 14;
+    const match = { intentId: 6, captures: {} };
+    const intent = {
+      id: 6,
+      workflow: JSON.stringify({ steps: [{ call: 'ask_user', as: 'ans' }] }),
+      format: 'text',
+    };
+    const executor = makeExecutor({ success: false, suspended: true, suspendedAt: 0, stepResults: {} });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    const layer = createIntentMatcherLayer(
+      makeMatcher(match),
+      makeIntentRepo(intent),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+
+    await layer(ctx, 'create event');
+    expect(ctx.send).not.toHaveBeenCalled();
+  });
+
   test('passes groupContext to executor as groupIsGroup and groupChatId', async () => {
     const match = { intentId: 10, captures: {} };
     const intent = {
