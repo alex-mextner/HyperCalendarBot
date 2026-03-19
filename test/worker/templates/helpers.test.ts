@@ -63,9 +63,9 @@ describe('computeEventColumns', () => {
       { startMinutes: 600, endMinutes: 660 },
       { startMinutes: 630, endMinutes: 750 },
     ]);
-    expect(result[0].column).toBe(0);
-    expect(result[1].column).toBe(1);
-    expect(result[2].column).toBe(2);
+    expect(result[0]!.column).toBe(0);
+    expect(result[1]!.column).toBe(1);
+    expect(result[2]!.column).toBe(2);
     for (const r of result) expect(r.totalColumns).toBe(3);
   });
 

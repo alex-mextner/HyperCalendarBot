@@ -34,7 +34,7 @@ const RESUME_WORDS = new Set([
 export function classifyInterrupt(transcript: string): InterruptionDecision {
   const words = transcript.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return 'noise';
-  if (words.length === 1 && !RESUME_WORDS.has(words[0])) return 'noise';
+  if (words.length === 1 && !RESUME_WORDS.has(words[0]!)) return 'noise';
   if (words.length <= 2 && words.every((w) => RESUME_WORDS.has(w))) return 'resume';
   return 'respond';
 }

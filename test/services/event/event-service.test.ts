@@ -340,7 +340,7 @@ describe('EventService', () => {
 
       const results = service.searchEventsForGroup(GROUP_ID, 'Sprint');
       expect(results.length).toBe(1);
-      expect(results[0].title).toBe('Sprint Planning');
+      expect(results[0]!.title).toBe('Sprint Planning');
     });
 
     test('getUpcomingForGroup() returns upcoming group events', () => {

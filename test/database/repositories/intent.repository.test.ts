@@ -88,8 +88,8 @@ describe('IntentRepository', () => {
 
     const approved = repo.getApproved();
     expect(approved.length).toBe(1);
-    expect(approved[0].canonical_name).toBe('approved_intent');
-    expect(approved[0].status).toBe('approved');
+    expect(approved[0]!.canonical_name).toBe('approved_intent');
+    expect(approved[0]!.status).toBe('approved');
   });
 
   test('updateStatus changes intent status', () => {
@@ -166,8 +166,8 @@ describe('IntentRepository', () => {
     });
 
     repo.update(id, {
-      phrases: ['new1', 'new2'],
-      trigger_words: ['new_word1', 'new_word2'],
+      phrases: ['new1', 'new2'] as unknown as string,
+      trigger_words: ['new_word1', 'new_word2'] as unknown as string,
       pattern: 'new_pattern',
       format: 'html',
     });
@@ -189,7 +189,7 @@ describe('IntentRepository', () => {
     });
 
     repo.update(id, {
-      phrases: ['updated'],
+      phrases: ['updated'] as unknown as string,
     });
 
     const intent = repo.getById(id);

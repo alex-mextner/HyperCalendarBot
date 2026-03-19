@@ -118,7 +118,7 @@ describe('invitation callbacks', () => {
     expect(ctx.answer).toHaveBeenCalled();
     const answerCall = (ctx.answer as ReturnType<typeof mock>).mock.calls[0];
     // Russian text contains specific characters
-    expect(answerCall[0]).toContain('принято');
+    expect(answerCall![0]).toContain('принято');
   });
 });
 
@@ -170,7 +170,7 @@ describe('inviter notification on response', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
     expect(chatId).toBe(100);
     expect(text).toContain('Party');
     expect(text).toContain('accepted');
@@ -199,7 +199,7 @@ describe('inviter notification on response', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
     expect(chatId).toBe(100);
     expect(text).toContain('declined');
     expect(text).toContain('❌');
@@ -226,7 +226,7 @@ describe('inviter notification on response', () => {
     await handler(ctx as never);
     await new Promise((r) => setTimeout(r, 50));
 
-    const [, text] = sendMessage.mock.calls[0] as [number, string, unknown];
+    const [, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
     expect(text).toContain('принял');
     expect(text).toContain('Встреча');
   });

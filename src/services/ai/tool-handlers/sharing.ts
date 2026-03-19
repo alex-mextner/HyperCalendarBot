@@ -98,6 +98,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
     fallbackText: fallbackMsg,
     botSend: async (recipientId, msgText) => {
       if (recipientId === inviteeId) {
+        if (!sender.sendInvitation) throw new Error('sendInvitation not available');
         const sent = await sender.sendInvitation(recipientId, msgText, invitationId);
         if (!sent) throw new Error('Bot API delivery failed');
         return sent;
@@ -223,7 +224,7 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
       ctx.contactRepo.upsert(
         ctx.user.telegram_id,
         invitee.first_name ?? invitee.username ?? `User ${invitee.telegram_id}`,
-        invitee.username,
+        invitee.username ?? undefined,
         invitee.telegram_id,
       );
     }

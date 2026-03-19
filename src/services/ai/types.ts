@@ -126,18 +126,27 @@ export interface AgentConfig {
 }
 
 export interface TelegramSender {
-  sendMessage(chatId: number, text: string, parseMode?: string): Promise<{ message_id: number }>;
+  sendMessage(
+    chatId: number,
+    text: string,
+    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+  ): Promise<{ message_id: number }>;
   sendMessageWithKeyboard?(
     chatId: number,
     text: string,
     keyboard: import('gramio').InlineKeyboard,
   ): Promise<{ message_id: number }>;
-  editMessageText(chatId: number, messageId: number, text: string, parseMode?: string): Promise<void>;
+  editMessageText(
+    chatId: number,
+    messageId: number,
+    text: string,
+    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+  ): Promise<void>;
   sendButtons?(
     chatId: number,
     text: string,
     buttons: string[],
-    parseMode?: string,
+    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;

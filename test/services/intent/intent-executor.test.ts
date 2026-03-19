@@ -414,7 +414,7 @@ describe('IntentExecutor', () => {
     await executor.run(workflow, { $1: '22' }, userCtx, mock);
     // Exactly one branch taken: either 'not_past' or 'past', never both
     expect(calls.length).toBe(1);
-    expect(['not_past', 'past']).toContain(calls[0]);
+    expect(['not_past', 'past']).toContain(calls[0]!);
   });
 
   test('isAmPmAmbiguous with $1 from captures — hour 8 triggers AM/PM ask', async () => {

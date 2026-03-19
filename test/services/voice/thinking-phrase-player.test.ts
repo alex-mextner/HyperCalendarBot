@@ -16,7 +16,7 @@ test('sends STOP then PLAY start phrase immediately on start()', () => {
   const play = (sendCmd.mock.calls[1] as [{ type: string; file?: string }])[0];
   expect(stop.type).toBe('STOP');
   expect(play.type).toBe('PLAY');
-  expect(play.file).toMatch(/data\/thinking-phrases\/ru\/start_/);
+  expect(play.file).toMatch(/data\/call-phrases\/ru\/start_/);
   player.cancel();
 });
 
@@ -46,6 +46,6 @@ test('uses EN phrases for lang=en', () => {
   player.start(sendCmd);
   // calls[0] = STOP, calls[1] = PLAY
   const play = (sendCmd.mock.calls[1] as [{ type: string; file?: string }])[0];
-  expect(play.file).toMatch(/data\/thinking-phrases\/en\/start_/);
+  expect(play.file).toMatch(/data\/call-phrases\/en\/start_/);
   player.cancel();
 });

@@ -29,10 +29,10 @@ describe('StressDictionary', () => {
 
   test('lookupMany returns stressed and similar for each word', () => {
     const results = dict.lookupMany(['молоко', 'алексом', 'встреча']);
-    expect(results.молоко.stressed).toBe('молок+о');
-    expect(results.молоко.similar).toEqual([]);
-    expect(results.встреча.stressed).toBe('встр+еча');
-    expect(results.алексом.stressed).toBeNull();
+    expect(results.молоко!.stressed).toBe('молок+о');
+    expect(results.молоко!.similar).toEqual([]);
+    expect(results.встреча!.stressed).toBe('встр+еча');
+    expect(results.алексом!.stressed).toBeNull();
   });
 
   test('findSimilar returns words with shared prefix', () => {
@@ -48,8 +48,8 @@ describe('StressDictionary', () => {
 
   test('lookupMany includes similar when word not found', () => {
     const results = dict.lookupMany(['молоки']);
-    expect(results.молоки.stressed).toBeNull();
-    expect(results.молоки.similar.length).toBeGreaterThan(0);
+    expect(results.молоки!.stressed).toBeNull();
+    expect(results.молоки!.similar.length).toBeGreaterThan(0);
   });
 
   test('reports correct size', () => {

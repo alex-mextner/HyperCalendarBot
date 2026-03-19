@@ -5,7 +5,7 @@ describe('getSceneUser', () => {
   test('extracts dbUser from context', () => {
     const user = { telegram_id: 1, language: 'en', timezone: 'UTC' };
     const ctx = { dbUser: user };
-    expect(getSceneUser(ctx)).toBe(user);
+    expect(getSceneUser(ctx)).toBe(user as unknown as import('../../../src/database/types.ts').User);
   });
 
   test('returns undefined when dbUser is not present', () => {

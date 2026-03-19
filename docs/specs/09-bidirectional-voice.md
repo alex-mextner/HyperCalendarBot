@@ -250,11 +250,11 @@ than to ignore a real request.
 
 ### 7.1 Audio Files
 
-Pre-recorded files in `data/thinking-phrases/{ru,en}/`. Generated once at deploy time,
+Pre-recorded files in `data/call-phrases/{ru,en}/`. Generated once at deploy time,
 committed to `.gitignore`.
 
 ```
-data/thinking-phrases/
+data/call-phrases/
 ├── ru/
 │   ├── start_hmm.ogg
 │   ├── start_sec.ogg          "Секундочку."
@@ -289,8 +289,8 @@ Delays are randomized within the range to avoid mechanical repetition across cal
 
 ### 7.3 Generator Script
 
-`scripts/generate-thinking-phrases.ts` — uses `TtsService` (Google TTS) to synthesize
-each phrase and save to `data/thinking-phrases/`. Idempotent — skips existing files.
+`scripts/generate-call-phrases.ts` — uses `TtsService` (Google TTS) to synthesize
+each phrase and save to `data/call-phrases/`. Idempotent — skips existing files.
 Added to deploy checklist as a one-time step.
 
 ---
@@ -430,7 +430,7 @@ Session cleanup (on `CALL_ENDED`, timeout, or error) glob-deletes all
 | Flux WS drops mid-call | Reconnect once; on second failure fall back to Nova-3 |
 | Python bridge WS disconnect | Session marked failed, call log updated |
 | Agent timeout (>30s) | Play "извини, не успел обработать, попробуй ещё раз" |
-| TTS synthesis fails | Play pre-recorded error phrase from `data/thinking-phrases/` |
+| TTS synthesis fails | Play pre-recorded error phrase from `data/call-phrases/` |
 
 ---
 

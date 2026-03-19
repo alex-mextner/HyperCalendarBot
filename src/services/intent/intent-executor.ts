@@ -199,6 +199,10 @@ async function runLevel2(
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
+    if (!step) {
+      cmdLogger.warn({ stepIndex: i }, 'Intent executor: undefined step in dense array, skipping');
+      continue;
+    }
 
     // Evaluate `when` condition — skip step if false
     if (step.when !== undefined) {

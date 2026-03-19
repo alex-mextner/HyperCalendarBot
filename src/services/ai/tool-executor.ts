@@ -74,7 +74,7 @@ export async function executeTool(
         ctx.onEventMentioned?.(input.event_id);
       } else if (toolName === 'create_event' && result.output) {
         const m = /^id:\s*(\d+)/m.exec(result.output);
-        if (m) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
+        if (m?.[1]) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
       }
     }
 
@@ -192,7 +192,11 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'manage_settings':
         return handleManageSettings(
           ctx,
-          input as { action: 'get' | 'update'; category?: string; updates?: Record<string, unknown> },
+          input as unknown as {
+            action: 'get' | 'update';
+            category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
+            updates?: Record<string, unknown>;
+          },
         );
 
       case 'share_event':
@@ -265,7 +269,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         );
 
       case 'propose_calendar_change':
-        return handleProposeCalendarChange(ctx, input as ProposeInput);
+        return handleProposeCalendarChange(ctx, input as unknown as ProposeInput);
 
       case 'get_history':
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });

@@ -72,13 +72,14 @@ describe('IntentLearner', () => {
     };
 
     const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
           content: [{ type: 'text', text: `\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\`` }],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
+      ) as unknown as Response;
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
@@ -92,6 +93,7 @@ describe('IntentLearner', () => {
     const truncatedJson = '{"canonical_name":"show_today","phrases":["что сегодня"],"workflow":{';
 
     const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
     globalThis.fetch = async () =>
       new Response(
         JSON.stringify({
@@ -99,7 +101,7 @@ describe('IntentLearner', () => {
           stop_reason: 'max_tokens',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
-      );
+      ) as unknown as Response;
 
     const originalWarn = cmdLogger.warn.bind(cmdLogger);
     const originalError = cmdLogger.error.bind(cmdLogger);
@@ -146,13 +148,14 @@ describe('IntentLearner', () => {
 
     let callCount = 0;
     const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
     globalThis.fetch = async () => {
       callCount++;
       const payload = callCount === 1 ? invalidPayload : validPayload;
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(payload) }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      });
+      }) as unknown as Response;
     };
 
     try {
@@ -174,12 +177,13 @@ describe('IntentLearner', () => {
 
     let callCount = 0;
     const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
     globalThis.fetch = async () => {
       callCount++;
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(invalidPayload) }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      });
+      }) as unknown as Response;
     };
 
     try {

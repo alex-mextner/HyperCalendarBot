@@ -20,6 +20,7 @@ export interface CallSessionConfig {
   openerText: string;
   agentContextBase?: Partial<AgentContext>;
   unlink?: (path: string) => Promise<void>;
+  sttErrorTimeoutMs?: number;
 }
 
 export class CallSession {
@@ -33,6 +34,9 @@ export class CallSession {
   lastPlayFile: string | null = null;
   private tmpFiles = new Set<string>();
   private rollingTranscript = '';
+  private pendingErrorPhrase: string | null = null;
+  private endCallAfterCurrentPlay = false;
+  private sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
 
   private constructor(private readonly cfg: CallSessionConfig) {}
 
@@ -95,7 +99,10 @@ export class CallSession {
         onInterim: (t: string) => {
           this.rollingTranscript = t;
         },
-        onError: (err: Error) => voiceLogger.warn({ err }, 'Flux STT error'),
+        onError: (err: Error) => {
+          voiceLogger.warn({ err, sessionId: this.cfg.sessionId }, 'Flux STT error');
+          this.playErrorPhrase();
+        },
       });
     }
     await this.playOpener();
@@ -124,7 +131,10 @@ export class CallSession {
         onFinal: (t: string) => {
           this.rollingTranscript = t;
         },
-        onError: (err: Error) => voiceLogger.warn({ err }, 'Nova-3 STT error'),
+        onError: (err: Error) => {
+          voiceLogger.warn({ err, sessionId: this.cfg.sessionId }, 'Nova-3 STT error');
+          this.playErrorPhrase();
+        },
       });
     }
   }
@@ -208,18 +218,46 @@ export class CallSession {
   }
 
   private async onPlayDone(): Promise<void> {
+    const shouldEndCall = this.endCallAfterCurrentPlay;
+    this.endCallAfterCurrentPlay = false;
+
     if (this.lastPlayFile) {
       const del = this.cfg.unlink ?? fsUnlink;
       await del(this.lastPlayFile).catch(() => {});
       this.tmpFiles.delete(this.lastPlayFile);
       this.lastPlayFile = null;
     }
+
+    if (this.pendingErrorPhrase) {
+      const file = this.pendingErrorPhrase;
+      this.pendingErrorPhrase = null;
+      this.endCallAfterCurrentPlay = true;
+      this.send(JSON.stringify({ type: 'STOP' }));
+      this.send(JSON.stringify({ type: 'PLAY', file }));
+      return;
+    }
+
+    if (shouldEndCall && !this.ended) {
+      voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Ending call after STT error phrase');
+      this.onCallEnded();
+      this.cfg.ws.close();
+    }
+  }
+
+  private clearSttErrorTimeout(): void {
+    if (this.sttErrorTimeout) {
+      clearTimeout(this.sttErrorTimeout);
+      this.sttErrorTimeout = null;
+    }
   }
 
   private onCallEnded(): void {
     if (this.ended) return;
     this.ended = true;
+    this.clearSttErrorTimeout();
     this.speaking = false;
+    this.pendingErrorPhrase = null;
+    this.endCallAfterCurrentPlay = false;
     this.thinking?.cancel();
     this.novaStt?.close();
     this.fluxStt?.close();
@@ -229,6 +267,28 @@ export class CallSession {
     }
     this.tmpFiles.clear();
     voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Call ended, session cleaned up');
+  }
+
+  private playErrorPhrase(): void {
+    if (this.ended) return;
+    const file = `data/call-phrases/${this.cfg.language}/stt_error.ogg`;
+    this.clearSttErrorTimeout();
+    this.sttErrorTimeout = setTimeout(() => {
+      if (!this.ended) {
+        voiceLogger.warn(
+          { sessionId: this.cfg.sessionId },
+          'Force-ending call: PLAY_DONE never arrived after STT error',
+        );
+        this.cfg.ws.close();
+      }
+    }, this.cfg.sttErrorTimeoutMs ?? 15_000);
+    if (this.lastPlayFile !== null) {
+      this.pendingErrorPhrase = file;
+    } else {
+      this.endCallAfterCurrentPlay = true;
+      this.send(JSON.stringify({ type: 'STOP' }));
+      this.send(JSON.stringify({ type: 'PLAY', file }));
+    }
   }
 
   private closeSttEpisode(): void {

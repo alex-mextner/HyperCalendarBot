@@ -50,6 +50,7 @@ describe('handleSendFeedback', () => {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
@@ -133,7 +134,11 @@ describe('handleSendFeedback', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
-    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as [number, string, Record<string, unknown>];
+    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as unknown as [
+      number,
+      string,
+      Record<string, unknown>,
+    ];
     expect(chatId).toBe(ADMIN_ID);
     expect(text).toContain('feature');
     expect(text).toContain('Add dark mode');

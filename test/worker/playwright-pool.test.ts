@@ -26,6 +26,7 @@ describe('PlaywrightPool', () => {
     await page.setContent(
       '<html><body><div id="__root" style="width:200px;height:100px;background:#f00;">Test</div></body></html>',
     );
+    // @ts-expect-error: document is available in browser context evaluated by Playwright
     const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 100);
     expect(height).toBeGreaterThan(0);
     const buf = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 200, height } });

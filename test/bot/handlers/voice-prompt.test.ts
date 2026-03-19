@@ -11,7 +11,7 @@ function makeFetch(filePath = 'voice/file.ogg') {
       return new Response(JSON.stringify({ ok: true, result: { file_path: filePath } }));
     }
     return new Response(Buffer.from('fake-audio'));
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
 }
 
 function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
@@ -153,7 +153,10 @@ describe('voice response prompt', () => {
 
       // send was called for the prompt
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [text, options] = ctx.send.mock.calls[0] as [string, { reply_markup: unknown }];
+      const [text, options] = (ctx.send as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
+        string,
+        { reply_markup: unknown },
+      ];
       expect(text).toContain('голосовые ответы');
       expect(options?.reply_markup).toBeDefined();
     } finally {

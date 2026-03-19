@@ -353,7 +353,7 @@ function computeKeyFingerprint(key: Buffer): bigint {
   // Bytes 12..19, little-endian → uint64
   let fp = 0n;
   for (let i = 19; i >= 12; i--) {
-    fp = (fp << 8n) | BigInt(hash[i]);
+    fp = (fp << 8n) | BigInt(hash[i]!);
   }
   // Reinterpret as signed 64-bit
   if (fp >= 1n << 63n) {
@@ -379,7 +379,7 @@ export function computeEmojiFingerprint(key: Buffer, gA: Buffer): string[] {
     const offset = i * 8;
     let value = 0n;
     for (let j = 7; j >= 0; j--) {
-      value = (value << 8n) | BigInt(hash[offset + j]);
+      value = (value << 8n) | BigInt(hash[offset + j]!);
     }
     const index = Number(value % EMOJI_COUNT);
     emojis.push(EMOJI_LIST[index] ?? `[${index}]`);
@@ -489,7 +489,7 @@ function generatePrivateExponent(serverRandom: Buffer, p: bigint): { exponent: b
     const localRandom = randomBytes(DH_KEY_SIZE);
     const raw = Buffer.alloc(DH_KEY_SIZE);
     for (let i = 0; i < DH_KEY_SIZE; i++) {
-      raw[i] = localRandom[i] ^ (serverRandom[i] ?? 0);
+      raw[i] = localRandom[i]! ^ (serverRandom[i] ?? 0);
     }
 
     const exponent = bufToBigInt(raw);

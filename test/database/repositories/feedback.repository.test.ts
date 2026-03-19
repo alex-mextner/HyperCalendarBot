@@ -143,7 +143,7 @@ describe('FeedbackRepository', () => {
 
     const messages = repo.getMessages(threadId);
     expect(messages.length).toBe(1);
-    expect(messages[0].telegram_message_id).toBe(99999);
+    expect(messages[0]!.telegram_message_id).toBe(99999);
   });
 
   test('getMessages returns messages ordered by created_at ASC', () => {
@@ -173,12 +173,12 @@ describe('FeedbackRepository', () => {
 
     const messages = repo.getMessages(threadId);
     expect(messages.length).toBe(3);
-    expect(messages[0].id).toBe(msg1Id);
-    expect(messages[1].id).toBe(msg2Id);
-    expect(messages[2].id).toBe(msg3Id);
-    expect(messages[0].text).toBe('First message');
-    expect(messages[1].text).toBe('Admin reply');
-    expect(messages[2].text).toBe('Follow-up');
+    expect(messages[0]!.id).toBe(msg1Id);
+    expect(messages[1]!.id).toBe(msg2Id);
+    expect(messages[2]!.id).toBe(msg3Id);
+    expect(messages[0]!.text).toBe('First message');
+    expect(messages[1]!.text).toBe('Admin reply');
+    expect(messages[2]!.text).toBe('Follow-up');
   });
 
   test('getMessages returns empty array for thread with no messages', () => {

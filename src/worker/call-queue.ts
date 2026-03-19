@@ -15,10 +15,9 @@ export function createCallQueue(connection: ConnectionOptions) {
         'call-reminder',
         { ...data, sessionId: randomUUID() },
         {
-          attempts: 2,
-          backoff: { type: 'fixed', delay: 60_000 },
+          attempts: 1,
           removeOnComplete: true,
-          removeOnFail: 100,
+          removeOnFail: true,
         },
       );
     },

@@ -144,8 +144,8 @@ describe('InlineService', () => {
       const service = new InlineService(eventService as never, privacyService as never);
       const results = service.buildResults(100, { type: 'agenda_today' as const }, 'UTC');
       expect(results.length).toBeGreaterThan(0);
-      expect(results[0].type).toBe('article');
-      expect(results[0].title).toContain('Meeting');
+      expect(results[0]!.type).toBe('article');
+      expect(results[0]!.title).toContain('Meeting');
     });
 
     test('filters private events', () => {
@@ -188,8 +188,8 @@ describe('InlineService', () => {
       const service = new InlineService(eventService as never, privacyService as never);
       const results = service.buildResults(100, { type: 'agenda_today' as const }, 'UTC');
       expect(results).toHaveLength(1);
-      expect(results[0].title).toContain('Busy');
-      expect(results[0].title).not.toContain('Private stuff');
+      expect(results[0]!.title).toContain('Busy');
+      expect(results[0]!.title).not.toContain('Private stuff');
     });
 
     test('week intent uses getEventsForWeek', () => {
@@ -216,7 +216,7 @@ describe('InlineService', () => {
       const results = service.buildResults(100, { type: 'agenda_week' as const }, 'UTC');
       expect(weekCalled).toBe(true);
       expect(results).toHaveLength(1);
-      expect(results[0].title).toContain('Weekly standup');
+      expect(results[0]!.title).toContain('Weekly standup');
     });
 
     test('search intent uses searchEvents', () => {
@@ -244,7 +244,7 @@ describe('InlineService', () => {
       const results = service.buildResults(100, { type: 'search' as const, query: 'dentist' }, 'UTC');
       expect(searchQuery).toBe('dentist');
       expect(results).toHaveLength(1);
-      expect(results[0].title).toContain('Dentist appointment');
+      expect(results[0]!.title).toContain('Dentist appointment');
     });
 
     test('buildPhotoResult returns null (stub)', async () => {

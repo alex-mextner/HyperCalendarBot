@@ -93,7 +93,7 @@ export class IntentMatcher {
         const captures: Record<string, string> = {};
         for (let i = 1; i < m.length; i++) {
           if (m[i] !== undefined) {
-            captures[`$${i}`] = m[i];
+            captures[`$${i}`] = m[i]!;
           }
         }
         return { intentId, captures };

@@ -23,7 +23,7 @@ function makeFeedbackRepo(
 describe('createFeedbackRouterLayer', () => {
   test('returns handled:false without feedbackContext when no open thread', async () => {
     const layer = createFeedbackRouterLayer(makeFeedbackRepo(null));
-    const result = await layer(makeCtx(), 'hello');
+    const result = await layer(makeCtx());
 
     expect(result.handled).toBe(false);
     expect('feedbackContext' in result).toBe(false);
@@ -36,7 +36,7 @@ describe('createFeedbackRouterLayer', () => {
       { id: 2, thread_id: 10, sender: 'admin', text: 'checking' },
     ];
     const layer = createFeedbackRouterLayer(makeFeedbackRepo(thread, messages));
-    const result = await layer(makeCtx(), 'still broken');
+    const result = await layer(makeCtx());
 
     expect(result.handled).toBe(false);
     expect('feedbackContext' in result).toBe(true);
@@ -61,7 +61,7 @@ describe('createFeedbackRouterLayer', () => {
     }));
 
     const layer = createFeedbackRouterLayer(makeFeedbackRepo(thread, messages));
-    const result = await layer(makeCtx(2), 'more');
+    const result = await layer(makeCtx(2));
 
     expect(result.handled).toBe(false);
     const ctx = result as { handled: false; feedbackContext: { messages: unknown[] } };
@@ -71,7 +71,7 @@ describe('createFeedbackRouterLayer', () => {
   test('queried with correct userId from ctx.dbUser', async () => {
     const repo = makeFeedbackRepo(null);
     const layer = createFeedbackRouterLayer(repo);
-    await layer(makeCtx(99), 'test');
+    await layer(makeCtx(99));
 
     expect(repo.getOpenThreadForUser).toHaveBeenCalledWith(99);
   });

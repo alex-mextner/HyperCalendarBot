@@ -8,7 +8,7 @@ function makeWeekData(overrides: Partial<WeeklyOverviewData> = {}): WeeklyOvervi
     weekLabel: 'March 9–15, 2026',
     days: Array.from({ length: 7 }, (_, i) => ({
       dayNumber: 9 + i,
-      dayName: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
+      dayName: (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as string[])[i] as string,
       eventCount: 0,
       isWeekend: i >= 5,
       events: [],
@@ -40,8 +40,10 @@ describe('weeklyOverviewTemplate', () => {
 
   test('renders event titles in pills', () => {
     const data = makeWeekData();
-    data.days[0].events = [{ title: 'Standup', startMinutes: 540, endMinutes: 570, color: '#6366F1', isAllDay: false }];
-    data.days[0].eventCount = 1;
+    data.days[0]!.events = [
+      { title: 'Standup', startMinutes: 540, endMinutes: 570, color: '#6366F1', isAllDay: false },
+    ];
+    data.days[0]!.eventCount = 1;
     const html = weeklyOverviewTemplate.render(data);
     expect(html).toContain('Standup');
     expect(html).toContain('event-pill');
@@ -49,8 +51,10 @@ describe('weeklyOverviewTemplate', () => {
 
   test('renders event time and color', () => {
     const data = makeWeekData();
-    data.days[0].events = [{ title: 'Meeting', startMinutes: 540, endMinutes: 600, color: '#6366F1', isAllDay: false }];
-    data.days[0].eventCount = 1;
+    data.days[0]!.events = [
+      { title: 'Meeting', startMinutes: 540, endMinutes: 600, color: '#6366F1', isAllDay: false },
+    ];
+    data.days[0]!.eventCount = 1;
     const html = weeklyOverviewTemplate.render(data);
     expect(html).toContain('09:00');
     expect(html).toContain('#6366F1');

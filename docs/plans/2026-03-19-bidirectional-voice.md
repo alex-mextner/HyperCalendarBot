@@ -22,7 +22,7 @@
 | `src/services/voice/thinking-phrase-player.ts` | Schedules start_* and mid_* thinking phrase playback with randomized delays; cancels on agent response. |
 | `src/services/voice/call-session.ts` | Per-call state machine. Owns STT, classifier, thinking player, agent. Routes WS messages from Python bridge. |
 | `src/services/voice/call-session-manager.ts` | Session registry (Map<sessionId, CallSession>). Starts `Bun.serve()` on `:3001`. Routes WS connections by URL path. |
-| `scripts/generate-thinking-phrases.ts` | CLI: uses TtsService (Google TTS) to generate `data/thinking-phrases/{ru,en}/*.ogg`. Idempotent. |
+| `scripts/generate-call-phrases.ts` | CLI: uses TtsService (Google TTS) to generate `data/call-phrases/{ru,en}/*.ogg`. Idempotent. |
 
 ### Modified files
 
@@ -35,7 +35,7 @@
 | `src/services/voice/types.ts` | Add `sessionId: string` and ensure `language` to `CallReminderJobData` |
 | `src/worker/call-queue.ts` | Generate `sessionId` (UUID) in `enqueue()`, include it in job data |
 | `scripts/voice-call-bridge.py` | Full rewrite: accept `user_id session_id language`, connect WS, bidirectional VAD + audio |
-| `.gitignore` | Add `data/thinking-phrases/` |
+| `.gitignore` | Add `data/call-phrases/` |
 
 ### Test files
 
@@ -121,19 +121,19 @@ git commit -m "refactor(voice): replace isVoiceMessage boolean with inputMode en
 ## Task 2: Generate thinking phrases script + .gitignore
 
 **Files:**
-- Create: `scripts/generate-thinking-phrases.ts`
+- Create: `scripts/generate-call-phrases.ts`
 - Modify: `.gitignore`
 
 - [ ] **Step 2.1: Add to .gitignore**
 
 In `.gitignore`, add:
 ```
-data/thinking-phrases/
+data/call-phrases/
 ```
 
 - [ ] **Step 2.2: Write generator script**
 
-Create `scripts/generate-thinking-phrases.ts`:
+Create `scripts/generate-call-phrases.ts`:
 ```typescript
 #!/usr/bin/env bun
 /**
@@ -143,7 +143,7 @@ Create `scripts/generate-thinking-phrases.ts`:
  * Both produce OGG Opus natively; no ffmpeg needed.
  * Idempotent — skips existing files.
  *
- * Usage: bun run scripts/generate-thinking-phrases.ts
+ * Usage: bun run scripts/generate-call-phrases.ts
  * Env vars:
  *   PYTHON_PATH — path to Python binary for Silero TTS (default: venv/bin/python)
  *   HF_TOKEN    — Hugging Face token for Kokoro TTS (required for EN phrases)
@@ -191,7 +191,7 @@ async function generate() {
   const stressDict = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
   const sileroTts = new SileroTtsService(pythonPath);
 
-  const ruDir = 'data/thinking-phrases/ru';
+  const ruDir = 'data/call-phrases/ru';
   mkdirSync(ruDir, { recursive: true });
 
   for (const [file, text] of Object.entries(RU_PHRASES)) {
@@ -213,7 +213,7 @@ async function generate() {
   } else {
     const kokoroTts = new KokoroTtsService(hfToken);
 
-    const enDir = 'data/thinking-phrases/en';
+    const enDir = 'data/call-phrases/en';
     mkdirSync(enDir, { recursive: true });
 
     for (const [file, text] of Object.entries(EN_PHRASES)) {
@@ -244,16 +244,16 @@ Note: This script is a CLI utility — no unit tests needed. It will fail gracef
 - [ ] **Step 2.3: Test-run script**
 
 ```bash
-bun run scripts/generate-thinking-phrases.ts
+bun run scripts/generate-call-phrases.ts
 ```
 
-Expected: Creates `data/thinking-phrases/ru/*.ogg` and `data/thinking-phrases/en/*.ogg`. Each file ~5-20KB.
+Expected: Creates `data/call-phrases/ru/*.ogg` and `data/call-phrases/en/*.ogg`. Each file ~5-20KB.
 
 - [ ] **Step 2.4: Commit**
 
 ```bash
-git add scripts/generate-thinking-phrases.ts .gitignore
-git commit -m "feat(voice): thinking phrases generator script + gitignore data/thinking-phrases"
+git add scripts/generate-call-phrases.ts .gitignore
+git commit -m "feat(voice): thinking phrases generator script + gitignore data/call-phrases"
 ```
 
 ---
@@ -792,7 +792,7 @@ test('sends PLAY start phrase immediately on start()', () => {
   expect(sendCmd).toHaveBeenCalledTimes(1);
   const call = (sendCmd.mock.calls[0] as [{ type: string; file?: string }])[0];
   expect(call.type).toBe('PLAY');
-  expect(call.file).toMatch(/data\/thinking-phrases\/ru\/start_/);
+  expect(call.file).toMatch(/data\/call-phrases\/ru\/start_/);
   player.cancel();
 });
 
@@ -820,7 +820,7 @@ test('uses EN phrases for lang=en', () => {
   const { player, sendCmd } = makePlayer('en');
   player.start(sendCmd);
   const call = (sendCmd.mock.calls[0] as [{ type: string; file?: string }])[0];
-  expect(call.file).toMatch(/data\/thinking-phrases\/en\/start_/);
+  expect(call.file).toMatch(/data\/call-phrases\/en\/start_/);
   player.cancel();
 });
 ```
@@ -853,7 +853,7 @@ function randomFrom<T>(arr: T[]): T {
 }
 
 function phrasePath(lang: string, name: string): string {
-  return `data/thinking-phrases/${lang}/${name}.ogg`;
+  return `data/call-phrases/${lang}/${name}.ogg`;
 }
 
 export interface ThinkingPhrasePlayerOpts {
@@ -2083,9 +2083,9 @@ This task verifies the full bidirectional flow works with a real Telegram accoun
 - [ ] **Step 12.1: Generate thinking phrases**
 
 ```bash
-bun run scripts/generate-thinking-phrases.ts
-ls data/thinking-phrases/ru/
-ls data/thinking-phrases/en/
+bun run scripts/generate-call-phrases.ts
+ls data/call-phrases/ru/
+ls data/call-phrases/en/
 ```
 
 Expected: 8 files per language directory.
@@ -2139,7 +2139,7 @@ git commit -m "feat(voice): bidirectional voice calls — full integration (spec
 
 1. **Generate thinking phrases** on each server after deploy:
    ```bash
-   bun run scripts/generate-thinking-phrases.ts
+   bun run scripts/generate-call-phrases.ts
    ```
 
 2. **Python dependencies** (in addition to existing pytgcalls deps):

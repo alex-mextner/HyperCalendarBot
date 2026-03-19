@@ -30,6 +30,7 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
   fixLineBreaks,
@@ -114,7 +115,7 @@ export function createCallbackHandler(
     sileroTts?: { synthesize: (text: string) => Promise<Buffer> };
     kokoroTts?: { synthesize: (text: string) => Promise<Buffer> };
     sendVoice: (chatId: number, audio: Buffer) => Promise<void>;
-    stressDictionary?: { lookup: (word: string) => string | null };
+    stressDictionary?: StressDictionary;
   },
   contactRepo?: ContactRepository,
   timezoneScene?: AnyScene,
@@ -567,7 +568,9 @@ export function createCallbackHandler(
           return;
         }
 
-        let result: { success: boolean; error?: string } | undefined;
+        let result:
+          | { success: boolean; error?: string; invitation?: import('../../database/types.ts').Invitation }
+          | undefined;
         if (subAction === 'accept') {
           result = invitationService.acceptInvitation(invId, user.telegram_id);
         } else if (subAction === 'decline') {
@@ -755,6 +758,7 @@ export function createCallbackHandler(
 
       // Invite: user picked an event → show contact picker
       if (action === CB.INVITE_PICK) {
+        const lang = (user.language ?? 'en') as Lang;
         if (payload === 'cancel') {
           await ctx.answer();
           await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');

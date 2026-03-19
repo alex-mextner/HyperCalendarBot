@@ -9,7 +9,7 @@ interface TelegramSenderOptions {
 
 export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions): TelegramSender {
   return {
-    async sendMessage(chatId: number, text: string, parseMode?: string) {
+    async sendMessage(chatId: number, text: string, parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown') {
       const result = await bot.api.sendMessage({
         chat_id: chatId,
         text,
@@ -25,7 +25,12 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
-    async editMessageText(chatId: number, messageId: number, text: string, parseMode?: string) {
+    async editMessageText(
+      chatId: number,
+      messageId: number,
+      text: string,
+      parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+    ) {
       await bot.api.editMessageText({
         chat_id: chatId,
         message_id: messageId,
@@ -33,7 +38,13 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
         ...(parseMode ? { parse_mode: parseMode } : {}),
       });
     },
-    async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: string, userId?: number) {
+    async sendButtons(
+      chatId: number,
+      text: string,
+      buttons: string[],
+      parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+      userId?: number,
+    ) {
       const kb = new InlineKeyboard();
       for (const btn of buttons) {
         const cbData = userId ? `ai_btn:${userId}:${btn}` : `ai_btn:${btn}`;

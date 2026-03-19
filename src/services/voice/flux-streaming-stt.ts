@@ -18,6 +18,12 @@ export class FluxStreamingSTT {
   ) {}
 
   connect(events: FluxStreamingSTTEvents): void {
+    let errorFired = false;
+    const fireError = (err: Error) => {
+      if (errorFired) return;
+      errorFired = true;
+      events.onError(err);
+    };
     const params = new URLSearchParams({
       model: 'flux-general-en',
       eot_threshold: '0.7',
@@ -27,7 +33,7 @@ export class FluxStreamingSTT {
       channels: '1',
       interim_results: 'true',
     });
-    const url = `wss://api.deepgram.com/v1/listen?${params}`;
+    const url = `wss://api.deepgram.com/v2/listen?${params}`;
     const createWs =
       this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } } as never));
     this.ws = createWs(url);
@@ -55,7 +61,16 @@ export class FluxStreamingSTT {
       }
     };
 
-    this.ws.onerror = () => events.onError(new Error('Flux WebSocket error'));
+    this.ws.onerror = (event: Event) => {
+      const msg = (event as ErrorEvent).message ?? 'unknown';
+      fireError(new Error(`Flux WebSocket error: ${msg} (readyState=${this.ws?.readyState})`));
+    };
+
+    this.ws.onclose = (event: CloseEvent) => {
+      if (event.code !== 1000) {
+        fireError(new Error(`Flux WebSocket closed: code=${event.code} reason=${event.reason || '(none)'}`));
+      }
+    };
   }
 
   sendAudio(pcm: Buffer): void {

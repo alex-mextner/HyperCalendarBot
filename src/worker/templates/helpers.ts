@@ -30,15 +30,15 @@ export interface EventColumn {
 export function computeEventColumns(events: TimeRange[]): EventColumn[] {
   if (events.length === 0) return [];
 
-  const indices = events.map((_, i) => i).sort((a, b) => events[a].startMinutes - events[b].startMinutes);
+  const indices = events.map((_, i) => i).sort((a, b) => events[a]!.startMinutes - events[b]!.startMinutes);
 
   const columns: EventColumn[] = new Array(events.length);
   const columnEnds: number[] = [];
 
   for (const i of indices) {
-    const ev = events[i];
+    const ev = events[i]!;
     let col = 0;
-    while (col < columnEnds.length && columnEnds[col] > ev.startMinutes) {
+    while (col < columnEnds.length && columnEnds[col]! > ev.startMinutes) {
       col++;
     }
     columnEnds[col] = ev.endMinutes;
@@ -46,14 +46,14 @@ export function computeEventColumns(events: TimeRange[]): EventColumn[] {
   }
 
   for (let i = 0; i < events.length; i++) {
-    let maxCol = columns[i].column;
+    let maxCol = columns[i]!.column;
     for (let j = 0; j < events.length; j++) {
       if (i === j) continue;
-      if (events[j].startMinutes < events[i].endMinutes && events[j].endMinutes > events[i].startMinutes) {
-        maxCol = Math.max(maxCol, columns[j].column);
+      if (events[j]!.startMinutes < events[i]!.endMinutes && events[j]!.endMinutes > events[i]!.startMinutes) {
+        maxCol = Math.max(maxCol, columns[j]!.column);
       }
     }
-    columns[i].totalColumns = maxCol + 1;
+    columns[i]!.totalColumns = maxCol + 1;
   }
 
   return columns;

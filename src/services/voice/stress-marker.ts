@@ -51,12 +51,12 @@ function numToWords(n: number): string {
   const t = Math.floor(rest / 10);
   const o = rest % 10;
 
-  if (h > 0) parts.push(HUNDREDS[h]);
+  if (h > 0) parts.push(HUNDREDS[h]!);
   if (rest >= 10 && rest <= 19) {
-    parts.push(TEENS[rest - 10]);
+    parts.push(TEENS[rest - 10]!);
   } else {
-    if (t > 0) parts.push(TENS[t]);
-    if (o > 0) parts.push(ONES[o]);
+    if (t > 0) parts.push(TENS[t]!);
+    if (o > 0) parts.push(ONES[o]!);
   }
 
   return parts.join(' ');
@@ -91,11 +91,11 @@ export function markStress(text: string, dict: StressDictionary): string {
     if (!stressed) return word;
 
     // Preserve original casing: if original starts with uppercase, capitalize stressed form
-    if (word[0] === word[0].toUpperCase() && stressed[0] !== '+') {
-      return stressed[0].toUpperCase() + stressed.slice(1);
+    if (word[0] === word[0]!.toUpperCase() && stressed[0] !== '+') {
+      return stressed[0]!.toUpperCase() + stressed.slice(1);
     }
-    if (word[0] === word[0].toUpperCase() && stressed[0] === '+') {
-      return `+${stressed[1].toUpperCase()}${stressed.slice(2)}`;
+    if (word[0] === word[0]!.toUpperCase() && stressed[0] === '+') {
+      return `+${stressed[1]!.toUpperCase()}${stressed.slice(2)}`;
     }
     return stressed;
   });
@@ -265,7 +265,7 @@ export function transliterateEnglish(text: string): string {
         }
       }
       if (!matched) {
-        result += EN_TO_RU[lower[i]] ?? lower[i];
+        result += EN_TO_RU[lower[i]!] ?? lower[i]!;
         i++;
       }
     }

@@ -54,9 +54,9 @@ describe('mapDailyAgendaData', () => {
     });
     expect(result.eventCount).toBe(1);
     expect(result.timedEvents).toHaveLength(1);
-    expect(result.timedEvents[0].title).toBe('Test Event');
-    expect(result.timedEvents[0].startMinutes).toBe(11 * 60); // 11:00 Kyiv
-    expect(result.timedEvents[0].endMinutes).toBe(12 * 60);
+    expect(result.timedEvents[0]!.title).toBe('Test Event');
+    expect(result.timedEvents[0]!.startMinutes).toBe(11 * 60); // 11:00 Kyiv
+    expect(result.timedEvents[0]!.endMinutes).toBe(12 * 60);
   });
 
   test('separates all-day from timed', () => {
@@ -144,10 +144,10 @@ describe('mapWeeklyOverviewData', () => {
       theme: THEME_LIGHT,
     });
     expect(result.days).toHaveLength(7);
-    expect(result.days[0].dayName).toBe('Mon');
-    expect(result.days[0].dayNumber).toBe(9);
-    expect(result.days[5].isWeekend).toBe(true);
-    expect(result.days[6].isWeekend).toBe(true);
+    expect(result.days[0]!.dayName).toBe('Mon');
+    expect(result.days[0]!.dayNumber).toBe(9);
+    expect(result.days[5]!.isWeekend).toBe(true);
+    expect(result.days[6]!.isWeekend).toBe(true);
   });
 });
 

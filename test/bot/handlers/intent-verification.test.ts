@@ -266,7 +266,7 @@ describe('admin edit session in message handler', () => {
           ],
         }),
       );
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     try {
       const sendMsg = mock(() => Promise.resolve());

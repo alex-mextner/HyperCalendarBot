@@ -8,7 +8,7 @@ describe('sendAdminReplyToUser', () => {
     await sendAdminReplyToUser(sendMessage, 123, 'We fixed it!', 'Something broken');
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text] = sendMessage.mock.calls[0] as [number, string];
+    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string];
     expect(chatId).toBe(123);
     expect(text).toContain('Ответ разработчика');
     expect(text).toContain('Something broken');
@@ -20,7 +20,7 @@ describe('sendAdminReplyToUser', () => {
 
     await sendAdminReplyToUser(sendMessage, 456, 'Thanks for reporting', 'Login bug');
 
-    const [, text] = sendMessage.mock.calls[0] as [number, string];
+    const [, text] = sendMessage.mock.calls[0] as unknown as [number, string];
     expect(text).toContain('Login bug');
   });
 });

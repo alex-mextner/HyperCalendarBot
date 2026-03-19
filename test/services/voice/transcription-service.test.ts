@@ -28,7 +28,7 @@ describe('TranscriptionService', () => {
         }),
       );
       return new Response(JSON.stringify({ text: ' Привет, создай встречу на завтра ' }));
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await service.transcribe(audioBuffer);
     expect(result).toBe('Привет, создай встречу на завтра');
@@ -37,7 +37,7 @@ describe('TranscriptionService', () => {
   test('throws on HTTP error', async () => {
     globalThis.fetch = mock(async () => {
       return new Response('Service unavailable', { status: 503 });
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     await expect(service.transcribe(Buffer.from('data'))).rejects.toThrow('HTTP 503');
   });
@@ -45,7 +45,7 @@ describe('TranscriptionService', () => {
   test('returns empty string when API returns empty text', async () => {
     globalThis.fetch = mock(async () => {
       return new Response(JSON.stringify({ text: '' }));
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await service.transcribe(Buffer.from('data'));
     expect(result).toBe('');
@@ -54,7 +54,7 @@ describe('TranscriptionService', () => {
   test('returns empty string when API returns no text field', async () => {
     globalThis.fetch = mock(async () => {
       return new Response(JSON.stringify({}));
-    }) as typeof fetch;
+    }) as unknown as typeof fetch;
 
     const result = await service.transcribe(Buffer.from('data'));
     expect(result).toBe('');

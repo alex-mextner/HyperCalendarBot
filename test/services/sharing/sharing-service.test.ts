@@ -102,8 +102,8 @@ describe('SharingService', () => {
     });
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
     expect(result).toHaveLength(1);
-    expect(result[0].displayTitle).toBe('Public Meeting');
-    expect(result[0].visibility).toBe('full');
+    expect(result[0]!.displayTitle).toBe('Public Meeting');
+    expect(result[0]!.visibility).toBe('full');
   });
 
   test('getAgendaForSharing shows "Busy" for free_busy events', () => {
@@ -118,9 +118,9 @@ describe('SharingService', () => {
     });
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
     expect(result).toHaveLength(1);
-    expect(result[0].visibility).toBe('free_busy');
+    expect(result[0]!.visibility).toBe('free_busy');
     // displayTitle should still show the actual title -- the caller decides how to render
-    expect(result[0].displayTitle).toBe('Private Meeting');
+    expect(result[0]!.displayTitle).toBe('Private Meeting');
   });
 
   test('getAgendaForSharing respects event-level visibility override', () => {
@@ -137,8 +137,8 @@ describe('SharingService', () => {
     settingsRepo.setEventVisibility(event.id, 'full');
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
     expect(result).toHaveLength(1);
-    expect(result[0].displayTitle).toBe('Override Event');
-    expect(result[0].visibility).toBe('full');
+    expect(result[0]!.displayTitle).toBe('Override Event');
+    expect(result[0]!.visibility).toBe('full');
   });
 
   test('getAgendaForSharing includes startAt and timezone', () => {
@@ -153,7 +153,7 @@ describe('SharingService', () => {
     });
     const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
     expect(result).toHaveLength(1);
-    expect(result[0].startAt).toBe('2026-03-15T14:00:00Z');
-    expect(result[0].timezone).toBe(TZ);
+    expect(result[0]!.startAt).toBe('2026-03-15T14:00:00Z');
+    expect(result[0]!.timezone).toBe(TZ);
   });
 });

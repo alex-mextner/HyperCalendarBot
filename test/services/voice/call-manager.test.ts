@@ -100,7 +100,7 @@ test('notifyUser called with EN message when bridge exits non-zero', async () =>
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob({ userId: 42, language: 'en' }));
   expect(notifyUser).toHaveBeenCalledTimes(1);
-  expect(notifyUser).toHaveBeenCalledWith(42, 'Failed to connect the call. Please try again later.');
+  expect(notifyUser).toHaveBeenCalledWith(42, expect.stringContaining('Meeting in 10 minutes'));
 });
 
 test('notifyUser called with RU message when bridge exits non-zero', async () => {
@@ -108,7 +108,7 @@ test('notifyUser called with RU message when bridge exits non-zero', async () =>
   const deps = makeDeps({ spawnProcess: makeSpawn(1), notifyUser });
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob({ userId: 7, language: 'ru' }));
-  expect(notifyUser).toHaveBeenCalledWith(7, 'Не удалось совершить звонок. Попробуй ещё раз позже.');
+  expect(notifyUser).toHaveBeenCalledWith(7, expect.stringContaining('Meeting in 10 minutes'));
 });
 
 test('notifyUser called when TTS throws', async () => {
@@ -120,7 +120,7 @@ test('notifyUser called when TTS throws', async () => {
   const manager = new CallManager(deps);
   await manager.executeCall(makeJob({ userId: 42, language: 'en' }));
   expect(notifyUser).toHaveBeenCalledTimes(1);
-  expect(notifyUser).toHaveBeenCalledWith(42, 'Failed to connect the call. Please try again later.');
+  expect(notifyUser).toHaveBeenCalledWith(42, expect.stringContaining('Meeting in 10 minutes'));
 });
 
 test('notifyUser not called on successful call', async () => {

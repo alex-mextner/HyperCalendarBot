@@ -4,7 +4,7 @@ import { parseRedisUrl } from '../utils/redis.ts';
 import { playwrightPool } from './playwright-pool.ts';
 import type { ConflictScheduleData } from './templates/conflict-schedule.ts';
 import { getTemplate } from './templates/index.ts';
-import type { DailyAgendaData, EventCardData, WeeklyOverviewData } from './templates/types.ts';
+import type { DailyAgendaData, EventCardData, MonthlyCalendarData, WeeklyOverviewData } from './templates/types.ts';
 
 // --- Job types ---
 
@@ -12,6 +12,7 @@ export type ImageRenderJob =
   | { type: 'daily-agenda'; data: DailyAgendaData; userId: number }
   | { type: 'weekly-overview'; data: WeeklyOverviewData; userId: number }
   | { type: 'event-card'; data: EventCardData; userId: number }
+  | { type: 'monthly-calendar'; data: MonthlyCalendarData; userId: number }
   | { type: 'conflict-schedule'; data: ConflictScheduleData; userId: number };
 
 export interface ImageRenderResult {
@@ -37,6 +38,7 @@ export async function processRenderJob(job: ImageRenderJob): Promise<ImageRender
   try {
     await page.setContent(html, { waitUntil: 'load' });
 
+    // @ts-expect-error — page.evaluate callback runs in browser scope; document is unavailable in Node types
     const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 800);
 
     await page.setViewportSize({ width: 1080, height });
@@ -70,7 +72,6 @@ export function createImageRenderQueue(redisUrl: string) {
     defaultJobOptions: {
       attempts: 2,
       backoff: { type: 'fixed', delay: 1000 },
-      timeout: 15_000,
       removeOnComplete: { age: 60, count: 100 },
       removeOnFail: { age: 3600 },
     },

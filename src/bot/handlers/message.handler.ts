@@ -203,10 +203,11 @@ function levenshtein(a: string, b: string): number {
   );
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      dp[i]![j] =
+        a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
     }
   }
-  return dp[m][n];
+  return dp[m]![n]!;
 }
 
 const ADDRESS_TARGETS = ['календарь', 'calendar'];
@@ -215,10 +216,7 @@ const ADDRESS_MAX_DISTANCE = 2;
 // Exact "календарь"/"calendar" words are already in KEYWORD_PATTERN.
 // This function handles typos only (e.g. "Каледарь,", "Calender,").
 function startsWithCalendarAddress(text: string): boolean {
-  const firstWord = text
-    .trim()
-    .split(/[\s,!.?:]+/)[0]
-    .toLowerCase();
+  const firstWord = (text.trim().split(/[\s,!.?:]+/)[0] ?? '').toLowerCase();
   if (firstWord.length < 5) return false;
   return ADDRESS_TARGETS.some((target) => levenshtein(firstWord, target) <= ADDRESS_MAX_DISTANCE);
 }
@@ -466,10 +464,10 @@ async function handleIntentEditInstruction(
     }>;
 
     intentRepo.update(session.intentId, {
-      ...(updated.phrases !== undefined && { phrases: updated.phrases }),
-      ...(updated.trigger_words !== undefined && { trigger_words: updated.trigger_words }),
-      ...(updated.pattern !== undefined && { pattern: updated.pattern ?? undefined }),
-      ...(updated.workflow !== undefined && { workflow: updated.workflow }),
+      ...(updated.phrases !== undefined && { phrases: JSON.stringify(updated.phrases) }),
+      ...(updated.trigger_words !== undefined && { trigger_words: JSON.stringify(updated.trigger_words) }),
+      ...(updated.pattern !== undefined && { pattern: updated.pattern }),
+      ...(updated.workflow !== undefined && { workflow: JSON.stringify(updated.workflow) }),
       ...(updated.format !== undefined && { format: updated.format }),
     });
 

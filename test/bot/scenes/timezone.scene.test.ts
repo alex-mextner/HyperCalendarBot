@@ -41,7 +41,7 @@ describe('createTimezoneScene', () => {
       return;
     }
 
-    await enterHandlers[0](ctx);
+    await enterHandlers[0]!(ctx);
     expect(ctx.send).toHaveBeenCalledTimes(2);
   });
 });

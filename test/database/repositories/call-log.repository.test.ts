@@ -63,7 +63,7 @@ describe('CallLogRepository', () => {
     repo.create({ user_id: USER_ID, tts_text: 'Second' });
     const recent = repo.getRecent(USER_ID, 5);
     expect(recent).toHaveLength(2);
-    expect(recent[0].tts_text).toBe('Second');
+    expect(recent[0]!.tts_text).toBe('Second');
   });
 
   // --- Red tests ---

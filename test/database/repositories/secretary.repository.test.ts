@@ -97,6 +97,6 @@ describe('SecretaryRepository', () => {
     ).run();
     const result = repo.getPendingExpired();
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].owner_id).toBe(50);
+    expect(result[0]!.owner_id).toBe(50);
   });
 });

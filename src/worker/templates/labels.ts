@@ -88,7 +88,7 @@ const labelsDict: Record<string, Labels> = {
 };
 
 export function getLabels(locale: string): Labels {
-  return labelsDict[locale] ?? labelsDict.en;
+  return labelsDict[locale] ?? labelsDict.en!;
 }
 
 export function pluralizeEvents(count: number, locale: string): string {

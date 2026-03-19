@@ -51,6 +51,7 @@ function renderTimeline(data: DailyAgendaData): string {
       const top = ev.startMinutes - minHour * 60;
       const height = Math.max(ev.endMinutes - ev.startMinutes, 20);
       const col = cols[i];
+      if (!col) return '';
       const widthPct = 100 / col.totalColumns;
       const leftPct = col.column * widthPct;
       const bg = `${ev.calendarColor}20`;

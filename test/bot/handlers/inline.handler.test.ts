@@ -15,7 +15,7 @@ describe('createInlineHandler', () => {
       get: mock(() => null),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },
@@ -52,7 +52,7 @@ describe('createInlineHandler', () => {
       get: mock(() => ({ inline_mode_enabled: 1 })),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },
@@ -89,7 +89,7 @@ describe('createInlineHandler', () => {
       get: mock(() => ({ inline_mode_enabled: 1 })),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },
@@ -124,7 +124,7 @@ describe('createInlineHandler', () => {
       get: mock(() => ({ inline_mode_enabled: 0 })),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },
@@ -153,7 +153,7 @@ describe('createInlineHandler', () => {
       get: mock(() => null),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: undefined,
@@ -184,7 +184,7 @@ describe('createInlineHandler', () => {
       get: mock(() => ({ inline_mode_enabled: 1 })),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },
@@ -213,7 +213,7 @@ describe('createInlineHandler', () => {
       get: mock(() => ({ inline_mode_enabled: 1 })),
     };
 
-    const handler = createInlineHandler(inlineService, userRepo, settingsRepo);
+    const handler = createInlineHandler(inlineService as never, userRepo as never, settingsRepo as never);
 
     const ctx = {
       from: { id: 100 },

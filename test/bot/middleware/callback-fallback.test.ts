@@ -64,7 +64,7 @@ describe('callbackFallback', () => {
       // downstream does NOT answer (scene step didn't handle callback_query)
     });
     expect(answerMock).toHaveBeenCalledTimes(1);
-    const callArgs = answerMock.mock.calls[0]![0] as { text: string };
+    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
     expect(callArgs.text).toContain('progress');
   });
 
@@ -80,7 +80,7 @@ describe('callbackFallback', () => {
     const ctx = createFakeContext({ answer: answerMock });
     await middleware(ctx, async () => {});
     expect(answerMock).toHaveBeenCalledTimes(1);
-    const callArgs = answerMock.mock.calls[0]![0] as { text: string };
+    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
     expect(callArgs.text).toContain('expired');
   });
 
@@ -95,7 +95,7 @@ describe('callbackFallback', () => {
     const answerMock = mock(async () => {});
     const ctx = createFakeContext({ answer: answerMock, dbUser: { language: 'ru' } });
     await middleware(ctx, async () => {});
-    const callArgs = answerMock.mock.calls[0]![0] as { text: string };
+    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
     expect(callArgs.text).toContain('/cancel');
   });
 
@@ -110,7 +110,7 @@ describe('callbackFallback', () => {
     const answerMock = mock(async () => {});
     const ctx = createFakeContext({ answer: answerMock, dbUser: { language: 'ru' } });
     await middleware(ctx, async () => {});
-    const callArgs = answerMock.mock.calls[0]![0] as { text: string };
+    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
     expect(callArgs.text).toContain('устарело');
   });
 });

@@ -9,11 +9,11 @@ const MID_PHRASES: Record<string, string[]> = {
 };
 
 function randomFrom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  return arr[Math.floor(Math.random() * arr.length)]!;
 }
 
 function phrasePath(lang: string, name: string): string {
-  return `data/thinking-phrases/${lang}/${name}.ogg`;
+  return `data/call-phrases/${lang}/${name}.ogg`;
 }
 
 export interface ThinkingPhrasePlayerOpts {
@@ -34,16 +34,16 @@ export class ThinkingPhrasePlayer {
 
     // t=0: play start phrase
     sendCmd({ type: 'STOP' });
-    sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(START_PHRASES[this.lang])) });
+    sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(START_PHRASES[this.lang]!)) });
 
     const t1 = setTimeout(() => {
       sendCmd({ type: 'STOP' });
-      sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang])) });
+      sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang]!)) });
     }, midDelay1);
 
     const t2 = setTimeout(() => {
       sendCmd({ type: 'STOP' });
-      sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang])) });
+      sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang]!)) });
     }, midDelay2);
 
     this.timers = [t1, t2];

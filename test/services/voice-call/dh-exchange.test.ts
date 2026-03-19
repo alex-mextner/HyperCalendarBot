@@ -110,7 +110,7 @@ describe('DH exchange — low-level functions', () => {
 
     // Tamper with the hash
     const badHash = Buffer.from(caller.gAHash);
-    badHash[0] ^= 0xff;
+    badHash[0]! ^= 0xff;
 
     expect(() =>
       calleeDeriveKey(caller.gA, badHash, callee.privateExponent, dhConfig, callerAuth.keyFingerprint),
@@ -267,7 +267,7 @@ describe('DH config validation', () => {
     // Construct a 256-byte buffer that's NOT ≡ 7 mod 8
     const badPrime = Buffer.from(dhConfig.p);
     // Make last byte even (so p mod 8 != 7)
-    badPrime[255] = badPrime[255] & 0xfe;
+    badPrime[255] = badPrime[255]! & 0xfe;
     dhConfig.p = badPrime;
 
     expect(() => new VoiceCallDhExchange(dhConfig)).toThrow('p mod 8 must be 7');

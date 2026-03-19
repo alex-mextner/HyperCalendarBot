@@ -15,7 +15,7 @@ export interface CallSessionManagerDeps {
     sessionId: string,
     userId: number,
     language: 'ru' | 'en',
-    ws: { send: (data: string) => void; close: () => void },
+    ws: { send: (data: string | Buffer) => void; close: () => void },
   ) => ManagedSession;
   timeoutMs?: number;
 }
@@ -37,7 +37,7 @@ export class CallSessionManager {
     this.pendingSessions.set(sessionId, { userId, language: lang });
   }
 
-  onWebSocketOpen(sessionId: string, ws: { send: (data: string) => void; close: () => void }): void {
+  onWebSocketOpen(sessionId: string, ws: { send: (data: string | Buffer) => void; close: () => void }): void {
     const ctx = this.pendingSessions.get(sessionId);
     if (!ctx) {
       voiceLogger.error({ sessionId }, 'No pending session for WebSocket connection — closing');
@@ -89,28 +89,30 @@ export class CallSessionManager {
         const url = new URL(req.url);
         const match = url.pathname.match(/^\/call\/([^/]+)$/);
         if (!match) return new Response('Not found', { status: 404 });
-        const sessionId = match[1];
-        const upgraded = server.upgrade(req, { data: { sessionId } });
+        const sessionId = match[1]!;
+        const upgraded = (server.upgrade as (req: Request, opts: { data: unknown }) => boolean)(req, {
+          data: { sessionId },
+        });
         if (!upgraded) return new Response('Upgrade failed', { status: 426 });
         return undefined;
       },
       websocket: {
         open: (ws) => {
-          const { sessionId } = ws.data as { sessionId: string };
+          const { sessionId } = ws.data as unknown as { sessionId: string };
           this.onWebSocketOpen(sessionId, {
             send: (data) => ws.send(data),
             close: () => ws.close(),
           });
         },
         message: (ws, message) => {
-          const { sessionId } = ws.data as { sessionId: string };
+          const { sessionId } = ws.data as unknown as { sessionId: string };
           const isBinary = typeof message !== 'string';
           this.onWebSocketMessage(sessionId, message as string | Buffer, isBinary).catch((err) => {
             voiceLogger.error({ err, sessionId }, 'WebSocket message handler error');
           });
         },
         close: (ws) => {
-          const { sessionId } = ws.data as { sessionId: string };
+          const { sessionId } = ws.data as unknown as { sessionId: string };
           this.onWebSocketClose(sessionId);
         },
       },

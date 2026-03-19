@@ -126,7 +126,10 @@ export function createOnboardingScene(
             if (payload === 'confirm') {
               const tz = context.scene.state.detectedTz;
               if (!tz) return;
-              db.users.update(context.from.id, { timezone: tz, country_code: guessCountryFromTimezone(tz) });
+              db.users.update(context.from.id, {
+                timezone: tz,
+                country_code: guessCountryFromTimezone(tz) ?? undefined,
+              });
               await context.send(`✅ ${getTimezoneDisplay(tz)}`, removeKeyboard());
               await cbCtx.answer();
               await context.scene.update({ timezone: tz });

@@ -33,7 +33,7 @@ function getDayOfWeek(dateIso: string, locale: string): string {
   const d = new Date(`${dateIso}T12:00:00Z`);
   const dow = d.getUTCDay(); // 0=Sun
   const idx = dow === 0 ? 6 : dow - 1; // Monday-based
-  return labels.weekDaysFull[idx];
+  return labels.weekDaysFull[idx]!;
 }
 
 function mapToAgendaEvent(occ: EventOccurrence, tz: string, colorIdx: number, colors: string[]): AgendaEvent {
@@ -44,7 +44,7 @@ function mapToAgendaEvent(occ: EventOccurrence, tz: string, colorIdx: number, co
     startMinutes: toMinutes(occ.occurrence_start, tz),
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: ev.location ?? undefined,
-    calendarColor: colors[colorIdx % colors.length],
+    calendarColor: colors[colorIdx % colors.length]!,
     isAllDay: ev.all_day === 1,
   };
 }
@@ -110,7 +110,7 @@ export function mapWeeklyOverviewData(params: {
     const occs = occurrencesByDay.get(iso) ?? [];
     return {
       dayNumber: dayDate.getUTCDate(),
-      dayName: labels.weekDaysShort[i],
+      dayName: labels.weekDaysShort[i]!,
       eventCount: occs.length,
       isWeekend: i >= 5,
       events: occs.map(
@@ -123,7 +123,7 @@ export function mapWeeklyOverviewData(params: {
               : o.occurrence_end
                 ? toMinutes(o.occurrence_end, timezone)
                 : toMinutes(o.occurrence_start, timezone) + 60,
-          color: theme.eventColors[occs.indexOf(o) % theme.eventColors.length],
+          color: theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
           isAllDay: o.event.all_day === 1,
         }),
       ),
@@ -167,7 +167,7 @@ export function mapEventCardData(params: {
     location: ev.location ?? undefined,
     description: ev.description?.slice(0, 200) ?? undefined,
     calendarName: 'HyperCalendar',
-    calendarColor: theme.eventColors[0],
+    calendarColor: theme.eventColors[0]!,
     isAllDay: ev.all_day === 1,
     theme,
     locale,
@@ -268,7 +268,7 @@ function makeDay(
             : o.occurrence_end
               ? toMinutes(o.occurrence_end, params.timezone)
               : toMinutes(o.occurrence_start, params.timezone) + 60,
-        color: params.theme.eventColors[i % params.theme.eventColors.length],
+        color: params.theme.eventColors[i % params.theme.eventColors.length]!,
         isAllDay: o.event.all_day === 1,
       }),
     ),

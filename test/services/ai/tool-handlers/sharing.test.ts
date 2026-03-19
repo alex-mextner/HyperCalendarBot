@@ -704,9 +704,9 @@ describe('sharing tool handlers', () => {
 
       const shares = sharedEventRepo.getByEvent(event.id);
       expect(shares.length).toBe(1);
-      expect(shares[0].shared_to_type).toBe('user');
-      expect(shares[0].shared_to_id).toBe(OTHER_USER_ID);
-      expect(shares[0].share_type).toBe('agenda');
+      expect(shares[0]!.shared_to_type).toBe('user');
+      expect(shares[0]!.shared_to_id).toBe(OTHER_USER_ID);
+      expect(shares[0]!.share_type).toBe('agenda');
     });
   });
 
@@ -859,9 +859,9 @@ describe('sharing tool handlers', () => {
 
       const pending = editProposalRepo.getPendingForEvent(event.id);
       expect(pending).toHaveLength(1);
-      expect(pending[0].proposer_id).toBe(USER_ID);
-      expect(JSON.parse(pending[0].changes)).toEqual({ start_at: '2026-03-20T11:00:00Z' });
-      expect(pending[0].reason).toBe('Conflict with another meeting');
+      expect(pending[0]!.proposer_id).toBe(USER_ID);
+      expect(JSON.parse(pending[0]!.changes)).toEqual({ start_at: '2026-03-20T11:00:00Z' });
+      expect(pending[0]!.reason).toBe('Conflict with another meeting');
     });
 
     test('sends notification to event creator when sender available', () => {

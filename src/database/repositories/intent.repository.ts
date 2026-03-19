@@ -1,4 +1,4 @@
-import type { Database } from 'bun:sqlite';
+import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { CreateIntentData, Intent, IntentStatus } from '../types.ts';
 
 export class IntentRepository {
@@ -59,7 +59,7 @@ export class IntentRepository {
     data: Partial<Pick<Intent, 'phrases' | 'trigger_words' | 'pattern' | 'workflow' | 'format'>>,
   ): void {
     const fields: string[] = [];
-    const values: unknown[] = [];
+    const values: SQLQueryBindings[] = [];
 
     if (data.phrases !== undefined) {
       fields.push('phrases = ?');

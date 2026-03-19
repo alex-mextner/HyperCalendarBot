@@ -20,7 +20,7 @@ describe('ShareSessionManager', () => {
     });
     expect(id).toBeTruthy();
     expect(redis.set).toHaveBeenCalled();
-    const setArgs = redis.set.mock.calls[0] as unknown[];
+    const setArgs = (redis.set as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as unknown[];
     expect(setArgs[2]).toEqual({ ex: 300 });
   });
 

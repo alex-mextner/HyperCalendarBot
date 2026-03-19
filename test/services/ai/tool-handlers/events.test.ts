@@ -102,10 +102,10 @@ describe('event tool handlers', () => {
       expect(Array.isArray(result.data)).toBe(true);
       const data = result.data as Array<{ id: number; title: string; date: string; time: string }>;
       expect(data).toHaveLength(1);
-      expect(data[0].title).toBe('Standup');
-      expect(data[0].date).toBe('2026-03-15');
-      expect(data[0].time).toBe('09:00');
-      expect(typeof data[0].id).toBe('number');
+      expect(data[0]!.title).toBe('Standup');
+      expect(data[0]!.date).toBe('2026-03-15');
+      expect(data[0]!.time).toBe('09:00');
+      expect(typeof data[0]!.id).toBe('number');
     });
 
     test('data is empty array when no events found', () => {
@@ -418,9 +418,9 @@ describe('event tool handlers', () => {
         '2026-03-15T23:59:59Z',
       );
       expect(events.length).toBe(1);
-      expect(events[0].event.owner_type).toBe('group');
-      expect(events[0].event.group_id).toBe(GROUP_CHAT_ID);
-      expect(events[0].event.created_by).toBe(USER_ID);
+      expect(events[0]!.event.owner_type).toBe('group');
+      expect(events[0]!.event.group_id).toBe(GROUP_CHAT_ID);
+      expect(events[0]!.event.created_by).toBe(USER_ID);
     });
 
     test('handleUpdateEvent with scope=group updates group event', () => {
@@ -691,8 +691,8 @@ describe('event tool handlers', () => {
 
       await new Promise((r) => setTimeout(r, 10));
       expect(sent.length).toBe(1);
-      expect(sent[0].text).toContain(`href="${INVITE_LINK}"`);
-      expect(sent[0].text).toContain('Test Group');
+      expect(sent[0]!.text).toContain(`href="${INVITE_LINK}"`);
+      expect(sent[0]!.text).toContain('Test Group');
     });
   });
 

@@ -56,7 +56,7 @@ describe('ConflictChecker', () => {
 
     const conflicts = checker.checkConflicts(eventB, USER);
     expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].title).toBe('Meeting A');
+    expect(conflicts[0]!.title).toBe('Meeting A');
   });
 
   test('adjacent events do not conflict', () => {
@@ -117,7 +117,7 @@ describe('ConflictChecker', () => {
 
     const conflicts = checker.checkConflicts(point, USER);
     expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].title).toBe('Existing');
+    expect(conflicts[0]!.title).toBe('Existing');
   });
 
   test('excludes event itself from conflicts', () => {
@@ -153,7 +153,7 @@ describe('ConflictChecker', () => {
 
     const conflicts = checker.checkConflicts(own, USER);
     expect(conflicts).toHaveLength(1);
-    expect(conflicts[0].title).toBe('Shared Meeting');
+    expect(conflicts[0]!.title).toBe('Shared Meeting');
   });
 
   test('no conflicts when events are far apart', () => {

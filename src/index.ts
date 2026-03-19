@@ -26,7 +26,9 @@ let webServerHandle: { stop: () => void } | undefined;
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
-let callQueue: { enqueue(data: import('./services/voice/types.ts').CallReminderJobData): Promise<void> } | undefined;
+let callQueue:
+  | { enqueue(data: Omit<import('./services/voice/types.ts').CallReminderJobData, 'sessionId'>): Promise<void> }
+  | undefined;
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
@@ -67,7 +69,11 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
     onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
-    sendMessage: (telegramId, text) => botRef.sendMessage(telegramId, text),
+    sendMessage: (telegramId, text) =>
+      botRef
+        .sendMessage(telegramId, text)
+        .then(() => {})
+        .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification')),
   });
 
   syncQueueCleanup = {
@@ -145,13 +151,16 @@ if (config.REDIS_URL) {
 
   await playwrightPool.initialize();
 
-  const { queue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
-  renderService = new RenderService(queue, queueEvents);
+  const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
+  renderService = new RenderService(
+    imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
+    queueEvents,
+  );
 
   imageQueueCleanup = {
     close: async () => {
       await worker.close();
-      await queue.close();
+      await imageQueue.close();
       await queueEvents.close();
       await playwrightPool.shutdown();
     },
@@ -302,7 +311,11 @@ if (config.REDIS_URL) {
   const notifWorker = createNotificationWorker(
     config.REDIS_URL,
     db.notificationLog,
-    (telegramId, text) => botRef.sendMessage(telegramId, text),
+    (telegramId, text) =>
+      botRef
+        .sendMessage(telegramId, text)
+        .then(() => {})
+        .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send notification')),
     scheduler,
   );
 
@@ -331,7 +344,11 @@ if (config.REDIS_URL) {
       runSecretaryExpiry({
         secretaryRepo: db.secretaries,
         userRepo: db.users,
-        notify: (userId, text) => botRef.sendMessage(userId, text),
+        notify: (userId, text) =>
+          botRef
+            .sendMessage(userId, text)
+            .then(() => {})
+            .catch((err) => botLogger.error({ err, userId }, 'Failed to send secretary expiry notification')),
       }),
     onSharingCleanup: () => runSharingCleanup({ invitationRepo: db.invitations, deepLinkRepo: db.deepLinks }),
     onProposalExpiry: () =>

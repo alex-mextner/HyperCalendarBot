@@ -332,7 +332,7 @@ describe('createMessageHandler', () => {
           return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
         }
         return new Response(Buffer.from('fake-audio'));
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       try {
         const handler = createMessageHandler(deps as never);
@@ -367,7 +367,7 @@ describe('createMessageHandler', () => {
           return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
         }
         return new Response(Buffer.from('fake-audio'));
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       try {
         const ctx = makeVoiceCtx();
@@ -392,7 +392,7 @@ describe('createMessageHandler', () => {
           return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
         }
         return new Response(Buffer.from('fake-audio'));
-      }) as typeof fetch;
+      }) as unknown as typeof fetch;
 
       try {
         const ctx = makeVoiceCtx();

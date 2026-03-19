@@ -107,12 +107,134 @@ test('CALL_ENDED triggers cleanup', async () => {
   expect(session.isEnded()).toBe(true);
 });
 
+test('playErrorPhrase sends STOP then PLAY immediately when nothing is playing', async () => {
+  const { session, ws } = makeSession();
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  const sends = ws.send.mock.calls.map((c) => JSON.parse((c as [string])[0]) as { type: string; file?: string });
+  const stopIdx = sends.findIndex((s) => s.type === 'STOP');
+  const play = sends.find((s) => s.type === 'PLAY' && s.file?.includes('stt_error.ogg'));
+  expect(stopIdx).toBeGreaterThanOrEqual(0);
+  expect(play).toBeDefined();
+  expect(sends.indexOf(play!)).toBeGreaterThan(stopIdx);
+});
+
+test('playErrorPhrase queues when something is playing, then plays on PLAY_DONE', async () => {
+  const unlink = mock(async () => {});
+  const { session, ws } = makeSession({ unlink });
+  // Simulate something already playing
+  (session as never as { lastPlayFile: string }).lastPlayFile = '/tmp/call-test-session-1.ogg';
+
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  // Nothing should be sent yet (queued)
+  expect(ws.send.mock.calls.length).toBe(0);
+
+  // PLAY_DONE fires — error phrase should now play (with STOP before PLAY)
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  const sends = ws.send.mock.calls.map((c) => JSON.parse((c as [string])[0]) as { type: string; file?: string });
+  const stopIdx = sends.findIndex((s) => s.type === 'STOP');
+  const play = sends.find((s) => s.type === 'PLAY' && s.file?.includes('stt_error.ogg'));
+  expect(stopIdx).toBeGreaterThanOrEqual(0);
+  expect(play).toBeDefined();
+  expect(sends.indexOf(play!)).toBeGreaterThan(stopIdx);
+});
+
+test('Nova STT onError triggers error phrase', async () => {
+  const nova = makeNovaMock();
+  let capturedOnError: ((err: Error) => void) | undefined;
+  nova.connect = mock((events: { onError: (err: Error) => void }) => {
+    capturedOnError = events.onError;
+  }) as unknown as typeof nova.connect;
+  const { session, ws } = makeSession({ createNovaStt: () => nova as never });
+
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  ws.send.mockClear();
+
+  capturedOnError?.(new Error('Nova-3 WebSocket closed: code=1008 reason=Unauthorized'));
+  // Error phrase is queued because opener was playing; PLAY_DONE triggers it
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+
+  const sends = ws.send.mock.calls.map((c) => JSON.parse((c as [string])[0]) as { type: string; file?: string });
+  expect(sends.some((s) => s.type === 'PLAY' && s.file?.includes('stt_error.ogg'))).toBe(true);
+});
+
+test('Flux STT onError triggers error phrase (EN)', async () => {
+  let capturedOnError: ((err: Error) => void) | undefined;
+  const fluxMock = {
+    connect: mock((events: { onError: (err: Error) => void }) => {
+      capturedOnError = events.onError;
+    }),
+    sendAudio: mock(() => {}),
+    close: mock(() => {}),
+  };
+  const { session, ws } = makeSession({
+    language: 'en',
+    createFluxStt: () => fluxMock as never,
+  });
+
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  ws.send.mockClear();
+
+  capturedOnError?.(new Error('Flux WebSocket closed: code=1008 reason=Unauthorized'));
+  // Opener may still be "playing" — PLAY_DONE triggers the queued error phrase
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+
+  const sends = ws.send.mock.calls.map((c) => JSON.parse((c as [string])[0]) as { type: string; file?: string });
+  const play = sends.find((s) => s.type === 'PLAY' && s.file?.includes('stt_error.ogg'));
+  expect(play?.file).toContain('en/stt_error.ogg');
+});
+
+test('playErrorPhrase closes WS on PLAY_DONE (immediate play case)', async () => {
+  const { session, ws } = makeSession();
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(ws.close).toHaveBeenCalledTimes(1);
+});
+
+test('playErrorPhrase closes WS on second PLAY_DONE (queued case)', async () => {
+  const unlink = mock(async () => {});
+  const { session, ws } = makeSession({ unlink });
+  (session as never as { lastPlayFile: string }).lastPlayFile = '/tmp/call-test-session-1.ogg';
+
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  // First PLAY_DONE: opener finishes → error phrase starts playing
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(ws.close).not.toHaveBeenCalled();
+  // Second PLAY_DONE: error phrase finishes → WS closes
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(ws.close).toHaveBeenCalledTimes(1);
+});
+
+test('onCallEnded prevents WS close from error phrase PLAY_DONE', async () => {
+  const { session, ws } = makeSession();
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  expect(ws.close).not.toHaveBeenCalled();
+});
+
+test('force-ends call via timeout if PLAY_DONE never arrives after STT error', async () => {
+  const { session, ws } = makeSession({ sttErrorTimeoutMs: 10 });
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  await new Promise((r) => setTimeout(r, 30));
+  expect(ws.close).toHaveBeenCalledTimes(1);
+});
+
+test('timeout is cancelled when call ends normally via CALL_ENDED', async () => {
+  const { session, ws } = makeSession({ sttErrorTimeoutMs: 10 });
+  (session as never as { playErrorPhrase: () => void }).playErrorPhrase();
+  await session.handleMessage(JSON.stringify({ type: 'CALL_ENDED' }));
+  await new Promise((r) => setTimeout(r, 30));
+  // ws.close not called by timeout (CALL_ENDED already cleaned up)
+  expect(ws.close).not.toHaveBeenCalled();
+});
+
 test('agent runs only once when VAD_END follows classify respond', async () => {
   const nova = makeNovaMock();
   let interimCallback: ((t: string) => void) | null = null;
   nova.connect = mock((events: { onInterim: (t: string) => void }) => {
     interimCallback = events.onInterim;
-  });
+  }) as unknown as typeof nova.connect;
   const agent = makeAgentMock();
   const { session } = makeSession({ createNovaStt: () => nova as never, agent: agent as never });
 
@@ -120,7 +242,7 @@ test('agent runs only once when VAD_END follows classify respond', async () => {
   await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
 
   // Fire an interim that classifies as 'respond' (3+ words, not all fillers)
-  interimCallback?.('добавь встречу на завтра');
+  (interimCallback as ((t: string) => void) | null)?.('добавь встречу на завтра');
   // Small delay to let any async work settle
   await new Promise((r) => setTimeout(r, 10));
 

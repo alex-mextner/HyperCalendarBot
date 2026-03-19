@@ -35,7 +35,7 @@ from silero_vad import load_silero_vad
 
 from pyrogram import Client
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, AudioQuality, RecordStream, StreamFrames, Direction
+from pytgcalls.types import MediaStream, AudioQuality, RecordStream, StreamFrames, Direction, ChatUpdate
 
 import websockets
 
@@ -68,6 +68,7 @@ async def main():
     play_done_event: asyncio.Event | None = None
     audio_buffer = b""
     is_speaking = False
+    bun_closed_ws = False
 
     # ------- Connect to Bun WebSocket -------
     async with websockets.connect(WS_URL) as ws:
@@ -164,9 +165,13 @@ async def main():
         await calls.start()
 
         @calls.on_update()
-        async def on_update(update):
+        async def on_update(_, update):
             name = type(update).__name__
+            if name != 'StreamFrames':
+                print(f'[pytgcalls] update: {name}', file=sys.stderr, flush=True)
             if "Closed" in name or "HungUp" in name:
+                call_ended.set()
+            elif isinstance(update, ChatUpdate) and update.status & ChatUpdate.Status.LEFT_CALL:
                 call_ended.set()
             if ("StreamEnded" in name or "StreamAudioEnded" in name) and play_done_event is not None:
                 play_done_event.set()
@@ -174,16 +179,8 @@ async def main():
                 for frame in update.frames:
                     await on_audio_frame(frame.frame)
 
-        # Connect to user (muted — no audio yet)
-        try:
-            await calls.play(
-                USER_ID,
-                MediaStream(None, video_flags=MediaStream.Flags.IGNORE,  # muted
-                            audio_parameters=AudioQuality.HIGH),
-            )
-        except Exception as e:
-            # play() with None is expected to raise on some pytgcalls versions — call still proceeds
-            print(f"Note: muted play raised {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        # Connect to user (muted — no audio yet; stream=None is valid in pytgcalls 2.x)
+        await calls.play(USER_ID, None)
 
         await ws.send(json.dumps({"type": "CALL_CONNECTED"}))
 
@@ -191,17 +188,31 @@ async def main():
         # before the gather task is scheduled.
         await calls.record(USER_ID, RecordStream(audio=True, audio_parameters=AudioQuality.HIGH))
 
-        await asyncio.gather(
-            recv_commands(),
-            call_ended.wait(),
-        )
+        ws_task = asyncio.create_task(recv_commands())
+        call_done_task = asyncio.create_task(call_ended.wait())
+        done, _ = await asyncio.wait([ws_task, call_done_task], return_when=asyncio.FIRST_COMPLETED)
+        # True when Bun closed the WS (STT error / forced end), False when user hung up
+        bun_closed_ws = ws_task in done and call_done_task not in done
+        for t in [ws_task, call_done_task]:
+            t.cancel()
+        await asyncio.gather(ws_task, call_done_task, return_exceptions=True)
 
-        await ws.send(json.dumps({"type": "CALL_ENDED"}))
+        # Send CALL_ENDED only if WS is still open (user hung up, not Bun-initiated close)
+        try:
+            await ws.send(json.dumps({"type": "CALL_ENDED"}))
+        except Exception:
+            pass
 
     try:
         await calls.leave_call(USER_ID)
     except Exception:
         pass
-    await app.stop()
+    try:
+        await app.stop()
+    except Exception:
+        pass
+
+    if bun_closed_ws:
+        sys.exit(1)
 
 asyncio.run(main())

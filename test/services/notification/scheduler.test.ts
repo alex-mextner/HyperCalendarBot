@@ -152,7 +152,7 @@ describe('NotificationScheduler', () => {
       } as never,
       enqueueCall: mock((data: { userId: number; eventId: number }) => {
         callEnqueued.push(data);
-      }),
+      }) as never,
     });
 
     // 23:45 UTC is within quiet hours 22:00-08:00
@@ -269,7 +269,7 @@ describe('NotificationScheduler', () => {
       } as never,
       enqueueCall: mock((data: { userId: number; eventId: number }) => {
         callEnqueued.push(data);
-      }),
+      }) as never,
     });
 
     // 14:45 UTC is outside quiet hours 22:00-08:00

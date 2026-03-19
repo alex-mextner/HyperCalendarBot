@@ -107,7 +107,7 @@ export class CallManager {
       const callStatus = exitCode === 0 ? 'completed' : 'failed';
       this.deps.callLogRepo.complete(job.callLogId, callStatus, duration);
       if (callStatus === 'failed') {
-        this.deps.notifyUser?.(job.userId, t(job.language).aiTools.meta.callFailed);
+        this.deps.notifyUser?.(job.userId, t(job.language as 'en' | 'ru').aiTools.meta.callFailed(job.ttsText));
       }
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
     } catch (error) {
@@ -115,7 +115,7 @@ export class CallManager {
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       voiceLogger.error({ err: error, userId: job.userId }, 'Call failed');
       this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, errorMsg);
-      this.deps.notifyUser?.(job.userId, t(job.language).aiTools.meta.callFailed);
+      this.deps.notifyUser?.(job.userId, t(job.language as 'en' | 'ru').aiTools.meta.callFailed(job.ttsText));
     }
   }
 }

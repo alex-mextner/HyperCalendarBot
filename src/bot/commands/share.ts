@@ -56,11 +56,11 @@ export async function handleShare(
   }
 
   const parts = ctx.args.trim().toLowerCase().split(/\s+/);
-  const command = parts[0];
+  const command = parts[0] ?? '';
 
   // Handle "event <id>" subcommand
   if (command === 'event') {
-    const eventId = Number.parseInt(parts[1], 10);
+    const eventId = Number.parseInt(parts[1] ?? '', 10);
     if (Number.isNaN(eventId)) {
       await showUsageHint(ctx, lang);
       return;

@@ -127,7 +127,7 @@ describe('Pipeline Integration', () => {
 
     const ctx = makeCtx(456);
     const feedbackLayer = createFeedbackRouterLayer(feedbackRepo);
-    const result = await feedbackLayer(ctx, 'yes more details');
+    const result = await feedbackLayer(ctx);
 
     expect(result.handled).toBe(false);
     expect('feedbackContext' in result).toBe(true);

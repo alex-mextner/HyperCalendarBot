@@ -50,7 +50,7 @@ describe('visible events (owned + participated)', () => {
     });
     const events = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(events).toHaveLength(1);
-    expect(events[0].title).toBe('My Event');
+    expect(events[0]!.title).toBe('My Event');
   });
 
   test('getVisibleInRange returns accepted participated events', () => {
@@ -64,7 +64,7 @@ describe('visible events (owned + participated)', () => {
 
     const events = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(events).toHaveLength(1);
-    expect(events[0].title).toBe('Shared Meeting');
+    expect(events[0]!.title).toBe('Shared Meeting');
   });
 
   test('getVisibleInRange excludes declined participated events', () => {
@@ -110,8 +110,8 @@ describe('visible events (owned + participated)', () => {
 
     const events = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(events).toHaveLength(2);
-    expect(events[0].title).toBe('Own Event');
-    expect(events[1].title).toBe('Shared Event');
+    expect(events[0]!.title).toBe('Own Event');
+    expect(events[1]!.title).toBe('Shared Event');
   });
 
   test('getVisibleInRange excludes maybe status', () => {
@@ -249,8 +249,8 @@ describe('acceptInvitation — adds participant', () => {
 
     const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(visible).toHaveLength(1);
-    expect(visible[0].title).toBe('Visible Meeting');
-    expect(visible[0].user_id).toBe(CREATOR);
+    expect(visible[0]!.title).toBe('Visible Meeting');
+    expect(visible[0]!.user_id).toBe(CREATOR);
   });
 
   test('maybe → accept upgrades participant status', () => {
@@ -346,7 +346,7 @@ describe('acceptInvitation — conflict warnings', () => {
     expect(result.success).toBe(true);
     expect(result.conflicts).toBeDefined();
     expect(result.conflicts).toHaveLength(1);
-    expect(result.conflicts![0].title).toBe('Existing Meeting');
+    expect(result.conflicts![0]!.title).toBe('Existing Meeting');
   });
 
   test('returns no conflicts when no overlap', () => {
@@ -449,8 +449,8 @@ describe('calendar views show participated events', () => {
 
     const events = eventService.getEventsInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(events).toHaveLength(2);
-    expect(events[0].event.title).toBe('Team Standup');
-    expect(events[1].event.title).toBe('My Lunch');
+    expect(events[0]!.event.title).toBe('Team Standup');
+    expect(events[1]!.event.title).toBe('My Lunch');
   });
 
   test('getEventsForDay includes participated events', () => {
@@ -528,6 +528,7 @@ describe('invitee deletes shared event = decline', () => {
       user,
       chatId: user.telegram_id,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService: {} as HolidayService,
       chatHistory,
@@ -670,8 +671,8 @@ describe('creator delete notifies participants', () => {
     eventService.deleteEvent(event.id, CREATOR);
 
     expect(notified).toHaveLength(1);
-    expect(notified[0].userIds).toEqual([INVITEE]);
-    expect(notified[0].text).toContain('Team Meeting');
+    expect(notified[0]!.userIds).toEqual([INVITEE]);
+    expect(notified[0]!.text).toContain('Team Meeting');
   });
 
   test('deleteEvent does not fire callback when no accepted participants', () => {
@@ -793,8 +794,8 @@ describe('full shared event lifecycle', () => {
     // 4. Event appears in Bob's calendar
     const afterAccept = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(afterAccept).toHaveLength(1);
-    expect(afterAccept[0].event.title).toBe('Team Standup');
-    expect(afterAccept[0].event.user_id).toBe(ALICE); // Bob sees Alice's event
+    expect(afterAccept[0]!.event.title).toBe('Team Standup');
+    expect(afterAccept[0]!.event.user_id).toBe(ALICE); // Bob sees Alice's event
 
     // 5. Alice edits the event (changes time)
     const updated = eventService.updateEvent(event.id, ALICE, { start_at: '2026-03-20T10:00:00Z' });
@@ -804,7 +805,7 @@ describe('full shared event lifecycle', () => {
     // 6. Bob sees the updated event
     const afterEdit = eventService.getEventsInRange(BOB, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(afterEdit).toHaveLength(1);
-    expect(afterEdit[0].occurrence_start).toBe('2026-03-20T10:00:00Z');
+    expect(afterEdit[0]!.occurrence_start).toBe('2026-03-20T10:00:00Z');
 
     // 7. Bob declines (via handleDeleteEvent, which is what the AI uses)
     const bobUser = userRepo.findByTelegramId(BOB)!;
@@ -812,6 +813,7 @@ describe('full shared event lifecycle', () => {
       user: bobUser,
       chatId: BOB,
       messageText: '',
+      isGroup: false,
       eventService,
       holidayService: {} as HolidayService,
       chatHistory,
@@ -830,7 +832,7 @@ describe('full shared event lifecycle', () => {
     // 9. Event still exists for Alice
     const aliceEvents = eventService.getEventsInRange(ALICE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(aliceEvents).toHaveLength(1);
-    expect(aliceEvents[0].event.title).toBe('Team Standup');
+    expect(aliceEvents[0]!.event.title).toBe('Team Standup');
 
     // 10. Participant status is declined
     const participant = participantRepo.findByEventAndUser(event.id, BOB);

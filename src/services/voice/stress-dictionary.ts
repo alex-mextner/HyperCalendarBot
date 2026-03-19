@@ -43,7 +43,7 @@ export class StressDictionary {
       const startIdx = this.bsearchFirst(prefix);
 
       for (let i = startIdx; i < this.sortedKeys.length && results.length < limit; i++) {
-        const key = this.sortedKeys[i];
+        const key = this.sortedKeys[i]!;
         if (!key.startsWith(prefix)) break;
         if (key !== word) {
           const stressed = this.dict.get(key)!;
@@ -60,7 +60,7 @@ export class StressDictionary {
     let hi = this.sortedKeys.length;
     while (lo < hi) {
       const mid = (lo + hi) >>> 1;
-      if (this.sortedKeys[mid] < prefix) lo = mid + 1;
+      if (this.sortedKeys[mid]! < prefix) lo = mid + 1;
       else hi = mid;
     }
     return lo;

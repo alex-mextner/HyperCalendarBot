@@ -50,9 +50,9 @@ describe('createInlineHandler location auto-update', () => {
     });
 
     expect(updateMock).toHaveBeenCalled();
-    const call = updateMock.mock.calls[0]!;
+    const call = updateMock.mock.calls[0] as unknown as [number, { timezone: string }];
     expect(call[0]).toBe(100);
-    expect((call[1] as { timezone: string }).timezone).toContain('Europe/Belgrade');
+    expect(call[1].timezone).toContain('Europe/Belgrade');
   });
 
   test('does not update timezone when no location', async () => {

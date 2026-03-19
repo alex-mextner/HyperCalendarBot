@@ -6,10 +6,10 @@ import { CalendarProposalRepository } from '../database/repositories/calendar-pr
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import { IntentRepository } from '../database/repositories/intent.repository.ts';
-import type { User } from '../database/types.ts';
+import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
-import type { AgentConfig } from '../services/ai/types.ts';
+import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
@@ -171,7 +171,7 @@ export function createBot(
 
   const checkGroupMembership = async (chatId: number, userId: number): Promise<boolean> => {
     try {
-      const member = await bot.api.getChatMember(chatId, userId);
+      const member = await bot.api.getChatMember({ chat_id: chatId, user_id: userId });
       return !['left', 'kicked'].includes(member.status);
     } catch {
       return false;
@@ -228,7 +228,7 @@ export function createBot(
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as never,
+    callSettingsRepo: db.callSettings as unknown as AgentContext['callSettingsRepo'],
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -335,7 +335,12 @@ export function createBot(
       }
       return next();
     })
-    .use(createSceneCommandEscape(scenesSetup.storage) as never)
+    // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
+    .use(
+      createSceneCommandEscape(
+        scenesSetup.storage as unknown as Parameters<typeof createSceneCommandEscape>[0],
+      ) as never,
+    )
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .use(async (context, next) => {
       const ctx = context as unknown as {
@@ -507,9 +512,9 @@ export function createBot(
             await bot.api.sendMessage({
               chat_id: chatId,
               text,
-              parse_mode: options.parse_mode,
-              ...(options.reply_markup ? { reply_markup: options.reply_markup } : {}),
-            });
+              parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown',
+              ...(options.reply_markup ? { reply_markup: options.reply_markup as Record<string, unknown> } : {}),
+            } as Parameters<typeof bot.api.sendMessage>[0]);
           },
           editMessage: async (chatId: number, messageId: number, text: string, markup?: unknown) => {
             await bot.api
@@ -518,8 +523,8 @@ export function createBot(
                 message_id: messageId,
                 text,
                 parse_mode: 'HTML',
-                ...(markup ? { reply_markup: markup } : {}),
-              })
+                ...(markup ? { reply_markup: markup as Record<string, unknown> } : {}),
+              } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },
         },
@@ -553,7 +558,13 @@ export function createBot(
         },
         {
           proposalRepo: calendarProposalRepo,
-          eventService,
+          eventService: {
+            createEvent: (userId: number, data: Omit<CreateEventData, 'user_id'>) =>
+              eventService.createEvent({ ...data, user_id: userId }),
+            updateEvent: (id: number, userId: number, data: UpdateEventData) =>
+              eventService.updateEvent(id, userId, data),
+            deleteEvent: (id: number, userId: number) => eventService.deleteEvent(id, userId),
+          },
           userRepo: db.users,
           sendMessage: async (chatId: number, text: string) => {
             await bot.api.sendMessage({ chat_id: chatId, text });
@@ -606,9 +617,12 @@ export function createBot(
       createChatMemberHandler(
         db.groupChats,
         (chatId, text) =>
-          bot.api.sendMessage({ chat_id: chatId, text }).catch((err: unknown) => {
-            botLogger.error({ chatId, err: err }, 'Failed to send group welcome');
-          }),
+          bot.api
+            .sendMessage({ chat_id: chatId, text })
+            .catch((err: unknown) => {
+              botLogger.error({ chatId, err: err }, 'Failed to send group welcome');
+            })
+            .then(() => {}),
         (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru',
         async (chatId) => {
           try {

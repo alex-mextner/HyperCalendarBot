@@ -6,6 +6,7 @@ import {
   callerDeriveKey,
   callerInitExchange,
   type DhConfig,
+  DiscardReason,
 } from '../voice-call/dh-exchange';
 import { voiceLogger } from './types';
 
@@ -130,7 +131,7 @@ export class CallSignaling {
   }
 
   async discardCall(callId: bigint, accessHash: bigint): Promise<void> {
-    const payload = buildDiscardCallPayload({ id: callId, accessHash }, 'phoneCallDiscardReasonHangup');
+    const payload = buildDiscardCallPayload({ id: callId, accessHash }, DiscardReason.Hangup);
     await this.deps.callRaw(payload as unknown as Record<string, unknown>);
     this.pendingExchange = null;
   }

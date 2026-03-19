@@ -181,8 +181,8 @@ export function resolveVariables(
 
     // If the entire string is a single variable (no filter), return the raw resolved value
     // (preserves non-string types like numbers)
-    if (matches.length === 1 && template === `{{${matches[0][1]}}}` && !matches[0][1].includes('|')) {
-      const resolved = resolveVar(matches[0][1]!.trim(), captures, userCtx, stepResults, i18n);
+    if (matches.length === 1 && template === `{{${matches[0]![1]}}}` && !matches[0]![1]!.includes('|')) {
+      const resolved = resolveVar(matches[0]![1]!.trim(), captures, userCtx, stepResults, i18n);
       return resolved !== undefined ? resolved : template;
     }
 

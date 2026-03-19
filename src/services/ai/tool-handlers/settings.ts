@@ -51,7 +51,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
       const settings = ctx.sharingSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
-        const { user_id: _uid, updated_at: _uat, ...rest } = settings as Record<string, unknown>;
+        const { user_id: _uid, updated_at: _uat, ...rest } = settings as unknown as Record<string, unknown>;
         result.privacy = rest;
       }
     }

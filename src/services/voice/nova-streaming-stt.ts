@@ -47,7 +47,23 @@ export class NovaStreamingSTT {
       }
     };
 
-    this.ws.onerror = () => events.onError(new Error('Nova-3 WebSocket error'));
+    let errorFired = false;
+    const fireError = (err: Error) => {
+      if (errorFired) return;
+      errorFired = true;
+      events.onError(err);
+    };
+
+    this.ws.onerror = (event: Event) => {
+      const msg = (event as ErrorEvent).message ?? 'unknown';
+      fireError(new Error(`Nova-3 WebSocket error: ${msg} (readyState=${this.ws?.readyState})`));
+    };
+
+    this.ws.onclose = (event: CloseEvent) => {
+      if (event.code !== 1000) {
+        fireError(new Error(`Nova-3 WebSocket closed: code=${event.code} reason=${event.reason || '(none)'}`));
+      }
+    };
   }
 
   sendAudio(pcm: Buffer): void {

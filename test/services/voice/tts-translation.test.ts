@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { afterAll, describe, expect, mock, test } from 'bun:test';
 
 // Mock Anthropic before importing TtsTranslationService
 const mockCreate = mock(() =>
@@ -15,6 +15,8 @@ mock.module('@anthropic-ai/sdk', () => ({
 
 const { TtsTranslationService } = await import('../../../src/services/voice/tts-translation');
 
+afterAll(() => mock.restore());
+
 describe('TtsTranslationService', () => {
   test('translate calls Anthropic and returns translated text', async () => {
     const service = new TtsTranslationService();
@@ -26,11 +28,13 @@ describe('TtsTranslationService', () => {
   test('translate passes correct model and system prompt', async () => {
     const service = new TtsTranslationService();
     await service.translate('Good morning', 'ru');
-    const callArgs = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]![0];
-    expect(callArgs.model).toBe('claude-haiku-4-5-20251001');
-    expect(callArgs.system).toContain('ru');
-    expect(callArgs.system).toContain('translator');
-    expect(callArgs.messages[0].content).toBe('Good morning');
+    const callArgs = (
+      mockCreate.mock.calls[mockCreate.mock.calls.length - 1] as unknown as [Record<string, unknown>]
+    )[0];
+    expect((callArgs as { model: string }).model).toBe('claude-haiku-4-5-20251001');
+    expect((callArgs as { system: string }).system).toContain('ru');
+    expect((callArgs as { system: string }).system).toContain('translator');
+    expect((callArgs as { messages: { content: string }[] }).messages[0]!.content).toBe('Good morning');
   });
 
   test('translate caches results — second call does not call Anthropic', async () => {
