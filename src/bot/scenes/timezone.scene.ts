@@ -1,30 +1,59 @@
 // src/bot/scenes/timezone.scene.ts
 import { Scene } from '@gramio/scenes';
+import { InlineKeyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
+import { botLogger } from '../../utils/logger.ts';
+import { buildGeneralView } from '../commands/settings.ts';
 import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface TimezoneState {
   detectedTz?: string;
+  cityInputMode?: boolean;
 }
+
+interface TimezoneParams {
+  settingsMsgId: number;
+  settingsChatId: number;
+}
+
+type BotApiCtx = {
+  bot: { api: { editMessageText: (p: Record<string, unknown>) => Promise<unknown> } };
+};
+
+type MsgCtx = { delete: () => Promise<unknown> };
 
 export function createTimezoneScene(db: DatabaseService) {
   return new Scene('timezone')
     .state<TimezoneState>()
+    .params<TimezoneParams>()
     .onEnter(async (context) => {
       const lang = getSceneLang(context);
       const user = getSceneUser(context);
       if (!user) return;
 
       const display = getTimezoneDisplay(user.timezone);
-      const current = lang === 'ru' ? `🌍 Текущий: ${display}\n\n` : `🌍 Current: ${display}\n\n`;
-      // Prepend current timezone to the shared city input prompt (strip leading 🌍 icon)
-      const prompt = current + cityInputPrompt(lang).replace(/^🌍 /, '');
+      const chooserText =
+        lang === 'ru'
+          ? `🌍 Текущий: ${display}\n\nВыбери способ изменения:`
+          : `🌍 Current: ${display}\n\nChoose how to change:`;
 
-      await context.send(prompt, { reply_markup: timezoneMethodKeyboard(lang) });
+      const chooserKb = new InlineKeyboard()
+        .text(lang === 'ru' ? '🎹 Написать город' : '🎹 Type city', CB.TZ_TYPE_CITY)
+        .text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
+
+      // onEnter is called from stg:change_tz callback_query — editText replaces the settings message
+      const cbCtx = context as unknown as {
+        editText: (text: string, opts?: unknown) => Promise<unknown>;
+      };
+      await cbCtx.editText(chooserText, { reply_markup: chooserKb });
+
+      // Show geo request via reply keyboard (bottom of screen)
+      const geoHint = lang === 'ru' ? '📍 Или поделись геолокацией:' : '📍 Or share your location:';
+      await context.send(geoHint, { reply_markup: timezoneMethodKeyboard(lang) });
     })
     .step(['message', 'location', 'callback_query'], async (context) => {
       const user = getSceneUser(context);
@@ -33,9 +62,12 @@ export function createTimezoneScene(db: DatabaseService) {
         return;
       }
       const lang = getSceneLang(context);
+      const params = context.scene.params as TimezoneParams;
+      const { cityInputMode } = context.scene.state;
 
-      // Handle typed city name
+      // Handle typed city name (only after entering city input mode)
       if (context.is('message')) {
+        if (!cityInputMode) return;
         const text = (context as unknown as { text?: string }).text?.trim();
         if (!text) return;
         const tz = await resolveCity(text);
@@ -47,14 +79,14 @@ export function createTimezoneScene(db: DatabaseService) {
         } else {
           const msg =
             lang === 'ru'
-              ? 'Не удалось определить таймзону. Попробуйте ещё раз или:\n• Отправьте 📍 геолокацию\n• Введите код напрямую, например: <code>Europe/Belgrade</code>\n  Список: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
-              : 'Could not determine timezone. Try again or:\n• Share 📍 location\n• Enter code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
+              ? 'Не удалось определить таймзону. Попробуй ещё раз или:\n• Введи код напрямую, например: <code>Europe/Belgrade</code>\n  Список: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
+              : 'Could not determine timezone. Try again or:\n• Enter code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
           await context.send(msg, { parse_mode: 'HTML' });
         }
         return;
       }
 
-      // Handle location
+      // Handle location shared via reply keyboard
       if (context.is('location')) {
         const { latitude, longitude } = (
           context as unknown as { eventLocation: { latitude: number; longitude: number } }
@@ -62,7 +94,6 @@ export function createTimezoneScene(db: DatabaseService) {
         const tz = resolveTimezone(latitude, longitude);
         const display = getTimezoneDisplay(tz);
         await context.send(`✅ ${display}`, {
-          ...removeKeyboard(),
           reply_markup: timezoneConfirmKeyboard(lang),
         });
         await context.scene.update({ detectedTz: tz }, { step: undefined });
@@ -77,24 +108,70 @@ export function createTimezoneScene(db: DatabaseService) {
         const action = parts[0];
         const cbCtx = context as unknown as {
           answer: () => Promise<unknown>;
+          editText: (text: string, opts?: unknown) => Promise<unknown>;
         };
 
+        // Enter city input mode
+        if (action === CB.TZ_TYPE_CITY) {
+          await cbCtx.answer();
+          const display = getTimezoneDisplay(user.timezone);
+          const header = lang === 'ru' ? `🌍 Текущий: ${display}\n\n` : `🌍 Current: ${display}\n\n`;
+          const promptText = header + cityInputPrompt(lang).replace(/^🌍 /, '');
+          const cancelKb = new InlineKeyboard().text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
+          await cbCtx.editText(promptText, { reply_markup: cancelKb });
+          // Remove geo reply keyboard by sending the city prompt hint (visible + removes keyboard)
+          await context.send(cityInputPrompt(lang), removeKeyboard());
+          await context.scene.update({ cityInputMode: true }, { step: undefined });
+          return;
+        }
+
+        // Cancel — restore general settings
+        if (action === CB.TZ_CANCEL) {
+          await cbCtx.answer();
+          await context.scene.exit();
+          const { text: settingsText, kb: settingsKb } = buildGeneralView(user);
+          await cbCtx.editText(settingsText, { reply_markup: settingsKb });
+          // Remove geo reply keyboard only if we never entered city input mode
+          if (!cityInputMode) {
+            const tempMsg = await context.send('.', removeKeyboard());
+            (tempMsg as unknown as MsgCtx).delete().catch((err: unknown) => {
+              botLogger.warn({ err }, 'tz scene: failed to delete temp remove-keyboard message');
+            });
+          }
+          return;
+        }
+
+        // Confirm — save timezone, update settings message
         if (action === CB.ONBOARD_TZ) {
           const pendingTz = context.scene.state.detectedTz;
           if (!pendingTz) {
             await cbCtx.answer();
             return;
           }
-          db.users.update(user.telegram_id, { timezone: pendingTz });
+          const updatedUser = db.users.update(user.telegram_id, { timezone: pendingTz });
           await context.scene.exit();
-          await context.send(`✅ ${getTimezoneDisplay(pendingTz)}`, removeKeyboard());
+          // Edit the confirm message to show success
+          await cbCtx.editText(`✅ ${getTimezoneDisplay(pendingTz)}`);
+          // Restore general settings in the original settings message
+          if (updatedUser && params.settingsMsgId && params.settingsChatId) {
+            const { text: settingsText, kb: settingsKb } = buildGeneralView(updatedUser);
+            const bot = (context as unknown as BotApiCtx).bot;
+            await bot.api.editMessageText({
+              chat_id: params.settingsChatId,
+              message_id: params.settingsMsgId,
+              text: settingsText,
+              reply_markup: settingsKb,
+            });
+          }
           await cbCtx.answer();
           return;
         }
 
+        // Retry — delete the confirm message, user can type another city
         if (action === CB.ONBOARD_TZ_RETRY) {
           await cbCtx.answer();
-          await context.send(cityInputPrompt(lang), { reply_markup: timezoneMethodKeyboard(lang) });
+          const msg = (context as unknown as { message?: MsgCtx }).message;
+          await msg?.delete();
           return;
         }
 

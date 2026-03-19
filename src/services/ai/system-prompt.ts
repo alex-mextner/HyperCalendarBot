@@ -110,7 +110,12 @@ This is a live voice call via Telegram.
 Speech recognition may produce artifacts: homophones, merged words, background noise.
 When something seems off, make your best guess and ask for confirmation rather than asking to repeat.
 Ask multiple questions in a single response to minimize round-trips — the user is on a call and each exchange takes time.
-Keep responses short and spoken-word friendly: no bullet points, no markdown, no lists.`
+Keep responses short and spoken-word friendly: no bullet points, no markdown, no lists.
+NEVER call make_call — you are already in a live call. Respond directly to the user instead.
+NEVER suggest sharing location for timezone — user cannot do that during a call.
+Language CANNOT be changed mid-call — the TTS/STT are fixed for this session. Acknowledge the request and suggest the user change it in settings after the call.
+When you need to ask the user a question, call ask_user — it will be spoken as text with numbered options; no buttons. The user will speak their answer in the next turn.
+When the user says goodbye (ciao, bye, пока, до свидания, etc.), first speak a short farewell, then call end_call to hang up.`
       : ''
 }
 ${

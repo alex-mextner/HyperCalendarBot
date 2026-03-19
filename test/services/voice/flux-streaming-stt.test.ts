@@ -33,22 +33,40 @@ test('emits onStartOfTurn when Flux sends StartOfTurn event', () => {
   const onStartOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn, onEndOfTurn: () => {}, onInterim: () => {}, onError: () => {} });
 
-  ws.onmessage?.({ data: JSON.stringify({ type: 'ListenV2TurnInfo', event: 'StartOfTurn' }) });
+  ws.onmessage?.({ data: JSON.stringify({ type: 'TurnInfo', event: 'StartOfTurn' }) });
 
   expect(onStartOfTurn).toHaveBeenCalledTimes(1);
 });
 
-test('emits onEndOfTurn when Flux sends EndOfTurn event', () => {
+test('emits onEndOfTurn with confidence and final transcript', () => {
   const ws = makeWsMock();
   const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
   const onEndOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn, onInterim: () => {}, onError: () => {} });
 
   ws.onmessage?.({
-    data: JSON.stringify({ type: 'ListenV2TurnInfo', event: 'EndOfTurn', end_of_turn_confidence: 0.85 }),
+    data: JSON.stringify({
+      type: 'TurnInfo',
+      event: 'EndOfTurn',
+      end_of_turn_confidence: 0.85,
+      transcript: 'hello world',
+    }),
   });
 
-  expect(onEndOfTurn).toHaveBeenCalledWith(0.85);
+  expect(onEndOfTurn).toHaveBeenCalledWith(0.85, 'hello world');
+});
+
+test('emits onEndOfTurn with empty string when no transcript', () => {
+  const ws = makeWsMock();
+  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const onEndOfTurn = mock(() => {});
+  stt.connect({ onStartOfTurn: () => {}, onEndOfTurn, onInterim: () => {}, onError: () => {} });
+
+  ws.onmessage?.({
+    data: JSON.stringify({ type: 'TurnInfo', event: 'EndOfTurn', end_of_turn_confidence: 0.72 }),
+  });
+
+  expect(onEndOfTurn).toHaveBeenCalledWith(0.72, '');
 });
 
 test('emits onInterim for regular transcript', () => {
@@ -59,7 +77,7 @@ test('emits onInterim for regular transcript', () => {
 
   ws.onmessage?.({
     data: JSON.stringify({
-      type: 'ListenV2TurnInfo',
+      type: 'TurnInfo',
       event: 'Update',
       transcript: 'hello',
     }),

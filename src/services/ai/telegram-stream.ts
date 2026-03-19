@@ -54,14 +54,30 @@ export class TelegramStreamWriter {
   private pendingIndicators: string[] = [];
   private intermediateChunks: string[] = [];
   private plainResponseText = '';
+  private userTranscript: string | undefined;
 
   constructor(
     private sender: TelegramSender,
     private chatId: number,
     private lang: string = 'en',
-  ) {}
+    opts?: { userTranscript?: string; existingMessageId?: number },
+  ) {
+    this.userTranscript = opts?.userTranscript;
+    this.messageId = opts?.existingMessageId ?? null;
+  }
 
   async init(): Promise<void> {
+    if (this.messageId !== null) {
+      // Reuse existing listening indicator message — already visible in chat
+      return;
+    }
+    if (this.userTranscript !== undefined) {
+      // Live call without pre-created message: send transcript header
+      const header = escapeHtml(this.userTranscript || '…');
+      const result = await this.sender.sendMessage(this.chatId, `📞 👤 ${header}`, 'HTML');
+      this.messageId = result.message_id;
+      return;
+    }
     const result = await this.sender.sendMessage(this.chatId, '⏳');
     this.messageId = result.message_id;
   }
@@ -72,6 +88,10 @@ export class TelegramStreamWriter {
 
   getText(): string {
     return this.plainResponseText || this.text;
+  }
+
+  getPlainText(): string {
+    return this.plainResponseText;
   }
 
   setToolLabel(toolName: string, input?: Record<string, unknown>): void {
@@ -171,12 +191,20 @@ export class TelegramStreamWriter {
 
     const finalResponse = this.plainResponseText ? markdownToHtml(this.text) : '...';
 
-    // Build expandable blockquote with ALL intermediate reasoning + tools
-    let finalText = finalResponse;
-    if (this.intermediateChunks.length > 0) {
-      const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
-      const body = this.intermediateChunks.join('\n');
-      finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+    let finalText: string;
+    if (this.userTranscript !== undefined) {
+      // Live call: everything in one collapsed blockquote (transcript + tools + bot reply)
+      const toolsBlock = this.intermediateChunks.length > 0 ? `\n${this.intermediateChunks.join('\n')}` : '';
+      const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
+      finalText = `<blockquote>📞\n👤 ${escapeHtml(this.userTranscript || '…')}${toolsBlock}${botReply}</blockquote>`;
+    } else {
+      // Build expandable blockquote with ALL intermediate reasoning + tools
+      finalText = finalResponse;
+      if (this.intermediateChunks.length > 0) {
+        const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
+        const body = this.intermediateChunks.join('\n');
+        finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+      }
     }
 
     const chunks = splitMessage(finalText, MAX_MESSAGE_LENGTH);

@@ -1,24 +1,15 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { createTimezoneScene } from '../../../src/bot/scenes/timezone.scene.ts';
+import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 
 function makeDb() {
   return {
     users: {
-      update: mock(() => {}),
+      update: () => null,
+      findByTelegramId: () => null,
     },
   } as unknown as DatabaseService;
-}
-
-function makeContext(overrides: Record<string, unknown> = {}) {
-  return {
-    dbUser: { telegram_id: 1, language: 'ru' as const, timezone: 'Europe/Moscow' },
-    scene: {
-      exit: mock(() => Promise.resolve()),
-    },
-    send: mock(() => Promise.resolve()),
-    ...overrides,
-  };
 }
 
 describe('createTimezoneScene', () => {
@@ -27,21 +18,15 @@ describe('createTimezoneScene', () => {
     expect(scene.name).toBe('timezone');
   });
 
-  test('onEnter sends two messages with keyboards', async () => {
+  test('has one step for message/location/callback handling', () => {
     const scene = createTimezoneScene(makeDb());
-    const ctx = makeContext();
+    expect(scene.stepsCount).toBe(1);
+  });
+});
 
-    // Access the onEnter handler via the internal handlers list
-    // @ts-expect-error accessing internal scene handlers for testing
-    const enterHandlers: ((ctx: unknown) => Promise<void>)[] = scene._enterHandlers ?? scene.enterHandlers ?? [];
-
-    if (enterHandlers.length === 0) {
-      // GramIO doesn't expose onEnter handlers directly — test module load only
-      expect(scene.name).toBe('timezone');
-      return;
-    }
-
-    await enterHandlers[0]!(ctx);
-    expect(ctx.send).toHaveBeenCalledTimes(2);
+describe('CB.TZ_TYPE_CITY', () => {
+  test('is defined and distinct from TZ_CANCEL', () => {
+    expect(CB.TZ_TYPE_CITY).toBeDefined();
+    expect(CB.TZ_TYPE_CITY).not.toBe(CB.TZ_CANCEL);
   });
 });

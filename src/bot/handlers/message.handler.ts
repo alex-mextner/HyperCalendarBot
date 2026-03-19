@@ -392,10 +392,21 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
   };
 }
 
+export function stripJsonFences(raw: string): string {
+  return raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```\s*$/, '')
+    .trim();
+}
+
+const INTENT_EDIT_MAX_TOKENS = 2048;
+
 const INTENT_EDIT_SYSTEM_PROMPT = `You are a JSON editor for intent objects.
 Given a current intent JSON and admin instructions, return ONLY a valid JSON object with updated fields.
 Only include fields that should change: phrases (string[]), trigger_words (string[]), pattern (string|null), workflow (object), format (string).
-Do not include id, canonical_name, status, source_message, created_at.`;
+Do not include id, canonical_name, status, source_message, created_at.
+IMPORTANT: Return raw JSON only — no markdown, no code fences, no backticks, no explanation.
+Your response budget is ${INTENT_EDIT_MAX_TOKENS} tokens. The largest intents are ~820 tokens. Always emit complete, valid JSON — never truncate.`;
 
 async function handleIntentEditInstruction(
   ctx: BotCommandContext,
@@ -423,45 +434,67 @@ async function handleIntentEditInstruction(
     format: intent.format,
   });
 
-  try {
-    const apiKey = deps.aiApiKey ?? '';
-    const baseUrl = deps.aiBaseUrl ?? 'https://api.anthropic.com';
+  const MAX_RETRIES = 3;
+  let updated: Partial<{
+    phrases: string[];
+    trigger_words: string[];
+    pattern: string | null;
+    workflow: Record<string, unknown>;
+    format: string;
+  }> | null = null;
+  let lastError: unknown;
 
-    const response = await fetch(`${baseUrl}/v1/messages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1024,
-        system: INTENT_EDIT_SYSTEM_PROMPT,
-        messages: [
-          {
-            role: 'user',
-            content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
-          },
-        ],
-      }),
-    });
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    let rawText: string | undefined;
+    try {
+      const apiKey = deps.aiApiKey ?? '';
+      const baseUrl = deps.aiBaseUrl ?? 'https://api.anthropic.com';
 
-    if (!response.ok) {
-      throw new Error(`AI API error: ${response.status}`);
+      const response = await fetch(`${baseUrl}/v1/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: INTENT_EDIT_MAX_TOKENS,
+          system: INTENT_EDIT_SYSTEM_PROMPT,
+          messages: [
+            {
+              role: 'user',
+              content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
+            },
+          ],
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`AI API error: ${response.status}`);
+      }
+
+      const data = (await response.json()) as { content: { type: string; text: string }[] };
+      rawText = data.content.find((c) => c.type === 'text')?.text;
+      if (!rawText) throw new Error('Empty AI response');
+
+      const text = stripJsonFences(rawText);
+      updated = JSON.parse(text) as Partial<{
+        phrases: string[];
+        trigger_words: string[];
+        pattern: string | null;
+        workflow: Record<string, unknown>;
+        format: string;
+      }>;
+      break;
+    } catch (err) {
+      lastError = err;
+      cmdLogger.warn({ err, attempt, rawAiResponse: rawText }, 'Intent edit attempt failed, retrying');
     }
+  }
 
-    const data = (await response.json()) as { content: { type: string; text: string }[] };
-    const text = data.content.find((c) => c.type === 'text')?.text;
-    if (!text) throw new Error('Empty AI response');
-
-    const updated = JSON.parse(text) as Partial<{
-      phrases: string[];
-      trigger_words: string[];
-      pattern: string | null;
-      workflow: Record<string, unknown>;
-      format: string;
-    }>;
+  try {
+    if (!updated) throw lastError;
 
     intentRepo.update(session.intentId, {
       ...(updated.phrases !== undefined && { phrases: JSON.stringify(updated.phrases) }),

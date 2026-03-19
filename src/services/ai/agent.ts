@@ -6,7 +6,7 @@ import { createAnthropicClient } from './anthropic-client.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
-import { toolDefinitions } from './tools.ts';
+import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
@@ -40,6 +40,7 @@ export interface AgentRunResult {
   responseText: string;
   toolCalls: AgentToolCallRecord[];
   toolResults: AgentToolResultRecord[];
+  endCall?: boolean;
 }
 
 export class CalendarBotAgent {
@@ -109,7 +110,9 @@ export class CalendarBotAgent {
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
     ctx.sender = this.sender;
-    const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language);
+    const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language, {
+      userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
+    });
     await writer.init();
 
     this.saveUserMessage(ctx);
@@ -144,7 +147,7 @@ export class CalendarBotAgent {
               },
             ],
             messages: currentMessages,
-            tools: toolDefinitions,
+            tools: getToolDefinitions(ctx.inputMode),
           });
 
         let stream: ReturnType<typeof streamRequest>;
@@ -233,7 +236,12 @@ export class CalendarBotAgent {
               this.saveToolResults(ctx, toolResults);
               writer.commitIntermediate();
               await writer.finalize();
-              return { responseText: writer.getText(), toolCalls: allToolCalls, toolResults: allToolResults };
+              return {
+                responseText: ctx.inputMode === 'live_call' ? writer.getPlainText() : writer.getText(),
+                toolCalls: allToolCalls,
+                toolResults: allToolResults,
+                endCall: ctx.callEndRequested === true,
+              };
             }
           }
         }
@@ -282,6 +290,11 @@ export class CalendarBotAgent {
       ctx.onBotResponse(msgId);
     }
 
-    return { responseText: writer.getText(), toolCalls: allToolCalls, toolResults: allToolResults };
+    return {
+      responseText: ctx.inputMode === 'live_call' ? writer.getPlainText() : writer.getText(),
+      toolCalls: allToolCalls,
+      toolResults: allToolResults,
+      endCall: ctx.callEndRequested === true,
+    };
   }
 }

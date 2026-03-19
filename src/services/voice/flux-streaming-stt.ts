@@ -1,6 +1,6 @@
 export interface FluxStreamingSTTEvents {
   onStartOfTurn: () => void;
-  onEndOfTurn: (confidence: number) => void;
+  onEndOfTurn: (confidence: number, transcript: string) => void;
   onInterim: (transcript: string) => void;
   onError: (err: Error) => void;
 }
@@ -30,7 +30,6 @@ export class FluxStreamingSTT {
       eot_timeout_ms: '5000',
       encoding: 'linear16',
       sample_rate: '16000',
-      interim_results: 'true',
     });
     const url = `wss://api.deepgram.com/v2/listen?${params}`;
     const createWs =
@@ -39,21 +38,25 @@ export class FluxStreamingSTT {
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
+        // Flux uses ListenV2TurnInfo with an `event` sub-field; connection
+        // confirmation arrives as ListenV2Connected (ignored here).
         const data = JSON.parse(event.data as string) as {
           type?: string;
+          event?: string;
+          transcript?: string;
           end_of_turn_confidence?: number;
-          is_final?: boolean;
-          channel?: { alternatives?: { transcript: string }[] };
         };
-        if (data.type === 'StartOfTurn') {
+        if (data.type !== 'TurnInfo') return;
+        if (data.event === 'StartOfTurn') {
           events.onStartOfTurn();
           return;
         }
-        if (data.type === 'EndOfTurn') {
-          events.onEndOfTurn(data.end_of_turn_confidence ?? 1.0);
+        if (data.event === 'EndOfTurn') {
+          events.onEndOfTurn(data.end_of_turn_confidence ?? 1.0, data.transcript ?? '');
           return;
         }
-        const transcript = data.channel?.alternatives?.[0]?.transcript ?? '';
+        // Update / EagerEndOfTurn — emit interim transcript
+        const transcript = data.transcript ?? '';
         if (transcript) events.onInterim(transcript);
       } catch {
         // non-JSON keepalive

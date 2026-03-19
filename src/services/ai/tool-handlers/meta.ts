@@ -145,6 +145,15 @@ export function handleUpdateContact(
 }
 
 export function handleAskUser(ctx: AgentContext, input: { question: string; options: string[] }): ToolResult {
+  if (ctx.inputMode === 'live_call') {
+    // During a call, no buttons — speak the question with options as numbered list
+    const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');
+    return {
+      success: true,
+      output: `${input.question} Options: ${optionText}`,
+      stopLoop: true,
+    };
+  }
   if (!ctx.sender?.sendButtons) {
     return { success: false, error: 'Buttons not supported.' };
   }
@@ -222,7 +231,22 @@ export function handleRenderWeekImage(
   return { success: true, output: t(ctx.user.language).aiTools.meta.weekImageNotImplemented(input.week_start) };
 }
 
+export function handleEndCall(ctx: AgentContext): ToolResult {
+  if (ctx.inputMode !== 'live_call') {
+    return { success: false, error: 'end_call is only available during a live phone call.' };
+  }
+  ctx.callEndRequested = true;
+  return { success: true, output: 'Call will end after the current response is spoken.' };
+}
+
 export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
+  if (ctx.inputMode === 'live_call') {
+    metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: attempted during live call, blocked');
+    return {
+      success: false,
+      error: 'Cannot schedule a call while already on a live call. Just respond to the user directly.',
+    };
+  }
   if (!ctx.callQueue) {
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
     return {

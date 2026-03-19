@@ -12,9 +12,9 @@ const db = createDatabase(config.DATABASE_PATH);
 
 // Mutable ref — patched after bot creation
 const botRef: {
-  sendMessage: (telegramId: number, text: string) => Promise<{ message_id: number }>;
+  sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
-  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
@@ -206,11 +206,11 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
       botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
     }
 
-    // Minimal TelegramSender for voice calls — text responses go through TTS,
-    // but tools that send Telegram messages (ask_user, etc.) still need a real sender.
+    // TelegramSender for voice calls — forwards to botRef which wraps bot.api.
+    // Used for: call protocol messages (listening indicator, blockquote), ask_user, etc.
     const voiceSender: import('./services/ai/types.ts').TelegramSender = {
-      sendMessage: (chatId: number, text: string) => botRef.sendMessage(chatId, text),
-      editMessageText: async () => {},
+      sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
+      editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
     const voiceAgent = new CalendarBotAgent(
       { apiKey: config.ANTHROPIC_API_KEY, baseUrl: config.AI_BASE_URL, model: config.AI_MODEL },
@@ -219,6 +219,39 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
 
     const voiceEventService = new EventService(db.events, db.reminders);
     const voiceHolidayService = new HolidayService(db.holidays);
+
+    const { markStress, numbersToWords } = await import('./services/voice/stress-marker.ts');
+
+    // Language-aware TTS adapter: Silero (RU) → Kokoro (EN) → Google fallback.
+    // All four outer variables (sileroTts, kokoroTts, stressDictionary, fallbackTts) are
+    // module-level lets/consts initialized later; closures resolve them at call time.
+    const voiceCallTts = {
+      synthesize: async (text: string, lang: string): Promise<Buffer> => {
+        const clean = text.replace(/\n/g, ' ');
+        if (lang === 'ru' && sileroTts && stressDictionary) {
+          try {
+            const stressedText = markStress(numbersToWords(clean), stressDictionary);
+            botLogger.info({ engine: 'silero', lang }, 'Voice call TTS');
+            return await sileroTts.synthesize(stressedText);
+          } catch (err) {
+            botLogger.warn({ err }, 'Silero TTS failed, falling back to Google');
+          }
+        } else if (lang === 'en' && kokoroTts) {
+          try {
+            botLogger.info({ engine: 'kokoro', lang }, 'Voice call TTS');
+            return await kokoroTts.synthesize(clean);
+          } catch (err) {
+            botLogger.warn({ err }, 'Kokoro TTS failed, falling back to Google');
+          }
+        } else {
+          botLogger.info(
+            { engine: 'google', lang, sileroAvailable: !!sileroTts, kokoroAvailable: !!kokoroTts },
+            'Voice call TTS',
+          );
+        }
+        return fallbackTts.synthesize(clean, lang);
+      },
+    };
 
     const callSessionManager = new CallSessionManager({
       createSession: (sessionId, userId, language, ws) =>
@@ -231,9 +264,10 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
           createFluxStt: () => new FluxStreamingSTT(DEEPGRAM_API_KEY),
           createThinkingPlayer: () => new ThinkingPhrasePlayer(language),
           agent: voiceAgent,
-          tts: fallbackTts,
+          tts: voiceCallTts,
           openerText: language === 'ru' ? 'Привет! Чем могу помочь?' : 'Hello! How can I help you?',
           agentContextBase: {
+            sender: voiceSender,
             eventService: voiceEventService,
             chatHistory: db.chatHistory,
             userRepo: db.users,
@@ -496,12 +530,21 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   );
 
 // Patch bot ref to use real bot API
-botRef.sendMessage = async (telegramId, text) => {
-  const msg = await bot.api.sendMessage({ chat_id: telegramId, text });
+botRef.sendMessage = async (telegramId, text, parseMode) => {
+  const msg = await bot.api.sendMessage({
+    chat_id: telegramId,
+    text,
+    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+  });
   return { message_id: msg.message_id };
 };
-botRef.editMessage = async (chatId, messageId, text) => {
-  await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
+botRef.editMessage = async (chatId, messageId, text, parseMode) => {
+  await bot.api.editMessageText({
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+  });
 };
 botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });

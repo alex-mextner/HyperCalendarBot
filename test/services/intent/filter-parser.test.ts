@@ -153,4 +153,20 @@ describe('applyFilters', () => {
     expect(applyFilters('8', parseFilterChain('add(12)|pad(2)'))).toBe('20');
     expect(applyFilters('9', parseFilterChain('add(12)|pad(2)'))).toBe('21');
   });
+
+  test('eq("match","a","b") returns a when value equals match', () => {
+    expect(applyFilters('ru', parseFilterChain('eq("ru","en","ru")'))).toBe('en');
+  });
+
+  test('eq("match","a","b") returns b when value does not equal match', () => {
+    expect(applyFilters('en', parseFilterChain('eq("ru","en","ru")'))).toBe('ru');
+  });
+
+  test('eq coerces value to string for comparison', () => {
+    expect(applyFilters(42, parseFilterChain('eq("42","yes","no")'))).toBe('yes');
+  });
+
+  test('eq is chainable', () => {
+    expect(applyFilters('ru', parseFilterChain('eq("ru","en","ru")|upper'))).toBe('EN');
+  });
 });

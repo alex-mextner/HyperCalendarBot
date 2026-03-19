@@ -286,6 +286,16 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'end_call',
+    description:
+      'End the current live phone call. Use ONLY during a live_call session when the user says goodbye (ciao, bye, пока, до свидания, etc.) or explicitly asks to hang up. Speak a short farewell first, then call this tool.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
     name: 'make_call',
     description:
       'Make a voice call to the user with a spoken message (TTS). Use when the user asks you to call them. If this tool returns an error, tell the user voice calls are temporarily unavailable — do NOT suggest changing settings, the issue is server-side.',
@@ -919,3 +929,15 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
     },
   },
 ];
+
+// Tools not available during a live call (no visual output, no Telegram UI)
+const CALL_EXCLUDED_TOOLS = new Set(['make_call', 'render_day_image', 'render_week_image', 'pick_users']);
+// Tools only available during a live call
+const CALL_ONLY_TOOLS = new Set(['end_call']);
+
+export function getToolDefinitions(inputMode?: string): ToolDefinition[] {
+  if (inputMode === 'live_call') {
+    return toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
+  }
+  return toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
+}

@@ -92,10 +92,27 @@ export class CallManager {
         stderr: 'pipe',
       });
 
-      const errors = await new Response(proc.stderr).text();
-      const exitCode = await proc.exited;
+      // Stream stderr line-by-line in real-time so debug logs appear during the call
+      const stderrTask = (async () => {
+        if (!proc.stderr) return;
+        const reader = proc.stderr.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() ?? '';
+          for (const line of lines) {
+            if (line.trim()) voiceLogger.debug({ line }, 'Bridge stderr');
+          }
+        }
+        if (buf.trim()) voiceLogger.debug({ line: buf }, 'Bridge stderr');
+      })();
 
-      if (errors) voiceLogger.warn({ stderr: errors.slice(0, 200) }, 'Bridge stderr');
+      const exitCode = await proc.exited;
+      await stderrTask;
       voiceLogger.info({ exitCode, userId: job.userId }, 'Bridge exited');
 
       // Cleanup

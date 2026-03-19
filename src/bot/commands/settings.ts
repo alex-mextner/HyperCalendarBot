@@ -70,6 +70,27 @@ export function buildGeneralText(
   ].join('\n');
 }
 
+export function buildGeneralView(user: User): { text: string; kb: InlineKeyboard } {
+  const tzDisplay = getTimezoneDisplay(user.timezone);
+  const lang = user.language ?? 'en';
+  const country = user.country_code ?? '—';
+  const duration = user.default_event_duration_minutes ?? 60;
+  const durationLabel = duration >= 60 && duration % 60 === 0 ? `${duration / 60}ч` : `${duration} мин`;
+  const text = buildGeneralText(tzDisplay, lang, country, duration);
+  const kb = new InlineKeyboard()
+    .text('🕐 Часовой пояс', 'stg:change_tz')
+    .row()
+    .text(lang === 'ru' ? '✅ 🇷🇺 Русский' : '🇷🇺 Русский', 'stg:set_lang:ru')
+    .text(lang === 'en' ? '✅ 🇬🇧 English' : '🇬🇧 English', 'stg:set_lang:en')
+    .row()
+    .text('🏳️ Страна', 'stg:show_countries')
+    .row()
+    .text(`⏱ Длительность: ${durationLabel}`, 'stg:edit_duration')
+    .row()
+    .text('🔙 Назад', 'stg:back');
+  return { text, kb };
+}
+
 export function buildDurationView(currentMinutes: number): { text: string; kb: InlineKeyboard } {
   const fmt = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}ч` : `${m} мин`);
   const mark = (m: number) => (m === currentMinutes ? `✅ ${fmt(m)}` : fmt(m));
@@ -300,25 +321,7 @@ export async function handleSettingsCallback(
       return;
     }
 
-    const tzDisplay = getTimezoneDisplay(currentUser.timezone);
-    const lang = currentUser.language ?? 'en';
-    const country = currentUser.country_code ?? '—';
-    const duration = currentUser.default_event_duration_minutes ?? 60;
-    const durationLabel = duration >= 60 && duration % 60 === 0 ? `${duration / 60}ч` : `${duration} мин`;
-    const text = buildGeneralText(tzDisplay, lang, country, duration);
-
-    const kb = new InlineKeyboard()
-      .text('🕐 Часовой пояс', 'stg:change_tz')
-      .row()
-      .text(lang === 'ru' ? '✅ 🇷🇺 Русский' : '🇷🇺 Русский', 'stg:set_lang:ru')
-      .text(lang === 'en' ? '✅ 🇬🇧 English' : '🇬🇧 English', 'stg:set_lang:en')
-      .row()
-      .text('🏳️ Страна', 'stg:show_countries')
-      .row()
-      .text(`⏱ Длительность: ${durationLabel}`, 'stg:edit_duration')
-      .row()
-      .text('🔙 Назад', 'stg:back');
-
+    const { text, kb } = buildGeneralView(currentUser);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

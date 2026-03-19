@@ -55,7 +55,10 @@ export class TtsService {
     }
 
     const result = Buffer.concat(audioChunks);
-    voiceLogger.info({ language: lang, textLen: text.length, audioBytes: result.length }, 'TTS synthesized');
+    voiceLogger.info(
+      { engine: 'google', language: lang, textLen: text.length, audioBytes: result.length },
+      'TTS synthesized',
+    );
 
     if (this.cache.size >= MAX_CACHE_ENTRIES) {
       const oldest = this.cache.keys().next().value;

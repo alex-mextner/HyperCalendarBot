@@ -123,6 +123,7 @@ const KNOWN_FILTERS = new Set([
   'replace',
   'date',
   'ternary',
+  'eq',
   'add',
   'sub',
   'mul',
@@ -189,6 +190,13 @@ export function applyFilters(value: unknown, filters: FilterCall[]): string {
         const ifTrue = String(filter.args[0] ?? '');
         const ifFalse = String(filter.args[1] ?? '');
         current = current ? ifTrue : ifFalse;
+        break;
+      }
+      case 'eq': {
+        const match = String(filter.args[0] ?? '');
+        const ifMatch = String(filter.args[1] ?? '');
+        const ifNoMatch = String(filter.args[2] ?? '');
+        current = String(current) === match ? ifMatch : ifNoMatch;
         break;
       }
       case 'add': {

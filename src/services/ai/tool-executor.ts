@@ -16,6 +16,7 @@ import {
   handleAddContact,
   handleAskUser,
   handleCalculate,
+  handleEndCall,
   handleFindContact,
   handleFindUser,
   handleGetBotInfo,
@@ -182,6 +183,9 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as { week_start: string; owner_id?: number });
+
+      case 'end_call':
+        return handleEndCall(ctx);
 
       case 'make_call':
         return handleMakeCall(ctx, input as { text: string });

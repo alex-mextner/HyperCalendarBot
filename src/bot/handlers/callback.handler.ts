@@ -963,8 +963,10 @@ export function createCallbackHandler(
             await ctx.answer('Недоступно');
             return;
           }
+          const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
+          const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
           await ctx.answer();
-          await ctx.scene.enter(timezoneScene);
+          await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
           return;
         }
         return handleSettingsCallback(
@@ -1101,11 +1103,11 @@ export function createCallbackHandler(
           }
         } catch (err) {
           cmdLogger.error({ err: err }, 'Voice opt-in TTS error');
-          await ctx.editText(msgs.voice_demo_failed);
+          await ctx.editText(msgs.voice_demo_failed).catch(() => {});
           return;
         }
 
-        await ctx.editText(msgs.voice_response_enabled);
+        await ctx.editText(msgs.voice_response_enabled).catch(() => {});
         return;
       }
 

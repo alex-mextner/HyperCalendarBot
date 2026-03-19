@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { createMessageHandler, toEventSummary } from '../../../src/bot/handlers/message.handler.ts';
+import { createMessageHandler, stripJsonFences, toEventSummary } from '../../../src/bot/handlers/message.handler.ts';
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
@@ -574,5 +574,32 @@ describe('voice reply TTS fallback', () => {
     );
     expect(fallbackTts.synthesize).toHaveBeenCalledWith(expect.any(String), 'en');
     expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('stripJsonFences', () => {
+  test('passes through raw JSON untouched', () => {
+    const json = '{"phrases":["привет"]}';
+    expect(stripJsonFences(json)).toBe(json);
+  });
+
+  test('strips ```json fence', () => {
+    const json = '{"phrases":["привет"]}';
+    expect(stripJsonFences(`\`\`\`json\n${json}\n\`\`\``)).toBe(json);
+  });
+
+  test('strips plain ``` fence', () => {
+    const json = '{"phrases":["привет"]}';
+    expect(stripJsonFences(`\`\`\`\n${json}\n\`\`\``)).toBe(json);
+  });
+
+  test('strips fences case-insensitively', () => {
+    const json = '{"phrases":["ok"]}';
+    expect(stripJsonFences(`\`\`\`JSON\n${json}\n\`\`\``)).toBe(json);
+  });
+
+  test('trims surrounding whitespace', () => {
+    const json = '{"phrases":["ok"]}';
+    expect(stripJsonFences(`  ${json}  `)).toBe(json);
   });
 });

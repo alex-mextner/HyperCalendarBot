@@ -82,13 +82,14 @@ test('opens Nova-3 STT on VAD_START (RU)', async () => {
   expect(nova.connect).toHaveBeenCalledTimes(1);
 });
 
-test('forwards binary frames to Nova STT during speech', async () => {
+test('forwards binary frames to Nova STT during speech, stripping 2-byte seq_num header', async () => {
   const { session, nova } = makeSession();
   await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
   await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
-  const pcm = Buffer.from([1, 2, 3, 4, 5]);
+  // Bridge prepends a 2-byte big-endian seq_num header before PCM payload
+  const pcm = Buffer.from([0x00, 0x01, 3, 4, 5]);
   session.handleBinaryMessage(pcm);
-  expect(nova.sendAudio).toHaveBeenCalledWith(pcm);
+  expect(nova.sendAudio).toHaveBeenCalledWith(pcm.subarray(2));
 });
 
 test('deletes temp file on PLAY_DONE', async () => {
@@ -98,6 +99,15 @@ test('deletes temp file on PLAY_DONE', async () => {
   (session as never as { lastPlayFile: string }).lastPlayFile = '/tmp/call-test-session-1.ogg';
   await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
   expect(unlink).toHaveBeenCalledWith('/tmp/call-test-session-1.ogg');
+});
+
+test('sends RESUME after normal PLAY_DONE', async () => {
+  const { session, ws } = makeSession();
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  ws.send.mockClear();
+  await session.handleMessage(JSON.stringify({ type: 'PLAY_DONE' }));
+  const sends = ws.send.mock.calls.map((c) => JSON.parse((c as [string])[0]) as { type: string });
+  expect(sends.some((s) => s.type === 'RESUME')).toBe(true);
 });
 
 test('CALL_ENDED triggers cleanup', async () => {
@@ -227,6 +237,41 @@ test('timeout is cancelled when call ends normally via CALL_ENDED', async () => 
   await new Promise((r) => setTimeout(r, 30));
   // ws.close not called by timeout (CALL_ENDED already cleaned up)
   expect(ws.close).not.toHaveBeenCalled();
+});
+
+test('agent does not run when transcript is empty (false VAD trigger)', async () => {
+  const agent = makeAgentMock();
+  const { session } = makeSession({ agent: agent as never });
+
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  // VAD_END fires immediately with no transcript (noise burst)
+  await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  expect(agent.run).not.toHaveBeenCalled();
+});
+
+test('TTS receives markdown-stripped text', async () => {
+  const tts = makeTtsMock();
+  const agent = makeAgentMock('**Готово!** Событие *встреча* добавлено на `завтра`.');
+  const nova = makeNovaMock();
+  let onFinalCb: ((t: string) => void) | undefined;
+  nova.connect = mock((events: { onFinal: (t: string) => void }) => {
+    onFinalCb = events.onFinal;
+  }) as unknown as typeof nova.connect;
+  const { session } = makeSession({ agent: agent as never, tts, createNovaStt: () => nova as never });
+
+  await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
+  await session.handleMessage(JSON.stringify({ type: 'VAD_START' }));
+  // Simulate Nova providing a final transcript before VAD_END
+  onFinalCb?.('добавь встречу на завтра');
+  await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
+  await new Promise((r) => setTimeout(r, 20));
+
+  const calls = tts.synthesize.mock.calls as [string, string][];
+  const agentCall = calls.find(([text]) => text.includes('Готово'));
+  expect(agentCall?.[0]).toBe('Готово! Событие встреча добавлено на завтра.');
 });
 
 test('agent runs only once when VAD_END follows classify respond', async () => {

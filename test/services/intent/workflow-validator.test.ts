@@ -235,4 +235,59 @@ describe('validateWorkflowVariables', () => {
     };
     expect(validateWorkflowVariables(workflow, '^.+(\\d{1,2})$')).toEqual([]);
   });
+
+  test('error includes path to the field with invalid variable', () => {
+    const workflow = {
+      steps: [{ call: 'manage_settings', input: { language: '{{user.phone}}' } }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('steps[0].input.language');
+    expect(errors[0]).toContain('user.phone');
+  });
+
+  test('error includes path for invalid variable inside i18n string', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: 'ok' } }],
+      i18n: { ru: { msg: '{{user.unknown}}' } },
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('i18n.ru.msg');
+    expect(errors[0]).toContain('user.unknown');
+  });
+
+  test('ternary expression is rejected with explanation', () => {
+    const workflow = {
+      steps: [
+        {
+          call: 'manage_settings',
+          input: { language: "{{user.language == 'ru' ? 'en' : 'ru'}}" },
+        },
+      ],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('steps[0].input.language');
+    expect(errors[0]).toContain('conditional expressions are not supported');
+    expect(errors[0]).toContain('eq(');
+    expect(errors[0]).toContain('ternary(');
+    expect(errors[0]).toContain('user.language');
+  });
+
+  test('ternary with == in ask namespace is rejected with explanation', () => {
+    const workflow = {
+      steps: [
+        {
+          call: 'manage_settings',
+          input: { language: "{{ask.current_language == 'ru' ? 'en' : 'ru'}}" },
+        },
+      ],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('conditional expressions are not supported');
+    expect(errors[0]).toContain('eq(');
+    expect(errors[0]).toContain('ternary(');
+  });
 });

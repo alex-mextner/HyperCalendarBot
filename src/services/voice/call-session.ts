@@ -15,7 +15,7 @@ export interface CallSessionConfig {
   createNovaStt: () => NovaStreamingSTT;
   createFluxStt: () => FluxStreamingSTT;
   createThinkingPlayer: () => ThinkingPhrasePlayer;
-  agent: { run: (ctx: AgentContext) => Promise<{ responseText?: string }> };
+  agent: { run: (ctx: AgentContext) => Promise<{ responseText?: string; endCall?: boolean }> };
   tts: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   openerText: string;
   agentContextBase?: Partial<AgentContext>;
@@ -37,6 +37,8 @@ export class CallSession {
   private pendingErrorPhrase: string | null = null;
   private endCallAfterCurrentPlay = false;
   private sttErrorTimeout: ReturnType<typeof setTimeout> | null = null;
+  private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly INACTIVITY_MS = 4 * 60 * 1000; // 4 minutes
 
   private constructor(private readonly cfg: CallSessionConfig) {}
 
@@ -73,11 +75,14 @@ export class CallSession {
   }
 
   handleBinaryMessage(data: Buffer): void {
-    if (!this.speaking) return;
+    // Both RU and EN paths: bridge prepends a 2-byte big-endian seq_num header — strip it.
+    const pcm = data.subarray(2);
     if (this.cfg.language === 'ru') {
-      this.novaStt?.sendAudio(data);
+      if (!this.speaking) return;
+      this.novaStt?.sendAudio(pcm);
     } else {
-      this.fluxStt?.sendAudio(data);
+      // EN: bridge streams audio continuously (no Python VAD); Flux handles turn detection.
+      this.fluxStt?.sendAudio(pcm);
     }
   }
 
@@ -94,9 +99,20 @@ export class CallSession {
     if (this.cfg.language === 'en') {
       this.fluxStt = this.cfg.createFluxStt();
       this.fluxStt.connect({
-        onStartOfTurn: () => {},
-        onEndOfTurn: (_confidence: number) => this.onEnoughToRespond(),
+        onStartOfTurn: () => {
+          this.resetInactivityTimer();
+          this.send(JSON.stringify({ type: 'PAUSE' }));
+        },
+        onEndOfTurn: (confidence: number, finalTranscript: string) => {
+          if (finalTranscript) this.rollingTranscript = finalTranscript;
+          voiceLogger.info(
+            { sessionId: this.cfg.sessionId, transcript: this.rollingTranscript, confidence },
+            'Flux EndOfTurn',
+          );
+          this.onEnoughToRespond();
+        },
         onInterim: (t: string) => {
+          voiceLogger.debug({ sessionId: this.cfg.sessionId, transcript: t }, 'Flux interim');
           this.rollingTranscript = t;
         },
         onError: (err: Error) => {
@@ -120,6 +136,7 @@ export class CallSession {
   }
 
   private onVadStart(): void {
+    this.resetInactivityTimer(); // user started speaking — reset idle timer
     this.speaking = true;
     this.rollingTranscript = '';
     this.send(JSON.stringify({ type: 'PAUSE' }));
@@ -162,6 +179,7 @@ export class CallSession {
 
   private onEnoughToRespond(): void {
     if (this.agentRunning) return;
+    if (!this.rollingTranscript.trim()) return;
     this.agentRunning = true;
 
     this.speaking = false;
@@ -173,6 +191,7 @@ export class CallSession {
 
     const transcript = this.rollingTranscript;
     this.rollingTranscript = '';
+    voiceLogger.info({ sessionId: this.cfg.sessionId, transcript }, 'Running agent');
 
     // TODO: spec requires a 10s fail-open timer — if agent takes longer, resume listening
     this.runAgent(transcript).catch((err) => {
@@ -182,9 +201,14 @@ export class CallSession {
 
   private async runAgent(transcript: string): Promise<void> {
     try {
+      const userRepo = this.cfg.agentContextBase?.userRepo;
+      const user = (userRepo?.findByTelegramId(this.cfg.userId) ?? {
+        telegram_id: this.cfg.userId,
+        language: this.cfg.language,
+      }) as never;
       const ctx = {
         ...(this.cfg.agentContextBase ?? {}),
-        user: { telegram_id: this.cfg.userId } as never,
+        user,
         chatId: this.cfg.userId,
         messageText: transcript,
         inputMode: 'live_call',
@@ -192,8 +216,11 @@ export class CallSession {
       } as AgentContext;
 
       let responseText: string | undefined;
+      let endCall = false;
       try {
-        ({ responseText } = await this.cfg.agent.run(ctx));
+        const result = await this.cfg.agent.run(ctx);
+        responseText = result.responseText;
+        endCall = result.endCall === true;
       } catch (err) {
         voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'Agent error during call');
         return;
@@ -202,10 +229,23 @@ export class CallSession {
         this.thinking = null;
       }
 
+      if (endCall) {
+        this.endCallAfterCurrentPlay = true;
+      }
+
       if (!responseText) return;
 
+      // Strip Telegram markdown before TTS so asterisks/underscores aren't read aloud
+      const spokenText = responseText
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/_(.*?)_/g, '$1')
+        .replace(/`(.*?)`/g, '$1');
+
+      voiceLogger.info({ sessionId: this.cfg.sessionId, responseText: spokenText }, 'TTS response');
+
       try {
-        const audio = await this.cfg.tts.synthesize(responseText, this.cfg.language);
+        const audio = await this.cfg.tts.synthesize(spokenText, this.cfg.language);
         const file = this.tempFile();
         await Bun.write(file, audio);
         this.sendPlay(file);
@@ -241,6 +281,13 @@ export class CallSession {
       voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Ending call after STT error phrase');
       this.onCallEnded();
       this.cfg.ws.close();
+      return;
+    }
+
+    // Normal play completion — resume listening for next user utterance
+    if (!this.ended) {
+      this.send(JSON.stringify({ type: 'RESUME' }));
+      this.resetInactivityTimer();
     }
   }
 
@@ -251,10 +298,32 @@ export class CallSession {
     }
   }
 
+  private resetInactivityTimer(): void {
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
+    if (this.ended) return;
+    this.inactivityTimer = setTimeout(() => {
+      if (this.ended || this.agentRunning || this.speaking) return;
+      voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Inactivity check-in triggered');
+      const checkIn =
+        this.cfg.language === 'ru'
+          ? 'Ты ещё здесь? Могу ещё чем-то помочь?'
+          : 'Are you still there? Is there anything else I can help you with?';
+      this.rollingTranscript = checkIn;
+      this.onEnoughToRespond();
+    }, CallSession.INACTIVITY_MS);
+  }
+
   private onCallEnded(): void {
     if (this.ended) return;
     this.ended = true;
     this.clearSttErrorTimeout();
+    if (this.inactivityTimer) {
+      clearTimeout(this.inactivityTimer);
+      this.inactivityTimer = null;
+    }
     this.speaking = false;
     this.pendingErrorPhrase = null;
     this.endCallAfterCurrentPlay = false;
