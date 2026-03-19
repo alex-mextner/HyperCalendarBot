@@ -104,6 +104,7 @@ export function createBot(
   stressDictionary?: StressDictionary,
   sileroTts?: SileroTtsService,
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'],
+  fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'],
   mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>,
   eventMentionStore?: EventMentionStore,
 ) {
@@ -252,8 +253,9 @@ export function createBot(
     resolveUsername: mtprotoResolveUsername,
     sileroTts,
     kokoroTts,
+    fallbackTts,
     sendVoice:
-      sileroTts || kokoroTts
+      sileroTts || kokoroTts || fallbackTts
         ? async (chatId: number, audio: Buffer) => {
             const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
             await bot.api.sendVoice({ chat_id: chatId, voice: file });

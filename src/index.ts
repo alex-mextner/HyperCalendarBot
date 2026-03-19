@@ -310,6 +310,9 @@ try {
   botLogger.warn({ err: error }, 'Stress dictionary not loaded');
 }
 
+const { TtsService: FallbackTtsService } = await import('./services/voice/tts-service.ts');
+const fallbackTts = new FallbackTtsService();
+
 let kokoroTts: import('./services/voice/kokoro-tts-service.ts').KokoroTtsService | undefined;
 if (config.HF_TOKEN) {
   const { KokoroTtsService } = await import('./services/voice/kokoro-tts-service.ts');
@@ -403,6 +406,7 @@ const { bot } = createBot(
   stressDictionary,
   sileroTts,
   kokoroTts,
+  fallbackTts,
   mtprotoResolveUsername,
   eventMentionStore,
 );

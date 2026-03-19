@@ -101,10 +101,12 @@ export interface MessageHandlerDeps {
   groupMemberService?: GroupMemberService;
   transcriptionService?: TranscriptionService;
   botToken?: string;
+  downloadVoiceBuffer?: (botToken: string, fileId: string) => Promise<Buffer>;
   stressDictionary?: AgentContext['stressDictionary'];
   resolveUsername?: AgentContext['resolveUsername'];
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
+  fallbackTts?: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
   // Persistent store for last-mentioned event context (Redis-backed or in-memory)
   eventMentionStore?: EventMentionStore;
@@ -254,7 +256,7 @@ async function handleVoiceMessage(
   const lang = user.language as 'en' | 'ru';
 
   try {
-    const audioBuffer = await downloadTelegramFile(deps.botToken!, voice.file_id);
+    const audioBuffer = await (deps.downloadVoiceBuffer ?? downloadTelegramFile)(deps.botToken!, voice.file_id);
     const transcription = await deps.transcriptionService!.transcribe(audioBuffer);
 
     if (!transcription) {
@@ -274,9 +276,8 @@ async function handleVoiceMessage(
     // Send voice reply if TTS is available and user has opted in
     if (responseText && user.voice_response_enabled === 1 && deps.sendVoice) {
       const isRu = user.language === 'ru';
-      const hasRuTts = isRu && deps.sileroTts && deps.stressDictionary;
-      const hasEnTts = !isRu && deps.kokoroTts;
-      if (hasRuTts || hasEnTts) {
+      const hasPrimaryTts = isRu ? !!(deps.sileroTts && deps.stressDictionary) : !!deps.kokoroTts;
+      if (hasPrimaryTts || deps.fallbackTts) {
         try {
           await fetch(`${TG_API}/bot${deps.botToken!}/sendChatAction`, {
             method: 'POST',
@@ -286,16 +287,24 @@ async function handleVoiceMessage(
           const plainText = stripMarkdown(responseText);
           const noLineBreaks = fixLineBreaks(plainText);
           let voiceBuffer: Buffer | undefined;
-          if (isRu && deps.sileroTts) {
-            const withOrdinals = fixDateOrdinals(noLineBreaks);
-            const withNumbers = numbersToWords(withOrdinals);
-            const withStress = markStress(withNumbers, deps.stressDictionary!);
-            const stressedText = transliterateEnglish(withStress);
-            cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing RU voice reply');
-            voiceBuffer = await deps.sileroTts.synthesize(stressedText);
-          } else if (!isRu && deps.kokoroTts) {
-            cmdLogger.info({ userId: user.telegram_id, textLen: noLineBreaks.length }, 'Synthesizing EN voice reply');
-            voiceBuffer = await deps.kokoroTts.synthesize(noLineBreaks);
+          try {
+            if (isRu && deps.sileroTts && deps.stressDictionary) {
+              const withOrdinals = fixDateOrdinals(noLineBreaks);
+              const withNumbers = numbersToWords(withOrdinals);
+              const withStress = markStress(withNumbers, deps.stressDictionary);
+              const stressedText = transliterateEnglish(withStress);
+              cmdLogger.info({ userId: user.telegram_id, textLen: stressedText.length }, 'Synthesizing RU voice reply');
+              voiceBuffer = await deps.sileroTts.synthesize(stressedText);
+            } else if (!isRu && deps.kokoroTts) {
+              cmdLogger.info({ userId: user.telegram_id, textLen: noLineBreaks.length }, 'Synthesizing EN voice reply');
+              voiceBuffer = await deps.kokoroTts.synthesize(noLineBreaks);
+            }
+          } catch (primaryError) {
+            cmdLogger.warn({ err: primaryError, userId: user.telegram_id }, 'Primary TTS failed, trying fallback');
+          }
+          if (!voiceBuffer && deps.fallbackTts) {
+            cmdLogger.info({ userId: user.telegram_id, lang: user.language }, 'Using fallback TTS');
+            voiceBuffer = await deps.fallbackTts.synthesize(noLineBreaks, user.language ?? 'ru');
           }
           if (voiceBuffer) {
             await deps.sendVoice(Number(chatId), voiceBuffer);

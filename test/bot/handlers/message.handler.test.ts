@@ -499,3 +499,78 @@ describe('toEventSummary', () => {
     expect(summary.recurrence_rule).toBeUndefined();
   });
 });
+
+describe('voice reply TTS fallback', () => {
+  const audioBuffer = Buffer.from('fake-audio');
+  const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
+
+  function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+    return makeDeps({
+      agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ бота' })) },
+      sendVoice: mock(() => Promise.resolve()),
+      botToken: 'test-token',
+      transcriptionService: { transcribe: mock(() => Promise.resolve('Пользователь говорит')) },
+      downloadVoiceBuffer: fakeAudioDownload,
+      ...overrides,
+    });
+  }
+
+  function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+    return makeCtx({
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 },
+      voice: { file_id: 'test-file-id', duration: 5 },
+      text: undefined,
+      ...overrides,
+    });
+  }
+
+  test('uses primary sileroTts when available', async () => {
+    const sileroTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const stressDictionary = { lookup: () => undefined } as never;
+    const deps = makeVoiceDeps({ sileroTts, fallbackTts, stressDictionary });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeVoiceCtx() as never);
+    expect(sileroTts.synthesize).toHaveBeenCalledTimes(1);
+    expect(fallbackTts.synthesize).toHaveBeenCalledTimes(0);
+    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to fallbackTts when primary sileroTts throws', async () => {
+    const sileroTts = { synthesize: mock(() => Promise.reject(new Error('silero down'))) };
+    const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const stressDictionary = { lookup: () => undefined } as never;
+    const deps = makeVoiceDeps({ sileroTts, fallbackTts, stressDictionary });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeVoiceCtx() as never);
+    expect(fallbackTts.synthesize).toHaveBeenCalledTimes(1);
+    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+  });
+
+  test('uses fallbackTts when no primary TTS configured', async () => {
+    const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const deps = makeVoiceDeps({ fallbackTts });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeVoiceCtx() as never);
+    expect(fallbackTts.synthesize).toHaveBeenCalledTimes(1);
+    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+  });
+
+  test('sends no voice when no TTS configured at all', async () => {
+    const sendVoice = mock(() => Promise.resolve());
+    const deps = makeVoiceDeps({ sendVoice });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeVoiceCtx() as never);
+    expect(sendVoice).toHaveBeenCalledTimes(0);
+  });
+
+  test('uses fallbackTts for EN when kokoroTts throws', async () => {
+    const kokoroTts = { synthesize: mock(() => Promise.reject(new Error('kokoro down'))) };
+    const fallbackTts = { synthesize: mock(() => Promise.resolve(audioBuffer)) };
+    const deps = makeVoiceDeps({ kokoroTts, fallbackTts });
+    const handler = createMessageHandler(deps as never);
+    await handler(makeVoiceCtx({ dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC', voice_response_enabled: 1 } }) as never);
+    expect(fallbackTts.synthesize).toHaveBeenCalledWith(expect.any(String), 'en');
+    expect((deps as never as { sendVoice: ReturnType<typeof mock> }).sendVoice).toHaveBeenCalledTimes(1);
+  });
+});
