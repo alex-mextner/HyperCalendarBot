@@ -71,7 +71,7 @@ export interface AgentContext {
   googleCalendarRepo?: GoogleCalendarRepository;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
-  isVoiceMessage?: boolean;
+  inputMode?: 'text' | 'voice_message' | 'live_call';
   stressDictionary?: StressDictionary;
   feedbackContext?: {
     threadId: number;

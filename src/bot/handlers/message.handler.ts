@@ -268,7 +268,7 @@ async function handleVoiceMessage(
 
     const agentContext: AgentContext = {
       ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
-      isVoiceMessage: true,
+      inputMode: 'voice_message',
     };
 
     const { responseText } = await deps.agent.run(agentContext);
