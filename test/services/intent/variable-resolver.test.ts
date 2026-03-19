@@ -118,6 +118,13 @@ describe('resolveVariables', () => {
     expect(nextEnd >= nextStart).toBe(true);
   });
 
+  test('resolves {{dates.next_month_start}} to the first day of the next calendar month', () => {
+    const monthEnd = resolveVariables('{{dates.month_end}}', {}, userCtx) as string;
+    const nextStart = resolveVariables('{{dates.next_month_start}}', {}, userCtx) as string;
+    expect(nextStart).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(nextStart > monthEnd).toBe(true);
+  });
+
   test('resolves {{dates.now}} to ISO datetime string with time component', () => {
     const now = resolveVariables('{{dates.now}}', {}, userCtx) as string;
     expect(now).toContain('T');
@@ -240,5 +247,82 @@ describe('resolveVariables', () => {
 
   test('{{group.chat_id}} stays as literal when not in a group', () => {
     expect(resolveVariables('{{group.chat_id}}', {}, userCtx)).toBe('{{group.chat_id}}');
+  });
+
+  // --- user.utc_offset ---
+
+  test('{{user.utc_offset}} resolves to +HH:MM format for positive offset', () => {
+    const ctx = { timezone: 'Europe/Moscow', language: 'ru' };
+    const result = resolveVariables('{{user.utc_offset}}', {}, ctx) as string;
+    expect(result).toMatch(/^[+-]\d{2}:\d{2}$/);
+    expect(result).toBe('+03:00');
+  });
+
+  test('{{user.utc_offset}} resolves to -HH:MM for negative offset', () => {
+    const ctx = { timezone: 'America/New_York', language: 'en' };
+    const result = resolveVariables('{{user.utc_offset}}', {}, ctx) as string;
+    expect(result).toMatch(/^[+-]\d{2}:\d{2}$/);
+  });
+
+  test('{{user.utc_offset}} resolves to +00:00 for UTC', () => {
+    const ctx = { timezone: 'UTC', language: 'en' };
+    expect(resolveVariables('{{user.utc_offset}}', {}, ctx)).toBe('+00:00');
+  });
+
+  test('{{user.utc_offset}} works inline in ISO datetime string', () => {
+    const ctx = { timezone: 'Europe/Moscow', language: 'ru' };
+    const result = resolveVariables('{{dates.today}}T22:00:00{{user.utc_offset}}', {}, ctx) as string;
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}T22:00:00\+03:00$/);
+  });
+
+  // --- i18n / t.* namespace ---
+
+  const i18n = {
+    ru: { q1: 'Это дата или время?', greeting: 'Привет, {{user.first_name}}!' },
+    en: { q1: 'Is this a date or time?', greeting: 'Hello, {{user.first_name}}!' },
+  };
+
+  test('{{t.key}} resolves to string for current language', () => {
+    const ctx = { timezone: 'UTC', language: 'ru' };
+    expect(resolveVariables('{{t.q1}}', {}, ctx, undefined, i18n)).toBe('Это дата или время?');
+  });
+
+  test('{{t.key}} resolves to en for English user', () => {
+    const ctx = { timezone: 'UTC', language: 'en' };
+    expect(resolveVariables('{{t.q1}}', {}, ctx, undefined, i18n)).toBe('Is this a date or time?');
+  });
+
+  test('{{t.key}} falls back to en when language not in i18n', () => {
+    const ctx = { timezone: 'UTC', language: 'uk' };
+    expect(resolveVariables('{{t.q1}}', {}, ctx, undefined, i18n)).toBe('Is this a date or time?');
+  });
+
+  test('{{t.key}} resolves nested {{}} in i18n value lazily', () => {
+    const ctx = { timezone: 'UTC', language: 'ru', firstName: 'Alex' };
+    expect(resolveVariables('{{t.greeting}}', {}, ctx, undefined, i18n)).toBe('Привет, Alex!');
+  });
+
+  test('{{t.key}} works inline with surrounding text', () => {
+    const ctx = { timezone: 'UTC', language: 'en' };
+    expect(resolveVariables('Question: {{t.q1}}', {}, ctx, undefined, i18n)).toBe('Question: Is this a date or time?');
+  });
+
+  test('{{t.key}} with $1 capture inside i18n string', () => {
+    const i18nCapture = {
+      ru: { q: '«{{$1}}» — дата или время?' },
+      en: { q: 'Is «{{$1}}» a date or time?' },
+    };
+    const ctx = { timezone: 'UTC', language: 'ru' };
+    expect(resolveVariables('{{t.q}}', { $1: '22' }, ctx, undefined, i18nCapture)).toBe('«22» — дата или время?');
+  });
+
+  test('{{t.unknown}} returns template literal unchanged', () => {
+    const ctx = { timezone: 'UTC', language: 'ru' };
+    expect(resolveVariables('{{t.missing}}', {}, ctx, undefined, i18n)).toBe('{{t.missing}}');
+  });
+
+  test('{{t.key}} without i18n returns template literal', () => {
+    const ctx = { timezone: 'UTC', language: 'ru' };
+    expect(resolveVariables('{{t.q1}}', {}, ctx)).toBe('{{t.q1}}');
   });
 });

@@ -1,5 +1,15 @@
 import { TZDate } from '@date-fns/tz';
-import { addDays, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays } from 'date-fns';
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  endOfMonth,
+  endOfWeek,
+  format,
+  startOfMonth,
+  startOfWeek,
+  subDays,
+} from 'date-fns';
 import { cmdLogger } from '../../utils/logger.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
 
@@ -69,6 +79,9 @@ function accessPath(obj: Record<string, unknown>, path: string): unknown {
   return current;
 }
 
+/** i18n dictionary: language code → key → template string */
+export type I18nMap = Record<string, Record<string, unknown>>;
+
 /**
  * Resolve a single variable name to its value.
  * Returns undefined if not resolvable (caller decides how to handle).
@@ -78,6 +91,7 @@ function resolveVar(
   captures: Record<string, string>,
   userCtx: UserContext,
   stepResults?: Record<string, unknown>,
+  i18n?: I18nMap,
 ): unknown {
   const now = new TZDate(new Date(), userCtx.timezone);
 
@@ -94,6 +108,8 @@ function resolveVar(
       return format(startOfMonth(now), 'yyyy-MM-dd');
     case 'dates.month_end':
       return format(endOfMonth(now), 'yyyy-MM-dd');
+    case 'dates.next_month_start':
+      return format(startOfMonth(addMonths(now, 1)), 'yyyy-MM-dd');
     case 'dates.yesterday':
       return format(subDays(now, 1), 'yyyy-MM-dd');
     case 'dates.next_week_start':
@@ -114,11 +130,22 @@ function resolveVar(
       return userCtx.firstName;
     case 'user.id':
       return userCtx.userId;
+    case 'user.utc_offset':
+      return format(now, 'xxx');
     case 'group.is_group':
       return userCtx.groupIsGroup ?? false;
     case 'group.chat_id':
       return userCtx.groupChatId;
     default:
+      // t.* namespace — lazy i18n lookup
+      if (name.startsWith('t.') && i18n) {
+        const key = name.slice(2);
+        const langDict = i18n[userCtx.language] ?? i18n.en ?? {};
+        const raw = langDict[key];
+        if (raw === undefined) return undefined;
+        // Lazy: resolve any {{}} inside the i18n string with current context
+        return resolveVariables(raw, captures, userCtx, stepResults, i18n);
+      }
       break;
   }
 
@@ -146,6 +173,7 @@ export function resolveVariables(
   captures: Record<string, string>,
   userCtx: UserContext,
   stepResults?: Record<string, unknown>,
+  i18n?: I18nMap,
 ): unknown {
   if (typeof template === 'string') {
     const pattern = /\{\{([^}]+)\}\}/g;
@@ -154,7 +182,7 @@ export function resolveVariables(
     // If the entire string is a single variable (no filter), return the raw resolved value
     // (preserves non-string types like numbers)
     if (matches.length === 1 && template === `{{${matches[0][1]}}}` && !matches[0][1].includes('|')) {
-      const resolved = resolveVar(matches[0][1]!.trim(), captures, userCtx, stepResults);
+      const resolved = resolveVar(matches[0][1]!.trim(), captures, userCtx, stepResults, i18n);
       return resolved !== undefined ? resolved : template;
     }
 
@@ -164,7 +192,7 @@ export function resolveVariables(
       const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
       const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
 
-      const resolved = resolveVar(varName, captures, userCtx, stepResults);
+      const resolved = resolveVar(varName, captures, userCtx, stepResults, i18n);
 
       if (!filterExpr) {
         return resolved !== undefined ? String(resolved) : match;
@@ -185,13 +213,13 @@ export function resolveVariables(
   }
 
   if (Array.isArray(template)) {
-    return template.map((item) => resolveVariables(item, captures, userCtx, stepResults));
+    return template.map((item) => resolveVariables(item, captures, userCtx, stepResults, i18n));
   }
 
   if (template !== null && typeof template === 'object') {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(template as Record<string, unknown>)) {
-      result[key] = resolveVariables(value, captures, userCtx, stepResults);
+      result[key] = resolveVariables(value, captures, userCtx, stepResults, i18n);
     }
     return result;
   }

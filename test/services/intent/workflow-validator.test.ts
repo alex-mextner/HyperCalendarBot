@@ -112,4 +112,127 @@ describe('validateWorkflowVariables', () => {
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('invalid filter syntax');
   });
+
+  test('"as" field with valid filter is accepted', () => {
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice|lower' },
+        { when: 'choice == "время"', call: 'create_event', input: {} },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('"as" field with unknown filter is rejected', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '?' }, as: 'result|bogus_filter' }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('bogus_filter');
+    expect(errors[0]).toContain('as');
+  });
+
+  test('"as" field with invalid filter syntax is rejected', () => {
+    const workflow = {
+      steps: [{ call: 'create_event', input: {}, as: 'result|pad(' }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('as');
+  });
+
+  test('"as" field without filter is accepted', () => {
+    const workflow = {
+      steps: [{ call: 'create_event', input: {}, as: 'result' }],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('{{t.key}} i18n namespace is accepted', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '{{t.q1}}' } }],
+      i18n: { ru: { q1: 'Вопрос?' }, en: { q1: 'Question?' } },
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('unknown variable inside i18n string is rejected', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '{{t.q}}' } }],
+      i18n: { ru: { q: '{{user.unknown}} — дата или время?' }, en: { q: 'ok' } },
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('user.unknown');
+  });
+
+  test('known variable inside i18n string is accepted', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '{{t.q}}' } }],
+      i18n: { ru: { q: '{{dates.today}} — сегодня' }, en: { q: '{{dates.today}} today' } },
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('$1 inside i18n string is accepted when pattern has 1 capture group', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '{{t.q}}' } }],
+      i18n: { ru: { q: '«{{$1}}» — дата или время?' }, en: { q: 'Is «{{$1}}» a date?' } },
+    };
+    expect(validateWorkflowVariables(workflow, '^(.+)$')).toEqual([]);
+  });
+
+  test('$2 inside i18n string is rejected when pattern has only 1 capture group', () => {
+    const workflow = {
+      steps: [{ call: 'ask_user', input: { question: '{{t.q}}' } }],
+      i18n: { ru: { q: '{{$2}} недопустимо' }, en: { q: 'ok' } },
+    };
+    const errors = validateWorkflowVariables(workflow, '^(.+)$');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('$2');
+  });
+
+  test('{{ask.choice}} is valid when ask_user step with matching as field exists', () => {
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'choose?', options: ['a', 'b'] }, as: 'choice' },
+        { call: 'get_event', input: { id: '{{ask.choice}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('{{ask.choice}} is rejected when no ask_user step defines it', () => {
+    const workflow = {
+      steps: [{ call: 'get_event', input: { id: '{{ask.choice}}' } }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('ask.choice');
+  });
+
+  test('{{ask.name}} with filter is valid when matching as field exists', () => {
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'date?' }, as: 'date_or_time|lower' },
+        { when: 'ask.date_or_time == "дата"', call: 'create_event', input: { title: '{{ask.date_or_time}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('dates.next_month_start is an allowed variable', () => {
+    const workflow = {
+      tools: [{ name: 'create_event', input: { start_at: '{{dates.next_month_start|date("yyyy-MM-")}}22T12:00:00' } }],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+
+  test('user.utc_offset is an allowed variable', () => {
+    const workflow = {
+      tools: [{ name: 'create_event', input: { start_at: '{{dates.today}}T{{$1|pad(2)}}:00:00{{user.utc_offset}}' } }],
+    };
+    expect(validateWorkflowVariables(workflow, '^.+(\\d{1,2})$')).toEqual([]);
+  });
 });
