@@ -263,7 +263,7 @@ export const toolDefinitions: ToolDefinition[] = [
       'IMPORTANT: When user asks to change language (e.g. "switch to English", "speak Russian"), ' +
       'you MUST call this tool with action=update, category=general, updates={language: "en"/"ru"} ' +
       'BEFORE responding in the new language. Do not just say you switched — persist it. ' +
-      'Categories: general (timezone, language, country_code), ' +
+      'Categories: general (timezone, language, country_code, default_event_duration_minutes), ' +
       'notifications (morning agenda, evening review, quiet hours, reminders), ' +
       'calls (enabled, language), privacy (default visibility, inline mode, invitations), ' +
       'voice (voice response enabled/disabled). Use action "get" without category to return all settings.',
@@ -279,7 +279,7 @@ export const toolDefinitions: ToolDefinition[] = [
         updates: {
           type: 'object',
           description:
-            'Fields to update. For general: timezone (IANA string), language (en/ru), country_code (ISO 3166-1 alpha-2 string). For notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). For calls: enabled (bool), language (string). For privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). For voice: voice_response_enabled (bool).',
+            'Fields to update. For general: timezone (IANA string), language (en/ru), country_code (ISO 3166-1 alpha-2 string), default_event_duration_minutes (positive integer, minutes). For notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). For calls: enabled (bool), language (string). For privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). For voice: voice_response_enabled (bool).',
         },
       },
       required: ['action'],

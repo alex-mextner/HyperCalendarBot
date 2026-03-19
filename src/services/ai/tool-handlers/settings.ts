@@ -24,6 +24,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       username: ctx.user.username ?? 'not set',
       first_name: ctx.user.first_name ?? 'not set',
       country_code: ctx.user.country_code ?? 'not set',
+      default_event_duration_minutes: ctx.user.default_event_duration_minutes ?? 60,
     };
   }
 
@@ -85,6 +86,13 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
   if (updates.timezone !== undefined) patch.timezone = updates.timezone as string;
   if (updates.language !== undefined) patch.language = updates.language as 'en' | 'ru';
   if (updates.country_code !== undefined) patch.country_code = updates.country_code as string;
+  if (updates.default_event_duration_minutes !== undefined) {
+    const mins = updates.default_event_duration_minutes as number;
+    if (!Number.isInteger(mins) || mins <= 0) {
+      return { success: false, error: 'default_event_duration_minutes must be a positive integer.' };
+    }
+    patch.default_event_duration_minutes = mins;
+  }
 
   if (Object.keys(patch).length === 0) {
     return { success: false, error: 'No valid general settings to update.' };
