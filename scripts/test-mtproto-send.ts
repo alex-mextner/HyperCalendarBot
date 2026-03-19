@@ -46,12 +46,12 @@ try {
     try {
       const result = await client.sendText(Number(target), message);
       console.log(`  ✅ Sent by ID! message_id=${result.id}`);
-      await client.close();
+      await client.disconnect();
       process.exit(0);
     } catch (e) {
       console.log(`  ❌ By ID failed: ${e}`);
       console.log('  Will NOT try username fallback (no username provided)');
-      await client.close();
+      await client.disconnect();
       process.exit(1);
     }
   }
@@ -74,4 +74,4 @@ try {
   console.error(`  Full error:`, error);
 }
 
-await client.close();
+await client.disconnect();

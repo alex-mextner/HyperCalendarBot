@@ -14,6 +14,7 @@ await pool.initialize();
 async function renderToFile(html: string, filename: string) {
   const page = await pool.acquire();
   await page.setContent(html, { waitUntil: 'load' });
+  // @ts-expect-error — page.evaluate callback runs in browser scope; document is unavailable in Node types
   const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 800);
   await page.setViewportSize({ width: 1080, height });
   const buf = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width: 1080, height } });

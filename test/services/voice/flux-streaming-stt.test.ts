@@ -33,7 +33,7 @@ test('emits onStartOfTurn when Flux sends StartOfTurn event', () => {
   const onStartOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn, onEndOfTurn: () => {}, onInterim: () => {}, onError: () => {} });
 
-  ws.onmessage?.({ data: JSON.stringify({ type: 'StartOfTurn' }) });
+  ws.onmessage?.({ data: JSON.stringify({ type: 'ListenV2TurnInfo', event: 'StartOfTurn' }) });
 
   expect(onStartOfTurn).toHaveBeenCalledTimes(1);
 });
@@ -44,7 +44,9 @@ test('emits onEndOfTurn when Flux sends EndOfTurn event', () => {
   const onEndOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn, onInterim: () => {}, onError: () => {} });
 
-  ws.onmessage?.({ data: JSON.stringify({ type: 'EndOfTurn', end_of_turn_confidence: 0.85 }) });
+  ws.onmessage?.({
+    data: JSON.stringify({ type: 'ListenV2TurnInfo', event: 'EndOfTurn', end_of_turn_confidence: 0.85 }),
+  });
 
   expect(onEndOfTurn).toHaveBeenCalledWith(0.85);
 });
@@ -57,8 +59,9 @@ test('emits onInterim for regular transcript', () => {
 
   ws.onmessage?.({
     data: JSON.stringify({
-      is_final: false,
-      channel: { alternatives: [{ transcript: 'hello' }] },
+      type: 'ListenV2TurnInfo',
+      event: 'Update',
+      transcript: 'hello',
     }),
   });
 

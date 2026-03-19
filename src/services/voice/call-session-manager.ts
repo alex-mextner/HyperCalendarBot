@@ -82,7 +82,7 @@ export class CallSessionManager {
 
   /** Start the WebSocket server on :3001 */
   startServer(): void {
-    Bun.serve({
+    Bun.serve<{ sessionId: string }>({
       port: 3001,
       hostname: '127.0.0.1',
       fetch(req, server): Response | undefined {
@@ -90,29 +90,27 @@ export class CallSessionManager {
         const match = url.pathname.match(/^\/call\/([^/]+)$/);
         if (!match) return new Response('Not found', { status: 404 });
         const sessionId = match[1]!;
-        const upgraded = (server.upgrade as (req: Request, opts: { data: unknown }) => boolean)(req, {
-          data: { sessionId },
-        });
+        const upgraded = server.upgrade(req, { data: { sessionId } });
         if (!upgraded) return new Response('Upgrade failed', { status: 426 });
         return undefined;
       },
       websocket: {
         open: (ws) => {
-          const { sessionId } = ws.data as unknown as { sessionId: string };
+          const { sessionId } = ws.data;
           this.onWebSocketOpen(sessionId, {
             send: (data) => ws.send(data),
             close: () => ws.close(),
           });
         },
         message: (ws, message) => {
-          const { sessionId } = ws.data as unknown as { sessionId: string };
+          const { sessionId } = ws.data;
           const isBinary = typeof message !== 'string';
           this.onWebSocketMessage(sessionId, message as string | Buffer, isBinary).catch((err) => {
             voiceLogger.error({ err, sessionId }, 'WebSocket message handler error');
           });
         },
         close: (ws) => {
-          const { sessionId } = ws.data as unknown as { sessionId: string };
+          const { sessionId } = ws.data;
           this.onWebSocketClose(sessionId);
         },
       },
