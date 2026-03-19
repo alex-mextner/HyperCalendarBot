@@ -1,4 +1,6 @@
 // src/worker/call-queue.ts
+
+import { randomUUID } from 'node:crypto';
 import { type ConnectionOptions, Queue, Worker } from 'bullmq';
 import type { CallManager } from '../services/voice/call-manager';
 import type { CallReminderJobData } from '../services/voice/types';
@@ -8,13 +10,17 @@ export function createCallQueue(connection: ConnectionOptions) {
   const queue = new Queue<CallReminderJobData>('call-reminders', { connection });
   return {
     queue,
-    async enqueue(data: CallReminderJobData): Promise<void> {
-      await queue.add('call-reminder', data, {
-        attempts: 2,
-        backoff: { type: 'fixed', delay: 60_000 },
-        removeOnComplete: true,
-        removeOnFail: 100,
-      });
+    async enqueue(data: Omit<CallReminderJobData, 'sessionId'>): Promise<void> {
+      await queue.add(
+        'call-reminder',
+        { ...data, sessionId: randomUUID() },
+        {
+          attempts: 2,
+          backoff: { type: 'fixed', delay: 60_000 },
+          removeOnComplete: true,
+          removeOnFail: 100,
+        },
+      );
     },
   };
 }

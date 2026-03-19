@@ -180,7 +180,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     const ttsTranslationService = new TtsTranslationService();
     const ttsService = new TtsService();
     const callManager = new CallManager({
-      ttsService,
+      fallbackTts: ttsService,
       callLogRepo: db.callLog,
       translateText: (text, lang) => ttsTranslationService.translate(text, lang),
       sendVoiceMessage: async (userId, audio) => {
