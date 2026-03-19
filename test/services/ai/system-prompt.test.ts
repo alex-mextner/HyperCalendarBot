@@ -246,4 +246,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('"ru"');
     expect(prompt).toContain('"en"');
   });
+
+  test('system prompt includes default duration when set', () => {
+    ctx.user = { ...ctx.user, default_event_duration_minutes: 45 };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Default event duration: 45 minutes');
+  });
+
+  test('system prompt includes 60 min default', () => {
+    ctx.user = { ...ctx.user, default_event_duration_minutes: 60 };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Default event duration: 60 minutes');
+  });
 });

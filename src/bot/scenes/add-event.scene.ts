@@ -27,6 +27,10 @@ function getMessageText(context: unknown): string | undefined {
   return (context as { text?: string }).text;
 }
 
+export function applyDefaultDuration(startAt: string, defaultMinutes: number): string {
+  return addMinutes(new Date(startAt), defaultMinutes).toISOString();
+}
+
 function isCallbackQuery(context: unknown): boolean {
   return typeof getCallbackData(context) === 'string';
 }
@@ -90,7 +94,14 @@ export function createAddEventScene(eventService: EventService) {
           const data = getCallbackData(context)!;
           if (data === `${CB.ADD_SKIP}:2`) {
             await answerCallback(context);
-            await context.scene.update({});
+            const sceneUser = getSceneUser(context);
+            const defaultMins = sceneUser?.default_event_duration_minutes ?? 60;
+            const { startAt } = context.scene.state;
+            if (startAt) {
+              await context.scene.update({ endAt: applyDefaultDuration(startAt, defaultMins) });
+            } else {
+              await context.scene.update({});
+            }
             return;
           }
           await answerCallback(context);
