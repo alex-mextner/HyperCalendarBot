@@ -24,10 +24,9 @@ export class KokoroTtsService {
     const tmpOgg = `/tmp/kokoro-${Date.now()}.ogg`;
     await Bun.write(tmpWav, wavBuffer);
 
-    const proc = Bun.spawn(
-      ['ffmpeg', '-y', '-i', tmpWav, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', tmpOgg],
-      { stderr: 'pipe' },
-    );
+    const proc = Bun.spawn(['ffmpeg', '-y', '-i', tmpWav, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', tmpOgg], {
+      stderr: 'pipe',
+    });
     const exitCode = await proc.exited;
 
     await unlink(tmpWav).catch(() => {});

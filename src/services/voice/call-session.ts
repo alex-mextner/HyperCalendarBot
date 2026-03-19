@@ -25,11 +25,13 @@ export interface CallSessionConfig {
 export class CallSession {
   private ended = false;
   private speaking = false;
+  private agentRunning = false;
   private novaStt: NovaStreamingSTT | null = null;
   private fluxStt: FluxStreamingSTT | null = null;
   private thinking: ThinkingPhrasePlayer | null = null;
   private fileSeq = 0;
   lastPlayFile: string | null = null;
+  private tmpFiles = new Set<string>();
   private rollingTranscript = '';
 
   private constructor(private readonly cfg: CallSessionConfig) {}
@@ -149,6 +151,9 @@ export class CallSession {
   }
 
   private onEnoughToRespond(): void {
+    if (this.agentRunning) return;
+    this.agentRunning = true;
+
     this.speaking = false;
     this.novaStt?.close();
     this.novaStt = null;
@@ -159,34 +164,37 @@ export class CallSession {
     const transcript = this.rollingTranscript;
     this.rollingTranscript = '';
 
+    // TODO: spec requires a 10s fail-open timer — if agent takes longer, resume listening
     this.runAgent(transcript).catch((err) => {
       voiceLogger.error({ err, sessionId: this.cfg.sessionId }, 'Agent error during call');
     });
   }
 
   private async runAgent(transcript: string): Promise<void> {
-    const ctx = {
-      ...(this.cfg.agentContextBase ?? {}),
-      user: { telegram_id: this.cfg.userId } as never,
-      chatId: this.cfg.userId,
-      messageText: transcript,
-      inputMode: 'live_call',
-      isGroup: false,
-    } as AgentContext;
-
-    const { responseText } = await this.cfg.agent.run(ctx);
-    this.thinking?.cancel();
-    this.thinking = null;
-
-    if (!responseText) return;
-
     try {
+      const ctx = {
+        ...(this.cfg.agentContextBase ?? {}),
+        user: { telegram_id: this.cfg.userId } as never,
+        chatId: this.cfg.userId,
+        messageText: transcript,
+        inputMode: 'live_call',
+        isGroup: false,
+      } as AgentContext;
+
+      const { responseText } = await this.cfg.agent.run(ctx);
+      this.thinking?.cancel();
+      this.thinking = null;
+
+      if (!responseText) return;
+
       const audio = await this.cfg.tts.synthesize(responseText, this.cfg.language);
       const file = this.tempFile();
       await Bun.write(file, audio);
       this.sendPlay(file);
     } catch (err) {
       voiceLogger.error({ err }, 'TTS synthesis failed during call');
+    } finally {
+      this.agentRunning = false;
     }
   }
 
@@ -194,16 +202,23 @@ export class CallSession {
     if (this.lastPlayFile) {
       const del = this.cfg.unlink ?? fsUnlink;
       await del(this.lastPlayFile).catch(() => {});
+      this.tmpFiles.delete(this.lastPlayFile);
       this.lastPlayFile = null;
     }
   }
 
   private onCallEnded(): void {
+    if (this.ended) return;
     this.ended = true;
     this.speaking = false;
     this.thinking?.cancel();
     this.novaStt?.close();
     this.fluxStt?.close();
+    const del = this.cfg.unlink ?? fsUnlink;
+    for (const f of this.tmpFiles) {
+      del(f).catch(() => {});
+    }
+    this.tmpFiles.clear();
     voiceLogger.info({ sessionId: this.cfg.sessionId }, 'Call ended, session cleaned up');
   }
 
@@ -214,7 +229,13 @@ export class CallSession {
   }
 
   private sendPlay(file: string): void {
+    if (this.lastPlayFile) {
+      const del = this.cfg.unlink ?? fsUnlink;
+      del(this.lastPlayFile).catch(() => {});
+      this.tmpFiles.delete(this.lastPlayFile);
+    }
     this.lastPlayFile = file;
+    this.send(JSON.stringify({ type: 'STOP' }));
     this.send(JSON.stringify({ type: 'PLAY', file }));
   }
 
