@@ -3,25 +3,15 @@
 import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
-import type { AgentContext } from '../../services/ai/types.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import type { AgentContextBuilder } from '../agent-context-factory.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
 
 export interface AgentLayerDeps {
   agent: CalendarBotAgent;
-  agentContextBuilder: (
-    user: User,
-    chatId: number,
-    messageText: string,
-    groupInfo?: {
-      isGroup: boolean;
-      groupChatId?: number;
-      groupTitle?: string;
-      onBotResponse?: (messageId: number) => void;
-    },
-  ) => AgentContext;
+  agentContextBuilder: AgentContextBuilder;
   intentLearner?: IntentLearner;
 }
 
