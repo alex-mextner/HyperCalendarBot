@@ -67,7 +67,7 @@ describe('IntentLearner', () => {
     const intentPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня', 'events today'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{today}}' } }] },
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
       format: 'events_list',
     };
 
@@ -140,7 +140,7 @@ describe('IntentLearner', () => {
     const validPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{today}}' } }] },
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
       format: 'events_list',
     };
 

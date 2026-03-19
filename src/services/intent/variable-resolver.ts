@@ -1,6 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { addDays, addWeeks, endOfMonth, endOfWeek, format, startOfMonth, startOfWeek, subDays } from 'date-fns';
 import { cmdLogger } from '../../utils/logger.ts';
+import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
 
 /** Event summary available as template variables in intent workflows. */
 export interface EventSummary {
@@ -81,26 +82,28 @@ function resolveVar(
   const now = new TZDate(new Date(), userCtx.timezone);
 
   switch (name) {
-    case 'today':
+    case 'dates.today':
       return format(now, 'yyyy-MM-dd');
-    case 'tomorrow':
+    case 'dates.tomorrow':
       return format(addDays(now, 1), 'yyyy-MM-dd');
-    case 'week_start':
+    case 'dates.week_start':
       return format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'week_end':
+    case 'dates.week_end':
       return format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'month_start':
+    case 'dates.month_start':
       return format(startOfMonth(now), 'yyyy-MM-dd');
-    case 'month_end':
+    case 'dates.month_end':
       return format(endOfMonth(now), 'yyyy-MM-dd');
-    case 'yesterday':
+    case 'dates.yesterday':
       return format(subDays(now, 1), 'yyyy-MM-dd');
-    case 'next_week_start':
+    case 'dates.next_week_start':
       return format(startOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'next_week_end':
+    case 'dates.next_week_end':
       return format(endOfWeek(addWeeks(now, 1), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    case 'now':
+    case 'dates.now':
       return format(now, "yyyy-MM-dd'T'HH:mm:ssxxx");
+    case 'env.scope':
+      return userCtx.groupIsGroup ? 'group' : 'personal';
     case 'user.timezone':
       return userCtx.timezone;
     case 'user.language':
@@ -151,18 +154,33 @@ export function resolveVariables(
     // If the entire string is a single variable (no filter), return the raw resolved value
     // (preserves non-string types like numbers)
     if (matches.length === 1 && template === `{{${matches[0][1]}}}` && !matches[0][1].includes('|')) {
-      const resolved = resolveVar(matches[0][1], captures, userCtx, stepResults);
+      const resolved = resolveVar(matches[0][1]!.trim(), captures, userCtx, stepResults);
       return resolved !== undefined ? resolved : template;
     }
 
     // Otherwise do text substitution, converting everything to string
     return template.replace(pattern, (match, expr: string) => {
-      const [varName, filter] = expr.split('|', 2) as [string, string | undefined];
+      const pipeIdx = expr.indexOf('|');
+      const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
+      const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
+
       const resolved = resolveVar(varName, captures, userCtx, stepResults);
-      if (resolved === undefined) return match;
-      const str = String(resolved);
-      if (filter === 'pad2') return str.padStart(2, '0');
-      return str;
+
+      if (!filterExpr) {
+        return resolved !== undefined ? String(resolved) : match;
+      }
+
+      let filters: FilterCall[];
+      try {
+        filters = parseFilterChain(filterExpr);
+      } catch {
+        cmdLogger.warn({ expr }, 'Invalid filter expression in intent template');
+        return match;
+      }
+
+      // default() can produce a value even when resolved is undefined
+      const result = applyFilters(resolved, filters);
+      return result;
     });
   }
 

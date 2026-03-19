@@ -276,6 +276,14 @@ venv/bin/python scripts/pyrogram-auth.py
 - `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it, audio will be silent
 - Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
 
+## Backward Compatibility
+
+When renaming variables, constants, config keys, or any other interface:
+- **Ask immediately**: is backward compatibility needed, or can we migrate everything and remove the old names?
+- **Default recommendation**: full migration — no aliases, no legacy shims. Aliases are technical debt.
+- **Exceptions** worth keeping old names: public API with external consumers, stable library interface, or explicit user decision.
+- If migration is feasible (internal code, DB rows can be updated, tests can be rewritten), propose full migration as the primary option. Final call is the programmer's.
+
 ## Debugging
 
 - Read error messages carefully — they often contain the exact solution.

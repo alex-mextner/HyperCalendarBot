@@ -11,7 +11,7 @@ describe('IntentExecutor', () => {
 
   test('executes Level 1 workflow (single tool call)', async () => {
     const workflow = {
-      tools: [{ name: 'get_events', input: { start_date: '{{today}}' } }],
+      tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}' } }],
       format: 'events_list',
     };
     const mockExecutor = (_name: string) => ({

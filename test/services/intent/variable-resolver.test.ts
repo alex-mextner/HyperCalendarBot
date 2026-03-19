@@ -10,14 +10,14 @@ describe('resolveVariables', () => {
     userId: 5153477378,
   };
 
-  test('resolves {{today}} to YYYY-MM-DD in user timezone', () => {
-    const result = resolveVariables('{{today}}', {}, userCtx);
+  test('resolves {{dates.today}} to YYYY-MM-DD in user timezone', () => {
+    const result = resolveVariables('{{dates.today}}', {}, userCtx);
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
-  test('resolves {{tomorrow}}', () => {
-    const today = resolveVariables('{{today}}', {}, userCtx) as string;
-    const tomorrow = resolveVariables('{{tomorrow}}', {}, userCtx) as string;
+  test('resolves {{dates.tomorrow}} after today', () => {
+    const today = resolveVariables('{{dates.today}}', {}, userCtx) as string;
+    const tomorrow = resolveVariables('{{dates.tomorrow}}', {}, userCtx) as string;
     expect(tomorrow > today).toBe(true);
   });
 
@@ -40,7 +40,7 @@ describe('resolveVariables', () => {
   });
 
   test('resolves variables in nested objects', () => {
-    const input = { start_date: '{{today}}', nested: { end_date: '{{tomorrow}}' } };
+    const input = { start_date: '{{dates.today}}', nested: { end_date: '{{dates.tomorrow}}' } };
     const result = resolveVariables(input, {}, userCtx) as Record<string, unknown>;
     expect(result.start_date as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect((result.nested as Record<string, unknown>).end_date as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -52,7 +52,7 @@ describe('resolveVariables', () => {
   });
 
   test('resolves arrays', () => {
-    const input = ['{{today}}', '{{tomorrow}}'];
+    const input = ['{{dates.today}}', '{{dates.tomorrow}}'];
     const result = resolveVariables(input, {}, userCtx) as string[];
     expect(result[0]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(result[1]).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -64,17 +64,17 @@ describe('resolveVariables', () => {
     expect(resolveVariables(null, {}, userCtx)).toBeNull();
   });
 
-  test('resolves {{week_start}} and {{week_end}}', () => {
-    const weekStart = resolveVariables('{{week_start}}', {}, userCtx) as string;
-    const weekEnd = resolveVariables('{{week_end}}', {}, userCtx) as string;
+  test('resolves {{dates.week_start}} and {{dates.week_end}}', () => {
+    const weekStart = resolveVariables('{{dates.week_start}}', {}, userCtx) as string;
+    const weekEnd = resolveVariables('{{dates.week_end}}', {}, userCtx) as string;
     expect(weekStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(weekEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(weekEnd >= weekStart).toBe(true);
   });
 
-  test('resolves {{month_start}} and {{month_end}}', () => {
-    const monthStart = resolveVariables('{{month_start}}', {}, userCtx) as string;
-    const monthEnd = resolveVariables('{{month_end}}', {}, userCtx) as string;
+  test('resolves {{dates.month_start}} and {{dates.month_end}}', () => {
+    const monthStart = resolveVariables('{{dates.month_start}}', {}, userCtx) as string;
+    const monthEnd = resolveVariables('{{dates.month_end}}', {}, userCtx) as string;
     expect(monthStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(monthEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(monthEnd >= monthStart).toBe(true);
@@ -83,8 +83,6 @@ describe('resolveVariables', () => {
   test('resolves {{user.language}}', () => {
     expect(resolveVariables('{{user.language}}', {}, userCtx)).toBe('ru');
   });
-
-  // --- New user variables ---
 
   test('resolves {{user.username}} to sender username without @', () => {
     expect(resolveVariables('{{user.username}}', {}, userCtx)).toBe('ultra');
@@ -100,32 +98,28 @@ describe('resolveVariables', () => {
 
   test('{{user.username}} stays unresolved when username not set', () => {
     const ctx = { timezone: 'UTC', language: 'en' };
-    // no username — should stay as literal
     expect(resolveVariables('{{user.username}}', {}, ctx)).toBe('{{user.username}}');
   });
 
-  // --- New date variables ---
-
-  test('resolves {{yesterday}} to date before today', () => {
-    const today = resolveVariables('{{today}}', {}, userCtx) as string;
-    const yesterday = resolveVariables('{{yesterday}}', {}, userCtx) as string;
+  test('resolves {{dates.yesterday}} to date before today', () => {
+    const today = resolveVariables('{{dates.today}}', {}, userCtx) as string;
+    const yesterday = resolveVariables('{{dates.yesterday}}', {}, userCtx) as string;
     expect(yesterday).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(yesterday < today).toBe(true);
   });
 
-  test('resolves {{next_week_start}} and {{next_week_end}} after this week', () => {
-    const weekEnd = resolveVariables('{{week_end}}', {}, userCtx) as string;
-    const nextStart = resolveVariables('{{next_week_start}}', {}, userCtx) as string;
-    const nextEnd = resolveVariables('{{next_week_end}}', {}, userCtx) as string;
+  test('resolves {{dates.next_week_start}} and {{dates.next_week_end}} after this week', () => {
+    const weekEnd = resolveVariables('{{dates.week_end}}', {}, userCtx) as string;
+    const nextStart = resolveVariables('{{dates.next_week_start}}', {}, userCtx) as string;
+    const nextEnd = resolveVariables('{{dates.next_week_end}}', {}, userCtx) as string;
     expect(nextStart).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(nextEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(nextStart > weekEnd).toBe(true);
     expect(nextEnd >= nextStart).toBe(true);
   });
 
-  test('resolves {{now}} to ISO datetime string with time component', () => {
-    const now = resolveVariables('{{now}}', {}, userCtx) as string;
-    // e.g. "2026-03-19T14:32:00+03:00" — must contain T
+  test('resolves {{dates.now}} to ISO datetime string with time component', () => {
+    const now = resolveVariables('{{dates.now}}', {}, userCtx) as string;
     expect(now).toContain('T');
   });
 
@@ -163,7 +157,6 @@ describe('resolveVariables', () => {
         all_day: true,
       },
     };
-    // absent optional fields stay as literal template
     expect(resolveVariables('{{last_added_event.location}}', {}, userCtx, stepResults)).toBe(
       '{{last_added_event.location}}',
     );
@@ -172,19 +165,61 @@ describe('resolveVariables', () => {
     );
   });
 
-  // --- |pad2 filter ---
+  // --- filter pipeline ---
 
-  test('{{$1|pad2}} zero-pads single-digit capture to 2 chars', () => {
-    expect(resolveVariables('{{$1|pad2}}', { $1: '9' }, userCtx)).toBe('09');
+  test('{{$1|pad(2)}} zero-pads single-digit capture', () => {
+    expect(resolveVariables('{{$1|pad(2)}}', { $1: '9' }, userCtx)).toBe('09');
   });
 
-  test('{{$1|pad2}} leaves 2-digit capture unchanged', () => {
-    expect(resolveVariables('{{$1|pad2}}', { $1: '23' }, userCtx)).toBe('23');
+  test('{{$1|pad(2)}} leaves 2-digit capture unchanged', () => {
+    expect(resolveVariables('{{$1|pad(2)}}', { $1: '23' }, userCtx)).toBe('23');
   });
 
-  test('{{$1|pad2}} works inline in ISO datetime string', () => {
-    const result = resolveVariables('{{today}}T{{$1|pad2}}:00:00Z', { $1: '9' }, userCtx);
+  test('{{$1|pad(2)}} works inline in ISO datetime string', () => {
+    const result = resolveVariables('{{dates.today}}T{{$1|pad(2)}}:00:00Z', { $1: '9' }, userCtx);
     expect(result as string).toMatch(/^\d{4}-\d{2}-\d{2}T09:00:00Z$/);
+  });
+
+  test('{{user.first_name|default("гость")}} returns default when name absent', () => {
+    const ctx = { timezone: 'UTC', language: 'ru' };
+    expect(resolveVariables('{{user.first_name|default("гость")}}', {}, ctx)).toBe('гость');
+  });
+
+  test('{{$1|trim|upper}} chains trim and upper', () => {
+    expect(resolveVariables('{{$1|trim|upper}}', { $1: '  привет  ' }, userCtx)).toBe('ПРИВЕТ');
+  });
+
+  // --- env.scope ---
+
+  test('{{env.scope}} resolves to "group" when groupIsGroup', () => {
+    const ctx = { ...userCtx, groupIsGroup: true, groupChatId: -100123 };
+    expect(resolveVariables('{{env.scope}}', {}, ctx)).toBe('group');
+  });
+
+  test('{{env.scope}} resolves to "personal" in private chat', () => {
+    expect(resolveVariables('{{env.scope}}', {}, userCtx)).toBe('personal');
+  });
+
+  // --- date() filter ---
+
+  test('{{$1|date("dd.MM")}} reformats ISO date string', () => {
+    expect(resolveVariables('{{$1|date("dd.MM")}}', { $1: '2026-03-19' }, userCtx)).toBe('19.03');
+  });
+
+  test('{{dates.today|date("dd.MM.yyyy")}} formats today', () => {
+    const result = resolveVariables('{{dates.today|date("dd.MM.yyyy")}}', {}, userCtx) as string;
+    expect(result).toMatch(/^\d{2}\.\d{2}\.\d{4}$/);
+  });
+
+  // --- ternary() filter ---
+
+  test('{{group.is_group|ternary("group","personal")}} returns "group" when true', () => {
+    const ctx = { ...userCtx, groupIsGroup: true };
+    expect(resolveVariables('{{group.is_group|ternary("group","personal")}}', {}, ctx)).toBe('group');
+  });
+
+  test('{{group.is_group|ternary("group","personal")}} returns "personal" when false', () => {
+    expect(resolveVariables('{{group.is_group|ternary("group","personal")}}', {}, userCtx)).toBe('personal');
   });
 
   // --- Group context variables ---
@@ -204,7 +239,6 @@ describe('resolveVariables', () => {
   });
 
   test('{{group.chat_id}} stays as literal when not in a group', () => {
-    // groupChatId is undefined → resolveVar returns undefined → template stays unreplaced
     expect(resolveVariables('{{group.chat_id}}', {}, userCtx)).toBe('{{group.chat_id}}');
   });
 });

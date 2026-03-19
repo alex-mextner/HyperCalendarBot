@@ -4,7 +4,7 @@ import { validateWorkflowVariables } from '../../../src/services/intent/workflow
 describe('validateWorkflowVariables', () => {
   test('valid known variables pass', () => {
     const workflow = {
-      tools: [{ name: 'get_events', input: { start_date: '{{today}}', end_date: '{{week_end}}' } }],
+      tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.week_end}}' } }],
     };
     expect(validateWorkflowVariables(workflow, null)).toEqual([]);
   });
@@ -75,12 +75,12 @@ describe('validateWorkflowVariables', () => {
         {
           call: 'get_events',
           input: {
-            a: '{{today}}',
-            b: '{{tomorrow}}',
-            c: '{{week_start}}',
-            d: '{{week_end}}',
-            e: '{{month_start}}',
-            f: '{{month_end}}',
+            a: '{{dates.today}}',
+            b: '{{dates.tomorrow}}',
+            c: '{{dates.week_start}}',
+            d: '{{dates.week_end}}',
+            e: '{{dates.month_start}}',
+            f: '{{dates.month_end}}',
             g: '{{user.timezone}}',
             h: '{{user.language}}',
           },
@@ -92,10 +92,24 @@ describe('validateWorkflowVariables', () => {
 
   test('variables embedded in longer strings are validated', () => {
     const workflow = {
-      steps: [{ call: 'fn', input: { msg: 'Hello {{user.unknown}} you asked about {{today}}' } }],
+      steps: [{ call: 'fn', input: { msg: 'Hello {{user.unknown}} you asked about {{dates.today}}' } }],
     };
     const errors = validateWorkflowVariables(workflow, null);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('user.unknown');
+  });
+
+  test('unknown filter name is rejected', () => {
+    const workflow = { tools: [{ name: 'fn', input: { x: '{{dates.today|bogus}}' } }] };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('bogus');
+  });
+
+  test('invalid filter syntax is rejected', () => {
+    const workflow = { tools: [{ name: 'fn', input: { x: '{{$1|pad(}}' } }] };
+    const errors = validateWorkflowVariables(workflow, '^(.+)$');
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('invalid filter syntax');
   });
 });

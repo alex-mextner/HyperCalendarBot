@@ -37,7 +37,7 @@ describe('Pipeline Integration', () => {
       canonical_name: 'show_today',
       phrases: ['что сегодня'],
       workflow: {
-        tools: [{ name: 'get_events', input: { start_date: '{{today}}' } }],
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}' } }],
         format: 'events_list',
       },
       format: 'events_list',
