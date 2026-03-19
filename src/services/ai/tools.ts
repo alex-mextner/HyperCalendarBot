@@ -279,7 +279,7 @@ export const toolDefinitions: ToolDefinition[] = [
         updates: {
           type: 'object',
           description:
-            'Fields to update. For general: timezone (IANA string), language (en/ru), country_code (ISO 3166-1 alpha-2 string), default_event_duration_minutes (positive integer, minutes). For notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). For calls: enabled (bool), language (string). For privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). For voice: voice_response_enabled (bool).',
+            'Fields to update. For general: timezone (IANA string), language (en/ru), country_code (ISO 3166-1 alpha-2 string), default_event_duration_minutes (1–1440 minutes). For notifications: morning_agenda_enabled (bool), morning_agenda_time (HH:MM), evening_review_enabled (bool), evening_review_time (HH:MM), quiet_hours_enabled (bool), quiet_hours_start (HH:MM), quiet_hours_end (HH:MM), default_reminder_minutes (number[]). For calls: enabled (bool), language (string). For privacy: default_visibility (private/free_busy/full), inline_mode_enabled (bool), allow_invitations (bool). For voice: voice_response_enabled (bool).',
         },
       },
       required: ['action'],

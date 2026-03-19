@@ -457,7 +457,7 @@ export async function handleSettingsCallback(
 
   if (subAction.startsWith('set_duration:') && userRepo) {
     const mins = Number.parseInt(subAction.split(':')[1]!, 10);
-    if (mins > 0) {
+    if (mins > 0 && mins <= 1440) {
       userRepo.update(user.telegram_id, { default_event_duration_minutes: mins });
       pendingDurationInput.delete(user.telegram_id);
     }
