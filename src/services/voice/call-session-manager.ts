@@ -41,7 +41,7 @@ export class CallSessionManager {
     if (!entry) return;
 
     if (isBinary) {
-      entry.session.handleBinaryMessage(Buffer.isBuffer(data) ? data : Buffer.from(data as never));
+      entry.session.handleBinaryMessage(Buffer.isBuffer(data) ? data : Buffer.from(data as string));
     } else {
       await entry.session.handleMessage(data as string);
     }
@@ -64,14 +64,14 @@ export class CallSessionManager {
     Bun.serve({
       port: 3001,
       hostname: '127.0.0.1',
-      fetch(req, server) {
+      fetch(req, server): Response | undefined {
         const url = new URL(req.url);
         const match = url.pathname.match(/^\/call\/([^/]+)$/);
         if (!match) return new Response('Not found', { status: 404 });
         const sessionId = match[1];
         const upgraded = server.upgrade(req, { data: { sessionId } });
         if (!upgraded) return new Response('Upgrade failed', { status: 426 });
-        return undefined as unknown as Response;
+        return undefined;
       },
       websocket: {
         open: (ws) => {
@@ -81,10 +81,12 @@ export class CallSessionManager {
             close: () => ws.close(),
           });
         },
-        message: async (ws, message) => {
+        message: (ws, message) => {
           const { sessionId } = ws.data as { sessionId: string };
           const isBinary = typeof message !== 'string';
-          await this.onWebSocketMessage(sessionId, message as string | Buffer, isBinary);
+          this.onWebSocketMessage(sessionId, message as string | Buffer, isBinary).catch((err) => {
+            voiceLogger.error({ err, sessionId }, 'WebSocket message handler error');
+          });
         },
         close: (ws) => {
           const { sessionId } = ws.data as { sessionId: string };
