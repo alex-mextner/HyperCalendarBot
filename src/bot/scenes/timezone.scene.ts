@@ -62,9 +62,12 @@ export function createTimezoneScene(db: DatabaseService) {
           context as unknown as { eventLocation: { latitude: number; longitude: number } }
         ).eventLocation;
         const tz = resolveTimezone(latitude, longitude);
-        db.users.update(user.telegram_id, { timezone: tz });
-        await context.scene.exit();
-        await context.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
+        const display = getTimezoneDisplay(tz);
+        await context.send(`✅ ${display}`, {
+          ...removeKeyboard(),
+          reply_markup: timezoneConfirmKeyboard(lang),
+        });
+        await context.scene.update({ detectedTz: tz }, { step: undefined });
         return;
       }
 
