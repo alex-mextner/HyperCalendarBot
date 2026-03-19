@@ -51,7 +51,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
         });
       }
     } catch (error) {
-      cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'AI agent error');
+      cmdLogger.error({ err: error, userId: user.telegram_id }, 'AI agent error');
       const lang = user.language as 'en' | 'ru';
       await ctx.send(t(lang).something_wrong);
     }

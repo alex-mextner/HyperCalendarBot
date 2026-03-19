@@ -266,7 +266,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return { success: false, error: `Unknown tool: ${toolName}` };
     }
   } catch (error) {
-    aiLogger.error({ tool: toolName, error: String(error) }, 'Tool execution error');
+    aiLogger.error({ tool: toolName, err: error }, 'Tool execution error');
     return { success: false, error: `Tool execution failed: ${String(error)}` };
   }
 }

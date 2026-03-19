@@ -694,7 +694,7 @@ export function createBot(
     .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
-      botLogger.error({ kind, error: String(error) }, 'Bot error');
+      botLogger.error({ kind, err: error }, 'Bot error');
       try {
         if (context && 'send' in context) {
           const derived = context as unknown as GramIOContextWithDerived;
@@ -725,7 +725,7 @@ export function createBot(
       .derive(createUserResolver(db))
       .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
       .onError(({ error }) => {
-        botLogger.error({ error: String(error) }, 'Inline bot error');
+        botLogger.error({ err: error }, 'Inline bot error');
       });
   } else {
     // No separate inline bot — register on main bot

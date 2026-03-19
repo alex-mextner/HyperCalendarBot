@@ -987,10 +987,11 @@ export function createCallbackHandler(
             user.language === 'ru'
               ? '🌍 Введите название города для группы:\n\nПримеры: Белград, Belgrade, Нью-Йорк, Bangkok'
               : '🌍 Enter city name for the group:\n\nExamples: Belgrade, New York, Bangkok';
-          pendingGroupTzInput.set(user.telegram_id, { chatId, ts: Date.now() });
+          pendingGroupTzInput.set(user.telegram_id, { chatId, ts: Date.now(), lang: user.language as 'en' | 'ru' });
           await ctx.send(prompt);
           return;
         }
+        // Stale callback from old region/city buttons — just dismiss it
         await ctx.answer();
         return;
       }

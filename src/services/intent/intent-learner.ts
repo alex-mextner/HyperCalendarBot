@@ -93,7 +93,7 @@ export class IntentLearner {
 
       return intentData;
     } catch (error) {
-      cmdLogger.error({ error: String(error) }, 'IntentLearner AI call failed');
+      cmdLogger.error({ err: error }, 'IntentLearner AI call failed');
       return null;
     }
   }

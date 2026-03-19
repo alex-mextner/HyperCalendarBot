@@ -23,7 +23,7 @@ const ALLOWED_VARS = new Set([
   'group.chat_id',
 ]);
 
-const CAPTURE_VAR_RE = /^\$(\d+)$/;
+const CAPTURE_VAR_RE = /^\$(\d+)(\|pad2)?$/;
 
 /** Count capturing (non-non-capturing) groups in a regex pattern string. */
 function countCapturingGroups(pattern: string): number {

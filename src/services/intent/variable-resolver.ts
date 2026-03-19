@@ -148,17 +148,21 @@ export function resolveVariables(
     const pattern = /\{\{([^}]+)\}\}/g;
     const matches = [...template.matchAll(pattern)];
 
-    // If the entire string is a single variable, return the raw resolved value
+    // If the entire string is a single variable (no filter), return the raw resolved value
     // (preserves non-string types like numbers)
-    if (matches.length === 1 && template === `{{${matches[0][1]}}}`) {
+    if (matches.length === 1 && template === `{{${matches[0][1]}}}` && !matches[0][1].includes('|')) {
       const resolved = resolveVar(matches[0][1], captures, userCtx, stepResults);
       return resolved !== undefined ? resolved : template;
     }
 
     // Otherwise do text substitution, converting everything to string
-    return template.replace(pattern, (match, varName: string) => {
+    return template.replace(pattern, (match, expr: string) => {
+      const [varName, filter] = expr.split('|', 2) as [string, string | undefined];
       const resolved = resolveVar(varName, captures, userCtx, stepResults);
-      return resolved !== undefined ? String(resolved) : match;
+      if (resolved === undefined) return match;
+      const str = String(resolved);
+      if (filter === 'pad2') return str.padStart(2, '0');
+      return str;
     });
   }
 

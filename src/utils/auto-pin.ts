@@ -15,7 +15,7 @@ export async function autoPin(chatId: number, messageId: number, deps: AutoPinDe
     await deps.pinChatMessage(chatId, messageId, { disable_notification: true });
   } catch (error) {
     if (!deps.isGroupChat) {
-      cmdLogger.warn({ chatId, error: String(error) }, 'Failed to pin in private chat');
+      cmdLogger.warn({ chatId, err: error }, 'Failed to pin in private chat');
       return;
     }
 

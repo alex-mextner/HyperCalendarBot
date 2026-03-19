@@ -122,9 +122,7 @@ describe('NotificationScheduler – eve_holiday', () => {
   test('sends eve_holiday when tomorrow is a holiday and notify=1 with evening_review_time set', async () => {
     // User 42, UTC timezone, evening_review_time = 21:00 (default)
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
       "INSERT INTO holidays (country_code, date, name, type, year) VALUES ('UA', '2026-03-19', 'Test Holiday', 'public', 2026)",
@@ -138,9 +136,7 @@ describe('NotificationScheduler – eve_holiday', () => {
 
   test('does not send eve_holiday when notify=0', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
       "INSERT INTO holidays (country_code, date, name, type, year) VALUES ('UA', '2026-03-19', 'Test Holiday', 'public', 2026)",
@@ -154,9 +150,7 @@ describe('NotificationScheduler – eve_holiday', () => {
 
   test('does not send eve_holiday when tomorrow has no holiday', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run("INSERT INTO holiday_subscriptions (user_id, country_code, is_primary, notify) VALUES (42, 'UA', 1, 1)");
     // No holiday inserted for tomorrow
@@ -167,9 +161,7 @@ describe('NotificationScheduler – eve_holiday', () => {
 
   test('deduplicates eve_holiday (does not send twice for same date)', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
       "INSERT INTO holidays (country_code, date, name, type, year) VALUES ('UA', '2026-03-19', 'Test Holiday', 'public', 2026)",
@@ -198,9 +190,7 @@ describe('NotificationScheduler – eve_holiday', () => {
 
   test('payload contains holiday name', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run("INSERT INTO holiday_countries (code, name, region) VALUES ('UA', 'Ukraine', 'Europe')");
     db.run(
       "INSERT INTO holidays (country_code, date, name, type, year) VALUES ('UA', '2026-03-19', 'Test Holiday', 'public', 2026)",

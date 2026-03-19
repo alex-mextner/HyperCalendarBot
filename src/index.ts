@@ -199,7 +199,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
 
     botLogger.info('Voice call pipeline initialized (Python bridge + BullMQ)');
   } catch (error) {
-    botLogger.warn({ error: String(error) }, 'Voice call init failed, queue-only mode');
+    botLogger.warn({ err: error }, 'Voice call init failed, queue-only mode');
     const { createCallQueue } = await import('./worker/call-queue.ts');
     const cq = createCallQueue({ url: config.REDIS_URL });
     callQueue = cq;
@@ -307,7 +307,7 @@ try {
   const { StressDictionary } = await import('./services/voice/stress-dictionary.ts');
   stressDictionary = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
 } catch (error) {
-  botLogger.warn({ error: String(error) }, 'Stress dictionary not loaded');
+  botLogger.warn({ err: error }, 'Stress dictionary not loaded');
 }
 
 let kokoroTts: import('./services/voice/kokoro-tts-service.ts').KokoroTtsService | undefined;

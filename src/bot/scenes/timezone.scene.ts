@@ -4,7 +4,7 @@ import { CB } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
-import { removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
+import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface TimezoneState {
@@ -21,10 +21,8 @@ export function createTimezoneScene(db: DatabaseService) {
 
       const display = getTimezoneDisplay(user.timezone);
       const current = lang === 'ru' ? `🌍 Текущий: ${display}\n\n` : `🌍 Current: ${display}\n\n`;
-      const prompt =
-        lang === 'ru'
-          ? `${current}В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ`
-          : `${current}What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv`;
+      // Prepend current timezone to the shared city input prompt (strip leading 🌍 icon)
+      const prompt = current + cityInputPrompt(lang).replace(/^🌍 /, '');
 
       await context.send(prompt, { reply_markup: timezoneMethodKeyboard(lang) });
     })
@@ -96,11 +94,7 @@ export function createTimezoneScene(db: DatabaseService) {
 
         if (action === CB.ONBOARD_TZ_RETRY) {
           await cbCtx.answer();
-          const prompt =
-            lang === 'ru'
-              ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
-              : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
-          await context.send(prompt, { reply_markup: timezoneMethodKeyboard(lang) });
+          await context.send(cityInputPrompt(lang), { reply_markup: timezoneMethodKeyboard(lang) });
           return;
         }
 

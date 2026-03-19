@@ -115,5 +115,4 @@ describe('NotificationPreferencesService', () => {
     const intervals = service.resolveDefaultIntervals(42);
     expect(intervals).toEqual([5, 10, 30]);
   });
-
 });

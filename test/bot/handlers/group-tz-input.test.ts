@@ -40,7 +40,7 @@ test('resolves city via library and saves timezone to group', async () => {
   const store: Record<number, string> = {};
   const groupRepo = makeGroupRepo(store);
   const { ctx, sent } = makeCtx();
-  pendingGroupTzInput.set(1, { chatId: -100, ts: Date.now() });
+  pendingGroupTzInput.set(1, { chatId: -100, ts: Date.now(), lang: 'ru' });
 
   // 'Belgrade' resolves via city-timezones library (no AI needed)
   const handled = await tryHandleGroupTzInput(ctx as never, 1, 'Belgrade', groupRepo as never);
@@ -59,7 +59,7 @@ test('returns false when no pending state', async () => {
 });
 
 test('clears expired pending state (> 5 min)', async () => {
-  pendingGroupTzInput.set(3, { chatId: -200, ts: Date.now() - 6 * 60 * 1000 });
+  pendingGroupTzInput.set(3, { chatId: -200, ts: Date.now() - 6 * 60 * 1000, lang: 'en' });
 
   const handled = await tryHandleGroupTzInput({} as never, 3, 'Belgrade', {} as never);
   expect(handled).toBe(false);
@@ -71,7 +71,7 @@ test('sends error message when city cannot be resolved', async () => {
   mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
   const { ctx, sent } = makeCtx();
   const groupRepo = makeGroupRepo({});
-  pendingGroupTzInput.set(4, { chatId: -300, ts: Date.now() });
+  pendingGroupTzInput.set(4, { chatId: -300, ts: Date.now(), lang: 'ru' });
 
   const handled = await tryHandleGroupTzInput(ctx as never, 4, 'xyzxyzxyz', groupRepo as never);
 
@@ -80,11 +80,21 @@ test('sends error message when city cannot be resolved', async () => {
   expect(pendingGroupTzInput.has(4)).toBe(false);
 });
 
+test('sends English error when lang is en', async () => {
+  mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
+  const { ctx, sent } = makeCtx();
+  pendingGroupTzInput.set(6, { chatId: -500, ts: Date.now(), lang: 'en' });
+
+  await tryHandleGroupTzInput(ctx as never, 6, 'xyzxyzxyz', makeGroupRepo({}) as never);
+
+  expect(sent[0]).toContain('Could not determine');
+});
+
 test('trims whitespace from input before resolving', async () => {
   const store: Record<number, string> = {};
   const groupRepo = makeGroupRepo(store);
   const { ctx } = makeCtx();
-  pendingGroupTzInput.set(5, { chatId: -400, ts: Date.now() });
+  pendingGroupTzInput.set(5, { chatId: -400, ts: Date.now(), lang: 'ru' });
 
   await tryHandleGroupTzInput(ctx as never, 5, '  Belgrade  ', groupRepo as never);
 

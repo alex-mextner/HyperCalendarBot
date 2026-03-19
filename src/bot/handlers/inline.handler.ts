@@ -147,7 +147,7 @@ export function createInlineHandler(
 
       await ctx.answerInlineQuery(results, { cache_time: 30 });
     } catch (error) {
-      cmdLogger.error({ error: String(error), userId }, 'Inline query error');
+      cmdLogger.error({ err: error, userId }, 'Inline query error');
       await ctx.answerInlineQuery([]);
     }
   };

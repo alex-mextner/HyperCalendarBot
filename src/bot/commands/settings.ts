@@ -13,7 +13,7 @@ import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.t
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
-export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number }>(); // userId → { chatId, ts }
+export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number; lang: 'en' | 'ru' }>(); // userId → { chatId, ts, lang }
 
 export function settingsCategoryKeyboard(): InlineKeyboard {
   return new InlineKeyboard()

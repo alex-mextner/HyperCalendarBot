@@ -51,7 +51,7 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
 
   worker.on('failed', (job, err) => {
     if (!job) return;
-    botTasksLogger.error({ jobId: job.id, type: job.data.type, error: err.message }, 'Bot task job failed');
+    botTasksLogger.error({ jobId: job.id, type: job.data.type, err: err }, 'Bot task job failed');
   });
 
   return { queue, worker };

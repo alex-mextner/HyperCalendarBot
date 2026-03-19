@@ -26,7 +26,7 @@ export function runSharingCleanup(deps: {
 
     return { expiredInvitations, deletedDeepLinks, cleanedSessions };
   } catch (error) {
-    sharingLogger.error({ error: String(error) }, 'Sharing cleanup failed');
+    sharingLogger.error({ err: error }, 'Sharing cleanup failed');
     return { expiredInvitations: 0, deletedDeepLinks: 0, cleanedSessions: 0 };
   }
 }

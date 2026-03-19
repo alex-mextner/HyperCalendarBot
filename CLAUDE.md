@@ -147,6 +147,8 @@ After every AI interaction (no `ask_user` calls, no contextual pronouns), `Inten
 
 ### Workers (`src/worker/`)
 
+For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
+
 BullMQ on Redis, three queues:
 - **image-render** — Playwright renders weekly/monthly calendar images.
 - **call-reminders** — schedules voice call reminders via the Python bridge.
@@ -163,6 +165,12 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
 ### MTProto Bridge
 
 For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.
+
+## Logging
+
+- Use **pino** for all logging. The `err` key triggers pino's error serializer (stack trace included).
+- Always pass errors as `{ err: error }`, never `{ error: String(error) }` or `{ error: err.message }`.
+- `String(error)` and `.message` lose the stack trace and are not acceptable.
 
 ## Linting
 

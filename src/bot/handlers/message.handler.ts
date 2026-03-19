@@ -314,7 +314,7 @@ async function handleVoiceMessage(
       await ctx.send(t(lang).voice_prompt, { reply_markup: keyboard });
     }
   } catch (error) {
-    cmdLogger.error({ error: String(error), userId: user.telegram_id }, 'Voice transcription error');
+    cmdLogger.error({ err: error, userId: user.telegram_id }, 'Voice transcription error');
     await ctx.send(t(lang).voice_error);
   }
 }
@@ -481,7 +481,7 @@ async function handleIntentEditInstruction(
 
     await ctx.send(preview, { parse_mode: 'HTML', reply_markup: kb });
   } catch (error) {
-    cmdLogger.error({ error: String(error) }, 'Intent edit instruction failed');
+    cmdLogger.error({ err: error }, 'Intent edit instruction failed');
     await ctx.send(`Failed to process edit: ${String(error)}`);
   }
 }
@@ -603,13 +603,19 @@ export async function tryHandleGroupTzInput(
 
   if (!tz) {
     await ctx.send(
-      'Не удалось определить таймзону. Попробуйте ещё раз через /settings или введите код напрямую, например: Europe/Belgrade',
+      entry.lang === 'ru'
+        ? 'Не удалось определить таймзону. Попробуйте ещё раз через /settings или введите код напрямую, например: Europe/Belgrade'
+        : 'Could not determine timezone. Try again via /settings or enter the code directly, e.g. Europe/Belgrade',
     );
     return true;
   }
 
   groupChatRepo.setTimezone(entry.chatId, tz);
-  await ctx.send(`✅ Таймзона группы: ${getTimezoneDisplay(tz)}`);
+  await ctx.send(
+    entry.lang === 'ru'
+      ? `✅ Таймзона группы: ${getTimezoneDisplay(tz)}`
+      : `✅ Group timezone: ${getTimezoneDisplay(tz)}`,
+  );
   return true;
 }
 
@@ -693,6 +699,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     }
 
     if (isGroup) {
+      // Check pending group TZ input before relevance gate — the city name prompt
+      // won't match any bot keyword, so it must be intercepted before the gate drops it
+      if (deps.groupChatRepo) {
+        const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
+        if (groupTzHandled) return;
+      }
+
       const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;
       const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
@@ -815,11 +828,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             : undefined,
         }
       : undefined;
-
-    if (isGroup && deps.groupChatRepo) {
-      const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
-      if (groupTzHandled) return;
-    }
 
     if (!isGroup) {
       const durationHandled = await tryHandleDurationInput(ctx, user.telegram_id, text, deps.userRepo);

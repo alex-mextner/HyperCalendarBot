@@ -42,6 +42,21 @@ describe('resolveCity', () => {
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
+  test('resolves when AI returns a city name instead of IANA key (libFallback path)', async () => {
+    // Cyrillic input → library misses → AI returns 'Belgrade' (city name, not IANA key)
+    // validateTimezone('Belgrade') is false → lookupLibrary('Belgrade') → 'Europe/Belgrade'
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Belgrade' }] });
+    const result = await resolveCity('Белград');
+    expect(result).toBe('Europe/Belgrade');
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  test('returns null when AI response has empty content', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [] });
+    const result = await resolveCity('Белград');
+    expect(result).toBeNull();
+  });
+
   test('retries AI when it returns invalid IANA key', async () => {
     // Use Cyrillic so library won't resolve it
     mockCreate

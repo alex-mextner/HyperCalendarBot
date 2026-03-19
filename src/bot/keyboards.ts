@@ -16,6 +16,12 @@ export function timezoneMethodKeyboard(lang: 'en' | 'ru'): Keyboard {
   return new Keyboard().requestLocation(locationText).resized().oneTime();
 }
 
+export function cityInputPrompt(lang: 'en' | 'ru'): string {
+  return lang === 'ru'
+    ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, Киев'
+    : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
+}
+
 export function timezoneConfirmKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
   return new InlineKeyboard()
     .text(lang === 'ru' ? 'Да ✓' : 'Yes ✓', `${CB.ONBOARD_TZ}:confirm`)

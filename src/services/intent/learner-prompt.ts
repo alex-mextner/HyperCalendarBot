@@ -17,6 +17,7 @@ Output a single JSON object with these fields:
     - Last added event (most recently created by the user): {{last_added_event.id}}, {{last_added_event.title}}, {{last_added_event.date}}, {{last_added_event.time}}, {{last_added_event.all_day}}, {{last_added_event.end_at}}, {{last_added_event.description}}, {{last_added_event.location}}, {{last_added_event.recurrence_rule}}
     - Last mentioned event (most recently referenced in the conversation): {{last_mentioned_event.id}}, {{last_mentioned_event.title}}, {{last_mentioned_event.date}}, {{last_mentioned_event.time}}, {{last_mentioned_event.all_day}}, {{last_mentioned_event.end_at}}, {{last_mentioned_event.description}}, {{last_mentioned_event.location}}, {{last_mentioned_event.recurrence_rule}}
     - {{$1}}, {{$2}}, ... — values captured by the Nth capturing group in the pattern (use these for mentioned @usernames, search queries, etc.)
+    - Filters: {{$N|pad2}} — zero-pads the captured value to 2 digits (e.g. "9" → "09"). Use when constructing ISO datetime strings from user-provided hour/minute numbers.
   - CRITICAL: Any other {{variable}} will fail at runtime. If the workflow needs a value not in the list above, return {"skip": true} — this intent cannot be automated without AI context.
   - Replace concrete dates/values from the actual call with template variables
 - format: string — response format type: "events_list", "free_slots", "text", "search_results", "holidays", "settings"

@@ -172,6 +172,21 @@ describe('resolveVariables', () => {
     );
   });
 
+  // --- |pad2 filter ---
+
+  test('{{$1|pad2}} zero-pads single-digit capture to 2 chars', () => {
+    expect(resolveVariables('{{$1|pad2}}', { $1: '9' }, userCtx)).toBe('09');
+  });
+
+  test('{{$1|pad2}} leaves 2-digit capture unchanged', () => {
+    expect(resolveVariables('{{$1|pad2}}', { $1: '23' }, userCtx)).toBe('23');
+  });
+
+  test('{{$1|pad2}} works inline in ISO datetime string', () => {
+    const result = resolveVariables('{{today}}T{{$1|pad2}}:00:00Z', { $1: '9' }, userCtx);
+    expect(result as string).toMatch(/^\d{4}-\d{2}-\d{2}T09:00:00Z$/);
+  });
+
   // --- Group context variables ---
 
   test('{{group.is_group}} resolves to true when groupIsGroup is set', () => {

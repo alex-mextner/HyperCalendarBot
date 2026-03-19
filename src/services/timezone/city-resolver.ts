@@ -53,7 +53,9 @@ export async function resolveCity(input: string): Promise<string | null> {
       messages,
     });
 
-    const tz = (response.content[0] as { text: string }).text.trim();
+    const raw = response.content[0];
+    if (!raw || !('text' in raw)) break;
+    const tz = raw.text.trim();
 
     if (tz === 'UNKNOWN') return null;
 

@@ -97,9 +97,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('enqueues weekly_digest on Sunday at evening_review_time', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(
       `INSERT INTO events (id, user_id, title, start_at, end_at, timezone) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z', '${MON}T10:30:00Z', 'UTC')`,
     );
@@ -110,9 +108,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('does not enqueue weekly_digest when evening_review_enabled = 0', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 0)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 0)');
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     await scheduler.tick(SUNDAY_21H);
@@ -121,9 +117,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('does not enqueue weekly_digest on non-Sunday', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     // Monday 2026-03-23 at 21:00 UTC — not Sunday
@@ -133,9 +127,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('does not enqueue weekly_digest at wrong time', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     // Sunday but at 20:00 instead of 21:00
@@ -145,9 +137,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('deduplicates weekly_digest for same week', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     await scheduler.tick(SUNDAY_21H);
@@ -157,9 +147,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('payload is rendered text containing event title and day names', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(
       `INSERT INTO events (id, user_id, title, start_at, end_at, timezone) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z', '${MON}T10:30:00Z', 'UTC')`,
     );
@@ -185,9 +173,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('ref_key uses ISO week format wd:{userId}:{YYYY-WNN}', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     const logRepo = new NotificationLogRepository(db);
@@ -211,9 +197,7 @@ describe('NotificationScheduler – weekly_digest', () => {
 
   test('still enqueues weekly_digest even when no events next week (sends empty week digest)', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'ru')");
-    db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)",
-    );
+    db.run('INSERT INTO notification_preferences (user_id, evening_review_enabled) VALUES (42, 1)');
     // No events inserted
 
     await scheduler.tick(SUNDAY_21H);

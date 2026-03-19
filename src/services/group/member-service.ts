@@ -25,9 +25,8 @@ export class GroupMemberService {
         const memberIds = members.map((m) => m.id);
         return memberIds.filter((id) => this.userRepo.findByTelegramId(id) !== null);
       }
-      groupLogger.warn({ chatId, exitCode }, 'Pyrogram fetch failed, using fallback');
     } catch (error) {
-      groupLogger.warn({ chatId, error: String(error) }, 'Pyrogram unavailable, using fallback');
+      groupLogger.debug({ chatId, err: error }, 'Pyrogram unavailable, using fallback');
     }
 
     // Fallback: use tracked members from group_members table

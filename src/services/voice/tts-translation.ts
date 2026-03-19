@@ -41,7 +41,7 @@ export class TtsTranslationService {
       this.cache.set(cacheKey, translated);
       return translated;
     } catch (error) {
-      voiceLogger.error({ error: String(error), targetLang }, 'TTS translation failed, using original text');
+      voiceLogger.error({ err: error, targetLang }, 'TTS translation failed, using original text');
       return text;
     }
   }

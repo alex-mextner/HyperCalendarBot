@@ -89,7 +89,7 @@ export function createImageRenderQueue(redisUrl: string) {
   );
 
   worker.on('failed', (bullJob, err) => {
-    imageLogger.error({ jobId: bullJob?.id, error: err.message }, 'Image render failed');
+    imageLogger.error({ jobId: bullJob?.id, err: err }, 'Image render failed');
   });
 
   return { queue, worker, queueEvents };

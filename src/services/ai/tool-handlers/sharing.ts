@@ -117,7 +117,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
       }
     })
     .catch((error) => {
-      deliveryLogger.error({ invitationId, inviteeId, error: String(error) }, 'Delivery chain failed');
+      deliveryLogger.error({ invitationId, inviteeId, err: error }, 'Delivery chain failed');
     });
 }
 

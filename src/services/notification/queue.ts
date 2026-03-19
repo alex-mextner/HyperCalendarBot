@@ -46,7 +46,7 @@ export function createNotificationWorker(
   worker.on('failed', (job, err) => {
     if (!job) return;
     notifyLogger.error(
-      { jobId: job.id, type: job.data.type, error: err.message, attempts: job.attemptsMade },
+      { jobId: job.id, type: job.data.type, err: err, attempts: job.attemptsMade },
       'Notification job failed',
     );
     if (job.attemptsMade >= (job.opts.attempts ?? 3)) {

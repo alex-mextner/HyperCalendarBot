@@ -164,7 +164,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         jobId: job.id,
         type: job.data.type,
         userId: job.data.userId,
-        error: err.message,
+        err: err,
         attempts: job.attemptsMade,
       },
       'Google sync job failed',
