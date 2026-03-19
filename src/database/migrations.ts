@@ -667,4 +667,54 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE notification_preferences DROP COLUMN evening_review_utc');
     },
   },
+  {
+    name: '030_scheduled_ai_calls',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE scheduled_ai_calls (
+          id          TEXT PRIMARY KEY,
+          user_id     INTEGER NOT NULL,
+          message     TEXT NOT NULL,
+          label       TEXT,
+          run_at      TEXT,
+          cron        TEXT,
+          enabled     INTEGER NOT NULL DEFAULT 1,
+          run_count   INTEGER NOT NULL DEFAULT 0,
+          last_run_at TEXT,
+          created_at  TEXT NOT NULL
+        )
+      `);
+    },
+  },
+  {
+    name: '031_ai_triggers',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE ai_triggers (
+          id            TEXT PRIMARY KEY,
+          user_id       INTEGER NOT NULL,
+          topic         TEXT NOT NULL,
+          condition     TEXT,
+          action        TEXT NOT NULL,
+          label         TEXT,
+          once          INTEGER NOT NULL DEFAULT 0,
+          enabled       INTEGER NOT NULL DEFAULT 1,
+          fire_count    INTEGER NOT NULL DEFAULT 0,
+          last_fired_at TEXT,
+          created_at    TEXT NOT NULL
+        )
+      `);
+    },
+  },
+  {
+    name: '032_event_starting_log',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE event_starting_log (
+          event_id    INTEGER PRIMARY KEY,
+          notified_at TEXT NOT NULL
+        )
+      `);
+    },
+  },
 ];

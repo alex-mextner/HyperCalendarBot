@@ -7,6 +7,7 @@ import type { ReminderRepository } from '../../database/repositories/reminder.re
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
 import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
 import type { ReminderMaterializer } from '../notification/materializer.ts';
+import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import { expandRecurrence } from './recurrence.ts';
 
 export interface FreeSlot {
@@ -25,6 +26,7 @@ export class EventService {
     private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void,
     private participantRepo?: ParticipantRepository,
     private onParticipantsNotify?: (userIds: number[], text: string) => void,
+    private domainEvents?: DomainEventBus,
   ) {}
 
   private getSyncUserId(event: CalendarEvent): number {
@@ -52,11 +54,24 @@ export class EventService {
     if (this.pushSync && event.google_calendar_id) {
       this.pushSync(this.getSyncUserId(event), event.id, 'create');
     }
+    if (this.domainEvents) {
+      if (event.owner_type === 'group' && event.group_id) {
+        this.domainEvents.emit('myGroup.newEvent', {
+          userId: event.created_by ?? event.user_id,
+          groupChatId: event.group_id,
+          newEvent: event,
+          createdBy: event.created_by ?? event.user_id,
+        });
+      } else {
+        this.domainEvents.emit('myCalendar.newEvent', { userId: event.user_id, newEvent: event });
+      }
+    }
     return event;
   }
 
   updateEvent(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
-    const existing = data.start_at && this.onEventTimeChanged ? this.eventRepo.findById(id, userId) : null;
+    const needOldEvent = (data.start_at && this.onEventTimeChanged) || this.domainEvents;
+    const existing = needOldEvent ? this.eventRepo.findById(id, userId) : null;
     const updated = this.eventRepo.update(id, userId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
@@ -75,6 +90,13 @@ export class EventService {
     }
     if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
       this.onEventTimeChanged(id, userId, data.start_at);
+    }
+    if (this.domainEvents && updated && existing) {
+      this.domainEvents.emit('myCalendar.updatedEvent', {
+        userId: updated.user_id,
+        updatedEvent: updated,
+        oldEvent: existing,
+      });
     }
     return updated;
   }
@@ -101,7 +123,15 @@ export class EventService {
     if (this.materializer) {
       this.materializer.deleteForEvent(id);
     }
-    return this.eventRepo.remove(id, userId);
+    const deleted = this.eventRepo.remove(id, userId);
+    if (this.domainEvents && deleted && event) {
+      this.domainEvents.emit('myCalendar.deletedEvent', {
+        userId: event.user_id,
+        eventId: event.id,
+        title: event.title,
+      });
+    }
+    return deleted;
   }
 
   getEvent(id: number, userId: number): CalendarEvent | null {

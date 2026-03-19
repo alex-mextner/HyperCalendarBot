@@ -14,9 +14,11 @@ import type { SharedEventRepository } from '../../database/repositories/shared-e
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
+import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
@@ -82,6 +84,10 @@ export interface AgentContext {
   botAdminId?: number;
   sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
+  domainEvents?: DomainEventBus;
+  conflictChecker?: ConflictChecker;
+  scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
+  triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
 }
 
 /**

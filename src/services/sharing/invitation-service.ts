@@ -4,6 +4,7 @@ import type { ParticipantRepository } from '../../database/repositories/particip
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
 import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
 import type { ConflictChecker } from '../event/conflict-checker';
+import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 
 const MAX_DECLINES = 3;
 
@@ -22,6 +23,7 @@ export class InvitationService {
     private settingsRepo: SharingSettingsRepository,
     private participantRepo?: ParticipantRepository,
     private conflictChecker?: ConflictChecker,
+    private domainEvents?: DomainEventBus,
   ) {}
 
   sendInvitation(eventId: number, inviterId: number, inviteeId: number, inviteeUsername?: string): InvitationResult {
@@ -171,6 +173,25 @@ export class InvitationService {
         const conflicts = this.conflictChecker.checkConflicts(event, userId);
         if (conflicts.length > 0) {
           result.conflicts = conflicts;
+        }
+      }
+    }
+
+    if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
+      const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);
+      if (event) {
+        if (newStatus === 'accepted') {
+          this.domainEvents.emit('myInvitations.accepted', {
+            userId: invitation.inviter_id,
+            inviteeId: invitation.invitee_id,
+            event,
+          });
+        } else {
+          this.domainEvents.emit('myInvitations.rejected', {
+            userId: invitation.inviter_id,
+            inviteeId: invitation.invitee_id,
+            event,
+          });
         }
       }
     }
