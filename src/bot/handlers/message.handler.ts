@@ -54,6 +54,7 @@ import type { TranscriptionService } from '../../services/voice/transcription-se
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { pendingDurationInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
 import { createIntentMatcherLayer, type WorkflowSession } from '../pipeline/intent-matcher-layer.ts';
@@ -548,6 +549,38 @@ export function toEventSummary(event: CalendarEvent, timezone: string): EventSum
   return summary;
 }
 
+const DURATION_TTL_MS = 5 * 60 * 1000;
+
+export async function tryHandleDurationInput(
+  ctx: BotCommandContext,
+  userId: number,
+  text: string,
+  userRepo: UserRepository,
+): Promise<boolean> {
+  const ts = pendingDurationInput.get(userId);
+  if (ts === undefined) return false;
+
+  if (Date.now() - ts > DURATION_TTL_MS) {
+    pendingDurationInput.delete(userId);
+    return false;
+  }
+
+  const trimmed = text.trim();
+  const mins = Number.parseInt(trimmed, 10);
+  const valid = Number.isInteger(mins) && mins > 0 && mins <= 1440 && trimmed === String(mins);
+
+  if (!valid) {
+    await ctx.send('Введите число минут от 1 до 1440 (например: 45)');
+    return true;
+  }
+
+  pendingDurationInput.delete(userId);
+  userRepo.update(userId, { default_event_duration_minutes: mins });
+  const label = mins >= 60 ? `${mins / 60}ч` : `${mins} мин`;
+  await ctx.send(`✅ Длительность встреч по умолчанию: ${label}`);
+  return true;
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
@@ -764,6 +797,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             : undefined,
         }
       : undefined;
+
+    if (!isGroup) {
+      const durationHandled = await tryHandleDurationInput(ctx, user.telegram_id, text, deps.userRepo);
+      if (durationHandled) return;
+    }
 
     await runPipeline(ctx, messageText, layers, groupContext);
   };
