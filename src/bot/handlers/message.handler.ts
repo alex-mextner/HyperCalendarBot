@@ -40,6 +40,8 @@ import type { DeepLinkService } from '../../services/sharing/deep-link-service.t
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
+import { resolveCity } from '../../services/timezone/city-resolver.ts';
+import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import {
@@ -54,7 +56,7 @@ import type { TranscriptionService } from '../../services/voice/transcription-se
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { pendingDurationInput } from '../commands/settings.ts';
+import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
 import { createIntentMatcherLayer, type WorkflowSession } from '../pipeline/intent-matcher-layer.ts';
@@ -580,6 +582,37 @@ export async function tryHandleDurationInput(
   return true;
 }
 
+const GROUP_TZ_TTL_MS = 5 * 60 * 1000;
+
+export async function tryHandleGroupTzInput(
+  ctx: BotCommandContext,
+  userId: number,
+  text: string,
+  groupChatRepo: GroupChatRepository,
+): Promise<boolean> {
+  const entry = pendingGroupTzInput.get(userId);
+  if (!entry) return false;
+
+  if (Date.now() - entry.ts > GROUP_TZ_TTL_MS) {
+    pendingGroupTzInput.delete(userId);
+    return false;
+  }
+
+  const tz = await resolveCity(text.trim());
+  pendingGroupTzInput.delete(userId);
+
+  if (!tz) {
+    await ctx.send(
+      'Не удалось определить таймзону. Попробуйте ещё раз через /settings или введите код напрямую, например: Europe/Belgrade',
+    );
+    return true;
+  }
+
+  groupChatRepo.setTimezone(entry.chatId, tz);
+  await ctx.send(`✅ Таймзона группы: ${getTimezoneDisplay(tz)}`);
+  return true;
+}
+
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
   const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
@@ -782,6 +815,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             : undefined,
         }
       : undefined;
+
+    if (isGroup && deps.groupChatRepo) {
+      const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
+      if (groupTzHandled) return;
+    }
 
     if (!isGroup) {
       const durationHandled = await tryHandleDurationInput(ctx, user.telegram_id, text, deps.userRepo);

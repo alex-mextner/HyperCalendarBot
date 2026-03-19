@@ -4,7 +4,7 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import type { Lang } from '../../config/constants.ts';
-import { CB, TZ_REGIONS, t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -49,14 +49,8 @@ import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts
 import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
-import { handleSettingsCallback } from '../commands/settings.ts';
-import {
-  editFieldKeyboard,
-  eventActionsKeyboard,
-  groupTimezoneCitiesKeyboard,
-  groupTimezoneRegionKeyboard,
-  inviteContactPickerKeyboard,
-} from '../keyboards.ts';
+import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
+import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -989,26 +983,15 @@ export function createCallbackHandler(
         }
         if (payload === 'select') {
           await ctx.answer();
-          await ctx.editText(user.language === 'ru' ? 'Выберите регион:' : 'Choose a region:', {
-            reply_markup: groupTimezoneRegionKeyboard(),
-          });
+          const prompt =
+            user.language === 'ru'
+              ? '🌍 Введите название города для группы:\n\nПримеры: Белград, Belgrade, Нью-Йорк, Bangkok'
+              : '🌍 Enter city name for the group:\n\nExamples: Belgrade, New York, Bangkok';
+          pendingGroupTzInput.set(user.telegram_id, { chatId, ts: Date.now() });
+          await ctx.send(prompt);
           return;
         }
-        if (Object.keys(TZ_REGIONS).includes(payload)) {
-          await ctx.answer();
-          await ctx.editText(user.language === 'ru' ? 'Выберите город:' : 'Choose a city:', {
-            reply_markup: groupTimezoneCitiesKeyboard(payload),
-          });
-          return;
-        }
-        groupRepo.setTimezone(chatId, payload);
         await ctx.answer();
-        await ctx.editText(
-          user.language === 'ru'
-            ? `✅ Таймзона группы: <code>${payload}</code>`
-            : `✅ Group timezone: <code>${payload}</code>`,
-          { parse_mode: 'HTML' },
-        );
         return;
       }
 
