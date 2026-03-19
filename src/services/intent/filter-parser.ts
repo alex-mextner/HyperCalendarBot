@@ -1,106 +1,7 @@
 // src/services/intent/filter-parser.ts
 
 import { format as dateFnsFormat, parseISO } from 'date-fns';
-
-// ---------------------------------------------------------------------------
-// Token types
-// ---------------------------------------------------------------------------
-
-type Token =
-  | { type: 'ident'; value: string }
-  | { type: 'number'; value: number }
-  | { type: 'string'; value: string }
-  | { type: 'lparen' }
-  | { type: 'rparen' }
-  | { type: 'comma' }
-  | { type: 'pipe' };
-
-// ---------------------------------------------------------------------------
-// Lexer
-// ---------------------------------------------------------------------------
-
-function tokenize(input: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
-
-  while (i < input.length) {
-    const ch = input[i];
-
-    // Skip whitespace
-    if (ch === ' ' || ch === '\t') {
-      i++;
-      continue;
-    }
-
-    // Single-char punctuation
-    if (ch === '(') {
-      tokens.push({ type: 'lparen' });
-      i++;
-      continue;
-    }
-    if (ch === ')') {
-      tokens.push({ type: 'rparen' });
-      i++;
-      continue;
-    }
-    if (ch === ',') {
-      tokens.push({ type: 'comma' });
-      i++;
-      continue;
-    }
-    if (ch === '|') {
-      tokens.push({ type: 'pipe' });
-      i++;
-      continue;
-    }
-
-    // Quoted string (double or single quotes)
-    if (ch === '"' || ch === "'") {
-      const quote = ch;
-      i++;
-      let str = '';
-      while (i < input.length && input[i] !== quote) {
-        if (input[i] === '\\' && i + 1 < input.length) {
-          i++;
-          str += input[i];
-        } else {
-          str += input[i];
-        }
-        i++;
-      }
-      if (i >= input.length) throw new Error(`Unterminated string literal in filter: ${input}`);
-      i++; // closing quote
-      tokens.push({ type: 'string', value: str });
-      continue;
-    }
-
-    // Number
-    if (ch >= '0' && ch <= '9') {
-      let num = '';
-      while (i < input.length && input[i]! >= '0' && input[i]! <= '9') {
-        num += input[i];
-        i++;
-      }
-      tokens.push({ type: 'number', value: Number.parseInt(num, 10) });
-      continue;
-    }
-
-    // Identifier (ASCII + Cyrillic)
-    if (/[a-zA-Z_а-яёА-ЯЁ]/.test(ch)) {
-      let ident = '';
-      while (i < input.length && /[a-zA-Z0-9_а-яёА-ЯЁ]/.test(input[i]!)) {
-        ident += input[i];
-        i++;
-      }
-      tokens.push({ type: 'ident', value: ident });
-      continue;
-    }
-
-    throw new Error(`Unexpected character '${ch}' in filter: ${input}`);
-  }
-
-  return tokens;
-}
+import { type Token, tokenize } from './lexer.ts';
 
 // ---------------------------------------------------------------------------
 // AST
@@ -212,7 +113,21 @@ export function parseFilterChain(input: string): FilterCall[] {
 // Public API: apply
 // ---------------------------------------------------------------------------
 
-const KNOWN_FILTERS = new Set(['pad', 'upper', 'lower', 'trim', 'truncate', 'default', 'replace', 'date', 'ternary']);
+const KNOWN_FILTERS = new Set([
+  'pad',
+  'upper',
+  'lower',
+  'trim',
+  'truncate',
+  'default',
+  'replace',
+  'date',
+  'ternary',
+  'add',
+  'sub',
+  'mul',
+  'div',
+]);
 
 export function applyFilters(value: unknown, filters: FilterCall[]): string {
   let current: unknown = value;
@@ -274,6 +189,31 @@ export function applyFilters(value: unknown, filters: FilterCall[]): string {
         const ifTrue = String(filter.args[0] ?? '');
         const ifFalse = String(filter.args[1] ?? '');
         current = current ? ifTrue : ifFalse;
+        break;
+      }
+      case 'add': {
+        const n = filter.args[0];
+        if (typeof n !== 'number') throw new Error('add() requires a numeric argument');
+        current = Number(current ?? 0) + n;
+        break;
+      }
+      case 'sub': {
+        const n = filter.args[0];
+        if (typeof n !== 'number') throw new Error('sub() requires a numeric argument');
+        current = Number(current ?? 0) - n;
+        break;
+      }
+      case 'mul': {
+        const n = filter.args[0];
+        if (typeof n !== 'number') throw new Error('mul() requires a numeric argument');
+        current = Number(current ?? 0) * n;
+        break;
+      }
+      case 'div': {
+        const n = filter.args[0];
+        if (typeof n !== 'number') throw new Error('div() requires a numeric argument');
+        if (n === 0) throw new Error('div() by zero');
+        current = Math.floor(Number(current ?? 0) / n);
         break;
       }
     }

@@ -1,122 +1,15 @@
 /**
  * Safe recursive descent expression evaluator for workflow `when` conditions.
  * Supports: ==, !=, >, <, >=, <=, &&, ||, .length, string/number/boolean literals,
- * property access, and array index access.
+ * property access, array index access, and function calls.
  * NO eval(), NO Function(), NO new Function().
+ *
+ * Tokenization is delegated to the shared lexer (lexer.ts).
  */
 
+import { type Token, tokenize } from './lexer.ts';
+
 const DANGEROUS_PROPS = new Set(['__proto__', 'constructor', 'prototype']);
-
-// ---------------------------------------------------------------------------
-// Tokenizer
-// ---------------------------------------------------------------------------
-
-type Token =
-  | { type: 'op'; value: '||' | '&&' | '==' | '!=' | '>=' | '<=' | '>' | '<' }
-  | { type: 'dot' }
-  | { type: 'lbracket' }
-  | { type: 'rbracket' }
-  | { type: 'number'; value: number }
-  | { type: 'string'; value: string }
-  | { type: 'bool'; value: boolean }
-  | { type: 'ident'; value: string };
-
-function tokenize(input: string): Token[] {
-  const tokens: Token[] = [];
-  let i = 0;
-
-  while (i < input.length) {
-    // Skip whitespace
-    if (/\s/.test(input[i])) {
-      i++;
-      continue;
-    }
-
-    // Two-char operators
-    const two = input.slice(i, i + 2);
-    if (two === '||' || two === '&&' || two === '==' || two === '!=' || two === '>=' || two === '<=') {
-      tokens.push({ type: 'op', value: two });
-      i += 2;
-      continue;
-    }
-
-    // Single-char operators
-    const ch = input[i];
-    if (ch === '>' || ch === '<') {
-      tokens.push({ type: 'op', value: ch });
-      i++;
-      continue;
-    }
-    if (ch === '.') {
-      tokens.push({ type: 'dot' });
-      i++;
-      continue;
-    }
-    if (ch === '[') {
-      tokens.push({ type: 'lbracket' });
-      i++;
-      continue;
-    }
-    if (ch === ']') {
-      tokens.push({ type: 'rbracket' });
-      i++;
-      continue;
-    }
-
-    // Quoted string (double quotes only)
-    if (ch === '"') {
-      let str = '';
-      i++; // skip opening quote
-      while (i < input.length && input[i] !== '"') {
-        if (input[i] === '\\' && i + 1 < input.length) {
-          i++;
-          str += input[i];
-        } else {
-          str += input[i];
-        }
-        i++;
-      }
-      if (i >= input.length) {
-        throw new Error('Unterminated string literal');
-      }
-      i++; // skip closing quote
-      tokens.push({ type: 'string', value: str });
-      continue;
-    }
-
-    // Number
-    if (/[0-9]/.test(ch)) {
-      let num = '';
-      while (i < input.length && /[0-9]/.test(input[i])) {
-        num += input[i];
-        i++;
-      }
-      tokens.push({ type: 'number', value: Number.parseInt(num, 10) });
-      continue;
-    }
-
-    // Identifier, boolean literals
-    if (/[a-zA-Z_]/.test(ch)) {
-      let ident = '';
-      while (i < input.length && /[a-zA-Z0-9_]/.test(input[i])) {
-        ident += input[i];
-        i++;
-      }
-      if (ident === 'true') {
-        tokens.push({ type: 'bool', value: true });
-      } else if (ident === 'false') {
-        tokens.push({ type: 'bool', value: false });
-      } else {
-        tokens.push({ type: 'ident', value: ident });
-      }
-      continue;
-    }
-
-    throw new Error(`Unexpected character: '${ch}' at position ${i}`);
-  }
-
-  return tokens;
-}
 
 // ---------------------------------------------------------------------------
 // Parser
@@ -228,6 +121,22 @@ class Parser {
     }
 
     let value: unknown = context[rootKey];
+
+    // Function call: ident(arg, arg, ...)
+    if (this.peek()?.type === 'lparen') {
+      this.consume(); // (
+      const args: unknown[] = [];
+      while (this.peek()?.type !== 'rparen') {
+        if (args.length > 0) {
+          if (this.peek()?.type !== 'comma') throw new Error('Expected , between function arguments');
+          this.consume(); // ,
+        }
+        args.push(this.parseValue(context));
+      }
+      this.consume(); // )
+      if (typeof value !== 'function') throw new Error(`'${rootKey}' is not a function in context`);
+      return (value as (...a: unknown[]) => unknown)(...args);
+    }
 
     // Chain: .identifier or [number]
     while (true) {
