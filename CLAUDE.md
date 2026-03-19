@@ -283,6 +283,13 @@ venv/bin/python scripts/pyrogram-auth.py
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
 
+## Session Wrap-Up
+
+When summarising completed work or suggesting next steps, always scan the conversation history and memory
+for items that were explicitly deferred, noted as "pending", or silently dropped mid-discussion.
+Surface them as concrete suggestions — not vague hints. If something was discussed but not implemented,
+name it and ask whether to pick it up.
+
 ## Documentation
 
 - Specs: `docs/specs/` — design documents and feature specifications

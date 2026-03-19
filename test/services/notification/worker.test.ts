@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
-import { processNotification } from '../../../src/services/notification/worker.ts';
+import { parseTelegramError, processNotification } from '../../../src/services/notification/worker.ts';
 
 describe('processNotification', () => {
   let db: Database;
@@ -93,6 +93,53 @@ describe('processNotification', () => {
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendWithKeyboard).not.toHaveBeenCalled();
+  });
+
+  test('re-throws on send failure so BullMQ can retry', async () => {
+    const logId = logRepo.insert({
+      user_id: 42,
+      type: 'event_reminder',
+      reference_key: 'er:99',
+      channel: 'telegram_text',
+      payload: '{}',
+    })!;
+
+    const sendMessage = mock(() => Promise.reject(new Error('network error')));
+    await expect(
+      processNotification({ logId, telegramId: 42, type: 'event_reminder', payload: '{}' }, logRepo, sendMessage),
+    ).rejects.toThrow('network error');
+  });
+
+  describe('parseTelegramError', () => {
+    test('returns null for non-objects', () => {
+      expect(parseTelegramError('string error')).toBeNull();
+      expect(parseTelegramError(null)).toBeNull();
+      expect(parseTelegramError(42)).toBeNull();
+    });
+
+    test('returns null when code is not a number', () => {
+      expect(parseTelegramError({ code: '429', message: 'Too Many Requests' })).toBeNull();
+    });
+
+    test('returns code for generic Telegram error', () => {
+      const err = { code: 400, message: 'Bad Request' };
+      expect(parseTelegramError(err)).toEqual({ code: 400, retryAfter: undefined });
+    });
+
+    test('extracts retryAfter from 429 error payload', () => {
+      const err = { code: 429, message: 'Too Many Requests', payload: { retry_after: 15 } };
+      expect(parseTelegramError(err)).toEqual({ code: 429, retryAfter: 15 });
+    });
+
+    test('returns code 403 without retryAfter', () => {
+      const err = { code: 403, message: 'Forbidden: bot was blocked by the user' };
+      expect(parseTelegramError(err)).toEqual({ code: 403, retryAfter: undefined });
+    });
+
+    test('handles missing payload gracefully', () => {
+      const err = { code: 429, message: 'Too Many Requests' };
+      expect(parseTelegramError(err)).toEqual({ code: 429, retryAfter: undefined });
+    });
   });
 
   test('skips already-sent notifications', async () => {
