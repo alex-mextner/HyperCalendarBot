@@ -39,7 +39,7 @@ from pytgcalls.types import MediaStream, AudioQuality, RecordStream, StreamFrame
 
 import websockets
 
-model, _ = load_silero_vad()
+model = load_silero_vad()
 model.eval()
 
 def detect_vad(pcm_bytes: bytes) -> bool:
