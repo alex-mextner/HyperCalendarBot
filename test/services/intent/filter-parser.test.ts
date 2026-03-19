@@ -125,4 +125,32 @@ describe('applyFilters', () => {
   test('returns string from non-string input', () => {
     expect(applyFilters(42, parseFilterChain('pad(4)'))).toBe('0042');
   });
+
+  test('add(n) adds number to value', () => {
+    expect(applyFilters('8', parseFilterChain('add(12)'))).toBe('20');
+    expect(applyFilters(5, parseFilterChain('add(3)'))).toBe('8');
+  });
+
+  test('sub(n) subtracts from value', () => {
+    expect(applyFilters('20', parseFilterChain('sub(12)'))).toBe('8');
+    expect(applyFilters(10, parseFilterChain('sub(3)'))).toBe('7');
+  });
+
+  test('mul(n) multiplies value', () => {
+    expect(applyFilters('3', parseFilterChain('mul(4)'))).toBe('12');
+  });
+
+  test('div(n) integer-divides value', () => {
+    expect(applyFilters('10', parseFilterChain('div(3)'))).toBe('3');
+    expect(applyFilters(12, parseFilterChain('div(4)'))).toBe('3');
+  });
+
+  test('div(0) throws', () => {
+    expect(() => applyFilters(10, parseFilterChain('div(0)'))).toThrow();
+  });
+
+  test('chain: add(12)|pad(2) — AM/PM to 24h hour with zero-padding', () => {
+    expect(applyFilters('8', parseFilterChain('add(12)|pad(2)'))).toBe('20');
+    expect(applyFilters('9', parseFilterChain('add(12)|pad(2)'))).toBe('21');
+  });
 });

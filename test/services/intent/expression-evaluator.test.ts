@@ -64,4 +64,31 @@ describe('evaluate', () => {
     expect(evaluate('active', { active: true })).toBe(true);
     expect(evaluate('active', { active: false })).toBe(false);
   });
+
+  test('$N identifier syntax — captures accessible by $1, $2', () => {
+    expect(evaluate('$1 > 10', { $1: 22 })).toBe(true);
+    expect(evaluate('$1 == 5', { $1: 5 })).toBe(true);
+    expect(evaluate('$2 != $1', { $1: 3, $2: 7 })).toBe(true);
+  });
+
+  test('function call with literal arg', () => {
+    expect(evaluate('fn(22)', { fn: (n: unknown) => Number(n) > 10 })).toBe(true);
+    expect(evaluate('fn(5)', { fn: (n: unknown) => Number(n) > 10 })).toBe(false);
+  });
+
+  test('function call with identifier arg — looks up in context', () => {
+    expect(evaluate('fn($1)', { fn: (n: unknown) => Number(n) > 10, $1: 22 })).toBe(true);
+    expect(evaluate('fn(x)', { fn: (n: unknown) => Number(n) > 10, x: 5 })).toBe(false);
+  });
+
+  test('function call result usable in comparison', () => {
+    expect(evaluate('fn(5) == true', { fn: (n: unknown) => Number(n) > 3 })).toBe(true);
+    expect(evaluate('fn(2) == false', { fn: (n: unknown) => Number(n) > 3 })).toBe(true);
+  });
+
+  test('user.language in when condition — bilingual workflow branching', () => {
+    expect(evaluate('user.language == "ru"', { user: { language: 'ru' } })).toBe(true);
+    expect(evaluate('user.language != "ru"', { user: { language: 'en' } })).toBe(true);
+    expect(evaluate('user.language == "ru"', { user: { language: 'en' } })).toBe(false);
+  });
 });
