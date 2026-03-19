@@ -2,6 +2,7 @@ import { formatUtcOffset } from '../../utils/telegram.ts';
 import type { AgentContext } from './types.ts';
 
 export function buildSystemPrompt(ctx: AgentContext): string {
+  const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
 
   const tzUpdatedAt = ctx.user.timezone_updated_at;
@@ -48,6 +49,7 @@ ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secreta
 - If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
 - When the user asks about free time, use the get_free_slots tool.
 - For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
+- Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.
 - When the user asks "what's next?" or "upcoming events", use the get_upcoming tool.
 - When the user wants to postpone/snooze an event, use the snooze_event tool.
 - To check or show reminders for an event, use the get_reminders tool.
