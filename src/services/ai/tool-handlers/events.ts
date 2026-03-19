@@ -275,6 +275,17 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 
     if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
+    if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
+      const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
+      if (conflicts.length > 0) {
+        ctx.domainEvents.emit('myCalendar.conflictDetected', {
+          userId: ctx.user.telegram_id,
+          event,
+          conflictsWith: conflicts[0],
+        });
+      }
+    }
+
     return { success: true, output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')) };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
@@ -305,6 +316,17 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.location) parts.push(`location: ${updated.location}`);
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
+
+  if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
+    const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
+    if (conflicts.length > 0) {
+      ctx.domainEvents.emit('myCalendar.conflictDetected', {
+        userId: ctx.user.telegram_id,
+        event: updated,
+        conflictsWith: conflicts[0],
+      });
+    }
+  }
 
   let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
