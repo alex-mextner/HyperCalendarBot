@@ -378,7 +378,7 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
 let eventMentionStore: import('./services/intent/event-mention-store.ts').EventMentionStore | undefined;
 if (config.REDIS_URL) {
   const { RedisEventMentionStore } = await import('./services/intent/event-mention-store.ts');
-  const redisClient = new Bun.Redis(config.REDIS_URL);
+  const redisClient = new Bun.RedisClient(config.REDIS_URL);
   eventMentionStore = new RedisEventMentionStore(redisClient);
   botLogger.info('Event mention store: Redis (7-day TTL)');
 } else {
