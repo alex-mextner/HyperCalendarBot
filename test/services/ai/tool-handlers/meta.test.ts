@@ -71,6 +71,36 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('No');
     });
+
+    test('returns holidays list with English header for en user', () => {
+      const mockCtx = {
+        ...ctx,
+        holidayService: {
+          getUpcomingHolidays: () => [{ date: '2026-01-01', name: 'New Year', countryName: 'Russia' }],
+          getHolidaysForDate: () => [],
+        },
+      } as unknown as typeof ctx;
+      const result = handleGetHolidays(mockCtx, {});
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Upcoming holidays:');
+      expect(result.output).toContain('2026-01-01');
+      expect(result.output).toContain('New Year');
+    });
+
+    test('returns Russian holidays list for ru user', () => {
+      const mockCtx = {
+        ...ctx,
+        user: { ...ctx.user, language: 'ru' as const },
+        holidayService: {
+          getUpcomingHolidays: () => [{ date: '2026-01-01', name: 'Новый год', countryName: 'Россия' }],
+          getHolidaysForDate: () => [],
+        },
+      } as unknown as typeof ctx;
+      const result = handleGetHolidays(mockCtx, {});
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Новый год');
+      expect(result.output).toContain('Праздники:');
+    });
   });
 
   describe('handleFindUser', () => {

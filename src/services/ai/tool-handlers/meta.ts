@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { renderDayImage } from '../../image/render-day.ts';
@@ -21,24 +22,23 @@ export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): T
   const holidays = ctx.holidayService.getUpcomingHolidays(ctx.user.telegram_id, input.limit ?? 10);
 
   if (holidays.length === 0) {
-    return {
-      success: true,
-      output: 'No upcoming holidays. The user may not have country subscriptions.',
-    };
+    return { success: true, output: t(ctx.user.language).aiTools.meta.noHolidays };
   }
 
   const lines = holidays.map((h) => `${h.date}: ${h.name} (${h.countryName})`);
 
-  return { success: true, output: `Upcoming holidays:\n${lines.join('\n')}` };
+  return { success: true, output: t(ctx.user.language).aiTools.meta.holidaysList(lines.join('\n')) };
 }
 
 export async function handleFindUser(ctx: AgentContext, input: FindUserInput): Promise<ToolResult> {
   const username = input.username.replace(/^@/, '');
   const user = ctx.userRepo.findByUsername(username);
+  const lang = ctx.user.language;
+  const unknownName = t(lang).aiTools.meta.unknownName;
   if (user) {
     return {
       success: true,
-      output: `Found user: telegram_id=${user.telegram_id}, name=${user.first_name ?? user.username ?? 'unknown'}`,
+      output: t(lang).aiTools.meta.foundUser(user.telegram_id, user.first_name ?? user.username ?? unknownName),
     };
   }
 
@@ -47,7 +47,10 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
     if (resolved) {
       return {
         success: true,
-        output: `Found user via MTProto: telegram_id=${resolved.id}, name=${resolved.firstName ?? resolved.username ?? 'unknown'} (not a bot user yet — can only be reached via MTProto)`,
+        output: t(lang).aiTools.meta.foundUserMtproto(
+          resolved.id,
+          resolved.firstName ?? resolved.username ?? unknownName,
+        ),
       };
     }
   }
@@ -68,7 +71,8 @@ export function handleGetContacts(ctx: AgentContext, input: { force?: boolean })
     };
   }
   const contacts = ctx.contactRepo.list(ctx.user.telegram_id);
-  if (contacts.length === 0) return { success: true, output: 'Address book is empty.' };
+  const lang = ctx.user.language;
+  if (contacts.length === 0) return { success: true, output: t(lang).aiTools.meta.addressBookEmpty };
   const lines = contacts.map((c) => {
     const parts = [c.preferred_name ?? c.name];
     if (c.preferred_name) parts.push(`display:${c.name}`);
@@ -76,7 +80,7 @@ export function handleGetContacts(ctx: AgentContext, input: { force?: boolean })
     if (c.telegram_id) parts.push(`id:${c.telegram_id}`);
     return parts.join(' — ');
   });
-  return { success: true, output: `Contacts:\n${lines.join('\n')}` };
+  return { success: true, output: t(lang).aiTools.meta.contactsList(lines.join('\n')) };
 }
 
 export function handleAddContact(
@@ -96,10 +100,8 @@ export function handleAddContact(
     telegramId,
     input.preferred_name,
   );
-  return {
-    success: true,
-    output: `Contact saved: "${contact.preferred_name ?? contact.name}"${contact.username ? ` (@${contact.username})` : ''}`,
-  };
+  const savedName = `"${contact.preferred_name ?? contact.name}"${contact.username ? ` (@${contact.username})` : ''}`;
+  return { success: true, output: t(ctx.user.language).aiTools.meta.contactSaved(savedName) };
 }
 
 export function handleFindContact(ctx: AgentContext, input: { name: string }): ToolResult {
@@ -114,7 +116,8 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
   if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
   if (contact.username) parts.push(`username: @${contact.username}`);
   if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
-  return { success: true, output: parts.join(', ') };
+  const data = parts.join(', ');
+  return { success: true, output: t(ctx.user.language).aiTools.meta.contactFound(data) };
 }
 
 export function handleUpdateContact(
@@ -137,10 +140,8 @@ export function handleUpdateContact(
   const updatedName = patch.name ?? contact.name;
   const updated = ctx.contactRepo.findByName(userId, updatedName);
   const displayName = updated?.preferred_name ?? updated?.name ?? updatedName;
-  return {
-    success: true,
-    output: `Contact updated: "${displayName}"${updated?.username ? ` (@${updated.username})` : ''}`,
-  };
+  const updatedLabel = `"${displayName}"${updated?.username ? ` (@${updated.username})` : ''}`;
+  return { success: true, output: t(ctx.user.language).aiTools.meta.contactUpdated(updatedLabel) };
 }
 
 export function handleAskUser(ctx: AgentContext, input: { question: string; options: string[] }): ToolResult {
@@ -153,7 +154,11 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch((err) => {
     metaLogger.error({ err: err }, 'Failed to send buttons');
   });
-  return { success: true, output: 'Question sent. Waiting for user response.', stopLoop: true };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.meta.questionSent,
+    stopLoop: true,
+  };
 }
 
 export function handlePickUsers(ctx: AgentContext, input: { event_id: number; prompt: string }): ToolResult {
@@ -164,7 +169,7 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch((err) => {
     metaLogger.error({ err: err }, 'Failed to send user picker');
   });
-  return { success: true, output: 'User picker sent. Waiting for user to select participants.', stopLoop: true };
+  return { success: true, output: t(ctx.user.language).aiTools.meta.userPickerSent, stopLoop: true };
 }
 
 export function handleRenderDayImage(
@@ -202,7 +207,7 @@ export function handleRenderDayImage(
       metaLogger.error({ err: err }, 'Day image render failed');
     });
 
-  return { success: true, output: `Image for ${input.date} is being rendered and will be sent as a photo.` };
+  return { success: true, output: t(lang).aiTools.meta.dayImageRendering(input.date) };
 }
 
 export function handleRenderWeekImage(
@@ -214,7 +219,7 @@ export function handleRenderWeekImage(
   }
   const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
   if (!access.ok) return { success: false, error: access.error };
-  return { success: true, output: `Week image rendering for ${input.week_start} is not yet implemented via AI tools.` };
+  return { success: true, output: t(ctx.user.language).aiTools.meta.weekImageNotImplemented(input.week_start) };
 }
 
 export function handleMakeCall(ctx: AgentContext, input: { text: string }): ToolResult {
@@ -227,25 +232,24 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
   }
   metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
   ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);
-  return { success: true, output: 'Call queued. The user will receive a voice call shortly.' };
+  return { success: true, output: t(ctx.user.language).aiTools.meta.callQueued };
 }
 
 export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
   const connected = !!ctx.user.google_refresh_token_enc;
+  const lang = ctx.user.language;
   if (!connected) {
-    return {
-      success: true,
-      output: 'Google Calendar is NOT connected. The user can connect it with /connect_google command.',
-    };
+    return { success: true, output: t(lang).aiTools.meta.gcalNotConnected };
   }
 
   if (!ctx.googleCalendarRepo) {
-    return { success: true, output: 'Google Calendar is connected, but calendar data is not available.' };
+    return { success: true, output: t(lang).aiTools.meta.gcalConnectedNoData };
   }
 
   const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
   const enabled = calendars.filter((c) => c.sync_enabled);
-  const lines = ['Google Calendar is connected.', `Calendars: ${calendars.length} total, ${enabled.length} syncing.`];
+  const tr = t(lang).aiTools.meta;
+  const lines = [tr.gcalConnectedHeader, tr.gcalCalendarsCount(calendars.length, enabled.length)];
   for (const cal of calendars) {
     lines.push(`  ${cal.sync_enabled ? '✅' : '⬜'} ${cal.calendar_name} (${cal.google_calendar_id})`);
   }
@@ -263,13 +267,14 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
     return { success: false, error: 'Calendar data not available.' };
   }
 
+  const lang = ctx.user.language;
   const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
   if (calendars.length === 0) {
-    return { success: true, output: 'No Google Calendars found. Sync may still be in progress.' };
+    return { success: true, output: t(lang).aiTools.meta.gcalNoCalendars };
   }
 
   const lines = calendars.map((c) => `${c.sync_enabled ? '✅' : '⬜'} ${c.calendar_name} (${c.google_calendar_id})`);
-  return { success: true, output: `Google Calendars:\n${lines.join('\n')}` };
+  return { success: true, output: t(lang).aiTools.meta.gcalList(lines.join('\n')) };
 }
 
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {

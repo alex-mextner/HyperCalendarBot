@@ -219,6 +219,86 @@ export const MSG = {
       '<b>📤 Sharing &amp; Invitations</b>\n/share today — share your agenda\n/invite @username — invite someone to an event\nEvent visibility: /settings → Privacy\nInline mode: type @HyperCalendarBot in any chat.',
       '<b>🖼 Visual Schedule</b>\nBeautiful calendar images are sent automatically with /today and /week commands.',
     ],
+    aiTools: {
+      history: {
+        notFound: 'No history found.',
+      },
+      meta: {
+        noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
+        unknownName: 'unknown',
+        holidaysList: (lines: string) => `Upcoming holidays:\n${lines}`,
+        foundUser: (id: number, name: string) => `Found user: telegram_id=${id}, name=${name}`,
+        foundUserMtproto: (id: number, name: string) =>
+          `Found user via MTProto: telegram_id=${id}, name=${name} (not a bot user yet — can only be reached via MTProto)`,
+        addressBookEmpty: 'Address book is empty.',
+        contactsList: (lines: string) => `Contacts:\n${lines}`,
+        contactSaved: (name: string) => `Contact saved: ${name}`,
+        contactFound: (data: string) => `Contact found: ${data}`,
+        contactUpdated: (label: string) => `Contact updated: ${label}`,
+        questionSent: 'Question sent. Waiting for user response.',
+        dayImageRendering: (date: string) => `Image for ${date} is being rendered and will be sent as a photo.`,
+        weekImageNotImplemented: (weekStart: string) =>
+          `Week image rendering for ${weekStart} is not yet implemented via AI tools.`,
+        callQueued: 'Call queued. You will receive a voice call shortly.',
+        gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
+        gcalConnectedNoData: 'Google Calendar is connected, but calendar data is not available.',
+        gcalConnectedHeader: 'Google Calendar is connected.',
+        gcalCalendarsCount: (total: number, syncing: number) => `Calendars: ${total} total, ${syncing} syncing.`,
+        gcalNoCalendars: 'No Google Calendars found. Sync may still be in progress.',
+        gcalList: (lines: string) => `Google Calendars:\n${lines}`,
+        userPickerSent: 'User picker sent. Waiting for user to select participants.',
+      },
+      slots: {
+        noFreeSlots: 'No free slots — the entire day is busy.',
+        freeSlots: (lines: string) => `Free slots:\n${lines}`,
+      },
+      settings: {
+        callsUpdated: 'Call settings updated.',
+        notificationsUpdated: (keys: string) => `Notification settings updated: ${keys}`,
+        privacyUpdated: (lines: string) => `Privacy settings updated: ${lines}`,
+        voiceUpdated: (value: string) => `Voice settings updated: voice_response_enabled = ${value}`,
+      },
+      feedback: {
+        feedbackSent: 'Feedback sent to developer. They will respond in this chat.',
+      },
+      events: {
+        noEventsInRange: 'No events found in this range.',
+        noEventsMatching: 'No events found matching the query.',
+        noUpcomingEvents: 'No upcoming events.',
+        upcomingEvents: (count: number, lines: string) => `Next ${count} events:\n${lines}`,
+        eventCreated: (parts: string) => `Event created: ${parts}`,
+        eventUpdated: (parts: string) => `Event updated: ${parts}`,
+        eventDeleted: (title: string, id: number) => `Event "${title}" (id: ${id}) deleted.`,
+        eventDeclined: (id: number) =>
+          `You declined the shared event (id: ${id}). It has been removed from your calendar.`,
+        snoozed: (title: string, minutes: number, newStart: string) =>
+          `Event "${title}" snoozed by ${minutes} min. New start: ${newStart}`,
+      },
+      reminders: {
+        noReminders: (title: string) => `No reminders set for "${title}".`,
+        remindersSet: (title: string, descriptions: string) => `Reminders set for "${title}": ${descriptions}`,
+        remindersFor: (title: string, lines: string) => `Reminders for "${title}": ${lines}`,
+      },
+      sharing: {
+        eventShared: (title: string, id: number, targetType: string, targetId: number) =>
+          `Event "${title}" shared (id: ${id}, target: ${targetType} ${targetId}).`,
+        invitationCreated: (invId: number, eventId: number, inviteeId: number) =>
+          `Invitation created (id: ${invId}, event: ${eventId}, invitee: ${inviteeId}). Notification is being sent in background.`,
+        invitationCancelled: (id: number) => `Invitation ${id} cancelled.`,
+        invitationReminderQueued: (userId: number) =>
+          `Invitation reminder queued for user ${userId}. Notification is being sent in background.`,
+        noInvitations: (title: string) => `No invitations for event "${title}".`,
+        invitationsFor: (title: string, id: number, lines: string) =>
+          `Invitations for "${title}" (id: ${id}):\n${lines}`,
+        noEventsToShare: (period: string) => `No visible events to share for ${period}.`,
+        agendaShared: (period: string, targetType: string, targetId: number, count: number, lines: string) =>
+          `Agenda for ${period} shared with ${targetType} ${targetId} (${count} events):\n${lines}`,
+        visibilitySet: (title: string, id: number, visibility: string) =>
+          `Visibility for "${title}" (id: ${id}) set to "${visibility}".`,
+        editProposalSubmitted: (id: number) =>
+          `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
+      },
+    },
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -378,6 +458,87 @@ export const MSG = {
       '<b>📤 Шаринг и приглашения</b>\n/share today — поделиться расписанием\n/invite @username — пригласить на событие\nВидимость событий: /settings → Приватность\nInline-режим: наберите @HyperCalendarBot в любом чате.',
       '<b>🖼 Визуальное расписание</b>\nКрасивые изображения календаря автоматически отправляются с командами /today и /week.',
     ],
+    aiTools: {
+      history: {
+        notFound: 'История не найдена.',
+      },
+      meta: {
+        noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',
+        unknownName: 'неизвестно',
+        holidaysList: (lines: string) => `Праздники:\n${lines}`,
+        foundUser: (id: number, name: string) => `Пользователь найден: telegram_id=${id}, имя=${name}`,
+        foundUserMtproto: (id: number, name: string) =>
+          `Пользователь найден через MTProto: telegram_id=${id}, имя=${name} (бот ещё не запускал — доступен только через MTProto)`,
+        addressBookEmpty: 'Адресная книга пуста.',
+        contactsList: (lines: string) => `Контакты:\n${lines}`,
+        contactSaved: (name: string) => `Контакт сохранён: ${name}`,
+        contactFound: (data: string) => `Контакт найден: ${data}`,
+        contactUpdated: (label: string) => `Контакт обновлён: ${label}`,
+        questionSent: 'Вопрос отправлен. Ожидаю ответа.',
+        dayImageRendering: (date: string) => `Изображение за ${date} формируется и будет отправлено фото.`,
+        weekImageNotImplemented: (weekStart: string) =>
+          `Недельное изображение (с ${weekStart}) через AI-инструменты пока не реализовано.`,
+        callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
+        gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',
+        gcalConnectedNoData: 'Google Calendar подключён, но данные календарей недоступны.',
+        gcalConnectedHeader: 'Google Calendar подключён.',
+        gcalCalendarsCount: (total: number, syncing: number) =>
+          `Календари: всего ${total}, синхронизируется ${syncing}.`,
+        gcalNoCalendars: 'Google-календари не найдены. Возможно, синхронизация ещё идёт.',
+        gcalList: (lines: string) => `Google-календари:\n${lines}`,
+        userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
+      },
+      slots: {
+        noFreeSlots: 'Свободных окон нет — весь день занят.',
+        freeSlots: (lines: string) => `Свободные слоты:\n${lines}`,
+      },
+      settings: {
+        callsUpdated: 'Настройки звонков обновлены.',
+        notificationsUpdated: (keys: string) => `Настройки уведомлений обновлены: ${keys}`,
+        privacyUpdated: (lines: string) => `Настройки приватности обновлены: ${lines}`,
+        voiceUpdated: (value: string) => `Настройки голоса обновлены: voice_response_enabled = ${value}`,
+      },
+      feedback: {
+        feedbackSent: 'Отзыв отправлен разработчику. Ответ придёт в этот чат.',
+      },
+      events: {
+        noEventsInRange: 'Событий в этом диапазоне не найдено.',
+        noEventsMatching: 'Событий по запросу не найдено.',
+        noUpcomingEvents: 'Предстоящих событий нет.',
+        upcomingEvents: (count: number, lines: string) => `Следующие ${count}:\n${lines}`,
+        eventCreated: (parts: string) => `Событие создано: ${parts}`,
+        eventUpdated: (parts: string) => `Событие обновлено: ${parts}`,
+        eventDeleted: (title: string, id: number) => `Событие «${title}» (id: ${id}) удалено.`,
+        eventDeclined: (id: number) => `Ты отклонил(а) общее событие (id: ${id}). Оно удалено из твоего календаря.`,
+        snoozed: (title: string, minutes: number, newStart: string) =>
+          `Событие «${title}» отложено на ${minutes} мин. Новое начало: ${newStart}`,
+      },
+      reminders: {
+        noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
+        remindersSet: (title: string, descriptions: string) =>
+          `Напоминания для «${title}» установлены: ${descriptions}`,
+        remindersFor: (title: string, lines: string) => `Напоминания для «${title}»: ${lines}`,
+      },
+      sharing: {
+        eventShared: (title: string, id: number, targetType: string, targetId: number) =>
+          `Событие «${title}» опубликовано (id: ${id}, получатель: ${targetType} ${targetId}).`,
+        invitationCreated: (invId: number, eventId: number, inviteeId: number) =>
+          `Приглашение создано (id: ${invId}, событие: ${eventId}, приглашённый: ${inviteeId}). Уведомление отправляется в фоне.`,
+        invitationCancelled: (id: number) => `Приглашение ${id} отменено.`,
+        invitationReminderQueued: (userId: number) =>
+          `Напоминание о приглашении поставлено в очередь (пользователь ${userId}). Уведомление отправляется в фоне.`,
+        noInvitations: (title: string) => `Для события «${title}» нет приглашений.`,
+        invitationsFor: (title: string, id: number, lines: string) =>
+          `Приглашения для «${title}» (id: ${id}):\n${lines}`,
+        noEventsToShare: (period: string) => `Нет видимых событий для публикации за ${period}.`,
+        agendaShared: (period: string, targetType: string, targetId: number, count: number, lines: string) =>
+          `Расписание (${period}) опубликовано для ${targetType} ${targetId} (${count} событий):\n${lines}`,
+        visibilitySet: (title: string, id: number, visibility: string) =>
+          `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
+        editProposalSubmitted: (id: number) =>
+          `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+      },
+    },
   },
 } as const;
 
