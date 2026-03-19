@@ -91,16 +91,12 @@ function makeDayLabel(date: Date, lang: string): string {
   return `${day} ${date.getUTCDate()}`;
 }
 
-const DEFAULT_EVE_HOLIDAY_UTCHHMM = '21:00';
+const DEFAULT_EVE_HOLIDAY_HHMM = '21:00';
 
 function truncateToMinute(d: Date): Date {
   const r = new Date(d);
   r.setSeconds(0, 0);
   return r;
-}
-
-function formatHHMM(d: Date): string {
-  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
 }
 
 export interface EnqueueCallData {
@@ -132,7 +128,6 @@ export class NotificationScheduler {
 
   async tick(nowUtc: Date): Promise<void> {
     const minute = truncateToMinute(nowUtc);
-    const currentHHMM = formatHHMM(minute);
     const windowStart = minute.toISOString();
     const windowEnd = new Date(minute.getTime() + 60_000).toISOString();
     const tomorrowDate = new Date(minute.getTime() + 86_400_000).toISOString().slice(0, 10);
@@ -303,11 +298,11 @@ export class NotificationScheduler {
         }
       }
       for (const [userId] of candidates) {
-        const prefs = this.deps.prefsRepo.get(userId);
-        const targetUtc = prefs?.evening_review_utc ?? DEFAULT_EVE_HOLIDAY_UTCHHMM;
-        if (currentHHMM !== targetUtc) continue;
         const user = this.deps.userRepo.findByTelegramId(userId);
         if (!user) continue;
+        const prefs = this.deps.prefsRepo.get(userId);
+        const targetTime = prefs?.evening_review_time ?? DEFAULT_EVE_HOLIDAY_HHMM;
+        if (!isLocalTimeInWindow(nowUtc, user.timezone, targetTime, 5)) continue;
         const localTomorrowIso = new TZDate(new Date(minute.getTime() + 86_400_000), user.timezone)
           .toISOString()
           .slice(0, 10);

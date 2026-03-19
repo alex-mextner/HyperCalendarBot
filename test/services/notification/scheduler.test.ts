@@ -341,22 +341,23 @@ describe('NotificationScheduler', () => {
     expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
   });
 
-  test('eve-holiday fires for holiday on user local tomorrow (UTC+2 past midnight)', async () => {
-    // nowUtc = 2026-03-18T22:00:00Z = 00:00 local (Europe/Kyiv, UTC+2)
-    // UTC tomorrow = 2026-03-19, local tomorrow = 2026-03-20
-    // Holiday is on local tomorrow (2026-03-20) — should trigger notification
+  test('eve-holiday fires for holiday on user local tomorrow (UTC+2)', async () => {
+    // nowUtc = 2026-03-18T19:00:30Z = 21:00 local (Europe/Kyiv, UTC+2)
+    // Local tomorrow = 2026-03-19, UTC date still 2026-03-18
+    // Holiday is on local tomorrow (2026-03-19) — should trigger at 21:00 local
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Kyiv', 'en')");
     db.run(
-      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '22:00')",
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_time) VALUES (42, 1, '21:00')",
     );
     const eveHolidayEnqueued: string[] = [];
     const mockHolidayRepo = {
       getUsersWithNotifyForDate: (date: string) => {
-        if (date === '2026-03-20') return [{ user_id: 42, country_code: 'UA', holiday_name: 'Test Holiday' }];
+        if (date === '2026-03-18' || date === '2026-03-19')
+          return [{ user_id: 42, country_code: 'UA', holiday_name: 'Test Holiday' }];
         return [];
       },
       getHolidayForUser: (userId: number, date: string) => {
-        if (userId === 42 && date === '2026-03-20') return { country_code: 'UA', holiday_name: 'Test Holiday' };
+        if (userId === 42 && date === '2026-03-19') return { country_code: 'UA', holiday_name: 'Test Holiday' };
         return null;
       },
     };
@@ -369,7 +370,7 @@ describe('NotificationScheduler', () => {
       enqueue: (type: string) => eveHolidayEnqueued.push(type),
       holidayRepo: mockHolidayRepo as never,
     });
-    await testScheduler.tick(new Date('2026-03-18T22:00:30Z'));
+    await testScheduler.tick(new Date('2026-03-18T19:00:30Z'));
     expect(eveHolidayEnqueued.some((t) => t === 'eve_holiday')).toBe(true);
   });
 
