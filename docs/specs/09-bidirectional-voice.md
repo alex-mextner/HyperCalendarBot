@@ -386,8 +386,20 @@ DEEPGRAM_API_KEY=   # Nova-3 and Flux (same key)
    stops any audio currently playing before starting the new file. Send `PLAY_DONE`
    when the file finishes.
 
+**TTS engine selection (calls and voice messages):**
+
+| Language | Primary | Fallback |
+|----------|---------|----------|
+| RU | `SileroTtsService` | `TtsService` (Google Translate TTS) |
+| EN | `KokoroTtsService` | `TtsService` (Google Translate TTS) |
+
+`TtsService` (Google Translate, unofficial endpoint) is free but low quality — used only
+when the primary engine fails. This applies to both voice call audio and voice message
+audio. `CallManager` currently uses `TtsService` directly — it should be updated to
+follow the same primary/fallback pattern used by the voice message pipeline.
+
 Audio output format for TTS files: OGG Opus 48kHz mono (pytgcalls native format).
-The `TtsService` must produce OGG Opus output, not MP3 or OGG Vorbis.
+All TTS engines must produce OGG Opus output before passing to the Python bridge.
 
 Audio capture uses pytgcalls `AudioReceiver`. PCM format: s16le 48kHz mono (native
 pytgcalls format, matches Deepgram input requirements).

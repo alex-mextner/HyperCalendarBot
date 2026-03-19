@@ -18,7 +18,7 @@
 |------|----------------|
 | `src/services/voice/nova-streaming-stt.ts` | Nova-3 Deepgram WebSocket client (RU, 48kHz). Opens per-episode, closes on VAD_END. |
 | `src/services/voice/flux-streaming-stt.ts` | Flux Deepgram WebSocket client (EN, 16kHz). One persistent WS per call. Emits StartOfTurn / EndOfTurn. |
-| `src/services/voice/interruption-classifier.ts` | Haiku classifier for RU: transcript + bot context → `noise \| resume \| respond`. Debounced: 3+ new words, 1 in-flight call. |
+| `src/services/voice/interruption-classifier.ts` | Rule-based classifier for RU interim transcripts → `noise \| resume \| respond`. Zero-latency keyword matching, no LLM. |
 | `src/services/voice/thinking-phrase-player.ts` | Schedules start_* and mid_* thinking phrase playback with randomized delays; cancels on agent response. |
 | `src/services/voice/call-session.ts` | Per-call state machine. Owns STT, classifier, thinking player, agent. Routes WS messages from Python bridge. |
 | `src/services/voice/call-session-manager.ts` | Session registry (Map<sessionId, CallSession>). Starts `Bun.serve()` on `:3001`. Routes WS connections by URL path. |
@@ -138,73 +138,108 @@ Create `scripts/generate-thinking-phrases.ts`:
 #!/usr/bin/env bun
 /**
  * Generates pre-recorded thinking phrase audio files for live calls.
- * Uses Google TTS (TtsService). Idempotent — skips existing files.
+ * Uses SileroTtsService for Russian and KokoroTtsService for English —
+ * same engines as normal bot voice replies, so the voice matches.
+ * Both produce OGG Opus natively; no ffmpeg needed.
+ * Idempotent — skips existing files.
  *
  * Usage: bun run scripts/generate-thinking-phrases.ts
+ * Env vars:
+ *   PYTHON_PATH — path to Python binary for Silero TTS (default: venv/bin/python)
+ *   HF_TOKEN    — Hugging Face token for Kokoro TTS (required for EN phrases)
  */
-import { mkdirSync, existsSync } from 'node:fs';
-import { TtsService } from '../src/services/voice/tts-service.ts';
+import { existsSync, mkdirSync } from 'node:fs';
+import { SileroTtsService } from '../src/services/voice/silero-tts-service.ts';
+import { KokoroTtsService } from '../src/services/voice/kokoro-tts-service.ts';
+import { StressDictionary } from '../src/services/voice/stress-dictionary.ts';
+import {
+  fixDateOrdinals,
+  fixLineBreaks,
+  markStress,
+  numbersToWords,
+  stripMarkdown,
+  transliterateEnglish,
+} from '../src/services/voice/stress-marker.ts';
 
-const PHRASES: Record<string, Record<string, { file: string; text: string }>> = {
-  ru: {
-    start_hmm: { file: 'start_hmm.ogg', text: 'Хмм.' },
-    start_sec: { file: 'start_sec.ogg', text: 'Секундочку.' },
-    start_look: { file: 'start_look.ogg', text: 'Сейчас посмотрю.' },
-    start_think: { file: 'start_think.ogg', text: 'Дай подумаю.' },
-    mid_checking: { file: 'mid_checking.ogg', text: 'Проверяю.' },
-    mid_moment: { file: 'mid_moment.ogg', text: 'Момент.' },
-    mid_almost: { file: 'mid_almost.ogg', text: 'Почти готово.' },
-    mid_looking: { file: 'mid_looking.ogg', text: 'Смотрю в календарь.' },
-  },
-  en: {
-    start_hmm: { file: 'start_hmm.ogg', text: 'Hmm.' },
-    start_sec: { file: 'start_sec.ogg', text: 'One second.' },
-    start_look: { file: 'start_look.ogg', text: 'Let me check.' },
-    start_think: { file: 'start_think.ogg', text: 'Let me think.' },
-    mid_checking: { file: 'mid_checking.ogg', text: 'Checking.' },
-    mid_moment: { file: 'mid_moment.ogg', text: 'Just a moment.' },
-    mid_almost: { file: 'mid_almost.ogg', text: 'Almost there.' },
-    mid_looking: { file: 'mid_looking.ogg', text: 'Looking at your calendar.' },
-  },
+const RU_PHRASES: Record<string, string> = {
+  'start_hmm.ogg': 'Хмм.',
+  'start_sec.ogg': 'Секундочку.',
+  'start_look.ogg': 'Сейчас посмотрю.',
+  'start_think.ogg': 'Дай подумаю.',
+  'mid_checking.ogg': 'Проверяю.',
+  'mid_moment.ogg': 'Момент.',
+  'mid_almost.ogg': 'Почти готово.',
+  'mid_looking.ogg': 'Смотрю в календарь.',
 };
 
-const tts = new TtsService();
+const EN_PHRASES: Record<string, string> = {
+  'start_hmm.ogg': 'Hmm.',
+  'start_sec.ogg': 'One second.',
+  'start_look.ogg': 'Let me check.',
+  'start_think.ogg': 'Let me think.',
+  'mid_checking.ogg': 'Checking.',
+  'mid_moment.ogg': 'Just a moment.',
+  'mid_almost.ogg': 'Almost there.',
+  'mid_looking.ogg': 'Looking at your calendar.',
+};
 
-for (const [lang, phrases] of Object.entries(PHRASES)) {
-  const dir = `data/thinking-phrases/${lang}`;
-  mkdirSync(dir, { recursive: true });
+async function generate() {
+  const pythonPath = process.env.PYTHON_PATH ?? 'venv/bin/python';
+  const hfToken = process.env.HF_TOKEN;
 
-  for (const [, { file, text }] of Object.entries(phrases)) {
-    const path = `${dir}/${file}`;
-    if (existsSync(path)) {
-      console.log(`Skip (exists): ${path}`);
-      continue;
-    }
-    console.log(`Synthesizing: ${path} — "${text}"`);
+  // Russian — SileroTts
+  const stressDict = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
+  const sileroTts = new SileroTtsService(pythonPath);
+
+  const ruDir = 'data/thinking-phrases/ru';
+  mkdirSync(ruDir, { recursive: true });
+
+  for (const [file, text] of Object.entries(RU_PHRASES)) {
+    const path = `${ruDir}/${file}`;
+    if (existsSync(path)) { console.log(`Skip: ${path}`); continue; }
+    console.log(`RU: ${path} — "${text}"`);
     try {
-      const audio = await tts.synthesize(text, lang);
+      const plain = fixLineBreaks(stripMarkdown(text));
+      const stressed = transliterateEnglish(markStress(numbersToWords(fixDateOrdinals(plain)), stressDict));
+      const audio = await sileroTts.synthesize(stressed);
       await Bun.write(path, audio);
       console.log(`  OK (${audio.length} bytes)`);
-    } catch (err) {
-      console.error(`  FAIL: ${err}`);
+    } catch (err) { console.error(`  FAIL: ${err}`); }
+  }
+
+  // English — KokoroTts
+  if (!hfToken) {
+    console.warn('HF_TOKEN not set — skipping EN phrases');
+  } else {
+    const kokoroTts = new KokoroTtsService(hfToken);
+
+    const enDir = 'data/thinking-phrases/en';
+    mkdirSync(enDir, { recursive: true });
+
+    for (const [file, text] of Object.entries(EN_PHRASES)) {
+      const path = `${enDir}/${file}`;
+      if (existsSync(path)) { console.log(`Skip: ${path}`); continue; }
+      console.log(`EN: ${path} — "${text}"`);
+      try {
+        const audio = await kokoroTts.synthesize(text);
+        await Bun.write(path, audio);
+        console.log(`  OK (${audio.length} bytes)`);
+      } catch (err) { console.error(`  FAIL: ${err}`); }
     }
   }
+
+  console.log('Done.');
 }
-console.log('Done.');
+
+await generate();
 ```
 
-Note: TtsService returns MP3 bytes from Google Translate. The spec requires OGG Opus 48kHz mono. Convert with `ffmpeg` before saving:
+**Constructor signatures (for reference):**
+- `SileroTtsService(pythonPath: string)` — pythonPath defaults to `venv/bin/python`
+- `KokoroTtsService(hfToken: string)` — requires Hugging Face token
+- `StressDictionary.loadFromFile(path)` — static async method, path `data/dictionaries/stress-dict.json`
 
-```typescript
-// Replace `await Bun.write(path, audio)` with:
-const mp3File = `${path}.mp3`;
-await Bun.write(mp3File, audio);
-const proc = Bun.spawn(['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', path]);
-await proc.exited;
-await Bun.file(mp3File).exists() && (await import('node:fs/promises')).unlink(mp3File);
-```
-
-`ffmpeg` must be installed (`brew install ffmpeg` on macOS, `apt install ffmpeg` on Linux). If unavailable, the script will fail — there is no acceptable workaround since pytgcalls requires OGG Opus.
+Note: This script is a CLI utility — no unit tests needed. It will fail gracefully if the TTS services are unavailable. The output is already OGG Opus — no ffmpeg conversion needed.
 
 - [ ] **Step 2.3: Test-run script**
 
@@ -617,6 +652,15 @@ git commit -m "feat(voice): FluxStreamingSTT — Deepgram Flux EN WebSocket clie
 
 ## Task 5: InterruptionClassifier
 
+**Context:** LLM-based classifier (Haiku) adds 300-800ms latency per interim transcript — too slow for real-time voice. Replaced with zero-latency keyword rules.
+
+**Rules:**
+- `noise` — fewer than 2 words
+- `resume` — 1-2 words that are known filler/acknowledgements (да, угу, ага, ок, нет, хорошо, понятно, ясно, продолжай, давай, yes, no, ok, okay, yeah, yep, mhm, sure, got it)
+- `respond` — everything else (question, command, multiple words not in resume set)
+
+`VAD_END` from Python → always `respond` (primary signal, handled in CallSession, not here).
+
 **Files:**
 - Create: `src/services/voice/interruption-classifier.ts`
 - Create: `test/services/voice/interruption-classifier.test.ts`
@@ -625,87 +669,49 @@ git commit -m "feat(voice): FluxStreamingSTT — Deepgram Flux EN WebSocket clie
 
 Create `test/services/voice/interruption-classifier.test.ts`:
 ```typescript
-import { describe, expect, mock, test } from 'bun:test';
-import { InterruptionClassifier } from '../../../src/services/voice/interruption-classifier.ts';
+import { expect, test } from 'bun:test';
+import { classifyInterrupt } from '../../../src/services/voice/interruption-classifier.ts';
 
-function makeAnthropic(decision: string) {
-  return {
-    messages: {
-      create: mock(async () => ({
-        content: [{ type: 'text', text: decision }],
-      })),
-    },
-  };
-}
-
-test('returns resume for short transcript (< 3 words)', async () => {
-  const anthropic = makeAnthropic('respond');
-  const classifier = new InterruptionClassifier(anthropic as never);
-  const result = await classifier.classify('да', 'Bot was saying something');
-  expect(result).toBe('resume');
-  // Haiku not called — debounced
-  expect(anthropic.messages.create).not.toHaveBeenCalled();
+test('noise: empty string', () => {
+  expect(classifyInterrupt('')).toBe('noise');
 });
 
-test('calls Haiku and returns respond for long transcript', async () => {
-  const anthropic = makeAnthropic('respond');
-  const classifier = new InterruptionClassifier(anthropic as never);
-  const result = await classifier.classify('добавь встречу завтра в три часа', 'Bot was listing events');
-  expect(result).toBe('respond');
-  expect(anthropic.messages.create).toHaveBeenCalledTimes(1);
+test('noise: single non-filler word', () => {
+  expect(classifyInterrupt('хм')).toBe('noise');
 });
 
-test('returns resume from Haiku response', async () => {
-  const anthropic = makeAnthropic('resume');
-  const classifier = new InterruptionClassifier(anthropic as never);
-  const result = await classifier.classify('угу понятно хорошо спасибо', 'Bot was listing events');
-  expect(result).toBe('resume');
+test('resume: single filler "да"', () => {
+  expect(classifyInterrupt('да')).toBe('resume');
 });
 
-test('returns noise from Haiku response', async () => {
-  const anthropic = makeAnthropic('noise');
-  const classifier = new InterruptionClassifier(anthropic as never);
-  const result = await classifier.classify('фоновый шум мне не важно это', 'Bot was reading schedule');
-  expect(result).toBe('noise');
+test('resume: single filler "угу"', () => {
+  expect(classifyInterrupt('угу')).toBe('resume');
 });
 
-test('debounce: does not call Haiku again if < 3 new words', async () => {
-  const anthropic = makeAnthropic('respond');
-  const classifier = new InterruptionClassifier(anthropic as never);
-
-  // First call: 5 words → calls Haiku
-  await classifier.classify('добавь встречу завтра в три', 'context');
-  expect(anthropic.messages.create).toHaveBeenCalledTimes(1);
-
-  // Second call: same 5 words → debounced (0 new words)
-  await classifier.classify('добавь встречу завтра в три', 'context');
-  expect(anthropic.messages.create).toHaveBeenCalledTimes(1);
+test('resume: two fillers "ага ок"', () => {
+  expect(classifyInterrupt('ага ок')).toBe('resume');
 });
 
-test('debounce: calls Haiku again when 3+ new words added', async () => {
-  const anthropic = makeAnthropic('respond');
-  const classifier = new InterruptionClassifier(anthropic as never);
-
-  await classifier.classify('добавь встречу завтра', 'context');
-  expect(anthropic.messages.create).toHaveBeenCalledTimes(1);
-
-  // 3 new words added
-  await classifier.classify('добавь встречу завтра в три часа', 'context');
-  expect(anthropic.messages.create).toHaveBeenCalledTimes(2);
+test('resume: english filler "yeah"', () => {
+  expect(classifyInterrupt('yeah')).toBe('resume');
 });
 
-test('defaults to respond on Haiku timeout', async () => {
-  const anthropic = {
-    messages: {
-      create: mock(async () => {
-        await new Promise<void>((resolve) => setTimeout(resolve, 100));
-        return { content: [{ type: 'text', text: 'respond' }] };
-      }),
-    },
-  };
-  const classifier = new InterruptionClassifier(anthropic as never, { timeoutMs: 50 });
-  const result = await classifier.classify('скажи мне что за события', 'context');
-  expect(result).toBe('respond');
+test('respond: command with multiple words', () => {
+  expect(classifyInterrupt('добавь встречу завтра')).toBe('respond');
+});
+
+test('respond: question', () => {
+  expect(classifyInterrupt('что у меня сегодня')).toBe('respond');
+});
+
+test('respond: mixed filler + real word makes it respond', () => {
+  // "да встречу" — not all fillers, has a non-filler second word
+  expect(classifyInterrupt('да встречу')).toBe('respond');
+});
+
+test('respond: three single-word fillers → respond (3 words)', () => {
+  // Resume rule only applies when ALL words are fillers AND word count <= 2
+  expect(classifyInterrupt('да нет ок')).toBe('respond');
 });
 ```
 
@@ -716,85 +722,32 @@ bun test test/services/voice/interruption-classifier.test.ts
 ```
 Expected: FAIL.
 
-- [ ] **Step 5.3: Implement InterruptionClassifier**
+- [ ] **Step 5.3: Implement classifyInterrupt**
 
 Create `src/services/voice/interruption-classifier.ts`:
 ```typescript
 // src/services/voice/interruption-classifier.ts
-import type Anthropic from '@anthropic-ai/sdk';
-import { voiceLogger } from './types';
 
 export type InterruptionDecision = 'noise' | 'resume' | 'respond';
 
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const MIN_NEW_WORDS = 3;
+const RESUME_WORDS = new Set([
+  // Russian
+  'да', 'нет', 'угу', 'ага', 'ок', 'хорошо', 'понятно', 'ясно', 'продолжай', 'давай',
+  // English
+  'yes', 'no', 'ok', 'okay', 'yeah', 'yep', 'mhm', 'sure', 'got',
+]);
 
-interface InterruptionClassifierDeps {
-  timeoutMs?: number;
-}
-
-export class InterruptionClassifier {
-  private lastWordCount = 0;
-  private inFlight = false;
-
-  constructor(
-    private readonly anthropic: Anthropic,
-    private readonly opts: InterruptionClassifierDeps = {},
-  ) {}
-
-  async classify(transcript: string, botContext: string): Promise<InterruptionDecision> {
-    const words = transcript.trim().split(/\s+/).filter(Boolean);
-    const newWords = words.length - this.lastWordCount;
-
-    if (newWords < MIN_NEW_WORDS) return 'resume';
-    if (this.inFlight) return 'resume';
-
-    this.inFlight = true;
-    try {
-      const decision = await this.callHaiku(transcript, botContext);
-      this.lastWordCount = words.length;
-      return decision;
-    } finally {
-      this.inFlight = false;
-    }
-  }
-
-  reset(): void {
-    this.lastWordCount = 0;
-    this.inFlight = false;
-  }
-
-  private async callHaiku(transcript: string, botContext: string): Promise<InterruptionDecision> {
-    const timeoutMs = this.opts.timeoutMs ?? 3000;
-    const prompt = `You are deciding whether a user's speech during a bot's monologue warrants a response.
-
-Bot was saying: "${botContext}"
-User said: "${transcript}"
-
-Reply with exactly one word:
-- "noise" — background speech, not addressed to the bot
-- "resume" — acknowledgement (угу, да, ок) or filler, bot should continue
-- "respond" — user asked a question or gave a command, bot must respond`;
-
-    try {
-      const result = await Promise.race([
-        this.anthropic.messages.create({
-          model: HAIKU_MODEL,
-          max_tokens: 10,
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-      ]);
-
-      const text = (result.content[0] as { text: string }).text.trim().toLowerCase();
-      if (text === 'noise' || text === 'resume' || text === 'respond') return text;
-      voiceLogger.warn({ text }, 'InterruptionClassifier: unexpected Haiku response, defaulting to respond');
-      return 'respond';
-    } catch (err) {
-      voiceLogger.warn({ err }, 'InterruptionClassifier: Haiku call failed/timed out, defaulting to respond');
-      return 'respond';
-    }
-  }
+/**
+ * Classifies an interim STT transcript as noise, resume, or respond.
+ * Called when the user speaks during active bot audio playback.
+ * VAD_END → always 'respond' (handled in CallSession, not here).
+ */
+export function classifyInterrupt(transcript: string): InterruptionDecision {
+  const words = transcript.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 'noise';
+  if (words.length === 1 && !RESUME_WORDS.has(words[0])) return 'noise';
+  if (words.length <= 2 && words.every((w) => RESUME_WORDS.has(w))) return 'resume';
+  return 'respond';
 }
 ```
 
@@ -803,13 +756,13 @@ Reply with exactly one word:
 ```bash
 bun test test/services/voice/interruption-classifier.test.ts
 ```
-Expected: all 7 pass.
+Expected: all 10 pass.
 
 - [ ] **Step 5.5: Commit**
 
 ```bash
 git add src/services/voice/interruption-classifier.ts test/services/voice/interruption-classifier.test.ts
-git commit -m "feat(voice): InterruptionClassifier — Haiku-based RU interruption detection with debounce"
+git commit -m "feat(voice): InterruptionClassifier — rule-based zero-latency interruption detection"
 ```
 
 ---
