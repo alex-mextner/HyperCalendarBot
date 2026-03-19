@@ -293,30 +293,40 @@ export class NotificationScheduler {
       notifyLogger.info({ userId: pref.user_id }, 'Morning agenda enqueued');
     }
 
-    // 3. Eve-holiday notifications
-    // TODO: tomorrowDate is UTC-based; for users past midnight locally (UTC+ with late evening_review_utc),
-    // their local tomorrow may differ. Fixing requires per-user local date in the repo query.
+    // 3. Eve-holiday notifications (per-user local tomorrow date)
+    // Query 3 consecutive UTC dates to cover all timezone offsets (UTC-14 to UTC+14),
+    // then verify each user's actual local tomorrow with getHolidayForUser.
     if (this.deps.holidayRepo) {
-      const usersWithHoliday = this.deps.holidayRepo.getUsersWithNotifyForDate(tomorrowDate);
-      const seen = new Set<number>();
-      for (const row of usersWithHoliday) {
-        if (seen.has(row.user_id)) continue;
-        seen.add(row.user_id);
-        const prefs = this.deps.prefsRepo.get(row.user_id);
+      const utcToday = minute.toISOString().slice(0, 10);
+      const utcDayAfter = new Date(minute.getTime() + 2 * 86_400_000).toISOString().slice(0, 10);
+      const candidates = new Map<number, true>();
+      for (const date of [utcToday, tomorrowDate, utcDayAfter]) {
+        for (const row of this.deps.holidayRepo.getUsersWithNotifyForDate(date)) {
+          candidates.set(row.user_id, true);
+        }
+      }
+      for (const [userId] of candidates) {
+        const prefs = this.deps.prefsRepo.get(userId);
         const targetUtc = prefs?.evening_review_utc ?? DEFAULT_EVE_HOLIDAY_UTCHHMM;
         if (currentHHMM !== targetUtc) continue;
-        const refKey = `eh:${row.user_id}:${tomorrowDate}`;
-        const payload = JSON.stringify({ date: tomorrowDate, holidayName: row.holiday_name });
+        const user = this.deps.userRepo.findByTelegramId(userId);
+        if (!user) continue;
+        const tomorrowUtc = new Date(nowUtc.getTime() + 86_400_000);
+        const localTomorrowIso = new TZDate(tomorrowUtc, user.timezone).toISOString().slice(0, 10);
+        const holiday = this.deps.holidayRepo.getHolidayForUser(userId, localTomorrowIso);
+        if (!holiday) continue;
+        const refKey = `eh:${userId}:${localTomorrowIso}`;
+        const payload = JSON.stringify({ date: localTomorrowIso, holidayName: holiday.holiday_name });
         const logId = this.deps.logRepo.insert({
-          user_id: row.user_id,
+          user_id: userId,
           type: 'eve_holiday',
           reference_key: refKey,
           channel: 'telegram_text',
           payload,
         });
         if (logId === null) continue;
-        this.deps.enqueue('eve_holiday', row.user_id, logId, payload);
-        notifyLogger.info({ userId: row.user_id, holiday: row.holiday_name }, 'Eve-holiday notification enqueued');
+        this.deps.enqueue('eve_holiday', userId, logId, payload);
+        notifyLogger.info({ userId, holiday: holiday.holiday_name }, 'Eve-holiday notification enqueued');
       }
     }
 

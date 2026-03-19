@@ -128,6 +128,32 @@ describe('handleWeek group context', () => {
     expect(sentText).toContain('таймзону');
   });
 
+  test('group mode holiday keys use local calendar dates, not UTC dates (UTC+2)', async () => {
+    const queriedDates: string[] = [];
+    const holidayService = {
+      getHolidaysForDate: (_userId: number, date: string) => {
+        queriedDates.push(date);
+        return [];
+      },
+    };
+    const groupRepo = { getTimezone: () => 'Europe/Kyiv' };
+    const eventService = { getEventsInRangeForGroup: () => [] };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve()),
+    };
+
+    await handleWeek(ctx as never, eventService as never, holidayService as never, undefined, groupRepo as never);
+
+    expect(queriedDates).toHaveLength(7);
+    // For Europe/Kyiv (UTC+2), local week starts on Monday.
+    // With local calendar dates, the first key is a Monday; with UTC dates it would be Sunday.
+    const firstDate = new Date(`${queriedDates[0]}T12:00:00Z`);
+    expect(firstDate.getUTCDay()).toBe(1); // Monday = 1, not Sunday = 0
+  });
+
   test('in private chat uses personal calendar', async () => {
     const eventService = {
       getEventsInRange: mock(() => []),

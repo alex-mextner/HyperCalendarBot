@@ -43,10 +43,7 @@ export async function handleWeek(
     let groupHolidaysByDate: Map<string, HolidayEntry[]> | undefined;
     if (holidayService) {
       groupHolidaysByDate = new Map();
-      const startD = new Date(start);
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(startD.getTime() + i * 86400000);
-        const dayKey = d.toISOString().slice(0, 10);
+      for (const dayKey of localCalendarWeekDays(start, timezone)) {
         const holidays = holidayService.getHolidaysForDate(user.telegram_id, dayKey);
         if (holidays.length > 0) {
           groupHolidaysByDate.set(dayKey, holidays);

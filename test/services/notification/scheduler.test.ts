@@ -341,6 +341,38 @@ describe('NotificationScheduler', () => {
     expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
   });
 
+  test('eve-holiday fires for holiday on user local tomorrow (UTC+2 past midnight)', async () => {
+    // nowUtc = 2026-03-18T22:00:00Z = 00:00 local (Europe/Kyiv, UTC+2)
+    // UTC tomorrow = 2026-03-19, local tomorrow = 2026-03-20
+    // Holiday is on local tomorrow (2026-03-20) — should trigger notification
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Kyiv', 'en')");
+    db.run(
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_utc) VALUES (42, 1, '22:00')",
+    );
+    const eveHolidayEnqueued: string[] = [];
+    const mockHolidayRepo = {
+      getUsersWithNotifyForDate: (date: string) => {
+        if (date === '2026-03-20') return [{ user_id: 42, country_code: 'UA', holiday_name: 'Test Holiday' }];
+        return [];
+      },
+      getHolidayForUser: (userId: number, date: string) => {
+        if (userId === 42 && date === '2026-03-20') return { country_code: 'UA', holiday_name: 'Test Holiday' };
+        return null;
+      },
+    };
+    const testScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: (type: string) => eveHolidayEnqueued.push(type),
+      holidayRepo: mockHolidayRepo as never,
+    });
+    await testScheduler.tick(new Date('2026-03-18T22:00:30Z'));
+    expect(eveHolidayEnqueued.some((t) => t === 'eve_holiday')).toBe(true);
+  });
+
   test('evening review includes event at 00:30 local tomorrow (22:30 UTC today) for UTC+2 user', async () => {
     // Tick: 2026-03-18T19:00:30Z = 21:00 local in Europe/Kyiv (UTC+2)
     // Event at 2026-03-18T22:30:00Z = 00:30 local on March 19 — that is "tomorrow" → should appear
