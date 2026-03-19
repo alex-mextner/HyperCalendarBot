@@ -41,6 +41,7 @@ function makeHolidayService(overrides: Record<string, unknown> = {}) {
     getSubscriptions: mock(() => []),
     getCountryName: mock((code: string) => `Country-${code}`),
     getUpcomingHolidays: mock(() => []),
+    getUpcomingForCountry: mock(() => [{ date: '2026-01-01', name: 'New Year', type: 'public', countryCode: 'RU', countryName: 'Russia' }]),
     getAvailableRegions: mock(() => ['Europe', 'Asia']),
     getCountriesForRegion: mock(() => [{ code: 'US', name: 'United States' }]),
     subscribeUser: mock(() => {}),
@@ -361,18 +362,23 @@ describe('handleHolidays group context', () => {
     expect(msg).toContain('страну');
   });
 
-  test('in group with country proceeds to show menu', async () => {
+  test('in group with country shows upcoming holidays for group country', async () => {
     const { handleHolidays } = await import('../../../src/bot/commands/holidays.ts');
     const groupRepo = makeGroupRepo('RU');
     const svc = makeHolidayService();
+    let sentText = '';
     const ctx = {
       chat: { type: 'group', id: -100 },
       dbUser: userRu,
       args: '',
-      send: mock(() => Promise.resolve()),
+      send: mock((text: string) => {
+        sentText = text;
+        return Promise.resolve();
+      }),
     };
     await handleHolidays(ctx as never, svc as never, groupRepo as never);
-    expect(ctx.send).toHaveBeenCalled();
+    expect(svc.getUpcomingForCountry).toHaveBeenCalledWith('RU');
+    expect(sentText).toContain('New Year');
   });
 
   test('in private uses personal flow without groupRepo', async () => {

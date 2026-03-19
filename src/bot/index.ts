@@ -324,7 +324,7 @@ export function createBot(
       handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
     )
     .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext, db.groupChats))
-    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene))
+    .command('import', (ctx) => handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats))
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
     // Sharing commands
     .command('invite', (ctx) =>

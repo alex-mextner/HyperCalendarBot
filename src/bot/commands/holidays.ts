@@ -36,7 +36,19 @@ export async function handleHolidays(
       );
       return;
     }
-    await sendMainMenu(ctx, holidayService, user, lang);
+    const upcoming = holidayService.getUpcomingForCountry(group.country);
+    const countryName = holidayService.getCountryName(group.country);
+    if (upcoming.length === 0) {
+      await ctx.send(
+        lang === 'ru'
+          ? `🎉 ${escapeHtml(countryName)} — праздников не найдено`
+          : `🎉 ${escapeHtml(countryName)} — no upcoming holidays`,
+        { parse_mode: 'HTML' },
+      );
+      return;
+    }
+    const lines = upcoming.map((h) => `${h.date} — ${escapeHtml(h.name)}`).join('\n');
+    await ctx.send(`🎉 <b>${escapeHtml(countryName)}</b>\n\n${lines}`, { parse_mode: 'HTML' });
     return;
   }
 

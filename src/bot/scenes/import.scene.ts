@@ -5,8 +5,13 @@ import { ruPlural } from '../../services/event/formatters.ts';
 import { parseIcs } from '../../services/ics/parser.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
+interface ImportParams {
+  groupId?: number;
+  groupTimezone?: string;
+}
+
 export function createImportScene(eventService: EventService, botToken: string) {
-  return new Scene('import').step('message', async (context) => {
+  return new Scene('import').params<ImportParams>().step('message', async (context) => {
     const lang = getSceneLang(context);
     const user = getSceneUser(context);
     if (!user) {
@@ -47,6 +52,12 @@ export function createImportScene(eventService: EventService, botToken: string) 
         return;
       }
 
+      const params = context.scene.params ?? {};
+      const { groupId, groupTimezone } = params;
+      const timezone = groupTimezone ?? user.timezone;
+      const groupFields =
+        groupId !== undefined ? { owner_type: 'group' as const, group_id: groupId, created_by: user.telegram_id } : {};
+
       let imported = 0;
       for (const icsEvent of parsed) {
         eventService.createEvent({
@@ -56,8 +67,9 @@ export function createImportScene(eventService: EventService, botToken: string) 
           end_at: icsEvent.end_at,
           description: icsEvent.description,
           location: icsEvent.location,
-          timezone: user.timezone,
+          timezone,
           recurrence_rule: icsEvent.recurrence_rule,
+          ...groupFields,
         });
         imported++;
       }

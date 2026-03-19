@@ -118,6 +118,18 @@ export class HolidayService {
     return all.sort((a, b) => a.date.localeCompare(b.date)).slice(0, limit);
   }
 
+  getUpcomingForCountry(countryCode: string, limit = 10): HolidayEntry[] {
+    const today = new Date().toISOString().slice(0, 10);
+    const endDate = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
+    const country = this.repo.getCountry(countryCode);
+    const countryName = country?.name ?? countryCode;
+    const holidays = this.repo.getHolidaysForRange(countryCode, today, endDate);
+    return holidays
+      .filter((h) => h.type === 'public' || h.type === 'bank')
+      .slice(0, limit)
+      .map((h) => ({ date: h.date, name: h.name, type: h.type, countryCode: h.country_code, countryName }));
+  }
+
   getAvailableRegions(): string[] {
     const countries = this.hd.getCountries();
     const regionSet = new Set<string>();
