@@ -238,6 +238,11 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
       translateText: (text, lang) => ttsTranslationService.translate(text, lang),
       pyBridgePath,
       registerSession: (sessionId, userId, language) => callSessionManager.registerSession(sessionId, userId, language),
+      notifyUser: (userId, msg) => {
+        botRef
+          .sendMessage(userId, msg)
+          .catch((err) => botLogger.error({ err, userId }, 'Failed to send call failure notification'));
+      },
     });
 
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);

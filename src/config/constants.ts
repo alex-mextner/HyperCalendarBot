@@ -240,6 +240,7 @@ export const MSG = {
         weekImageNotImplemented: (weekStart: string) =>
           `Week image rendering for ${weekStart} is not yet implemented via AI tools.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
+        callFailed: 'Failed to connect the call. Please try again later.',
         gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
         gcalConnectedNoData: 'Google Calendar is connected, but calendar data is not available.',
         gcalConnectedHeader: 'Google Calendar is connected.',
@@ -479,6 +480,7 @@ export const MSG = {
         weekImageNotImplemented: (weekStart: string) =>
           `Недельное изображение (с ${weekStart}) через AI-инструменты пока не реализовано.`,
         callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
+        callFailed: 'Не удалось совершить звонок. Попробуй ещё раз позже.',
         gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',
         gcalConnectedNoData: 'Google Calendar подключён, но данные календарей недоступны.',
         gcalConnectedHeader: 'Google Calendar подключён.',

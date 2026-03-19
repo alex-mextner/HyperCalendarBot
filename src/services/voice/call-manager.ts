@@ -1,6 +1,7 @@
 // src/services/voice/call-manager.ts
 
 import { unlink } from 'node:fs/promises';
+import { t } from '../../config/constants.ts';
 import type { CallStatus } from '../../database/types';
 import type { CallReminderJobData } from './types';
 import { voiceLogger } from './types';
@@ -22,6 +23,7 @@ export interface CallManagerDeps {
   pyBridgePath: string;
   registerSession?: (sessionId: string, userId: number, language: string) => void;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
+  notifyUser?: (userId: number, msg: string) => void;
 }
 
 export class CallManager {
@@ -102,13 +104,18 @@ export class CallManager {
       } catch {}
 
       const duration = Math.floor((Date.now() - startTime) / 1000);
-      this.deps.callLogRepo.complete(job.callLogId, exitCode === 0 ? 'completed' : 'failed', duration);
+      const callStatus = exitCode === 0 ? 'completed' : 'failed';
+      this.deps.callLogRepo.complete(job.callLogId, callStatus, duration);
+      if (callStatus === 'failed') {
+        this.deps.notifyUser?.(job.userId, t(job.language).aiTools.meta.callFailed);
+      }
       voiceLogger.info({ userId: job.userId, duration }, 'Call completed');
     } catch (error) {
       const duration = Math.floor((Date.now() - startTime) / 1000);
       const errorMsg = error instanceof Error ? error.message : JSON.stringify(error);
       voiceLogger.error({ err: error, userId: job.userId }, 'Call failed');
       this.deps.callLogRepo.complete(job.callLogId, 'failed', duration, errorMsg);
+      this.deps.notifyUser?.(job.userId, t(job.language).aiTools.meta.callFailed);
     }
   }
 }

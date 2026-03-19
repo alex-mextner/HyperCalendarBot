@@ -35,7 +35,7 @@ from silero_vad import load_silero_vad
 
 from pyrogram import Client
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream, AudioQuality, AudioReceiver
+from pytgcalls.types import MediaStream, AudioQuality, RecordStream, StreamFrames, Direction
 
 import websockets
 
@@ -66,6 +66,8 @@ async def main():
     speaking = False
     seq_num = 0
     play_done_event: asyncio.Event | None = None
+    audio_buffer = b""
+    is_speaking = False
 
     # ------- Connect to Bun WebSocket -------
     async with websockets.connect(WS_URL) as ws:
@@ -122,49 +124,40 @@ async def main():
                     except Exception:
                         pass  # older pytgcalls may not have skip_stream; cancel of play_task is enough
 
-        async def capture_audio():
-            """Capture audio from pytgcalls and run VAD."""
-            nonlocal speaking, seq_num
+        async def on_audio_frame(chunk: bytes):
+            """Process incoming audio chunk from the call with VAD."""
+            nonlocal audio_buffer, is_speaking, speaking, seq_num
 
-            audio_buffer = b""
-            is_speaking = False
+            if paused:
+                return
 
-            # pytgcalls calls on_audio sequentially in its event loop — audio_buffer is safe without locking
-            async def on_audio(chunk: bytes):
-                nonlocal audio_buffer, is_speaking, speaking, seq_num
+            audio_buffer += chunk
+            while len(audio_buffer) >= CHUNK_BYTES:
+                frame = audio_buffer[:CHUNK_BYTES]
+                audio_buffer = audio_buffer[CHUNK_BYTES:]
 
-                if paused:
-                    return
+                detected = detect_vad(frame)
 
-                audio_buffer += chunk
-                while len(audio_buffer) >= CHUNK_BYTES:
-                    frame = audio_buffer[:CHUNK_BYTES]
-                    audio_buffer = audio_buffer[CHUNK_BYTES:]
+                if detected and not is_speaking:
+                    is_speaking = True
+                    speaking = True
+                    await ws.send(json.dumps({"type": "VAD_START"}))
+                    seq_num = 0
 
-                    detected = detect_vad(frame)
+                if is_speaking:
+                    # Send binary: 2-byte seq_num + PCM
+                    header = struct.pack(">H", seq_num % 65536)
+                    if LANGUAGE == "en":
+                        frame_to_send = resample_to_16k(frame)
+                    else:
+                        frame_to_send = frame
+                    await ws.send(header + frame_to_send)
+                    seq_num += 1
 
-                    if detected and not is_speaking:
-                        is_speaking = True
-                        speaking = True
-                        await ws.send(json.dumps({"type": "VAD_START"}))
-                        seq_num = 0
-
-                    if is_speaking:
-                        # Send binary: 2-byte seq_num + PCM
-                        header = struct.pack(">H", seq_num % 65536)
-                        if LANGUAGE == "en":
-                            frame_to_send = resample_to_16k(frame)
-                        else:
-                            frame_to_send = frame
-                        await ws.send(header + frame_to_send)
-                        seq_num += 1
-
-                    if not detected and is_speaking:
-                        is_speaking = False
-                        speaking = False
-                        await ws.send(json.dumps({"type": "VAD_END"}))
-
-            calls.on_stream_audio(USER_ID)(on_audio)
+                if not detected and is_speaking:
+                    is_speaking = False
+                    speaking = False
+                    await ws.send(json.dumps({"type": "VAD_END"}))
 
         # ------- Start call -------
         await app.start()
@@ -177,6 +170,9 @@ async def main():
                 call_ended.set()
             if ("StreamEnded" in name or "StreamAudioEnded" in name) and play_done_event is not None:
                 play_done_event.set()
+            if isinstance(update, StreamFrames) and update.direction == Direction.INCOMING:
+                for frame in update.frames:
+                    await on_audio_frame(frame.frame)
 
         # Connect to user (muted — no audio yet)
         try:
@@ -191,9 +187,9 @@ async def main():
 
         await ws.send(json.dumps({"type": "CALL_CONNECTED"}))
 
-        # Register audio callback before starting the command loop — avoids
-        # a race where audio arrives before the gather task is scheduled.
-        await capture_audio()
+        # Enable incoming audio capture — avoids a race where audio arrives
+        # before the gather task is scheduled.
+        await calls.record(USER_ID, RecordStream(audio=True, audio_parameters=AudioQuality.HIGH))
 
         await asyncio.gather(
             recv_commands(),
