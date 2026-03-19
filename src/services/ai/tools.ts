@@ -858,4 +858,64 @@ export const toolDefinitions: ToolDefinition[] = [
       required: [],
     },
   },
+  {
+    name: 'schedule_ai_call',
+    description:
+      'Schedule a one-time or recurring message to be injected into the AI pipeline on your behalf at a future time. The bot will process it as if you sent it. Use run_at for one-time, cron for recurring. Always convert user local time to UTC using their timezone before calling.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        message: { type: 'string', description: 'Message to inject (e.g. "call me", "show today events")' },
+        run_at: { type: 'string', description: 'ISO 8601 UTC datetime for one-time execution' },
+        cron: { type: 'string', description: 'Cron expression in UTC for recurring execution (e.g. "0 8 * * *")' },
+        label: { type: 'string', description: 'Human-readable description' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'schedule_ai_calls_list',
+    description: 'List all active scheduled AI calls for the user.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'schedule_ai_call_cancel',
+    description: 'Cancel a scheduled AI call by id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Schedule id from schedule_ai_calls_list' } },
+      required: ['id'],
+    },
+  },
+  {
+    name: 'add_trigger',
+    description: `Add an event-driven trigger. When the specified topic fires (and optional condition is true), the action message is injected into the AI pipeline.
+Available topics: myCalendar.newEvent, myCalendar.updatedEvent, myCalendar.deletedEvent, myCalendar.conflictDetected, myCalendar.eventStarting, myInvitations.accepted, myInvitations.rejected, myGroup.newEvent.
+Condition is an expression using dot-notation on the event payload (e.g. "newEvent.title == \\"standup\\"").`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        topic: { type: 'string', description: 'Domain event topic to listen for' },
+        action: { type: 'string', description: 'Message to inject when trigger fires' },
+        condition: { type: 'string', description: 'Optional filter expression evaluated against event payload' },
+        label: { type: 'string', description: 'Human-readable description' },
+        once: { type: 'boolean', description: 'If true, trigger auto-disables after first fire' },
+      },
+      required: ['topic', 'action'],
+    },
+  },
+  {
+    name: 'list_triggers',
+    description: 'List all triggers for the user.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'remove_trigger',
+    description: 'Remove a trigger by id.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { id: { type: 'string', description: 'Trigger id from list_triggers' } },
+      required: ['id'],
+    },
+  },
 ];

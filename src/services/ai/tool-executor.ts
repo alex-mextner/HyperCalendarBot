@@ -33,6 +33,14 @@ import {
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import {
+  handleAddTrigger,
+  handleListTriggers,
+  handleRemoveTrigger,
+  handleScheduleAiCall,
+  handleScheduleAiCallCancel,
+  handleScheduleAiCallsList,
+} from './tool-handlers/scheduled.ts';
 import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import { handleManageSettings } from './tool-handlers/settings.ts';
 import {
@@ -261,6 +269,19 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'get_history':
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
+
+      case 'schedule_ai_call':
+        return handleScheduleAiCall(ctx, input as never);
+      case 'schedule_ai_calls_list':
+        return handleScheduleAiCallsList(ctx);
+      case 'schedule_ai_call_cancel':
+        return handleScheduleAiCallCancel(ctx, input as never);
+      case 'add_trigger':
+        return handleAddTrigger(ctx, input as never);
+      case 'list_triggers':
+        return handleListTriggers(ctx);
+      case 'remove_trigger':
+        return handleRemoveTrigger(ctx, input as never);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };
