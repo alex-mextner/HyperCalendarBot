@@ -20,6 +20,7 @@ export interface User {
   onboarding_completed: number; // 0 | 1
   timezone_updated_at: string | null;
   voice_response_enabled: number | null;
+  default_event_duration_minutes: number;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +81,7 @@ export interface UpdateUserData {
   country_code?: string;
   onboarding_completed?: number;
   voice_response_enabled?: number | null;
+  default_event_duration_minutes?: number;
 }
 
 export interface CreateEventData {
