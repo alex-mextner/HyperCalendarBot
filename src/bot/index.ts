@@ -22,6 +22,11 @@ import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
+import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
+import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
+import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
+import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
+import type { AiMessageJobData } from '../services/scheduled/trigger.service.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
@@ -107,6 +112,8 @@ export function createBot(
   fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'],
   mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>,
   eventMentionStore?: EventMentionStore,
+  domainEventBus?: DomainEventBus,
+  pushAiMessage?: (data: AiMessageJobData) => Promise<void>,
 ) {
   const eventService = new EventService(
     db.events,
@@ -121,6 +128,7 @@ export function createBot(
         bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
       }
     },
+    domainEventBus,
   );
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -140,6 +148,7 @@ export function createBot(
     db.sharingSettings,
     db.participants,
     conflictChecker,
+    domainEventBus,
   );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
@@ -173,6 +182,8 @@ export function createBot(
     sendAsUser: mtprotoSendAsUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
+  const triggerRepo = new TriggerRepository(db.db);
+  const scheduleRepo = new ScheduledAiCallRepository(db.db);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
 
   const botAdminId = process.env.BOT_ADMIN_ID ? Number.parseInt(process.env.BOT_ADMIN_ID, 10) : undefined;
@@ -275,6 +286,9 @@ export function createBot(
     aiApiKey: aiConfig.apiKey,
     sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
     proposeTimeSessions,
+    scheduledCallService: undefined as ScheduledAiCallService | undefined,
+    triggerService: undefined as { repo: typeof triggerRepo } | undefined,
+    domainEvents: domainEventBus,
     editMessage: async (chatId: number, messageId: number, text: string) => {
       await bot.api
         .editMessageText({ chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML' })
@@ -748,5 +762,13 @@ export function createBot(
     groupSessions,
     db,
     renderService,
+    agentContextBuilder: buildAgentContextFactory(msgDeps),
+    agent,
+    intentMatcher,
+    intentExecutor,
+    scheduleRepo,
+    triggerRepo,
+    msgDeps,
+    pushAiMessage,
   };
 }

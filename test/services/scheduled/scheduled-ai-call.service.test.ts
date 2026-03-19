@@ -1,7 +1,7 @@
-import { describe, expect, mock, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { runMigrations } from '../../../src/database/schema.ts';
+import { describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 import { ScheduledAiCallRepository } from '../../../src/services/scheduled/scheduled-ai-call.repository.ts';
 import { ScheduledAiCallService } from '../../../src/services/scheduled/scheduled-ai-call.service.ts';
 
@@ -39,8 +39,9 @@ describe('ScheduledAiCallService', () => {
     for (let i = 0; i < 50; i++) {
       await service.create({ userId: 1, message: 'x', runAt: futureTime, cron: null, label: null });
     }
-    await expect(service.create({ userId: 1, message: 'x', runAt: futureTime, cron: null, label: null }))
-      .rejects.toThrow('limit');
+    await expect(
+      service.create({ userId: 1, message: 'x', runAt: futureTime, cron: null, label: null }),
+    ).rejects.toThrow('limit');
   });
 
   test('cancel disables in DB and calls removeDelayed', async () => {
