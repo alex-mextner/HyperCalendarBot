@@ -1,6 +1,6 @@
-import { test, expect } from 'bun:test';
-import { tryHandleDurationInput } from '../../../src/bot/handlers/message.handler.ts';
+import { expect, test } from 'bun:test';
 import { pendingDurationInput } from '../../../src/bot/commands/settings.ts';
+import { tryHandleDurationInput } from '../../../src/bot/handlers/message.handler.ts';
 
 function makeUserRepo(store: Record<number, number>) {
   return {
@@ -20,7 +20,11 @@ test('intercepts plain number when pending, updates setting', async () => {
   pendingDurationInput.set(100, Date.now());
 
   const sent: string[] = [];
-  const ctx = { send: async (text: string) => { sent.push(text); } };
+  const ctx = {
+    send: async (text: string) => {
+      sent.push(text);
+    },
+  };
 
   const handled = await tryHandleDurationInput(ctx as never, 100, '45', userRepo as never);
   expect(handled).toBe(true);
@@ -42,18 +46,55 @@ test('intercepts invalid text when pending, shows error, keeps pending', async (
   const userRepo = makeUserRepo({});
 
   const sent: string[] = [];
-  const ctx = { send: async (text: string) => { sent.push(text); } };
+  const ctx = {
+    send: async (text: string) => {
+      sent.push(text);
+    },
+  };
 
   for (const bad of ['hello', '-5', '1.5', '99999', '4 5', '0']) {
     sent.length = 0;
     pendingDurationInput.set(300, Date.now());
     const handled = await tryHandleDurationInput(ctx as never, 300, bad, userRepo as never);
-    expect(handled).toBe(true);                          // intercepted
-    expect(sent[0]).toContain('1 до 1440');              // error shown
-    expect(pendingDurationInput.has(300)).toBe(true);    // still waiting
+    expect(handled).toBe(true); // intercepted
+    expect(sent[0]).toContain('1 до 1440'); // error shown
+    expect(pendingDurationInput.has(300)).toBe(true); // still waiting
   }
 
   pendingDurationInput.delete(300);
+});
+
+test('confirmation message for 90 min shows "90 мин", not "1.5ч"', async () => {
+  const store: Record<number, number> = {};
+  const userRepo = makeUserRepo(store);
+  pendingDurationInput.set(500, Date.now());
+
+  const sent: string[] = [];
+  const ctx = {
+    send: async (text: string) => {
+      sent.push(text);
+    },
+  };
+
+  await tryHandleDurationInput(ctx as never, 500, '90', userRepo as never);
+  expect(sent[0]).toContain('90 мин');
+  expect(sent[0]).not.toContain('1.5ч');
+});
+
+test('confirmation message for 120 min shows "2ч"', async () => {
+  const store: Record<number, number> = {};
+  const userRepo = makeUserRepo(store);
+  pendingDurationInput.set(501, Date.now());
+
+  const sent: string[] = [];
+  const ctx = {
+    send: async (text: string) => {
+      sent.push(text);
+    },
+  };
+
+  await tryHandleDurationInput(ctx as never, 501, '120', userRepo as never);
+  expect(sent[0]).toContain('2ч');
 });
 
 test('clears expired pending state (> 5 min)', async () => {

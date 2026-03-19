@@ -576,7 +576,7 @@ export async function tryHandleDurationInput(
 
   pendingDurationInput.delete(userId);
   userRepo.update(userId, { default_event_duration_minutes: mins });
-  const label = mins >= 60 ? `${mins / 60}ч` : `${mins} мин`;
+  const label = mins >= 60 && mins % 60 === 0 ? `${mins / 60}ч` : `${mins} мин`;
   await ctx.send(`✅ Длительность встреч по умолчанию: ${label}`);
   return true;
 }

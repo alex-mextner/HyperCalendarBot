@@ -18,3 +18,25 @@ test('buildDurationView marks active duration with checkmark', () => {
   const { kb } = buildDurationView(60);
   expect(JSON.stringify(kb)).toContain('✅');
 });
+
+test('buildGeneralText formats 90 min as "90 мин", not "1.5ч"', () => {
+  const text = buildGeneralText('UTC', 'ru', 'RU', 90);
+  expect(text).toContain('90 мин');
+  expect(text).not.toContain('1.5ч');
+});
+
+test('buildDurationView formats 90 min as "90 мин", not "1.5ч"', () => {
+  const { text } = buildDurationView(90);
+  expect(text).toContain('90 мин');
+  expect(text).not.toContain('1.5ч');
+});
+
+test('buildGeneralText formats 120 min as "2ч"', () => {
+  const text = buildGeneralText('UTC', 'ru', 'RU', 120);
+  expect(text).toContain('2ч');
+});
+
+test('buildDurationView formats 120 min as "2ч"', () => {
+  const { text } = buildDurationView(120);
+  expect(text).toContain('2ч');
+});

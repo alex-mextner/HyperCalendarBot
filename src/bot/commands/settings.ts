@@ -55,7 +55,9 @@ export function buildGeneralText(
   defaultDurationMinutes: number,
 ): string {
   const durationLabel =
-    defaultDurationMinutes >= 60 ? `${defaultDurationMinutes / 60}ч` : `${defaultDurationMinutes} мин`;
+    defaultDurationMinutes >= 60 && defaultDurationMinutes % 60 === 0
+      ? `${defaultDurationMinutes / 60}ч`
+      : `${defaultDurationMinutes} мин`;
   return [
     '🌍 Основные настройки',
     '',
@@ -68,7 +70,7 @@ export function buildGeneralText(
 }
 
 export function buildDurationView(currentMinutes: number): { text: string; kb: InlineKeyboard } {
-  const fmt = (m: number) => (m >= 60 ? `${m / 60}ч` : `${m} мин`);
+  const fmt = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}ч` : `${m} мин`);
   const mark = (m: number) => (m === currentMinutes ? `✅ ${fmt(m)}` : fmt(m));
   const text = [
     '⏱ Длительность встреч по умолчанию',
@@ -301,7 +303,7 @@ export async function handleSettingsCallback(
     const lang = currentUser.language ?? 'en';
     const country = currentUser.country_code ?? '—';
     const duration = currentUser.default_event_duration_minutes ?? 60;
-    const durationLabel = duration >= 60 ? `${duration / 60}ч` : `${duration} мин`;
+    const durationLabel = duration >= 60 && duration % 60 === 0 ? `${duration / 60}ч` : `${duration} мин`;
     const text = buildGeneralText(tzDisplay, lang, country, duration);
 
     const kb = new InlineKeyboard()
