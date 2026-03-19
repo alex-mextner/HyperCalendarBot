@@ -91,6 +91,7 @@ export interface MessageHandlerDeps {
   transcriptionService?: TranscriptionService;
   botToken?: string;
   stressDictionary?: AgentContext['stressDictionary'];
+  resolveUsername?: AgentContext['resolveUsername'];
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
   sendVoice?: (chatId: number, audio: Buffer) => Promise<void>;
@@ -389,6 +390,7 @@ function buildAgentContextFactory(deps: MessageHandlerDeps) {
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
       stressDictionary: deps.stressDictionary,
+      resolveUsername: deps.resolveUsername,
     };
   };
 }
