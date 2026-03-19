@@ -1,7 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
+import { createAnthropicClient } from './anthropic-client.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -47,10 +48,7 @@ export class CalendarBotAgent {
   private sender: TelegramSender;
 
   constructor(config: AgentConfig, sender: TelegramSender) {
-    this.client = new Anthropic({
-      apiKey: config.apiKey,
-      baseURL: config.baseUrl,
-    });
+    this.client = createAnthropicClient({ apiKey: config.apiKey, baseURL: config.baseUrl });
     this.model = config.model;
     this.sender = sender;
   }

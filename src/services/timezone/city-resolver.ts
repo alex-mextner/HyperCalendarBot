@@ -1,6 +1,7 @@
 // src/services/timezone/city-resolver.ts
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
 import cityTimezones from 'city-timezones';
+import { createAnthropicClient } from '../ai/anthropic-client.ts';
 
 const SYSTEM_PROMPT =
   'You are a timezone resolver. Given a city name in any language or format, ' +
@@ -42,7 +43,7 @@ export async function resolveCity(input: string): Promise<string | null> {
   if (libResult && validateTimezone(libResult)) return libResult;
 
   // 3. AI with retry loop (max 3 calls)
-  const client = new Anthropic();
+  const client = createAnthropicClient();
   const messages: Anthropic.MessageParam[] = [{ role: 'user', content: trimmed }];
 
   for (let attempt = 0; attempt < 3; attempt++) {

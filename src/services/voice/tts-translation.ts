@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import Anthropic from '@anthropic-ai/sdk';
+import type Anthropic from '@anthropic-ai/sdk';
+import { createAnthropicClient } from '../ai/anthropic-client.ts';
 import { voiceLogger } from './types';
 
 const MAX_CACHE_ENTRIES = 200;
@@ -13,8 +14,8 @@ export class TtsTranslationService {
   private client: Anthropic;
   private cache = new Map<string, string>();
 
-  constructor() {
-    this.client = new Anthropic();
+  constructor(opts?: { apiKey?: string; baseUrl?: string }) {
+    this.client = createAnthropicClient({ apiKey: opts?.apiKey, baseURL: opts?.baseUrl });
   }
 
   async translate(text: string, targetLang: string): Promise<string> {

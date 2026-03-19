@@ -15,6 +15,7 @@ Default to using Bun instead of Node.js.
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
+- **Anthropic client**: never use `new Anthropic()` directly — it ignores `AI_BASE_URL` and will fail when a proxy is configured. Always use `createAnthropicClient()` from `src/services/ai/anthropic-client.ts`. Pass `{ apiKey, baseURL }` to override env defaults, or call without args to use `process.env.ANTHROPIC_API_KEY` / `process.env.AI_BASE_URL`.
 - `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
 - `Bun.redis` (singleton, default localhost) or `new Bun.RedisClient(url)` (custom URL) for Redis. Don't use `ioredis`. Note: `Bun.Redis` does not exist — use `Bun.RedisClient`.
 - `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.

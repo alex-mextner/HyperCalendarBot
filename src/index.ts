@@ -185,7 +185,10 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     }
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
-    const ttsTranslationService = new TtsTranslationService();
+    const ttsTranslationService = new TtsTranslationService({
+      apiKey: config.ANTHROPIC_API_KEY,
+      baseUrl: config.AI_BASE_URL,
+    });
     const ttsService = new TtsService();
 
     const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY ?? '';
