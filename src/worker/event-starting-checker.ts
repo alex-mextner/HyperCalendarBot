@@ -21,11 +21,11 @@ export class EventStartingChecker {
       const already = this.db.prepare('SELECT 1 FROM event_starting_log WHERE event_id = ?').get(event.id);
       if (already) continue;
 
-      this.bus.emit('myCalendar.eventStarting', { userId: event.user_id, event });
-
       this.db
         .prepare('INSERT OR IGNORE INTO event_starting_log (event_id, notified_at) VALUES (?, ?)')
         .run(event.id, new Date().toISOString());
+
+      this.bus.emit('myCalendar.eventStarting', { userId: event.user_id, event });
 
       checkerLogger.info({ eventId: event.id, userId: event.user_id }, 'Emitted eventStarting');
     }

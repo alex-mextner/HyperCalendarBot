@@ -299,6 +299,16 @@ export const MSG = {
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
       },
+      scheduled: {
+        noScheduledCalls: 'No scheduled calls.',
+        noTriggers: 'No triggers.',
+        scheduleCreated: (id: string, message: string, when: string) =>
+          `Scheduled (id: ${id}): "${message}" at ${when}`,
+        scheduleCancelled: (id: string) => `Schedule ${id} cancelled.`,
+        triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
+          `Trigger created (id: ${id}): when ${topic}${condition ? ` and (${condition})` : ''} → "${action}"`,
+        triggerRemoved: (id: string) => `Trigger ${id} removed.`,
+      },
     },
   },
   ru: {
@@ -539,6 +549,16 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+      },
+      scheduled: {
+        noScheduledCalls: 'Запланированных вызовов нет.',
+        noTriggers: 'Триггеров нет.',
+        scheduleCreated: (id: string, message: string, when: string) =>
+          `Запланировано (id: ${id}): «${message}» — ${when}`,
+        scheduleCancelled: (id: string) => `Расписание ${id} отменено.`,
+        triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
+          `Триггер создан (id: ${id}): когда ${topic}${condition ? ` и (${condition})` : ''} → «${action}»`,
+        triggerRemoved: (id: string) => `Триггер ${id} удалён.`,
       },
     },
   },

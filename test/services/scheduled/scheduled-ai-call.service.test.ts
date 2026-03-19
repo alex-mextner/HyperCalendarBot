@@ -48,7 +48,7 @@ describe('ScheduledAiCallService', () => {
     const { service, repo, removeDelayed } = makeService();
     const futureTime = new Date(Date.now() + 60_000).toISOString();
     const id = await service.create({ userId: 1, message: 'x', runAt: futureTime, cron: null, label: null });
-    await service.cancel(id);
+    await service.cancel(id, 1);
     expect(removeDelayed).toHaveBeenCalledWith(id);
     expect(repo.findById(id)?.enabled).toBe(0);
   });
@@ -56,7 +56,7 @@ describe('ScheduledAiCallService', () => {
   test('cancel recurring calls removeRepeat with cron pattern', async () => {
     const { service, repo, removeRepeat } = makeService();
     const id = await service.create({ userId: 1, message: 'x', runAt: null, cron: '0 9 * * 1', label: null });
-    await service.cancel(id);
+    await service.cancel(id, 1);
     expect(removeRepeat).toHaveBeenCalledWith('0 9 * * 1');
     expect(repo.findById(id)?.enabled).toBe(0);
   });

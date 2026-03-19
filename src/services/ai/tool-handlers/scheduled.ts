@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import { evaluate } from '../../intent/expression-evaluator.ts';
 import { ALL_TOPICS } from '../../scheduled/domain-event-bus.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -27,7 +28,7 @@ export async function handleScheduleAiCall(
       label: input.label ?? null,
     });
     const when = input.run_at ?? `cron: ${input.cron}`;
-    return { success: true, output: `Scheduled (id: ${id}): "${input.message}" at ${when}` };
+    return { success: true, output: t(ctx.user.language).aiTools.scheduled.scheduleCreated(id, input.message, when) };
   } catch (e: unknown) {
     return { success: false, error: String(e) };
   }
@@ -37,7 +38,8 @@ export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
   const schedules = ctx.scheduledCallService!.list(ctx.user.telegram_id);
-  if (schedules.length === 0) return { success: true, output: 'No scheduled calls.', data: [] };
+  if (schedules.length === 0)
+    return { success: true, output: t(ctx.user.language).aiTools.scheduled.noScheduledCalls, data: [] };
   const lines = schedules.map(
     (s) => `[${s.id}] "${s.label ?? s.message}" — ${s.run_at ?? `cron: ${s.cron}`} (runs: ${s.run_count})`,
   );
@@ -47,8 +49,8 @@ export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
 export async function handleScheduleAiCallCancel(ctx: AgentContext, input: { id: string }): Promise<ToolResult> {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
-  await ctx.scheduledCallService!.cancel(input.id);
-  return { success: true, output: `Schedule ${input.id} cancelled.` };
+  await ctx.scheduledCallService!.cancel(input.id, ctx.user.telegram_id);
+  return { success: true, output: t(ctx.user.language).aiTools.scheduled.scheduleCancelled(input.id) };
 }
 
 export function handleAddTrigger(
@@ -85,7 +87,12 @@ export function handleAddTrigger(
 
   return {
     success: true,
-    output: `Trigger created (id: ${id}): when ${input.topic}${input.condition ? ` and (${input.condition})` : ''} → "${input.action}"`,
+    output: t(ctx.user.language).aiTools.scheduled.triggerCreated(
+      id,
+      input.topic,
+      input.condition ?? null,
+      input.action,
+    ),
   };
 }
 
@@ -93,7 +100,8 @@ export function handleListTriggers(ctx: AgentContext): ToolResult {
   const err = requireTriggerRepo(ctx);
   if (err) return err;
   const triggers = ctx.triggerService!.repo.listByUser(ctx.user.telegram_id);
-  if (triggers.length === 0) return { success: true, output: 'No triggers.', data: [] };
+  if (triggers.length === 0)
+    return { success: true, output: t(ctx.user.language).aiTools.scheduled.noTriggers, data: [] };
   const lines = triggers.map(
     (tr) =>
       `[${tr.id}] ${tr.topic}${tr.condition ? ` if (${tr.condition})` : ''} → "${tr.action}" ${tr.enabled ? '✅' : '⬜'} fires:${tr.fire_count}${tr.once ? ' once' : ''}`,
@@ -105,5 +113,5 @@ export function handleRemoveTrigger(ctx: AgentContext, input: { id: string }): T
   const err = requireTriggerRepo(ctx);
   if (err) return err;
   ctx.triggerService!.repo.remove(input.id, ctx.user.telegram_id);
-  return { success: true, output: `Trigger ${input.id} removed.` };
+  return { success: true, output: t(ctx.user.language).aiTools.scheduled.triggerRemoved(input.id) };
 }

@@ -30,6 +30,11 @@ export class ScheduledAiCallService {
     if (!input.runAt && !input.cron) throw new Error('Either runAt or cron must be provided');
     if (input.runAt && input.cron) throw new Error('Only one of runAt or cron may be provided');
 
+    if (input.runAt) {
+      const delayMs = new Date(input.runAt).getTime() - Date.now();
+      if (delayMs < 0) throw new Error('run_at must be in the future');
+    }
+
     const count = this.repo.countEnabled(input.userId);
     if (count >= USER_LIMIT) throw new Error(`Scheduled calls limit (${USER_LIMIT}) reached for this user`);
 
@@ -43,7 +48,6 @@ export class ScheduledAiCallService {
 
     if (input.runAt) {
       const delayMs = new Date(input.runAt).getTime() - Date.now();
-      if (delayMs < 0) throw new Error('run_at must be in the future');
       await this.queue.addDelayed(
         { userId: input.userId, message: input.message, source: 'scheduled', scheduleId: schedule.id },
         delayMs,
@@ -63,9 +67,9 @@ export class ScheduledAiCallService {
     return this.repo.listEnabled(userId);
   }
 
-  async cancel(id: string): Promise<void> {
+  async cancel(id: string, userId: number): Promise<void> {
     const schedule = this.repo.findById(id);
-    if (!schedule) return;
+    if (!schedule || schedule.user_id !== userId) return;
 
     if (schedule.cron) {
       await this.queue.removeRepeat(schedule.cron);
@@ -74,6 +78,6 @@ export class ScheduledAiCallService {
     }
 
     this.repo.disable(id);
-    scheduleLogger.info({ scheduleId: id }, 'Scheduled AI call cancelled');
+    scheduleLogger.info({ scheduleId: id, userId }, 'Scheduled AI call cancelled');
   }
 }
