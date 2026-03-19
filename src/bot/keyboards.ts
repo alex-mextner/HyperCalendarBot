@@ -20,7 +20,7 @@ export function timezoneManualKeyboard(): InlineKeyboard {
   const kb = new InlineKeyboard();
   const regions = Object.keys(TZ_REGIONS);
   for (const region of regions) {
-    kb.text(region, `${CB.ONBOARD_TZ_REGION}:${region}`);
+    kb.text(region, `${CB.ONBOARD_TZ_RETRY}:${region}`);
   }
   return kb;
 }
@@ -40,7 +40,7 @@ export function timezoneCitiesKeyboard(region: string): InlineKeyboard {
 export function timezoneConfirmKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
   return new InlineKeyboard()
     .text(lang === 'ru' ? 'Да ✓' : 'Yes ✓', `${CB.ONBOARD_TZ}:confirm`)
-    .text(lang === 'ru' ? 'Нет, вручную' : 'No, choose manually', `${CB.ONBOARD_TZ}:manual`);
+    .text(lang === 'ru' ? 'Нет, другой город' : 'No, different city', `${CB.ONBOARD_TZ_RETRY}:`);
 }
 
 export function groupTimezoneRegionKeyboard(): InlineKeyboard {
