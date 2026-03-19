@@ -4,6 +4,7 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
 
 const config = loadConfig();
@@ -437,6 +438,9 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
   }
 }
 
+let aiMessagesQueueCleanup: { close: () => Promise<void> } | undefined;
+let eventCheckerQueueCleanup: { close: () => Promise<void> } | undefined;
+
 let eventMentionStore: import('./services/intent/event-mention-store.ts').EventMentionStore | undefined;
 if (config.REDIS_URL) {
   const { RedisEventMentionStore } = await import('./services/intent/event-mention-store.ts');
@@ -449,26 +453,30 @@ if (config.REDIS_URL) {
   botLogger.info('Event mention store: in-memory (no REDIS_URL)');
 }
 
-const { bot } = createBot(
-  config.BOT_TOKEN,
-  db,
-  {
-    apiKey: config.ANTHROPIC_API_KEY,
-    baseUrl: config.AI_BASE_URL,
-    model: config.AI_MODEL,
-  },
-  googleDeps,
-  renderService,
-  callQueue,
-  transcriptionService,
-  mtprotoSendAsUser,
-  stressDictionary,
-  sileroTts,
-  kokoroTts,
-  fallbackTts,
-  mtprotoResolveUsername,
-  eventMentionStore,
-);
+const domainEventBus = new DomainEventBus();
+
+const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
+  createBot(
+    config.BOT_TOKEN,
+    db,
+    {
+      apiKey: config.ANTHROPIC_API_KEY,
+      baseUrl: config.AI_BASE_URL,
+      model: config.AI_MODEL,
+    },
+    googleDeps,
+    renderService,
+    callQueue,
+    transcriptionService,
+    mtprotoSendAsUser,
+    stressDictionary,
+    sileroTts,
+    kokoroTts,
+    fallbackTts,
+    mtprotoResolveUsername,
+    eventMentionStore,
+    domainEventBus,
+  );
 
 // Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text) => {
@@ -482,6 +490,125 @@ botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
+
+// Scheduled AI calls + trigger system — requires Redis for BullMQ
+if (config.REDIS_URL) {
+  const { TriggerService } = await import('./services/scheduled/trigger.service.ts');
+  const { ScheduledAiCallService } = await import('./services/scheduled/scheduled-ai-call.service.ts');
+  const { createAiMessagesQueue, createAiMessagesWorker, SyntheticPipelineRunner } = await import(
+    './worker/ai-messages-queue.ts'
+  );
+  const { EventStartingChecker } = await import('./worker/event-starting-checker.ts');
+  const { executeTool } = await import('./services/ai/tool-executor.ts');
+  const { Queue, Worker } = await import('bullmq');
+
+  const redisConnection = { url: config.REDIS_URL };
+  const aiMsgQueue = createAiMessagesQueue(redisConnection);
+
+  // TriggerService — subscribes to all domain events
+  const triggerService = new TriggerService(domainEventBus, triggerRepo, (data) => aiMsgQueue.pushTrigger(data));
+  triggerService.subscribe();
+
+  // ScheduledAiCallService — manages BullMQ delayed/repeat jobs
+  const scheduledCallService = new ScheduledAiCallService(scheduleRepo, aiMsgQueue);
+
+  // Patch msgDeps so agentContextBuilder picks up the services
+  msgDeps.scheduledCallService = scheduledCallService;
+  msgDeps.triggerService = { repo: triggerRepo };
+
+  // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
+  const syntheticRunner = new SyntheticPipelineRunner({
+    contextBuilder: (user, chatId, message) => {
+      const ctx = agentContextBuilder(user, chatId, message);
+      ctx.scheduledCallService = scheduledCallService;
+      ctx.triggerService = { repo: triggerRepo };
+      ctx.domainEvents = domainEventBus;
+      return ctx;
+    },
+    intentRun: async (agentCtx, message) => {
+      const match = intentMatcher.match(message);
+      if (!match) return { handled: false };
+      const intent = msgDeps.intentRepo.getById(match.intentId);
+      if (!intent) return { handled: false };
+      let workflow: Record<string, unknown>;
+      try {
+        workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+      } catch {
+        return { handled: false };
+      }
+      const userCtx = {
+        userId: agentCtx.user.telegram_id,
+        language: agentCtx.user.language,
+        timezone: agentCtx.user.timezone,
+        username: agentCtx.user.username ?? undefined,
+        firstName: agentCtx.user.first_name ?? undefined,
+      };
+      const result = await intentExecutor.run(
+        workflow,
+        match.captures,
+        userCtx,
+        (toolName: string, input: Record<string, unknown>) => executeTool(agentCtx, toolName, input),
+      );
+      if (result.response && agentCtx.sender) {
+        await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);
+      }
+      return { handled: true, response: result.response };
+    },
+    agentRun: async (agentCtx) => {
+      await agent.run(agentCtx);
+    },
+  });
+
+  const aiWorker = createAiMessagesWorker(
+    redisConnection,
+    syntheticRunner,
+    (userId) => db.users.findByTelegramId(userId),
+    (scheduleId) => scheduleRepo.recordRun(scheduleId),
+  );
+
+  // EventStartingChecker — runs on 1-minute BullMQ cron
+  const eventStartingChecker = new EventStartingChecker(db.db, domainEventBus, (withinMs) =>
+    db.events.findStartingWithin(withinMs),
+  );
+
+  const checkerQueue = new Queue('event-starting-checker', { connection: redisConnection });
+  await checkerQueue.add(
+    'tick',
+    {},
+    {
+      repeat: { every: 60_000 },
+      jobId: 'event-starting-checker-tick',
+      removeOnComplete: { count: 100 },
+    },
+  );
+  const checkerWorker = new Worker(
+    'event-starting-checker',
+    async () => {
+      await eventStartingChecker.check();
+    },
+    { connection: redisConnection },
+  );
+
+  checkerWorker.on('failed', (job, err) => {
+    botLogger.error({ jobId: job?.id, err }, 'EventStartingChecker job failed');
+  });
+
+  aiMessagesQueueCleanup = {
+    close: async () => {
+      await aiWorker.close();
+      await aiMsgQueue.queue.close();
+    },
+  };
+
+  eventCheckerQueueCleanup = {
+    close: async () => {
+      await checkerWorker.close();
+      await checkerQueue.close();
+    },
+  };
+
+  botLogger.info('Scheduled AI calls + trigger system initialized');
+}
 
 // Register bot commands in Telegram menu — both languages
 const COMMANDS_EN = [
@@ -550,6 +677,8 @@ bot.onStart(async ({ info }) => {
 process.on('SIGINT', async () => {
   botLogger.info('Shutting down...');
   await bot.stop();
+  if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
+  if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();
   if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
@@ -562,6 +691,8 @@ process.on('SIGINT', async () => {
 
 process.on('SIGTERM', async () => {
   await bot.stop();
+  if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
+  if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
   if (notificationQueueCleanup) await notificationQueueCleanup.close();
   if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();

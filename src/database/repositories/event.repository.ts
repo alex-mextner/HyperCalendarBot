@@ -505,4 +505,18 @@ export class EventRepository {
       .run(id, groupId);
     return result.changes > 0;
   }
+
+  findStartingWithin(withinMs: number): CalendarEvent[] {
+    const now = new Date().toISOString();
+    const until = new Date(Date.now() + withinMs).toISOString();
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE start_at >= ? AND start_at <= ?
+      AND all_day = 0
+      AND recurrence_rule IS NULL
+      ORDER BY start_at ASC
+    `)
+      .all(now, until) as CalendarEvent[];
+  }
 }
