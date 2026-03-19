@@ -322,7 +322,7 @@ describe('createMessageHandler', () => {
       });
     }
 
-    test('transcribes voice and routes to AI agent with isVoiceMessage flag', async () => {
+    test('transcribes voice and routes to AI agent with inputMode voice_message', async () => {
       const deps = makeVoiceDeps();
       // Mock fetch for Telegram file download
       const originalFetch = globalThis.fetch;
@@ -340,10 +340,10 @@ describe('createMessageHandler', () => {
         expect(deps.agent.run).toHaveBeenCalledTimes(1);
         const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as {
           messageText: string;
-          isVoiceMessage: boolean;
+          inputMode: string;
         };
         expect(call.messageText).toBe('создай встречу на завтра');
-        expect(call.isVoiceMessage).toBe(true);
+        expect(call.inputMode).toBe('voice_message');
       } finally {
         globalThis.fetch = originalFetch;
       }
