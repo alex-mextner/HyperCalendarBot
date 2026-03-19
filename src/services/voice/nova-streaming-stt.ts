@@ -61,6 +61,7 @@ export class NovaStreamingSTT {
       try {
         this.ws.send(JSON.stringify({ type: 'CloseStream' }));
       } catch {}
+      this.ws.close();
       this.ws = null;
     }
   }

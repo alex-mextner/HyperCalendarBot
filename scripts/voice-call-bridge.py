@@ -191,9 +191,12 @@ async def main():
 
         await ws.send(json.dumps({"type": "CALL_CONNECTED"}))
 
+        # Register audio callback before starting the command loop — avoids
+        # a race where audio arrives before the gather task is scheduled.
+        await capture_audio()
+
         await asyncio.gather(
             recv_commands(),
-            capture_audio(),
             call_ended.wait(),
         )
 

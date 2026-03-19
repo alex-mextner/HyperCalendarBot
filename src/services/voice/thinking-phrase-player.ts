@@ -33,13 +33,16 @@ export class ThinkingPhrasePlayer {
     const midDelay2 = opts.midDelay2Ms ?? this.randomDelay(7000, 10000);
 
     // t=0: play start phrase
+    sendCmd({ type: 'STOP' });
     sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(START_PHRASES[this.lang])) });
 
     const t1 = setTimeout(() => {
+      sendCmd({ type: 'STOP' });
       sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang])) });
     }, midDelay1);
 
     const t2 = setTimeout(() => {
+      sendCmd({ type: 'STOP' });
       sendCmd({ type: 'PLAY', file: phrasePath(this.lang, randomFrom(MID_PHRASES[this.lang])) });
     }, midDelay2);
 

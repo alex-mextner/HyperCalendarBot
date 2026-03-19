@@ -248,6 +248,8 @@ export class CallSession {
   }
 
   private tempFile(): string {
-    return `/tmp/call-${this.cfg.sessionId}-${++this.fileSeq}.ogg`;
+    const file = `/tmp/call-${this.cfg.sessionId}-${++this.fileSeq}.ogg`;
+    this.tmpFiles.add(file);
+    return file;
   }
 }

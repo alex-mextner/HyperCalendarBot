@@ -189,6 +189,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     const ttsService = new TtsService();
 
     const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY ?? '';
+    if (!DEEPGRAM_API_KEY) {
+      botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
+    }
 
     // Minimal TelegramSender for voice calls — text responses go through TTS,
     // but tools that send Telegram messages (ask_user, etc.) still need a real sender.

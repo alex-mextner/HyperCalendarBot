@@ -38,7 +38,12 @@ export class CallSessionManager {
   }
 
   onWebSocketOpen(sessionId: string, ws: { send: (data: string) => void; close: () => void }): void {
-    const ctx = this.pendingSessions.get(sessionId) ?? { userId: 0, language: 'ru' as const };
+    const ctx = this.pendingSessions.get(sessionId);
+    if (!ctx) {
+      voiceLogger.error({ sessionId }, 'No pending session for WebSocket connection — closing');
+      ws.close();
+      return;
+    }
     this.pendingSessions.delete(sessionId);
     const session = this.deps.createSession(sessionId, ctx.userId, ctx.language, ws);
     const timer = setTimeout(() => {
