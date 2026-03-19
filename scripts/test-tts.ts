@@ -1,12 +1,18 @@
 #!/usr/bin/env bun
+
 // Full TTS pipeline test: strip markdown → stress → transliterate → Silero → play
 // Usage: bun scripts/test-tts.ts "На сегодня одно событие: 📅 Тест — в 15:00"
 // Or pipe: echo "текст" | bun scripts/test-tts.ts
 
-import { StressDictionary } from '../src/services/voice/stress-dictionary.ts';
-import { markStress, numbersToWords, stripMarkdown, transliterateEnglish } from '../src/services/voice/stress-marker.ts';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { StressDictionary } from '../src/services/voice/stress-dictionary.ts';
+import {
+  markStress,
+  numbersToWords,
+  stripMarkdown,
+  transliterateEnglish,
+} from '../src/services/voice/stress-marker.ts';
 
 const dict = await StressDictionary.loadFromFile('data/dictionaries/stress-dict.json');
 

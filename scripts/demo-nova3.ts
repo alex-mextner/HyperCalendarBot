@@ -5,7 +5,7 @@
  *
  * Generates Russian speech via Edge TTS, transcribes via Nova-3.
  */
-import { writeFileSync, readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { TtsService } from '../src/services/voice/tts-service';
 
 const API_KEY = process.env.DEEPGRAM_API_KEY;
@@ -28,7 +28,9 @@ async function synthesize(text: string, outFile: string): Promise<void> {
   writeFileSync(outFile, audio);
 }
 
-async function transcribeNova3(audioFile: string): Promise<{ transcript: string; confidence: number; elapsed: number }> {
+async function transcribeNova3(
+  audioFile: string,
+): Promise<{ transcript: string; confidence: number; elapsed: number }> {
   const audio = readFileSync(audioFile);
   const t0 = Date.now();
 
@@ -76,8 +78,14 @@ for (const [i, text] of SAMPLES.entries()) {
   console.log(`     Nova-3 result: "${transcript}"`);
   console.log(`     Confidence:    ${(confidence * 100).toFixed(1)}%`);
 
-  const origWords = text.toLowerCase().replace(/[,.!?-]/g, '').split(' ');
-  const resWords = transcript.toLowerCase().replace(/[,.!?-]/g, '').split(' ');
+  const origWords = text
+    .toLowerCase()
+    .replace(/[,.!?-]/g, '')
+    .split(' ');
+  const resWords = transcript
+    .toLowerCase()
+    .replace(/[,.!?-]/g, '')
+    .split(' ');
   const errors = origWords.filter((w, idx) => w !== resWords[idx]).length;
   const wer = ((errors / origWords.length) * 100).toFixed(1);
   console.log(`     WER (approx): ${wer}%`);
