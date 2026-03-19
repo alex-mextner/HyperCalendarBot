@@ -28,6 +28,7 @@
     "@mtcute/bun": "^0.29.0",
     "@mtcute/tl": "^223.0.0",
     "bullmq": "^5.71.0",
+    "city-timezones": "^1.3.3",
     "date-fns": "4.1.0",
     "date-holidays": "^3.26.9",
     "edge-tts": "^1.0.1",
