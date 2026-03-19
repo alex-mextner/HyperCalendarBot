@@ -2,7 +2,7 @@ import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
-import { formatEventDetail } from '../../event/formatters.ts';
+import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
@@ -152,7 +152,7 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
       : ctx.eventService.getEventsInRange(userId, input.start_date, input.end_date);
 
   if (occurrences.length === 0) {
-    return { success: true, output: 'No events found in this range.' };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange };
   }
 
   const lines = occurrences.map((occ) => {
@@ -236,7 +236,7 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 
     if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
-    return { success: true, output: `Event created: ${parts.join(', ')}` };
+    return { success: true, output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')) };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
   }
@@ -267,14 +267,17 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
-  let output = `Event updated: ${parts.join(', ')}`;
+  let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
   if (ctx.participantRepo) {
     const accepted = ctx.participantRepo
       .getByEvent(event_id)
       .filter((p) => p.status === 'accepted' && p.user_id !== ctx.user.telegram_id);
     if (accepted.length > 0) {
-      output += `. This event has ${accepted.length} participant${accepted.length > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
+      output +=
+        ctx.user.language === 'ru'
+          ? `. У этого события ${accepted.length} ${ruPlural(accepted.length, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
+          : `. This event has ${accepted.length} participant${accepted.length > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
     }
   }
 
@@ -296,7 +299,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
-    return { success: true, output: `Event "${event.title}" (id: ${event.id}) deleted.` };
+    return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
   }
 
   const event = ctx.eventService.getEvent(input.event_id, userId);
@@ -305,10 +308,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     const participant = ctx.participantRepo.findByEventAndUser(input.event_id, userId);
     if (participant && participant.status === 'accepted') {
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
-      return {
-        success: true,
-        output: `You declined the shared event (id: ${input.event_id}). It has been removed from your calendar.`,
-      };
+      return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
     }
   }
 
@@ -317,7 +317,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   }
 
   ctx.eventService.deleteEvent(input.event_id, userId);
-  return { success: true, output: `Event "${event.title}" (id: ${event.id}) deleted.` };
+  return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
 }
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
@@ -334,7 +334,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
       : ctx.eventService.searchEvents(userId, input.query);
 
   if (events.length === 0) {
-    return { success: true, output: 'No events found matching the query.' };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsMatching };
   }
 
   const lines = events.map((e) => {
@@ -370,7 +370,7 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
   }
 
   if (upcoming.length === 0) {
-    return { success: true, output: 'No upcoming events.' };
+    return { success: true, output: t(ctx.user.language).aiTools.events.noUpcomingEvents };
   }
 
   const lines = upcoming.map((occ) => {
@@ -381,7 +381,10 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
     return parts.join(', ');
   });
 
-  return { success: true, output: `Next ${upcoming.length} events:\n${lines.join('\n')}` };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.events.upcomingEvents(upcoming.length, lines.join('\n')),
+  };
 }
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
@@ -420,7 +423,7 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
 
   return {
     success: true,
-    output: `Event "${updated.title}" snoozed by ${minutes} min. New start: ${updated.start_at}`,
+    output: t(ctx.user.language).aiTools.events.snoozed(updated.title, minutes, updated.start_at),
   };
 }
 
@@ -500,6 +503,9 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
 
   return {
     success: true,
-    output: `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
+    output:
+      ctx.user.language === 'ru'
+        ? `Уведомление отправлено ${accepted.length} ${ruPlural(accepted.length, 'участнику', 'участникам', 'участникам')}.`
+        : `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
   };
 }

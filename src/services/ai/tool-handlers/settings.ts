@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import type { UpdateUserData } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
@@ -133,7 +134,10 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
 
   if (Object.keys(patch).length === 0) return { success: false, error: 'No notification settings provided.' };
   ctx.notificationPrefs.update(ctx.user.telegram_id, patch);
-  return { success: true, output: `Notification settings updated: ${Object.keys(patch).join(', ')}` };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.settings.notificationsUpdated(Object.keys(patch).join(', ')),
+  };
 }
 
 function updateCalls(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
@@ -142,7 +146,7 @@ function updateCalls(ctx: AgentContext, updates: Record<string, unknown>): ToolR
   if (updates.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled as boolean);
   if (updates.language !== undefined)
     ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language as string);
-  return { success: true, output: 'Call settings updated.' };
+  return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
 }
 
 function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
@@ -161,7 +165,7 @@ function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): Too
   ctx.sharingSettingsRepo.update(ctx.user.telegram_id, patch);
 
   const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
-  return { success: true, output: `Privacy settings updated: ${lines.join(', ')}` };
+  return { success: true, output: t(ctx.user.language).aiTools.settings.privacyUpdated(lines.join(', ')) };
 }
 
 function updateVoice(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
@@ -175,5 +179,5 @@ function updateVoice(ctx: AgentContext, updates: Record<string, unknown>): ToolR
   if (!updated) return { success: false, error: 'Failed to update voice settings.' };
 
   ctx.user = updated;
-  return { success: true, output: `Voice settings updated: voice_response_enabled = ${raw}` };
+  return { success: true, output: t(ctx.user.language).aiTools.settings.voiceUpdated(String(raw)) };
 }

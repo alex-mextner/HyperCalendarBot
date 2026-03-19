@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
@@ -9,6 +10,16 @@ interface SetReminderInput {
   minutes_before: number[];
   scope?: Scope;
   owner_id?: number;
+}
+
+function formatReminderDuration(minutesBefore: number, lang: string): string {
+  if (minutesBefore >= 60) {
+    const hours = Math.floor(minutesBefore / 60);
+    const mins = minutesBefore % 60;
+    if (lang === 'ru') return mins > 0 ? `${hours}ч ${mins}мин` : `${hours}ч`;
+    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+  }
+  return lang === 'ru' ? `${minutesBefore}мин` : `${minutesBefore}min`;
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
@@ -30,21 +41,13 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
     };
   }
 
+  const lang = ctx.user.language;
   const reminders = ctx.reminderRepo.setForEvent(input.event_id, input.minutes_before);
-
-  const descriptions = reminders.map((r) => {
-    if (r.minutes_before >= 60) {
-      const hours = Math.floor(r.minutes_before / 60);
-      const mins = r.minutes_before % 60;
-      const label = mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-      return `${r.minutes_before}min (${label})`;
-    }
-    return `${r.minutes_before}min`;
-  });
+  const descriptions = reminders.map((r) => formatReminderDuration(r.minutes_before, lang));
 
   return {
     success: true,
-    output: `Reminders set for "${event.title}": ${descriptions.join(', ')}`,
+    output: t(lang).aiTools.reminders.remindersSet(event.title, descriptions.join(', ')),
   };
 }
 
@@ -71,18 +74,15 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
   }
 
   const reminders = ctx.reminderRepo.getByEventId(input.event_id);
+  const lang = ctx.user.language;
   if (reminders.length === 0) {
-    return { success: true, output: `No reminders set for "${event.title}".` };
+    return { success: true, output: t(lang).aiTools.reminders.noReminders(event.title) };
   }
 
   const lines = reminders.map((r) => {
-    if (r.minutes_before >= 60) {
-      const hours = Math.floor(r.minutes_before / 60);
-      const mins = r.minutes_before % 60;
-      return mins > 0 ? `${hours}h ${mins}m before` : `${hours}h before`;
-    }
-    return `${r.minutes_before}min before`;
+    const dur = formatReminderDuration(r.minutes_before, lang);
+    return lang === 'ru' ? `за ${dur}` : `${dur} before`;
   });
 
-  return { success: true, output: `Reminders for "${event.title}": ${lines.join(', ')}` };
+  return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, lines.join(', ')) };
 }

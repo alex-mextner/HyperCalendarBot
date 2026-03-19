@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import type { FreeSlot } from '../../event/event-service.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -29,8 +30,9 @@ export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput):
     slots = ctx.eventService.getFreeSlots(userId, date, ctx.user.timezone);
   }
 
+  const lang = ctx.user.language;
   if (slots.length === 0) {
-    return { success: true, output: 'No free slots — the entire day is busy.' };
+    return { success: true, output: t(lang).aiTools.slots.noFreeSlots };
   }
 
   const lines = slots.map((s) => {
@@ -40,5 +42,5 @@ export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput):
     return `${s.start} — ${s.end} (${duration})`;
   });
 
-  return { success: true, output: `Free slots:\n${lines.join('\n')}` };
+  return { success: true, output: t(lang).aiTools.slots.freeSlots(lines.join('\n')) };
 }

@@ -1,6 +1,7 @@
 // src/services/ai/tool-handlers/history.ts
 
 import { isValid, parseISO } from 'date-fns';
+import { t } from '../../../config/constants.ts';
 import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
@@ -57,7 +58,11 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
       limit,
       search: input.search,
     });
-    if (messages.length === 0) return { success: true, output: 'No history found.' };
+    if (messages.length === 0)
+      return {
+        success: true,
+        output: t(ctx.user.language).aiTools.history.notFound,
+      };
     const lines = messages.map((msg) => {
       const ts = msg.created_at.slice(0, 16);
       const role = msg.role === 'tool' ? 'tool_result' : msg.role;
@@ -74,7 +79,10 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
   });
 
   if (messages.length === 0) {
-    return { success: true, output: 'No history found.' };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.history.notFound,
+    };
   }
 
   const lines = messages.map((msg) => {

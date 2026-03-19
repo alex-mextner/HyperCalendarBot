@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import type { FeedbackType } from '../../../database/types.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -60,5 +61,5 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
       });
   }
 
-  return { success: true, output: 'Feedback sent to developer. They will respond in this chat.' };
+  return { success: true, output: t(ctx.user.language).aiTools.feedback.feedbackSent };
 }

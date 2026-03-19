@@ -189,7 +189,12 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
 
   return {
     success: true,
-    output: `Event "${event.title}" shared (id: ${shared.id}, target: ${input.target_type} ${input.target_id}).`,
+    output: t(ctx.user.language).aiTools.sharing.eventShared(
+      event.title,
+      shared.id,
+      input.target_type,
+      input.target_id,
+    ),
   };
 }
 
@@ -240,7 +245,9 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
 
   return {
     success: true,
-    output: `Invitation created (id: ${invitation.id}, event: ${input.event_id}, invitee: ${input.invitee_id}). Notification delivery is being attempted in the background — do NOT tell the user it was delivered. Say the invitation was created and the notification is being sent.`,
+    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, input.invitee_id),
+    agentHint:
+      'Do NOT say the notification was delivered — say the invitation was created and the notification is being sent.',
   };
 }
 
@@ -252,7 +259,10 @@ export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id
   if (!result.success) {
     return { success: false, error: result.error };
   }
-  return { success: true, output: `Invitation ${input.invitation_id} cancelled.` };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.sharing.invitationCancelled(input.invitation_id),
+  };
 }
 
 export function handleResendInvitation(
@@ -290,7 +300,8 @@ export function handleResendInvitation(
     });
     return {
       success: true,
-      output: `Invitation reminder queued for user ${invitation.invitee_id}. Notification delivery is being attempted in the background — do NOT tell the user it was delivered. Say the reminder was queued and the notification is being sent.`,
+      output: t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
+      agentHint: 'Do NOT say the reminder was delivered — say it was queued and the notification is being sent.',
     };
   }
 
@@ -318,13 +329,14 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
     lines.push(`invitee: ${inv.invitee_id}, status: ${inv.status}`);
   }
 
+  const lang = ctx.user.language;
   if (lines.length === 0) {
-    return { success: true, output: `No invitations for event "${event.title}".` };
+    return { success: true, output: t(lang).aiTools.sharing.noInvitations(event.title) };
   }
 
   return {
     success: true,
-    output: `Invitations for "${event.title}" (id: ${event.id}):\n${lines.join('\n')}`,
+    output: t(lang).aiTools.sharing.invitationsFor(event.title, event.id, lines.join('\n')),
   };
 }
 
@@ -355,7 +367,7 @@ export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): T
   );
 
   if (allEvents.length === 0) {
-    return { success: true, output: `No visible events to share for ${input.period}.` };
+    return { success: true, output: t(ctx.user.language).aiTools.sharing.noEventsToShare(input.period) };
   }
 
   // Record the share
@@ -372,7 +384,13 @@ export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): T
   const lines = allEvents.map((ev) => `- ${ev.displayTitle} (${ev.startAt})`);
   return {
     success: true,
-    output: `Agenda for ${input.period} shared with ${input.target_type} ${input.target_id} (${allEvents.length} events):\n${lines.join('\n')}`,
+    output: t(ctx.user.language).aiTools.sharing.agendaShared(
+      input.period,
+      input.target_type,
+      input.target_id,
+      allEvents.length,
+      lines.join('\n'),
+    ),
   };
 }
 
@@ -394,7 +412,7 @@ export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisib
 
   return {
     success: true,
-    output: `Visibility for "${event.title}" (id: ${event.id}) set to "${input.visibility}".`,
+    output: t(ctx.user.language).aiTools.sharing.visibilitySet(event.title, event.id, input.visibility),
   };
 }
 
@@ -438,6 +456,6 @@ export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): T
 
   return {
     success: true,
-    output: `Edit proposal submitted (id: ${proposal.id}). The event creator will be notified to accept or reject.`,
+    output: t(ctx.user.language).aiTools.sharing.editProposalSubmitted(proposal.id),
   };
 }
