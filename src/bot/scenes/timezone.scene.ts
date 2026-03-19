@@ -2,87 +2,106 @@
 import { Scene } from '@gramio/scenes';
 import { CB } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
+import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
-import { timezoneCitiesKeyboard, timezoneManualKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
+import { removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
+interface TimezoneState {
+  detectedTz?: string;
+}
+
 export function createTimezoneScene(db: DatabaseService) {
-  return (
-    new Scene('timezone')
-      // onEnter sends prompts — because scene is entered from /timezone (message)
-      // but step 0 is ["callback_query", "location"], so firstTime won't fire on entry
-      .onEnter(async (context) => {
-        const lang = getSceneLang(context);
-        const user = getSceneUser(context);
-        if (!user) return;
+  return new Scene('timezone')
+    .state<TimezoneState>()
+    .onEnter(async (context) => {
+      const lang = getSceneLang(context);
+      const user = getSceneUser(context);
+      if (!user) return;
 
-        const display = getTimezoneDisplay(user.timezone);
-        const text =
-          lang === 'ru'
-            ? `\ud83c\udf0d Текущий часовой пояс: ${display}\n\nИзменить?`
-            : `\ud83c\udf0d Current timezone: ${display}\n\nChange it?`;
+      const display = getTimezoneDisplay(user.timezone);
+      const current = lang === 'ru' ? `🌍 Текущий: ${display}\n\n` : `🌍 Current: ${display}\n\n`;
+      const prompt =
+        lang === 'ru'
+          ? `${current}В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ`
+          : `${current}What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv`;
 
-        await context.send(text, { reply_markup: timezoneManualKeyboard() });
-        await context.send(lang === 'ru' ? 'Или отправьте геолокацию:' : 'Or share your location:', {
-          reply_markup: timezoneMethodKeyboard(lang),
-        });
-      })
-      .step(['callback_query', 'location'], async (context) => {
-        const user = getSceneUser(context);
-        if (!user) {
-          await context.scene.exit();
-          return;
-        }
+      await context.send(prompt, { reply_markup: timezoneMethodKeyboard(lang) });
+    })
+    .step(['message', 'location', 'callback_query'], async (context) => {
+      const user = getSceneUser(context);
+      if (!user) {
+        await context.scene.exit();
+        return;
+      }
+      const lang = getSceneLang(context);
 
-        // Handle location
-        if (context.is('location')) {
-          const { latitude, longitude } = (
-            context as unknown as { eventLocation: { latitude: number; longitude: number } }
-          ).eventLocation;
-          const tz = resolveTimezone(latitude, longitude);
-          db.users.update(user.telegram_id, { timezone: tz });
-          await context.scene.exit();
-          await context.send(`\u2705 ${getTimezoneDisplay(tz)}`, {
-            reply_markup: { remove_keyboard: true },
+      // Handle typed city name
+      if (context.is('message')) {
+        const text = (context as unknown as { text?: string }).text?.trim();
+        if (!text) return;
+        const tz = await resolveCity(text);
+        if (tz) {
+          await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
+            reply_markup: timezoneConfirmKeyboard(lang),
           });
-          return;
+          await context.scene.update({ detectedTz: tz }, { step: undefined });
+        } else {
+          const msg =
+            lang === 'ru'
+              ? 'Не удалось определить таймзону. Попробуйте ещё раз или:\n• Отправьте 📍 геолокацию\n• Введите код напрямую, например: <code>Europe/Belgrade</code>\n  Список: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones'
+              : 'Could not determine timezone. Try again or:\n• Share 📍 location\n• Enter code directly, e.g. <code>Europe/Belgrade</code>\n  Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones';
+          await context.send(msg, { parse_mode: 'HTML' });
         }
+        return;
+      }
 
-        // Handle callback_query
-        if (context.is('callback_query')) {
-          const data = (context as unknown as { data: string }).data;
-          if (!data) return;
+      // Handle location
+      if (context.is('location')) {
+        const { latitude, longitude } = (
+          context as unknown as { eventLocation: { latitude: number; longitude: number } }
+        ).eventLocation;
+        const tz = resolveTimezone(latitude, longitude);
+        db.users.update(user.telegram_id, { timezone: tz });
+        await context.scene.exit();
+        await context.send(`✅ ${getTimezoneDisplay(tz)}`, { reply_markup: { remove_keyboard: true } });
+        return;
+      }
 
-          const parts = data.split(':');
-          const action = parts[0];
-          const payload = parts.slice(1).join(':');
-          const cbCtx = context as unknown as {
-            answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-            editText: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-          };
+      // Handle callback
+      if (context.is('callback_query')) {
+        const data = (context as unknown as { data: string }).data;
+        if (!data) return;
+        const parts = data.split(':');
+        const action = parts[0];
+        const cbCtx = context as unknown as {
+          answer: () => Promise<unknown>;
+        };
 
-          // Region selected -> show cities
-          if (action === CB.ONBOARD_TZ_REGION) {
-            await cbCtx.editText('Select city:', {
-              reply_markup: timezoneCitiesKeyboard(payload),
-            });
-            await cbCtx.answer();
-            return; // Stay on same step
-          }
-
-          // Timezone selected
-          if (action === CB.ONBOARD_TZ) {
-            db.users.update(user.telegram_id, { timezone: payload });
-            await context.scene.exit();
-            await context.send(`\u2705 ${getTimezoneDisplay(payload)}`, {
-              reply_markup: { remove_keyboard: true },
-            });
+        if (action === CB.ONBOARD_TZ) {
+          const pendingTz = context.scene.state.detectedTz;
+          if (!pendingTz) {
             await cbCtx.answer();
             return;
           }
-
+          db.users.update(user.telegram_id, { timezone: pendingTz });
+          await context.scene.exit();
+          await context.send(`✅ ${getTimezoneDisplay(pendingTz)}`, removeKeyboard());
           await cbCtx.answer();
+          return;
         }
-      })
-  );
+
+        if (action === CB.ONBOARD_TZ_RETRY) {
+          await cbCtx.answer();
+          const prompt =
+            lang === 'ru'
+              ? '🌍 В каком городе вы находитесь?\n\nПримеры: Белград, Belgrade, Нью-Йорк, бангкок, Алматы, київ'
+              : '🌍 What city are you in?\n\nExamples: Belgrade, New York, Bangkok, Almaty, Kyiv';
+          await context.send(prompt, { reply_markup: timezoneMethodKeyboard(lang) });
+          return;
+        }
+
+        await cbCtx.answer();
+      }
+    });
 }
