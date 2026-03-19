@@ -42,3 +42,13 @@ test('update general rejects invalid duration', () => {
   });
   expect(result.success).toBe(false);
 });
+
+test('update general rejects duration over 1440', () => {
+  const ctx = makeCtx(60);
+  const result = handleManageSettings(ctx as never, {
+    action: 'update',
+    category: 'general',
+    updates: { default_event_duration_minutes: 1441 },
+  });
+  expect(result.success).toBe(false);
+});

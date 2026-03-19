@@ -88,8 +88,8 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
   if (updates.country_code !== undefined) patch.country_code = updates.country_code as string;
   if (updates.default_event_duration_minutes !== undefined) {
     const mins = updates.default_event_duration_minutes as number;
-    if (!Number.isInteger(mins) || mins <= 0) {
-      return { success: false, error: 'default_event_duration_minutes must be a positive integer.' };
+    if (!Number.isInteger(mins) || mins <= 0 || mins > 1440) {
+      return { success: false, error: 'default_event_duration_minutes must be a positive integer between 1 and 1440.' };
     }
     patch.default_event_duration_minutes = mins;
   }
