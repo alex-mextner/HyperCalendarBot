@@ -47,6 +47,19 @@ describe('timezone utilities', () => {
     test('handles wrap-around past midnight', () => {
       expect(localTimeToUtcHHMM('02:00', 'Asia/Tokyo')).toBe('17:00');
     });
+
+    test('round-trips correctly for DST-affected timezone (Europe/Belgrade)', () => {
+      const localHHMM = '09:00';
+      const utcHHMM = localTimeToUtcHHMM(localHHMM, 'Europe/Belgrade');
+
+      // Reconstruct what UTC time the function produced and verify round-trip
+      const [utcH, utcM] = utcHHMM.split(':').map(Number);
+      const utcDate = new Date();
+      utcDate.setUTCHours(utcH!, utcM!, 0, 0);
+
+      const result = isTimeMatch(utcDate, 'Europe/Belgrade', localHHMM);
+      expect(result).toBe(true);
+    });
   });
 
   describe('isQuietHours', () => {

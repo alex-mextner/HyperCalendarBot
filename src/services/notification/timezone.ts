@@ -13,7 +13,7 @@ export function isTimeMatch(utcNow: Date, timezone: string, targetHHMM: string):
 
 export function localTimeToUtcHHMM(localHHMM: string, timezone: string): string {
   const [h, m] = localHHMM.split(':').map(Number);
-  const refDate = new Date('2026-06-15T12:00:00Z');
+  const refDate = new Date();
   const localDate = new TZDate(refDate, timezone);
   const offsetMs = localDate.getTimezoneOffset() * -60_000;
   const localMinutes = h! * 60 + m!;

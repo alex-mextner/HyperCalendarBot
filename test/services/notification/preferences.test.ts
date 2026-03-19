@@ -125,12 +125,12 @@ describe('NotificationPreferencesService', () => {
     service.updateMorningTime(42, '09:00', 'Europe/Moscow');
     service.updateEveningTime(42, '21:00', 'Europe/Moscow');
 
-    // Recompute with a different timezone (UTC+2 vs UTC+3)
-    service.recomputeUtcTimes(42, 'Europe/Kyiv');
+    // Recompute with Asia/Tokyo (UTC+9, no DST — stable offset year-round)
+    service.recomputeUtcTimes(42, 'Asia/Tokyo');
     const prefs = service.getOrCreate(42);
-    // Morning 09:00 in Europe/Kyiv (UTC+3 summer) => 06:00 UTC
-    expect(prefs.morning_agenda_utc).toBe('06:00');
-    // Evening 21:00 in Europe/Kyiv (UTC+3 summer) => 18:00 UTC
-    expect(prefs.evening_review_utc).toBe('18:00');
+    // Morning 09:00 in Asia/Tokyo (UTC+9) => 00:00 UTC
+    expect(prefs.morning_agenda_utc).toBe('00:00');
+    // Evening 21:00 in Asia/Tokyo (UTC+9) => 12:00 UTC
+    expect(prefs.evening_review_utc).toBe('12:00');
   });
 });
