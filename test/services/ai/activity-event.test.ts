@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 import { formatActivityEvent } from '../../../src/services/ai/activity-event.ts';
 
 describe('formatActivityEvent', () => {
@@ -7,7 +7,9 @@ describe('formatActivityEvent', () => {
   });
 
   test('button with detail', () => {
-    expect(formatActivityEvent({ kind: 'button', label: 'accept', detail: 'id:42' })).toBe('[Button: "accept"] (id:42)');
+    expect(formatActivityEvent({ kind: 'button', label: 'accept', detail: 'id:42' })).toBe(
+      '[Button: "accept"] (id:42)',
+    );
   });
 
   test('command', () => {

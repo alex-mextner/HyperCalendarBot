@@ -1,12 +1,14 @@
-import { describe, test, expect } from 'bun:test';
-import { ConversationLogger } from '../../src/services/conversation-logger.ts';
-import { formatActivityEvent } from '../../src/services/ai/activity-event.ts';
+import { describe, expect, test } from 'bun:test';
 import type { ChatHistoryRepository } from '../../src/database/repositories/chat-history.repository.ts';
+import { formatActivityEvent } from '../../src/services/ai/activity-event.ts';
+import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 
 function makeRepo() {
   const calls: unknown[][] = [];
   const repo = {
-    save: (...args: unknown[]) => { calls.push(args); },
+    save: (...args: unknown[]) => {
+      calls.push(args);
+    },
     _calls: calls,
   } as unknown as ChatHistoryRepository & { _calls: unknown[][] };
   return repo;
@@ -84,8 +86,7 @@ describe('ConversationLogger — get_history format compatibility', () => {
   });
 
   test('logButtonPress format renders via formatActivityEvent', () => {
-    expect(formatActivityEvent({ kind: 'button', label: 'accept', detail: '42' }))
-      .toBe('[Button: "accept"] (42)');
+    expect(formatActivityEvent({ kind: 'button', label: 'accept', detail: '42' })).toBe('[Button: "accept"] (42)');
   });
 
   test('logEditedMessage format renders via formatActivityEvent (requires Task 2)', () => {
