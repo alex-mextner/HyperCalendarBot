@@ -1,6 +1,6 @@
 // src/bot/index.ts
 import { Bot, InlineKeyboard } from 'gramio';
-import { AgentDispatcher } from '../agent/dispatcher.ts';
+import { agentDispatcher } from '../agent/dispatcher.ts';
 import { agentRegistry } from '../agent/registry.ts';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
@@ -39,7 +39,7 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
-import { connectCommand, createActivateCommand } from './commands/connect.command.ts';
+import { createActivateCommand, createConnectCommand } from './commands/connect.command.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -119,8 +119,6 @@ export function createBot(
   domainEventBus?: DomainEventBus,
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>,
 ) {
-  const agentDispatcher = new AgentDispatcher(agentRegistry);
-
   const eventService = new EventService(
     db.events,
     db.reminders,
@@ -762,6 +760,7 @@ export function createBot(
     });
 
   // AI Assistant commands
+  const connectCommand = createConnectCommand(process.env.AGENT_DOWNLOAD_URL ?? '');
   bot
     .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
     .command('activate', (ctx) =>

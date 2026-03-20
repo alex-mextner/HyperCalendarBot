@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { registerPendingConnection } from '../../../src/agent/pairing.ts';
 import { AgentRegistry } from '../../../src/agent/registry.ts';
 import type { ConnectCtx } from '../../../src/bot/commands/connect.command.ts';
-import { connectCommand, createActivateCommand } from '../../../src/bot/commands/connect.command.ts';
+import { createActivateCommand, createConnectCommand } from '../../../src/bot/commands/connect.command.ts';
 
 interface MockCtx extends ConnectCtx {
   _sent: string[];
@@ -21,7 +21,7 @@ function mockCtx(args = ''): MockCtx {
 }
 
 test('/connect sends download link', async () => {
-  process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent.pkg';
+  const connectCommand = createConnectCommand('https://example.com/agent.pkg');
   const ctx = mockCtx();
   await connectCommand(ctx);
   expect(ctx._sent[0]).toContain('https://example.com/agent.pkg');

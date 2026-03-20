@@ -346,5 +346,22 @@ describe('handleManageSettings', () => {
       expect(calledWith!).toEqual([USER_ID, false]);
       expect(result.output).toContain('disabled');
     });
+
+    test('update assistant reflects new value in ctx.user within same turn', () => {
+      const ctxWithAssistant = {
+        ...ctx,
+        user: { ...ctx.user, assistant_enabled: 0 },
+        userRepo: {
+          ...ctx.userRepo,
+          updateAssistantEnabled: () => {},
+        },
+      };
+      handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'update',
+        category: 'assistant',
+        assistantEnabled: true,
+      });
+      expect((ctxWithAssistant as unknown as AgentContext).user.assistant_enabled).toBe(1);
+    });
   });
 });

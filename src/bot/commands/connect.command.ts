@@ -8,14 +8,15 @@ export interface ConnectCtx {
   send: (text: string) => Promise<void>;
 }
 
-export async function connectCommand(ctx: ConnectCtx): Promise<void> {
-  const url = process.env.AGENT_DOWNLOAD_URL ?? '';
-  const ru = ctx.user?.language === 'ru';
-  await ctx.send(
-    ru
-      ? `🔗 *Подключить AI Ассистент*\n\nСкачай агент для macOS:\n${url}\n\nПосле установки приложение само покажет команду активации.`
-      : `🔗 *Connect AI Assistant*\n\nDownload the macOS agent:\n${url}\n\nAfter installing, the app will show an activation command.`,
-  );
+export function createConnectCommand(downloadUrl: string) {
+  return async function connectCommand(ctx: ConnectCtx): Promise<void> {
+    const ru = ctx.user?.language === 'ru';
+    await ctx.send(
+      ru
+        ? `🔗 *Подключить AI Ассистент*\n\nСкачай агент для macOS:\n${downloadUrl}\n\nПосле установки приложение само покажет команду активации.`
+        : `🔗 *Connect AI Assistant*\n\nDownload the macOS agent:\n${downloadUrl}\n\nAfter installing, the app will show an activation command.`,
+    );
+  };
 }
 
 export function createActivateCommand(registry: AgentRegistry) {

@@ -9,6 +9,7 @@ const PAIRING_TTL_MS = 10 * 60 * 1000;
 
 export interface WsData {
   userId: number | null;
+  _token?: string | null;
 }
 
 interface PendingConnection {

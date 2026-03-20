@@ -1,18 +1,13 @@
 // src/agent/ws-server.ts
 import type { ServerWebSocket } from 'bun';
 import type { AgentDispatcher } from './dispatcher.ts';
-import { registerPendingConnection, verifyAgentJwt } from './pairing.ts';
+import { registerPendingConnection, verifyAgentJwt, type WsData } from './pairing.ts';
 import type { AgentInbound } from './protocol.ts';
 import type { AgentRegistry } from './registry.ts';
 
-export interface AgentWsData {
-  userId: number | null;
-  _token: string | null;
-}
-
 export function upgradeAgentWs(
   req: Request,
-  server: { upgrade(req: Request, opts: { data: AgentWsData }): boolean },
+  server: { upgrade(req: Request, opts: { data: WsData }): boolean },
 ): boolean {
   const token = req.headers.get('authorization')?.replace('Bearer ', '') ?? null;
   return server.upgrade(req, { data: { userId: null, _token: token } });
@@ -20,7 +15,7 @@ export function upgradeAgentWs(
 
 export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentDispatcher) {
   return {
-    async open(ws: ServerWebSocket<AgentWsData>) {
+    async open(ws: ServerWebSocket<WsData>) {
       if (ws.data._token) {
         const userId = await verifyAgentJwt(ws.data._token);
         if (!userId) {
@@ -28,11 +23,11 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
           return;
         }
         ws.data.userId = userId;
-        registry.register(userId, ws as unknown as Parameters<typeof registry.register>[1]);
+        registry.register(userId, ws);
       }
     },
 
-    message(ws: ServerWebSocket<AgentWsData>, raw: string) {
+    message(ws: ServerWebSocket<WsData>, raw: string) {
       let msg: AgentInbound;
       try {
         msg = JSON.parse(raw) as AgentInbound;
@@ -47,7 +42,7 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
       }
 
       if (msg.type === 'pair') {
-        registerPendingConnection(msg.code, ws as unknown as Parameters<typeof registerPendingConnection>[1]);
+        registerPendingConnection(msg.code, ws);
         return;
       }
 
@@ -56,8 +51,11 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
       }
     },
 
-    close(ws: ServerWebSocket<AgentWsData>) {
-      if (ws.data.userId) registry.unregister(ws.data.userId);
+    close(ws: ServerWebSocket<WsData>) {
+      if (ws.data.userId) {
+        dispatcher.rejectPendingForUser(ws.data.userId, new Error('Agent disconnected'));
+        registry.unregister(ws.data.userId);
+      }
     },
   };
 }

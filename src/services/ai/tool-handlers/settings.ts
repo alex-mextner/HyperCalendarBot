@@ -65,13 +65,8 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
   }
 
   if (category === 'assistant') {
-    // field added in Task 8
-    const connected =
-      (ctx as unknown as { agentRegistry?: { isConnected(id: number): boolean } }).agentRegistry?.isConnected(
-        ctx.user.telegram_id,
-      ) ?? false;
-    // column added in migration Task 2
-    const enabled = Boolean((ctx.user as unknown as { assistant_enabled?: number }).assistant_enabled);
+    const connected = ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false;
+    const enabled = Boolean(ctx.user.assistant_enabled);
     return {
       success: true,
       output:
@@ -198,11 +193,8 @@ function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolRes
   if (typeof assistantEnabled !== 'boolean') {
     return { success: false, output: 'Unknown action' };
   }
-  // updateAssistantEnabled added in Task 8
-  (ctx.userRepo as unknown as { updateAssistantEnabled(id: number, enabled: boolean): void }).updateAssistantEnabled(
-    ctx.user.telegram_id,
-    assistantEnabled,
-  );
+  ctx.userRepo.updateAssistantEnabled(ctx.user.telegram_id, assistantEnabled);
+  ctx.user = { ...ctx.user, assistant_enabled: assistantEnabled ? 1 : 0 };
   return {
     success: true,
     output:

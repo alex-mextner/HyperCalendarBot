@@ -31,6 +31,15 @@ test('close unregisters', () => {
   expect(registry.isConnected(42)).toBe(false);
 });
 
+test('close rejects in-flight commands for that user', async () => {
+  const { registry, dispatcher, handler } = setup();
+  const w = ws(42);
+  registry.register(42, w as unknown as Parameters<typeof registry.register>[1]);
+  const promise = dispatcher.send(42, 'bash_execute', { command: 'sleep 99' });
+  handler.close(w);
+  await expect(promise).rejects.toThrow('Agent disconnected');
+});
+
 test('ping → pong', () => {
   const { registry, handler } = setup();
   const sent: string[] = [];

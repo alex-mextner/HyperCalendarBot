@@ -129,7 +129,7 @@ export class CalendarBotAgent {
     ctx.onAgentChunk = (text: string) => {
       writer.appendText(text);
       writer.tailText(3500);
-      writer.flush(false).catch(() => {});
+      writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
     };
 
     this.saveUserMessage(ctx);

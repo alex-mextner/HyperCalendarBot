@@ -1,5 +1,7 @@
 // src/index.ts
 
+import { agentDispatcher } from './agent/dispatcher.ts';
+import { agentRegistry } from './agent/registry.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
@@ -120,6 +122,8 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
     stateLookup: stateStore,
+    agentRegistry,
+    agentDispatcher,
     onConnected: async (userId) => {
       await queue.add('refresh-calendars', { type: 'refresh-calendars', userId });
     },
