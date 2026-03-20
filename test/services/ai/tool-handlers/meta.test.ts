@@ -21,6 +21,7 @@ import {
   handlePickUsers,
   handleRenderDayImage,
   handleUpdateContact,
+  validateAndGetOffset,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -543,6 +544,36 @@ describe('handleMakeCall', () => {
     const noQueueCtx = { user: { telegram_id: 1, language: 'en' }, inputMode: undefined } as unknown as AgentContext;
     const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
     expect(result.success).toBe(false);
+  });
+});
+
+describe('validateAndGetOffset', () => {
+  test('returns offset for valid timezone', () => {
+    const dt = new Date('2026-03-20T12:00:00Z');
+    const result = validateAndGetOffset('Europe/Kyiv', dt);
+    expect(result.offsetStr).toBe('+02:00');
+    expect(result.offsetMinutes).toBe(120);
+  });
+
+  test('returns offset for UTC', () => {
+    const dt = new Date('2026-03-20T12:00:00Z');
+    const result = validateAndGetOffset('UTC', dt);
+    expect(result.offsetStr).toBe('+00:00');
+    expect(result.offsetMinutes).toBe(0);
+  });
+
+  test('throws RangeError for invalid timezone', () => {
+    const dt = new Date('2026-03-20T12:00:00Z');
+    expect(() => {
+      validateAndGetOffset('Garbage/Fake', dt);
+    }).toThrow(RangeError);
+  });
+
+  test('throws RangeError for invalid timezone with specific message', () => {
+    const dt = new Date('2026-03-20T12:00:00Z');
+    expect(() => {
+      validateAndGetOffset('Invalid/Timezone', dt);
+    }).toThrow(/invalid time zone/i);
   });
 });
 

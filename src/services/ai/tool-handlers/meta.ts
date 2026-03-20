@@ -21,7 +21,7 @@ interface GetHolidaysInput {
 }
 
 function _getOffsetMinutes(timezone: string, dt: Date): number {
-  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
+  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'longOffset' });
   const parts = formatter.formatToParts(dt);
   const raw = (parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0').replace(/^GMT/, '');
   const match = raw.match(/^([+-])(\d{1,2}):(\d{2})$/);
@@ -50,9 +50,9 @@ export function getTimezoneSuggestions(input: string): string[] {
     .map(([tz, { city }]) => `${tz} (${city})`);
 }
 
-function _validateAndGetOffset(timezone: string, dt: Date): { offsetStr: string; offsetMinutes: number } {
+export function validateAndGetOffset(timezone: string, dt: Date): { offsetStr: string; offsetMinutes: number } {
   // throws if timezone is invalid
-  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
+  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'longOffset' });
   const parts = formatter.formatToParts(dt);
   const raw = (parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0').replace(/^GMT/, '');
   const match = raw.match(/^([+-])(\d{1,2}):(\d{2})$/);
