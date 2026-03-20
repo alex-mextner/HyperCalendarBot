@@ -271,6 +271,9 @@ async function handleVoiceMessage(
 
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
 
+    const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
+    deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
+
     const agentContext: AgentContext = {
       ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
       inputMode: 'voice_message',

@@ -7,6 +7,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     eventService: {},
     holidayService: {},
     chatHistory: {},
+    conversationLogger: { logUserMessage: mock(() => {}) },
     userRepo: {},
     reminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },
@@ -344,6 +345,27 @@ describe('createMessageHandler', () => {
         };
         expect(call.messageText).toBe('создай встречу на завтра');
         expect(call.inputMode).toBe('voice_message');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    test('logs transcribed voice text before calling agent', async () => {
+      const deps = makeVoiceDeps();
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as unknown as typeof fetch;
+
+      try {
+        const handler = createMessageHandler(deps as never);
+        await handler(makeVoiceCtx() as never);
+        const logger = deps.conversationLogger as { logUserMessage: ReturnType<typeof mock> };
+        expect(logger.logUserMessage).toHaveBeenCalledWith(100, 'создай встречу на завтра', undefined);
       } finally {
         globalThis.fetch = originalFetch;
       }
