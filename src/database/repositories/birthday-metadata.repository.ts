@@ -68,15 +68,16 @@ export class BirthdayMetadataRepository {
       .get(userId) as BirthdaySyncState | null;
   }
 
-  getUsersNeedingSync(maxAgeMs: number): number[] {
+  getUsersNeedingSync(
+    maxAgeMs: number,
+  ): { telegram_id: number; first_name: string | null; language: string; timezone: string }[] {
     const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
-    const rows = this.db
+    return this.db
       .prepare(
-        `SELECT u.telegram_id FROM users u
+        `SELECT u.telegram_id, u.first_name, u.language, u.timezone FROM users u
          LEFT JOIN birthday_sync_state s ON s.user_id = u.telegram_id
          WHERE s.synced_at IS NULL OR s.synced_at < ?`,
       )
-      .all(cutoff) as { telegram_id: number }[];
-    return rows.map((r) => r.telegram_id);
+      .all(cutoff) as { telegram_id: number; first_name: string | null; language: string; timezone: string }[];
   }
 }

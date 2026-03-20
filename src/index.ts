@@ -408,10 +408,9 @@ if (config.REDIS_URL) {
     },
     onBirthdaySync: async () => {
       const BATCH = 100;
-      const needingIds = new Set(db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000));
-      const allUsers = db.users.findAll().filter((u) => needingIds.has(u.telegram_id));
-      for (let i = 0; i < allUsers.length; i += BATCH) {
-        await cronBirthdayService.runBatchSync(allUsers.slice(i, i + BATCH));
+      const users = db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
+      for (let i = 0; i < users.length; i += BATCH) {
+        await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
       }
     },
   });

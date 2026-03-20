@@ -70,11 +70,11 @@ test('upsertSyncState and getSyncState round-trip', () => {
 
 test('getUsersNeedingSync includes users with no sync state', () => {
   const users = repo.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
-  expect(users).toContain(1);
+  expect(users.some((u) => u.telegram_id === 1)).toBe(true);
 });
 
 test('getUsersNeedingSync excludes recently synced users', () => {
   repo.upsertSyncState(1, new Date().toISOString());
   const users = repo.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
-  expect(users).not.toContain(1);
+  expect(users.some((u) => u.telegram_id === 1)).toBe(false);
 });

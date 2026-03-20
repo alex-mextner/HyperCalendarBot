@@ -1,4 +1,3 @@
-import { TZDate } from '@date-fns/tz';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -6,18 +5,12 @@ import type { NotificationPreferencesRepository } from '../../database/repositor
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { ruPlural } from '../event/formatters.ts';
+import { allDayReminderUtc } from '../notification/materializer.ts';
 
 const birthdayLogger = logger.child({ module: 'birthday-service' });
 
 const SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ALL_DAY_TIME = '09:00';
-
-function allDayReminderUtc(dateStr: string, localTime: string, timezone: string): Date {
-  const [h, m] = localTime.split(':').map(Number);
-  const local = new TZDate(new Date(dateStr), timezone);
-  local.setHours(h!, m!, 0, 0);
-  return new Date(local.getTime());
-}
 
 export interface UpsertBirthdayParams {
   ownerId: number;
@@ -82,8 +75,8 @@ export class BirthdayService {
     const title = titlePrefix + params.celebrantName;
 
     const now = new Date();
-    let year = now.getFullYear();
-    const thisYearDate = new Date(year, params.month - 1, params.day);
+    let year = now.getUTCFullYear();
+    const thisYearDate = new Date(Date.UTC(year, params.month - 1, params.day));
     if (thisYearDate < now) year += 1;
 
     const startDateStr = `${year}-${String(params.month).padStart(2, '0')}-${String(params.day).padStart(2, '0')}`;
@@ -225,8 +218,6 @@ export class BirthdayService {
         stderr: 'pipe',
       });
       const exitCode = await proc.exited;
-      const now = new Date().toISOString();
-      for (const u of users) this.metaRepo.upsertSyncState(u.telegram_id, now);
 
       if (exitCode !== 0) {
         const err = await new Response(proc.stderr).text();
@@ -235,6 +226,8 @@ export class BirthdayService {
       }
       const stdout = await new Response(proc.stdout).text();
       result = JSON.parse(stdout);
+      const now = new Date().toISOString();
+      for (const u of users) this.metaRepo.upsertSyncState(u.telegram_id, now);
     } catch (err) {
       birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
       return;
@@ -267,13 +260,9 @@ export class BirthdayService {
       return { event: e, celebrantId: meta?.celebrant_id ?? null, birthYear: meta?.birth_year ?? null, username: null };
     });
 
-    const groups = groupCalendars.map(({ groupId, title }) => {
+    const groups = groupCalendars.flatMap(({ groupId, title }) => {
       const groupEvents = this.eventRepo.getBirthdaysForGroup(groupId);
       const items: BirthdayDisplayItem[] = groupEvents
-        .filter((e) => {
-          const meta = this.metaRepo.findByEventId(e.id);
-          return meta?.celebrant_id == null || !personalCelebrantIds.has(meta.celebrant_id);
-        })
         .map((e) => {
           const meta = this.metaRepo.findByEventId(e.id);
           return {
@@ -282,8 +271,10 @@ export class BirthdayService {
             birthYear: meta?.birth_year ?? null,
             username: null,
           };
-        });
-      return { groupId, title, items };
+        })
+        .filter((item) => item.celebrantId == null || !personalCelebrantIds.has(item.celebrantId));
+      if (items.length === 0) return [];
+      return [{ groupId, title, items }];
     });
 
     personal.sort(sortByNext);
@@ -300,8 +291,7 @@ function sortByNext(a: BirthdayDisplayItem, b: BirthdayDisplayItem): number {
 function nextOccurrenceTs(startAt: string): number {
   const d = new Date(startAt);
   const now = new Date();
-  const thisYear = new Date(now.getFullYear(), d.getUTCMonth(), d.getUTCDate());
-  return thisYear >= now
-    ? thisYear.getTime()
-    : new Date(now.getFullYear() + 1, d.getUTCMonth(), d.getUTCDate()).getTime();
+  const year = now.getUTCFullYear();
+  const thisYear = new Date(Date.UTC(year, d.getUTCMonth(), d.getUTCDate()));
+  return thisYear >= now ? thisYear.getTime() : new Date(Date.UTC(year + 1, d.getUTCMonth(), d.getUTCDate())).getTime();
 }
