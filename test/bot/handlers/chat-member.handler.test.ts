@@ -208,7 +208,7 @@ describe('createChatMemberHandler', () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 0));
     expect(exportInviteLink).toHaveBeenCalledWith(-1001234);
     expect(groupRepo.setInviteLink).toHaveBeenCalledWith(-1001234, INVITE_LINK);
   });
@@ -228,7 +228,7 @@ describe('createChatMemberHandler', () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 0));
     expect(exportInviteLink).not.toHaveBeenCalled();
   });
 });

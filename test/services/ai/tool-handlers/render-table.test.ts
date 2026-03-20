@@ -79,6 +79,6 @@ describe('handleRenderTable', () => {
     // Synchronous return is still success
     expect(result.success).toBe(true);
     // Allow the fire-and-forget promise to settle — must not throw unhandled rejection
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 0));
   });
 });
