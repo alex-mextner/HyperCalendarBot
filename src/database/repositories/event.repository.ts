@@ -393,7 +393,7 @@ export class EventRepository {
     const applyPrivacy = requesterId !== undefined && requesterId !== userId;
     const privacyClause = applyPrivacy
       ? `AND (
-          e.user_id = ${requesterId}
+          e.user_id = ?
           OR COALESCE(
             (SELECT visibility FROM event_visibility WHERE event_id = e.id),
             (SELECT default_visibility FROM sharing_settings WHERE user_id = e.user_id),
@@ -421,7 +421,9 @@ export class EventRepository {
         ${privacyClause}
       ORDER BY e.start_at
     `;
-    return this.db.prepare(sql).all(endUtc, startUtc, startUtc, userId, userId) as CalendarEvent[];
+    const params: (string | number)[] = [endUtc, startUtc, startUtc, userId, userId];
+    if (applyPrivacy) params.push(requesterId as number);
+    return this.db.prepare(sql).all(...params) as CalendarEvent[];
   }
 
   countInRange(userId: number, startUtc: string, endUtc: string): number {
