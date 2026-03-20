@@ -37,6 +37,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
@@ -70,6 +71,7 @@ import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
   get(key: string): Promise<unknown>;
+  delete(key: string): unknown;
 }
 
 export interface MessageHandlerDeps {
@@ -142,6 +144,7 @@ export interface MessageHandlerDeps {
     formattedTime: string,
     eventTitle: string,
   ) => Promise<void>;
+  scenePauseService?: ScenePauseService;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -399,6 +402,9 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupChatRepo: deps.groupChatRepo,
       groupMemberRepo: deps.groupMemberRepo,
       groupMemberService: deps.groupMemberService,
+      sceneStorage: {
+        delete: (key: string) => Promise.resolve(deps.sceneStorage.delete(key)).then(() => {}),
+      },
     };
   };
 }
@@ -749,6 +755,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return ctx;
     },
     intentLearner: deps.intentLearner,
+    scenePauseService: deps.scenePauseService,
   });
 
   // Static layers that don't require per-message context
@@ -793,7 +800,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     // Don't handle if a scene is active — @gramio/scenes handles those
     const sceneKey = `@gramio/scenes:${user.telegram_id}`;
     const activeScene = await deps.sceneStorage.get(sceneKey);
-    if (activeScene) return;
+    if (activeScene) {
+      // If the scene is paused, let it fall through to the AI pipeline
+      const isPaused = deps.scenePauseService ? (await deps.scenePauseService.get(user.telegram_id)) !== null : false;
+      if (!isPaused) return;
+    }
 
     const chatId = ctx.chatId;
     if (!chatId) return;
