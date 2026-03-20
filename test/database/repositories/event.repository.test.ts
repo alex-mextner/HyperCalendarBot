@@ -307,6 +307,100 @@ describe('EventRepository', () => {
     });
   });
 
+  describe('birthday queries', () => {
+    test('create stores event_type when provided', () => {
+      const event = events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      expect(event.event_type).toBe('birthday');
+    });
+
+    test('getBirthdays returns only birthday events for personal calendar', () => {
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-06-15T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      events.create({
+        user_id: USER_ID,
+        title: 'Meeting',
+        start_at: '2026-06-16T00:00:00Z',
+        all_day: false,
+        timezone: 'UTC',
+      });
+      const results = events.getBirthdays(USER_ID);
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Д/р Ivan');
+    });
+
+    test('getBirthdaysForGroup returns birthday events in group calendar', () => {
+      db.prepare("INSERT INTO group_chats (chat_id, title, added_by) VALUES (100, 'Team', ?)").run(USER_ID);
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Bob',
+        start_at: '2026-07-01T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+        owner_type: 'group',
+        group_id: 100,
+      });
+      const results = events.getBirthdaysForGroup(100);
+      expect(results.length).toBe(1);
+    });
+
+    test('searchWithEventType filters by event_type=birthday', () => {
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      events.create({
+        user_id: USER_ID,
+        title: 'Meeting',
+        start_at: '2026-05-11T00:00:00Z',
+        all_day: false,
+        timezone: 'UTC',
+      });
+      const results = events.searchWithEventType(USER_ID, null, 'birthday');
+      expect(results.every((e) => e.event_type === 'birthday')).toBe(true);
+      expect(results.length).toBe(1);
+    });
+
+    test('searchWithEventType with query filters by title', () => {
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      events.create({
+        user_id: USER_ID,
+        title: 'Д/р Anna',
+        start_at: '2026-05-11T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      const results = events.searchWithEventType(USER_ID, 'ivan', null);
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Д/р Ivan');
+    });
+  });
+
   describe('group calendar', () => {
     const GROUP_ID = 999;
     const CREATOR_ID = USER_ID;

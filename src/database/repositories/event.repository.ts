@@ -8,8 +8,8 @@ export class EventRepository {
   create(data: CreateEventData): CalendarEvent {
     const result = this.db
       .prepare(`
-      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by, event_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .run(
         data.user_id,
@@ -26,6 +26,7 @@ export class EventRepository {
         data.owner_type ?? 'user',
         data.group_id ?? null,
         data.created_by ?? null,
+        data.event_type ?? null,
       );
     const id = Number(result.lastInsertRowid);
     if (data.owner_type === 'group' && data.group_id != null) {
@@ -504,6 +505,46 @@ export class EventRepository {
       .prepare("DELETE FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ?")
       .run(id, groupId);
     return result.changes > 0;
+  }
+
+  getBirthdays(userId: number): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM events
+         WHERE user_id = ? AND event_type = 'birthday' AND is_cancelled = 0
+           AND (owner_type IS NULL OR owner_type = 'user')
+         ORDER BY start_at`,
+      )
+      .all(userId) as CalendarEvent[];
+  }
+
+  getBirthdaysForGroup(groupId: number): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM events
+         WHERE group_id = ? AND event_type = 'birthday' AND is_cancelled = 0
+           AND owner_type = 'group'
+         ORDER BY start_at`,
+      )
+      .all(groupId) as CalendarEvent[];
+  }
+
+  searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
+    const conditions: string[] = ['user_id = ?', 'is_cancelled = 0', "(owner_type IS NULL OR owner_type = 'user')"];
+    const params: (string | number | null)[] = [userId];
+
+    if (query) {
+      conditions.push('title LIKE ?');
+      params.push(`%${query}%`);
+    }
+    if (eventType) {
+      conditions.push('event_type = ?');
+      params.push(eventType);
+    }
+
+    return this.db
+      .prepare(`SELECT * FROM events WHERE ${conditions.join(' AND ')} ORDER BY start_at`)
+      .all(...params) as CalendarEvent[];
   }
 
   findStartingWithin(withinMs: number): CalendarEvent[] {
