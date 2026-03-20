@@ -255,7 +255,7 @@ export class BirthdayService {
     }
   }
 
-  getBirthdaysForDisplay(userId: number, groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {
+  getBirthdaysForDisplay(userId: number, lang: 'en' | 'ru', groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {
     const personalEvents = this.eventRepo.getBirthdays(userId);
     const personalCelebrantIds = new Set<number>();
 

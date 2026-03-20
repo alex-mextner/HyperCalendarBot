@@ -113,7 +113,7 @@ test('getBirthdaysForDisplay returns personal entries sorted by next occurrence'
     timezone: 'UTC',
     autoCreated: false,
   });
-  const { personal } = service.getBirthdaysForDisplay(1, []);
+  const { personal } = service.getBirthdaysForDisplay(1, 'ru', []);
   expect(personal.length).toBe(1);
   expect(personal[0]!.event.title).toBe('Д/р Иван');
 });
