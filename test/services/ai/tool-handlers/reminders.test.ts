@@ -43,6 +43,7 @@ describe('handleSetReminder', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 

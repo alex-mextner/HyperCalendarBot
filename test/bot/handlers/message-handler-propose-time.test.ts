@@ -51,6 +51,7 @@ describe('message handler: propose time session', () => {
       invitationRepo: invitationRepo as never,
       editMessage,
       sendMessageToUser: sendMessage,
+      conversationLogger: null as never,
     });
 
     const ctx = makeCtx('tomorrow 15:00');
@@ -93,6 +94,7 @@ describe('message handler: propose time session', () => {
       invitationService: invitationService as never,
       invitationRepo: invitationRepo as never,
       notifyInviterProposal,
+      conversationLogger: null as never,
     });
 
     const ctx = makeCtx('tomorrow 15:00');
@@ -115,6 +117,7 @@ describe('message handler: propose time session', () => {
       reminderRepo: {} as never,
       sceneStorage: { get: mock(() => Promise.resolve(null)) },
       proposeTimeSessions,
+      conversationLogger: null as never,
     });
 
     await handler(ctx as never);
@@ -137,6 +140,7 @@ describe('message handler: propose time session', () => {
       sceneStorage: { get: mock(() => Promise.resolve(null)) },
       proposeTimeSessions,
       invitationService: invitationService as never,
+      conversationLogger: null as never,
     });
 
     const ctx = {

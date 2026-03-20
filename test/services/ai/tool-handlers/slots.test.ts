@@ -43,6 +43,7 @@ describe('handleGetFreeSlots', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 

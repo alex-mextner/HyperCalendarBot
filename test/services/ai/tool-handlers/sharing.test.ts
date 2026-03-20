@@ -70,6 +70,7 @@ describe('sharing tool handlers', () => {
       invitationService,
       sharingSettingsRepo,
       sharingService,
+      conversationLogger: null as never,
       ...overrides,
     };
   }

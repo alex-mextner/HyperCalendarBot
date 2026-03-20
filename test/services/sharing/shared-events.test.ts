@@ -535,6 +535,7 @@ describe('invitee deletes shared event = decline', () => {
       userRepo,
       reminderRepo,
       participantRepo,
+      conversationLogger: null as never,
     };
   }
 
@@ -820,6 +821,7 @@ describe('full shared event lifecycle', () => {
       userRepo,
       reminderRepo,
       participantRepo,
+      conversationLogger: null as never,
     };
     const deleteResult = handleDeleteEvent(ctx, { event_id: event.id });
     expect(deleteResult.success).toBe(true);

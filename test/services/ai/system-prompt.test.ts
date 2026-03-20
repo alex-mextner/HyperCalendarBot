@@ -50,6 +50,7 @@ describe('buildSystemPrompt', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 

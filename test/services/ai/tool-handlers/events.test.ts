@@ -57,6 +57,7 @@ describe('event tool handlers', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 

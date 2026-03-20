@@ -47,6 +47,7 @@ describe('handleGetUpcoming', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 
@@ -141,6 +142,7 @@ describe('handleSnoozeEvent', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 
@@ -216,6 +218,7 @@ describe('handleGetEvent', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 
