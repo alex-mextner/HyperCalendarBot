@@ -14,7 +14,9 @@ import { resolveScope } from './shared.ts';
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
-  const d = new TZDate(new Date(`${dateStr}T12:00:00Z`), timezone);
+  // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
+  // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
+  const d = new TZDate(`${dateStr}T12:00:00`, timezone);
   return getDayRangeUtc(d, timezone);
 }
 
