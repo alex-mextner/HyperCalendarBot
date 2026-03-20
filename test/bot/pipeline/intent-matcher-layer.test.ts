@@ -27,6 +27,11 @@ function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userI
     delete(chatId, userId) {
       m.delete(k(chatId, userId));
     },
+    deleteByUser(userId) {
+      for (const key of [...m.keys()]) {
+        if (key.endsWith(`:${userId}`)) m.delete(key);
+      }
+    },
     has(chatId, userId) {
       return m.has(k(chatId, userId));
     },

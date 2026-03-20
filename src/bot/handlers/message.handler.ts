@@ -131,6 +131,7 @@ export interface MessageHandlerDeps {
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
   aiApiKey?: string;
+  aiModel?: string;
   proposeTimeSessions?: Map<number, { invitationId: number }>;
   editMessage?: (chatId: number, messageId: number, text: string) => Promise<void>;
   notifyInviterProposal?: (
@@ -405,12 +406,50 @@ export function stripJsonFences(raw: string): string {
 
 const INTENT_EDIT_MAX_TOKENS = 2048;
 
-const INTENT_EDIT_SYSTEM_PROMPT = `You are a JSON editor for intent objects.
+const INTENT_EDIT_SYSTEM_PROMPT = `You are a JSON editor for calendar-bot intent objects.
 Given a current intent JSON and admin instructions, return ONLY a valid JSON object with updated fields.
 Only include fields that should change: phrases (string[]), trigger_words (string[]), pattern (string|null), workflow (object), format (string).
 Do not include id, canonical_name, status, source_message, created_at.
 IMPORTANT: Return raw JSON only — no markdown, no code fences, no backticks, no explanation.
-Your response budget is ${INTENT_EDIT_MAX_TOKENS} tokens. The largest intents are ~820 tokens. Always emit complete, valid JSON — never truncate.`;
+Your response budget is ${INTENT_EDIT_MAX_TOKENS} tokens. Always emit complete, valid JSON — never truncate.
+
+## Workflow syntax reference
+
+Workflow is always { "steps": [...] }. Step types:
+- Tool call: { "call": "tool_name", "input": {...} } — add "as": "var_name" to save output for later steps.
+- Conditional: add "when": "expr" to any step — skip if false.
+- Clarifying question: { "call": "ask_user", "input": { "question": "{{t.q}}", "options": ["{{t.opt1}}", "{{t.opt2}}"] }, "as": "name|lower" } — suspends, resumes when user replies. Answer is in ask.name namespace.
+- Respond and stop: { "respond": "{{t.msg}}" }
+- i18n: add "i18n": { "ru": { "key": "..." }, "en": { "key": "..." } } at workflow root when steps use {{t.key}}.
+
+## Context helper functions (use in "when" expressions)
+- isPastHour(h) — true if hour h (0-23) already passed today in user timezone
+- isPastHourPM(h) — true if PM hour h (1-12, maps to h+12) already passed today
+- isPastDay(d) — true if day-of-month d already passed this month
+- isAmPmAmbiguous(h) — true if h is 1-12 (ambiguous AM/PM, must ask user)
+
+## Template variables (ONLY these — any other {{var}} will crash at runtime)
+Dates: {{dates.today}}, {{dates.yesterday}}, {{dates.tomorrow}}, {{dates.week_start}}, {{dates.week_end}}, {{dates.next_week_start}}, {{dates.next_week_end}}, {{dates.month_start}}, {{dates.month_end}}, {{dates.next_month_start}}, {{dates.now}}
+User: {{user.id}}, {{user.username}}, {{user.first_name}}, {{user.timezone}}, {{user.language}}, {{user.utc_offset}}
+Env: {{env.scope}} — "group" in group chats, "personal" in private chats
+Captures: {{$1}}, {{$2}}, ... — regex capturing group values
+Last events: {{last_added_event.id/.title/.date/.time/...}}, {{last_mentioned_event.id/.title/.date/.time/...}}
+i18n text: {{t.key}}
+Filters (pipe): {{$1|pad(2)}}, {{var|upper}}, {{var|lower}}, {{var|trim}}, {{var|truncate(50)}}, {{var|default("x")}}, {{var|replace("a","b")}}, {{var|date("dd.MM")}}, {{var|ternary("yes","no")}}, {{var|eq("m","if","else")}}, {{$1|add(12)}}
+
+## AM/PM handling pattern
+When hour $N could be 1-12, use ask_user for AM/PM clarification:
+{ "steps": [
+  { "when": "isAmPmAmbiguous($1) == false", "call": "create_event", "input": { "start_at": "{{dates.today}}T{{$1|pad(2)}}:00:00{{user.utc_offset}}", "scope": "{{env.scope}}" } },
+  { "when": "isAmPmAmbiguous($1)", "call": "ask_user", "input": { "question": "{{t.ampm_q}}", "options": ["{{t.am}}", "{{t.pm}}"] }, "as": "ampm|lower" },
+  { "when": "isAmPmAmbiguous($1) && ask.ampm == 'am'", "call": "create_event", "input": { "start_at": "{{dates.today}}T{{$1|pad(2)}}:00:00{{user.utc_offset}}", "scope": "{{env.scope}}" } },
+  { "when": "isAmPmAmbiguous($1) && ask.ampm == 'pm'", "call": "create_event", "input": { "start_at": "{{dates.today}}T{{$1|add(12)|pad(2)}}:00:00{{user.utc_offset}}", "scope": "{{env.scope}}" } }
+], "i18n": { "ru": { "ampm_q": "{{$1}}:00 — это утро или вечер?", "am": "утро", "pm": "вечер" }, "en": { "ampm_q": "Is {{$1}}:00 AM or PM?", "am": "AM", "pm": "PM" } } }
+
+## Past-time handling pattern
+When event is today and hour could be in the past, add isPastHour check:
+{ "when": "isPastHour($1) == false", "call": "create_event", "input": { "start_at": "{{dates.today}}T{{$1|pad(2)}}:00:00{{user.utc_offset}}", ... } },
+{ "when": "isPastHour($1)", "call": "create_event", "input": { "start_at": "{{dates.tomorrow}}T{{$1|pad(2)}}:00:00{{user.utc_offset}}", ... } }`;
 
 async function handleIntentEditInstruction(
   ctx: BotCommandContext,
@@ -682,6 +721,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         set: (chatId, userId, s) => m.set(`${chatId}:${userId}`, s),
         delete: (chatId, userId) => {
           m.delete(`${chatId}:${userId}`);
+        },
+        deleteByUser: (userId) => {
+          for (const key of [...m.keys()]) {
+            if (key.endsWith(`:${userId}`)) m.delete(key);
+          }
         },
       };
     })();

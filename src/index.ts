@@ -503,7 +503,12 @@ let eventCheckerQueueCleanup: { close: () => Promise<void> } | undefined;
 let eventMentionStore: import('./services/intent/event-mention-store.ts').EventMentionStore | undefined;
 if (config.REDIS_URL) {
   const { RedisEventMentionStore } = await import('./services/intent/event-mention-store.ts');
-  const redisClient = new Bun.RedisClient(config.REDIS_URL);
+  const bunRedis = new Bun.RedisClient(config.REDIS_URL);
+  const redisClient = {
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? bunRedis.set(key, value, 'EX', opts.ex) : bunRedis.set(key, value),
+    get: (key: string) => bunRedis.get(key),
+  };
   eventMentionStore = new RedisEventMentionStore(redisClient);
   botLogger.info('Event mention store: Redis (7-day TTL)');
 } else {

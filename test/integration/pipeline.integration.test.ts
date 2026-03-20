@@ -2,6 +2,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createFeedbackRouterLayer } from '../../src/bot/pipeline/feedback-router-layer.ts';
+import type { WorkflowSessionStore } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../../src/bot/pipeline/pipeline.ts';
 import type { BotCommandContext } from '../../src/bot/types.ts';
@@ -11,6 +12,15 @@ import { IntentRepository } from '../../src/database/repositories/intent.reposit
 import { runMigrations } from '../../src/database/schema.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
+
+function makeEmptyWorkflowStore(): WorkflowSessionStore {
+  return {
+    get: () => null,
+    set: () => {},
+    delete: () => {},
+    deleteByUser: () => {},
+  };
+}
 
 function makeCtx(userId: number, timezone = 'UTC', language = 'en'): BotCommandContext {
   return {
@@ -54,7 +64,13 @@ describe('Pipeline Integration', () => {
     }));
     const ctx = makeCtx(123, 'Europe/Moscow', 'ru');
 
-    const intentLayer = createIntentMatcherLayer(matcher, intentRepo, executor, mockToolExecutor, new Map());
+    const intentLayer = createIntentMatcherLayer(
+      matcher,
+      intentRepo,
+      executor,
+      mockToolExecutor,
+      makeEmptyWorkflowStore(),
+    );
 
     const result = await intentLayer(ctx, 'что сегодня');
     expect(result.handled).toBe(true);
@@ -73,7 +89,7 @@ describe('Pipeline Integration', () => {
       intentRepo,
       executor,
       mock(() => ({ success: true })),
-      new Map(),
+      makeEmptyWorkflowStore(),
     );
 
     const result = await intentLayer(ctx, 'something completely random');
@@ -105,7 +121,13 @@ describe('Pipeline Integration', () => {
     });
     const ctx = makeCtx(1);
 
-    const intentLayer = createIntentMatcherLayer(matcher, intentRepo, executor, mockToolExecutor, new Map());
+    const intentLayer = createIntentMatcherLayer(
+      matcher,
+      intentRepo,
+      executor,
+      mockToolExecutor,
+      makeEmptyWorkflowStore(),
+    );
 
     const result = await intentLayer(ctx, 'покажи завтра');
     expect(result.handled).toBe(true);
@@ -152,7 +174,7 @@ describe('Pipeline Integration', () => {
     const toolExecutor = mock(() => ({ success: true, output: 'handled' }));
     const ctx = makeCtx(1);
 
-    const intentLayer = createIntentMatcherLayer(matcher, intentRepo, executor, toolExecutor, new Map());
+    const intentLayer = createIntentMatcherLayer(matcher, intentRepo, executor, toolExecutor, makeEmptyWorkflowStore());
 
     const secondLayerCalled = { value: false };
     const secondLayer = mock(async () => {
@@ -211,7 +233,7 @@ describe('Pipeline Integration', () => {
       intentRepo,
       executor,
       mock(() => ({ success: true })),
-      new Map(),
+      makeEmptyWorkflowStore(),
     );
 
     // Should fall through gracefully (handled: false)

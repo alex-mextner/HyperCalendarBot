@@ -52,4 +52,10 @@ Rules:
 - Always include the original phrase in the phrases array
 - Most tool calls are universal — they work for both personal and group calendars. The key is setting scope correctly: use scope "personal" for private chats ({{group.is_group}} == false) and scope "group" for group chats. When the original message came from a group, use scope "group"; when from a private chat, use scope "personal". Do NOT create separate intents for personal vs group versions of the same command — use a single intent and rely on the scope field.
 - When scope is "group", the create_event / get_events / list_reminders and other tools automatically operate on the group calendar. Group member notifications are handled internally by the tools — do NOT add separate steps to notify members.
-- Output ONLY valid JSON, no markdown, no explanation`;
+- Output ONLY valid JSON, no markdown, no explanation
+
+SELF-CHECK — verify ALL of these before emitting JSON:
+1. Does the pattern capture a number $N in range 1-12 (could be an hour)? → MUST add an isAmPmAmbiguous($N) check with an ask_user step for AM/PM. No exceptions.
+2. Is the event scheduled relative to today without an explicit day anchor (e.g. "в 15" with no "tomorrow"/"next week")? → MUST add isPastHour($N) check — if past, schedule for tomorrow instead.
+3. Is the event anchored to a day-of-month (e.g. "22-го")? → MUST add isPastDay($N) check — if past, schedule next month instead.
+4. CRITICAL — do NOT replicate what the AI agent did. The AI had conversation context and may have silently guessed AM/PM or assumed a future time. Your job is to build a correct workflow using the rules above, independent of the AI's choices. When in doubt, ask_user.`;
