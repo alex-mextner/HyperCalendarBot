@@ -357,6 +357,7 @@ export function createBot(
         dbUser?: User;
         chatId?: number | bigint;
         send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
       };
 
       const user = ctx.dbUser;
@@ -400,12 +401,21 @@ export function createBot(
         }
       }
 
-      // Wrap ctx.send — logs every bot response (intent matcher, scenes, commands)
+      // Wrap ctx.send and ctx.editText — logs every bot response (intent matcher, scenes, commands, callbacks)
       // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
       const originalSend = ctx.send?.bind(ctx);
       if (originalSend) {
         (ctx as { send: typeof originalSend }).send = async (text, opts) => {
           const result = await originalSend(text, opts);
+          conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
+          return result;
+        };
+      }
+
+      const originalEditText = ctx.editText?.bind(ctx);
+      if (originalEditText) {
+        (ctx as { editText: typeof originalEditText }).editText = async (text, opts) => {
+          const result = await originalEditText(text, opts);
           conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
           return result;
         };
