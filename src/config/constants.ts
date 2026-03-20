@@ -60,6 +60,7 @@ export const CB = {
   TZ_CANCEL: 'tzc',
   TZ_TYPE_CITY: 'tzt',
   TZ_GEO_PICK: 'tzg',
+  SCENE_HELP: 'scene_help',
 } as const;
 
 // i18n messages
@@ -117,6 +118,7 @@ export const MSG = {
     holidays_notify_off: (country: string) => `${country}: notifications OFF`,
     ai_error: 'AI is temporarily unavailable. Use bot commands (/help).',
     ai_clear_history: 'Chat history cleared.',
+    scene_help_btn: '🆘 Ask AI for help',
     notify_menu: '⚙️ Notification Settings',
     notify_morning: '🌅 Morning Agenda',
     notify_morning_status: (enabled: boolean, time: string) => `Morning agenda: ${enabled ? `✅ ${time}` : '❌'}`,
@@ -369,6 +371,7 @@ export const MSG = {
     holidays_notify_off: (country: string) => `${country}: уведомления ВЫКЛ`,
     ai_error: 'ИИ временно недоступен. Используйте команды бота (/help).',
     ai_clear_history: 'История чата очищена.',
+    scene_help_btn: '🆘 Позвать на помощь',
     notify_menu: '⚙️ Настройки уведомлений',
     notify_morning: '🌅 Утренняя повестка',
     notify_morning_status: (enabled: boolean, time: string) => `Утренняя повестка: ${enabled ? `✅ ${time}` : '❌'}`,
