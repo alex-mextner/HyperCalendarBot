@@ -190,30 +190,22 @@ describe('timeline layout', () => {
     expect(html).toContain(`height: ${60 * PX_PER_MIN}px`);
   });
 
-  test('sequential 5-min events: second starts at correct scaled top', () => {
-    // minHour=8; ev1 top=(540-480)*2=120; ev2 top=(545-480)*2=130
+  test('sequential 5-min events: placed in separate columns via visual range overlap', () => {
+    // Visual range of ev1: [540, 555] (5min → expanded to 15min); ev2: [545, 560]
+    // 545 < 555 → visual overlap → separate columns → no vertical stacking
     const html = dailyAgendaTemplate.render(
       makeData({
         eventCount: 2,
         timedEvents: [ev(1, 540, 545), ev(2, 545, 550)],
       }),
     );
-    expect(html).toContain('top:130px'); // ev2 top
-    // ev1 height clamped to gap: (545-540)*2 = 10px ≤ COMPACT_PX → compact class
+    // Both expand to COMPACT_PX and land side-by-side (50% each)
+    expect(html).toContain('height:30px');
+    expect(html).toContain('top:120px'); // ev1
+    expect(html).toContain('top:130px'); // ev2
+    expect(html).toContain('width:calc(50% - 8px)');
+    // Both are compact (height == COMPACT_PX)
     expect(html).toContain('event-block--compact');
-  });
-
-  test('sequential 5-min events: first height ≤ gap to next (no visual overlap)', () => {
-    const html = dailyAgendaTemplate.render(
-      makeData({
-        eventCount: 2,
-        timedEvents: [ev(1, 540, 545), ev(2, 545, 550)],
-      }),
-    );
-    // ev1 height = min(expand=15, gap=5)*2 = 10px (inline style, no spaces)
-    // ev2 top = (545-480)*2 = 130px → ev2 visual top (130) ≥ ev1 top+height (120+10) → no overlap
-    expect(html).toContain('height:10px');
-    expect(html).toContain('top:130px');
   });
 
   test('two overlapping events render side by side (50% width each)', () => {
@@ -234,22 +226,25 @@ describe('timeline layout', () => {
     expect(html).toContain(`width:calc(${100 / MAX_OVERLAP_COLUMNS}% - 8px)`);
   });
 
-  test('five overlapping events: overflow block with title of 5th event', () => {
+  test('five overlapping events: 5th event shown as full card in overflow column (N+2: 1 event)', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 1 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
-    expect(html).toContain('class="event-block event-block--overflow"');
-    expect(html).toContain('overflow-item');
-    // Event 5 is the sole overflow event; its title must appear in the overflow block
+    // 1 overflow event → full event card, NOT a group card
     expect(html).toContain('>Event 5<');
-    // Visible events use MAX_OVERLAP_COLUMNS+1 slots → 20% each
+    expect(html).not.toContain('class="event-block event-block--overflow"');
+    expect(html).not.toContain('<div class="overflow-item">');
+    // All slots use (MAX_OVERLAP_COLUMNS+1) width → 20% each
     expect(html).toContain(`width:calc(${100 / (MAX_OVERLAP_COLUMNS + 1)}% - 8px)`);
   });
 
-  test('six overlapping events: two titles in overflow block', () => {
+  test('six overlapping events: group card without "+more" (N+2: 2 events)', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 2 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    // 2 overflow events → group card showing both titles, no "+N more"
+    expect(html).toContain('class="event-block event-block--overflow"');
     expect(html).toContain('>Event 5<');
     expect(html).toContain('>Event 6<');
+    expect(html).not.toContain('<div class="overflow-more">');
   });
 
   test('overflow block shows "+N more" when titles exceed MAX_OVERFLOW_LABELS', () => {

@@ -67,47 +67,32 @@ export const PX_PER_MIN = 2;
 /** Minimum visual event height in minutes; short events expand to this for readability. */
 export const MIN_EVENT_DURATION_MIN = 15;
 
-/** Max side-by-side columns for overlapping events; beyond this an overflow indicator renders. */
+/** Max side-by-side columns for overlapping events; beyond this an overflow block renders. */
 export const MAX_OVERLAP_COLUMNS = 4;
 
-/** Minimum visual event height in px; CSS min-height ensures blocks are always readable. */
+/** Minimum visual event height in px. CSS min-height guarantees events are always readable. */
 export const COMPACT_PX = MIN_EVENT_DURATION_MIN * PX_PER_MIN;
 
 /** Max event titles shown in the overflow block before "+N more" is appended. */
 export const MAX_OVERFLOW_LABELS = 3;
 
+// ── px ↔ minutes conversions ───────────────────────────────────────────────
+
+export function minutesToPx(minutes: number): number {
+  return minutes * PX_PER_MIN;
+}
+
+export function pxToMinutes(px: number): number {
+  return px / PX_PER_MIN;
+}
+
 /**
  * Computed rendered height (px) for one event on the daily timeline.
  *
- * Expands short events to MIN_EVENT_DURATION_MIN for readability, then caps the
- * expansion at the gap to the next sequential event in the same column so that
- * adjacent events never visually overlap. Never shrinks below the actual duration.
+ * Expands short events to MIN_EVENT_DURATION_MIN for readability.
+ * Visual overlap prevention is handled upstream by column assignment using
+ * visual (min-height expanded) ranges — no gap-clamping needed here.
  */
-export function computeEventHeight(
-  event: TimeRange,
-  eventIdx: number,
-  allEvents: ReadonlyArray<TimeRange>,
-  columns: ReadonlyArray<EventColumn>,
-): number {
-  const durationMin = event.endMinutes - event.startMinutes;
-  const expandedDuration = Math.max(durationMin, MIN_EVENT_DURATION_MIN);
-
-  // Nearest sequential event in the same column (starts at or after this event ends).
-  const myColumn = columns[eventIdx]!.column;
-  let nextSameColStart = Infinity;
-  for (let j = 0; j < allEvents.length; j++) {
-    if (j === eventIdx) continue;
-    if (columns[j]?.column !== myColumn) continue;
-    const other = allEvents[j]!;
-    if (other.startMinutes < event.endMinutes) continue; // time-overlapping → different column
-    if (other.startMinutes < nextSameColStart) nextSameColStart = other.startMinutes;
-  }
-
-  // Gap from THIS event's start to the next event's start limits visual height.
-  // Visual tops are spaced by startMinutes*PX_PER_MIN, so height ≤ gap prevents overlap.
-  const maxDuration = Number.isFinite(nextSameColStart) ? nextSameColStart - event.startMinutes : Infinity;
-  const visualDuration = Number.isFinite(maxDuration) ? Math.min(expandedDuration, maxDuration) : expandedDuration;
-
-  // Never shrink below actual duration (don't misrepresent time).
-  return Math.max(visualDuration, durationMin) * PX_PER_MIN;
+export function computeEventHeight(event: TimeRange): number {
+  return Math.max(event.endMinutes - event.startMinutes, MIN_EVENT_DURATION_MIN) * PX_PER_MIN;
 }

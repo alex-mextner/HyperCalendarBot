@@ -6,6 +6,7 @@ import {
   formatTime,
   MAX_OVERFLOW_LABELS,
   MAX_OVERLAP_COLUMNS,
+  MIN_EVENT_DURATION_MIN,
   PX_PER_MIN,
 } from './helpers.ts';
 import { getLabels, pluralizeEvents } from './labels.ts';
@@ -54,20 +55,44 @@ function renderTimeline(data: DailyAgendaData): string {
       </div>`);
   }
 
-  // Event blocks — collect overflow items while building HTML
-  const cols = computeEventColumns(timedEvents);
-  const overflowItems: Array<{ top: number; endPx: number; title: string }> = [];
+  // Column assignment uses visual ranges (min-height applied) to prevent vertical overlap.
+  // A 5-min event expanded to COMPACT_PX visually occupies MIN_EVENT_DURATION_MIN minutes,
+  // so sequential short events land in separate columns instead of stacking.
+  const visualRanges = timedEvents.map((ev) => ({
+    startMinutes: ev.startMinutes,
+    endMinutes: ev.startMinutes + Math.max(ev.endMinutes - ev.startMinutes, MIN_EVENT_DURATION_MIN),
+  }));
+  const cols = computeEventColumns(visualRanges);
+
+  type OverflowItem = {
+    top: number;
+    endPx: number;
+    height: number;
+    title: string;
+    calendarColor: string;
+    startMinutes: number;
+    endMinutes: number;
+  };
+  const overflowItems: OverflowItem[] = [];
 
   const eventBlocksHtml = timedEvents
     .map((ev, i) => {
       const col = cols[i];
       if (!col) return '';
       const top = (ev.startMinutes - minHour * 60) * PX_PER_MIN;
-      const height = computeEventHeight(ev, i, timedEvents, cols);
+      const height = computeEventHeight(ev);
 
       // Events that exceed the column cap go to the overflow block
       if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS) {
-        overflowItems.push({ top, endPx: top + height, title: ev.title });
+        overflowItems.push({
+          top,
+          endPx: top + height,
+          height,
+          title: ev.title,
+          calendarColor: ev.calendarColor,
+          startMinutes: ev.startMinutes,
+          endMinutes: ev.endMinutes,
+        });
         return '';
       }
 
@@ -93,28 +118,41 @@ function renderTimeline(data: DailyAgendaData): string {
     })
     .join('');
 
-  // Build overflow blocks: merge time-overlapping items, show titles list + "+N more"
+  // Build overflow blocks: merge visually overlapping overflow items.
+  // N+2 rule: 1 event → full card; 2+ events → group card with titles ("+N more" if > MAX_OVERFLOW_LABELS).
   const sortedOverflow = overflowItems.sort((a, b) => a.top - b.top);
-  const overflowBlocks: Array<{ top: number; endPx: number; titles: string[] }> = [];
+  const overflowBlocks: Array<{ top: number; endPx: number; items: OverflowItem[] }> = [];
   for (const item of sortedOverflow) {
     const last = overflowBlocks[overflowBlocks.length - 1];
     if (last && item.top < last.endPx) {
       last.endPx = Math.max(last.endPx, item.endPx);
-      last.titles.push(item.title);
+      last.items.push(item);
     } else {
-      overflowBlocks.push({ top: item.top, endPx: item.endPx, titles: [item.title] });
+      overflowBlocks.push({ top: item.top, endPx: item.endPx, items: [item] });
     }
   }
-  // Overflow column occupies the extra (MAX_OVERLAP_COLUMNS + 1)th slot
+  // Overflow column occupies the extra (MAX_OVERLAP_COLUMNS + 1)th slot — no visual overlap with main columns
   const ovfWidthPct = 100 / (MAX_OVERLAP_COLUMNS + 1);
   const ovfLeftPct = MAX_OVERLAP_COLUMNS * ovfWidthPct;
   const overflowHtml = overflowBlocks
-    .map(({ top, endPx, titles }) => {
+    .map(({ top, endPx, items }) => {
+      if (items.length === 1) {
+        // Single overflow event: render as a full event card in the overflow column
+        const item = items[0]!;
+        const isCompact = item.height <= COMPACT_PX;
+        const bg = `${item.calendarColor}20`;
+        const timeStr = `${formatTime(item.startMinutes)} – ${formatTime(item.endMinutes)}`;
+        return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${item.top}px;height:${item.height}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);background:${bg};border-left:4px solid ${item.calendarColor};color:${item.calendarColor};">
+      <div class="event-block__title">${escapeHtml(item.title)}</div>
+      <div class="event-block__meta">${timeStr}</div>
+    </div>`;
+      }
+      // 2+ events: group card — show titles, append "+N more" if count exceeds MAX_OVERFLOW_LABELS
       const h = Math.max(endPx - top, COMPACT_PX);
       const isCompact = h <= COMPACT_PX;
-      const visible = titles.slice(0, MAX_OVERFLOW_LABELS);
-      const remaining = titles.length - visible.length;
-      const labelsHtml = visible.map((t) => `<div class="overflow-item">${escapeHtml(t)}</div>`).join('');
+      const visible = items.slice(0, MAX_OVERFLOW_LABELS);
+      const remaining = items.length - visible.length;
+      const labelsHtml = visible.map((it) => `<div class="overflow-item">${escapeHtml(it.title)}</div>`).join('');
       const moreHtml = remaining > 0 ? `<div class="overflow-more">+${remaining} more</div>` : '';
       return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);">${labelsHtml}${moreHtml}</div>`;
     })

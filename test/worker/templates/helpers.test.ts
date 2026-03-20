@@ -9,7 +9,9 @@ import {
   MAX_OVERFLOW_LABELS,
   MAX_OVERLAP_COLUMNS,
   MIN_EVENT_DURATION_MIN,
+  minutesToPx,
   PX_PER_MIN,
+  pxToMinutes,
 } from '../../../src/worker/templates/helpers.ts';
 
 describe('escapeHtml', () => {
@@ -105,72 +107,37 @@ describe('layout constants', () => {
   test('MAX_OVERFLOW_LABELS is 3', () => expect(MAX_OVERFLOW_LABELS).toBe(3));
 });
 
+describe('minutesToPx / pxToMinutes', () => {
+  test('minutesToPx: 60 min → 120px', () => expect(minutesToPx(60)).toBe(120));
+  test('minutesToPx: 15 min → 30px (COMPACT_PX)', () => expect(minutesToPx(15)).toBe(COMPACT_PX));
+  test('pxToMinutes: 120px → 60 min', () => expect(pxToMinutes(120)).toBe(60));
+  test('pxToMinutes: 30px → 15 min', () => expect(pxToMinutes(30)).toBe(15));
+  test('round-trip: minutesToPx → pxToMinutes', () => expect(pxToMinutes(minutesToPx(45))).toBe(45));
+});
+
 describe('computeEventHeight', () => {
-  test('single 5-min event expands to MIN_EVENT_DURATION_MIN * PX_PER_MIN', () => {
-    const events = [{ startMinutes: 540, endMinutes: 545 }];
-    const cols = computeEventColumns(events);
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  test('5-min event expands to COMPACT_PX', () => {
+    expect(computeEventHeight({ startMinutes: 540, endMinutes: 545 })).toBe(COMPACT_PX);
   });
 
   test('30-min event uses actual duration', () => {
-    const events = [{ startMinutes: 540, endMinutes: 570 }];
-    const cols = computeEventColumns(events);
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60);
+    expect(computeEventHeight({ startMinutes: 540, endMinutes: 570 })).toBe(60);
   });
 
-  test('sequential 5-min events: first clamped to gap, no visual overlap', () => {
-    const events = [
-      { startMinutes: 540, endMinutes: 545 },
-      { startMinutes: 545, endMinutes: 550 },
-    ];
-    const cols = computeEventColumns(events);
-    // gap = 545-540 = 5min; expanded=15; clamped=min(15,5)=5; max(5,5)*2 = 10
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(10);
-    // last event has no next → expands to MIN * PX = 30
-    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  test('60-min event returns 120px', () => {
+    expect(computeEventHeight({ startMinutes: 540, endMinutes: 600 })).toBe(120);
   });
 
-  test('20-min gap allows full minimum expansion', () => {
-    const events = [
-      { startMinutes: 540, endMinutes: 545 },
-      { startMinutes: 560, endMinutes: 600 },
-    ];
-    const cols = computeEventColumns(events);
-    // gap = 560-540 = 20min; expanded=15; min(15,20)=15; *2 = 30
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  test('event shorter than MIN_EVENT_DURATION_MIN always returns COMPACT_PX', () => {
+    expect(computeEventHeight({ startMinutes: 0, endMinutes: 5 })).toBe(COMPACT_PX);
+    expect(computeEventHeight({ startMinutes: 0, endMinutes: 14 })).toBe(COMPACT_PX);
   });
 
-  test('overlapping events in different columns do not constrain each other', () => {
-    const events = [
-      { startMinutes: 540, endMinutes: 600 }, // col 0
-      { startMinutes: 550, endMinutes: 610 }, // col 1
-    ];
-    const cols = computeEventColumns(events);
-    // no sequential event in same column → full duration
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60 * PX_PER_MIN);
-    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(60 * PX_PER_MIN);
+  test('event exactly MIN_EVENT_DURATION_MIN returns COMPACT_PX', () => {
+    expect(computeEventHeight({ startMinutes: 540, endMinutes: 555 })).toBe(COMPACT_PX);
   });
 
-  test('30-min sequential events use actual height, not clamped', () => {
-    const events = [
-      { startMinutes: 540, endMinutes: 570 },
-      { startMinutes: 570, endMinutes: 600 },
-    ];
-    const cols = computeEventColumns(events);
-    // gap=570-540=30min; expanded=30; min(30,30)=30; max(30,30)*2=60
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60);
-    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(60);
-  });
-
-  test('three sequential 5-min events: first two clamped, last expanded', () => {
-    const events = [
-      { startMinutes: 540, endMinutes: 545 },
-      { startMinutes: 545, endMinutes: 550 },
-      { startMinutes: 550, endMinutes: 555 },
-    ];
-    const cols = computeEventColumns(events);
-    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(10);
-    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(10);
-    expect(computeEventHeight(events[2]!, 2, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  test('event longer than MIN_EVENT_DURATION_MIN uses actual duration', () => {
+    expect(computeEventHeight({ startMinutes: 540, endMinutes: 560 })).toBe(40);
   });
 });
