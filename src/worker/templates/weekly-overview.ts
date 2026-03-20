@@ -99,7 +99,7 @@ function css(data: WeeklyOverviewData): string {
       font-size: 11px;
       line-height: 1.3;
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 3px;
       overflow: hidden;
     }
@@ -108,8 +108,6 @@ function css(data: WeeklyOverviewData): string {
       flex-shrink: 0;
       font-size: 10px;
       opacity: 0.8;
-      /* aligns time badge to the first text baseline of the clamped title */
-      padding-top: 1px;
     }
     .event-pill__title {
       overflow: hidden;

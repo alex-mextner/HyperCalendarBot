@@ -98,7 +98,7 @@ function css(data: MonthlyCalendarData): string {
       font-size: 10px;
       line-height: 1.3;
       display: flex;
-      align-items: baseline;
+      align-items: center;
       gap: 2px;
       overflow: hidden;
     }
@@ -109,9 +109,10 @@ function css(data: MonthlyCalendarData): string {
       opacity: 0.8;
     }
     .ev-title {
-      white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
       font-weight: 500;
     }
     .ev-overflow {
