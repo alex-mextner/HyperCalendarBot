@@ -123,6 +123,13 @@ export class CalendarBotAgent {
     });
     await writer.init();
 
+    // Stream macOS agent chunks into the same writer so they appear live
+    // and land in the collapsed blockquote after commitIntermediate()
+    ctx.onAgentChunk = (text: string) => {
+      writer.appendText(text);
+      writer.flush(false).catch(() => {});
+    };
+
     this.saveUserMessage(ctx);
 
     const startTime = Date.now();
