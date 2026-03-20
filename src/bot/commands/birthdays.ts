@@ -58,7 +58,7 @@ export async function handleBirthdays(
     groupCalendars = group ? [{ groupId, title: group.title ?? String(groupId) }] : [];
   }
 
-  const { personal, groups } = birthdayService.getBirthdaysForDisplay(user.telegram_id, lang, groupCalendars);
+  const { personal, groups } = birthdayService.getBirthdaysForDisplay(user.telegram_id, groupCalendars);
 
   if (personal.length === 0 && groups.every((g) => g.items.length === 0)) {
     await ctx.send(lang === 'ru' ? 'Дней рождения пока нет 🎂' : 'No birthdays yet 🎂');

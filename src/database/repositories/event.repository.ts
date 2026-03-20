@@ -538,8 +538,12 @@ export class EventRepository {
       params.push(`%${this.escapeLike(query)}%`);
     }
     if (eventType) {
-      conditions.push('event_type = ?');
-      params.push(eventType);
+      if (eventType === 'regular') {
+        conditions.push('event_type IS NULL');
+      } else {
+        conditions.push('event_type = ?');
+        params.push(eventType);
+      }
     }
 
     return this.db

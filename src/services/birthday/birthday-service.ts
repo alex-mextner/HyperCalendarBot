@@ -94,13 +94,15 @@ export class BirthdayService {
       : null;
 
     let eventId: number;
+    let remindersNeedUpdate = !existing;
+
     if (existing) {
       const existingMonth = new Date(existing.start_at).getUTCMonth() + 1;
       const existingDay = new Date(existing.start_at).getUTCDate();
       if (existingMonth !== params.month || existingDay !== params.day) {
         this.eventRepo.update(existing.event_id, params.ownerId, { start_at: startAt });
-        this.reminderRepo.deleteForEvent(existing.event_id);
         birthdayLogger.info({ eventId: existing.event_id }, 'Birthday date updated');
+        remindersNeedUpdate = true;
       }
       eventId = existing.event_id;
     } else {
@@ -125,8 +127,10 @@ export class BirthdayService {
       auto_created: params.autoCreated ? 1 : 0,
     });
 
-    this.reminderRepo.deleteForEvent(eventId);
-    this.createBirthdayReminders(eventId, params.ownerId, startDateStr, params.timezone);
+    if (remindersNeedUpdate) {
+      this.reminderRepo.deleteForEvent(eventId);
+      this.createBirthdayReminders(eventId, params.ownerId, startDateStr, params.timezone);
+    }
   }
 
   private createBirthdayReminders(eventId: number, userId: number, startDateStr: string, timezone: string): void {
@@ -255,11 +259,7 @@ export class BirthdayService {
     }
   }
 
-  getBirthdaysForDisplay(
-    userId: number,
-    _lang: 'en' | 'ru',
-    groupCalendars: { groupId: number; title: string }[],
-  ): BirthdaysForDisplay {
+  getBirthdaysForDisplay(userId: number, groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {
     const personalEvents = this.eventRepo.getBirthdays(userId);
     const personalCelebrantIds = new Set<number>();
 

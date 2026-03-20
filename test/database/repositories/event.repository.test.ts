@@ -551,4 +551,25 @@ describe('EventRepository', () => {
       expect(events.findByIdInGroup(event.id, GROUP_ID)).not.toBeNull();
     });
   });
+
+  test('searchWithEventType with event_type=regular returns non-birthday events', () => {
+    events.create({
+      user_id: USER_ID,
+      title: 'Meeting',
+      start_at: '2026-05-11T00:00:00Z',
+      all_day: false,
+      timezone: 'UTC',
+    });
+    events.create({
+      user_id: USER_ID,
+      title: 'Д/р Ivan',
+      start_at: '2026-05-10T00:00:00Z',
+      all_day: true,
+      timezone: 'UTC',
+      event_type: 'birthday',
+    });
+    const results = events.searchWithEventType(USER_ID, null, 'regular');
+    expect(results.length).toBe(1);
+    expect(results[0]!.title).toBe('Meeting');
+  });
 });

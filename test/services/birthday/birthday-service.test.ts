@@ -101,6 +101,37 @@ test('findExistingBirthday returns existing personal calendar entry', () => {
   expect(result!.celebrant_id).toBe(42);
 });
 
+test('upsertBirthdayEvent same-date call does not recreate reminders', () => {
+  service.upsertBirthdayEvent({
+    ownerId: 1,
+    celebrantId: 42,
+    celebrantName: 'Иван',
+    day: 10,
+    month: 5,
+    year: null,
+    lang: 'ru',
+    timezone: 'UTC',
+    autoCreated: false,
+  });
+  const remindersAfterFirst = db.prepare('SELECT * FROM event_reminders').all().length;
+
+  // Call again with same date — should be a no-op for reminders
+  service.upsertBirthdayEvent({
+    ownerId: 1,
+    celebrantId: 42,
+    celebrantName: 'Иван',
+    day: 10,
+    month: 5,
+    year: null,
+    lang: 'ru',
+    timezone: 'UTC',
+    autoCreated: false,
+  });
+  const remindersAfterSecond = db.prepare('SELECT * FROM event_reminders').all().length;
+
+  expect(remindersAfterFirst).toBe(remindersAfterSecond);
+});
+
 test('getBirthdaysForDisplay returns personal entries sorted by next occurrence', () => {
   service.upsertBirthdayEvent({
     ownerId: 1,
@@ -113,7 +144,7 @@ test('getBirthdaysForDisplay returns personal entries sorted by next occurrence'
     timezone: 'UTC',
     autoCreated: false,
   });
-  const { personal } = service.getBirthdaysForDisplay(1, 'ru', []);
+  const { personal } = service.getBirthdaysForDisplay(1, []);
   expect(personal.length).toBe(1);
   expect(personal[0]!.event.title).toBe('Д/р Иван');
 });
