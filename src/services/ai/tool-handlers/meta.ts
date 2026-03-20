@@ -62,6 +62,105 @@ export function validateAndGetOffset(timezone: string, dt: Date): { offsetStr: s
   return { offsetStr, offsetMinutes };
 }
 
+function resolveSingle(
+  timezone: string,
+  dt: Date,
+): { offsetStr: string; offsetMinutes: number; dstActive: boolean; localTime: string } {
+  const { offsetStr, offsetMinutes } = validateAndGetOffset(timezone, dt); // throws if invalid
+  const year = dt.getFullYear();
+  const janOffset = _getOffsetMinutes(timezone, new Date(Date.UTC(year, 0, 15)));
+  const julOffset = _getOffsetMinutes(timezone, new Date(Date.UTC(year, 6, 15)));
+  const dstActive = janOffset !== julOffset && offsetMinutes === Math.max(janOffset, julOffset);
+  const localMs = dt.getTime() + offsetMinutes * 60_000;
+  const local = new Date(localMs);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const localTime =
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}${offsetStr}`;
+  return { offsetStr, offsetMinutes, dstActive, localTime };
+}
+
+function invalidTimezoneError(tz: string): ToolResult {
+  const suggestions = getTimezoneSuggestions(tz);
+  const hint = suggestions.length > 0 ? `\nLargest cities in this region: ${suggestions.join(', ')}` : '';
+  if (!tz.includes('/')) {
+    return { success: false, error: `Invalid timezone "${tz}". Use IANA format, e.g. "America/New_York".${hint}` };
+  }
+  return { success: false, error: `Invalid timezone "${tz}". Check the region name.${hint}` };
+}
+
+export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?: string }): ToolResult {
+  const dt = input.at ? new Date(input.at) : new Date();
+  if (Number.isNaN(dt.getTime())) {
+    return { success: false, error: `Invalid datetime: ${input.at}` };
+  }
+
+  // Single timezone
+  if (typeof input.timezone === 'string') {
+    try {
+      const { offsetStr, offsetMinutes, dstActive, localTime } = resolveSingle(input.timezone, dt);
+      return {
+        success: true,
+        output: JSON.stringify({
+          timezone: input.timezone,
+          utc_offset: offsetStr,
+          utc_offset_minutes: offsetMinutes,
+          dst_active: dstActive,
+          local_time: localTime,
+        }),
+      };
+    } catch {
+      return invalidTimezoneError(input.timezone);
+    }
+  }
+
+  // Array of timezones
+  const entries: Array<{
+    timezone: string;
+    utc_offset: string;
+    utc_offset_minutes: number;
+    dst_active: boolean;
+    local_time: string;
+  }> = [];
+  for (const tz of input.timezone) {
+    try {
+      const { offsetStr, offsetMinutes, dstActive, localTime } = resolveSingle(tz, dt);
+      entries.push({
+        timezone: tz,
+        utc_offset: offsetStr,
+        utc_offset_minutes: offsetMinutes,
+        dst_active: dstActive,
+        local_time: localTime,
+      });
+    } catch {
+      return invalidTimezoneError(tz);
+    }
+  }
+
+  // Sort west→east by offset
+  entries.sort((a, b) => a.utc_offset_minutes - b.utc_offset_minutes);
+
+  const minOffset = entries[0]!.utc_offset_minutes;
+  const maxOffset = entries[entries.length - 1]!.utc_offset_minutes;
+  const diffMinutes = maxOffset - minOffset;
+  const diffHours = Math.round((diffMinutes / 60) * 10) / 10;
+
+  const mostWest = entries[0]!.timezone;
+  const mostEast = entries[entries.length - 1]!.timezone;
+  const isTwo = entries.length === 2;
+  const ahead = isTwo
+    ? `${mostEast} is ${diffHours}h ahead of ${mostWest}`
+    : `Ranked west→east: ${entries.map((e) => `${e.timezone} (${e.utc_offset})`).join(', ')}. ${mostEast} is furthest ahead.`;
+
+  const result: Record<string, unknown> = { timezones: entries, ahead };
+  if (isTwo) {
+    result.difference_minutes = diffMinutes;
+    result.difference_hours = diffHours;
+  }
+
+  return { success: true, output: JSON.stringify(result) };
+}
+
 export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): ToolResult {
   const holidays = ctx.holidayService.getUpcomingHolidays(ctx.user.telegram_id, input.limit ?? 10);
 

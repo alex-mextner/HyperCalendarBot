@@ -18,6 +18,7 @@ import {
   handleGetBotInfo,
   handleGetContacts,
   handleGetHolidays,
+  handleGetTimezoneInfo,
   handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
@@ -602,5 +603,92 @@ describe('getTimezoneSuggestions', () => {
   test('format includes timezone and city name', () => {
     const suggestions = getTimezoneSuggestions('America/Blah');
     expect(suggestions[0]).toMatch(/^[\w/]+ \(.+\)$/);
+  });
+});
+
+describe('handleGetTimezoneInfo', () => {
+  // --- single timezone ---
+  test('returns correct info for valid IANA timezone', () => {
+    const result = handleGetTimezoneInfo({ timezone: 'Europe/London' });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.timezone).toBe('Europe/London');
+    expect(data.utc_offset).toMatch(/^[+-]\d{2}:\d{2}$/);
+    expect(typeof data.dst_active).toBe('boolean');
+    expect(data.local_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  test('accepts at parameter and returns offset at that time', () => {
+    // New York in January is UTC-5 (EST, no DST)
+    const result = handleGetTimezoneInfo({ timezone: 'America/New_York', at: '2026-01-15T12:00:00Z' });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.utc_offset).toBe('-05:00');
+    expect(data.dst_active).toBe(false);
+  });
+
+  test('detects DST active in summer', () => {
+    // New York in July is UTC-4 (EDT, DST active)
+    const result = handleGetTimezoneInfo({ timezone: 'America/New_York', at: '2026-07-15T12:00:00Z' });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.utc_offset).toBe('-04:00');
+    expect(data.dst_active).toBe(true);
+  });
+
+  test('returns error and suggestions for invalid timezone', () => {
+    const result = handleGetTimezoneInfo({ timezone: 'America/Blah' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid timezone');
+    expect(result.error).toContain('America/');
+  });
+
+  test('returns format error when no slash', () => {
+    const result = handleGetTimezoneInfo({ timezone: 'Moscow' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('IANA');
+  });
+
+  test('returns error for invalid at datetime', () => {
+    const result = handleGetTimezoneInfo({ timezone: 'Europe/London', at: 'not-a-date' });
+    expect(result.success).toBe(false);
+  });
+
+  // --- array of timezones ---
+  test('compares two timezones and shows which is ahead', () => {
+    const result = handleGetTimezoneInfo({
+      timezone: ['Europe/Moscow', 'America/New_York'],
+      at: '2026-01-15T12:00:00Z', // winter: Moscow +03:00, NY -05:00
+    });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.timezones).toHaveLength(2);
+    expect(data.difference_minutes).toBe(480);
+    expect(data.difference_hours).toBe(8);
+    expect(data.ahead).toContain('Europe/Moscow');
+    expect(data.ahead).toContain('ahead');
+  });
+
+  test('array: ranks N timezones west to east, no difference fields', () => {
+    const result = handleGetTimezoneInfo({
+      timezone: ['Asia/Tokyo', 'America/New_York', 'Europe/London'],
+      at: '2026-01-15T12:00:00Z',
+    });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.timezones).toHaveLength(3);
+    // ranked west→east: NY (-05:00), London (+00:00), Tokyo (+09:00)
+    expect(data.ahead).toContain('Asia/Tokyo');
+    expect(data.timezones[0].timezone).toBe('America/New_York');
+    expect(data.timezones[2].timezone).toBe('Asia/Tokyo');
+    // no difference fields for N>2
+    expect(data.difference_minutes).toBeUndefined();
+    expect(data.difference_hours).toBeUndefined();
+  });
+
+  test('array: returns error if any timezone is invalid', () => {
+    const result = handleGetTimezoneInfo({ timezone: ['Europe/Moscow', 'America/Blah'] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('America/Blah');
   });
 });
