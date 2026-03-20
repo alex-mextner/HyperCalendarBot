@@ -4,6 +4,7 @@ import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
+import type { ScenePauseService } from '../../services/scene-pause.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { AgentContextBuilder } from '../agent-context-factory.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -13,6 +14,7 @@ export interface AgentLayerDeps {
   agent: CalendarBotAgent;
   agentContextBuilder: AgentContextBuilder;
   intentLearner?: IntentLearner;
+  scenePauseService?: ScenePauseService;
 }
 
 export function createAiAgentLayer(deps: AgentLayerDeps) {
@@ -29,6 +31,14 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     if (extra?.feedbackContext) {
       agentContext.feedbackContext = extra.feedbackContext;
+    }
+
+    if (deps.scenePauseService) {
+      const pauseState = await deps.scenePauseService.get(user.telegram_id);
+      if (pauseState) {
+        agentContext.scenePauseState = pauseState;
+        agentContext.scenePauseService = deps.scenePauseService;
+      }
     }
 
     cmdLogger.info({ userId: user.telegram_id, messageText }, 'Routing to AI agent');
