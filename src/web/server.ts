@@ -16,17 +16,18 @@ interface OAuthStateLookup {
   del(stateId: string): Promise<void>;
 }
 
-interface WebServerDeps {
+export interface WebServerDeps {
   config: EnvConfig;
-  oauthService: GoogleOAuthService;
   userRepo: UserRepository;
-  syncRepo: GoogleSyncRepository;
-  calendarRepo: GoogleCalendarRepository;
-  stateLookup: OAuthStateLookup;
-  onConnected?: (userId: number) => Promise<void>;
-  onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
+  // Google Calendar — only populated when GOOGLE_CLIENT_ID is configured
+  oauthService?: GoogleOAuthService;
+  syncRepo?: GoogleSyncRepository;
+  calendarRepo?: GoogleCalendarRepository;
+  stateLookup?: OAuthStateLookup;
+  onConnected?: (userId: number) => Promise<void>;
+  onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
 }
 
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
@@ -55,10 +56,25 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
       }
 
       if (req.method === 'GET' && url.pathname === '/oauth/google/callback') {
-        return handleOAuthCallback(req, deps);
+        if (!deps.oauthService || !deps.syncRepo || !deps.calendarRepo || !deps.stateLookup) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return handleOAuthCallback(req, {
+          config: deps.config,
+          oauthService: deps.oauthService,
+          userRepo: deps.userRepo,
+          syncRepo: deps.syncRepo,
+          calendarRepo: deps.calendarRepo,
+          stateLookup: deps.stateLookup,
+          onConnected: deps.onConnected,
+        });
       }
 
       if (req.method === 'POST' && url.pathname === '/webhooks/google-calendar') {
+        if (!deps.calendarRepo) {
+          return new Response('Not Found', { status: 404 });
+        }
+
         const channelId = req.headers.get('x-goog-channel-id');
         const resourceId = req.headers.get('x-goog-resource-id');
         const resourceState = req.headers.get('x-goog-resource-state');
