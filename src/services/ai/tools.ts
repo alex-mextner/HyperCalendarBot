@@ -894,6 +894,63 @@ During a voice call the table is still sent to chat; you MUST mention it verball
     },
   },
   {
+    name: 'get_timezone_info',
+    description:
+      'Get accurate UTC offset, DST status, and local time for one or more IANA timezones. ' +
+      'ALWAYS use this tool — never guess offsets from memory. Training data about timezones is stale: ' +
+      'countries change DST rules, cancel DST, or shift permanently. ' +
+      'Pass `at` when scheduling a future event — the offset may differ from today due to DST transitions. ' +
+      'Example: scheduling a New York meeting in July while it is currently March — ' +
+      'the offset changes from -05:00 (winter) to -04:00 (summer). Without `at` you get the wrong offset. ' +
+      'Pass an ARRAY of timezones to compare them: the response includes each offset, which is ahead, ' +
+      'and (for exactly 2) the difference in hours — all pre-computed, no extra calculate call needed.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        timezone: {
+          oneOf: [
+            { type: 'string', description: 'Single IANA timezone (e.g. "America/New_York")' },
+            {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of IANA timezones to compare (e.g. ["Europe/Moscow", "America/New_York"])',
+            },
+          ],
+          description: 'IANA timezone name(s). Use array to compare multiple zones in one call.',
+        },
+        at: {
+          type: 'string',
+          description:
+            'ISO 8601 datetime to check offset at (default: now). ' +
+            'IMPORTANT: always pass the event datetime here when scheduling — DST may differ from today.',
+        },
+      },
+      required: ['timezone'],
+    },
+  },
+  {
+    name: 'convert_to_timezone',
+    description:
+      'Convert a UTC (or offset-aware) datetime to local time in any IANA timezone. ' +
+      'DST is applied automatically based on the exact datetime. ' +
+      'Use when the user gives a time in their timezone and you need the UTC equivalent, ' +
+      'or when showing a foreign time in local terms.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        datetime: {
+          type: 'string',
+          description: 'ISO 8601 datetime — UTC (e.g. "2026-07-15T14:00:00Z") or with offset',
+        },
+        timezone: {
+          type: 'string',
+          description: 'IANA timezone name (e.g. "America/New_York")',
+        },
+      },
+      required: ['datetime', 'timezone'],
+    },
+  },
+  {
     name: 'get_history',
     description:
       'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
