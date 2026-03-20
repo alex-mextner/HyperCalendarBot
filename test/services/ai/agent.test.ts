@@ -65,8 +65,10 @@ describe('CalendarBotAgent', () => {
   });
 
   test('buildMessages includes system prompt and user message', () => {
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves before pipeline
+    const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
-    const { systemPrompt, messages } = agent.buildMessages(ctx, []);
+    const { systemPrompt, messages } = agent.buildMessages(ctx, history);
     expect(systemPrompt).toContain('calendar assistant');
     expect(messages.length).toBe(1);
     expect(messages[0]!.role).toBe('user');
@@ -76,14 +78,13 @@ describe('CalendarBotAgent', () => {
   test('buildMessages includes chat history', () => {
     ctx.chatHistory.save(USER_ID, 'user', 'Previous question');
     ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Previous answer' }]));
-
-    const agent = new CalendarBotAgent(config, sender);
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // current msg saved by middleware
     const history = ctx.chatHistory.getRecent(USER_ID);
+    const agent = new CalendarBotAgent(config, sender);
     const { messages } = agent.buildMessages(ctx, history);
-    // 2 history + 1 current
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('Previous question');
-    expect(messages[2]!.content as string).toContain('What do I have today?');
+    expect(messages[2]!.content as string).toContain(ctx.messageText);
   });
 
   test('buildMessages prefixes user text messages with UTC timestamp', () => {
@@ -96,11 +97,13 @@ describe('CalendarBotAgent', () => {
     expect(messages[0]!.content as string).toContain('Hello');
   });
 
-  test('buildMessages prefixes current message with UTC timestamp', () => {
+  test('buildMessages prefixes user messages with UTC timestamp', () => {
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves it
+    const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
-    const { messages } = agent.buildMessages(ctx, []);
+    const { messages } = agent.buildMessages(ctx, history);
     expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
-    expect(messages[0]!.content as string).toContain('What do I have today?');
+    expect(messages[0]!.content as string).toContain(ctx.messageText);
   });
 
   test('buildMessages formats button activity event as readable text', () => {
@@ -155,16 +158,6 @@ describe('CalendarBotAgent', () => {
     expect(messages[0]!.role).toBe('user');
   });
 
-  test('saveUserMessage saves user text to chat history', () => {
-    const agent = new CalendarBotAgent(config, sender);
-    agent.saveUserMessage(ctx);
-
-    const history = ctx.chatHistory.getRecent(USER_ID);
-    expect(history.length).toBe(1);
-    expect(history[0]!.role).toBe('user');
-    expect(history[0]!.content).toBe('What do I have today?');
-  });
-
   test('saveAssistantTurn saves content blocks as JSON', () => {
     const agent = new CalendarBotAgent(config, sender);
     const blocks = [{ type: 'text' as const, text: 'Here are your events...' }];
@@ -185,5 +178,31 @@ describe('CalendarBotAgent', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('tool');
+  });
+
+  // Test limit=30 — must use group context because buildMessages calls getRecentByChat directly for groups
+  test('buildMessages fetches 30 entries for group chats', () => {
+    const calls: { chatId: number; limit: number }[] = [];
+    const mockChatHistory = {
+      ...ctx.chatHistory,
+      getRecentByChat: (chatId: number, limit: number) => { calls.push({ chatId, limit }); return []; },
+    } as never;
+    const groupCtx: AgentContext = { ...ctx, isGroup: true, groupChatId: 456, chatHistory: mockChatHistory };
+
+    const agent = new CalendarBotAgent(config, sender);
+    agent.buildMessages(groupCtx, []);
+    expect(calls[0]).toMatchObject({ chatId: 456, limit: 30 });
+  });
+
+  // Confirm no duplicate: current message in history once, not twice
+  test('buildMessages does not re-append current message already in history', () => {
+    // Simulate middleware having saved the current message before pipeline ran
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const agent = new CalendarBotAgent(config, sender);
+    const { messages } = agent.buildMessages(ctx, history);
+    const userMessages = messages.filter(m => m.role === 'user');
+    expect(userMessages).toHaveLength(1);
+    expect(userMessages[0]!.content as string).toContain(ctx.messageText);
   });
 });

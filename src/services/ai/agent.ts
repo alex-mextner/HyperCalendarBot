@@ -62,7 +62,7 @@ export class CalendarBotAgent {
     const systemPrompt = buildSystemPrompt(ctx);
 
     const relevantHistory =
-      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 10) : history;
+      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
 
     const messages: MessageParam[] = [];
 
@@ -84,29 +84,21 @@ export class CalendarBotAgent {
       messages.push({ role, content } as MessageParam);
     }
 
-    const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
-
     return { systemPrompt, messages };
-  }
-
-  saveUserMessage(ctx: AgentContext): void {
-    const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText, chatId);
   }
 
   saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'assistant', JSON.stringify(contentBlocks), chatId);
+    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, contentBlocks, chatId);
   }
 
   saveToolResults(ctx: AgentContext, toolResults: Anthropic.ToolResultBlockParam[]): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults), chatId);
+    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toolResults, chatId);
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
-    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
+    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
     ctx.sender = this.sender;
@@ -114,8 +106,6 @@ export class CalendarBotAgent {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
     });
     await writer.init();
-
-    this.saveUserMessage(ctx);
 
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];

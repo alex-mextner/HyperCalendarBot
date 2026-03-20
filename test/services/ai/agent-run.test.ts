@@ -9,6 +9,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 
@@ -77,6 +78,7 @@ describe('CalendarBotAgent.run()', () => {
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
+      conversationLogger: new ConversationLogger(chatHistoryRepo),
       userRepo,
       reminderRepo,
     };
@@ -105,6 +107,9 @@ describe('CalendarBotAgent.run()', () => {
     const agent = new CalendarBotAgent(config, sender);
     // Replace the internal client with our mock
     (agent as unknown as { client: unknown }).client = mockClient;
+
+    // Middleware saves user message before pipeline runs
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
 
     await agent.run(ctx);
 
@@ -176,6 +181,9 @@ describe('CalendarBotAgent.run()', () => {
     const agent = new CalendarBotAgent(config, sender);
     (agent as unknown as { client: unknown }).client = mockClient;
 
+    // Middleware saves user message before pipeline runs
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
     await agent.run(ctx);
 
     // Should have called stream twice (tool round + final text round)
@@ -202,6 +210,9 @@ describe('CalendarBotAgent.run()', () => {
     const agent = new CalendarBotAgent(config, sender);
     (agent as unknown as { client: unknown }).client = mockClient;
 
+    // Middleware saves user message before pipeline runs
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
     await agent.run(ctx);
 
     // Should not throw, should finalize gracefully
@@ -209,7 +220,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(sender.sendMessage).toHaveBeenCalledTimes(1);
     expect(sender.editMessageText).toHaveBeenCalled();
 
-    // User message should still be saved
+    // User message should still be saved (saved by middleware before run())
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('user');
@@ -314,9 +325,10 @@ describe('CalendarBotAgent.run()', () => {
     const GROUP_CHAT_ID = -1001234;
     // Save some per-user history (should be ignored in group)
     ctx.chatHistory.save(USER_ID, 'user', 'personal message');
-    // Save per-chat history
+    // Save per-chat history including current message (simulating middleware)
     ctx.chatHistory.save(USER_ID, 'user', 'group message', GROUP_CHAT_ID);
     ctx.chatHistory.save(USER_ID, 'assistant', 'group reply', GROUP_CHAT_ID);
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
 
     ctx.isGroup = true;
     ctx.groupChatId = GROUP_CHAT_ID;
@@ -326,7 +338,7 @@ describe('CalendarBotAgent.run()', () => {
     const personalHistory = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, personalHistory);
 
-    // Should have 2 group history + 1 current message = 3
+    // Should have 3 group history entries (group message + reply + current)
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('group message');
     expect(messages[1]!.content as string).toContain('group reply');
@@ -426,18 +438,20 @@ describe('CalendarBotAgent.run()', () => {
     expect(onBotResponse).not.toHaveBeenCalled();
   });
 
-  test('saveUserMessage includes chatId in group context', () => {
+  test('logAiTurn via ConversationLogger saves content blocks with chatId in group context', () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.isGroup = true;
     ctx.groupChatId = GROUP_CHAT_ID;
 
     const agent = new CalendarBotAgent(config, sender);
-    agent.saveUserMessage(ctx);
+    const blocks = [{ type: 'text' as const, text: 'Group response' }];
+    agent.saveAssistantTurn(ctx, blocks);
 
     const chatHistory = ctx.chatHistory.getRecentByChat(GROUP_CHAT_ID, 10);
     expect(chatHistory.length).toBe(1);
-    expect(chatHistory[0]!.role).toBe('user');
-    expect(chatHistory[0]!.content).toBe('Show my events today');
+    expect(chatHistory[0]!.role).toBe('assistant');
+    const parsed = JSON.parse(chatHistory[0]!.content);
+    expect(parsed[0].text).toBe('Group response');
   });
 
   test('voice_message mode returns plain text without execution log HTML', async () => {
