@@ -23,6 +23,7 @@ import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
+import { ScenePauseService } from '../services/scene-pause.ts';
 import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
 import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
@@ -160,6 +161,13 @@ export function createBot(
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
+  const scenePauseService = new ScenePauseService(
+    scenesSetup.storage as unknown as {
+      get(key: string): Promise<unknown>;
+      set(key: string, value: unknown): Promise<void>;
+      delete(key: string): Promise<void>;
+    },
+  );
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
@@ -320,6 +328,7 @@ export function createBot(
         reply_markup: keyboard,
       });
     },
+    scenePauseService,
   };
 
   bot
@@ -656,6 +665,13 @@ export function createBot(
         db.contacts,
         scenesSetup.scenes.timezoneScene,
         db.groupChats,
+        {
+          sceneStorage: scenesSetup.storage as {
+            get(key: string): Promise<unknown>;
+            delete(key: string): unknown;
+          },
+          scenePauseService,
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
