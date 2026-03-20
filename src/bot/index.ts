@@ -196,7 +196,7 @@ export function createBot(
       ? new IntentLearner(intentRepo, {
           apiKey: aiConfig.apiKey,
           baseUrl: aiConfig.baseUrl,
-          model: 'claude-haiku-4-5-20251001',
+          model: aiConfig.model,
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
           sendToAdmin: (text, replyMarkup) =>
@@ -284,6 +284,7 @@ export function createBot(
     botAdminId,
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,
+    aiModel: aiConfig.model,
     sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
     proposeTimeSessions,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
