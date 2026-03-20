@@ -543,6 +543,9 @@ export function createBot(
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },
+          sendPhoto: async (chatId: number, photo: File) => {
+            await bot.api.sendPhoto({ chat_id: chatId, photo });
+          },
         },
         scenesSetup.scenes.onboardingScene,
         undefined,

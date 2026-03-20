@@ -26,8 +26,10 @@ import { formatDayAgenda, formatEventDetail } from '../../services/event/formatt
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
+import { renderConflictImage } from '../../services/image/render-conflict.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
+import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -85,6 +87,7 @@ export function createCallbackHandler(
       options: { parse_mode: string; reply_markup?: unknown },
     ) => Promise<void>;
     editMessage?: (chatId: number, messageId: number, text: string, markup?: unknown) => Promise<void>;
+    sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   onboardingScene?: AnyScene,
   editProposalDeps?: {
@@ -607,6 +610,7 @@ export function createCallbackHandler(
               user,
               invitationNotifyDeps,
               eventRepo,
+              renderService,
             ).catch(() => {});
           }
 
@@ -1400,8 +1404,10 @@ async function notifyInviter(
   deps: {
     userRepo: UserRepository;
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   eventRepo?: EventRepository,
+  renderService?: RenderService,
 ): Promise<void> {
   const inviter = deps.userRepo.findByTelegramId(invitation.inviter_id);
   if (!inviter) return;
@@ -1421,4 +1427,45 @@ async function notifyInviter(
         : msgs.invitation_response_maybe(respondentName, eventTitle);
 
   await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML' });
+  if (action === 'accept' && renderService && deps.sendPhoto && event && event.start_at && event.end_at) {
+    const sendPhoto = deps.sendPhoto;
+    const twoHoursMs = 2 * 60 * 60 * 1000;
+    const windowStart = new Date(new Date(event.start_at).getTime() - twoHoursMs).toISOString();
+    const windowEnd = new Date(new Date(event.end_at).getTime() + twoHoursMs).toISOString();
+    const organizerRawEvents = eventRepo
+      ? eventRepo.findVisibleOverlapping(invitation.inviter_id, windowStart, windowEnd)
+      : [];
+    const inviteeConflicts = eventRepo
+      ? new ConflictService(eventRepo, deps.userRepo).checkConflicts(
+          invitation.inviter_id,
+          [respondent.telegram_id],
+          event.start_at,
+          event.end_at,
+          inviter.timezone ?? 'UTC',
+        )
+      : [];
+    const organizerLabel = inviter.first_name ?? inviter.username ?? `#${invitation.inviter_id}`;
+    const locale = (inviterLang === 'ru' ? 'ru' : 'en') as 'ru' | 'en';
+    renderConflictImage(
+      renderService,
+      invitation.inviter_id,
+      organizerLabel,
+      organizerRawEvents.map((e) => ({
+        startAt: e.start_at,
+        endAt: e.end_at ?? new Date(new Date(e.start_at).getTime() + 30 * 60 * 1000).toISOString(),
+        title: e.title ?? '',
+      })),
+      inviteeConflicts,
+      event.start_at,
+      event.end_at,
+      locale,
+    )
+      .then((buffer) => {
+        const photo = new File([buffer], 'conflict.png', { type: 'image/png' });
+        return sendPhoto(invitation.inviter_id, photo);
+      })
+      .catch((err) => {
+        cmdLogger.error({ err }, 'Failed to render/send conflict image');
+      });
+  }
 }
