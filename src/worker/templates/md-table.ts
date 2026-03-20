@@ -6,7 +6,6 @@ import type { MdTableData, TemplateRenderer } from './types.ts';
 function css(theme: MdTableData['theme']): string {
   return `
     ${sharedCSS({ bg: theme.bg, textPrimary: theme.textPrimary })}
-    #__root { padding: 48px; }
     .tbl-title {
       font-size: 28px;
       font-weight: 700;
