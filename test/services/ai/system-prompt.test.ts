@@ -264,4 +264,31 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Never use markdown tables');
   });
+
+  test('does not include scene section when scenePauseState is absent', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('## Scene Paused');
+  });
+
+  test('includes scene section when scenePauseState is set', () => {
+    ctx.scenePauseState = { sceneName: 'add_event', step: 1, sceneState: { title: 'Team meeting' } };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Scene Paused');
+    expect(prompt).toContain('add_event');
+    expect(prompt).toContain('step 1');
+    expect(prompt).toContain('Team meeting');
+  });
+
+  test('scene section mentions resume_scene and cancel_scene tools', () => {
+    ctx.scenePauseState = { sceneName: 'edit_value', step: 0, sceneState: {} };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('resume_scene');
+    expect(prompt).toContain('cancel_scene');
+  });
+
+  test('scene section shows "(none yet)" when sceneState is empty', () => {
+    ctx.scenePauseState = { sceneName: 'add_event', step: 0, sceneState: {} };
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('(none yet)');
+  });
 });
