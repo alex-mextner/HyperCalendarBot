@@ -6,7 +6,13 @@ import { CB, t } from '../../config/constants.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
-import { eventActionsKeyboard, recurrenceEndKeyboard, recurrenceKeyboard, skipKeyboard } from '../keyboards.ts';
+import {
+  eventActionsKeyboard,
+  recurrenceEndKeyboard,
+  recurrenceKeyboard,
+  sceneHelpKeyboard,
+  skipKeyboard,
+} from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface AddEventState {
@@ -74,6 +80,7 @@ export function createAddEventScene(eventService: EventService) {
             lang === 'ru'
               ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"'
               : 'Can\'t parse that date. Try: "tomorrow 15:00"',
+            { reply_markup: sceneHelpKeyboard(lang) },
           );
           return;
         }
@@ -124,6 +131,7 @@ export function createAddEventScene(eventService: EventService) {
             lang === 'ru'
               ? 'Не понял. Примеры: 1ч, 30м, 1ч30м, 1 час 30 минут.'
               : "Can't parse. Examples: 1h, 30m, 1h30m, 1 hour 30 min.",
+            { reply_markup: sceneHelpKeyboard(lang) },
           );
           return;
         }
@@ -167,7 +175,7 @@ export function createAddEventScene(eventService: EventService) {
 
         const parsed = parseRecurrence(text);
         if (!parsed) {
-          await context.send(t(lang).recurrence_custom_prompt);
+          await context.send(t(lang).recurrence_custom_prompt, { reply_markup: sceneHelpKeyboard(lang) });
           return;
         }
         const rule = parsed.interval > 1 ? `FREQ=${parsed.freq};INTERVAL=${parsed.interval}` : `FREQ=${parsed.freq}`;
