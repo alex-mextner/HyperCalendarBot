@@ -552,7 +552,7 @@ describe('handleMakeCall', () => {
 
 describe('validateAndGetOffset', () => {
   test('returns offset for valid timezone', () => {
-    const dt = new Date('2026-03-20T12:00:00Z');
+    const dt = new Date('2026-01-15T12:00:00Z'); // January — unambiguously winter (UTC+2)
     const result = validateAndGetOffset('Europe/Kyiv', dt);
     expect(result.offsetStr).toBe('+02:00');
     expect(result.offsetMinutes).toBe(120);
