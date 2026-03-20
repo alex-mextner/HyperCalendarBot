@@ -90,7 +90,8 @@ export class EventRepository {
     return this.db
       .prepare(
         `
-      SELECT DISTINCT e.* FROM events e
+      SELECT DISTINCT e.*, m.birth_year FROM events e
+      LEFT JOIN birth_event_metadata m ON m.event_id = e.id
       WHERE e.recurrence_rule IS NOT NULL
         AND e.parent_event_id IS NULL
         AND e.is_cancelled = 0
@@ -453,8 +454,9 @@ export class EventRepository {
   getRecurringTemplatesForGroup(groupId: number): CalendarEvent[] {
     return this.db
       .prepare(`
-      SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+      SELECT e.*, m.birth_year FROM events e
+      LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+      WHERE e.owner_type = 'group' AND e.group_id = ? AND e.recurrence_rule IS NOT NULL AND e.parent_event_id IS NULL AND e.is_cancelled = 0
     `)
       .all(groupId) as CalendarEvent[];
   }

@@ -51,6 +51,7 @@ export interface CalendarEvent {
   group_id: number | null;
   created_by: number | null;
   event_type?: 'birthday' | null;
+  birth_year?: number | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;

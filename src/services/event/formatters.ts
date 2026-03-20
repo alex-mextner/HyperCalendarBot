@@ -13,6 +13,11 @@ import {
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 
+function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
+  if (birthYear == null) return null;
+  return new Date(occurrenceStart).getUTCFullYear() - birthYear;
+}
+
 export function formatDayAgenda(
   occurrences: EventOccurrence[],
   dateIso: string,
@@ -32,9 +37,15 @@ export function formatDayAgenda(
   const eventLines = occurrences.map((occ) => {
     const time = formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
     const isBirthday = occ.event.event_type === 'birthday';
-    const title = isBirthday ? `🎁 ${escapeHtml(occ.event.title)}` : escapeHtml(occ.event.title);
-    const recur = !isBirthday && occ.event.recurrence_rule ? ' 🔁' : '';
-    return `  ${time}  ${title}${recur}`;
+    const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
+    let title = escapeHtml(occ.event.title);
+    if (isBirthday) {
+      const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
+      const suffix =
+        age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+      title = `🎁 ${title}${escapeHtml(suffix)}`;
+    }
+    return `  ${time}  ${title}${isRecurring ? ' 🔁' : ''}`;
   });
 
   const allLines = [...holidayLines, ...eventLines];
@@ -81,8 +92,19 @@ export function formatWeekAgenda(
       for (const occ of dayEvents) {
         const time = formatTime(occ.occurrence_start, timezone);
         const isBirthday = occ.event.event_type === 'birthday';
-        const title = isBirthday ? `🎁 ${escapeHtml(occ.event.title)}` : escapeHtml(occ.event.title);
-        lines.push(`  ${time} ${title}`);
+        const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
+        let title = escapeHtml(occ.event.title);
+        if (isBirthday) {
+          const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
+          const suffix =
+            age !== null
+              ? lang === 'ru'
+                ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}`
+                : ` — turns ${age}`
+              : '';
+          title = `🎁 ${title}${escapeHtml(suffix)}`;
+        }
+        lines.push(`  ${time} ${title}${isRecurring ? ' 🔁' : ''}`);
       }
     }
     lines.push('');
