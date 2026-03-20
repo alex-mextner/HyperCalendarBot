@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  COMPACT_PX,
   computeEventColumns,
   computeEventHeight,
   escapeHtml,
   formatDuration,
   formatTime,
+  MAX_OVERFLOW_LABELS,
   MAX_OVERLAP_COLUMNS,
   MIN_EVENT_DURATION_MIN,
   PX_PER_MIN,
@@ -98,6 +100,9 @@ describe('layout constants', () => {
   test('PX_PER_MIN is 2', () => expect(PX_PER_MIN).toBe(2));
   test('MIN_EVENT_DURATION_MIN is 15', () => expect(MIN_EVENT_DURATION_MIN).toBe(15));
   test('MAX_OVERLAP_COLUMNS is 4', () => expect(MAX_OVERLAP_COLUMNS).toBe(4));
+  test('COMPACT_PX equals MIN_EVENT_DURATION_MIN * PX_PER_MIN', () =>
+    expect(COMPACT_PX).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN));
+  test('MAX_OVERFLOW_LABELS is 3', () => expect(MAX_OVERFLOW_LABELS).toBe(3));
 });
 
 describe('computeEventHeight', () => {

@@ -230,22 +230,80 @@ describe('timeline layout', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
     expect(html).not.toContain('class="event-block event-block--overflow"');
-    // each at 25% width
+    // each at 25% width (no overflow → MAX_OVERLAP_COLUMNS columns)
     expect(html).toContain(`width:calc(${100 / MAX_OVERLAP_COLUMNS}% - 8px)`);
   });
 
-  test('five overlapping events: overflow indicator appears', () => {
+  test('five overlapping events: overflow block with title of 5th event', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 1 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
     expect(html).toContain('class="event-block event-block--overflow"');
-    expect(html).toContain('overflow-count');
-    expect(html).toContain('+1');
+    expect(html).toContain('overflow-item');
+    // Event 5 is the sole overflow event; its title must appear in the overflow block
+    expect(html).toContain('>Event 5<');
+    // Visible events use MAX_OVERLAP_COLUMNS+1 slots → 20% each
+    expect(html).toContain(`width:calc(${100 / (MAX_OVERLAP_COLUMNS + 1)}% - 8px)`);
   });
 
-  test('six overlapping events: overflow shows +2', () => {
+  test('six overlapping events: two titles in overflow block', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 2 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
-    expect(html).toContain('+2');
+    expect(html).toContain('>Event 5<');
+    expect(html).toContain('>Event 6<');
+  });
+
+  test('overflow block shows "+N more" when titles exceed MAX_OVERFLOW_LABELS', () => {
+    // MAX_OVERLAP_COLUMNS=4 visible + 4 overflow events
+    const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 4 }, (_, i) => ev(i + 1, 540, 600));
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    // First 3 overflow titles shown (Event 5, 6, 7), Event 8 collapsed to "+1 more"
+    expect(html).toContain('>Event 5<');
+    expect(html).toContain('>Event 7<');
+    expect(html).toContain('+1 more');
+    expect(html).not.toContain('>Event 8<');
+  });
+
+  test('overlapping events with different start times: both shown side by side', () => {
+    // A: 9:00–10:00, B: 9:30–11:00 — overlap, different starts
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 2,
+        timedEvents: [ev(1, 540, 600), ev(2, 570, 660)],
+      }),
+    );
+    expect(html).toContain('Event 1');
+    expect(html).toContain('Event 2');
+    expect(html).toContain('width:calc(50% - 8px)');
+    expect(html).not.toContain('class="event-block event-block--overflow"');
+  });
+
+  test('three events with staggered starts: all shown in 3 columns', () => {
+    // A: 9:00–10:30, B: 9:15–10:00, C: 9:45–11:00 — all overlap transitively
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 3,
+        timedEvents: [ev(1, 540, 630), ev(2, 555, 600), ev(3, 585, 660)],
+      }),
+    );
+    expect(html).toContain('Event 1');
+    expect(html).toContain('Event 2');
+    expect(html).toContain('Event 3');
+    expect(html).not.toContain('class="event-block event-block--overflow"');
+    expect(html).toContain(`width:calc(${100 / 3}% - 8px)`);
+  });
+
+  test('two non-overlapping groups rendered independently', () => {
+    // Morning group: A+B overlap; afternoon group: C alone
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 3,
+        timedEvents: [ev(1, 540, 600), ev(2, 570, 660), ev(3, 840, 900)],
+      }),
+    );
+    // Morning group: 2 columns → 50% width
+    expect(html).toContain('width:calc(50% - 8px)');
+    // Afternoon event: 1 column → 100% width
+    expect(html).toContain('width:calc(100% - 8px)');
   });
 
   test('compact class applied to short events below COMPACT_PX threshold', () => {

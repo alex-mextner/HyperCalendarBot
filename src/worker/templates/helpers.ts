@@ -70,6 +70,12 @@ export const MIN_EVENT_DURATION_MIN = 15;
 /** Max side-by-side columns for overlapping events; beyond this an overflow indicator renders. */
 export const MAX_OVERLAP_COLUMNS = 4;
 
+/** Minimum visual event height in px; CSS min-height ensures blocks are always readable. */
+export const COMPACT_PX = MIN_EVENT_DURATION_MIN * PX_PER_MIN;
+
+/** Max event titles shown in the overflow block before "+N more" is appended. */
+export const MAX_OVERFLOW_LABELS = 3;
+
 /**
  * Computed rendered height (px) for one event on the daily timeline.
  *

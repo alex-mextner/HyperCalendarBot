@@ -1,10 +1,11 @@
 import {
+  COMPACT_PX,
   computeEventColumns,
   computeEventHeight,
   escapeHtml,
   formatTime,
+  MAX_OVERFLOW_LABELS,
   MAX_OVERLAP_COLUMNS,
-  MIN_EVENT_DURATION_MIN,
   PX_PER_MIN,
 } from './helpers.ts';
 import { getLabels, pluralizeEvents } from './labels.ts';
@@ -42,7 +43,6 @@ function renderTimeline(data: DailyAgendaData): string {
   const totalMinutes = (maxHour - minHour) * 60;
   const containerHeight = totalMinutes * PX_PER_MIN;
   const HOUR_PX = 60 * PX_PER_MIN;
-  const COMPACT_PX = MIN_EVENT_DURATION_MIN * PX_PER_MIN;
 
   // Hour rows for left column labels
   const hourRows: string[] = [];
@@ -56,7 +56,7 @@ function renderTimeline(data: DailyAgendaData): string {
 
   // Event blocks — collect overflow items while building HTML
   const cols = computeEventColumns(timedEvents);
-  const overflowItems: Array<{ top: number; endPx: number }> = [];
+  const overflowItems: Array<{ top: number; endPx: number; title: string }> = [];
 
   const eventBlocksHtml = timedEvents
     .map((ev, i) => {
@@ -65,13 +65,17 @@ function renderTimeline(data: DailyAgendaData): string {
       const top = (ev.startMinutes - minHour * 60) * PX_PER_MIN;
       const height = computeEventHeight(ev, i, timedEvents, cols);
 
-      // Events that exceed the column cap go to the overflow indicator
-      if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS - 1) {
-        overflowItems.push({ top, endPx: top + height });
+      // Events that exceed the column cap go to the overflow block
+      if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS) {
+        overflowItems.push({ top, endPx: top + height, title: ev.title });
         return '';
       }
 
-      const effectiveCols = Math.min(col.totalColumns, MAX_OVERLAP_COLUMNS);
+      // When overflow exists in this group, use one extra column slot for the overflow block
+      const effectiveCols =
+        col.totalColumns > MAX_OVERLAP_COLUMNS
+          ? MAX_OVERLAP_COLUMNS + 1
+          : Math.min(col.totalColumns, MAX_OVERLAP_COLUMNS);
       const widthPct = 100 / effectiveCols;
       const leftPct = col.column * widthPct;
       const bg = `${ev.calendarColor}20`;
@@ -89,27 +93,30 @@ function renderTimeline(data: DailyAgendaData): string {
     })
     .join('');
 
-  // Build overflow indicator blocks: merge visually overlapping overflow items
+  // Build overflow blocks: merge time-overlapping items, show titles list + "+N more"
   const sortedOverflow = overflowItems.sort((a, b) => a.top - b.top);
-  const overflowBlocks: Array<{ top: number; endPx: number; count: number }> = [];
+  const overflowBlocks: Array<{ top: number; endPx: number; titles: string[] }> = [];
   for (const item of sortedOverflow) {
     const last = overflowBlocks[overflowBlocks.length - 1];
     if (last && item.top < last.endPx) {
       last.endPx = Math.max(last.endPx, item.endPx);
-      last.count++;
+      last.titles.push(item.title);
     } else {
-      overflowBlocks.push({ top: item.top, endPx: item.endPx, count: 1 });
+      overflowBlocks.push({ top: item.top, endPx: item.endPx, titles: [item.title] });
     }
   }
-  const ovfWidthPct = 100 / MAX_OVERLAP_COLUMNS;
-  const ovfLeftPct = (MAX_OVERLAP_COLUMNS - 1) * ovfWidthPct;
+  // Overflow column occupies the extra (MAX_OVERLAP_COLUMNS + 1)th slot
+  const ovfWidthPct = 100 / (MAX_OVERLAP_COLUMNS + 1);
+  const ovfLeftPct = MAX_OVERLAP_COLUMNS * ovfWidthPct;
   const overflowHtml = overflowBlocks
-    .map(({ top, endPx, count }) => {
+    .map(({ top, endPx, titles }) => {
       const h = Math.max(endPx - top, COMPACT_PX);
       const isCompact = h <= COMPACT_PX;
-      return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);">
-      <div class="event-block__overflow-count">+${count}</div>
-    </div>`;
+      const visible = titles.slice(0, MAX_OVERFLOW_LABELS);
+      const remaining = titles.length - visible.length;
+      const labelsHtml = visible.map((t) => `<div class="overflow-item">${escapeHtml(t)}</div>`).join('');
+      const moreHtml = remaining > 0 ? `<div class="overflow-more">+${remaining} more</div>` : '';
+      return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);">${labelsHtml}${moreHtml}</div>`;
     })
     .join('');
 
@@ -230,6 +237,7 @@ function css(data: DailyAgendaData): string {
       padding: 10px 14px;
       overflow: hidden;
       font-size: 14px;
+      min-height: ${COMPACT_PX}px;
     }
     .event-block__title {
       font-weight: 600;
@@ -257,16 +265,26 @@ function css(data: DailyAgendaData): string {
     }
     .event-block--overflow {
       display: flex;
-      align-items: center;
-      justify-content: center;
+      flex-direction: column;
+      justify-content: flex-start;
       border-left: 4px solid ${t.textSecondary}40;
       background: ${t.cardBg};
       color: ${t.textSecondary};
+      padding: 6px 8px;
+      z-index: 5;
     }
-    .event-block__overflow-count {
-      font-size: 18px;
-      font-weight: 700;
-      opacity: 0.7;
+    .overflow-item {
+      font-size: 11px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      line-height: 1.4;
+    }
+    .overflow-more {
+      font-size: 11px;
+      opacity: 0.6;
+      margin-top: 2px;
     }
     .now-line {
       position: absolute;
