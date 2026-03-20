@@ -67,7 +67,7 @@ function resolveSingle(
   dt: Date,
 ): { offsetStr: string; offsetMinutes: number; dstActive: boolean; localTime: string } {
   const { offsetStr, offsetMinutes } = validateAndGetOffset(timezone, dt); // throws if invalid
-  const year = dt.getFullYear();
+  const year = dt.getUTCFullYear();
   const janOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 0, 15)));
   const julOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 6, 15)));
   const dstActive = janOffset !== julOffset && offsetMinutes === Math.max(janOffset, julOffset);
