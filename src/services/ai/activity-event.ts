@@ -3,7 +3,8 @@
 export type ActivityEvent =
   | { kind: 'button'; label: string; detail?: string }
   | { kind: 'command'; name: string }
-  | { kind: 'bot'; text: string };
+  | { kind: 'bot'; text: string }
+  | { kind: 'edited'; text: string };
 
 export function formatActivityEvent(event: ActivityEvent): string {
   switch (event.kind) {
@@ -13,5 +14,7 @@ export function formatActivityEvent(event: ActivityEvent): string {
       return `[Command: ${event.name}]`;
     case 'bot':
       return `[Bot: ${event.text}]`;
+    case 'edited':
+      return `[Edited: ${event.text}]`;
   }
 }
