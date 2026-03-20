@@ -43,7 +43,8 @@ async def fetch(user_ids: list[int]) -> dict:
                         print(f"FloodWait {e.value}s exceeds limit", file=sys.stderr)
                         sys.exit(1)
                     await asyncio.sleep(e.value)
-                except Exception:
+                except Exception as e:
+                    print(f"skip uid={uid}: {e}", file=sys.stderr)
                     break  # omit unresolvable users
     finally:
         await app.stop()

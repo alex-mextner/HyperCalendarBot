@@ -50,7 +50,7 @@ export interface CalendarEvent {
   owner_type: 'user' | 'group';
   group_id: number | null;
   created_by: number | null;
-  event_type: string | null; // null = regular, 'birthday' = birthday
+  event_type: 'birthday' | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -101,7 +101,7 @@ export interface CreateEventData {
   owner_type?: 'user' | 'group';
   group_id?: number;
   created_by?: number;
-  event_type?: string;
+  event_type?: 'birthday';
 }
 
 export interface UpdateEventData {
