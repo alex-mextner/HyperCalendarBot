@@ -389,10 +389,19 @@ export class EventRepository {
       );
   }
 
-  findVisibleOverlapping(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
-    return this.db
-      .prepare(
-        `
+  findVisibleOverlapping(userId: number, startUtc: string, endUtc: string, requesterId?: number): CalendarEvent[] {
+    const applyPrivacy = requesterId !== undefined && requesterId !== userId;
+    const privacyClause = applyPrivacy
+      ? `AND (
+          e.user_id = ${requesterId}
+          OR COALESCE(
+            (SELECT visibility FROM event_visibility WHERE event_id = e.id),
+            (SELECT default_visibility FROM sharing_settings WHERE user_id = e.user_id),
+            'full'
+          ) != 'private'
+        )`
+      : '';
+    const sql = `
       SELECT DISTINCT e.* FROM events e
       WHERE e.is_cancelled = 0
         AND e.recurrence_rule IS NULL
@@ -409,10 +418,10 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           )
         )
+        ${privacyClause}
       ORDER BY e.start_at
-    `,
-      )
-      .all(endUtc, startUtc, startUtc, userId, userId) as CalendarEvent[];
+    `;
+    return this.db.prepare(sql).all(endUtc, startUtc, startUtc, userId, userId) as CalendarEvent[];
   }
 
   countInRange(userId: number, startUtc: string, endUtc: string): number {
