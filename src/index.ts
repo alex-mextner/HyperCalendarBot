@@ -395,6 +395,7 @@ if (config.REDIS_URL) {
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
+      db.eventMentions.deleteExpired();
     },
   });
 

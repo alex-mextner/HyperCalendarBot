@@ -2,6 +2,7 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { SqliteEventMentionStore } from '../services/intent/event-mention-store.ts';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
@@ -58,6 +59,7 @@ export class DatabaseService {
   readonly calendarProposals: CalendarProposalRepository;
   readonly workflowSessions: WorkflowSessionRepository;
   readonly groupSessions: GroupSessionRepository;
+  readonly eventMentions: SqliteEventMentionStore;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -95,6 +97,7 @@ export class DatabaseService {
     this.calendarProposals = new CalendarProposalRepository(this.db);
     this.workflowSessions = new WorkflowSessionRepository(this.db);
     this.groupSessions = new GroupSessionRepository(this.db);
+    this.eventMentions = new SqliteEventMentionStore(this.db);
   }
 
   close(): void {

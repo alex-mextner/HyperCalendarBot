@@ -21,6 +21,8 @@ export function createScenesPlugin(
   holidayService?: HolidayService,
 ) {
   const storage = createSceneStorage(db.db);
+  // Cast satisfies GramIO's generic Storage<Data> structural contract:
+  // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
   const scopedStorage = wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
 
   const addEventScene = createAddEventScene(eventService);

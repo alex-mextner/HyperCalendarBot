@@ -57,9 +57,15 @@ export class SqliteEventMentionStore implements EventMentionStore {
   }
 
   get(userId: number): number | null {
-    const row = this.db.prepare('SELECT event_id FROM event_mention_store WHERE user_id = ?').get(userId) as {
-      event_id: number;
-    } | null;
+    const cutoff = Date.now() - TTL_SECONDS * 1000;
+    const row = this.db
+      .prepare('SELECT event_id FROM event_mention_store WHERE user_id = ? AND updated_at > ?')
+      .get(userId, cutoff) as { event_id: number } | null;
     return row?.event_id ?? null;
+  }
+
+  deleteExpired(): void {
+    const cutoff = Date.now() - TTL_SECONDS * 1000;
+    this.db.prepare('DELETE FROM event_mention_store WHERE updated_at <= ?').run(cutoff);
   }
 }

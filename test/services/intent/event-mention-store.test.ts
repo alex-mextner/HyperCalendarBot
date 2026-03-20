@@ -111,4 +111,23 @@ describe('SqliteEventMentionStore', () => {
     expect(store.get(1)).toBe(10);
     expect(store.get(2)).toBe(20);
   });
+
+  test('returns null for entries older than 7 days', () => {
+    const db = createTestDb();
+    const store = new SqliteEventMentionStore(db);
+    const oldTs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    db.prepare('INSERT INTO event_mention_store (user_id, event_id, updated_at) VALUES (?, ?, ?)').run(1, 42, oldTs);
+    expect(store.get(1)).toBeNull();
+  });
+
+  test('deleteExpired removes stale entries, keeps fresh ones', () => {
+    const db = createTestDb();
+    const store = new SqliteEventMentionStore(db);
+    store.set(2, 99);
+    const oldTs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    db.prepare('INSERT INTO event_mention_store (user_id, event_id, updated_at) VALUES (?, ?, ?)').run(1, 42, oldTs);
+    store.deleteExpired();
+    expect(store.get(1)).toBeNull();
+    expect(store.get(2)).toBe(99);
+  });
 });

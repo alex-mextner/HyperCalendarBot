@@ -290,7 +290,7 @@ describe('createIntentMatcherLayer', () => {
     expect(workflowSessions.has(userId, userId)).toBe(true);
   });
 
-  test('normalizes user answer to lowercase+trim when resuming workflow', async () => {
+  test('trims whitespace when resuming workflow', async () => {
     const userId = 15;
     const workflow = {
       steps: [
