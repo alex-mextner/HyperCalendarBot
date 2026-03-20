@@ -416,6 +416,33 @@ describe('formatEventListItem', () => {
     expect(result).toContain('&lt;b&gt;Bold&lt;/b&gt;');
     expect(result).not.toContain('<b>');
   });
+
+  test('birthday event gets 🎁 prefix', () => {
+    const event = makeEvent({ title: 'Иван', event_type: 'birthday', start_at: '2026-05-10T00:00:00Z' });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toContain('🎁');
+    expect(result).toContain('Иван');
+    expect(result).not.toContain('🔁');
+  });
+
+  test('recurring non-birthday event gets 🔁 suffix', () => {
+    const event = makeEvent({ title: 'Standup', recurrence_rule: 'FREQ=DAILY', start_at: '2026-03-11T09:00:00Z' });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toContain('🔁');
+    expect(result).not.toContain('🎁');
+  });
+
+  test('birthday recurring event gets only 🎁, not 🔁', () => {
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      recurrence_rule: 'FREQ=YEARLY',
+      start_at: '2026-05-10T00:00:00Z',
+    });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toContain('🎁');
+    expect(result).not.toContain('🔁');
+  });
 });
 
 describe('ruPlural', () => {

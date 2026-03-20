@@ -183,7 +183,10 @@ export function formatInvitation(
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number): string {
   const time = formatTime(event.start_at, timezone);
-  return `${index + 1}. ${time} — ${escapeHtml(event.title)}`;
+  const isBirthday = event.event_type === 'birthday';
+  const isRecurring = !isBirthday && !!(event.recurrence_rule || event.parent_event_id);
+  const title = isBirthday ? `🎁 ${escapeHtml(event.title)}` : escapeHtml(event.title);
+  return `${index + 1}. ${time} — ${title}${isRecurring ? ' 🔁' : ''}`;
 }
 
 export function formatRecurrenceHuman(rrule: string, lang: string): string {

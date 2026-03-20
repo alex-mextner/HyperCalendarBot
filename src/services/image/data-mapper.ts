@@ -187,14 +187,14 @@ export function mapEventCardData(params: {
   const dayOfWeek = getDayOfWeek(dateIso, locale);
 
   return {
-    title: ev.title,
+    title: eventTitle(occurrence, locale),
     dateFormatted: `${dayOfWeek}, ${dateStr}`,
     timeFormatted: ev.all_day === 1 ? '' : `${formatTime(startMin)} – ${formatTime(endMin)}`,
     duration: ev.all_day === 1 ? '' : formatDuration(endMin - startMin),
     location: ev.location ?? undefined,
     description: ev.description?.slice(0, 200) ?? undefined,
     calendarName: 'HyperCalendar',
-    calendarColor: theme.eventColors[0]!,
+    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : theme.eventColors[0]!,
     isAllDay: ev.all_day === 1,
     theme,
     locale,
