@@ -399,3 +399,7 @@ export function inviteContactPickerKeyboard(contacts: Contact[], eventId: number
 export function removeKeyboard(): { reply_markup: { remove_keyboard: true } } {
   return { reply_markup: { remove_keyboard: true } };
 }
+
+export function sceneHelpKeyboard(lang: string): InlineKeyboard {
+  return new InlineKeyboard().text(t(lang as 'en' | 'ru').scene_help_btn, CB.SCENE_HELP);
+}
