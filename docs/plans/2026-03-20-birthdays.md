@@ -82,7 +82,14 @@ bun test test/database/migrations.test.ts -t 'birthday migrations'
 ```
 Expected: FAIL
 
-- [ ] **Step 3: Append 3 migrations to `src/database/migrations.ts`** (after `035_event_mention_store`)
+- [ ] **Step 3: Verify 035 is the last migration**
+
+```bash
+grep "name: '" src/database/migrations.ts | tail -3
+```
+Expected: last entry is `035_event_mention_store`. If not — adjust numbers accordingly.
+
+- [ ] **Step 4: Append 3 migrations to `src/database/migrations.ts`** (after `035_event_mention_store`)
 
 ```ts
 {
@@ -490,10 +497,19 @@ export class BirthdayMetadataRepository {
 
 - [ ] **Step 4: Wire into `src/database/index.ts`**
 
+Add import at top:
 ```ts
 import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
-// In the repos object / return value:
-birthdayMeta: new BirthdayMetadataRepository(db),
+```
+
+Add `readonly` field to `DatabaseService` class (after `eventMentions`):
+```ts
+readonly birthdayMeta: BirthdayMetadataRepository;
+```
+
+Add instantiation in constructor (after `this.eventMentions = ...`):
+```ts
+this.birthdayMeta = new BirthdayMetadataRepository(this.db);
 ```
 
 - [ ] **Step 5: Run tests**
@@ -766,7 +782,7 @@ export class BirthdayService {
 
   getDisplayTitle(title: string, birthYear: number | null, eventDate: Date, lang: 'en' | 'ru'): string {
     const prefix = '🎁 ';
-    if (!birthYear) return prefix + title;
+    if (birthYear === null) return prefix + title;
     const age = eventDate.getFullYear() - birthYear;
     const suffix =
       lang === 'ru'
@@ -833,6 +849,8 @@ export class BirthdayService {
       auto_created: params.autoCreated ? 1 : 0,
     });
 
+    // Always delete stale reminders before recreating — prevents duplicates on repeated upserts
+    this.reminderRepo.deleteForEvent(eventId);
     this.createBirthdayReminders(eventId, params.ownerId, startDateStr, params.timezone);
   }
 
@@ -1117,45 +1135,46 @@ if (deps.birthdayService) {
 }
 ```
 
-- [ ] **Step 6: Wire everything in `src/bot/index.ts`**
+- [ ] **Step 6: Add `findAll()` to `src/database/repositories/user.repository.ts`**
+
+```ts
+findAll(): User[] {
+  return this.db.prepare('SELECT * FROM users').all() as User[];
+}
+```
+
+- [ ] **Step 7: Wire everything in `src/bot/index.ts`**
 
 ```ts
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { setupBirthdaySyncCron } from '../worker/bot-tasks-queue.ts';
 
-// After db init:
-const birthdayService = new BirthdayService(db.events, db.birthdayMeta, db.eventReminders, db.notificationPrefs);
+// After db init (note: db.notificationPreferences — not notificationPrefs):
+const birthdayService = new BirthdayService(
+  db.events, db.birthdayMeta, db.eventReminders, db.notificationPreferences
+);
 
 // In botTasksQueue deps, add:
 onBirthdaySync: async () => {
-  const allUsers = db.users.findAll(); // add findAll() to UserRepository if missing
-  // process in batches of 100
   const BATCH = 100;
-  const needing = db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
-  const batch = allUsers.filter(u => needing.includes(u.telegram_id));
-  for (let i = 0; i < batch.length; i += BATCH) {
-    await birthdayService.runBatchSync(batch.slice(i, i + BATCH));
+  const needingIds = new Set(db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000));
+  const allUsers = db.users.findAll().filter(u => needingIds.has(u.telegram_id));
+  for (let i = 0; i < allUsers.length; i += BATCH) {
+    await birthdayService.runBatchSync(allUsers.slice(i, i + BATCH));
   }
 },
 
-// Pass birthdayService to message handler deps:
-// birthdayService,
+// In message handler deps object, add:
+birthdayService,
 ```
 
-> **Note:** If `UserRepository` has no `findAll()` method, add it:
-> ```ts
-> findAll(): User[] {
->   return this.db.prepare('SELECT * FROM users').all() as User[];
-> }
-> ```
-
-- [ ] **Step 7: Run full suite**
+- [ ] **Step 8: Run full suite**
 
 ```bash
 bun test
 ```
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add src/worker/bot-tasks-queue.ts src/bot/handlers/message.handler.ts src/bot/index.ts \
@@ -1264,7 +1283,7 @@ export function formatBirthdayLine(params: FormatBirthdayLineParams): string {
   const dateStr = formatDate(eventDate, lang);
 
   let nameStr: string;
-  if (celebrantId) {
+  if (celebrantId !== null) {
     nameStr = `[${name}](tg://user?id=${celebrantId})`;
   } else if (username) {
     nameStr = `${name} @${username}`;
@@ -1588,24 +1607,40 @@ required: [],
 
 - [ ] **Step 7: Route `create_birthday_event` in `src/services/ai/tool-executor.ts`**
 
+Add import at top of file:
 ```ts
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
-// In the dispatcher:
-if (toolName === 'create_birthday_event') {
-  return handleCreateBirthdayEvent(ctx, input as Parameters<typeof handleCreateBirthdayEvent>[1]);
-}
+```
+
+Inside the `switch (toolName)` block (same pattern as all other tools):
+```ts
+case 'create_birthday_event':
+  return handleCreateBirthdayEvent(ctx, input as { celebrant_id: number; date: { day: number; month: number }; year?: number; custom_name?: string; group_id?: number });
 ```
 
 - [ ] **Step 8: Update `handleSearchEvents` in `src/services/ai/tool-handlers/events.ts`**
 
-Add `event_type?: 'birthday' | 'regular'` to `SearchEventsInput`.
-
-Replace the search call:
+Update `SearchEventsInput` interface — make `query` optional and add `event_type`:
 ```ts
-// Old:
+interface SearchEventsInput {
+  query?: string;           // was required string
+  scope?: 'personal' | 'group';
+  owner_id?: number;
+  event_type?: 'birthday' | 'regular';
+}
+```
+
+Replace the search calls (both personal and group scopes):
+```ts
+// Personal scope (old):
 ctx.eventService.searchEvents(userId, input.query)
-// New (personal scope):
+// Personal scope (new):
 ctx.eventService.searchWithEventType(userId, input.query ?? null, input.event_type ?? null)
+
+// Group scope (old):
+ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
+// Group scope (new):
+ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query ?? '')
 ```
 
 - [ ] **Step 9: Run tests**
@@ -1651,5 +1686,8 @@ bun run lint
 - [ ] **Fix any lint issues and commit**
 
 ```bash
-git add -A && git commit -m "fix(birthday): lint fixes"
+# Stage only modified files (bun run lint:fix reports which files changed)
+bun run lint:fix
+git add src/ scripts/ test/
+git commit -m "fix(birthday): lint fixes"
 ```
