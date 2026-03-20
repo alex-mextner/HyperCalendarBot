@@ -295,6 +295,22 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
           event,
           conflictsWith: conflicts[0]!,
         });
+
+        const tz = ctx.user.timezone;
+        const conflictList = conflicts
+          .map((c) => {
+            const start = new TZDate(new Date(c.start_at), tz);
+            const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
+            const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
+            return `"${c.title}" (${timeRange})`;
+          })
+          .join(', ');
+
+        return {
+          success: true,
+          output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
+          agentHint: `⚠️ This event overlaps with: ${conflictList}. Warn the user about the overlap.`,
+        };
       }
     }
 

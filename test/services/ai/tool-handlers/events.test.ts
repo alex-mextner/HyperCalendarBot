@@ -21,6 +21,7 @@ import {
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { ConflictChecker } from '../../../../src/services/event/conflict-checker.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
@@ -186,6 +187,54 @@ describe('event tool handlers', () => {
       });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Past Holiday');
+    });
+
+    test('returns agentHint with conflict info when new event overlaps existing', () => {
+      const eventRepo = new EventRepository(db);
+      const conflictCtx = {
+        ...ctx,
+        conflictChecker: new ConflictChecker(eventRepo),
+        domainEvents: { emit: mock(() => {}) },
+      } as unknown as AgentContext;
+
+      // Create existing event
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Урок с Настей',
+        start_at: `${futureDate}11:00:00Z`,
+        end_at: `${futureDate}12:00:00Z`,
+        timezone: 'UTC',
+      });
+
+      // Create overlapping event
+      const result = handleCreateEvent(conflictCtx, {
+        title: 'Новое событие',
+        start_at: `${futureDate}11:30:00Z`,
+        end_at: `${futureDate}12:30:00Z`,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.agentHint).toContain('⚠️');
+      expect(result.agentHint).toContain('Урок с Настей');
+      expect(result.agentHint).toContain('11:00');
+    });
+
+    test('no agentHint when no conflict', () => {
+      const eventRepo = new EventRepository(db);
+      const conflictCtx = {
+        ...ctx,
+        conflictChecker: new ConflictChecker(eventRepo),
+        domainEvents: { emit: mock(() => {}) },
+      } as unknown as AgentContext;
+
+      const result = handleCreateEvent(conflictCtx, {
+        title: 'Без конфликта',
+        start_at: `${futureDate}09:00:00Z`,
+        end_at: `${futureDate}10:00:00Z`,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.agentHint).toBeUndefined();
     });
   });
 
