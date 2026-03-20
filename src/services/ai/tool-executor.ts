@@ -28,6 +28,7 @@ import {
   handleMakeCall,
   handlePickUsers,
   handleRenderDayImage,
+  handleRenderTable,
   handleRenderWeekImage,
   handleUpdateContact,
 } from './tool-handlers/meta.ts';
@@ -183,6 +184,9 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as { week_start: string; owner_id?: number });
+
+      case 'render_table':
+        return handleRenderTable(ctx, input as { title: string; markdown: string; caption?: string });
 
       case 'end_call':
         return handleEndCall(ctx);
