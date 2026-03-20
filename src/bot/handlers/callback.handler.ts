@@ -57,6 +57,18 @@ import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
 
 /**
+ * Parse ai_btn payload into answer text and optional group restriction.
+ * Payload format: "{text}" (private) or "{userId}:{text}" (group).
+ */
+export function parseAiBtnPayload(payload: string): { answerText: string; restrictedToUserId?: number } {
+  const colon = payload.indexOf(':');
+  if (colon !== -1 && /^\d+$/.test(payload.slice(0, colon))) {
+    return { answerText: payload.slice(colon + 1), restrictedToUserId: Number(payload.slice(0, colon)) };
+  }
+  return { answerText: payload };
+}
+
+/**
  * Route all inline keyboard callbacks.
  * Callback data format: "prefix:payload" or "prefix:p1:p2"
  */
@@ -661,20 +673,8 @@ export function createCallbackHandler(
 
       // AI ask_user button responses — trigger AI continuation
       if (action === 'ai_btn') {
-        // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
-        // Check if the second segment is a numeric userId (group restriction)
         const firstColon = data.indexOf(':');
-        const rest = data.slice(firstColon + 1);
-        const secondColon = rest.indexOf(':');
-        let answerText: string;
-        let restrictedToUserId: number | undefined;
-
-        if (secondColon !== -1 && /^\d+$/.test(rest.slice(0, secondColon))) {
-          restrictedToUserId = Number(rest.slice(0, secondColon));
-          answerText = rest.slice(secondColon + 1);
-        } else {
-          answerText = rest;
-        }
+        const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1));
 
         // In groups, only the user who triggered the question can answer
         const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;

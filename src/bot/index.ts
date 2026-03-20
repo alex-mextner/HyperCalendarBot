@@ -57,7 +57,7 @@ import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
-import { createCallbackHandler } from './handlers/callback.handler.ts';
+import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
@@ -391,10 +391,7 @@ export function createBot(
         const payload = firstColon >= 0 ? callbackData.slice(firstColon + 1) : '';
 
         if (action === 'ai_btn') {
-          // ai_btn payload: "{answerText}" (private) or "{userId}:{answerText}" (group)
-          const secondColon = payload.indexOf(':');
-          const firstSegment = secondColon >= 0 ? payload.slice(0, secondColon) : payload;
-          const answerText = secondColon >= 0 && /^\d+$/.test(firstSegment) ? payload.slice(secondColon + 1) : payload;
+          const { answerText } = parseAiBtnPayload(payload);
           conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId);
         } else {
           conversationLogger.logButtonPress(user.telegram_id, action, payload || undefined, logChatId);

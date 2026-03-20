@@ -5,6 +5,7 @@ import {
   handleProposalDecline,
   handleSecretaryAccept,
   handleSecretaryDecline,
+  parseAiBtnPayload,
 } from '../../../src/bot/handlers/callback.handler.ts';
 
 function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
@@ -341,4 +342,22 @@ test('prop:decline: no-op if caller is not the target', async () => {
   await handleProposalDecline(10, 999, deps as never);
 
   expect(deps.proposalRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+describe('parseAiBtnPayload', () => {
+  test('private chat — plain text payload', () => {
+    expect(parseAiBtnPayload('Да')).toEqual({ answerText: 'Да' });
+  });
+
+  test('group chat — userId:text payload', () => {
+    expect(parseAiBtnPayload('123:Нет')).toEqual({ answerText: 'Нет', restrictedToUserId: 123 });
+  });
+
+  test('non-numeric first segment treated as plain text', () => {
+    expect(parseAiBtnPayload('text:with:colons')).toEqual({ answerText: 'text:with:colons' });
+  });
+
+  test('non-numeric prefix with colons treated as plain text', () => {
+    expect(parseAiBtnPayload('yes:please')).toEqual({ answerText: 'yes:please' });
+  });
 });
