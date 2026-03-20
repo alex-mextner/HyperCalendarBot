@@ -1428,6 +1428,7 @@ async function notifyInviter(
 
   await deps.sendMessage(invitation.inviter_id, text, { parse_mode: 'HTML' });
   if (action === 'accept' && renderService && deps.sendPhoto && event && event.start_at && event.end_at) {
+    const sendPhoto = deps.sendPhoto;
     const twoHoursMs = 2 * 60 * 60 * 1000;
     const windowStart = new Date(new Date(event.start_at).getTime() - twoHoursMs).toISOString();
     const windowEnd = new Date(new Date(event.end_at).getTime() + twoHoursMs).toISOString();
@@ -1461,7 +1462,7 @@ async function notifyInviter(
     )
       .then((buffer) => {
         const photo = new File([buffer], 'conflict.png', { type: 'image/png' });
-        return deps.sendPhoto!(invitation.inviter_id, photo);
+        return sendPhoto(invitation.inviter_id, photo);
       })
       .catch((err) => {
         cmdLogger.error({ err }, 'Failed to render/send conflict image');
