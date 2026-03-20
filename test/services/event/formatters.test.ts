@@ -340,6 +340,49 @@ describe('formatEventDetail — edge cases', () => {
     expect(result).not.toContain('🏷');
     expect(result).not.toContain('🔁');
   });
+
+  test('birthday event shows 🎁 header with age (EN)', () => {
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      birth_year: 1996,
+      all_day: 1,
+      start_at: '2026-05-10T00:00:00Z',
+      recurrence_rule: 'FREQ=YEARLY',
+    });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('🎁');
+    expect(result).toContain('turns 30');
+    expect(result).not.toContain('📌');
+    // Yearly recurrence should be hidden for birthdays
+    expect(result).not.toContain('🔁');
+  });
+
+  test('birthday event shows Russian age plural (RU)', () => {
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      birth_year: 1996,
+      all_day: 1,
+      start_at: '2026-05-10T00:00:00Z',
+    });
+    const result = formatEventDetail(event, 'UTC', 'ru');
+    expect(result).toContain('🎁');
+    expect(result).toContain('30 лет');
+  });
+
+  test('birthday event without birth_year shows no age', () => {
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      all_day: 1,
+      start_at: '2026-05-10T00:00:00Z',
+    });
+    const result = formatEventDetail(event, 'UTC', 'en');
+    expect(result).toContain('🎁');
+    expect(result).not.toContain('turns');
+    expect(result).not.toContain('лет');
+  });
 });
 
 // ── formatInvitation ──
@@ -417,12 +460,37 @@ describe('formatEventListItem', () => {
     expect(result).not.toContain('<b>');
   });
 
-  test('birthday event gets 🎁 prefix', () => {
+  test('birthday event gets 🎁 prefix and age (EN)', () => {
+    // start_at is the next occurrence: 2026-05-10, born 1996 → turns 30
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      birth_year: 1996,
+      start_at: '2026-05-10T00:00:00Z',
+    });
+    const result = formatEventListItem(event, 'UTC', 0, 'en');
+    expect(result).toContain('🎁');
+    expect(result).toContain('turns 30');
+    expect(result).not.toContain('🔁');
+  });
+
+  test('birthday event age uses Russian plural (RU)', () => {
+    const event = makeEvent({
+      title: 'Иван',
+      event_type: 'birthday',
+      birth_year: 1996,
+      start_at: '2026-05-10T00:00:00Z',
+    });
+    const result = formatEventListItem(event, 'UTC', 0, 'ru');
+    expect(result).toContain('30 лет');
+  });
+
+  test('birthday event without birth_year shows no age', () => {
     const event = makeEvent({ title: 'Иван', event_type: 'birthday', start_at: '2026-05-10T00:00:00Z' });
     const result = formatEventListItem(event, 'UTC', 0);
     expect(result).toContain('🎁');
-    expect(result).toContain('Иван');
-    expect(result).not.toContain('🔁');
+    expect(result).not.toContain('turns');
+    expect(result).not.toContain('лет');
   });
 
   test('recurring non-birthday event gets 🔁 suffix', () => {

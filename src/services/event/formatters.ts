@@ -117,7 +117,16 @@ export function formatWeekAgenda(
 
 export function formatEventDetail(event: CalendarEvent, timezone: string, lang: string): string {
   const lines: string[] = [];
-  lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+  const isBirthday = event.event_type === 'birthday';
+
+  if (isBirthday) {
+    const age = birthdayAge(event.birth_year, event.start_at);
+    const ageSuffix =
+      age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+    lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
+  } else {
+    lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+  }
 
   if (event.all_day) {
     lines.push(`📅 ${lang === 'ru' ? 'Весь день' : 'All day'}`);
@@ -140,7 +149,7 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
   if (event.category) {
     lines.push(`🏷 ${escapeHtml(event.category)}`);
   }
-  if (event.recurrence_rule) {
+  if (event.recurrence_rule && !isBirthday) {
     lines.push(`🔁 ${formatRecurrenceHuman(event.recurrence_rule, lang)}`);
   }
 
@@ -181,11 +190,17 @@ export function formatInvitation(
   return `${header}\n\n${formatEventDetail(event, timezone, lang)}`;
 }
 
-export function formatEventListItem(event: CalendarEvent, timezone: string, index: number): string {
+export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {
   const time = formatTime(event.start_at, timezone);
   const isBirthday = event.event_type === 'birthday';
   const isRecurring = !isBirthday && !!(event.recurrence_rule || event.parent_event_id);
-  const title = isBirthday ? `🎁 ${escapeHtml(event.title)}` : escapeHtml(event.title);
+  let title = escapeHtml(event.title);
+  if (isBirthday) {
+    const age = birthdayAge(event.birth_year, event.start_at);
+    const suffix =
+      age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+    title = `🎁 ${title}${escapeHtml(suffix)}`;
+  }
   return `${index + 1}. ${time} — ${title}${isRecurring ? ' 🔁' : ''}`;
 }
 
