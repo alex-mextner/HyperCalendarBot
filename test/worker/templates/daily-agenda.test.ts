@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { dailyAgendaTemplate } from '../../../src/worker/templates/daily-agenda.ts';
+import { MAX_OVERLAP_COLUMNS, PX_PER_MIN } from '../../../src/worker/templates/helpers.ts';
 import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
-import type { DailyAgendaData } from '../../../src/worker/templates/types.ts';
+import type { AgendaEvent, DailyAgendaData } from '../../../src/worker/templates/types.ts';
 
 function makeData(overrides: Partial<DailyAgendaData> = {}): DailyAgendaData {
   return {
@@ -168,5 +169,104 @@ describe('dailyAgendaTemplate', () => {
   test('renders footer', () => {
     const html = dailyAgendaTemplate.render(makeData());
     expect(html).toContain('HyperCalendar');
+  });
+});
+
+// ── Timeline layout tests ────────────────────────────────────────────────────
+
+function ev(id: number, start: number, end: number, color = '#6366F1'): AgendaEvent {
+  return { id, title: `Event ${id}`, startMinutes: start, endMinutes: end, calendarColor: color, isAllDay: false };
+}
+
+describe('timeline layout', () => {
+  test('event top position scales with PX_PER_MIN', () => {
+    // minHour = floor(540/60)-1 = 8; top = (540-480)*2 = 120px
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: 1, timedEvents: [ev(1, 540, 600)] }));
+    expect(html).toContain('top:120px');
+  });
+
+  test('hour row height scales with PX_PER_MIN', () => {
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: 1, timedEvents: [ev(1, 540, 600)] }));
+    expect(html).toContain(`height: ${60 * PX_PER_MIN}px`);
+  });
+
+  test('sequential 5-min events: second starts at correct scaled top', () => {
+    // minHour=8; ev1 top=(540-480)*2=120; ev2 top=(545-480)*2=130
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 2,
+        timedEvents: [ev(1, 540, 545), ev(2, 545, 550)],
+      }),
+    );
+    expect(html).toContain('top:130px'); // ev2 top
+    // ev1 height clamped to gap: (545-540)*2 = 10px ≤ COMPACT_PX → compact class
+    expect(html).toContain('event-block--compact');
+  });
+
+  test('sequential 5-min events: first height ≤ gap to next (no visual overlap)', () => {
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 2,
+        timedEvents: [ev(1, 540, 545), ev(2, 545, 550)],
+      }),
+    );
+    // ev1 height = min(expand=15, gap=5)*2 = 10px (inline style, no spaces)
+    // ev2 top = (545-480)*2 = 130px → ev2 visual top (130) ≥ ev1 top+height (120+10) → no overlap
+    expect(html).toContain('height:10px');
+    expect(html).toContain('top:130px');
+  });
+
+  test('two overlapping events render side by side (50% width each)', () => {
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 2,
+        timedEvents: [ev(1, 540, 600), ev(2, 560, 620)],
+      }),
+    );
+    expect(html).toContain('width:calc(50% - 8px)');
+  });
+
+  test('four overlapping events: all visible, no overflow', () => {
+    const events = Array.from({ length: MAX_OVERLAP_COLUMNS }, (_, i) => ev(i + 1, 540, 600));
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    expect(html).not.toContain('class="event-block event-block--overflow"');
+    // each at 25% width
+    expect(html).toContain(`width:calc(${100 / MAX_OVERLAP_COLUMNS}% - 8px)`);
+  });
+
+  test('five overlapping events: overflow indicator appears', () => {
+    const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 1 }, (_, i) => ev(i + 1, 540, 600));
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    expect(html).toContain('class="event-block event-block--overflow"');
+    expect(html).toContain('overflow-count');
+    expect(html).toContain('+1');
+  });
+
+  test('six overlapping events: overflow shows +2', () => {
+    const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 2 }, (_, i) => ev(i + 1, 540, 600));
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    expect(html).toContain('+2');
+  });
+
+  test('compact class applied to short events below COMPACT_PX threshold', () => {
+    // Two sequential 5-min events; first is clamped to 10px < COMPACT_PX=30
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 2,
+        timedEvents: [ev(1, 540, 545), ev(2, 545, 550)],
+      }),
+    );
+    expect(html).toContain('event-block--compact');
+  });
+
+  test('30-min event is not compact', () => {
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 1,
+        timedEvents: [ev(1, 540, 570)],
+      }),
+    );
+    // height = 30*2 = 60px > COMPACT_PX=30 → no compact class
+    expect(html).not.toContain('class="event-block event-block--compact"');
   });
 });

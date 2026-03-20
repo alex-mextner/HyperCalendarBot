@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { computeEventColumns, escapeHtml, formatDuration, formatTime } from '../../../src/worker/templates/helpers.ts';
+import {
+  computeEventColumns,
+  computeEventHeight,
+  escapeHtml,
+  formatDuration,
+  formatTime,
+  MAX_OVERLAP_COLUMNS,
+  MIN_EVENT_DURATION_MIN,
+  PX_PER_MIN,
+} from '../../../src/worker/templates/helpers.ts';
 
 describe('escapeHtml', () => {
   test('escapes special characters', () => {
@@ -82,5 +91,81 @@ describe('computeEventColumns', () => {
 
   test('empty → empty', () => {
     expect(computeEventColumns([])).toEqual([]);
+  });
+});
+
+describe('layout constants', () => {
+  test('PX_PER_MIN is 2', () => expect(PX_PER_MIN).toBe(2));
+  test('MIN_EVENT_DURATION_MIN is 15', () => expect(MIN_EVENT_DURATION_MIN).toBe(15));
+  test('MAX_OVERLAP_COLUMNS is 4', () => expect(MAX_OVERLAP_COLUMNS).toBe(4));
+});
+
+describe('computeEventHeight', () => {
+  test('single 5-min event expands to MIN_EVENT_DURATION_MIN * PX_PER_MIN', () => {
+    const events = [{ startMinutes: 540, endMinutes: 545 }];
+    const cols = computeEventColumns(events);
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  });
+
+  test('30-min event uses actual duration', () => {
+    const events = [{ startMinutes: 540, endMinutes: 570 }];
+    const cols = computeEventColumns(events);
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60);
+  });
+
+  test('sequential 5-min events: first clamped to gap, no visual overlap', () => {
+    const events = [
+      { startMinutes: 540, endMinutes: 545 },
+      { startMinutes: 545, endMinutes: 550 },
+    ];
+    const cols = computeEventColumns(events);
+    // gap = 545-540 = 5min; expanded=15; clamped=min(15,5)=5; max(5,5)*2 = 10
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(10);
+    // last event has no next → expands to MIN * PX = 30
+    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  });
+
+  test('20-min gap allows full minimum expansion', () => {
+    const events = [
+      { startMinutes: 540, endMinutes: 545 },
+      { startMinutes: 560, endMinutes: 600 },
+    ];
+    const cols = computeEventColumns(events);
+    // gap = 560-540 = 20min; expanded=15; min(15,20)=15; *2 = 30
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
+  });
+
+  test('overlapping events in different columns do not constrain each other', () => {
+    const events = [
+      { startMinutes: 540, endMinutes: 600 }, // col 0
+      { startMinutes: 550, endMinutes: 610 }, // col 1
+    ];
+    const cols = computeEventColumns(events);
+    // no sequential event in same column → full duration
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60 * PX_PER_MIN);
+    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(60 * PX_PER_MIN);
+  });
+
+  test('30-min sequential events use actual height, not clamped', () => {
+    const events = [
+      { startMinutes: 540, endMinutes: 570 },
+      { startMinutes: 570, endMinutes: 600 },
+    ];
+    const cols = computeEventColumns(events);
+    // gap=570-540=30min; expanded=30; min(30,30)=30; max(30,30)*2=60
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(60);
+    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(60);
+  });
+
+  test('three sequential 5-min events: first two clamped, last expanded', () => {
+    const events = [
+      { startMinutes: 540, endMinutes: 545 },
+      { startMinutes: 545, endMinutes: 550 },
+      { startMinutes: 550, endMinutes: 555 },
+    ];
+    const cols = computeEventColumns(events);
+    expect(computeEventHeight(events[0]!, 0, events, cols)).toBe(10);
+    expect(computeEventHeight(events[1]!, 1, events, cols)).toBe(10);
+    expect(computeEventHeight(events[2]!, 2, events, cols)).toBe(MIN_EVENT_DURATION_MIN * PX_PER_MIN);
   });
 });

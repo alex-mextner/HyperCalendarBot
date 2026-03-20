@@ -1,4 +1,12 @@
-import { computeEventColumns, escapeHtml, formatTime } from './helpers.ts';
+import {
+  computeEventColumns,
+  computeEventHeight,
+  escapeHtml,
+  formatTime,
+  MAX_OVERLAP_COLUMNS,
+  MIN_EVENT_DURATION_MIN,
+  PX_PER_MIN,
+} from './helpers.ts';
 import { getLabels, pluralizeEvents } from './labels.ts';
 import { sharedCSS } from './shared-css.ts';
 import type { AgendaEvent, DailyAgendaData, TemplateRenderer } from './types.ts';
@@ -32,27 +40,39 @@ function renderTimeline(data: DailyAgendaData): string {
   }
 
   const totalMinutes = (maxHour - minHour) * 60;
-  const containerHeight = totalMinutes;
+  const containerHeight = totalMinutes * PX_PER_MIN;
+  const HOUR_PX = 60 * PX_PER_MIN;
+  const COMPACT_PX = MIN_EVENT_DURATION_MIN * PX_PER_MIN;
 
   // Hour rows for left column labels
   const hourRows: string[] = [];
   for (let h = minHour; h < maxHour; h++) {
     const label = h === 0 ? '' : formatTime(h * 60);
     hourRows.push(`
-      <div class="timeline__hour-row" style="top:${(h - minHour) * 60}px;">
+      <div class="timeline__hour-row" style="top:${(h - minHour) * HOUR_PX}px;">
         <div class="timeline__hour-label">${label}</div>
       </div>`);
   }
 
-  // Event blocks
+  // Event blocks — collect overflow items while building HTML
   const cols = computeEventColumns(timedEvents);
-  const eventBlocks = timedEvents
+  const overflowItems: Array<{ top: number; endPx: number }> = [];
+
+  const eventBlocksHtml = timedEvents
     .map((ev, i) => {
-      const top = ev.startMinutes - minHour * 60;
-      const height = Math.max(ev.endMinutes - ev.startMinutes, 20);
       const col = cols[i];
       if (!col) return '';
-      const widthPct = 100 / col.totalColumns;
+      const top = (ev.startMinutes - minHour * 60) * PX_PER_MIN;
+      const height = computeEventHeight(ev, i, timedEvents, cols);
+
+      // Events that exceed the column cap go to the overflow indicator
+      if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS - 1) {
+        overflowItems.push({ top, endPx: top + height });
+        return '';
+      }
+
+      const effectiveCols = Math.min(col.totalColumns, MAX_OVERLAP_COLUMNS);
+      const widthPct = 100 / effectiveCols;
       const leftPct = col.column * widthPct;
       const bg = `${ev.calendarColor}20`;
       const border = ev.calendarColor;
@@ -60,12 +80,35 @@ function renderTimeline(data: DailyAgendaData): string {
 
       const timeStr = `${formatTime(ev.startMinutes)} – ${formatTime(ev.endMinutes)}`;
       const locationStr = ev.location ? ` · ${escapeHtml(ev.location)}` : '';
-      // Compact: time + location on one line; title adapts to available height
-      const isShort = height <= 30;
+      const isCompact = height <= COMPACT_PX;
 
-      return `<div class="event-block${isShort ? ' event-block--compact' : ''}" style="top:${top}px;height:${height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${border};color:${color};">
+      return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${border};color:${color};">
       <div class="event-block__title">${escapeHtml(ev.title)}</div>
       <div class="event-block__meta">${timeStr}${locationStr}</div>
+    </div>`;
+    })
+    .join('');
+
+  // Build overflow indicator blocks: merge visually overlapping overflow items
+  const sortedOverflow = overflowItems.sort((a, b) => a.top - b.top);
+  const overflowBlocks: Array<{ top: number; endPx: number; count: number }> = [];
+  for (const item of sortedOverflow) {
+    const last = overflowBlocks[overflowBlocks.length - 1];
+    if (last && item.top < last.endPx) {
+      last.endPx = Math.max(last.endPx, item.endPx);
+      last.count++;
+    } else {
+      overflowBlocks.push({ top: item.top, endPx: item.endPx, count: 1 });
+    }
+  }
+  const ovfWidthPct = 100 / MAX_OVERLAP_COLUMNS;
+  const ovfLeftPct = (MAX_OVERLAP_COLUMNS - 1) * ovfWidthPct;
+  const overflowHtml = overflowBlocks
+    .map(({ top, endPx, count }) => {
+      const h = Math.max(endPx - top, COMPACT_PX);
+      const isCompact = h <= COMPACT_PX;
+      return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);">
+      <div class="event-block__overflow-count">+${count}</div>
     </div>`;
     })
     .join('');
@@ -73,7 +116,7 @@ function renderTimeline(data: DailyAgendaData): string {
   // Current time indicator — spans full width (hour labels + events area)
   let nowLine = '';
   if (currentTimeMinutes !== undefined && currentTimeMinutes >= minHour * 60 && currentTimeMinutes <= maxHour * 60) {
-    const top = currentTimeMinutes - minHour * 60;
+    const top = (currentTimeMinutes - minHour * 60) * PX_PER_MIN;
     const timeLabel = formatTime(currentTimeMinutes);
     nowLine = `
       <div class="now-line" style="top:${top}px;">
@@ -90,7 +133,7 @@ function renderTimeline(data: DailyAgendaData): string {
         ${hourRows.join('')}
       </div>
       <div class="timeline__events" style="position:absolute;top:0;left:80px;right:0;height:${containerHeight}px;">
-        ${eventBlocks}
+        ${eventBlocksHtml}${overflowHtml}
       </div>
       ${nowLine}
     </div>`;
@@ -166,7 +209,7 @@ function css(data: DailyAgendaData): string {
       position: absolute;
       left: 0;
       right: 0;
-      height: 60px;
+      height: ${60 * PX_PER_MIN}px;
       display: flex;
       align-items: flex-start;
       border-top: 1px solid ${t.border};
@@ -211,6 +254,19 @@ function css(data: DailyAgendaData): string {
     }
     .event-block--compact .event-block__meta {
       display: none;
+    }
+    .event-block--overflow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-left: 4px solid ${t.textSecondary}40;
+      background: ${t.cardBg};
+      color: ${t.textSecondary};
+    }
+    .event-block__overflow-count {
+      font-size: 18px;
+      font-weight: 700;
+      opacity: 0.7;
     }
     .now-line {
       position: absolute;
