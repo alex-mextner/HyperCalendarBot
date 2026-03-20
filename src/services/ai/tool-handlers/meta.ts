@@ -1,3 +1,4 @@
+import cityTimezones from 'city-timezones';
 import { t } from '../../../config/constants.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
@@ -17,6 +18,49 @@ interface FindUserInput {
 
 interface GetHolidaysInput {
   limit?: number;
+}
+
+function _getOffsetMinutes(timezone: string, dt: Date): number {
+  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
+  const parts = formatter.formatToParts(dt);
+  const raw = (parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0').replace(/^GMT/, '');
+  const match = raw.match(/^([+-])(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  return (match[1] === '+' ? 1 : -1) * (Number.parseInt(match[2]!, 10) * 60 + Number.parseInt(match[3]!, 10));
+}
+
+export function getTimezoneSuggestions(input: string): string[] {
+  const prefix = input.includes('/') ? input.split('/')[0] : null;
+  const cities = prefix
+    ? cityTimezones.cityMapping.filter((c) => c.timezone?.startsWith(`${prefix}/`))
+    : cityTimezones.cityMapping;
+
+  const best = new Map<string, { city: string; pop: number }>();
+  for (const c of cities) {
+    if (!c.timezone) continue;
+    const existing = best.get(c.timezone);
+    if (!existing || (c.pop ?? 0) > existing.pop) {
+      best.set(c.timezone, { city: c.city, pop: c.pop ?? 0 });
+    }
+  }
+
+  return [...best.entries()]
+    .sort(([, a], [, b]) => b.pop - a.pop)
+    .slice(0, 30)
+    .map(([tz, { city }]) => `${tz} (${city})`);
+}
+
+function _validateAndGetOffset(timezone: string, dt: Date): { offsetStr: string; offsetMinutes: number } {
+  // throws if timezone is invalid
+  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'shortOffset' });
+  const parts = formatter.formatToParts(dt);
+  const raw = (parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0').replace(/^GMT/, '');
+  const match = raw.match(/^([+-])(\d{1,2}):(\d{2})$/);
+  const offsetStr = match ? `${match[1]}${match[2]!.padStart(2, '0')}:${match[3]}` : '+00:00';
+  const offsetMinutes = match
+    ? (match[1] === '+' ? 1 : -1) * (Number.parseInt(match[2]!, 10) * 60 + Number.parseInt(match[3]!, 10))
+    : 0;
+  return { offsetStr, offsetMinutes };
 }
 
 export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): ToolResult {

@@ -545,3 +545,34 @@ describe('handleMakeCall', () => {
     expect(result.success).toBe(false);
   });
 });
+
+describe('getTimezoneSuggestions', () => {
+  test('returns up to 30 suggestions for valid region prefix', () => {
+    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
+    const suggestions = getTimezoneSuggestions('America/Blah');
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.length).toBeLessThanOrEqual(30);
+    expect(suggestions.every((s: string) => s.startsWith('America/'))).toBe(true);
+  });
+
+  test('returns globally sorted suggestions when no slash', () => {
+    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
+    const suggestions = getTimezoneSuggestions('Moscow');
+    expect(suggestions.length).toBeGreaterThan(0);
+    expect(suggestions.length).toBeLessThanOrEqual(30);
+  });
+
+  test('deduplicates by timezone', () => {
+    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
+    const suggestions = getTimezoneSuggestions('America/Blah');
+    const tzNames = suggestions.map((s: string) => s.split(' ')[0]);
+    const unique = new Set(tzNames);
+    expect(unique.size).toBe(tzNames.length);
+  });
+
+  test('format includes timezone and city name', () => {
+    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
+    const suggestions = getTimezoneSuggestions('America/Blah');
+    expect(suggestions[0]).toMatch(/^[\w/]+ \(.+\)$/);
+  });
+});
