@@ -204,6 +204,53 @@ Reminder text is dynamic — includes age if `birth_year` known:
 
 ---
 
+## `/birthdays` Command
+
+New bot command `/birthdays` — lists all birthday events accessible to the user, grouped by calendar.
+
+**Output format:**
+
+```
+🎂 Дни рождения
+
+👤 Личный календарь
+• 🎁 Д/р Иван — 30 лет (15 марта)
+• 🎁 Д/р Мария (22 июня)
+
+👥 Команда (группа)
+• 🎁 Д/р Алексей — 25 лет (3 апреля)
+```
+
+- Shows all `event_type = 'birthday'` events the user can see (personal + all group calendars they're in)
+- Deduplication applied (personal takes priority over group)
+- Sorted within each section by upcoming date (next occurrence from today)
+- Age appended dynamically if `birth_year` known
+- If no birthdays anywhere: `"Дней рождения пока нет"` / `"No birthdays yet"`
+- Works in both private and group chat contexts (in group — shows only that group's birthdays + personal)
+
+---
+
+## AI Tool — `search_events` — Birthday Filter
+
+Existing `search_events` tool gets an optional `event_type` parameter:
+
+```ts
+{
+  query?: string,       // existing text search
+  event_type?: 'birthday' | 'regular',  // new filter
+}
+```
+
+When `event_type = 'birthday'`:
+- Returns only birthday events
+- `query` optionally filters by name within results
+- Results include dynamic display title with age (🎁 prefix + age suffix)
+- Useful for AI queries like "покажи все дни рождения" or "есть ли у меня день рождения Ивана"
+
+When `event_type` is omitted — existing behaviour unchanged (returns all event types).
+
+---
+
 ## Out of Scope
 
 - Birthday events for non-Telegram contacts (manual AI creation covers individual cases)
