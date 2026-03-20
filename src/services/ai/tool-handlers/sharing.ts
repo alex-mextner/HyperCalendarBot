@@ -81,7 +81,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
 
   const mtprotoSend =
     sender.sendAsUser && url !== null
-      ? (userId: number, username?: string): Promise<boolean> => {
+      ? (userId: number, _text: string, username?: string): Promise<boolean> => {
           const mtprotoText =
             lang === 'ru'
               ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
