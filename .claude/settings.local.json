@@ -8,7 +8,6 @@
       "Read(//tmp/**)",
       "Bash(./node_modules/.bin/biome check:*)",
       "Bash(./node_modules/.bin/biome format:*)",
-      "Read(//Users/ultra/xp/**)",
       "Bash(uv pip:*)",
       "Bash(ffmpeg -version)",
       "Bash(node_modules/.bin/biome check:*)",
@@ -17,10 +16,9 @@
       "Bash(for dir:*)",
       "Bash(do ls:*)",
       "Bash(done)",
-      "Read(//Users/ultra/.claude/projects/-Users-ultra-xp-hypercalendarbot/c47cad90-aa56-42c2-8712-ed97d58cfe0d/**)",
-      "Read(//Users/ultra/.claude/projects/-Users-ultra-xp-hypercalendarbot/**)",
-      "Write",
-      "Bash"
+      "Bash(uv pip:*)",
+      "Bash(ffmpeg -version)",
+      "Bash(node_modules/.bin/biome check:*)"
     ]
   }
 }

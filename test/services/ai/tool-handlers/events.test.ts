@@ -86,6 +86,22 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('No events');
     });
 
+    test('accepts date-only format (YYYY-MM-DD) and finds events on that day', () => {
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Morning Meeting',
+        start_at: '2026-03-15T10:00:00Z',
+        end_at: '2026-03-15T11:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-15',
+        end_date: '2026-03-15',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Morning Meeting');
+    });
+
     test('populates data with EventSummary array', () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,

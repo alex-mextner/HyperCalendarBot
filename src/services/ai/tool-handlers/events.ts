@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
+import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
@@ -9,6 +10,13 @@ import type { EventSummary } from '../../intent/variable-resolver.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
+  const d = new TZDate(new Date(`${dateStr}T12:00:00Z`), timezone);
+  return getDayRangeUtc(d, timezone);
+}
 
 function occurrenceToSummary(occ: EventOccurrence, timezone: string): EventSummary {
   const d = new TZDate(new Date(occ.occurrence_start), timezone);
@@ -182,12 +190,14 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
+  const tz = ctx.user.timezone;
+  const startDate = DATE_ONLY_RE.test(input.start_date) ? expandDateOnly(input.start_date, tz).start : input.start_date;
+  const endDate = DATE_ONLY_RE.test(input.end_date) ? expandDateOnly(input.end_date, tz).end : input.end_date;
   const occurrences =
     scope === 'group'
-      ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, input.start_date, input.end_date)
-      : ctx.eventService.getEventsInRange(userId, input.start_date, input.end_date);
+      ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startDate, endDate)
+      : ctx.eventService.getEventsInRange(userId, startDate, endDate);
 
-  const tz = ctx.user.timezone;
   const data = occurrences.map((occ) => occurrenceToSummary(occ, tz));
 
   if (occurrences.length === 0) {
