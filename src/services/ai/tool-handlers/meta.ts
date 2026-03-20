@@ -20,7 +20,7 @@ interface GetHolidaysInput {
   limit?: number;
 }
 
-function _getOffsetMinutes(timezone: string, dt: Date): number {
+function getOffsetMinutes(timezone: string, dt: Date): number {
   try {
     return validateAndGetOffset(timezone, dt).offsetMinutes;
   } catch {
@@ -68,8 +68,8 @@ function resolveSingle(
 ): { offsetStr: string; offsetMinutes: number; dstActive: boolean; localTime: string } {
   const { offsetStr, offsetMinutes } = validateAndGetOffset(timezone, dt); // throws if invalid
   const year = dt.getFullYear();
-  const janOffset = _getOffsetMinutes(timezone, new Date(Date.UTC(year, 0, 15)));
-  const julOffset = _getOffsetMinutes(timezone, new Date(Date.UTC(year, 6, 15)));
+  const janOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 0, 15)));
+  const julOffset = getOffsetMinutes(timezone, new Date(Date.UTC(year, 6, 15)));
   const dstActive = janOffset !== julOffset && offsetMinutes === Math.max(janOffset, julOffset);
   const localMs = dt.getTime() + offsetMinutes * 60_000;
   const local = new Date(localMs);
