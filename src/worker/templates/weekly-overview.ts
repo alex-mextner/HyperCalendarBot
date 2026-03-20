@@ -7,7 +7,7 @@ function renderEvent(ev: MiniEvent): string {
   const timeStr = ev.isAllDay ? '' : formatTime(ev.startMinutes);
   const timeHtml = timeStr ? `<span class="event-pill__time">${timeStr}</span>` : '';
   return `<div class="event-pill" style="background:${bg};border-left:3px solid ${ev.color};color:${ev.color};">
-    ${timeHtml}<span class="event-pill__title">${escapeHtml(ev.title)}</span>
+    <span class="event-pill__inner">${timeHtml}<span class="event-pill__title">${escapeHtml(ev.title)}</span></span>
   </div>`;
 }
 
@@ -98,22 +98,23 @@ function css(data: WeeklyOverviewData): string {
       padding: 5px 6px;
       font-size: 11px;
       line-height: 1.3;
-      display: flex;
-      align-items: center;
-      gap: 3px;
+      display: block;
       overflow: hidden;
     }
-    .event-pill__time {
-      font-weight: 600;
-      flex-shrink: 0;
-      font-size: 10px;
-      opacity: 0.8;
-    }
-    .event-pill__title {
-      overflow: hidden;
+    .event-pill__inner {
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: break-word;
+    }
+    .event-pill__time {
+      font-weight: 600;
+      font-size: 10px;
+      opacity: 0.8;
+      margin-right: 3px;
+    }
+    .event-pill__title {
       font-weight: 500;
     }
     .footer {

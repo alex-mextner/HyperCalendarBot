@@ -6,7 +6,7 @@ function renderEventDot(ev: MiniEvent): string {
   const timeStr = ev.isAllDay ? '' : formatTime(ev.startMinutes);
   const timeHtml = timeStr ? `<span class="ev-time">${timeStr}</span>` : '';
   return `<div class="ev-dot" style="background:${ev.color}18;border-left:2px solid ${ev.color};color:${ev.color};">
-    ${timeHtml}<span class="ev-title">${escapeHtml(ev.title)}</span>
+    <span class="ev-inner">${timeHtml}<span class="ev-title">${escapeHtml(ev.title)}</span></span>
   </div>`;
 }
 
@@ -97,22 +97,23 @@ function css(data: MonthlyCalendarData): string {
       padding: 2px 4px;
       font-size: 10px;
       line-height: 1.3;
-      display: flex;
-      align-items: center;
-      gap: 2px;
+      display: block;
       overflow: hidden;
     }
-    .ev-time {
-      font-weight: 600;
-      flex-shrink: 0;
-      font-size: 9px;
-      opacity: 0.8;
-    }
-    .ev-title {
-      overflow: hidden;
+    .ev-inner {
       display: -webkit-box;
       -webkit-line-clamp: 2;
       -webkit-box-orient: vertical;
+      overflow: hidden;
+      overflow-wrap: break-word;
+    }
+    .ev-time {
+      font-weight: 600;
+      font-size: 9px;
+      opacity: 0.8;
+      margin-right: 2px;
+    }
+    .ev-title {
       font-weight: 500;
     }
     .ev-overflow {
