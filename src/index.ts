@@ -362,8 +362,6 @@ if (config.REDIS_URL) {
   botLogger.info('Notification scheduler initialized');
 }
 
-let birthdayService: import('./services/birthday/birthday-service.ts').BirthdayService | undefined;
-
 if (config.REDIS_URL) {
   const {
     createBotTasksQueue,
@@ -378,7 +376,12 @@ if (config.REDIS_URL) {
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
   const { BirthdayService } = await import('./services/birthday/birthday-service.ts');
 
-  birthdayService = new BirthdayService(db.events, db.birthdayMeta, db.eventReminders, db.notificationPreferences);
+  const cronBirthdayService = new BirthdayService(
+    db.events,
+    db.birthdayMeta,
+    db.eventReminders,
+    db.notificationPreferences,
+  );
 
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
@@ -408,7 +411,7 @@ if (config.REDIS_URL) {
       const needingIds = new Set(db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000));
       const allUsers = db.users.findAll().filter((u) => needingIds.has(u.telegram_id));
       for (let i = 0; i < allUsers.length; i += BATCH) {
-        await birthdayService.runBatchSync(allUsers.slice(i, i + BATCH));
+        await cronBirthdayService.runBatchSync(allUsers.slice(i, i + BATCH));
       }
     },
   });

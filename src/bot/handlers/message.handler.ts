@@ -24,6 +24,7 @@ import type { CalendarEvent, User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
+import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
@@ -140,6 +141,7 @@ export interface MessageHandlerDeps {
     formattedTime: string,
     eventTitle: string,
   ) => Promise<void>;
+  birthdayService?: BirthdayService;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -820,6 +822,18 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       // Track member for fallback reminders
       if (deps.groupMemberRepo) {
         deps.groupMemberRepo.upsert(Number(chatId), user.telegram_id);
+      }
+
+      if (deps.birthdayService) {
+        deps.birthdayService
+          .fetchAndSyncUser(
+            user.telegram_id,
+            user.first_name ?? '',
+            user.telegram_id,
+            user.language as 'en' | 'ru',
+            user.timezone,
+          )
+          .catch((err) => cmdLogger.error({ err, userId: user.telegram_id }, 'Birthday sync failed'));
       }
 
       const hasSession = deps.groupSessions?.hasActiveSession(Number(chatId)) ?? false;
