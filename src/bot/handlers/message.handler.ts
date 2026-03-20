@@ -911,7 +911,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               return executeTool(agentCtx, toolName, input);
             },
             workflowSessions,
-            deps.chatHistory,
             notifyAdmin,
             getEventContext,
             (uid, eventId) => {

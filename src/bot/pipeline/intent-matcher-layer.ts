@@ -1,6 +1,5 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
-import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
@@ -35,7 +34,6 @@ export function createIntentMatcherLayer(
   executor: IntentExecutor,
   toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
-  chatHistoryRepo?: ChatHistoryRepository,
   notifyAdmin?: (text: string) => Promise<unknown>,
   getEventContext?: (
     userId: number,
@@ -163,9 +161,6 @@ export function createIntentMatcherLayer(
           ? formatResponse(intent.format, result.response, user.timezone, user.language)
           : result.response;
       await ctx.send(formatted);
-      if (chatHistoryRepo) {
-        chatHistoryRepo.save(userId, 'assistant', JSON.stringify({ kind: 'bot', text: formatted }));
-      }
     }
 
     return { handled: true };

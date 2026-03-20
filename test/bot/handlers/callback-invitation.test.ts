@@ -293,10 +293,10 @@ describe('propose-time callbacks', () => {
       undefined,
       invitationService as never,
       eventRepoArg as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
+      undefined, // chatHistoryRepo
+      undefined, // onAiButtonClick
+      undefined, // oauthDeps
+      notifyDeps as never, // invitationNotifyDeps
       undefined,
       undefined,
       undefined,
@@ -417,11 +417,10 @@ describe('propose-time callbacks', () => {
       undefined,
       invitationService as never,
       eventRepoMock as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
-      undefined,
+      undefined, // chatHistoryRepo
+      undefined, // onAiButtonClick
+      undefined, // oauthDeps
+      notifyDeps as never, // invitationNotifyDeps
       undefined,
       undefined,
       undefined,
@@ -486,10 +485,11 @@ describe('propose-time callbacks', () => {
       undefined,
       invitationService as never,
       eventRepoMock as never,
+      undefined, // chatHistoryRepo
+      undefined, // onAiButtonClick
+      undefined, // oauthDeps
+      notifyDeps as never, // invitationNotifyDeps
       undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
       undefined,
       undefined,
       undefined,

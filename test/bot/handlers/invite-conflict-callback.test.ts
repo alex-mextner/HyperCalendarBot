@@ -55,8 +55,8 @@ function makeHandler(
     undefined, // 10 eventRepo
     undefined, // 11 chatHistoryRepo
     undefined, // 12 onAiButtonClick
-    undefined, // 13 oauthDeps
-    undefined, // 14 invitationNotifyDeps
+    undefined, // 14 oauthDeps
+    undefined, // 15 invitationNotifyDeps
     undefined, // 16 onboardingScene
     undefined, // 17 editProposalDeps
     undefined, // 18 callSettingsRepo

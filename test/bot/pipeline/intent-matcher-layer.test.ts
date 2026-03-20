@@ -229,7 +229,6 @@ describe('createIntentMatcherLayer', () => {
       makeExecutor({ success: false, response: 'tool error: user not found' }),
       makeToolExecutor(),
       workflowSessions,
-      undefined,
       notifyAdmin,
     );
 
