@@ -55,6 +55,8 @@ function css(theme: MdTableData['theme']): string {
 }
 
 function render(data: MdTableData): string {
+  // markdown originates from the AI agent, not direct user input.
+  // Rendered by Playwright (server-side screenshot), never in a user-facing browser — XSS is not a concern here.
   const tableHtml = marked.parse(data.markdown, { async: false }) as string;
   const captionBlock = data.caption ? `<div class="tbl-caption">${escapeHtml(data.caption)}</div>` : '';
   const styles = css(data.theme);

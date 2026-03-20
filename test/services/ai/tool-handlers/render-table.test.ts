@@ -31,6 +31,15 @@ describe('handleRenderTable', () => {
     expect(result.output).toBeTruthy();
   });
 
+  test('output contains the title', () => {
+    const ctx = makeCtx();
+    const result = handleRenderTable(ctx, {
+      title: 'МойЗаголовок',
+      markdown: '| A |\n|---|\n| 1 |',
+    });
+    expect(result.output).toContain('МойЗаголовок');
+  });
+
   test('fails when renderService missing', () => {
     const ctx = makeCtx({ renderService: undefined });
     const result = handleRenderTable(ctx, {

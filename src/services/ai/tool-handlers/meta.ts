@@ -220,13 +220,10 @@ export function handleRenderDayImage(
   return { success: true, output: t(lang).aiTools.meta.dayImageRendering(input.date) };
 }
 
-interface RenderTableInput {
-  title: string;
-  markdown: string;
-  caption?: string;
-}
-
-export function handleRenderTable(ctx: AgentContext, input: RenderTableInput): ToolResult {
+export function handleRenderTable(
+  ctx: AgentContext,
+  input: { title: string; markdown: string; caption?: string },
+): ToolResult {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
@@ -251,7 +248,7 @@ export function handleRenderTable(ctx: AgentContext, input: RenderTableInput): T
       return sender.sendPhoto!(ctx.chatId, file);
     })
     .catch((err) => {
-      metaLogger.error({ err: err }, 'Table image render failed');
+      metaLogger.error({ err }, 'Table image render failed');
     });
 
   const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
