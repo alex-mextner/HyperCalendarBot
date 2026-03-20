@@ -94,6 +94,7 @@ export interface AgentContext {
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   birthdayService?: BirthdayService;
+  userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
 }
 
 /**

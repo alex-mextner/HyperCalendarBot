@@ -142,6 +142,7 @@ export interface MessageHandlerDeps {
     eventTitle: string,
   ) => Promise<void>;
   birthdayService?: BirthdayService;
+  userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -404,6 +405,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             return deps.eventService.getEventsInRange(user.telegram_id, start, end);
           })(),
       birthdayService: deps.birthdayService,
+      userMemoryRepo: deps.userMemoryRepo,
     };
   };
 }

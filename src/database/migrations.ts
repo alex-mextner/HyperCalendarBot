@@ -791,4 +791,19 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '039_user_memory',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE user_memory (
+          id         INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id    INTEGER NOT NULL,
+          content    TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_user_memory_user_id ON user_memory(user_id);
+      `);
+    },
+  },
 ];

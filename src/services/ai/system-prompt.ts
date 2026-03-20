@@ -47,6 +47,12 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     ? `\n## Schedule Context (±2 weeks, local time)\n${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}\nUse this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`
     : '';
 
+  const memoryFacts = ctx.userMemoryRepo?.getAll(ctx.user.telegram_id) ?? [];
+  const memorySection =
+    memoryFacts.length > 0
+      ? `\n## What I Know About You\n${memoryFacts.map((f) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Update with remember_user_fact when you learn something new or when existing facts become outdated.`
+      : '\n## What I Know About You\n(nothing yet — use remember_user_fact to save facts as you learn them)';
+
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
 
@@ -59,7 +65,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
 - ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretaryForLine}` : ''}
-
+${memorySection}
 ## Context
 - Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as the current-time anchor. Convert to the user's local time by adding the offset (${utcOffset}).
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min") → use the result as start_at. "next week" → calculate("2026-03-18 + 7days"). "2 hours from now" → calculate("2026-03-18T22:34:00Z + 2hours"). If calculate returns an error, report it to the user — do not compute manually.
@@ -121,6 +127,7 @@ Be a proactive assistant, not a passive tool executor. After completing any acti
   - Very short gap before an event that needs preparation (meeting, lesson, call) → note it.
   - Event that is likely stressful or emotionally draining (medical, conflict, difficult conversation, exam) → suggest leaving buffer time after it; if something is already scheduled right after, flag it.
   - Event that may run long or shift (travel, open-ended meetings, anything with uncertainty) → note the risk for what follows.
+  - Event likely requires bringing specific things (sport → kit/shoes, doctor → insurance card/referral, travel → documents/tickets, school/exam → materials) → remind the user what to prepare or take; offer to add it to the description.
   - Don't comment if the day looks fine — silence is better than noise.
 
 **When showing events for a day or week:**

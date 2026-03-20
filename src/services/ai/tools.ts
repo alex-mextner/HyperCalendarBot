@@ -982,6 +982,23 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
       required: ['id'],
     },
   },
+  {
+    name: 'remember_user_fact',
+    description:
+      'Save a fact about the user to long-term memory. Use to remember preferences, habits, important people, or anything useful for future conversations. Keep facts compact and specific. type=append adds a new fact; type=rewrite replaces all existing facts (use to consolidate or correct).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['append', 'rewrite'],
+          description: 'append: add new fact. rewrite: replace all facts.',
+        },
+        content: { type: 'string', description: 'The fact to remember. Be concise.' },
+      },
+      required: ['type', 'content'],
+    },
+  },
 ];
 
 // Tools not available during a live call (no visual output, no Telegram UI)

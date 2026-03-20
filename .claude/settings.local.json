@@ -18,7 +18,8 @@
       "Bash(done)",
       "Bash(uv pip:*)",
       "Bash(ffmpeg -version)",
-      "Bash(node_modules/.bin/biome check:*)"
+      "Bash(node_modules/.bin/biome check:*)",
+      "Bash(grep:*)"
     ]
   }
 }
