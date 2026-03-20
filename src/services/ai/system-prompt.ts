@@ -69,6 +69,7 @@ ${eventsWindowSection}
 ## Rules
 - ${langInstruction}
 - All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z").
+- TIMEZONE RULE: NEVER guess or hardcode UTC offsets for any timezone — not even well-known ones like Moscow, Tokyo, Paris, or New York. Your training data about offsets is stale and wrong when DST or legal changes occur. The ONLY exception is the user's own timezone offset shown in User Info above — it is computed fresh for every message and is correct; use it directly without calling any tool. For ANY other timezone, ALWAYS call get_timezone_info first. When scheduling a future event in another timezone, ALWAYS pass the event datetime as the \`at\` parameter — the offset may differ from today due to DST transitions (e.g. New York is UTC-5 in winter but UTC-4 in summer). When comparing two or more timezones: pass them as an array in a single get_timezone_info call — the response already includes \`difference_hours\` (for exactly 2 zones) and \`ahead\` (which timezone is furthest ahead). Never compute timezone differences manually or in your head.
 - When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
 - Be concise. No unnecessary preamble.
 - For event creation: create immediately, do not ask for confirmation. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit.
