@@ -631,6 +631,33 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'render_table',
+    description: `Renders a Markdown table as a styled image and sends it to the chat.
+
+Use this tool whenever presenting tabular data (comparisons, schedules, lists with multiple attributes).
+Call it IN PARALLEL with writing the same data as plain text in your response — duplicating information visually and textually is intentional and correct.
+
+During a voice call the table is still sent to chat; you MUST mention it verbally (e.g. "I've sent a table to the chat — take a look").`,
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Table heading shown above the image.',
+        },
+        markdown: {
+          type: 'string',
+          description: 'Markdown table syntax. Example: "| Plan | Price |\\n|---|---|\\n| Basic | $5 |"',
+        },
+        caption: {
+          type: 'string',
+          description: 'Optional explanatory note shown below the table.',
+        },
+      },
+      required: ['title', 'markdown'],
+    },
+  },
+  {
     name: 'set_event_visibility',
     description: 'Set visibility for a specific event (overrides default settings).',
     input_schema: {

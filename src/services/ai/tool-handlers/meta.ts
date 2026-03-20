@@ -1,6 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
+import { getTheme } from '../../../worker/templates/themes.ts';
 import { renderDayImage } from '../../image/render-day.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -161,7 +162,7 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
   ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch((err) => {
-    metaLogger.error({ err: err }, 'Failed to send buttons');
+    metaLogger.error({ err }, 'Failed to send buttons');
   });
   return {
     success: true,
@@ -176,7 +177,7 @@ export function handlePickUsers(ctx: AgentContext, input: { event_id: number; pr
   }
   // Use event_id as request_id so we can match the response
   ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch((err) => {
-    metaLogger.error({ err: err }, 'Failed to send user picker');
+    metaLogger.error({ err }, 'Failed to send user picker');
   });
   return { success: true, output: t(ctx.user.language).aiTools.meta.userPickerSent, stopLoop: true };
 }
@@ -213,10 +214,49 @@ export function handleRenderDayImage(
       return sender.sendPhoto!(ctx.chatId, file);
     })
     .catch((err) => {
-      metaLogger.error({ err: err }, 'Day image render failed');
+      metaLogger.error({ err }, 'Day image render failed');
     });
 
   return { success: true, output: t(lang).aiTools.meta.dayImageRendering(input.date) };
+}
+
+export function handleRenderTable(
+  ctx: AgentContext,
+  input: { title: string; markdown: string; caption?: string },
+): ToolResult {
+  if (!ctx.renderService || !ctx.sender?.sendPhoto) {
+    return { success: false, error: 'Image rendering not available.' };
+  }
+
+  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
+  const tr = t(lang).aiTools.meta;
+  const sender = ctx.sender;
+
+  ctx.renderService
+    .renderDirect({
+      type: 'md-table',
+      data: {
+        title: input.title,
+        markdown: input.markdown,
+        caption: input.caption,
+        theme: getTheme(),
+      },
+      userId: ctx.user.telegram_id,
+    })
+    .then((buffer) => {
+      const file = new File([buffer], 'table.png', { type: 'image/png' });
+      return sender.sendPhoto!(ctx.chatId, file);
+    })
+    .catch((err) => {
+      metaLogger.error({ err }, 'Table image render failed');
+    });
+
+  const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
+
+  return {
+    success: true,
+    output: `${tr.tableRendering(input.title)}${voiceNote}`,
+  };
 }
 
 export function handleRenderWeekImage(

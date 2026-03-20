@@ -601,7 +601,7 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 0));
       expect(sent.length).toBe(2);
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
@@ -633,7 +633,7 @@ describe('event tool handlers', () => {
         force: true,
       });
 
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 0));
       expect(sent.length).toBe(2);
       const ruNotification = sent.find((s) => s.chatId === RU_MEMBER_ID);
       expect(ruNotification?.text).toContain('Новое событие');
@@ -661,7 +661,7 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 0));
       expect(sent.length).toBe(2);
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
@@ -689,7 +689,7 @@ describe('event tool handlers', () => {
       const gCtx: AgentContext = { ...makeGroupCtx(), groupMemberService, sender, groupChatRepo };
       handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
 
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise((r) => setTimeout(r, 0));
       expect(sent.length).toBe(1);
       expect(sent[0]!.text).toContain(`href="${INVITE_LINK}"`);
       expect(sent[0]!.text).toContain('Test Group');
