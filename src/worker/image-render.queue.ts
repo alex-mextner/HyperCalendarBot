@@ -4,7 +4,13 @@ import { parseRedisUrl } from '../utils/redis.ts';
 import { playwrightPool } from './playwright-pool.ts';
 import type { ConflictScheduleData } from './templates/conflict-schedule.ts';
 import { getTemplate } from './templates/index.ts';
-import type { DailyAgendaData, EventCardData, MonthlyCalendarData, WeeklyOverviewData } from './templates/types.ts';
+import type {
+  DailyAgendaData,
+  EventCardData,
+  MdTableData,
+  MonthlyCalendarData,
+  WeeklyOverviewData,
+} from './templates/types.ts';
 
 // --- Job types ---
 
@@ -13,7 +19,8 @@ export type ImageRenderJob =
   | { type: 'weekly-overview'; data: WeeklyOverviewData; userId: number }
   | { type: 'event-card'; data: EventCardData; userId: number }
   | { type: 'monthly-calendar'; data: MonthlyCalendarData; userId: number }
-  | { type: 'conflict-schedule'; data: ConflictScheduleData; userId: number };
+  | { type: 'conflict-schedule'; data: ConflictScheduleData; userId: number }
+  | { type: 'md-table'; data: MdTableData; userId: number };
 
 export interface ImageRenderResult {
   bufferBase64: string; // PNG as base64 (Buffer doesn't survive Redis JSON roundtrip)
