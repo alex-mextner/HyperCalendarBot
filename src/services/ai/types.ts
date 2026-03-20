@@ -14,6 +14,7 @@ import type { SharedEventRepository } from '../../database/repositories/shared-e
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
+import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
@@ -90,6 +91,7 @@ export interface AgentContext {
   conflictChecker?: ConflictChecker;
   scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  birthdayService?: BirthdayService;
 }
 
 /**

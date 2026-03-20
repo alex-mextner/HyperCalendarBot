@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger.ts';
+import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
@@ -131,7 +132,22 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleGetFreeSlots(ctx, input as { date: string; scope?: 'personal' | 'group' });
 
       case 'search_events':
-        return handleSearchEvents(ctx, input as { query: string; scope?: 'personal' | 'group' });
+        return handleSearchEvents(
+          ctx,
+          input as { query?: string; scope?: 'personal' | 'group'; event_type?: 'birthday' | 'regular' },
+        );
+
+      case 'create_birthday_event':
+        return handleCreateBirthdayEvent(
+          ctx,
+          input as {
+            celebrant_id: number;
+            date: { day: number; month: number };
+            year?: number;
+            custom_name?: string;
+            group_id?: number;
+          },
+        );
 
       case 'get_upcoming':
         return handleGetUpcoming(ctx, input as { limit?: number; scope?: 'personal' | 'group' });

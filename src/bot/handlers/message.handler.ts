@@ -395,6 +395,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupChatRepo: deps.groupChatRepo,
       groupMemberRepo: deps.groupMemberRepo,
       groupMemberService: deps.groupMemberService,
+      birthdayService: deps.birthdayService,
     };
   };
 }

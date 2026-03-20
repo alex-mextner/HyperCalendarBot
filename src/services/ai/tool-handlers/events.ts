@@ -169,9 +169,10 @@ interface GetEventInput {
 }
 
 interface SearchEventsInput {
-  query: string;
+  query?: string;
   scope?: Scope;
   owner_id?: number;
+  event_type?: 'birthday' | 'regular';
 }
 
 export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
@@ -391,8 +392,8 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   }
   const events =
     scope === 'group'
-      ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
-      : ctx.eventService.searchEvents(userId, input.query);
+      ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query ?? '')
+      : ctx.eventService.searchWithEventType(userId, input.query ?? null, input.event_type ?? null);
 
   const tz = ctx.user.timezone;
   const data = events.map((e) =>
