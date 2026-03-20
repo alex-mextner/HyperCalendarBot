@@ -16,5 +16,5 @@ export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFac
     ctx.userMemoryRepo.rewrite(ctx.user.telegram_id, input.content);
   }
 
-  return { success: true };
+  return { success: true, output: 'fact saved' };
 }

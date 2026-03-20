@@ -296,6 +296,7 @@ export function createBot(
     sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
     proposeTimeSessions,
     birthdayService,
+    userMemoryRepo: db.userMemory,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     domainEvents: domainEventBus,

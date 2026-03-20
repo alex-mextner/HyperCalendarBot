@@ -10,10 +10,12 @@ export interface UserMemoryEntry {
 export class UserMemoryRepository {
   constructor(private db: Database) {}
 
+  private static readonly MAX_FACTS = 50;
+
   getAll(userId: number): UserMemoryEntry[] {
     return this.db
-      .prepare('SELECT * FROM user_memory WHERE user_id = ? ORDER BY created_at ASC')
-      .all(userId) as UserMemoryEntry[];
+      .prepare('SELECT * FROM user_memory WHERE user_id = ? ORDER BY created_at ASC LIMIT ?')
+      .all(userId, UserMemoryRepository.MAX_FACTS) as UserMemoryEntry[];
   }
 
   append(userId: number, content: string): void {

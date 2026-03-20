@@ -992,7 +992,8 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
         type: {
           type: 'string',
           enum: ['append', 'rewrite'],
-          description: 'append: add new fact. rewrite: replace all facts.',
+          description:
+            'append: add a new fact (preferred). rewrite: DESTRUCTIVE — deletes all existing facts and replaces with this one. Use rewrite only to correct wrong information or consolidate many facts into one.',
         },
         content: { type: 'string', description: 'The fact to remember. Be concise.' },
       },

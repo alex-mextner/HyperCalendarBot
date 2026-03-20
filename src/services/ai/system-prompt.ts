@@ -47,11 +47,13 @@ export function buildSystemPrompt(ctx: AgentContext): string {
     ? `\n## Schedule Context (±2 weeks, local time)\n${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}\nUse this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`
     : '';
 
-  const memoryFacts = ctx.userMemoryRepo?.getAll(ctx.user.telegram_id) ?? [];
+  const memoryFacts = ctx.userMemoryRepo ? ctx.userMemoryRepo.getAll(ctx.user.telegram_id) : null;
   const memorySection =
-    memoryFacts.length > 0
-      ? `\n## What I Know About You\n${memoryFacts.map((f) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Update with remember_user_fact when you learn something new or when existing facts become outdated.`
-      : '\n## What I Know About You\n(nothing yet — use remember_user_fact to save facts as you learn them)';
+    memoryFacts === null
+      ? ''
+      : memoryFacts.length > 0
+        ? `\n## What I Know About You\n${memoryFacts.map((f) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
+        : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
 
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;

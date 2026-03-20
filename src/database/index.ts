@@ -30,6 +30,7 @@ import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
+import { UserMemoryRepository } from './repositories/user-memory.repository.ts';
 import { WorkflowSessionRepository } from './repositories/workflow-session.repository.ts';
 import { runMigrations } from './schema.ts';
 
@@ -62,6 +63,7 @@ export class DatabaseService {
   readonly groupSessions: GroupSessionRepository;
   readonly eventMentions: SqliteEventMentionStore;
   readonly birthdayMeta: BirthdayMetadataRepository;
+  readonly userMemory: UserMemoryRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -101,6 +103,7 @@ export class DatabaseService {
     this.groupSessions = new GroupSessionRepository(this.db);
     this.eventMentions = new SqliteEventMentionStore(this.db);
     this.birthdayMeta = new BirthdayMetadataRepository(this.db);
+    this.userMemory = new UserMemoryRepository(this.db);
   }
 
   close(): void {

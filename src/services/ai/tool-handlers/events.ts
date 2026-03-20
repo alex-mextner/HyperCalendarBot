@@ -346,6 +346,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
+  let conflictHint: string | undefined;
   if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
     const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
     if (conflicts.length > 0) {
@@ -354,6 +355,17 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
         event: updated,
         conflictsWith: conflicts[0]!,
       });
+
+      const tz = ctx.user.timezone;
+      const conflictList = conflicts
+        .map((c) => {
+          const start = new TZDate(new Date(c.start_at), tz);
+          const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
+          const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
+          return `"${c.title}" (${timeRange})`;
+        })
+        .join(', ');
+      conflictHint = `⚠️ This event now overlaps with: ${conflictList}. Warn the user about the overlap.`;
     }
   }
 
@@ -371,7 +383,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
     }
   }
 
-  return { success: true, output };
+  return { success: true, output, agentHint: conflictHint };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
