@@ -13,7 +13,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
@@ -90,6 +90,8 @@ export interface AgentContext {
   conflictChecker?: ConflictChecker;
   scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  /** Events in a ±2-week window around now, preloaded for pattern detection. */
+  recentEventsWindow?: EventOccurrence[];
 }
 
 /**

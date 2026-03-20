@@ -4,7 +4,7 @@ import { createMessageHandler, stripJsonFences, toEventSummary } from '../../../
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
-    eventService: {},
+    eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
     userRepo: {},

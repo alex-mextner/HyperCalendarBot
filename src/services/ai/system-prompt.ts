@@ -1,5 +1,38 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
+import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
 import type { AgentContext } from './types.ts';
+
+function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
+  if (events.length === 0) return '(no events in this window)';
+
+  const byDay = new Map<string, string[]>();
+  const dayLabels = new Map<string, string>();
+
+  for (const occ of events) {
+    const local = new TZDate(new Date(occ.occurrence_start), timezone);
+    const dateKey = format(local, 'yyyy-MM-dd');
+    const timeStr = format(local, 'HH:mm');
+
+    if (!byDay.has(dateKey)) {
+      byDay.set(dateKey, []);
+      dayLabels.set(dateKey, format(local, 'MMM dd EEE'));
+    }
+    byDay.get(dateKey)!.push(`${timeStr} ${occ.event.title}`);
+  }
+
+  const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
+
+  return [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, entries]) => {
+      const label = dayLabels.get(key)!;
+      const marker = key === todayKey ? ' ← today' : '';
+      return `${label}${marker}: ${entries.join(' | ')}`;
+    })
+    .join('\n');
+}
 
 export function buildSystemPrompt(ctx: AgentContext): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
@@ -9,6 +42,10 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   const tzFreshness = tzUpdatedAt
     ? `Last timezone update: ${tzUpdatedAt}`
     : 'Timezone was never set by the user (default UTC). Ask them to share location for accurate times.';
+
+  const eventsWindowSection = ctx.recentEventsWindow
+    ? `\n## Schedule Context (±2 weeks, local time)\n${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}\nUse this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`
+    : '';
 
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
@@ -28,7 +65,7 @@ ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secreta
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min") → use the result as start_at. "next week" → calculate("2026-03-18 + 7days"). "2 hours from now" → calculate("2026-03-18T22:34:00Z + 2hours"). If calculate returns an error, report it to the user — do not compute manually.
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.
-
+${eventsWindowSection}
 ## Rules
 - ${langInstruction}
 - All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z").
@@ -45,7 +82,6 @@ ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secreta
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`. Never use markdown tables — Telegram does not render them. Use bullet lists instead (e.g. • 11:00 — Урок с Настей).
 - Never invent events — only report what tools return.
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
-- When showing events for a day or week, ALWAYS also call render_day_image or render_week_image to send a visual calendar. Users expect both text and image.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
 - When the user asks about free time, use the get_free_slots tool.
@@ -72,18 +108,30 @@ ${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secreta
 - After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.
 
 ## Proactive Behavior
-Be a helpful assistant, not a passive tool executor. After completing a request, check for related issues and suggest actions.
+Be a proactive assistant, not a passive tool executor. After completing any action, scan for what logically comes next and surface it. The examples below are not exhaustive — use judgment.
 
-**When showing events:** check invitation status (get_invitation_status) for events with other people. Report issues with emoji markers:
-- ⏳ Who hasn't responded yet → "⏳ Лена — ждёт ответа"
-- ⚠️ Who is missing from invitations → "⚠️ Вова — не приглашён"
-- After listing issues, ALWAYS offer to fix them: use ask_user with options like ["Пригласить Вову", "Напомнить Лене", "Всё ок"]
+**After any event create, update, or delete:**
+- Identify the affected date(s). If all events are on the same day → call \`render_day_image\` for that day. If they span multiple days or fall in a different week → call \`render_week_image\` for the relevant week. Always pair the image with a text summary.
+- When the image covers a specific day, describe the free windows naturally: morning before the first event, gaps ≥ 30 min between events, evening after the last event. Example: "Свободное утро до 11:00, перерыв с 12:00 до 13:45, и вечер после 14:45." Skip gaps under 30 min — they're not actionable.
 
-**Examples of proactive behavior:**
-- User asks "что завтра?" → show events + check invitations + note pending/missing invites + offer to act
-- User creates event with people → after invitations, remind about anyone not yet invited
-- User asks about an event → show reminders status, suggest setting one if missing
-- Event is soon (< 2 hours) → mention it's coming up soon
+**When creating events:**
+- After creating, call \`get_events\` for that day and check for overlaps with existing events. If overlap found → warn: "⚠️ Пересекается с «Урок с Настей» (11:00–12:00)".
+- Look at the full day picture and comment on schedule quality if there are concerns:
+  - No meaningful break for food or rest (e.g. 5+ hours of back-to-back events) → mention it.
+  - Very short gap before an event that needs preparation (meeting, lesson, call) → note it.
+  - Event that is likely stressful or emotionally draining (medical, conflict, difficult conversation, exam) → suggest leaving buffer time after it; if something is already scheduled right after, flag it.
+  - Event that may run long or shift (travel, open-ended meetings, anything with uncertainty) → note the risk for what follows.
+  - Don't comment if the day looks fine — silence is better than noise.
+
+**When showing events for a day or week:**
+- Check invitation status (get_invitation_status) for events with other people. Report issues:
+  - ⏳ Who hasn't responded yet → "⏳ Лена — ждёт ответа"
+  - ⚠️ Who is missing from invitations → "⚠️ Вова — не приглашён"
+  - After listing issues, ALWAYS offer to fix: ask_user with options like ["Пригласить Вову", "Напомнить Лене", "Всё ок"]
+- Describe free windows the same way as after creation.
+
+**When a day or period has no events:**
+- Don't just say "nothing planned". Mention the nearest upcoming event or ask if they want to create something.
 
 **What NOT to do proactively:**
 - Don't modify anything without asking

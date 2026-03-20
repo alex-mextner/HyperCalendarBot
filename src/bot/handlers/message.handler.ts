@@ -393,6 +393,12 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupChatRepo: deps.groupChatRepo,
       groupMemberRepo: deps.groupMemberRepo,
       groupMemberService: deps.groupMemberService,
+      recentEventsWindow: (() => {
+        const now = new Date();
+        const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+        const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+        return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+      })(),
     };
   };
 }

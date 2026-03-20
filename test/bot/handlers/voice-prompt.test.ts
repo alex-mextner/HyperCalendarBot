@@ -17,7 +17,7 @@ function makeFetch(filePath = 'voice/file.ogg') {
 function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
   return {
     agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ от AI', toolCalls: [], toolResults: [] })) },
-    eventService: {},
+    eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
     userRepo: { update: mock(() => {}) },
