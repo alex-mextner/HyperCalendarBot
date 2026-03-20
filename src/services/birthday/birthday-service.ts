@@ -83,7 +83,9 @@ export class BirthdayService {
     const startAt = `${startDateStr}T00:00:00Z`;
 
     const existing = params.celebrantId
-      ? this.metaRepo.findByCelebrantAndOwner(params.celebrantId, params.ownerId)
+      ? params.groupId
+        ? this.metaRepo.findByCelebrantAndGroup(params.celebrantId, params.groupId)
+        : this.metaRepo.findByCelebrantAndOwner(params.celebrantId, params.ownerId)
       : null;
 
     let eventId: number;
@@ -180,8 +182,6 @@ export class BirthdayService {
       }
       const stdout = await new Response(proc.stdout).text();
       result = JSON.parse(stdout);
-      const now = new Date().toISOString();
-      for (const u of pending) this.metaRepo.upsertSyncState(u.telegram_id, now);
     } catch (err) {
       birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
       return;
@@ -190,18 +190,25 @@ export class BirthdayService {
     for (const user of pending) {
       const birthday = result[String(user.telegram_id)];
       if (!birthday) continue;
-      this.upsertBirthdayEvent({
-        ownerId: user.telegram_id,
-        celebrantId: user.telegram_id,
-        celebrantName: user.first_name ?? String(user.telegram_id),
-        day: birthday.day,
-        month: birthday.month,
-        year: birthday.year ?? null,
-        lang: (user.language as 'en' | 'ru') ?? 'en',
-        timezone: user.timezone,
-        autoCreated: true,
-      });
+      try {
+        this.upsertBirthdayEvent({
+          ownerId: user.telegram_id,
+          celebrantId: user.telegram_id,
+          celebrantName: user.first_name ?? String(user.telegram_id),
+          day: birthday.day,
+          month: birthday.month,
+          year: birthday.year ?? null,
+          lang: (user.language as 'en' | 'ru') ?? 'en',
+          timezone: user.timezone,
+          autoCreated: true,
+        });
+      } catch (err) {
+        birthdayLogger.error({ err, userId: user.telegram_id }, 'Failed to upsert birthday event');
+      }
     }
+
+    const now = new Date().toISOString();
+    for (const u of pending) this.metaRepo.upsertSyncState(u.telegram_id, now);
   }
 
   getBirthdaysForDisplay(userId: number, groupCalendars: { groupId: number; title: string }[]): BirthdaysForDisplay {

@@ -49,6 +49,23 @@ export class BirthdayMetadataRepository {
       .get(celebrantId, ownerId) as (BirthEventMetadata & { start_at: string; title: string }) | null;
   }
 
+  findByCelebrantAndGroup(
+    celebrantId: number,
+    groupId: number,
+  ): (BirthEventMetadata & { start_at: string; title: string }) | null {
+    return this.db
+      .prepare(
+        `SELECT m.*, e.start_at, e.title
+         FROM birth_event_metadata m
+         JOIN events e ON e.id = m.event_id
+         WHERE m.celebrant_id = ?
+           AND e.group_id = ?
+           AND e.owner_type = 'group'
+           AND e.is_cancelled = 0`,
+      )
+      .get(celebrantId, groupId) as (BirthEventMetadata & { start_at: string; title: string }) | null;
+  }
+
   deleteByEventId(eventId: number): void {
     this.db.prepare('DELETE FROM birth_event_metadata WHERE event_id = ?').run(eventId);
   }

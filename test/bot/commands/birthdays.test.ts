@@ -10,7 +10,7 @@ test('RU: uses tg link when celebrant_id known, strips Д/р prefix', () => {
     eventDate: new Date('2026-05-10T00:00:00Z'),
     lang: 'ru',
   });
-  expect(line).toContain('[Иван](tg://user?id=12345)');
+  expect(line).toContain('<a href="tg://user?id=12345">Иван</a>');
   expect(line).toContain('30 лет');
   expect(line).not.toContain('Д/р');
   expect(line).toContain('🎁');
@@ -63,7 +63,7 @@ test('EN: strips Bday prefix, uses tg link', () => {
     eventDate: new Date('2026-05-10T00:00:00Z'),
     lang: 'en',
   });
-  expect(line).toContain('[Ivan](tg://user?id=42)');
+  expect(line).toContain('<a href="tg://user?id=42">Ivan</a>');
   expect(line).toContain('turns 25');
   expect(line).not.toContain('Bday');
 });

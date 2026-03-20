@@ -3,6 +3,7 @@ import type { GroupMemberRepository } from '../../database/repositories/group-me
 import type { User } from '../../database/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
+import { escapeHtml } from '../../utils/telegram.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -31,13 +32,14 @@ export function formatBirthdayLine(params: FormatBirthdayLineParams): string {
     age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
   const dateStr = formatDate(eventDate, lang);
 
+  const safeName = escapeHtml(name);
   let nameStr: string;
   if (celebrantId !== null) {
-    nameStr = `[${name}](tg://user?id=${celebrantId})`;
+    nameStr = `<a href="tg://user?id=${celebrantId}">${safeName}</a>`;
   } else if (username) {
-    nameStr = `${name} @${username}`;
+    nameStr = `${safeName} @${escapeHtml(username)}`;
   } else {
-    nameStr = name;
+    nameStr = safeName;
   }
 
   return `🎁 ${nameStr}${ageSuffix} (${dateStr})`;
@@ -72,10 +74,10 @@ export async function handleBirthdays(
     return;
   }
 
-  const lines: string[] = [lang === 'ru' ? '🎂 *Дни рождения*' : '🎂 *Birthdays*', ''];
+  const lines: string[] = [lang === 'ru' ? '🎂 <b>Дни рождения</b>' : '🎂 <b>Birthdays</b>', ''];
 
   if (personal.length > 0) {
-    lines.push(lang === 'ru' ? '👤 *Личный календарь*' : '👤 *Personal calendar*');
+    lines.push(lang === 'ru' ? '👤 <b>Личный календарь</b>' : '👤 <b>Personal calendar</b>');
     for (const item of personal) {
       const eventDate = new Date(item.event.start_at);
       lines.push(
@@ -95,7 +97,7 @@ export async function handleBirthdays(
   for (const group of groups) {
     if (group.items.length === 0) continue;
     lines.push('');
-    lines.push(`👥 *${group.title}*`);
+    lines.push(`👥 <b>${escapeHtml(group.title)}</b>`);
     for (const item of group.items) {
       const eventDate = new Date(item.event.start_at);
       lines.push(
@@ -112,5 +114,5 @@ export async function handleBirthdays(
     }
   }
 
-  await ctx.send(lines.join('\n'), { parse_mode: 'Markdown' });
+  await ctx.send(lines.join('\n'), { parse_mode: 'HTML' });
 }
