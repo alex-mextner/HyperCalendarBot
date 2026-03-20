@@ -180,4 +180,20 @@ describe('TelegramStreamWriter', () => {
     expect(sendMock).toHaveBeenCalledTimes(1);
     expect(editMock).toHaveBeenCalledTimes(1);
   });
+
+  test('tailText trims from the start keeping the tail', () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    writer.appendText('A'.repeat(100));
+    writer.tailText(10);
+    const text = writer.getText();
+    expect(text.length).toBe(10);
+    expect(text).toMatch(/^…A+$/);
+  });
+
+  test('tailText does nothing when text is within limit', () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    writer.appendText('hello');
+    writer.tailText(100);
+    expect(writer.getText()).toBe('hello');
+  });
 });
