@@ -16,6 +16,7 @@ import {
   handleAddContact,
   handleAskUser,
   handleCalculate,
+  handleConvertToTimezone,
   handleEndCall,
   handleFindContact,
   handleFindUser,
@@ -23,6 +24,7 @@ import {
   handleGetContacts,
   handleGetGoogleCalendarStatus,
   handleGetHolidays,
+  handleGetTimezoneInfo,
   handleListGoogleCalendars,
   handleLookupStress,
   handleMakeCall,
@@ -261,6 +263,12 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
 
       case 'calculate':
         return handleCalculate(input as { expression: string });
+
+      case 'get_timezone_info':
+        return handleGetTimezoneInfo(input as { timezone: string | string[]; at?: string });
+
+      case 'convert_to_timezone':
+        return handleConvertToTimezone(input as { datetime: string; timezone: string });
 
       case 'list_calendar_access':
         return handleListCalendarAccess(ctx);
