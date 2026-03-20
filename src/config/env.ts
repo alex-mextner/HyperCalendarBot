@@ -21,6 +21,8 @@ export interface EnvConfig {
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
   INLINE_BOT_USERNAME?: string;
+  AGENT_JWT_SECRET: string;
+  AGENT_DOWNLOAD_URL: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -96,5 +98,19 @@ export function loadConfig(): EnvConfig {
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,
+    AGENT_JWT_SECRET: (() => {
+      const s = process.env.AGENT_JWT_SECRET;
+      if (!s || s.length < 32) {
+        throw new Error('AGENT_JWT_SECRET must be set and at least 32 characters');
+      }
+      return s;
+    })(),
+    AGENT_DOWNLOAD_URL: (() => {
+      const u = process.env.AGENT_DOWNLOAD_URL;
+      if (!u) {
+        throw new Error('AGENT_DOWNLOAD_URL must be set');
+      }
+      return u;
+    })(),
   };
 }

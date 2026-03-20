@@ -74,6 +74,10 @@ export class UserRepository {
       .run(telegramId);
   }
 
+  updateAssistantEnabled(telegramId: number, enabled: boolean): void {
+    this.db.run('UPDATE users SET assistant_enabled = ? WHERE telegram_id = ?', [enabled ? 1 : 0, telegramId]);
+  }
+
   update(telegramId: number, data: UpdateUserData): User | null {
     const existing = this.findByTelegramId(telegramId);
     if (!existing) return null;

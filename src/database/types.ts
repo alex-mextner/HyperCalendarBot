@@ -21,6 +21,7 @@ export interface User {
   timezone_updated_at: string | null;
   voice_response_enabled: number | null;
   default_event_duration_minutes: number;
+  assistant_enabled: number; // 0 | 1
   created_at: string;
   updated_at: string;
 }
