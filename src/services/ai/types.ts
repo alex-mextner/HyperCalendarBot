@@ -92,6 +92,9 @@ export interface AgentContext {
   conflictChecker?: ConflictChecker;
   scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  scenePauseState?: import('../scene-pause.ts').ScenePauseState;
+  scenePauseService?: import('../scene-pause.ts').ScenePauseService;
+  sceneStorage?: { delete(key: string): Promise<void> };
 }
 
 /**
