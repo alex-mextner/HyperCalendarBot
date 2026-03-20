@@ -68,7 +68,7 @@ export const PX_PER_MIN = 2;
 export const MIN_EVENT_DURATION_MIN = 15;
 
 /** Max side-by-side columns for overlapping events; beyond this an overflow block renders. */
-export const MAX_OVERLAP_COLUMNS = 4;
+export const MAX_OVERLAP_COLUMNS = 3;
 
 /** Minimum visual event height in px. CSS min-height guarantees events are always readable. */
 export const COMPACT_PX = MIN_EVENT_DURATION_MIN * PX_PER_MIN;

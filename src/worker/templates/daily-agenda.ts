@@ -73,8 +73,53 @@ function renderTimeline(data: DailyAgendaData): string {
     startMinutes: number;
     endMinutes: number;
   };
-  const overflowItems: OverflowItem[] = [];
 
+  // Pass 1: collect overflow items and build blocks so main-event rendering knows column counts.
+  // N+2 rule: 1-2 overflow events → individual equal-width cards; 3+ → group card.
+  const overflowItems: OverflowItem[] = timedEvents.flatMap((ev, i) => {
+    const col = cols[i];
+    if (!col || !(col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS)) return [];
+    const top = (ev.startMinutes - minHour * 60) * PX_PER_MIN;
+    const height = computeEventHeight(ev);
+    return [
+      {
+        top,
+        endPx: top + height,
+        height,
+        title: ev.title,
+        calendarColor: ev.calendarColor,
+        startMinutes: ev.startMinutes,
+        endMinutes: ev.endMinutes,
+      },
+    ];
+  });
+
+  const sortedOverflow = [...overflowItems].sort((a, b) => a.top - b.top);
+  const overflowBlocks: Array<{ top: number; endPx: number; items: OverflowItem[] }> = [];
+  for (const item of sortedOverflow) {
+    const last = overflowBlocks[overflowBlocks.length - 1];
+    if (last && item.top < last.endPx) {
+      last.endPx = Math.max(last.endPx, item.endPx);
+      last.items.push(item);
+    } else {
+      overflowBlocks.push({ top: item.top, endPx: item.endPx, items: [item] });
+    }
+  }
+
+  // Return the max individual overflow count among all ≤2-item blocks overlapping this event.
+  // Using max (not first-match) prevents horizontal overlap when a long event spans multiple overflow windows.
+  function individualOverflowCount(startMin: number, endMin: number): number {
+    let max = 0;
+    for (const b of overflowBlocks) {
+      if (b.items.length <= 2 && b.items.some((it) => it.startMinutes < endMin && it.endMinutes > startMin)) {
+        if (b.items.length > max) max = b.items.length;
+      }
+    }
+    return max;
+  }
+
+  // Pass 2: render main events.
+  // Individual overflow cards are equal-width extra columns, so effectiveCols = N + overflowCount.
   const eventBlocksHtml = timedEvents
     .map((ev, i) => {
       const col = cols[i];
@@ -82,25 +127,15 @@ function renderTimeline(data: DailyAgendaData): string {
       const top = (ev.startMinutes - minHour * 60) * PX_PER_MIN;
       const height = computeEventHeight(ev);
 
-      // Events that exceed the column cap go to the overflow block
-      if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS) {
-        overflowItems.push({
-          top,
-          endPx: top + height,
-          height,
-          title: ev.title,
-          calendarColor: ev.calendarColor,
-          startMinutes: ev.startMinutes,
-          endMinutes: ev.endMinutes,
-        });
-        return '';
-      }
+      if (col.totalColumns > MAX_OVERLAP_COLUMNS && col.column >= MAX_OVERLAP_COLUMNS) return '';
 
-      // When overflow exists in this group, use one extra column slot for the overflow block
+      const ovCount = individualOverflowCount(ev.startMinutes, ev.endMinutes);
       const effectiveCols =
-        col.totalColumns > MAX_OVERLAP_COLUMNS
-          ? MAX_OVERLAP_COLUMNS + 1
-          : Math.min(col.totalColumns, MAX_OVERLAP_COLUMNS);
+        ovCount > 0
+          ? MAX_OVERLAP_COLUMNS + ovCount
+          : col.totalColumns > MAX_OVERLAP_COLUMNS
+            ? MAX_OVERLAP_COLUMNS + 1
+            : Math.min(col.totalColumns, MAX_OVERLAP_COLUMNS);
       const widthPct = 100 / effectiveCols;
       const leftPct = col.column * widthPct;
       const bg = `${ev.calendarColor}20`;
@@ -118,43 +153,36 @@ function renderTimeline(data: DailyAgendaData): string {
     })
     .join('');
 
-  // Build overflow blocks: merge visually overlapping overflow items.
-  // N+2 rule: 1 event → full card; 2+ events → group card with titles ("+N more" if > MAX_OVERFLOW_LABELS).
-  const sortedOverflow = overflowItems.sort((a, b) => a.top - b.top);
-  const overflowBlocks: Array<{ top: number; endPx: number; items: OverflowItem[] }> = [];
-  for (const item of sortedOverflow) {
-    const last = overflowBlocks[overflowBlocks.length - 1];
-    if (last && item.top < last.endPx) {
-      last.endPx = Math.max(last.endPx, item.endPx);
-      last.items.push(item);
-    } else {
-      overflowBlocks.push({ top: item.top, endPx: item.endPx, items: [item] });
-    }
-  }
-  // Overflow column occupies the extra (MAX_OVERLAP_COLUMNS + 1)th slot — no visual overlap with main columns
-  const ovfWidthPct = 100 / (MAX_OVERLAP_COLUMNS + 1);
-  const ovfLeftPct = MAX_OVERLAP_COLUMNS * ovfWidthPct;
+  // Group card overflow slot: (MAX_OVERLAP_COLUMNS + 1)th column, used only for 3+ overflow events.
+  const ovfGroupWidthPct = 100 / (MAX_OVERLAP_COLUMNS + 1);
+  const ovfGroupLeftPct = MAX_OVERLAP_COLUMNS * ovfGroupWidthPct;
   const overflowHtml = overflowBlocks
     .map(({ top, endPx, items }) => {
-      if (items.length === 1) {
-        // Single overflow event: render as a full event card in the overflow column
-        const item = items[0]!;
-        const isCompact = item.height <= COMPACT_PX;
-        const bg = `${item.calendarColor}20`;
-        const timeStr = `${formatTime(item.startMinutes)} – ${formatTime(item.endMinutes)}`;
-        return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${item.top}px;height:${item.height}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);background:${bg};border-left:4px solid ${item.calendarColor};color:${item.calendarColor};">
+      if (items.length <= 2) {
+        // Equal-width columns alongside main events: column N+0, N+1, …
+        const totalCols = MAX_OVERLAP_COLUMNS + items.length;
+        const widthPct = 100 / totalCols;
+        return items
+          .map((item, idx) => {
+            const leftPct = (MAX_OVERLAP_COLUMNS + idx) * widthPct;
+            const isCompact = item.height <= COMPACT_PX;
+            const bg = `${item.calendarColor}20`;
+            const timeStr = `${formatTime(item.startMinutes)} – ${formatTime(item.endMinutes)}`;
+            return `<div class="event-block${isCompact ? ' event-block--compact' : ''}" style="top:${item.top}px;height:${item.height}px;left:calc(${leftPct}%);width:calc(${widthPct}% - 8px);background:${bg};border-left:4px solid ${item.calendarColor};color:${item.calendarColor};">
       <div class="event-block__title">${escapeHtml(item.title)}</div>
       <div class="event-block__meta">${timeStr}</div>
     </div>`;
+          })
+          .join('');
       }
-      // 2+ events: group card — show titles, append "+N more" if count exceeds MAX_OVERFLOW_LABELS
+      // 3+ events: group card in the fixed overflow slot
       const h = Math.max(endPx - top, COMPACT_PX);
       const isCompact = h <= COMPACT_PX;
       const visible = items.slice(0, MAX_OVERFLOW_LABELS);
       const remaining = items.length - visible.length;
       const labelsHtml = visible.map((it) => `<div class="overflow-item">${escapeHtml(it.title)}</div>`).join('');
       const moreHtml = remaining > 0 ? `<div class="overflow-more">+${remaining} more</div>` : '';
-      return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfLeftPct}%);width:calc(${ovfWidthPct}% - 8px);">${labelsHtml}${moreHtml}</div>`;
+      return `<div class="event-block event-block--overflow${isCompact ? ' event-block--compact' : ''}" style="top:${top}px;height:${h}px;left:calc(${ovfGroupLeftPct}%);width:calc(${ovfGroupWidthPct}% - 8px);">${labelsHtml}${moreHtml}</div>`;
     })
     .join('');
 

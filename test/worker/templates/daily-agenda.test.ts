@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { dailyAgendaTemplate } from '../../../src/worker/templates/daily-agenda.ts';
-import { MAX_OVERLAP_COLUMNS, PX_PER_MIN } from '../../../src/worker/templates/helpers.ts';
+import { MAX_OVERFLOW_LABELS, MAX_OVERLAP_COLUMNS, PX_PER_MIN } from '../../../src/worker/templates/helpers.ts';
 import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
 import type { AgendaEvent, DailyAgendaData } from '../../../src/worker/templates/types.ts';
 
@@ -218,44 +218,55 @@ describe('timeline layout', () => {
     expect(html).toContain('width:calc(50% - 8px)');
   });
 
-  test('four overlapping events: all visible, no overflow', () => {
+  test('N overlapping events: all visible, no overflow', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
     expect(html).not.toContain('class="event-block event-block--overflow"');
-    // each at 25% width (no overflow → MAX_OVERLAP_COLUMNS columns)
+    // each at 1/N width (no overflow → MAX_OVERLAP_COLUMNS columns)
     expect(html).toContain(`width:calc(${100 / MAX_OVERLAP_COLUMNS}% - 8px)`);
   });
 
-  test('five overlapping events: 5th event shown as full card in overflow column (N+2: 1 event)', () => {
+  test('N+1 overlapping events: last event as full card in overflow column (N+2: 1 event)', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 1 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
     // 1 overflow event → full event card, NOT a group card
-    expect(html).toContain('>Event 5<');
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 1}<`);
     expect(html).not.toContain('class="event-block event-block--overflow"');
     expect(html).not.toContain('<div class="overflow-item">');
-    // All slots use (MAX_OVERLAP_COLUMNS+1) width → 20% each
+    // All slots use (MAX_OVERLAP_COLUMNS+1) width → 1/(N+1) each
     expect(html).toContain(`width:calc(${100 / (MAX_OVERLAP_COLUMNS + 1)}% - 8px)`);
   });
 
-  test('six overlapping events: group card without "+more" (N+2: 2 events)', () => {
+  test('N+2 overlapping events: 2 overflow events shown as individual cards (N+2: ≤2 → no grouping)', () => {
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 2 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
-    // 2 overflow events → group card showing both titles, no "+N more"
+    // 2 overflow events → individual cards, no group card
+    expect(html).not.toContain('class="event-block event-block--overflow"');
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 1}<`);
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 2}<`);
+    expect(html).not.toContain('<div class="overflow-more">');
+  });
+
+  test('N+3 overlapping events: 3 overflow events → group card (N+2: 3+ → grouping)', () => {
+    const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 3 }, (_, i) => ev(i + 1, 540, 600));
+    const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
+    // 3 overflow events → group card showing all 3 titles, no "+N more"
     expect(html).toContain('class="event-block event-block--overflow"');
-    expect(html).toContain('>Event 5<');
-    expect(html).toContain('>Event 6<');
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 1}<`);
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 2}<`);
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 3}<`);
     expect(html).not.toContain('<div class="overflow-more">');
   });
 
   test('overflow block shows "+N more" when titles exceed MAX_OVERFLOW_LABELS', () => {
-    // MAX_OVERLAP_COLUMNS=4 visible + 4 overflow events
+    // MAX_OVERLAP_COLUMNS visible + 4 overflow events
     const events = Array.from({ length: MAX_OVERLAP_COLUMNS + 4 }, (_, i) => ev(i + 1, 540, 600));
     const html = dailyAgendaTemplate.render(makeData({ eventCount: events.length, timedEvents: events }));
-    // First 3 overflow titles shown (Event 5, 6, 7), Event 8 collapsed to "+1 more"
-    expect(html).toContain('>Event 5<');
-    expect(html).toContain('>Event 7<');
+    // First MAX_OVERFLOW_LABELS overflow titles shown, last one collapsed to "+1 more"
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + 1}<`);
+    expect(html).toContain(`>Event ${MAX_OVERLAP_COLUMNS + MAX_OVERFLOW_LABELS}<`);
     expect(html).toContain('+1 more');
-    expect(html).not.toContain('>Event 8<');
+    expect(html).not.toContain(`>Event ${MAX_OVERLAP_COLUMNS + 4}<`);
   });
 
   test('overlapping events with different start times: both shown side by side', () => {
@@ -321,5 +332,29 @@ describe('timeline layout', () => {
     );
     // height = 30*2 = 60px > COMPACT_PX=30 → no compact class
     expect(html).not.toContain('class="event-block event-block--compact"');
+  });
+
+  test('long main event spanning two separate overflow windows uses max overflow width', () => {
+    // ev 1-3: 9:00-12:00 (main columns 0,1,2)
+    // ev 4:   9:30-10:00 (overflow block A — 1 item)
+    // ev 5-6: 11:00-12:00 simultaneous (overflow block B — 2 items)
+    // main events must use effectiveCols = N+2 (not N+1) to avoid overlapping block B
+    const html = dailyAgendaTemplate.render(
+      makeData({
+        eventCount: 6,
+        timedEvents: [
+          ev(1, 540, 720),
+          ev(2, 540, 720),
+          ev(3, 540, 720),
+          ev(4, 570, 600),
+          ev(5, 660, 720),
+          ev(6, 660, 720),
+        ],
+      }),
+    );
+    // Main events use the wider effectiveCols = N+2 to accommodate 2-item block B
+    expect(html).toContain(`width:calc(${100 / (MAX_OVERLAP_COLUMNS + 2)}% - 8px)`);
+    // No group card: all overflow blocks have ≤2 items
+    expect(html).not.toContain('class="event-block event-block--overflow"');
   });
 });
