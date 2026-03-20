@@ -10,6 +10,7 @@ import type { CreateEventData, UpdateEventData, User } from '../database/types.t
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
+import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
@@ -158,6 +159,7 @@ export function createBot(
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
+  const conversationLogger = new ConversationLogger(db.chatHistory);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
@@ -213,6 +215,7 @@ export function createBot(
     eventService,
     holidayService,
     chatHistory: db.chatHistory,
+    conversationLogger,
     userRepo: db.users,
     reminderRepo: db.reminders,
     contactRepo: db.contacts,

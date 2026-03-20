@@ -14,6 +14,7 @@ import type { SharedEventRepository } from '../../database/repositories/shared-e
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
+import type { ConversationLogger } from '../conversation-logger.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
@@ -36,6 +37,7 @@ export interface AgentContext {
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
+  conversationLogger: ConversationLogger;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
   invitationService?: InvitationService;

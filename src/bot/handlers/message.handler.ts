@@ -24,6 +24,7 @@ import type { CalendarEvent, User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
+import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
@@ -76,6 +77,7 @@ export interface MessageHandlerDeps {
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
+  conversationLogger: ConversationLogger;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
   contactRepo?: ContactRepository;
@@ -366,6 +368,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       eventService: deps.eventService,
       holidayService: deps.holidayService,
       chatHistory: deps.chatHistory,
+      conversationLogger: deps.conversationLogger,
       userRepo: deps.userRepo,
       reminderRepo: deps.reminderRepo,
       contactRepo: deps.contactRepo,

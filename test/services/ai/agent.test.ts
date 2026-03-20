@@ -9,6 +9,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 
@@ -43,6 +44,7 @@ describe('CalendarBotAgent', () => {
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
+      conversationLogger: new ConversationLogger(chatHistoryRepo),
       userRepo,
       reminderRepo,
     };
