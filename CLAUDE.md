@@ -325,6 +325,13 @@ for items that were explicitly deferred, noted as "pending", or silently dropped
 Surface them as concrete suggestions — not vague hints. If something was discussed but not implemented,
 name it and ask whether to pick it up.
 
+After completing any task, answer these two questions out loud:
+
+1. **Всё ли сделано из того, что просили?** — go through the original request point by point.
+   Did any sub-task get quietly skipped? Was anything promised but not delivered?
+2. **Есть ли что улучшить, исправить или убрать?** — name specific things, not vague hints.
+   Open PRs not yet merged? Known limitations introduced? Stale comments or dead code noticed?
+
 ## Tone of Voice (bot messages)
 
 All user-facing bot messages must follow these rules:
