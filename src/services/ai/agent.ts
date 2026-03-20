@@ -6,7 +6,7 @@ import { createAnthropicClient } from './anthropic-client.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
-import { getToolDefinitions } from './tools.ts';
+import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
@@ -58,8 +58,12 @@ export class CalendarBotAgent {
     return this.sender;
   }
 
-  buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
-    const systemPrompt = buildSystemPrompt(ctx);
+  buildMessages(
+    ctx: AgentContext,
+    history: ChatHistoryMessage[],
+    caps?: UserCapabilities,
+  ): { systemPrompt: string; messages: MessageParam[] } {
+    const systemPrompt = buildSystemPrompt(ctx, caps);
 
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 10) : history;
@@ -106,8 +110,12 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    const caps: UserCapabilities = {
+      assistantEnabled: Boolean(ctx.user.assistant_enabled),
+      agentConnected: ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
+    };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
-    const { systemPrompt, messages } = this.buildMessages(ctx, history);
+    const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
 
     ctx.sender = this.sender;
     const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language, {
@@ -147,7 +155,7 @@ export class CalendarBotAgent {
               },
             ],
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode),
+            tools: getToolDefinitions(ctx.inputMode, caps),
           });
 
         let stream: ReturnType<typeof streamRequest>;
