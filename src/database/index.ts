@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { SqliteEventMentionStore } from '../services/intent/event-mention-store.ts';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
+import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
 import { CallLogRepository } from './repositories/call-log.repository.ts';
 import { CallSettingsRepository } from './repositories/call-settings.repository.ts';
@@ -60,6 +61,7 @@ export class DatabaseService {
   readonly workflowSessions: WorkflowSessionRepository;
   readonly groupSessions: GroupSessionRepository;
   readonly eventMentions: SqliteEventMentionStore;
+  readonly birthdayMeta: BirthdayMetadataRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -98,6 +100,7 @@ export class DatabaseService {
     this.workflowSessions = new WorkflowSessionRepository(this.db);
     this.groupSessions = new GroupSessionRepository(this.db);
     this.eventMentions = new SqliteEventMentionStore(this.db);
+    this.birthdayMeta = new BirthdayMetadataRepository(this.db);
   }
 
   close(): void {
