@@ -183,14 +183,14 @@ describe('formatWeekAgenda', () => {
     expect(result).toContain('Обед');
   });
 
-  test('renders multiple events day with "событий" in Russian', () => {
+  test('renders multiple events day with correct Russian plural (few: 3 → "события")', () => {
     const events = [
       makeOccurrence('Утро', '2026-03-09T08:00:00Z', '2026-03-09T09:00:00Z'),
       makeOccurrence('Обед', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z'),
       makeOccurrence('Вечер', '2026-03-09T18:00:00Z', '2026-03-09T19:00:00Z'),
     ];
     const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');
-    expect(result).toContain('3 событий');
+    expect(result).toContain('3 события');
   });
 
   test('renders holidays on a day', () => {

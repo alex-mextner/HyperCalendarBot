@@ -374,7 +374,7 @@ if (config.REDIS_URL) {
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
-  const { BirthdayService } = await import('./services/birthday/birthday-service.ts');
+  const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
 
   const cronBirthdayService = new BirthdayService(
     db.events,
@@ -408,7 +408,7 @@ if (config.REDIS_URL) {
     },
     onBirthdaySync: async () => {
       const BATCH = 100;
-      const users = db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000);
+      const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
       for (let i = 0; i < users.length; i += BATCH) {
         await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
       }

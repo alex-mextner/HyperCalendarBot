@@ -87,7 +87,7 @@ export function formatWeekAgenda(
       lines.push(`${dayLabel}  ${noEvents}`);
     } else if (dayEvents.length > 0) {
       lines.push(
-        `${dayLabel}  ▪ ${dayEvents.length} ${dayEvents.length === 1 ? (lang === 'ru' ? 'событие' : 'event') : lang === 'ru' ? 'событий' : 'events'}`,
+        `${dayLabel}  ▪ ${dayEvents.length} ${lang === 'ru' ? ruPlural(dayEvents.length, 'событие', 'события', 'событий') : dayEvents.length === 1 ? 'event' : 'events'}`,
       );
       for (const occ of dayEvents) {
         const time = formatTime(occ.occurrence_start, timezone);

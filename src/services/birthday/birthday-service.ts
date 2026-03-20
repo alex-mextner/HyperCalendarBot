@@ -4,12 +4,11 @@ import type { EventReminderRepository } from '../../database/repositories/event-
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
-import { ruPlural } from '../event/formatters.ts';
 import { allDayReminderUtc } from '../notification/materializer.ts';
 
 const birthdayLogger = logger.child({ module: 'birthday-service' });
 
-const SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
+export const BIRTHDAY_SYNC_THROTTLE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
 export interface UpsertBirthdayParams {
@@ -46,21 +45,10 @@ export class BirthdayService {
     private fetchScriptPath = 'scripts/fetch-birthdays.py',
   ) {}
 
-  getDisplayTitle(title: string, birthYear: number | null, eventDate: Date, lang: 'en' | 'ru'): string {
-    const prefix = '\u{1F381} ';
-    if (birthYear === null) return prefix + title;
-    const age = eventDate.getFullYear() - birthYear;
-    const suffix =
-      lang === 'ru'
-        ? ` \u2014 ${age} ${ruPlural(age, '\u0433\u043E\u0434', '\u0433\u043E\u0434\u0430', '\u043B\u0435\u0442')}`
-        : ` \u2014 turns ${age}`;
-    return prefix + title + suffix;
-  }
-
   shouldSkipSync(userId: number): boolean {
     const state = this.metaRepo.getSyncState(userId);
     if (!state) return false;
-    return Date.now() - new Date(state.synced_at).getTime() < SYNC_THROTTLE_MS;
+    return Date.now() - new Date(state.synced_at).getTime() < BIRTHDAY_SYNC_THROTTLE_MS;
   }
 
   findExistingBirthday(

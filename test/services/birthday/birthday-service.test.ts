@@ -33,20 +33,6 @@ beforeEach(() => {
   );
 });
 
-test('getDisplayTitle RU with birth_year uses ruPlural for age', () => {
-  expect(service.getDisplayTitle('Д/р Иван', 1996, new Date('2026-05-10'), 'ru')).toBe('🎁 Д/р Иван — 30 лет');
-  expect(service.getDisplayTitle('Д/р Иван', 1995, new Date('2026-05-10'), 'ru')).toBe('🎁 Д/р Иван — 31 год');
-  expect(service.getDisplayTitle('Д/р Иван', 2004, new Date('2026-05-10'), 'ru')).toBe('🎁 Д/р Иван — 22 года');
-});
-
-test('getDisplayTitle EN with birth_year', () => {
-  expect(service.getDisplayTitle('Bday Ivan', 1996, new Date('2026-05-10'), 'en')).toBe('🎁 Bday Ivan — turns 30');
-});
-
-test('getDisplayTitle without birth_year omits age', () => {
-  expect(service.getDisplayTitle('Д/р Иван', null, new Date('2026-05-10'), 'ru')).toBe('🎁 Д/р Иван');
-});
-
 test('upsertBirthdayEvent creates event with correct fields and reminders', () => {
   service.upsertBirthdayEvent({
     ownerId: 1,

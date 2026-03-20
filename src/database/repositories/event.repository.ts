@@ -512,10 +512,11 @@ export class EventRepository {
   getBirthdays(userId: number): CalendarEvent[] {
     return this.db
       .prepare(
-        `SELECT * FROM events
-         WHERE user_id = ? AND event_type = 'birthday' AND is_cancelled = 0
-           AND (owner_type IS NULL OR owner_type = 'user')
-         ORDER BY start_at`,
+        `SELECT e.*, m.birth_year FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+           AND (e.owner_type IS NULL OR e.owner_type = 'user')
+         ORDER BY e.start_at`,
       )
       .all(userId) as CalendarEvent[];
   }
@@ -523,33 +524,42 @@ export class EventRepository {
   getBirthdaysForGroup(groupId: number): CalendarEvent[] {
     return this.db
       .prepare(
-        `SELECT * FROM events
-         WHERE group_id = ? AND event_type = 'birthday' AND is_cancelled = 0
-           AND owner_type = 'group'
-         ORDER BY start_at`,
+        `SELECT e.*, m.birth_year FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+           AND e.owner_type = 'group'
+         ORDER BY e.start_at`,
       )
       .all(groupId) as CalendarEvent[];
   }
 
   searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
-    const conditions: string[] = ['user_id = ?', 'is_cancelled = 0', "(owner_type IS NULL OR owner_type = 'user')"];
+    const conditions: string[] = [
+      'e.user_id = ?',
+      'e.is_cancelled = 0',
+      "(e.owner_type IS NULL OR e.owner_type = 'user')",
+    ];
     const params: (string | number | null)[] = [userId];
 
     if (query) {
-      conditions.push('title LIKE ?');
+      conditions.push('e.title LIKE ?');
       params.push(`%${this.escapeLike(query)}%`);
     }
     if (eventType) {
       if (eventType === 'regular') {
-        conditions.push('event_type IS NULL');
+        conditions.push('e.event_type IS NULL');
       } else {
-        conditions.push('event_type = ?');
+        conditions.push('e.event_type = ?');
         params.push(eventType);
       }
     }
 
     return this.db
-      .prepare(`SELECT * FROM events WHERE ${conditions.join(' AND ')} ORDER BY start_at`)
+      .prepare(
+        `SELECT e.*, m.birth_year FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE ${conditions.join(' AND ')} ORDER BY e.start_at`,
+      )
       .all(...params) as CalendarEvent[];
   }
 

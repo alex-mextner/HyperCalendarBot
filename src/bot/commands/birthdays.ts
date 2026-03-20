@@ -27,7 +27,7 @@ function formatDate(date: Date, lang: 'en' | 'ru'): string {
 export function formatBirthdayLine(params: FormatBirthdayLineParams): string {
   const { title, celebrantId, birthYear, username, eventDate, lang } = params;
   const name = extractName(title);
-  const age = birthYear !== null ? eventDate.getFullYear() - birthYear : null;
+  const age = birthYear !== null ? eventDate.getUTCFullYear() - birthYear : null;
   const ageSuffix =
     age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
   const dateStr = formatDate(eventDate, lang);
