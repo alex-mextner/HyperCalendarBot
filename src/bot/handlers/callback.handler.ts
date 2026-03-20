@@ -659,7 +659,7 @@ export function createCallbackHandler(
         return;
       }
 
-      // AI ask_user button responses — save answer and trigger AI continuation
+      // AI ask_user button responses — trigger AI continuation
       if (action === 'ai_btn') {
         // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
         // Check if the second segment is a numeric userId (group restriction)
