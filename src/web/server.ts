@@ -1,4 +1,8 @@
 // src/web/server.ts
+
+import type { AgentDispatcher } from '../agent/dispatcher.ts';
+import type { AgentRegistry } from '../agent/registry.ts';
+import { createAgentWsHandler, upgradeAgentWs } from '../agent/ws-server.ts';
 import type { EnvConfig } from '../config/env.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
@@ -21,15 +25,30 @@ interface WebServerDeps {
   stateLookup: OAuthStateLookup;
   onConnected?: (userId: number) => Promise<void>;
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
+  agentRegistry?: AgentRegistry;
+  agentDispatcher?: AgentDispatcher;
 }
 
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
   const port = deps.config.OAUTH_SERVER_PORT ?? 3311;
 
-  const server = Bun.serve({
+  const agentWs =
+    deps.agentRegistry && deps.agentDispatcher
+      ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher)
+      : undefined;
+
+  const serveOptions = {
     port,
-    async fetch(req) {
+    ...(agentWs ? { websocket: agentWs } : {}),
+    async fetch(req: Request, server: { upgrade(req: Request, opts: { data: object }): boolean }) {
       const url = new URL(req.url);
+
+      if (url.pathname === '/ws/agent' && agentWs) {
+        if (!upgradeAgentWs(req, server)) {
+          return new Response('WebSocket upgrade failed', { status: 400 });
+        }
+        return;
+      }
 
       if (req.method === 'GET' && url.pathname === '/health') {
         return new Response('ok');
@@ -65,7 +84,11 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
 
       return new Response('Not Found', { status: 404 });
     },
-  });
+  };
+
+  // Bun.serve requires a discriminated union: either websocket is present or absent.
+  // We conditionally include it via spread, so cast at the framework boundary.
+  const server = Bun.serve(serveOptions as unknown as Parameters<typeof Bun.serve>[0]);
 
   webLogger.info({ port }, 'Web server started');
 
