@@ -535,7 +535,7 @@ export class EventRepository {
 
     if (query) {
       conditions.push('title LIKE ?');
-      params.push(`%${query}%`);
+      params.push(`%${this.escapeLike(query)}%`);
     }
     if (eventType) {
       conditions.push('event_type = ?');
