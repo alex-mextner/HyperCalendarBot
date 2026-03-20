@@ -41,6 +41,7 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
+import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
@@ -53,6 +54,7 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
+import { type CtxWithChat, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
@@ -365,12 +367,26 @@ export function createCallbackHandler(
           });
           const file = new File([buffer], 'agenda.png', { type: 'image/png' });
           if (ctx.message) {
-            await ctx.message.sendPhoto(file);
+            const sent = await ctx.message.sendPhoto(file);
+            const chatId = Number(ctx.chatId ?? user.telegram_id);
+            autoPin(chatId, sent.id, {
+              pinChatMessage: (cid, messageId, options) =>
+                ctx.bot.api.pinChatMessage({
+                  chat_id: cid,
+                  message_id: messageId,
+                  disable_notification: options.disable_notification,
+                }),
+              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
+              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              groupChatRepo: groupRepo,
+            }).catch((err) => {
+              imageLogger.error({ err }, 'autoPin failed');
+            });
           } else {
             await ctx.answer({ text: '⚠️ Could not send image' });
           }
         } catch (err) {
-          imageLogger.error({ error: (err as Error).message }, 'Render failed');
+          imageLogger.error({ err }, 'Render failed');
           if (ctx.message) {
             await ctx.message.send('⚠️ Image generation failed. Use text version above.');
           } else {
@@ -422,12 +438,26 @@ export function createCallbackHandler(
           });
           const file = new File([buffer], 'week.png', { type: 'image/png' });
           if (ctx.message) {
-            await ctx.message.sendPhoto(file);
+            const sent = await ctx.message.sendPhoto(file);
+            const weekChatId = Number(ctx.chatId ?? user.telegram_id);
+            autoPin(weekChatId, sent.id, {
+              pinChatMessage: (cid, messageId, options) =>
+                ctx.bot.api.pinChatMessage({
+                  chat_id: cid,
+                  message_id: messageId,
+                  disable_notification: options.disable_notification,
+                }),
+              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
+              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              groupChatRepo: groupRepo,
+            }).catch((err) => {
+              imageLogger.error({ err }, 'autoPin failed');
+            });
           } else {
             await ctx.answer({ text: '⚠️ Could not send image' });
           }
         } catch (err) {
-          imageLogger.error({ error: (err as Error).message }, 'Render failed');
+          imageLogger.error({ err }, 'Render failed');
           if (ctx.message) {
             await ctx.message.send('⚠️ Image generation failed. Use text version above.');
           } else {

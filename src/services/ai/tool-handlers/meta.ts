@@ -1,5 +1,6 @@
 import cityTimezones from 'city-timezones';
 import { t } from '../../../config/constants.ts';
+import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
@@ -389,10 +390,22 @@ export function handleRenderDayImage(
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
 
+  const chatId = ctx.chatId;
+  const isGroupChat = ctx.isGroup;
+  const groupChatRepo = ctx.groupChatRepo;
+
   renderDayImage(ctx.renderService as never, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
-    .then((buffer) => {
+    .then(async (buffer) => {
       const file = new File([buffer], 'day.png', { type: 'image/png' });
-      return sender.sendPhoto!(ctx.chatId, file);
+      const sent = await sender.sendPhoto!(chatId, file);
+      autoPin(chatId, sent.message_id, {
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
+        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        isGroupChat,
+        groupChatRepo,
+      }).catch((err) => {
+        metaLogger.error({ err }, 'autoPin failed');
+      });
     })
     .catch((err) => {
       metaLogger.error({ err }, 'Day image render failed');
@@ -412,6 +425,9 @@ export function handleRenderTable(
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const tr = t(lang).aiTools.meta;
   const sender = ctx.sender;
+  const chatId = ctx.chatId;
+  const isGroupChat = ctx.isGroup;
+  const groupChatRepo = ctx.groupChatRepo;
 
   ctx.renderService
     .renderDirect({
@@ -424,9 +440,17 @@ export function handleRenderTable(
       },
       userId: ctx.user.telegram_id,
     })
-    .then((buffer) => {
+    .then(async (buffer) => {
       const file = new File([buffer], 'table.png', { type: 'image/png' });
-      return sender.sendPhoto!(ctx.chatId, file);
+      const sent = await sender.sendPhoto!(chatId, file);
+      autoPin(chatId, sent.message_id, {
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
+        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        isGroupChat,
+        groupChatRepo,
+      }).catch((err) => {
+        metaLogger.error({ err }, 'autoPin failed');
+      });
     })
     .catch((err) => {
       metaLogger.error({ err }, 'Table image render failed');

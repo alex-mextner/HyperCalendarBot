@@ -393,7 +393,7 @@ describe('meta tool handlers', () => {
         editMessageText: (() => Promise.resolve()) as never,
         sendPhoto(chatId: number) {
           photoCalls.push({ chatId });
-          return Promise.resolve();
+          return Promise.resolve({ message_id: 1 });
         },
       };
     });

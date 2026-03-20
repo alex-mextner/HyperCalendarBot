@@ -157,7 +157,8 @@ export interface TelegramSender {
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
-  sendPhoto?(chatId: number, photo: File): Promise<void>;
+  sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
+  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<unknown>;
   sendInvitation?(
     inviteeId: number,
     text: string,
