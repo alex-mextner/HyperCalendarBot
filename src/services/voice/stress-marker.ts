@@ -181,11 +181,11 @@ export function stripMarkdown(text: string): string {
       .replace(/^#{1,6}\s+/gm, '')
       // Remove bullet points
       .replace(/^[-•]\s+/gm, '')
-      // Remove emoji (surrogate pairs and misc symbols)
-      .replace(/\p{Emoji_Presentation}|\p{Extended_Pictographic}/gu, '')
-      // Remove tool execution lines (⏳, ✅, ❌ with tool names)
-      .replace(/^[⏳✅❌].*$/gm, '')
+      // Remove emoji and variation selectors (FE0F/FE0E) + ZWJ
+      .replace(/\p{Extended_Pictographic}\uFE0F?/gu, '')
+      .replace(/[\uFE0E\uFE0F\u200D]/gu, '')
       // Collapse whitespace
+      .replace(/ {2,}/g, ' ')
       .replace(/\n{3,}/g, '\n\n')
       .trim()
   );

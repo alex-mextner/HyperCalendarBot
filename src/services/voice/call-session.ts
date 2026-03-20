@@ -4,6 +4,7 @@ import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
 import type { NovaStreamingSTT } from './nova-streaming-stt.ts';
+import { fixLineBreaks, stripMarkdown } from './stress-marker.ts';
 import type { ThinkingPhrasePlayer } from './thinking-phrase-player.ts';
 import { voiceLogger } from './types.ts';
 
@@ -235,12 +236,7 @@ export class CallSession {
 
       if (!responseText) return;
 
-      // Strip Telegram markdown before TTS so asterisks/underscores aren't read aloud
-      const spokenText = responseText
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/_(.*?)_/g, '$1')
-        .replace(/`(.*?)`/g, '$1');
+      const spokenText = fixLineBreaks(stripMarkdown(responseText));
 
       voiceLogger.info({ sessionId: this.cfg.sessionId, responseText: spokenText }, 'TTS response');
 

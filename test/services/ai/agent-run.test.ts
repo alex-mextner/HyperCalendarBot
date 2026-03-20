@@ -439,4 +439,61 @@ describe('CalendarBotAgent.run()', () => {
     expect(chatHistory[0]!.role).toBe('user');
     expect(chatHistory[0]!.content).toBe('Show my events today');
   });
+
+  test('voice_message mode returns plain text without execution log HTML', async () => {
+    // Round 1: tool call (produces execution log in intermediateChunks)
+    const toolCallFinal = {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'call-1',
+          name: 'get_events',
+          input: { start_date: '2026-03-20', end_date: '2026-03-20' },
+        },
+      ],
+      stop_reason: 'tool_use',
+    };
+    // Round 2: plain text summary
+    const textFinal = {
+      content: [{ type: 'text', text: 'You have 0 events today.' }],
+      stop_reason: 'end_turn',
+    };
+
+    let callCount = 0;
+    const mockClient = {
+      messages: {
+        stream: mock(() => {
+          callCount++;
+          const final = callCount === 1 ? toolCallFinal : textFinal;
+          const events =
+            callCount === 1
+              ? [{ type: 'content_block_start', content_block: { type: 'tool_use', name: 'get_events' } }]
+              : [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'You have 0 events today.' } }];
+          let index = 0;
+          return {
+            [Symbol.asyncIterator]() {
+              return {
+                next() {
+                  return index < events.length
+                    ? Promise.resolve({ value: events[index++], done: false })
+                    : Promise.resolve({ value: undefined, done: true });
+                },
+              };
+            },
+            finalMessage: mock(() => Promise.resolve(final)),
+          };
+        }),
+      },
+    };
+
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const result = await agent.run({ ...ctx, inputMode: 'voice_message' });
+
+    // Must be plain text — no HTML blockquote, no execution log markers
+    expect(result.responseText).toBe('You have 0 events today.');
+    expect(result.responseText).not.toContain('<blockquote');
+    expect(result.responseText).not.toContain('✅');
+  });
 });

@@ -101,4 +101,18 @@ describe('stripMarkdown', () => {
   test('collapses excessive newlines', () => {
     expect(stripMarkdown('a\n\n\n\nb')).toBe('a\n\nb');
   });
+
+  test('removes emoji with Emoji_Presentation', () => {
+    expect(stripMarkdown('✅ готово')).toBe('готово');
+    expect(stripMarkdown('текст 🎉 конец')).toBe('текст конец');
+  });
+
+  test('removes emoji requiring Extended_Pictographic (with variation selector)', () => {
+    expect(stripMarkdown('✏️ редактирую')).toBe('редактирую');
+    expect(stripMarkdown('⚙️ настройки')).toBe('настройки');
+  });
+
+  test('removes bullet points at line start', () => {
+    expect(stripMarkdown('• 10:30 — Встреча\n• 11:00 — Звонок')).toBe('10:30 — Встреча\n11:00 — Звонок');
+  });
 });

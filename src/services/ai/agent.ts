@@ -237,7 +237,7 @@ export class CalendarBotAgent {
               writer.commitIntermediate();
               await writer.finalize();
               return {
-                responseText: ctx.inputMode === 'live_call' ? writer.getPlainText() : writer.getText(),
+                responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
                 toolCalls: allToolCalls,
                 toolResults: allToolResults,
                 endCall: ctx.callEndRequested === true,
@@ -291,7 +291,7 @@ export class CalendarBotAgent {
     }
 
     return {
-      responseText: ctx.inputMode === 'live_call' ? writer.getPlainText() : writer.getText(),
+      responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
       toolCalls: allToolCalls,
       toolResults: allToolResults,
       endCall: ctx.callEndRequested === true,
