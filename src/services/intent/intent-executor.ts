@@ -196,6 +196,7 @@ async function runLevel2(
   }
 
   let mentionedEventId: number | undefined;
+  let lastToolOutput: string | undefined;
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
@@ -247,6 +248,8 @@ async function runLevel2(
       return { success: false, response: result.error };
     }
 
+    lastToolOutput = result.output;
+
     // If result carries structured event data, update last_mentioned_event in-workflow
     // and track the ID for cross-request persistence via mentionedEventId.
     if (result.data !== undefined) {
@@ -268,7 +271,7 @@ async function runLevel2(
     }
   }
 
-  return { success: true, stepResults, mentionedEventId };
+  return { success: true, response: lastToolOutput, stepResults, mentionedEventId };
 }
 
 export class IntentExecutor {

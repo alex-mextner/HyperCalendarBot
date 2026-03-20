@@ -1,5 +1,19 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
-import { InMemoryEventMentionStore, RedisEventMentionStore } from '../../../src/services/intent/event-mention-store.ts';
+import { migrations } from '../../../src/database/migrations.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import {
+  InMemoryEventMentionStore,
+  RedisEventMentionStore,
+  SqliteEventMentionStore,
+} from '../../../src/services/intent/event-mention-store.ts';
+
+function createTestDb(): Database {
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  return db;
+}
 
 describe('InMemoryEventMentionStore', () => {
   test('returns null for unknown user', () => {
@@ -68,5 +82,33 @@ describe('RedisEventMentionStore', () => {
     const data = new Map<string, string>([['last_mentioned_event:1', 'garbage']]);
     const store = new RedisEventMentionStore(makeRedis(data));
     expect(await store.get(1)).toBeNull();
+  });
+});
+
+describe('SqliteEventMentionStore', () => {
+  test('returns null for unknown user', () => {
+    const store = new SqliteEventMentionStore(createTestDb());
+    expect(store.get(999)).toBeNull();
+  });
+
+  test('stores and retrieves eventId', () => {
+    const store = new SqliteEventMentionStore(createTestDb());
+    store.set(1, 42);
+    expect(store.get(1)).toBe(42);
+  });
+
+  test('overwrites previous value', () => {
+    const store = new SqliteEventMentionStore(createTestDb());
+    store.set(1, 10);
+    store.set(1, 20);
+    expect(store.get(1)).toBe(20);
+  });
+
+  test('different users are isolated', () => {
+    const store = new SqliteEventMentionStore(createTestDb());
+    store.set(1, 10);
+    store.set(2, 20);
+    expect(store.get(1)).toBe(10);
+    expect(store.get(2)).toBe(20);
   });
 });

@@ -59,6 +59,7 @@ export const CB = {
   GROUP_SETTINGS_TZ: 'gst',
   TZ_CANCEL: 'tzc',
   TZ_TYPE_CITY: 'tzt',
+  TZ_GEO_PICK: 'tzg',
 } as const;
 
 // i18n messages

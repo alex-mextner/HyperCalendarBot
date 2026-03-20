@@ -18,6 +18,7 @@ import { GroupMemberService } from '../services/group/member-service.ts';
 import { HolidayService } from '../services/holiday/holiday-service.ts';
 import type { RenderService } from '../services/image/render-service.ts';
 import type { EventMentionStore } from '../services/intent/event-mention-store.ts';
+import { SqliteEventMentionStore } from '../services/intent/event-mention-store.ts';
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
@@ -64,6 +65,7 @@ import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
+import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { BotCallbackContext, BotCommandContext } from './types.ts';
 
@@ -132,7 +134,7 @@ export function createBot(
   );
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
-  const groupSessions = new GroupSessionManager();
+  const groupSessions = new GroupSessionManager(db.groupSessions);
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
   const rateLimiter = new RateLimiter({
     perMinute: RATE_LIMIT.MESSAGES_PER_MINUTE,
@@ -159,7 +161,6 @@ export function createBot(
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
-  const workflowSessions = new Map<number, import('./pipeline/intent-matcher-layer.ts').WorkflowSession>();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
   const adminReplySession = new Map<number, { threadId: number; userId: number }>();
   const proposeTimeSessions = new Map<number, { invitationId: number }>();
@@ -275,9 +276,9 @@ export function createBot(
     intentMatcher,
     intentRepo,
     intentExecutor,
-    eventMentionStore,
+    eventMentionStore: eventMentionStore ?? new SqliteEventMentionStore(db.db),
     feedbackRepo,
-    workflowSessions,
+    workflowSessions: db.workflowSessions,
     adminEditSessions,
     adminReplySession,
     intentLearner,
@@ -320,6 +321,9 @@ export function createBot(
 
   bot
     .derive(createUserResolver(db))
+    .use((context, next) =>
+      runWithChatId(Number((context as unknown as { chatId?: number | bigint }).chatId ?? 0), next),
+    )
     .use(async (context, next) => {
       const ctx = context as unknown as GramIOContextWithFrom;
       const userId = ctx.from?.id;
@@ -633,6 +637,22 @@ export function createBot(
         },
       )(ctx as never),
     )
+    // Private chat: user blocked the bot — clear pending workflow sessions
+    .on('my_chat_member', (ctx) => {
+      const update = (
+        ctx as unknown as {
+          myChatMember?: {
+            chat: { type: string };
+            from: { id: number };
+            new_chat_member: { status: string };
+          };
+        }
+      ).myChatMember;
+      if (!update) return;
+      if (update.chat.type !== 'private') return;
+      if (update.new_chat_member.status !== 'kicked') return;
+      db.workflowSessions.deleteByUser(update.from.id);
+    })
     // Users shared from picker modal → send invitations
     .on('users_shared', async (ctx) => {
       const user = (ctx as unknown as { dbUser?: User }).dbUser;

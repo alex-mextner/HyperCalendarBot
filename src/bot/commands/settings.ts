@@ -55,18 +55,19 @@ export function buildGeneralText(
   country: string,
   defaultDurationMinutes: number,
 ): string {
+  const ru = lang === 'ru';
   const durationLabel =
     defaultDurationMinutes >= 60 && defaultDurationMinutes % 60 === 0
-      ? `${defaultDurationMinutes / 60}ч`
-      : `${defaultDurationMinutes} мин`;
+      ? `${defaultDurationMinutes / 60}${ru ? 'ч' : 'h'}`
+      : `${defaultDurationMinutes}${ru ? ' мин' : ' min'}`;
   return [
-    '🌍 Основные настройки',
+    ru ? '🌍 Основные настройки' : '🌍 General settings',
     '',
-    `Часовой пояс: ${tzDisplay}`,
-    `Язык: ${lang === 'ru' ? '🇷🇺 Русский' : '🇬🇧 English'}`,
-    `Страна: ${country}`,
-    `Длительность встреч: ${durationLabel}`,
-    '  По умолчанию, если не указано время окончания.',
+    `${ru ? 'Часовой пояс' : 'Timezone'}: ${tzDisplay}`,
+    `${ru ? 'Язык' : 'Language'}: ${lang === 'ru' ? '🇷🇺 Русский' : '🇬🇧 English'}`,
+    `${ru ? 'Страна' : 'Country'}: ${country}`,
+    `${ru ? 'Длительность встреч' : 'Event duration'}: ${durationLabel}`,
+    `  ${ru ? 'По умолчанию, если не указано время окончания.' : 'Default if no end time is specified.'}`,
   ].join('\n');
 }
 
@@ -75,37 +76,40 @@ export function buildGeneralView(user: User): { text: string; kb: InlineKeyboard
   const lang = user.language ?? 'en';
   const country = user.country_code ?? '—';
   const duration = user.default_event_duration_minutes ?? 60;
-  const durationLabel = duration >= 60 && duration % 60 === 0 ? `${duration / 60}ч` : `${duration} мин`;
+  const ru = lang === 'ru';
+  const durationLabel =
+    duration >= 60 && duration % 60 === 0 ? `${duration / 60}${ru ? 'ч' : 'h'}` : `${duration}${ru ? ' мин' : ' min'}`;
   const text = buildGeneralText(tzDisplay, lang, country, duration);
   const kb = new InlineKeyboard()
-    .text('🕐 Часовой пояс', 'stg:change_tz')
+    .text(ru ? '🕐 Часовой пояс' : '🕐 Timezone', 'stg:change_tz')
     .row()
     .text(lang === 'ru' ? '✅ 🇷🇺 Русский' : '🇷🇺 Русский', 'stg:set_lang:ru')
     .text(lang === 'en' ? '✅ 🇬🇧 English' : '🇬🇧 English', 'stg:set_lang:en')
     .row()
-    .text('🏳️ Страна', 'stg:show_countries')
+    .text(ru ? '🏳️ Страна' : '🏳️ Country', 'stg:show_countries')
     .row()
-    .text(`⏱ Длительность: ${durationLabel}`, 'stg:edit_duration')
+    .text(ru ? `⏱ Длительность: ${durationLabel}` : `⏱ Duration: ${durationLabel}`, 'stg:edit_duration')
     .row()
-    .text('🔙 Назад', 'stg:back');
+    .text(ru ? '🔙 Назад' : '🔙 Back', 'stg:back');
   return { text, kb };
 }
 
-export function buildDurationView(currentMinutes: number): { text: string; kb: InlineKeyboard } {
-  const fmt = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}ч` : `${m} мин`);
+export function buildDurationView(currentMinutes: number, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
+  const ru = lang === 'ru';
+  const fmt = (m: number) => (m >= 60 && m % 60 === 0 ? `${m / 60}${ru ? 'ч' : 'h'}` : `${m}${ru ? ' мин' : ' min'}`);
   const mark = (m: number) => (m === currentMinutes ? `✅ ${fmt(m)}` : fmt(m));
   const text = [
-    '⏱ Длительность встреч по умолчанию',
+    ru ? '⏱ Длительность встреч по умолчанию' : '⏱ Default event duration',
     '',
-    `Текущая: ${fmt(currentMinutes)}`,
-    'Выберите или введите число минут:',
+    `${ru ? 'Текущая' : 'Current'}: ${fmt(currentMinutes)}`,
+    ru ? 'Выберите или введите число минут:' : 'Select or type minutes:',
   ].join('\n');
   const kb = new InlineKeyboard()
     .text(mark(15), 'stg:set_duration:15')
     .text(mark(30), 'stg:set_duration:30')
     .text(mark(60), 'stg:set_duration:60')
     .row()
-    .text('🔙 Назад', 'stg:general');
+    .text(ru ? '🔙 Назад' : '🔙 Back', 'stg:general');
   return { text, kb };
 }
 
@@ -452,7 +456,8 @@ export async function handleSettingsCallback(
 
   if (subAction === 'edit_duration') {
     const duration = user.default_event_duration_minutes ?? 60;
-    const { text, kb } = buildDurationView(duration);
+    const lang = (user.language ?? 'en') as 'en' | 'ru';
+    const { text, kb } = buildDurationView(duration, lang);
     pendingDurationInput.set(user.telegram_id, Date.now());
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
@@ -466,7 +471,8 @@ export async function handleSettingsCallback(
       pendingDurationInput.delete(user.telegram_id);
     }
     const updated = userRepo.findByTelegramId(user.telegram_id) ?? user;
-    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60);
+    const lang = (updated.language ?? 'en') as 'en' | 'ru';
+    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

@@ -21,6 +21,12 @@ export interface WorkflowSession {
   createdAt: number;
 }
 
+export interface WorkflowSessionStore {
+  get(chatId: number, userId: number): WorkflowSession | null;
+  set(chatId: number, userId: number, session: WorkflowSession): void;
+  delete(chatId: number, userId: number): void;
+}
+
 const WORKFLOW_SESSION_TTL = 5 * 60 * 1000; // 5 minutes
 
 export function createIntentMatcherLayer(
@@ -28,7 +34,7 @@ export function createIntentMatcherLayer(
   intentRepo: IntentRepository,
   executor: IntentExecutor,
   toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
-  workflowSessions: Map<number, WorkflowSession>,
+  workflowSessions: WorkflowSessionStore,
   chatHistoryRepo?: ChatHistoryRepository,
   notifyAdmin?: (text: string) => Promise<unknown>,
   getEventContext?: (
@@ -44,12 +50,13 @@ export function createIntentMatcherLayer(
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const userId = user.telegram_id;
+    const chatId = Number((ctx as unknown as { chatId?: number | bigint }).chatId ?? userId);
     const groupCtx = extra?.groupContext;
 
     // 1. Check for active workflow session (resuming from ask_user)
-    const session = workflowSessions.get(userId);
+    const session = workflowSessions.get(chatId, userId);
     if (session) {
-      workflowSessions.delete(userId);
+      workflowSessions.delete(chatId, userId);
       if (Date.now() - session.createdAt < WORKFLOW_SESSION_TTL) {
         const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};
         const result = await executor.run(
@@ -115,7 +122,7 @@ export function createIntentMatcherLayer(
 
     // 5. Handle suspension
     if (result.suspended && result.suspendedAt !== undefined) {
-      workflowSessions.set(userId, {
+      workflowSessions.set(chatId, userId, {
         intentId: match.intentId,
         stepIndex: result.suspendedAt,
         stepResults: result.stepResults ?? {},

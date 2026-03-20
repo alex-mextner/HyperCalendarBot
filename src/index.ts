@@ -244,10 +244,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
             botLogger.warn({ err }, 'Kokoro TTS failed, falling back to Google');
           }
         } else {
-          botLogger.info(
-            { engine: 'google', lang, sileroAvailable: !!sileroTts, kokoroAvailable: !!kokoroTts },
-            'Voice call TTS',
-          );
+          botLogger.info({ engine: 'google', lang }, 'Voice call TTS');
         }
         return fallbackTts.synthesize(clean, lang);
       },
@@ -366,8 +363,13 @@ if (config.REDIS_URL) {
 }
 
 if (config.REDIS_URL) {
-  const { createBotTasksQueue, setupSecretaryExpiryCron, setupSharingCleanupCron, setupProposalExpiryCron } =
-    await import('./worker/bot-tasks-queue.ts');
+  const {
+    createBotTasksQueue,
+    setupSecretaryExpiryCron,
+    setupSharingCleanupCron,
+    setupProposalExpiryCron,
+    setupSessionCleanupCron,
+  } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
@@ -390,11 +392,16 @@ if (config.REDIS_URL) {
         proposalRepo: db.calendarProposals,
         editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
       }),
+    onSessionCleanup: () => {
+      db.workflowSessions.cleanup();
+      db.groupSessions.deleteExpired();
+    },
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
   await setupProposalExpiryCron(botTasksQueue);
+  await setupSessionCleanupCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {

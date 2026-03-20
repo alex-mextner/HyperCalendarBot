@@ -1,10 +1,27 @@
 import { beforeEach, expect, test } from 'bun:test';
+import type { GroupSessionRepository } from '../../../src/database/repositories/group-session.repository';
+import type { GroupSession } from '../../../src/services/group/group-session';
 import { GroupSessionManager } from '../../../src/services/group/group-session';
+
+// In-memory repo for tests — returns same object references so mutation tests work
+function makeRepo(): GroupSessionRepository {
+  const m = new Map<number, GroupSession>();
+  return {
+    get: (chatId: number) => m.get(chatId) ?? null,
+    upsert: (s: GroupSession) => {
+      m.set(s.chatId, s);
+    },
+    delete: (chatId: number) => {
+      m.delete(chatId);
+    },
+    deleteExpired: () => {},
+  } as unknown as GroupSessionRepository;
+}
 
 let manager: GroupSessionManager;
 
 beforeEach(() => {
-  manager = new GroupSessionManager();
+  manager = new GroupSessionManager(makeRepo());
 });
 
 test('no session initially', () => {
@@ -67,7 +84,7 @@ test('refresh() resets counter and expiry', () => {
 test('expired session is not active', () => {
   manager.activate(1, 42, 100);
 
-  // Manually expire the session
+  // Manually expire the session via reference mutation (works with in-memory repo)
   const session = manager.getSession(1)!;
   session.expiresAt = Date.now() - 1;
 

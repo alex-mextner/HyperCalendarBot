@@ -717,4 +717,44 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '033_workflow_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE workflow_sessions (
+          chat_id    INTEGER NOT NULL,
+          user_id    INTEGER NOT NULL,
+          data       TEXT    NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (chat_id, user_id)
+        )
+      `);
+    },
+  },
+  {
+    name: '034_group_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE group_sessions (
+          chat_id              INTEGER PRIMARY KEY,
+          activated_by         INTEGER NOT NULL,
+          remaining_messages   INTEGER NOT NULL,
+          last_bot_message_id  INTEGER NOT NULL,
+          expires_at           INTEGER NOT NULL
+        )
+      `);
+    },
+  },
+  {
+    name: '035_event_mention_store',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE event_mention_store (
+          user_id    INTEGER PRIMARY KEY,
+          event_id   INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+        )
+      `);
+    },
+  },
 ];

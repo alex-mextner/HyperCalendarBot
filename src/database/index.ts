@@ -17,6 +17,7 @@ import { GoogleCalendarRepository } from './repositories/google-calendar.reposit
 import { GoogleSyncRepository } from './repositories/google-sync.repository.ts';
 import { GroupChatRepository } from './repositories/group-chat.repository.ts';
 import { GroupMemberRepository } from './repositories/group-member.repository.ts';
+import { GroupSessionRepository } from './repositories/group-session.repository.ts';
 import { HolidayRepository } from './repositories/holiday.repository.ts';
 import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
@@ -27,6 +28,7 @@ import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
+import { WorkflowSessionRepository } from './repositories/workflow-session.repository.ts';
 import { runMigrations } from './schema.ts';
 
 export class DatabaseService {
@@ -54,6 +56,8 @@ export class DatabaseService {
   readonly editProposals: EditProposalRepository;
   readonly secretaries: SecretaryRepository;
   readonly calendarProposals: CalendarProposalRepository;
+  readonly workflowSessions: WorkflowSessionRepository;
+  readonly groupSessions: GroupSessionRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -89,6 +93,8 @@ export class DatabaseService {
     this.editProposals = new EditProposalRepository(this.db);
     this.secretaries = new SecretaryRepository(this.db);
     this.calendarProposals = new CalendarProposalRepository(this.db);
+    this.workflowSessions = new WorkflowSessionRepository(this.db);
+    this.groupSessions = new GroupSessionRepository(this.db);
   }
 
   close(): void {

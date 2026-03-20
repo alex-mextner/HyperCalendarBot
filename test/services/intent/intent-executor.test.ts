@@ -501,6 +501,31 @@ describe('IntentExecutor', () => {
     expect(result.response).toBe('«22» — дата или время?');
   });
 
+  test('Level 2: last tool output becomes response when no respond step', async () => {
+    // Regression: get_history-style workflow where the only step is a tool call without `as`.
+    // Previously runLevel2 returned { success: true, stepResults } with no response field,
+    // causing silent delivery failure in intent-matcher-layer.
+    const workflow = {
+      steps: [{ call: 'get_history', input: { limit: 50 } }],
+    };
+    const historyText = '[2026-03-20 10:00] [user] Покажи нашу переписку';
+    const mockExecutor = () => ({ success: true, output: historyText });
+    const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+    expect(result.success).toBe(true);
+    expect(result.response).toBe(historyText);
+  });
+
+  test('Level 2: last tool output becomes response even with as field', async () => {
+    const workflow = {
+      steps: [{ call: 'get_history', input: { limit: 10 }, as: 'history' }],
+    };
+    const output = 'some history';
+    const mockExecutor = () => ({ success: true, output });
+    const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+    expect(result.success).toBe(true);
+    expect(result.response).toBe(output);
+  });
+
   test('resume from suspended workflow', async () => {
     const workflow = {
       steps: [

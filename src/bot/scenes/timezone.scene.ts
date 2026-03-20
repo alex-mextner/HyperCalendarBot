@@ -13,6 +13,7 @@ import { getSceneLang, getSceneUser } from './helpers.ts';
 interface TimezoneState {
   detectedTz?: string;
   cityInputMode?: boolean;
+  geoMsgId?: number;
 }
 
 interface TimezoneParams {
@@ -21,7 +22,12 @@ interface TimezoneParams {
 }
 
 type BotApiCtx = {
-  bot: { api: { editMessageText: (p: Record<string, unknown>) => Promise<unknown> } };
+  bot: {
+    api: {
+      editMessageText: (p: Record<string, unknown>) => Promise<unknown>;
+      deleteMessage: (p: { chat_id: number; message_id: number }) => Promise<unknown>;
+    };
+  };
 };
 
 type MsgCtx = { delete: () => Promise<unknown> };
@@ -43,6 +49,8 @@ export function createTimezoneScene(db: DatabaseService) {
 
       const chooserKb = new InlineKeyboard()
         .text(lang === 'ru' ? '🎹 Написать город' : '🎹 Type city', CB.TZ_TYPE_CITY)
+        .text(lang === 'ru' ? '📍 Скинуть гео' : '📍 Share geo', CB.TZ_GEO_PICK)
+        .row()
         .text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
 
       // onEnter is called from stg:change_tz callback_query — editText replaces the settings message
@@ -50,10 +58,6 @@ export function createTimezoneScene(db: DatabaseService) {
         editText: (text: string, opts?: unknown) => Promise<unknown>;
       };
       await cbCtx.editText(chooserText, { reply_markup: chooserKb });
-
-      // Show geo request via reply keyboard (bottom of screen)
-      const geoHint = lang === 'ru' ? '📍 Или поделись геолокацией:' : '📍 Or share your location:';
-      await context.send(geoHint, { reply_markup: timezoneMethodKeyboard(lang) });
     })
     .step(['message', 'location', 'callback_query'], async (context) => {
       const user = getSceneUser(context);
@@ -63,7 +67,7 @@ export function createTimezoneScene(db: DatabaseService) {
       }
       const lang = getSceneLang(context);
       const params = context.scene.params as TimezoneParams;
-      const { cityInputMode } = context.scene.state;
+      const { cityInputMode, geoMsgId } = context.scene.state;
 
       // Handle typed city name (only after entering city input mode)
       if (context.is('message')) {
@@ -93,6 +97,14 @@ export function createTimezoneScene(db: DatabaseService) {
         ).eventLocation;
         const tz = resolveTimezone(latitude, longitude);
         const display = getTimezoneDisplay(tz);
+        // Delete the geo request message now that location is received
+        if (geoMsgId) {
+          const bot = (context as unknown as BotApiCtx).bot;
+          const chatId = (context as unknown as { chatId?: number }).chatId ?? 0;
+          bot.api
+            .deleteMessage({ chat_id: chatId, message_id: geoMsgId })
+            .catch((err: unknown) => botLogger.warn({ err }, 'tz scene: failed to delete geo message'));
+        }
         await context.send(`✅ ${display}`, {
           reply_markup: timezoneConfirmKeyboard(lang),
         });
@@ -111,6 +123,23 @@ export function createTimezoneScene(db: DatabaseService) {
           editText: (text: string, opts?: unknown) => Promise<unknown>;
         };
 
+        // Geo pick — show geo reply keyboard via new message, save its ID
+        if (action === CB.TZ_GEO_PICK) {
+          await cbCtx.answer();
+          const display = getTimezoneDisplay(user.timezone);
+          const geoPromptText =
+            lang === 'ru'
+              ? `🌍 Текущий: ${display}\n\nПоделись геолокацией:`
+              : `🌍 Current: ${display}\n\nShare your location:`;
+          const cancelKb = new InlineKeyboard().text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
+          await cbCtx.editText(geoPromptText, { reply_markup: cancelKb });
+          const geoMsg = await context.send(lang === 'ru' ? '📍 Нажми кнопку ниже:' : '📍 Tap the button below:', {
+            reply_markup: timezoneMethodKeyboard(lang),
+          });
+          await context.scene.update({ geoMsgId: (geoMsg as unknown as { id: number }).id }, { step: undefined });
+          return;
+        }
+
         // Enter city input mode
         if (action === CB.TZ_TYPE_CITY) {
           await cbCtx.answer();
@@ -119,7 +148,7 @@ export function createTimezoneScene(db: DatabaseService) {
           const promptText = header + cityInputPrompt(lang).replace(/^🌍 /, '');
           const cancelKb = new InlineKeyboard().text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
           await cbCtx.editText(promptText, { reply_markup: cancelKb });
-          // Remove geo reply keyboard by sending the city prompt hint (visible + removes keyboard)
+          // Send city prompt as new message — removes any stale reply keyboard
           await context.send(cityInputPrompt(lang), removeKeyboard());
           await context.scene.update({ cityInputMode: true }, { step: undefined });
           return;
@@ -131,8 +160,13 @@ export function createTimezoneScene(db: DatabaseService) {
           await context.scene.exit();
           const { text: settingsText, kb: settingsKb } = buildGeneralView(user);
           await cbCtx.editText(settingsText, { reply_markup: settingsKb });
-          // Remove geo reply keyboard only if we never entered city input mode
-          if (!cityInputMode) {
+          // If geo request was active: delete its message and remove reply keyboard
+          if (geoMsgId) {
+            const bot = (context as unknown as BotApiCtx).bot;
+            const chatId = (context as unknown as { chatId?: number }).chatId ?? 0;
+            bot.api
+              .deleteMessage({ chat_id: chatId, message_id: geoMsgId })
+              .catch((err: unknown) => botLogger.warn({ err }, 'tz scene: failed to delete geo message'));
             const tempMsg = await context.send('.', removeKeyboard());
             (tempMsg as unknown as MsgCtx).delete().catch((err: unknown) => {
               botLogger.warn({ err }, 'tz scene: failed to delete temp remove-keyboard message');

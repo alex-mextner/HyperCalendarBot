@@ -59,7 +59,11 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
-import { createIntentMatcherLayer, type WorkflowSession } from '../pipeline/intent-matcher-layer.ts';
+import {
+  createIntentMatcherLayer,
+  type WorkflowSession,
+  type WorkflowSessionStore,
+} from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -114,7 +118,7 @@ export interface MessageHandlerDeps {
   intentMatcher?: IntentMatcher;
   intentRepo?: IntentRepository;
   intentExecutor?: IntentExecutor;
-  workflowSessions?: Map<number, WorkflowSession>;
+  workflowSessions?: WorkflowSessionStore;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
   // Pipeline: feedback routing
@@ -661,7 +665,26 @@ export async function tryHandleGroupTzInput(
 
 export function createMessageHandler(deps: MessageHandlerDeps) {
   const agentContextBuilder = buildAgentContextFactory(deps);
-  const workflowSessions = deps.workflowSessions ?? new Map<number, WorkflowSession>();
+  const workflowSessions: WorkflowSessionStore =
+    deps.workflowSessions ??
+    (() => {
+      const m = new Map<string, WorkflowSession>();
+      const TTL = 5 * 60 * 1000;
+      return {
+        get: (chatId, userId) => {
+          const s = m.get(`${chatId}:${userId}`);
+          if (!s || Date.now() - s.createdAt >= TTL) {
+            m.delete(`${chatId}:${userId}`);
+            return null;
+          }
+          return s;
+        },
+        set: (chatId, userId, s) => m.set(`${chatId}:${userId}`, s),
+        delete: (chatId, userId) => {
+          m.delete(`${chatId}:${userId}`);
+        },
+      };
+    })();
   const eventMentionStore: EventMentionStore = deps.eventMentionStore ?? new InMemoryEventMentionStore();
 
   const aiAgentLayer = createAiAgentLayer({

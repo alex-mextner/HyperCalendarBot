@@ -281,7 +281,7 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
         ctx.domainEvents.emit('myCalendar.conflictDetected', {
           userId: ctx.user.telegram_id,
           event,
-          conflictsWith: conflicts[0],
+          conflictsWith: conflicts[0]!,
         });
       }
     }
@@ -323,7 +323,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       ctx.domainEvents.emit('myCalendar.conflictDetected', {
         userId: ctx.user.telegram_id,
         event: updated,
-        conflictsWith: conflicts[0],
+        conflictsWith: conflicts[0]!,
       });
     }
   }

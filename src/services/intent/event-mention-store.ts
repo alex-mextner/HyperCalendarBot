@@ -1,4 +1,5 @@
 // src/services/intent/event-mention-store.ts
+import type { Database } from 'bun:sqlite';
 
 const KEY_PREFIX = 'last_mentioned_event:';
 const TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
@@ -37,5 +38,28 @@ export class RedisEventMentionStore implements EventMentionStore {
     if (!val) return null;
     const n = Number.parseInt(val, 10);
     return Number.isNaN(n) ? null : n;
+  }
+}
+
+export class SqliteEventMentionStore implements EventMentionStore {
+  constructor(private db: Database) {}
+
+  set(userId: number, eventId: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO event_mention_store (user_id, event_id, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT (user_id) DO UPDATE SET
+           event_id = excluded.event_id,
+           updated_at = excluded.updated_at`,
+      )
+      .run(userId, eventId, Date.now());
+  }
+
+  get(userId: number): number | null {
+    const row = this.db.prepare('SELECT event_id FROM event_mention_store WHERE user_id = ?').get(userId) as {
+      event_id: number;
+    } | null;
+    return row?.event_id ?? null;
   }
 }

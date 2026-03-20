@@ -1,17 +1,47 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import type { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import type { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
 
+const TTL_MS = 5 * 60 * 1000;
+
+// In-memory WorkflowSessionStore for tests. Also exposes has() for assertions.
+function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userId: number): boolean } {
+  const m = new Map<string, WorkflowSession>();
+  const k = (c: number, u: number) => `${c}:${u}`;
+  return {
+    get(chatId, userId) {
+      const s = m.get(k(chatId, userId));
+      if (!s || Date.now() - s.createdAt >= TTL_MS) {
+        m.delete(k(chatId, userId));
+        return null;
+      }
+      return s;
+    },
+    set(chatId, userId, s) {
+      m.set(k(chatId, userId), s);
+    },
+    delete(chatId, userId) {
+      m.delete(k(chatId, userId));
+    },
+    has(chatId, userId) {
+      return m.has(k(chatId, userId));
+    },
+  };
+}
+
 function makeUser(overrides: Record<string, unknown> = {}) {
   return { telegram_id: 1, timezone: 'UTC', language: 'ru', ...overrides };
 }
 
+// chatId defaults to telegram_id — mirrors the layer's fallback for private chats
 function makeCtx(user = makeUser()): BotCommandContext {
   return {
     dbUser: user,
+    chatId: user.telegram_id,
     send: mock(() => Promise.resolve()),
   } as unknown as BotCommandContext;
 }
@@ -33,13 +63,10 @@ function makeToolExecutor() {
 }
 
 describe('createIntentMatcherLayer', () => {
-  let workflowSessions: Map<
-    number,
-    Parameters<typeof createIntentMatcherLayer>[4] extends Map<number, infer V> ? V : never
-  >;
+  let workflowSessions: ReturnType<typeof makeWorkflowStore>;
 
   beforeEach(() => {
-    workflowSessions = new Map();
+    workflowSessions = makeWorkflowStore();
   });
 
   test('returns handled:false when matcher finds no match', async () => {
@@ -113,8 +140,8 @@ describe('createIntentMatcherLayer', () => {
 
     const result = await layer(ctx, 'create event tomorrow');
     expect(result.handled).toBe(true);
-    expect(workflowSessions.has(userId)).toBe(true);
-    const session = workflowSessions.get(userId)!;
+    expect(workflowSessions.has(userId, userId)).toBe(true);
+    const session = workflowSessions.get(userId, userId)!;
     expect(session.intentId).toBe(5);
     expect(session.captures).toEqual({ $1: 'tomorrow' });
   });
@@ -126,7 +153,7 @@ describe('createIntentMatcherLayer', () => {
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
     // Seed an active session
-    workflowSessions.set(userId, {
+    workflowSessions.set(userId, userId, {
       intentId: 3,
       stepIndex: 0,
       stepResults: {},
@@ -147,7 +174,7 @@ describe('createIntentMatcherLayer', () => {
     expect(result.handled).toBe(true);
     expect(ctx.send).toHaveBeenCalledWith('Created!');
     // Session must be deleted after use
-    expect(workflowSessions.has(userId)).toBe(false);
+    expect(workflowSessions.has(userId, userId)).toBe(false);
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {
@@ -156,7 +183,7 @@ describe('createIntentMatcherLayer', () => {
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
     // Seed an expired session (>5 min old)
-    workflowSessions.set(userId, {
+    workflowSessions.set(userId, userId, {
       intentId: 1,
       stepIndex: 0,
       stepResults: {},
@@ -176,7 +203,7 @@ describe('createIntentMatcherLayer', () => {
     const result = await layer(ctx, 'too late');
     expect(result.handled).toBe(false);
     // Session should be removed even though expired
-    expect(workflowSessions.has(userId)).toBe(false);
+    expect(workflowSessions.has(userId, userId)).toBe(false);
     // Matcher is called (no session short-circuit)
     expect(matcher.match).toHaveBeenCalled();
   });
@@ -260,7 +287,7 @@ describe('createIntentMatcherLayer', () => {
     const result = await layer(ctx, 'create event');
     expect(result.handled).toBe(true);
     expect(ctx.send).toHaveBeenCalledWith('Date or time?');
-    expect(workflowSessions.has(userId)).toBe(true);
+    expect(workflowSessions.has(userId, userId)).toBe(true);
   });
 
   test('normalizes user answer to lowercase+trim when resuming workflow', async () => {
@@ -274,7 +301,7 @@ describe('createIntentMatcherLayer', () => {
     const executor = makeExecutor({ success: true, response: 'created' });
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
-    workflowSessions.set(userId, {
+    workflowSessions.set(userId, userId, {
       intentId: 7,
       stepIndex: 0,
       stepResults: {},
