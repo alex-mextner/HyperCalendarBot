@@ -214,12 +214,18 @@ New bot command `/birthdays` — lists all birthday events accessible to the use
 🎂 Дни рождения
 
 👤 Личный календарь
-• 🎁 Д/р Иван — 30 лет (15 марта)
-• 🎁 Д/р Мария (22 июня)
+• 🎁 [Иван](tg://user?id=12345) — 30 лет (15 марта)
+• 🎁 Мария @masha_k (22 июня)
+• 🎁 Петя (7 сентября)
 
 👥 Команда (группа)
-• 🎁 Д/р Алексей — 25 лет (3 апреля)
+• 🎁 [Алексей](tg://user?id=67890) — 25 лет (3 апреля)
 ```
+
+Name display priority (strip "Д/р" prefix for this command only):
+1. If `celebrant_id` known → `[Имя](tg://user?id=<celebrant_id>)` (Telegram inline mention)
+2. Else if `username` known (from `users` table or `contacts`) → `Имя @username`
+3. Else → plain name
 
 - Shows all `event_type = 'birthday'` events the user can see (personal + all group calendars they're in)
 - Deduplication applied (personal takes priority over group)
@@ -227,6 +233,7 @@ New bot command `/birthdays` — lists all birthday events accessible to the use
 - Age appended dynamically if `birth_year` known
 - If no birthdays anywhere: `"Дней рождения пока нет"` / `"No birthdays yet"`
 - Works in both private and group chat contexts (in group — shows only that group's birthdays + personal)
+- Must use `parse_mode: 'Markdown'` or `'HTML'` to render links
 
 ---
 
