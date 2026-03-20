@@ -258,4 +258,9 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Default event duration: 60 minutes');
   });
+
+  test('forbids markdown tables', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Never use markdown tables');
+  });
 });
