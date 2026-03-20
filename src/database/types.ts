@@ -50,6 +50,7 @@ export interface CalendarEvent {
   owner_type: 'user' | 'group';
   group_id: number | null;
   created_by: number | null;
+  event_type: string | null; // null = regular, 'birthday' = birthday
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -100,6 +101,7 @@ export interface CreateEventData {
   owner_type?: 'user' | 'group';
   group_id?: number;
   created_by?: number;
+  event_type?: string;
 }
 
 export interface UpdateEventData {
@@ -491,4 +493,18 @@ export interface CallLog {
   error: string | null;
   created_at: string;
   completed_at: string | null;
+}
+
+// --- Birthday Events ---
+
+export interface BirthEventMetadata {
+  event_id: number;
+  celebrant_id: number | null;
+  birth_year: number | null;
+  auto_created: number; // 0 | 1
+}
+
+export interface BirthdaySyncState {
+  user_id: number;
+  synced_at: string;
 }
