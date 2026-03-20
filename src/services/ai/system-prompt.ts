@@ -13,7 +13,7 @@ export function buildSystemPrompt(ctx: AgentContext): string {
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
 
-  return `You are a calendar assistant for a Telegram bot. You help users manage their schedule.
+  const prompt = `You are a calendar assistant for a Telegram bot. You help users manage their schedule.
 
 ## User Info
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
@@ -190,4 +190,15 @@ When the user (as secretary) wants to stop being secretary for someone:
 - Call list_calendar_access first to get the secretary_access_id, then call manage_secretaries with action "self_remove" directly.`
     : ''
 }`;
+
+  if (ctx.scenePauseState) {
+    const { sceneName, step, sceneState } = ctx.scenePauseState;
+    const stateStr = Object.entries(sceneState)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
+      .join('\n');
+    return `${prompt}\n\n## Scene Paused\nThe user was filling in the "${sceneName}" wizard (step ${step}) and asked for AI help.\nData collected so far:\n${stateStr || '  (none yet)'}\nYou MUST help complete the action. When done:\n- Call resume_scene if the wizard should continue (you only clarified something)\n- Call cancel_scene if you completed everything via tools (e.g., created the event directly)`;
+  }
+
+  return prompt;
 }
