@@ -161,6 +161,45 @@ export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?:
   return { success: true, output: JSON.stringify(result) };
 }
 
+export function handleConvertToTimezone(input: { datetime: string; timezone: string }): ToolResult {
+  const dt = new Date(input.datetime);
+  if (Number.isNaN(dt.getTime())) {
+    return { success: false, error: `Invalid datetime: ${input.datetime}` };
+  }
+
+  let offsetStr: string;
+  let offsetMinutes: number;
+  try {
+    ({ offsetStr, offsetMinutes } = validateAndGetOffset(input.timezone, dt));
+  } catch {
+    const suggestions = getTimezoneSuggestions(input.timezone);
+    const hint = suggestions.length > 0 ? `\nLargest cities in this region: ${suggestions.join(', ')}` : '';
+    if (!input.timezone.includes('/')) {
+      return {
+        success: false,
+        error: `Invalid timezone "${input.timezone}". Use IANA format, e.g. "America/New_York".${hint}`,
+      };
+    }
+    return { success: false, error: `Invalid timezone "${input.timezone}".${hint}` };
+  }
+
+  const localMs = dt.getTime() + offsetMinutes * 60_000;
+  const local = new Date(localMs);
+  const pad = (n: number) => n.toString().padStart(2, '0');
+  const localDatetime =
+    `${local.getUTCFullYear()}-${pad(local.getUTCMonth() + 1)}-${pad(local.getUTCDate())}` +
+    `T${pad(local.getUTCHours())}:${pad(local.getUTCMinutes())}:${pad(local.getUTCSeconds())}${offsetStr}`;
+
+  return {
+    success: true,
+    output: JSON.stringify({
+      timezone: input.timezone,
+      local_datetime: localDatetime,
+      utc_offset: offsetStr,
+    }),
+  };
+}
+
 export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): ToolResult {
   const holidays = ctx.holidayService.getUpcomingHolidays(ctx.user.telegram_id, input.limit ?? 10);
 

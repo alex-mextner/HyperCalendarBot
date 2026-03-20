@@ -13,6 +13,7 @@ import {
   handleAddContact,
   handleAskUser,
   handleCalculate,
+  handleConvertToTimezone,
   handleFindContact,
   handleFindUser,
   handleGetBotInfo,
@@ -690,5 +691,34 @@ describe('handleGetTimezoneInfo', () => {
     const result = handleGetTimezoneInfo({ timezone: ['Europe/Moscow', 'America/Blah'] });
     expect(result.success).toBe(false);
     expect(result.error).toContain('America/Blah');
+  });
+});
+
+describe('handleConvertToTimezone', () => {
+  test('converts UTC datetime to local time in target timezone', () => {
+    const result = handleConvertToTimezone({ datetime: '2026-07-15T14:00:00Z', timezone: 'America/New_York' });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.timezone).toBe('America/New_York');
+    expect(data.local_datetime).toBe('2026-07-15T10:00:00-04:00'); // EDT = UTC-4
+    expect(data.utc_offset).toBe('-04:00');
+  });
+
+  test('converts datetime with offset to another timezone', () => {
+    const result = handleConvertToTimezone({ datetime: '2026-01-15T10:00:00+01:00', timezone: 'Asia/Tokyo' });
+    expect(result.success).toBe(true);
+    const data = JSON.parse(result.output!);
+    expect(data.local_datetime).toBe('2026-01-15T18:00:00+09:00');
+  });
+
+  test('returns error for invalid timezone', () => {
+    const result = handleConvertToTimezone({ datetime: '2026-01-15T10:00:00Z', timezone: 'Europe/Blah' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid timezone');
+  });
+
+  test('returns error for invalid datetime', () => {
+    const result = handleConvertToTimezone({ datetime: 'not-a-date', timezone: 'Europe/London' });
+    expect(result.success).toBe(false);
   });
 });
