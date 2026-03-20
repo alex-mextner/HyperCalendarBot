@@ -204,23 +204,19 @@ export class BirthdayService {
     const personalCelebrantIds = new Set<number>();
 
     const personal: BirthdayDisplayItem[] = personalEvents.map((e) => {
-      const meta = this.metaRepo.findByEventId(e.id);
-      if (meta?.celebrant_id != null) personalCelebrantIds.add(meta.celebrant_id);
-      return { event: e, celebrantId: meta?.celebrant_id ?? null, birthYear: meta?.birth_year ?? null, username: null };
+      if (e.celebrant_id != null) personalCelebrantIds.add(e.celebrant_id);
+      return { event: e, celebrantId: e.celebrant_id ?? null, birthYear: e.birth_year ?? null, username: null };
     });
 
     const groups = groupCalendars.flatMap(({ groupId, title }) => {
       const groupEvents = this.eventRepo.getBirthdaysForGroup(groupId);
       const items: BirthdayDisplayItem[] = groupEvents
-        .map((e) => {
-          const meta = this.metaRepo.findByEventId(e.id);
-          return {
-            event: e,
-            celebrantId: meta?.celebrant_id ?? null,
-            birthYear: meta?.birth_year ?? null,
-            username: null,
-          };
-        })
+        .map((e) => ({
+          event: e,
+          celebrantId: e.celebrant_id ?? null,
+          birthYear: e.birth_year ?? null,
+          username: null,
+        }))
         .filter((item) => item.celebrantId == null || !personalCelebrantIds.has(item.celebrantId));
       if (items.length === 0) return [];
       return [{ groupId, title, items }];

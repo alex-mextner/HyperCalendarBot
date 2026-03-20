@@ -512,7 +512,7 @@ export class EventRepository {
   getBirthdays(userId: number): CalendarEvent[] {
     return this.db
       .prepare(
-        `SELECT e.*, m.birth_year FROM events e
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
            AND (e.owner_type IS NULL OR e.owner_type = 'user')
@@ -524,7 +524,7 @@ export class EventRepository {
   getBirthdaysForGroup(groupId: number): CalendarEvent[] {
     return this.db
       .prepare(
-        `SELECT e.*, m.birth_year FROM events e
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
            AND e.owner_type = 'group'

@@ -341,6 +341,39 @@ describe('EventRepository', () => {
       expect(results[0]!.title).toBe('Д/р Ivan');
     });
 
+    test('getBirthdays populates birth_year and celebrant_id from metadata', () => {
+      const { id } = events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      db.prepare(
+        'INSERT INTO birth_event_metadata (event_id, celebrant_id, birth_year, auto_created) VALUES (?, ?, ?, 0)',
+      ).run(id, 42, 1996);
+      const results = events.getBirthdays(USER_ID);
+      const ev = results.find((e) => e.id === id)!;
+      expect(ev.birth_year).toBe(1996);
+      expect(ev.celebrant_id).toBe(42);
+    });
+
+    test('getBirthdays returns null birth_year when no metadata', () => {
+      const { id } = events.create({
+        user_id: USER_ID,
+        title: 'Д/р Anna',
+        start_at: '2026-06-01T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      const results = events.getBirthdays(USER_ID);
+      const ev = results.find((e) => e.id === id)!;
+      expect(ev.birth_year ?? null).toBeNull();
+      expect(ev.celebrant_id ?? null).toBeNull();
+    });
+
     test('getBirthdaysForGroup returns birthday events in group calendar', () => {
       db.prepare("INSERT INTO group_chats (chat_id, title, added_by) VALUES (100, 'Team', ?)").run(USER_ID);
       events.create({
@@ -355,6 +388,27 @@ describe('EventRepository', () => {
       });
       const results = events.getBirthdaysForGroup(100);
       expect(results.length).toBe(1);
+    });
+
+    test('getBirthdaysForGroup populates birth_year and celebrant_id from metadata', () => {
+      db.prepare("INSERT OR IGNORE INTO group_chats (chat_id, title, added_by) VALUES (101, 'Team2', ?)").run(USER_ID);
+      const { id } = events.create({
+        user_id: USER_ID,
+        title: 'Д/р Kate',
+        start_at: '2026-08-15T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+        owner_type: 'group',
+        group_id: 101,
+      });
+      db.prepare(
+        'INSERT INTO birth_event_metadata (event_id, celebrant_id, birth_year, auto_created) VALUES (?, ?, ?, 0)',
+      ).run(id, 99, 2000);
+      const results = events.getBirthdaysForGroup(101);
+      const ev = results.find((e) => e.id === id)!;
+      expect(ev.birth_year).toBe(2000);
+      expect(ev.celebrant_id).toBe(99);
     });
 
     test('searchWithEventType filters by event_type=birthday', () => {
@@ -376,6 +430,23 @@ describe('EventRepository', () => {
       const results = events.searchWithEventType(USER_ID, null, 'birthday');
       expect(results.every((e) => e.event_type === 'birthday')).toBe(true);
       expect(results.length).toBe(1);
+    });
+
+    test('searchWithEventType populates birth_year from metadata', () => {
+      const { id } = events.create({
+        user_id: USER_ID,
+        title: 'Д/р Ivan',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      db.prepare(
+        'INSERT INTO birth_event_metadata (event_id, celebrant_id, birth_year, auto_created) VALUES (?, ?, ?, 0)',
+      ).run(id, 42, 1996);
+      const results = events.searchWithEventType(USER_ID, null, 'birthday');
+      const ev = results.find((e) => e.id === id)!;
+      expect(ev.birth_year).toBe(1996);
     });
 
     test('searchWithEventType with query filters by title', () => {
