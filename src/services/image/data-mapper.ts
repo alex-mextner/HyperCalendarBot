@@ -14,6 +14,8 @@ import type {
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
 
+const BIRTHDAY_COLOR = '#EC4899';
+
 function toMinutes(isoUtc: string, timezone: string): number {
   const d = new TZDate(new Date(isoUtc), timezone);
   return d.getHours() * 60 + d.getMinutes();
@@ -38,13 +40,14 @@ function getDayOfWeek(dateIso: string, locale: string): string {
 
 function mapToAgendaEvent(occ: EventOccurrence, tz: string, colorIdx: number, colors: string[]): AgendaEvent {
   const ev = occ.event;
+  const isBirthday = ev.event_type === 'birthday';
   return {
     id: ev.id,
-    title: ev.title,
+    title: isBirthday ? `🎁 ${ev.title}` : ev.title,
     startMinutes: toMinutes(occ.occurrence_start, tz),
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: ev.location ?? undefined,
-    calendarColor: colors[colorIdx % colors.length]!,
+    calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
     isAllDay: ev.all_day === 1,
   };
 }
@@ -115,7 +118,7 @@ export function mapWeeklyOverviewData(params: {
       isWeekend: i >= 5,
       events: occs.map(
         (o): MiniEvent => ({
-          title: o.event.title,
+          title: o.event.event_type === 'birthday' ? `🎁 ${o.event.title}` : o.event.title,
           startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, timezone),
           endMinutes:
             o.event.all_day === 1
@@ -123,7 +126,10 @@ export function mapWeeklyOverviewData(params: {
               : o.occurrence_end
                 ? toMinutes(o.occurrence_end, timezone)
                 : toMinutes(o.occurrence_start, timezone) + 60,
-          color: theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
+          color:
+            o.event.event_type === 'birthday'
+              ? BIRTHDAY_COLOR
+              : theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
           isAllDay: o.event.all_day === 1,
         }),
       ),
@@ -260,7 +266,7 @@ function makeDay(
     eventCount: occs.length,
     events: occs.map(
       (o, i): MiniEvent => ({
-        title: o.event.title,
+        title: o.event.event_type === 'birthday' ? `🎁 ${o.event.title}` : o.event.title,
         startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, params.timezone),
         endMinutes:
           o.event.all_day === 1
@@ -268,7 +274,10 @@ function makeDay(
             : o.occurrence_end
               ? toMinutes(o.occurrence_end, params.timezone)
               : toMinutes(o.occurrence_start, params.timezone) + 60,
-        color: params.theme.eventColors[i % params.theme.eventColors.length]!,
+        color:
+          o.event.event_type === 'birthday'
+            ? BIRTHDAY_COLOR
+            : params.theme.eventColors[i % params.theme.eventColors.length]!,
         isAllDay: o.event.all_day === 1,
       }),
     ),

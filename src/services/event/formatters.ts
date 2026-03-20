@@ -31,8 +31,9 @@ export function formatDayAgenda(
 
   const eventLines = occurrences.map((occ) => {
     const time = formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
-    const title = escapeHtml(occ.event.title);
-    const recur = occ.event.recurrence_rule ? ' 🔁' : '';
+    const isBirthday = occ.event.event_type === 'birthday';
+    const title = isBirthday ? `🎁 ${escapeHtml(occ.event.title)}` : escapeHtml(occ.event.title);
+    const recur = !isBirthday && occ.event.recurrence_rule ? ' 🔁' : '';
     return `  ${time}  ${title}${recur}`;
   });
 
@@ -79,7 +80,9 @@ export function formatWeekAgenda(
       );
       for (const occ of dayEvents) {
         const time = formatTime(occ.occurrence_start, timezone);
-        lines.push(`  ${time} ${escapeHtml(occ.event.title)}`);
+        const isBirthday = occ.event.event_type === 'birthday';
+        const title = isBirthday ? `🎁 ${escapeHtml(occ.event.title)}` : escapeHtml(occ.event.title);
+        lines.push(`  ${time} ${title}`);
       }
     }
     lines.push('');
