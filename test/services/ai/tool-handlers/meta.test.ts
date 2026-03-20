@@ -9,6 +9,7 @@ import { ReminderRepository } from '../../../../src/database/repositories/remind
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
+  getTimezoneSuggestions,
   handleAddContact,
   handleAskUser,
   handleCalculate,
@@ -579,7 +580,6 @@ describe('validateAndGetOffset', () => {
 
 describe('getTimezoneSuggestions', () => {
   test('returns up to 30 suggestions for valid region prefix', () => {
-    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
     const suggestions = getTimezoneSuggestions('America/Blah');
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.length).toBeLessThanOrEqual(30);
@@ -587,14 +587,12 @@ describe('getTimezoneSuggestions', () => {
   });
 
   test('returns globally sorted suggestions when no slash', () => {
-    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
     const suggestions = getTimezoneSuggestions('Moscow');
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.length).toBeLessThanOrEqual(30);
   });
 
   test('deduplicates by timezone', () => {
-    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
     const suggestions = getTimezoneSuggestions('America/Blah');
     const tzNames = suggestions.map((s: string) => s.split(' ')[0]);
     const unique = new Set(tzNames);
@@ -602,7 +600,6 @@ describe('getTimezoneSuggestions', () => {
   });
 
   test('format includes timezone and city name', () => {
-    const { getTimezoneSuggestions } = require('../../../../src/services/ai/tool-handlers/meta.ts');
     const suggestions = getTimezoneSuggestions('America/Blah');
     expect(suggestions[0]).toMatch(/^[\w/]+ \(.+\)$/);
   });

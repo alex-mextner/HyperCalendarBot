@@ -21,12 +21,11 @@ interface GetHolidaysInput {
 }
 
 function _getOffsetMinutes(timezone: string, dt: Date): number {
-  const formatter = new Intl.DateTimeFormat('en', { timeZone: timezone, timeZoneName: 'longOffset' });
-  const parts = formatter.formatToParts(dt);
-  const raw = (parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0').replace(/^GMT/, '');
-  const match = raw.match(/^([+-])(\d{1,2}):(\d{2})$/);
-  if (!match) return 0;
-  return (match[1] === '+' ? 1 : -1) * (Number.parseInt(match[2]!, 10) * 60 + Number.parseInt(match[3]!, 10));
+  try {
+    return validateAndGetOffset(timezone, dt).offsetMinutes;
+  } catch {
+    return 0;
+  }
 }
 
 export function getTimezoneSuggestions(input: string): string[] {
