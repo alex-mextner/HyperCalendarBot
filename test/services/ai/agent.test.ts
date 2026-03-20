@@ -185,13 +185,34 @@ describe('CalendarBotAgent', () => {
     const calls: { chatId: number; limit: number }[] = [];
     const mockChatHistory = {
       ...ctx.chatHistory,
-      getRecentByChat: (chatId: number, limit: number) => { calls.push({ chatId, limit }); return []; },
+      getRecentByChat: (chatId: number, limit: number) => {
+        calls.push({ chatId, limit });
+        return [];
+      },
     } as never;
     const groupCtx: AgentContext = { ...ctx, isGroup: true, groupChatId: 456, chatHistory: mockChatHistory };
 
     const agent = new CalendarBotAgent(config, sender);
     agent.buildMessages(groupCtx, []);
     expect(calls[0]).toMatchObject({ chatId: 456, limit: 30 });
+  });
+
+  test('user message is saved before bot response in history', () => {
+    const db = createTestDb();
+    const userRepo = new UserRepository(db);
+    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC', language: 'en' });
+    const chatHistoryRepo = new ChatHistoryRepository(db);
+    const logger = new ConversationLogger(chatHistoryRepo);
+
+    logger.logUserMessage(USER_ID, 'add meeting');
+    logger.logBotResponse(USER_ID, 'Meeting added!');
+
+    const history = chatHistoryRepo.getRecent(USER_ID);
+    expect(history).toHaveLength(2);
+    expect(history[0]!.role).toBe('user');
+    expect(history[1]!.role).toBe('assistant');
+    // User row id is lower than assistant row id — strict ordering
+    expect(history[0]!.id).toBeLessThan(history[1]!.id);
   });
 
   // Confirm no duplicate: current message in history once, not twice
@@ -201,7 +222,7 @@ describe('CalendarBotAgent', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
     const { messages } = agent.buildMessages(ctx, history);
-    const userMessages = messages.filter(m => m.role === 'user');
+    const userMessages = messages.filter((m) => m.role === 'user');
     expect(userMessages).toHaveLength(1);
     expect(userMessages[0]!.content as string).toContain(ctx.messageText);
   });
