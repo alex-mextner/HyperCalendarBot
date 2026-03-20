@@ -447,6 +447,7 @@ describe('EventRepository', () => {
       const results = events.searchWithEventType(USER_ID, null, 'birthday');
       const ev = results.find((e) => e.id === id)!;
       expect(ev.birth_year).toBe(1996);
+      expect(ev.celebrant_id).toBe(42);
     });
 
     test('searchWithEventType with query filters by title', () => {

@@ -556,7 +556,7 @@ export class EventRepository {
 
     return this.db
       .prepare(
-        `SELECT e.*, m.birth_year FROM events e
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE ${conditions.join(' AND ')} ORDER BY e.start_at`,
       )

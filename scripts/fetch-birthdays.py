@@ -12,8 +12,8 @@ import os
 import json
 import asyncio
 
-API_ID = int(os.environ.get("MTPROTO_API_ID", 0))
-API_HASH = os.environ.get("MTPROTO_API_HASH", "")
+API_ID = int(os.environ["MTPROTO_API_ID"])
+API_HASH = os.environ["MTPROTO_API_HASH"]
 FLOOD_WAIT_MAX = 30
 
 
