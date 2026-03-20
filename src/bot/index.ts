@@ -426,7 +426,9 @@ export function createBot(
       handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats),
     )
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
-    .command('birthdays', (ctx) => handleBirthdays(ctx as unknown as BotCommandContext, birthdayService, db.groupChats))
+    .command('birthdays', (ctx) =>
+      handleBirthdays(ctx as unknown as BotCommandContext, birthdayService, db.groupChats, db.groupMembers),
+    )
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx as unknown as BotCommandContext, {

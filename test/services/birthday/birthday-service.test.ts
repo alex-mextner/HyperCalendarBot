@@ -132,6 +132,37 @@ test('upsertBirthdayEvent same-date call does not recreate reminders', () => {
   expect(remindersAfterFirst).toBe(remindersAfterSecond);
 });
 
+test('upsertBirthdayEvent updates start_at and reminders when year rolls over', () => {
+  // Simulate a stale event with last year's date
+  const metaRepo = new BirthdayMetadataRepository(db);
+  const eventRepo = new EventRepository(db);
+  const staleEvent = eventRepo.create({
+    user_id: 1,
+    title: 'Д/р Иван',
+    start_at: '2020-05-10T00:00:00Z', // deliberately old date
+    all_day: true,
+    timezone: 'UTC',
+    event_type: 'birthday',
+  });
+  metaRepo.upsertMetadata({ event_id: staleEvent.id, celebrant_id: 42, birth_year: null, auto_created: 0 });
+
+  // Call upsert — should detect stale date and update
+  service.upsertBirthdayEvent({
+    ownerId: 1,
+    celebrantId: 42,
+    celebrantName: 'Иван',
+    day: 10,
+    month: 5,
+    year: null,
+    lang: 'ru',
+    timezone: 'UTC',
+    autoCreated: false,
+  });
+
+  const updated = db.prepare('SELECT start_at FROM events WHERE id = ?').get(staleEvent.id) as { start_at: string };
+  expect(updated.start_at).not.toBe('2020-05-10T00:00:00Z'); // was updated
+});
+
 test('getBirthdaysForDisplay returns personal entries sorted by next occurrence', () => {
   service.upsertBirthdayEvent({
     ownerId: 1,

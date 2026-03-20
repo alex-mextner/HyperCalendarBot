@@ -1,4 +1,5 @@
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
@@ -46,6 +47,7 @@ export async function handleBirthdays(
   ctx: BotCommandContext,
   birthdayService: BirthdayService,
   groupChatRepo?: GroupChatRepository,
+  groupMemberRepo?: GroupMemberRepository,
 ): Promise<void> {
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
@@ -56,6 +58,11 @@ export async function handleBirthdays(
     if (groupId === null) return;
     const group = groupChatRepo?.findByChatId(groupId) ?? null;
     groupCalendars = group ? [{ groupId, title: group.title ?? String(groupId) }] : [];
+  } else {
+    groupCalendars = (groupMemberRepo?.getGroupsForUser(user.telegram_id) ?? []).map((g) => ({
+      groupId: g.chat_id,
+      title: g.title ?? String(g.chat_id),
+    }));
   }
 
   const { personal, groups } = birthdayService.getBirthdaysForDisplay(user.telegram_id, groupCalendars);

@@ -97,9 +97,7 @@ export class BirthdayService {
     let remindersNeedUpdate = !existing;
 
     if (existing) {
-      const existingMonth = new Date(existing.start_at).getUTCMonth() + 1;
-      const existingDay = new Date(existing.start_at).getUTCDate();
-      if (existingMonth !== params.month || existingDay !== params.day) {
+      if (existing.start_at !== startAt) {
         this.eventRepo.update(existing.event_id, params.ownerId, { start_at: startAt });
         birthdayLogger.info({ eventId: existing.event_id }, 'Birthday date updated');
         remindersNeedUpdate = true;
