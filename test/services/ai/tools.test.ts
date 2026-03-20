@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { toolDefinitions } from '../../../src/services/ai/tools.ts';
+import { getToolDefinitions, toolDefinitions } from '../../../src/services/ai/tools.ts';
 
 describe('toolDefinitions', () => {
   test('includes calculate tool', () => {
@@ -60,5 +60,44 @@ describe('toolDefinitions', () => {
   test('delete_event requires event_id', () => {
     const tool = toolDefinitions.find((t) => t.name === 'delete_event')!;
     expect(tool.input_schema.required).toContain('event_id');
+  });
+});
+
+const ASSISTANT_TOOLS = [
+  'claude_chat',
+  'claude_new_chat',
+  'claude_list_chats',
+  'claude_open_chat',
+  'claude_list_projects',
+  'claude_artifact',
+  'bash_execute',
+  'playwright_action',
+  'applescript_run',
+];
+
+describe('UserCapabilities gating', () => {
+  test('assistant tools hidden when both false', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: false }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools hidden when only assistantEnabled=true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: false }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools hidden when only agentConnected=true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: true }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools visible when both true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: true }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).toContain(tool);
+  });
+
+  test('no caps passed → assistant tools hidden', () => {
+    const names = getToolDefinitions('text').map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
   });
 });
