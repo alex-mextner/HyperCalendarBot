@@ -362,6 +362,8 @@ if (config.REDIS_URL) {
   botLogger.info('Notification scheduler initialized');
 }
 
+let birthdayService: import('./services/birthday/birthday-service.ts').BirthdayService | undefined;
+
 if (config.REDIS_URL) {
   const {
     createBotTasksQueue,
@@ -369,10 +371,14 @@ if (config.REDIS_URL) {
     setupSharingCleanupCron,
     setupProposalExpiryCron,
     setupSessionCleanupCron,
+    setupBirthdaySyncCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
+  const { BirthdayService } = await import('./services/birthday/birthday-service.ts');
+
+  birthdayService = new BirthdayService(db.events, db.birthdayMeta, db.eventReminders, db.notificationPreferences);
 
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
@@ -397,12 +403,21 @@ if (config.REDIS_URL) {
       db.groupSessions.deleteExpired();
       db.eventMentions.deleteExpired();
     },
+    onBirthdaySync: async () => {
+      const BATCH = 100;
+      const needingIds = new Set(db.birthdayMeta.getUsersNeedingSync(7 * 24 * 60 * 60 * 1000));
+      const allUsers = db.users.findAll().filter((u) => needingIds.has(u.telegram_id));
+      for (let i = 0; i < allUsers.length; i += BATCH) {
+        await birthdayService.runBatchSync(allUsers.slice(i, i + BATCH));
+      }
+    },
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
   await setupProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
+  await setupBirthdaySyncCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {
