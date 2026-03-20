@@ -251,6 +251,8 @@ export const MSG = {
         gcalNoCalendars: 'No Google Calendars found. Sync may still be in progress.',
         gcalList: (lines: string) => `Google Calendars:\n${lines}`,
         userPickerSent: 'User picker sent. Waiting for user to select participants.',
+        tableRendering: (title: string) => `Table "${title}" is rendering and will appear in the chat shortly.`,
+        tableRenderingVoice: 'Check the chat — the table is there.',
       },
       slots: {
         noFreeSlots: 'No free slots — the entire day is busy.',
@@ -502,6 +504,8 @@ export const MSG = {
         gcalNoCalendars: 'Google-календари не найдены. Возможно, синхронизация ещё идёт.',
         gcalList: (lines: string) => `Google-календари:\n${lines}`,
         userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
+        tableRendering: (title: string) => `Таблица «${title}» рендерится и скоро появится в чате.`,
+        tableRenderingVoice: 'Загляни в чат — там таблица.',
       },
       slots: {
         noFreeSlots: 'Свободных окон нет — весь день занят.',
