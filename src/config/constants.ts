@@ -304,6 +304,14 @@ export const MSG = {
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
       },
+      birthdays: {
+        created: (name: string, day: number, month: number) =>
+          `Birthday created: Bday ${name} (${day}.${String(month).padStart(2, '0')})`,
+        alreadyExists: (name: string, day: number, month: number) =>
+          `Birthday for ${name} already exists: ${day}.${String(month).padStart(2, '0')}`,
+        conflictError: (name: string, day: number, month: number) =>
+          `Birthday for ${name} already exists on ${day}.${String(month).padStart(2, '0')}. To update, call again with the correct date.`,
+      },
       scheduled: {
         noScheduledCalls: 'No scheduled calls.',
         noTriggers: 'No triggers.',
@@ -556,6 +564,14 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+      },
+      birthdays: {
+        created: (name: string, day: number, month: number) =>
+          `День рождения создан: Д/р ${name} (${day}.${String(month).padStart(2, '0')})`,
+        alreadyExists: (name: string, day: number, month: number) =>
+          `День рождения ${name} уже есть: ${day}.${String(month).padStart(2, '0')}`,
+        conflictError: (name: string, day: number, month: number) =>
+          `Уже есть день рождения для ${name}: дата ${day}.${String(month).padStart(2, '0')}. Хочешь обновить?`,
       },
       scheduled: {
         noScheduledCalls: 'Запланированных вызовов нет.',

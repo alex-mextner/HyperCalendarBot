@@ -757,4 +757,38 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '036_event_type',
+    up: (db) => {
+      db.exec(`ALTER TABLE events ADD COLUMN event_type TEXT`);
+    },
+  },
+  {
+    name: '037_birth_event_metadata',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE birth_event_metadata (
+          event_id     INTEGER PRIMARY KEY,
+          celebrant_id INTEGER,
+          birth_year   INTEGER,
+          auto_created INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_birth_meta_celebrant ON birth_event_metadata(celebrant_id)
+          WHERE celebrant_id IS NOT NULL;
+      `);
+    },
+  },
+  {
+    name: '038_birthday_sync_state',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE birthday_sync_state (
+          user_id   INTEGER PRIMARY KEY,
+          synced_at TEXT NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+      `);
+    },
+  },
 ];

@@ -191,13 +191,13 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'search_events',
-    description: 'Search events by title. Returns matching events.',
+    description: 'Search events by title. Returns matching events. Can also filter by event type (e.g. birthday).',
     input_schema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search query to match against event titles',
+          description: 'Search query to match against event titles. Optional when using event_type filter.',
         },
         scope: {
           type: 'string',
@@ -209,8 +209,35 @@ export const toolDefinitions: ToolDefinition[] = [
           description:
             "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
+        event_type: {
+          type: 'string',
+          enum: ['birthday', 'regular'],
+          description: "Filter by event type. Use 'birthday' to list all birthday events.",
+        },
       },
-      required: ['query'],
+      required: [],
+    },
+  },
+  {
+    name: 'create_birthday_event',
+    description: 'Create a birthday event for a Telegram user. Auto-fetches their name from the database.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        celebrant_id: { type: 'number', description: 'Telegram user ID of the birthday person' },
+        date: {
+          type: 'object' as const,
+          properties: {
+            day: { type: 'number', description: 'Day of month' },
+            month: { type: 'number', description: 'Month number (1-12)' },
+          },
+          required: ['day', 'month'],
+        },
+        year: { type: 'number', description: 'Birth year (optional)' },
+        custom_name: { type: 'string', description: 'Override auto-fetched name' },
+        group_id: { type: 'number', description: 'Group calendar ID. Omit for personal calendar.' },
+      },
+      required: ['celebrant_id', 'date'],
     },
   },
   {

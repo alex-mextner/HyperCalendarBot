@@ -369,10 +369,19 @@ if (config.REDIS_URL) {
     setupSharingCleanupCron,
     setupProposalExpiryCron,
     setupSessionCleanupCron,
+    setupBirthdaySyncCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
+  const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
+
+  const cronBirthdayService = new BirthdayService(
+    db.events,
+    db.birthdayMeta,
+    db.eventReminders,
+    db.notificationPreferences,
+  );
 
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({
     redisUrl: config.REDIS_URL,
@@ -397,12 +406,20 @@ if (config.REDIS_URL) {
       db.groupSessions.deleteExpired();
       db.eventMentions.deleteExpired();
     },
+    onBirthdaySync: async () => {
+      const BATCH = 100;
+      const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
+      for (let i = 0; i < users.length; i += BATCH) {
+        await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
+      }
+    },
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
   await setupProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
+  await setupBirthdaySyncCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {

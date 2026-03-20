@@ -308,6 +308,50 @@ describe('event tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
     });
+
+    test('event_type=birthday returns only birthday events', () => {
+      const eventRepo = new EventRepository(db);
+      eventRepo.create({
+        user_id: USER_ID,
+        title: 'Д/р Иван',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Team Meeting',
+        start_at: '2026-05-10T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleSearchEvents(ctx, { event_type: 'birthday' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Д/р Иван');
+      expect(result.output).not.toContain('Team Meeting');
+    });
+
+    test('event_type=regular excludes birthday events', () => {
+      const eventRepo = new EventRepository(db);
+      eventRepo.create({
+        user_id: USER_ID,
+        title: 'Д/р Иван',
+        start_at: '2026-05-10T00:00:00Z',
+        all_day: true,
+        timezone: 'UTC',
+        event_type: 'birthday',
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Team Meeting',
+        start_at: '2026-05-10T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = handleSearchEvents(ctx, { event_type: 'regular' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Team Meeting');
+      expect(result.output).not.toContain('Д/р Иван');
+    });
   });
 
   describe('handleUpdateEvent — participant info', () => {
