@@ -1,3 +1,5 @@
+import type { AgentDispatcher } from '../../agent/dispatcher.ts';
+import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -90,6 +92,9 @@ export interface AgentContext {
   conflictChecker?: ConflictChecker;
   scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  agentRegistry?: AgentRegistry;
+  agentDispatcher?: AgentDispatcher;
+  onAgentChunk?: (text: string) => void;
 }
 
 /**
