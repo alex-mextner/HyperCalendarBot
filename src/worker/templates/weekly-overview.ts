@@ -53,6 +53,7 @@ function css(data: WeeklyOverviewData): string {
       display: flex;
       flex-direction: column;
       min-height: 500px;
+      min-width: 0;
     }
     .day-column--weekend {
       background: ${t.border}15;
@@ -98,7 +99,7 @@ function css(data: WeeklyOverviewData): string {
       font-size: 11px;
       line-height: 1.3;
       display: flex;
-      align-items: baseline;
+      align-items: flex-start;
       gap: 3px;
       overflow: hidden;
     }
@@ -107,11 +108,14 @@ function css(data: WeeklyOverviewData): string {
       flex-shrink: 0;
       font-size: 10px;
       opacity: 0.8;
+      /* aligns time badge to the first text baseline of the clamped title */
+      padding-top: 1px;
     }
     .event-pill__title {
-      white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
       font-weight: 500;
     }
     .footer {

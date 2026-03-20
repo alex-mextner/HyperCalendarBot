@@ -64,6 +64,7 @@ function css(data: MonthlyCalendarData): string {
       min-height: 110px;
       display: flex;
       flex-direction: column;
+      min-width: 0;
     }
     .cell--other { opacity: 0.35; }
     .cell--weekend { background: ${t.border}10; }
