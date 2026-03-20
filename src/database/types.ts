@@ -50,7 +50,7 @@ export interface CalendarEvent {
   owner_type: 'user' | 'group';
   group_id: number | null;
   created_by: number | null;
-  event_type: 'birthday' | null;
+  event_type?: 'birthday' | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;

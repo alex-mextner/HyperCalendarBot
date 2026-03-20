@@ -827,13 +827,14 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
       if (deps.birthdayService) {
         deps.birthdayService
-          .fetchAndSyncUser(
-            user.telegram_id,
-            user.first_name ?? '',
-            user.telegram_id,
-            user.language as 'en' | 'ru',
-            user.timezone,
-          )
+          .runBatchSync([
+            {
+              telegram_id: user.telegram_id,
+              first_name: user.first_name,
+              language: user.language,
+              timezone: user.timezone,
+            },
+          ])
           .catch((err) => cmdLogger.error({ err, userId: user.telegram_id }, 'Birthday sync failed'));
       }
 

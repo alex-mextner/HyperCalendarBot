@@ -157,63 +157,17 @@ export class BirthdayService {
     }
   }
 
-  async fetchAndSyncUser(
-    userId: number,
-    firstName: string,
-    ownerId: number,
-    lang: 'en' | 'ru',
-    timezone: string,
-  ): Promise<void> {
-    if (this.shouldSkipSync(userId)) return;
-
-    let result: Record<string, { day: number; month: number; year?: number } | null>;
-    try {
-      const proc = Bun.spawn(['venv/bin/python', this.fetchScriptPath], {
-        stdin: JSON.stringify([userId]),
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const exitCode = await proc.exited;
-      this.metaRepo.upsertSyncState(userId, new Date().toISOString());
-
-      if (exitCode !== 0) {
-        const err = await new Response(proc.stderr).text();
-        birthdayLogger.warn({ userId, err }, 'fetch-birthdays.py failed');
-        return;
-      }
-      const stdout = await new Response(proc.stdout).text();
-      result = JSON.parse(stdout);
-    } catch (err) {
-      birthdayLogger.error({ userId, err }, 'Failed to spawn fetch-birthdays.py');
-      return;
-    }
-
-    const birthday = result[String(userId)];
-    if (!birthday) return;
-
-    this.upsertBirthdayEvent({
-      ownerId,
-      celebrantId: userId,
-      celebrantName: firstName,
-      day: birthday.day,
-      month: birthday.month,
-      year: birthday.year ?? null,
-      lang,
-      timezone,
-      autoCreated: true,
-    });
-  }
-
   async runBatchSync(
     users: { telegram_id: number; first_name: string | null; language: string; timezone: string }[],
   ): Promise<void> {
-    const ids = users.map((u) => u.telegram_id);
+    const pending = users.filter((u) => !this.shouldSkipSync(u.telegram_id));
+    const ids = pending.map((u) => u.telegram_id);
     if (ids.length === 0) return;
 
     let result: Record<string, { day: number; month: number; year?: number } | null>;
     try {
       const proc = Bun.spawn(['venv/bin/python', this.fetchScriptPath], {
-        stdin: JSON.stringify(ids),
+        stdin: Buffer.from(JSON.stringify(ids)),
         stdout: 'pipe',
         stderr: 'pipe',
       });
@@ -227,13 +181,13 @@ export class BirthdayService {
       const stdout = await new Response(proc.stdout).text();
       result = JSON.parse(stdout);
       const now = new Date().toISOString();
-      for (const u of users) this.metaRepo.upsertSyncState(u.telegram_id, now);
+      for (const u of pending) this.metaRepo.upsertSyncState(u.telegram_id, now);
     } catch (err) {
       birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
       return;
     }
 
-    for (const user of users) {
+    for (const user of pending) {
       const birthday = result[String(user.telegram_id)];
       if (!birthday) continue;
       this.upsertBirthdayEvent({
