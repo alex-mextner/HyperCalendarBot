@@ -8,6 +8,7 @@ import { ReminderRepository } from '../../../src/database/repositories/reminder.
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -454,6 +455,42 @@ describe('CalendarBotAgent.run()', () => {
     expect(chatHistory[0]!.role).toBe('assistant');
     const parsed = JSON.parse(chatHistory[0]!.content);
     expect(parsed[0].text).toBe('Group response');
+  });
+
+  test('end_conversation tool stops loop and calls debugLogger.endSession', async () => {
+    const endConvFinal = {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'call-end',
+          name: 'end_conversation',
+          input: {},
+        },
+      ],
+      stop_reason: 'tool_use',
+    };
+
+    const mockClient = createMockAnthropicClient(
+      [{ type: 'content_block_start', content_block: { type: 'tool_use', name: 'end_conversation' } }],
+      endConvFinal,
+    );
+    const endSession = mock(() => {});
+    const debugLogger = {
+      createRunContext: mock(() => null),
+      endSession,
+    } as unknown as AiDebugLogger;
+
+    const agent = new CalendarBotAgent({ ...config, debugLogger }, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const result = await agent.run(ctx);
+
+    // Loop stopped after one round (no second API call)
+    expect(mockClient.messages.stream).toHaveBeenCalledTimes(1);
+    expect(result.toolCalls.some((tc) => tc.name === 'end_conversation')).toBe(true);
+    // Session must be ended so next message gets a fresh log file
+    expect(endSession).toHaveBeenCalledWith(USER_ID);
   });
 
   test('voice_message mode returns plain text without execution log HTML', async () => {
