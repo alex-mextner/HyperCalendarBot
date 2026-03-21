@@ -610,7 +610,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'render_day_image',
     description:
-      'Generate and send a beautiful calendar image for a specific date. Use when showing events for a day (today, tomorrow, specific date) — always send an image alongside text. Users love visual schedules.',
+      'Generate and send a visual calendar image for a specific date. Use when the user explicitly asks to see their schedule as an image, OR when showing a full-day overview with multiple events and a visual layout would be genuinely helpful. Do NOT use for single event operations, confirmations, or quick replies.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -635,7 +635,7 @@ export const toolDefinitions: ToolDefinition[] = [
   {
     name: 'render_week_image',
     description:
-      'Generate and send a beautiful weekly calendar image starting from a specific date. Use when showing events for a week. Users love visual schedules.',
+      'Generate and send a visual weekly calendar image. Use when the user explicitly asks to see their week as an image, or when showing a week overview with many events.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -1072,6 +1072,16 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
       required: ['type', 'content'],
     },
   },
+  {
+    name: 'end_conversation',
+    description:
+      "Mark the current conversation as complete. Call when the user's request is fully resolved and no follow-up is expected. Starts a fresh context for the next unrelated request. This also creates a clean log boundary.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
 ];
 
 // Tools not available during a live call (no visual output, no Telegram UI)
@@ -1201,6 +1211,7 @@ export function getToolDefinitions(
   }
 
   if (supplementMode) {
+    tools = tools.filter((t) => t.name !== 'end_conversation');
     tools = [
       ...tools,
       {

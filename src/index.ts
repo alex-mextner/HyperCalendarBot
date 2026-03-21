@@ -7,12 +7,14 @@ import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
+import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
+const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
 
 if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
@@ -226,7 +228,12 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
     const voiceAgent = new CalendarBotAgent(
-      { apiKey: config.ANTHROPIC_API_KEY, baseUrl: config.AI_BASE_URL, model: config.AI_MODEL },
+      {
+        apiKey: config.ANTHROPIC_API_KEY,
+        baseUrl: config.AI_BASE_URL,
+        model: config.AI_MODEL,
+        debugLogger: aiDebugLogger,
+      },
       voiceSender,
     );
 
@@ -553,6 +560,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       apiKey: config.ANTHROPIC_API_KEY,
       baseUrl: config.AI_BASE_URL,
       model: config.AI_MODEL,
+      debugLogger: aiDebugLogger,
     },
     googleDeps,
     renderService,

@@ -1037,6 +1037,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       if (durationHandled) return;
     }
 
+    cmdLogger.info(
+      { userId: user.telegram_id, chatId: Number(chatId), msgPreview: messageText.slice(0, 100) },
+      '--- Message pipeline start ---',
+    );
+
     await runPipeline(ctx, messageText, layers, groupContext);
   };
 }

@@ -21,7 +21,12 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
   return async (
     ctx: BotCommandContext,
     messageText: string,
-    extra?: { feedbackContext?: FeedbackThreadContext; groupContext?: GroupContext; supplementMode?: boolean },
+    extra?: {
+      feedbackContext?: FeedbackThreadContext;
+      groupContext?: GroupContext;
+      supplementMode?: boolean;
+      supplementAutoResponse?: string;
+    },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const chatId = ctx.chatId;
@@ -35,6 +40,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     if (extra?.supplementMode) {
       agentContext.supplementMode = true;
+      agentContext.supplementAutoResponse = extra.supplementAutoResponse;
     }
 
     if (deps.scenePauseService) {

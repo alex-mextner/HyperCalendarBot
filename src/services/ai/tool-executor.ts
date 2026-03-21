@@ -22,6 +22,7 @@ import {
   handleCalculate,
   handleConvertToTimezone,
   handleEndCall,
+  handleEndConversation,
   handleFindContact,
   handleFindUser,
   handleGetBotInfo,
@@ -99,6 +100,9 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
     switch (toolName) {
       case 'supplement_skip':
         return { success: true, stopLoop: true };
+
+      case 'end_conversation':
+        return handleEndConversation();
 
       case 'get_events':
         return handleGetEvents(ctx, input as { start_date: string; end_date: string; scope?: 'personal' | 'group' });

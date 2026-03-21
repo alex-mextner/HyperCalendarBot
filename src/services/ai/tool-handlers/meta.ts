@@ -476,6 +476,14 @@ export function handleRenderWeekImage(
   return { success: true, output: t(ctx.user.language).aiTools.meta.weekImageNotImplemented(input.week_start) };
 }
 
+export function handleEndConversation(): ToolResult {
+  return {
+    success: true,
+    stopLoop: true,
+    output: 'Conversation marked as complete. The next message will start a fresh context.',
+  };
+}
+
 export function handleEndCall(ctx: AgentContext): ToolResult {
   if (ctx.inputMode !== 'live_call') {
     return { success: false, error: 'end_call is only available during a live phone call.' };

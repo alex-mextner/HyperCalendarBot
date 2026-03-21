@@ -1,6 +1,7 @@
 import { applescriptRun } from './actions/applescript.ts';
 import { bashExecute } from './actions/bash.ts';
-import { claudeChat, getOrgId, listChats, listProjects } from './actions/claude-bridge.ts';
+import { claudeChat, getArtifact, getOrgId, listChats, listProjects } from './actions/claude-bridge.ts';
+import { type PlaywrightAction, playwrightAction } from './actions/playwright.ts';
 import type { AgentCommand, AgentResponse } from './protocol.ts';
 
 type SendResponse = (resp: AgentResponse) => void;
@@ -98,20 +99,32 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
 
       case 'claude_artifact': {
         const artifactId = payload.artifact_id as string;
-        sendResponse({
-          id,
-          type: 'error',
-          error: `Artifact retrieval not yet implemented for artifact_id=${artifactId}`,
-        });
+        const artifact = await getArtifact(artifactId);
+        sendResponse({ id, type: 'done', data: artifact });
         break;
       }
 
       case 'playwright_action': {
-        sendResponse({
-          id,
-          type: 'error',
-          error: 'playwright_action not yet implemented in this agent version',
-        });
+        const action = payload.action as PlaywrightAction['action'];
+        const url = typeof payload.url === 'string' ? payload.url : undefined;
+        const selector = typeof payload.selector === 'string' ? payload.selector : '';
+        const value = typeof payload.value === 'string' ? payload.value : '';
+        const params: PlaywrightAction =
+          action === 'fill'
+            ? { action, url, selector, value }
+            : action === 'click' || action === 'extract'
+              ? { action, url, selector }
+              : { action: action ?? 'screenshot', url };
+        const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : 30_000;
+        const result = await playwrightAction(params, timeoutMs);
+        if (result.screenshot) {
+          sendResponse({
+            id,
+            type: 'chunk',
+            text: `[screenshot:${result.screenshot.substring(0, 50)}...]`,
+          });
+        }
+        sendResponse({ id, type: 'done', data: result });
         break;
       }
 

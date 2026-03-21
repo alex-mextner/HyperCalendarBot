@@ -10,7 +10,7 @@ export interface FeedbackThreadContext {
 
 export type PipelineResult =
   | { handled: true }
-  | { handled: true; needsSupplement: true }
+  | { handled: true; needsSupplement: true; supplementAutoResponse: string }
   | { handled: false }
   | { handled: false; feedbackContext: FeedbackThreadContext };
 
@@ -28,5 +28,6 @@ export type PipelineLayer = (
     feedbackContext?: FeedbackThreadContext;
     groupContext?: GroupContext;
     supplementMode?: boolean;
+    supplementAutoResponse?: string;
   },
 ) => Promise<PipelineResult>;

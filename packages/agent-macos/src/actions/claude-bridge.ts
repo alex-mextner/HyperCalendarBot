@@ -131,6 +131,21 @@ export async function listProjects(orgId: string): Promise<Array<{ id: string; n
   return projects.map((p) => ({ id: p.uuid, name: p.name }));
 }
 
+export async function getArtifact(artifactId: string): Promise<{ content: string; type: string }> {
+  const cookies = loadCookies();
+  const res = await apiRequest(`/api/artifacts/${artifactId}`, cookies);
+  const artifact = (await res.json()) as {
+    content?: string;
+    body?: string;
+    type?: string;
+    media_type?: string;
+  };
+  return {
+    content: artifact.content ?? artifact.body ?? '',
+    type: artifact.type ?? artifact.media_type ?? 'text/plain',
+  };
+}
+
 export async function claudeChat(
   message: string,
   conversationId?: string,

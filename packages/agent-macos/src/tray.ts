@@ -1,12 +1,17 @@
-import { app, Menu, Tray } from 'electron';
+import { app, Menu, nativeImage, Tray } from 'electron';
+import { join } from 'node:path';
 import type { WsClient } from './ws-client.ts';
 
-const ICON_CONNECTED = `${__dirname}/../assets/tray-connected.png`;
-const ICON_DISCONNECTED = `${__dirname}/../assets/tray-disconnected.png`;
+const ICON_CONNECTED = join(__dirname, '../assets/tray-connected.png');
+const ICON_DISCONNECTED = join(__dirname, '../assets/tray-disconnected.png');
+
+function loadIcon(path: string) {
+  const img = nativeImage.createFromPath(path);
+  return img.isEmpty() ? nativeImage.createEmpty() : img;
+}
 
 export function createTray(wsClient: WsClient): Tray {
-  const iconPath = wsClient.isConnected() ? ICON_CONNECTED : ICON_DISCONNECTED;
-  const tray = new Tray(iconPath);
+  const tray = new Tray(loadIcon(wsClient.isConnected() ? ICON_CONNECTED : ICON_DISCONNECTED));
   tray.setToolTip('HyperBot Agent');
 
   const updateMenu = (connected: boolean) => {
@@ -40,7 +45,7 @@ export function createTray(wsClient: WsClient): Tray {
     ]);
 
     tray.setContextMenu(menu);
-    tray.setImage(connected ? ICON_CONNECTED : ICON_DISCONNECTED);
+    tray.setImage(loadIcon(connected ? ICON_CONNECTED : ICON_DISCONNECTED));
   };
 
   updateMenu(wsClient.isConnected());

@@ -80,6 +80,8 @@ export interface AgentContext {
   botUsername?: string;
   inputMode?: 'text' | 'voice_message' | 'live_call';
   supplementMode?: boolean;
+  /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
+  supplementAutoResponse?: string;
   /** Set to true by end_call tool to hang up after TTS plays. */
   callEndRequested?: boolean;
   stressDictionary?: StressDictionary;
@@ -141,6 +143,7 @@ export interface AgentConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  debugLogger?: import('./debug-logger.ts').AiDebugLogger;
 }
 
 export interface TelegramSender {

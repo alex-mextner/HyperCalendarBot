@@ -254,15 +254,19 @@ When the user (as secretary) wants to stop being secretary for someone:
     ? `
 ## Supplement Mode
 
-An automatic rule-based response was already sent to the user (visible in the conversation
-history above). The response may be correct, incomplete, or inappropriate given the
-conversational context.
+The following auto-response was just sent to the user by the rule-based intent system:
+
+---
+${ctx.supplementAutoResponse ?? '(auto-response not available)'}
+---
+
+Evaluate ONLY this specific response. Do not comment on other messages or past events.
 
 Your job:
 - If the auto-response was correct and complete: call supplement_skip. Send nothing.
-- If you can add useful context, commentary, a relevant follow-up, or spot a pattern
-  worth mentioning: send a concise message.
-- If the auto-response was wrong or clearly inappropriate given the conversation:
+- If you can add useful context, clarify something the auto-response missed, or spot an
+  issue worth mentioning: send a concise message.
+- If the auto-response was wrong or clearly inappropriate given the user's request:
   say so directly. If the action can be undone (event created/deleted/updated),
   offer to undo it using the appropriate tool.
 

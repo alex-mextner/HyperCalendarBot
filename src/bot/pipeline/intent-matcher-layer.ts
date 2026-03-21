@@ -168,7 +168,7 @@ export function createIntentMatcherLayer(
           : result.response;
       await ctx.send(formatted);
       conversationLogger?.logBotResponse(userId, formatted, chatId);
-      return { handled: true, needsSupplement: true };
+      return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 
     return { handled: true };

@@ -49,3 +49,5 @@ lib/
 mtproto-session*
 .claude/worktrees/
 venv/
+packages/agent-macos/node_modules
+packages/agent-macos/dist

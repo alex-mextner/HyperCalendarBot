@@ -92,7 +92,6 @@ export function createImageRenderQueue(redisUrl: string) {
     {
       connection,
       concurrency: 4,
-      limiter: { max: 20, duration: 60_000 },
     },
   );
 

@@ -27,6 +27,7 @@ export interface EnvConfig {
   SILERO_PYTHON_PATH?: string;
   DEEPGRAM_API_KEY?: string;
   DISABLE_VOICE?: boolean;
+  AI_DEBUG_LOGS?: boolean;
 }
 
 export function loadConfig(): EnvConfig {
@@ -108,5 +109,6 @@ export function loadConfig(): EnvConfig {
     SILERO_PYTHON_PATH: process.env.SILERO_PYTHON_PATH || undefined,
     DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || undefined,
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
+    AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
   };
 }

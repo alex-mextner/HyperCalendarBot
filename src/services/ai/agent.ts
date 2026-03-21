@@ -333,6 +333,11 @@ export class CalendarBotAgent {
               }
               writer.commitIntermediate();
               await writer.finalize();
+              dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
+              dbg?.flush();
+              if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
+                this.debugLogger?.endSession(ctx.chatId);
+              }
               return {
                 responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
                 toolCalls: allToolCalls,
