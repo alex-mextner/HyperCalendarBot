@@ -41,7 +41,7 @@ export class ConflictService {
 
     return inviteeIds.map((inviteeId) => {
       const user = this.userRepo.findByTelegramId(inviteeId);
-      const overlapping = this.eventRepo.findVisibleOverlapping(inviteeId, windowStart, windowEnd);
+      const overlapping = this.eventRepo.findVisibleOverlapping(inviteeId, windowStart, windowEnd, organizerId);
 
       const conflictingEvents: ConflictEvent[] = overlapping.map((ev) => {
         const isShared = this.eventRepo.isParticipant(ev.id, organizerId);

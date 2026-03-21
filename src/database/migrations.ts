@@ -806,4 +806,12 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '040_default_visibility_private',
+    up: (db) => {
+      db.exec(`
+        UPDATE sharing_settings SET default_visibility = 'private' WHERE default_visibility = 'full'
+      `);
+    },
+  },
 ];
