@@ -8,7 +8,7 @@
 
 ## What it does
 
-A Telegram bot that manages your personal and group calendars through natural language. Type "Remind me about standup tomorrow at 10am" — the bot parses it, stores it, and calls you when the time comes. Everything runs through a 3-layer pipeline: pre-approved intent matching (no AI cost) → Claude-powered agent → intent learning from successful interactions.
+A Telegram bot that manages your personal and group calendars through natural language. Type "Remind me about standup tomorrow at 10am" — the bot parses it, stores it, and calls you when the time comes. Everything runs through a 3-layer pipeline: pre-approved intent matching (no AI cost, instant response) → Anthropic (Claude) SDK agent → intent learning from successful interactions.
 
 **Languages**: English and Russian.
 
@@ -24,22 +24,21 @@ A Telegram bot that manages your personal and group calendars through natural la
 - Public holidays for ~150 countries
 
 ### AI Agent
-- Claude Sonnet streaming agent with 40+ tools
+- Anthropic SDK streaming agent with 40+ tools (model configurable via `AI_MODEL`)
 - Up to 15 tool-use rounds per message
-- Intent learning: Haiku extracts reusable patterns after each AI interaction
-- Admin approves intents → future identical requests skip AI entirely
+- Intent learning: after each AI interaction a fast model extracts a reusable pattern; admin approves it → future identical requests skip AI entirely (instant response, zero API cost)
 - System prompt adapts to user context (timezone, language, secretary access, group mode)
 
 ### Notifications & Reminders
 - Telegram message reminders
 - **Voice call reminders** via MTProto P2P calls (Pyrogram + patched ntgcalls)
-- TTS: Edge TTS (primary) + OpenAI fallback
-- STT: Whisper (RunPod) + HuggingFace fallback
-- BullMQ job queues — reminders survive bot restarts
+- TTS: Kokoro-82M (HuggingFace) or Silero (local) → Google TTS fallback
+- STT: Deepgram Nova/Flux streaming (live calls) + Whisper via HuggingFace (messages)
+- BullMQ job queues (Redis) — reminders survive bot restarts
 
 ### Calendar Views
-- Weekly and monthly calendar images rendered by Playwright
-- Background rendering via BullMQ worker
+- Calendar images rendered by Playwright: daily agenda, weekly overview, monthly calendar, event cards, conflict schedules
+- Background rendering via BullMQ worker (Redis)
 
 ### Sharing & Collaboration
 - Event sharing with invite links
@@ -69,22 +68,22 @@ Telegram message
           │
           ▼
 ┌─────────────────────┐
-│   AiAgentLayer      │  ─── CalendarBotAgent (Claude Sonnet, streaming)
+│   AiAgentLayer      │  ─── CalendarBotAgent (Anthropic SDK, streaming)
 └─────────┬───────────┘
           │
           ▼
-     IntentLearner    ─── Haiku extracts intent candidate → admin approval
+     IntentLearner    ─── extracts intent candidate (AI_MODEL) → admin approval
 ```
 
 **Stack:**
 - Runtime: [Bun](https://bun.sh) (no Node.js)
 - Bot framework: [GramIO](https://gramio.dev) + `@gramio/scenes`
-- AI: Anthropic Claude (Sonnet agent, Haiku learner)
+- AI: Anthropic Claude (model configurable via `AI_MODEL` / `AI_FAST_MODEL`)
 - Database: `bun:sqlite` WAL mode
 - Queue: BullMQ on Redis
 - Calendar rendering: Playwright
 - Sync: Google Calendar API
-- Voice: Pyrogram + ntgcalls (patched), Edge TTS, Whisper STT
+- Voice: Pyrogram + ntgcalls (patched), Kokoro/Silero/Google TTS, Deepgram STT
 - Linting: Biome
 
 ## Quick Start
@@ -103,28 +102,7 @@ bun install
 
 ### Configure
 
-Copy `.env.example` to `.env` and fill in:
-
-```env
-# Required
-BOT_TOKEN=             # Telegram Bot API token
-ANTHROPIC_API_KEY=     # Claude API key
-DATABASE_PATH=data/db.sqlite
-REDIS_URL=redis://localhost:6379
-
-# Google Calendar (optional)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=
-ENCRYPTION_KEY=        # 32-byte hex key for AES-256-GCM
-
-# Voice calls (optional)
-MTPROTO_API_ID=
-MTPROTO_API_HASH=
-
-# Bot admin (for intent approval)
-BOT_ADMIN_ID=          # Your Telegram user ID
-```
+Copy `.env.example` to `.env` and fill in the values. The example file contains descriptions for all options.
 
 ### Run
 

@@ -78,9 +78,17 @@ describe('formatResponse', () => {
     expect(result).toBe('not valid json');
   });
 
+  test('search_results empty returns empty string', () => {
+    expect(formatResponse('search_results', '[]', 'UTC', 'en')).toBe('');
+  });
+
   test('search_results with invalid JSON falls back to text', () => {
     const result = formatResponse('search_results', 'invalid', 'UTC', 'en');
     expect(result).toBe('invalid');
+  });
+
+  test('free_slots empty returns empty string', () => {
+    expect(formatResponse('free_slots', '[]', 'UTC', 'en')).toBe('');
   });
 
   test('free_slots with invalid JSON falls back to text', () => {
@@ -88,9 +96,17 @@ describe('formatResponse', () => {
     expect(result).toBe('broken');
   });
 
+  test('holidays empty returns empty string', () => {
+    expect(formatResponse('holidays', '[]', 'UTC', 'en')).toBe('');
+  });
+
   test('holidays with invalid JSON falls back to text', () => {
     const result = formatResponse('holidays', 'bad json', 'UTC', 'en');
     expect(result).toBe('bad json');
+  });
+
+  test('settings with null value returns empty string', () => {
+    expect(formatResponse('settings', 'null', 'UTC', 'en')).toBe('');
   });
 
   test('settings formats key-value pairs', () => {

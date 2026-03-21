@@ -196,6 +196,18 @@ import { ruPlural } from '../../services/event/formatters.ts';
 
 Never hardcode a single word form next to a variable number.
 
+## Environment Variables
+
+All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and are accessed via the `config` object. Never read `process.env.*` directly in feature code, bot handlers, services, or commands.
+
+**Exceptions** (infrastructure layer where config object is not injected):
+- `src/utils/logger.ts` — reads `NODE_ENV` at module load time, before config is available
+- `src/services/ai/anthropic-client.ts` — reads `ANTHROPIC_API_KEY`/`AI_BASE_URL` as fallbacks, by design
+
+When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
+
+Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
+
 ## Coding Guidelines
 
 - **Dependency versions always use `^`** (e.g. `"marked": "^15.0.12"`). Never pin exact versions — it makes routine upgrades a chore and diverges from ecosystem norms. Range `^` is mandatory; `~` and bare exact versions are not acceptable.
