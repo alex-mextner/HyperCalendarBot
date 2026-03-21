@@ -1,0 +1,35 @@
+{
+  "name": "@hypercalendarbot/agent-macos",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "dev": "electron-builder --dir && electron dist/mac-arm64/HyperBotAgent.app",
+    "build": "tsc --project tsconfig.json",
+    "dist": "electron-builder --mac"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "keytar": "^7.9.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/keytar": "^4.4.2",
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.0.0",
+    "electron": "^34.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.0.0"
+  },
+  "build": {
+    "appId": "ai.hyperide.hyperbotAgent",
+    "productName": "HyperBotAgent",
+    "mac": {
+      "category": "public.app-category.utilities",
+      "target": ["dmg", "pkg"]
+    },
+    "files": ["dist/**/*"],
+    "npmRebuild": false
+  }
+}
