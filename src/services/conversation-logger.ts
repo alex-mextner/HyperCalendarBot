@@ -12,8 +12,8 @@ export class ConversationLogger {
     this.repo.save(userId, 'assistant', JSON.stringify({ kind: 'bot', text }), chatId);
   }
 
-  logCommand(userId: number, name: string, chatId?: number): void {
-    this.repo.save(userId, 'user', JSON.stringify({ kind: 'command', name }), chatId);
+  logCommand(userId: number, name: string, args?: string, chatId?: number): void {
+    this.repo.save(userId, 'user', JSON.stringify({ kind: 'command', name, ...(args && { args }) }), chatId);
   }
 
   logButtonPress(userId: number, label: string, detail?: string, chatId?: number): void {

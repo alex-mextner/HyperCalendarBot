@@ -410,8 +410,15 @@ export function createBot(
       // Incoming text message (regular or command)
       const incomingText = ctx.message?.text;
       if (incomingText) {
-        if (incomingText.startsWith('/')) {
-          conversationLogger.logCommand(user.telegram_id, incomingText.split(' ')[0]!, logChatId);
+        if (incomingText.match(/^\/cal(\s|$)/)) {
+          // /cal is an AI command — save args as plain user message, not a command event
+          const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
+          if (calArgs) conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId);
+        } else if (incomingText.startsWith('/')) {
+          const spaceIdx = incomingText.indexOf(' ');
+          const cmdName = spaceIdx >= 0 ? incomingText.slice(0, spaceIdx) : incomingText;
+          const cmdArgs = spaceIdx >= 0 ? incomingText.slice(spaceIdx + 1).trim() : undefined;
+          conversationLogger.logCommand(user.telegram_id, cmdName, cmdArgs || undefined, logChatId);
         } else {
           conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId);
         }
@@ -547,14 +554,6 @@ export function createBot(
       const chatId = calCtx.chatId;
       if (!chatId) return;
 
-      const from = (calCtx as unknown as { from?: { first_name?: string; username?: string } }).from;
-      let messagePrefix = '';
-      if (isGroup && from) {
-        const senderName = from.first_name ?? from.username ?? 'Unknown';
-        const groupName = chat?.title ?? 'group';
-        messagePrefix = `[Group: ${groupName}, From: ${senderName}] `;
-      }
-
       const groupInfo = isGroup
         ? {
             isGroup: true as const,
@@ -569,7 +568,7 @@ export function createBot(
             },
           }
         : undefined;
-      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), messagePrefix + text, groupInfo));
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo));
     })
     // Callback queries
     .on('callback_query', (ctx) =>

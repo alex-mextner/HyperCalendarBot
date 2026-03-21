@@ -289,6 +289,7 @@ describe('CalendarBotAgent.run()', () => {
 
   test('buildMessages parses JSON content blocks from history', () => {
     const agent = new CalendarBotAgent(config, sender);
+    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
     const contentBlocks = [{ type: 'text', text: 'Hello' }];
     ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(contentBlocks));
 
@@ -296,7 +297,7 @@ describe('CalendarBotAgent.run()', () => {
     const { messages } = agent.buildMessages(ctx, history);
 
     // Parsed JSON array should be passed as content blocks, not a string
-    expect(Array.isArray(messages[0]!.content)).toBe(true);
+    expect(Array.isArray(messages[1]!.content)).toBe(true);
   });
 
   test('buildMessages handles non-JSON content as plain string', () => {
@@ -312,13 +313,14 @@ describe('CalendarBotAgent.run()', () => {
 
   test('buildMessages handles non-array JSON as plain string', () => {
     const agent = new CalendarBotAgent(config, sender);
+    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
     ctx.chatHistory.save(USER_ID, 'assistant', '{"key": "value"}');
 
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
 
     // Non-array JSON should be kept as string
-    expect(typeof messages[0]!.content).toBe('string');
+    expect(typeof messages[1]!.content).toBe('string');
   });
 
   test('buildMessages uses per-chat history in group context', () => {

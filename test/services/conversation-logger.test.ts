@@ -41,6 +41,25 @@ describe('ConversationLogger', () => {
     expect(JSON.parse(repo._calls[0]![2] as string)).toEqual({ kind: 'command', name: '/start' });
   });
 
+  test('logCommand includes args when provided', () => {
+    const repo = makeRepo();
+    new ConversationLogger(repo).logCommand(123, '/today', '15 марта');
+    expect(JSON.parse(repo._calls[0]![2] as string)).toEqual({ kind: 'command', name: '/today', args: '15 марта' });
+  });
+
+  test('logCommand omits args key when args is undefined', () => {
+    const repo = makeRepo();
+    new ConversationLogger(repo).logCommand(123, '/start', undefined);
+    const saved = JSON.parse(repo._calls[0]![2] as string);
+    expect(saved).not.toHaveProperty('args');
+  });
+
+  test('logCommand passes chatId as 4th param', () => {
+    const repo = makeRepo();
+    new ConversationLogger(repo).logCommand(123, '/cal', 'text', 456);
+    expect(repo._calls[0]![3]).toBe(456);
+  });
+
   test('logButtonPress saves user role with kind:button wrapper', () => {
     const repo = makeRepo();
     new ConversationLogger(repo).logButtonPress(123, 'accept', 'id:42');

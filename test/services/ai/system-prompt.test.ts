@@ -282,7 +282,7 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt(ctx);
       expect(prompt).toContain('Supplement Mode');
       expect(prompt).toContain('supplement_skip');
-      expect(prompt).toContain('automatic rule-based response');
+      expect(prompt).toContain('rule-based intent system');
     });
   });
 

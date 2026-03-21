@@ -7,6 +7,7 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { ChatHistoryMessage } from '../../../src/database/types.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
@@ -128,23 +129,25 @@ describe('CalendarBotAgent', () => {
   });
 
   test('buildMessages formats bot reply activity event as readable text', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
     const botEvent = JSON.stringify({ kind: 'bot', text: 'Сегодня 3 события' });
     ctx.chatHistory.save(USER_ID, 'assistant', botEvent);
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
-    const content = messages[0]!.content as string;
+    const content = messages[1]!.content as string;
     expect(content).toContain('[Bot: Сегодня 3 события]');
   });
 
   test('buildMessages does not add timestamp to ContentBlockParam arrays', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
     const blocks = JSON.stringify([{ type: 'text', text: 'AI response' }]);
     ctx.chatHistory.save(USER_ID, 'assistant', blocks);
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
     // ContentBlock array should not be a string
-    expect(Array.isArray(messages[0]!.content)).toBe(true);
+    expect(Array.isArray(messages[1]!.content)).toBe(true);
   });
 
   test('buildMessages maps tool role to user for Anthropic API', () => {
@@ -242,5 +245,125 @@ describe('CalendarBotAgent', () => {
     const userMessages = messages.filter((m) => m.role === 'user');
     expect(userMessages).toHaveLength(1);
     expect(userMessages[0]!.content as string).toContain(ctx.messageText);
+  });
+
+  describe('sanitizeMessages', () => {
+    function makeGroupCtx(chatHistory: Partial<ChatHistoryRepository>): AgentContext {
+      return {
+        ...ctx,
+        isGroup: true,
+        groupChatId: 456,
+        chatHistory: chatHistory as ChatHistoryRepository,
+      };
+    }
+
+    function fakeMsg(
+      id: number,
+      userId: number,
+      role: 'user' | 'assistant' | 'tool',
+      content: string,
+    ): ChatHistoryMessage {
+      return { id, user_id: userId, role, content, chat_id: 456, created_at: '2026-01-01 10:00:00' };
+    }
+
+    test('inserts ... placeholder between consecutive user messages', () => {
+      const history: ChatHistoryMessage[] = [
+        fakeMsg(1, USER_ID, 'user', 'Hello'),
+        fakeMsg(2, USER_ID, 'user', 'Anyone there?'),
+        fakeMsg(3, USER_ID, 'user', 'Буду завтра'),
+      ];
+      const groupCtx = makeGroupCtx({ getRecentByChat: () => history });
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(groupCtx, []);
+      // 3 user → 2 '...' placeholders → 5 total
+      expect(messages).toHaveLength(5);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[1]!.role).toBe('assistant');
+      expect(messages[1]!.content).toBe('...');
+      expect(messages[2]!.role).toBe('user');
+      expect(messages[3]!.role).toBe('assistant');
+      expect(messages[3]!.content).toBe('...');
+      expect(messages[4]!.role).toBe('user');
+    });
+
+    test('inserts ... placeholder before leading assistant message', () => {
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Stale response' }]));
+      ctx.chatHistory.save(USER_ID, 'user', 'Hello again');
+      const history = ctx.chatHistory.getRecent(USER_ID);
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(ctx, history);
+      // [user:'...', assistant:..., user:'Hello again'] = 3
+      expect(messages).toHaveLength(3);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[0]!.content).toBe('...');
+      expect(messages[1]!.role).toBe('assistant');
+      expect(messages[2]!.role).toBe('user');
+      expect(messages[2]!.content as string).toContain('Hello again');
+    });
+
+    test('does not modify already alternating user/assistant messages', () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'Question');
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Answer' }]));
+      ctx.chatHistory.save(USER_ID, 'user', 'Follow-up');
+      const history = ctx.chatHistory.getRecent(USER_ID);
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(ctx, history);
+      expect(messages).toHaveLength(3);
+      expect(messages[0]!.role).toBe('user');
+      expect(messages[1]!.role).toBe('assistant');
+      expect(messages[2]!.role).toBe('user');
+    });
+  });
+
+  describe('group sender info', () => {
+    function fakeMsg(
+      id: number,
+      userId: number,
+      role: 'user' | 'assistant' | 'tool',
+      content: string,
+    ): ChatHistoryMessage {
+      return { id, user_id: userId, role, content, chat_id: 456, created_at: '2026-01-01 10:00:00' };
+    }
+
+    test('injects sender name and id for group user messages', () => {
+      const history: ChatHistoryMessage[] = [fakeMsg(1, USER_ID, 'user', 'Test message')];
+      const groupCtx: AgentContext = {
+        ...ctx,
+        isGroup: true,
+        groupChatId: 456,
+        chatHistory: { getRecentByChat: () => history } as unknown as ChatHistoryRepository,
+      };
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(groupCtx, []);
+      const content = messages[0]!.content as string;
+      expect(content).toContain(`id:${USER_ID}`);
+      expect(content).toContain('Test message');
+    });
+
+    test('does not add sender info for private chat messages', () => {
+      ctx.chatHistory.save(USER_ID, 'user', 'Private message');
+      const history = ctx.chatHistory.getRecent(USER_ID);
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(ctx, history);
+      const content = messages[0]!.content as string;
+      expect(content).not.toContain('[From:');
+    });
+
+    test('does not add sender info to tool result messages', () => {
+      const toolResult = JSON.stringify([{ type: 'tool_result', tool_use_id: 'abc', content: 'ok' }]);
+      const history: ChatHistoryMessage[] = [
+        { id: 1, user_id: USER_ID, role: 'tool', content: toolResult, chat_id: 456, created_at: '2026-01-01 10:00:00' },
+      ];
+      const groupCtx: AgentContext = {
+        ...ctx,
+        isGroup: true,
+        groupChatId: 456,
+        chatHistory: { getRecentByChat: () => history } as unknown as ChatHistoryRepository,
+      };
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(groupCtx, []);
+      // Tool results are arrays, not strings — no sender prefix
+      expect(Array.isArray(messages[0]!.content)).toBe(true);
+    });
   });
 });

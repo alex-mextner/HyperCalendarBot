@@ -3,6 +3,7 @@ import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { createAnthropicClient } from './anthropic-client.ts';
+import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -26,6 +27,24 @@ function withTimestamp(text: string, createdAt: string): string {
   return `[${ts}] ${text}`;
 }
 
+function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
+  // Ensure strict user/assistant alternation required by the API.
+  // Uses '...' placeholders so no history is lost.
+  const result: MessageParam[] = [];
+  for (const msg of messages) {
+    const lastRole = result.length > 0 ? result[result.length - 1]!.role : null;
+    if (lastRole === null) {
+      // First message must be user
+      if (msg.role !== 'user') result.push({ role: 'user', content: '...' });
+    } else if (lastRole === msg.role) {
+      // Same role twice — insert opposite placeholder
+      result.push({ role: msg.role === 'user' ? 'assistant' : 'user', content: '...' });
+    }
+    result.push(msg);
+  }
+  return result;
+}
+
 export interface AgentToolCallRecord {
   name: string;
   input: Record<string, unknown>;
@@ -47,11 +66,13 @@ export class CalendarBotAgent {
   private client: Anthropic;
   private model: string;
   private sender: TelegramSender;
+  private debugLogger?: AiDebugLogger;
 
   constructor(config: AgentConfig, sender: TelegramSender) {
     this.client = createAnthropicClient({ apiKey: config.apiKey, baseURL: config.baseUrl });
     this.model = config.model;
     this.sender = sender;
+    this.debugLogger = config.debugLogger;
   }
 
   getSender(): TelegramSender {
@@ -74,6 +95,7 @@ export class CalendarBotAgent {
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
 
     const messages: MessageParam[] = [];
+    const senderCache = new Map<number, string>();
 
     for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
@@ -90,10 +112,23 @@ export class CalendarBotAgent {
         content = withTimestamp(msg.content, msg.created_at);
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
+
+      // For group chats, inject sender name+id into plain text user messages
+      if (ctx.isGroup && ctx.groupChatId && msg.role === 'user' && typeof content === 'string') {
+        if (!senderCache.has(msg.user_id)) {
+          const u = ctx.userRepo.findByTelegramId(msg.user_id);
+          senderCache.set(msg.user_id, u?.first_name ?? u?.username ?? 'User');
+        }
+        const name = senderCache.get(msg.user_id)!;
+        const senderTag = `[From: ${name} (id:${msg.user_id})] `;
+        const tsPattern = /^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] )/;
+        content = tsPattern.test(content) ? content.replace(tsPattern, `$1${senderTag}`) : `${senderTag}${content}`;
+      }
+
       messages.push({ role, content } as MessageParam);
     }
 
-    return { systemPrompt, messages };
+    return { systemPrompt, messages: sanitizeMessages(messages) };
   }
 
   saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
@@ -107,12 +142,36 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    aiLogger.info(
+      {
+        userId: ctx.user.telegram_id,
+        chatId: ctx.chatId,
+        supplementMode: !!ctx.supplementMode,
+        msg: ctx.messageText.slice(0, 100),
+      },
+      'Agent run started',
+    );
+
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
       agentConnected: ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
     const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
+
+    const dbg: AiDebugRunContext | null =
+      this.debugLogger?.createRunContext(
+        ctx.user.telegram_id,
+        ctx.chatId,
+        ctx.user.username,
+        ctx.user.first_name,
+        ctx.groupTitle ?? null,
+        !!ctx.supplementMode,
+        ctx.messageText,
+        ctx.supplementAutoResponse,
+      ) ?? null;
+    dbg?.logSystemPrompt(systemPrompt);
+    dbg?.logHistory(messages);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
       ? ({
@@ -151,6 +210,8 @@ export class CalendarBotAgent {
       let currentMessages = [...messages];
 
       for (let round = 0; round < MAX_ROUNDS; round++) {
+        dbg?.logRound(round);
+
         if (Date.now() - startTime > TIMEOUT_MS) {
           aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout');
           writer.appendText('\n\n⚠️ Timeout reached.');
@@ -231,7 +292,11 @@ export class CalendarBotAgent {
               input: block.input,
             });
 
-            aiLogger.info({ tool: block.name, input: block.input, userId: ctx.user.telegram_id }, 'Tool call');
+            aiLogger.info(
+              { tool: block.name, input: block.input, userId: ctx.user.telegram_id, chatId: ctx.chatId },
+              'Tool call',
+            );
+            dbg?.logToolCall(block.name, block.input as Record<string, unknown>);
 
             writer.setToolLabel(block.name, block.input as Record<string, unknown>);
             await writer.flush(true);
@@ -239,7 +304,11 @@ export class CalendarBotAgent {
             const result = await executeTool(ctx, block.name, block.input as Record<string, unknown>);
 
             writer.markToolResult(result.success);
-            aiLogger.info({ tool: block.name, success: result.success, userId: ctx.user.telegram_id }, 'Tool result');
+            aiLogger.info(
+              { tool: block.name, success: result.success, userId: ctx.user.telegram_id, chatId: ctx.chatId },
+              'Tool result',
+            );
+            dbg?.logToolResult(block.name, result.success, result.output, result.error);
 
             allToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
             allToolResults.push({ success: result.success, output: result.output });
@@ -281,6 +350,14 @@ export class CalendarBotAgent {
         }
 
         if (!hasToolUse || toolResults.length === 0) {
+          const roundText = writer.getText();
+          if (!hasToolUse) {
+            aiLogger.info(
+              { userId: ctx.user.telegram_id, chatId: ctx.chatId, round, textPreview: roundText.slice(0, 300) },
+              'AI text-only response (no tool calls)',
+            );
+            dbg?.logAiText(roundText);
+          }
           break;
         }
 
@@ -294,8 +371,7 @@ export class CalendarBotAgent {
         ];
       }
     } catch (error) {
-      const errStr = String(error);
-      aiLogger.error({ error: errStr, userId: ctx.user.telegram_id }, 'Agent error');
+      aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
 
       const lang = ctx.user.language;
       const errorMsg =
@@ -306,6 +382,23 @@ export class CalendarBotAgent {
     }
 
     const finalText = writer.getText().trim();
+    dbg?.logFinal(finalText, allToolCalls.length);
+    dbg?.flush();
+
+    if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
+      this.debugLogger?.endSession(ctx.chatId);
+    }
+
+    aiLogger.info(
+      {
+        userId: ctx.user.telegram_id,
+        chatId: ctx.chatId,
+        toolCount: allToolCalls.length,
+        supplementMode: !!ctx.supplementMode,
+      },
+      'Agent run complete',
+    );
+
     if (ctx.isGroup && finalText === '[SKIP]') {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };

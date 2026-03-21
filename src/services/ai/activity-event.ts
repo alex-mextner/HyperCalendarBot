@@ -2,7 +2,7 @@
 
 export type ActivityEvent =
   | { kind: 'button'; label: string; detail?: string }
-  | { kind: 'command'; name: string }
+  | { kind: 'command'; name: string; args?: string }
   | { kind: 'bot'; text: string }
   | { kind: 'bot_edit'; text: string }
   | { kind: 'edited'; text: string };
@@ -12,7 +12,7 @@ export function formatActivityEvent(event: ActivityEvent): string {
     case 'button':
       return `[Button: "${event.label}"]${event.detail ? ` (${event.detail})` : ''}`;
     case 'command':
-      return `[Command: ${event.name}]`;
+      return event.args ? `[Command: ${event.name} ${event.args}]` : `[Command: ${event.name}]`;
     case 'bot':
       return `[Bot: ${event.text}]`;
     case 'bot_edit':
