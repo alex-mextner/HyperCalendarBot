@@ -4,10 +4,13 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import { ReminderMaterializer } from '../../../src/services/notification/materializer.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -28,6 +31,26 @@ describe('EventService', () => {
     const reminderRepo = new ReminderRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
     service = new EventService(eventRepo, reminderRepo);
+  });
+
+  test('createEvent inserts event_reminders rows when materializer is provided', () => {
+    const eventReminderRepo = new EventReminderRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
+    prefsRepo.ensureDefaults(USER_ID);
+    const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const svc = new EventService(new EventRepository(db), new ReminderRepository(db), mat);
+    const event = svc.createEvent({
+      user_id: USER_ID,
+      title: 'Coffee',
+      start_at: '2099-06-01T17:31:00Z',
+      timezone: TZ,
+    });
+    const rows = eventReminderRepo.getForEvent(event.id);
+    // default_reminder_intervals = '[30, 0]' → two reminders
+    expect(rows.length).toBeGreaterThan(0);
+    const thirtyMinRow = rows.find((r) => r.interval_minutes === 30);
+    expect(thirtyMinRow).toBeDefined();
+    expect(thirtyMinRow!.remind_at_utc).toBe('2099-06-01T17:01:00.000Z');
   });
 
   test('createEvent creates event with default reminder', () => {

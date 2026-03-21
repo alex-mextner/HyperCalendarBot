@@ -26,6 +26,7 @@ import type { EventMentionStore } from '../services/intent/event-mention-store.t
 import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
+import { ReminderMaterializer } from '../services/notification/materializer.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
 import { ScenePauseService } from '../services/scene-pause.ts';
 import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
@@ -133,10 +134,11 @@ export function createBot(
     | 'AI_FAST_MODEL'
   >,
 ) {
+  const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService(
     db.events,
     db.reminders,
-    undefined,
+    materializer,
     undefined,
     undefined,
     undefined,
