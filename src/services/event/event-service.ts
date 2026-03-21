@@ -20,9 +20,6 @@ export interface EventServiceDeps {
   eventRepo: EventRepository;
   reminderRepo: ReminderRepository;
   materializer?: ReminderMaterializer;
-  pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void;
-  onEventDeleted?: (eventId: number, userId: number) => void;
-  onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void;
   participantRepo?: ParticipantRepository;
   onParticipantsNotify?: (userIds: number[], text: string) => void;
   domainEvents?: DomainEventBus;
@@ -32,9 +29,6 @@ export class EventService {
   private eventRepo: EventRepository;
   private reminderRepo: ReminderRepository;
   private materializer?: ReminderMaterializer;
-  private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void;
-  private onEventDeleted?: (eventId: number, userId: number) => void;
-  private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void;
   private participantRepo?: ParticipantRepository;
   private onParticipantsNotify?: (userIds: number[], text: string) => void;
   private domainEvents?: DomainEventBus;
@@ -43,16 +37,9 @@ export class EventService {
     this.eventRepo = deps.eventRepo;
     this.reminderRepo = deps.reminderRepo;
     this.materializer = deps.materializer;
-    this.pushSync = deps.pushSync;
-    this.onEventDeleted = deps.onEventDeleted;
-    this.onEventTimeChanged = deps.onEventTimeChanged;
     this.participantRepo = deps.participantRepo;
     this.onParticipantsNotify = deps.onParticipantsNotify;
     this.domainEvents = deps.domainEvents;
-  }
-
-  private getSyncUserId(event: CalendarEvent): number {
-    return event.owner_type === 'group' && event.created_by ? event.created_by : event.user_id;
   }
 
   createEvent(data: CreateEventData): CalendarEvent {
@@ -73,9 +60,6 @@ export class EventService {
         event.user_id,
       );
     }
-    if (this.pushSync && event.google_calendar_id) {
-      this.pushSync(this.getSyncUserId(event), event.id, 'create');
-    }
     if (this.domainEvents) {
       if (event.owner_type === 'group' && event.group_id) {
         this.domainEvents.emit('myGroup.newEvent', {
@@ -92,8 +76,7 @@ export class EventService {
   }
 
   updateEvent(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
-    const needOldEvent = (data.start_at && this.onEventTimeChanged) || this.domainEvents;
-    const existing = needOldEvent ? this.eventRepo.findById(id, userId) : null;
+    const existing = this.domainEvents ? this.eventRepo.findById(id, userId) : null;
     const updated = this.eventRepo.update(id, userId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
@@ -107,12 +90,6 @@ export class EventService {
         updated.user_id,
       );
     }
-    if (this.pushSync && updated?.google_calendar_id) {
-      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
-    }
-    if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
-      this.onEventTimeChanged(id, userId, data.start_at);
-    }
     if (this.domainEvents && updated && existing) {
       this.domainEvents.emit('myCalendar.updatedEvent', {
         userId: updated.user_id,
@@ -125,9 +102,6 @@ export class EventService {
 
   deleteEvent(id: number, userId: number): boolean {
     const event = this.eventRepo.findById(id, userId);
-    if (this.pushSync && event?.google_calendar_id) {
-      this.pushSync(this.getSyncUserId(event), id, 'delete');
-    }
     if (this.onParticipantsNotify && this.participantRepo && event) {
       const accepted = this.participantRepo
         .getByEvent(id)
@@ -138,9 +112,6 @@ export class EventService {
           `Event "${event.title}" has been cancelled by the organizer.`,
         );
       }
-    }
-    if (this.onEventDeleted) {
-      this.onEventDeleted(id, userId);
     }
     if (this.materializer) {
       this.materializer.deleteForEvent(id);
@@ -362,7 +333,6 @@ export class EventService {
   }
 
   updateEventForGroup(eventId: number, groupId: number, data: UpdateEventData): CalendarEvent | null {
-    const existing = data.start_at && this.onEventTimeChanged ? this.eventRepo.findByIdInGroup(eventId, groupId) : null;
     const updated = this.eventRepo.updateInGroup(eventId, groupId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
@@ -376,24 +346,12 @@ export class EventService {
         updated.user_id,
       );
     }
-    if (this.pushSync && updated?.google_calendar_id) {
-      this.pushSync(this.getSyncUserId(updated), updated.id, 'update');
-    }
-    if (updated && existing && data.start_at && data.start_at !== existing.start_at && this.onEventTimeChanged) {
-      this.onEventTimeChanged(eventId, updated.user_id, data.start_at);
-    }
     return updated;
   }
 
   deleteEventForGroup(eventId: number, groupId: number): boolean {
     const event = this.eventRepo.findByIdInGroup(eventId, groupId);
     if (event) {
-      if (this.pushSync && event.google_calendar_id) {
-        this.pushSync(this.getSyncUserId(event), eventId, 'delete');
-      }
-      if (this.onEventDeleted) {
-        this.onEventDeleted(eventId, event.user_id);
-      }
       if (this.materializer) {
         this.materializer.deleteForEvent(eventId);
       }
