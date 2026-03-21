@@ -6,6 +6,7 @@ export interface EnvConfig {
   ANTHROPIC_API_KEY: string;
   AI_BASE_URL: string;
   AI_MODEL: string;
+  AI_FAST_MODEL: string;
   REDIS_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -21,8 +22,11 @@ export interface EnvConfig {
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
   INLINE_BOT_USERNAME?: string;
-  AGENT_JWT_SECRET: string;
-  AGENT_DOWNLOAD_URL: string;
+  AGENT_JWT_SECRET?: string;
+  AGENT_DOWNLOAD_URL?: string;
+  SILERO_PYTHON_PATH?: string;
+  DEEPGRAM_API_KEY?: string;
+  DISABLE_VOICE?: boolean;
 }
 
 export function loadConfig(): EnvConfig {
@@ -83,6 +87,7 @@ export function loadConfig(): EnvConfig {
     ANTHROPIC_API_KEY,
     AI_BASE_URL: process.env.AI_BASE_URL || 'https://api.anthropic.com',
     AI_MODEL: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
+    AI_FAST_MODEL: process.env.AI_FAST_MODEL || 'claude-haiku-4-5-20251001',
     REDIS_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || undefined,
@@ -98,19 +103,10 @@ export function loadConfig(): EnvConfig {
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
     INLINE_BOT_USERNAME: process.env.INLINE_BOT_USERNAME || undefined,
-    AGENT_JWT_SECRET: (() => {
-      const s = process.env.AGENT_JWT_SECRET;
-      if (!s || s.length < 32) {
-        throw new Error('AGENT_JWT_SECRET must be set and at least 32 characters');
-      }
-      return s;
-    })(),
-    AGENT_DOWNLOAD_URL: (() => {
-      const u = process.env.AGENT_DOWNLOAD_URL;
-      if (!u) {
-        throw new Error('AGENT_DOWNLOAD_URL must be set');
-      }
-      return u;
-    })(),
+    AGENT_JWT_SECRET: process.env.AGENT_JWT_SECRET || undefined,
+    AGENT_DOWNLOAD_URL: process.env.AGENT_DOWNLOAD_URL || undefined,
+    SILERO_PYTHON_PATH: process.env.SILERO_PYTHON_PATH || undefined,
+    DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || undefined,
+    DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
   };
 }

@@ -25,28 +25,30 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('ANTHROPIC_API_KEY');
   });
 
-  test('throws if AGENT_JWT_SECRET is missing', () => {
+  test('AGENT_JWT_SECRET is optional — bot starts without it', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
-    process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
     delete process.env.AGENT_JWT_SECRET;
-    expect(() => loadConfig()).toThrow('AGENT_JWT_SECRET');
+    delete process.env.AGENT_DOWNLOAD_URL;
+    const config = loadConfig();
+    expect(config.AGENT_JWT_SECRET).toBeUndefined();
   });
 
-  test('throws if AGENT_JWT_SECRET is too short', () => {
+  test('AGENT_DOWNLOAD_URL is optional — bot starts without it', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
-    process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
-    process.env.AGENT_JWT_SECRET = 'short';
-    expect(() => loadConfig()).toThrow('AGENT_JWT_SECRET');
+    delete process.env.AGENT_JWT_SECRET;
+    delete process.env.AGENT_DOWNLOAD_URL;
+    const config = loadConfig();
+    expect(config.AGENT_DOWNLOAD_URL).toBeUndefined();
   });
 
-  test('throws if AGENT_DOWNLOAD_URL is missing', () => {
+  test('AGENT_JWT_SECRET is loaded when present', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.AGENT_JWT_SECRET = 'test-agent-secret-at-least-32-chars!!';
-    delete process.env.AGENT_DOWNLOAD_URL;
-    expect(() => loadConfig()).toThrow('AGENT_DOWNLOAD_URL');
+    const config = loadConfig();
+    expect(config.AGENT_JWT_SECRET).toBe('test-agent-secret-at-least-32-chars!!');
   });
 
   test('returns config with defaults when required vars are set', () => {
