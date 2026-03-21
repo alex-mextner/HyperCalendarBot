@@ -729,9 +729,8 @@ export function createCallbackHandler(
               : t(lang).callbackErrors.proposalAcceptedNoEvent,
           );
 
-          // Proposer language unknown without DB lookup — use 'en' as fallback
           editProposalDeps
-            .sendMessage(proposal.proposer_id, t('en').callbackErrors.proposalAcceptedNotification, {
+            .sendMessage(proposal.proposer_id, t(lang).callbackErrors.proposalAcceptedNotification, {
               parse_mode: 'HTML',
             })
             .catch(() => {});
@@ -740,9 +739,8 @@ export function createCallbackHandler(
           await ctx.answer();
           await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
-          // Proposer language unknown without DB lookup — use 'en' as fallback
           editProposalDeps
-            .sendMessage(proposal.proposer_id, t('en').callbackErrors.proposalRejectedNotification, {
+            .sendMessage(proposal.proposer_id, t(lang).callbackErrors.proposalRejectedNotification, {
               parse_mode: 'HTML',
             })
             .catch(() => {});
@@ -1084,8 +1082,7 @@ export function createCallbackHandler(
         feedbackDeps.feedbackRepo.closeThread(threadId);
         await ctx.answer({ text: t(lang).callbackErrors.threadClosed });
         await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
-        // Thread user language unknown without DB lookup — use 'en' as fallback
-        feedbackDeps.sendMessage(thread.user_id, t('en').callbackErrors.feedbackThreadResolved).catch((e: unknown) => {
+        feedbackDeps.sendMessage(thread.user_id, t(lang).callbackErrors.feedbackThreadResolved).catch((e: unknown) => {
           cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
         });
         return;
