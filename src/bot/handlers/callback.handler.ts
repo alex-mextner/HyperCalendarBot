@@ -31,6 +31,7 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import type { AdminEditSession } from '../../services/intent/admin-edit-session.ts';
 import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
@@ -59,6 +60,18 @@ import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } 
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
+
+/**
+ * Parse ai_btn payload into answer text and optional group restriction.
+ * Payload format: "{text}" (private) or "{userId}:{text}" (group).
+ */
+export function parseAiBtnPayload(payload: string): { answerText: string; restrictedToUserId?: number } {
+  const colon = payload.indexOf(':');
+  if (colon !== -1 && /^\d+$/.test(payload.slice(0, colon))) {
+    return { answerText: payload.slice(colon + 1), restrictedToUserId: Number(payload.slice(0, colon)) };
+  }
+  return { answerText: payload };
+}
 
 /**
  * Route all inline keyboard callbacks.
@@ -125,6 +138,10 @@ export function createCallbackHandler(
   contactRepo?: ContactRepository,
   timezoneScene?: AnyScene,
   groupRepo?: GroupChatRepository,
+  scenePauseDeps?: {
+    sceneStorage: { get(key: string): Promise<unknown>; delete(key: string): unknown };
+    scenePauseService: ScenePauseService;
+  },
 ) {
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
@@ -135,18 +152,36 @@ export function createCallbackHandler(
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');
 
-    // Log button press to chat history.
-    // ai_btn is excluded: its answerText is saved as a button event just before onAiButtonClick,
-    // and saveUserMessage() inside agent.run() must NOT see a duplicate entry.
-    if (chatHistoryRepo && user && action !== 'ai_btn') {
-      chatHistoryRepo.save(
-        user.telegram_id,
-        'user',
-        JSON.stringify({ kind: 'button', label: action, detail: payload }),
-      );
-    }
-
     try {
+      // Scene help — user asked AI for help during wizard
+      if (data === CB.SCENE_HELP) {
+        await ctx.answer();
+        if (!scenePauseDeps) return;
+
+        const rawScene = await scenePauseDeps.sceneStorage.get(`@gramio/scenes:${user.telegram_id}`);
+        if (!rawScene) return;
+
+        let sceneName = 'unknown';
+        let step = 0;
+        let sceneState: Record<string, unknown> = {};
+        try {
+          const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
+          sceneName = (parsed.name as string) ?? 'unknown';
+          step = (parsed.step as number) ?? 0;
+          sceneState = (parsed.state as Record<string, unknown>) ?? {};
+        } catch {
+          // proceed with defaults
+        }
+
+        await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState });
+
+        const lang = user.language as 'en' | 'ru';
+        await ctx.send(
+          lang === 'ru' ? 'AI поможет. Просто напиши — что затрудняет?' : 'AI will help. Just tell me what you need.',
+        );
+        return;
+      }
+
       // Event view
       if (action === CB.EVENT_VIEW) {
         if (payload === 'cancel') {
@@ -705,22 +740,10 @@ export function createCallbackHandler(
         return;
       }
 
-      // AI ask_user button responses — save answer and trigger AI continuation
+      // AI ask_user button responses — trigger AI continuation
       if (action === 'ai_btn') {
-        // Callback data format: "ai_btn:{text}" or "ai_btn:{userId}:{text}" (groups)
-        // Check if the second segment is a numeric userId (group restriction)
         const firstColon = data.indexOf(':');
-        const rest = data.slice(firstColon + 1);
-        const secondColon = rest.indexOf(':');
-        let answerText: string;
-        let restrictedToUserId: number | undefined;
-
-        if (secondColon !== -1 && /^\d+$/.test(rest.slice(0, secondColon))) {
-          restrictedToUserId = Number(rest.slice(0, secondColon));
-          answerText = rest.slice(secondColon + 1);
-        } else {
-          answerText = rest;
-        }
+        const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1));
 
         // In groups, only the user who triggered the question can answer
         const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
@@ -731,7 +754,6 @@ export function createCallbackHandler(
 
         await ctx.answer();
         await ctx.editText(`✅ ${answerText}`);
-        // answerText is saved by agent.run() → saveUserMessage() — do not save here to avoid duplicates
         const cbChatId =
           (ctx as unknown as { chat?: { id: number } }).chat?.id ??
           (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;

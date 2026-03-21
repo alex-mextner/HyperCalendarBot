@@ -27,6 +27,7 @@ import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
+import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
@@ -39,6 +40,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
@@ -68,10 +70,12 @@ import {
   type WorkflowSessionStore,
 } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
   get(key: string): Promise<unknown>;
+  delete(key: string): unknown;
 }
 
 export interface MessageHandlerDeps {
@@ -79,6 +83,7 @@ export interface MessageHandlerDeps {
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
+  conversationLogger: ConversationLogger;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
   contactRepo?: ContactRepository;
@@ -147,6 +152,20 @@ export interface MessageHandlerDeps {
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
+  scenePauseService?: ScenePauseService;
+}
+
+// Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
+// Step indices are owned by each scene and imported here to avoid duplication.
+export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
+
+function isCallbackOnlyStep(rawScene: unknown): boolean {
+  try {
+    const parsed = JSON.parse(rawScene as string) as { name?: string; step?: number };
+    return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
+  } catch {
+    return false;
+  }
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -276,6 +295,9 @@ async function handleVoiceMessage(
 
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
 
+    const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
+    deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
+
     const agentContext: AgentContext = {
       ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
       inputMode: 'voice_message',
@@ -373,6 +395,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       eventService: deps.eventService,
       holidayService: deps.holidayService,
       chatHistory: deps.chatHistory,
+      conversationLogger: deps.conversationLogger,
       userRepo: deps.userRepo,
       reminderRepo: deps.reminderRepo,
       contactRepo: deps.contactRepo,
@@ -412,6 +435,11 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       userMemoryRepo: deps.userMemoryRepo,
       agentRegistry: deps.agentRegistry,
       agentDispatcher: deps.agentDispatcher,
+      sceneStorage: {
+        delete: async (key: string) => {
+          await deps.sceneStorage.delete(key);
+        },
+      },
     };
   };
 }
@@ -762,6 +790,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return ctx;
     },
     intentLearner: deps.intentLearner,
+    scenePauseService: deps.scenePauseService,
   });
 
   // Static layers that don't require per-message context
@@ -806,7 +835,32 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     // Don't handle if a scene is active — @gramio/scenes handles those
     const sceneKey = `@gramio/scenes:${user.telegram_id}`;
     const activeScene = await deps.sceneStorage.get(sceneKey);
-    if (activeScene) return;
+    if (activeScene) {
+      const isPaused = deps.scenePauseService ? (await deps.scenePauseService.get(user.telegram_id)) !== null : false;
+
+      if (!isPaused) {
+        // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
+        if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
+          try {
+            const parsed = JSON.parse(activeScene as string) as {
+              name?: string;
+              step?: number;
+              state?: Record<string, unknown>;
+            };
+            await deps.scenePauseService.save(user.telegram_id, {
+              sceneName: parsed.name ?? 'unknown',
+              step: parsed.step ?? 0,
+              sceneState: parsed.state ?? {},
+            });
+          } catch {
+            return; // can't parse scene state — skip
+          }
+          // fall through to AI pipeline
+        } else {
+          return;
+        }
+      }
+    }
 
     const chatId = ctx.chatId;
     if (!chatId) return;
@@ -940,7 +994,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               return executeTool(agentCtx, toolName, input);
             },
             workflowSessions,
-            deps.chatHistory,
             notifyAdmin,
             getEventContext,
             (uid, eventId) => {

@@ -18,6 +18,7 @@ function makeCtx(db: Database, userId: number): AgentContext {
     eventService: {} as AgentContext['eventService'],
     holidayService: {} as AgentContext['holidayService'],
     chatHistory: {} as AgentContext['chatHistory'],
+    conversationLogger: null as never,
     userRepo,
     reminderRepo: {} as AgentContext['reminderRepo'],
     userMemoryRepo: new UserMemoryRepository(db),

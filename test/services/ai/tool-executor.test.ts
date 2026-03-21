@@ -49,6 +49,7 @@ describe('executeTool', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 
@@ -232,6 +233,7 @@ describe('executeTool', () => {
         sharingService,
         sharingSettingsRepo,
         sharedEventRepo,
+        conversationLogger: null as never,
       };
     });
 

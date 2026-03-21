@@ -12,6 +12,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
+    conversationLogger: { logUserMessage: mock(() => {}) },
     userRepo: {},
     reminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },
@@ -61,6 +62,62 @@ describe('createMessageHandler', () => {
     const handler = createMessageHandler(deps as never);
     await handler(makeCtx() as never);
     expect(deps.agent.run).toHaveBeenCalledTimes(0);
+  });
+
+  describe('Trigger 2: callback-only step auto-pause', () => {
+    const callbackOnlyScene = JSON.stringify({ name: 'add_event', step: 3, state: { title: 'Test' } });
+
+    test('routes to AI and saves pause when user types on a callback-only step', async () => {
+      const saveScene = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        sceneStorage: { get: mock(() => Promise.resolve(callbackOnlyScene)) },
+        scenePauseService: {
+          get: mock(() => Promise.resolve(null)),
+          save: saveScene,
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      await handler(makeCtx({ text: 'каждую неделю' }) as never);
+
+      expect(saveScene).toHaveBeenCalledWith(100, {
+        sceneName: 'add_event',
+        step: 3,
+        sceneState: { title: 'Test' },
+      });
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not auto-pause for non-callback-only steps (step 1)', async () => {
+      const saveScene = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        sceneStorage: {
+          get: mock(() => Promise.resolve(JSON.stringify({ name: 'add_event', step: 1, state: {} }))),
+        },
+        scenePauseService: {
+          get: mock(() => Promise.resolve(null)),
+          save: saveScene,
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      await handler(makeCtx() as never);
+
+      expect(saveScene).not.toHaveBeenCalled();
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('falls through to AI when scene is already manually paused', async () => {
+      const deps = makeDeps({
+        sceneStorage: { get: mock(() => Promise.resolve(callbackOnlyScene)) },
+        scenePauseService: {
+          get: mock(() => Promise.resolve({ sceneName: 'add_event', step: 3, sceneState: {} })),
+          save: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      await handler(makeCtx() as never);
+
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
   });
 
   test('ignores messages without dbUser', async () => {
@@ -349,6 +406,27 @@ describe('createMessageHandler', () => {
         };
         expect(call.messageText).toBe('создай встречу на завтра');
         expect(call.inputMode).toBe('voice_message');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    test('logs transcribed voice text before calling agent', async () => {
+      const deps = makeVoiceDeps();
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as unknown as typeof fetch;
+
+      try {
+        const handler = createMessageHandler(deps as never);
+        await handler(makeVoiceCtx() as never);
+        const logger = deps.conversationLogger as { logUserMessage: ReturnType<typeof mock> };
+        expect(logger.logUserMessage).toHaveBeenCalledWith(100, 'создай встречу на завтра', undefined);
       } finally {
         globalThis.fetch = originalFetch;
       }

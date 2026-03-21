@@ -84,6 +84,7 @@ describe('intent_accept callback handler', () => {
       undefined,
       undefined,
       undefined,
+      undefined, // chatHistoryRepo
       undefined,
       undefined,
       undefined,
@@ -92,8 +93,7 @@ describe('intent_accept callback handler', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
-      undefined,
+      undefined, // userRepo
       { intentRepo: intentRepoArg, intentMatcher },
     );
   }
@@ -170,6 +170,7 @@ describe('intent_accept callback handler', () => {
       undefined,
       undefined,
       undefined,
+      undefined, // chatHistoryRepo
       undefined,
       undefined,
       undefined,
@@ -178,8 +179,7 @@ describe('intent_accept callback handler', () => {
       undefined,
       undefined,
       undefined,
-      undefined,
-      undefined,
+      undefined, // userRepo
       { intentRepo, adminEditSessions },
     );
 

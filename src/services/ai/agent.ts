@@ -63,10 +63,15 @@ export class CalendarBotAgent {
     history: ChatHistoryMessage[],
     caps?: UserCapabilities,
   ): { systemPrompt: string; messages: MessageParam[] } {
+    // IMPORTANT: history must already contain the current user message.
+    // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
+    // before the pipeline runs, so by the time agent.run() is called, it is present.
+    // If this agent is ever called outside that middleware (e.g. from tests or a new entry point),
+    // the caller is responsible for saving the message first.
     const systemPrompt = buildSystemPrompt(ctx, caps);
 
     const relevantHistory =
-      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 10) : history;
+      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
 
     const messages: MessageParam[] = [];
 
@@ -88,28 +93,17 @@ export class CalendarBotAgent {
       messages.push({ role, content } as MessageParam);
     }
 
-    if (!ctx.supplementMode) {
-      const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
-    }
-
     return { systemPrompt, messages };
-  }
-
-  saveUserMessage(ctx: AgentContext): void {
-    if (ctx.supplementMode) return;
-    const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText, chatId);
   }
 
   saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'assistant', JSON.stringify(contentBlocks), chatId);
+    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, contentBlocks, chatId);
   }
 
   saveToolResults(ctx: AgentContext, toolResults: Anthropic.ToolResultBlockParam[]): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.chatHistory.save(ctx.user.telegram_id, 'tool', JSON.stringify(toolResults), chatId);
+    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toolResults, chatId);
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
@@ -117,7 +111,7 @@ export class CalendarBotAgent {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
       agentConnected: ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
     };
-    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
+    const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
     const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
@@ -148,8 +142,6 @@ export class CalendarBotAgent {
       writer.tailText(3500);
       writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
     };
-
-    this.saveUserMessage(ctx);
 
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];

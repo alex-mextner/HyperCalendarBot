@@ -5,7 +5,7 @@ import { t } from '../../config/constants.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
-import { eventActionsKeyboard } from '../keyboards.ts';
+import { eventActionsKeyboard, sceneHelpKeyboard } from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface EditValueParams {
@@ -62,7 +62,9 @@ export function createEditValueScene(eventService: EventService) {
         } else if (field === 'time') {
           const parsed = parseSimpleDate(text, user.timezone);
           if (!parsed) {
-            await context.send(lang === 'ru' ? 'Не могу разобрать дату.' : "Can't parse that date.");
+            await context.send(lang === 'ru' ? 'Не могу разобрать дату.' : "Can't parse that date.", {
+              reply_markup: sceneHelpKeyboard(lang),
+            });
             return;
           }
           updateData.start_at = parsed.toISOString();
@@ -76,6 +78,7 @@ export function createEditValueScene(eventService: EventService) {
                 lang === 'ru'
                   ? 'Не могу разобрать. Примеры: 1ч, 30м, 1ч 30м'
                   : "Can't parse. Examples: 1h, 30m, 1h 30m",
+                { reply_markup: sceneHelpKeyboard(lang) },
               );
               return;
             }

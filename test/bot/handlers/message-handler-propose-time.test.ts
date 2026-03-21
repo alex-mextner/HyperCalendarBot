@@ -45,12 +45,13 @@ describe('message handler: propose time session', () => {
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: { findByTelegramId: mock(() => makeUser({ telegram_id: 100 })) } as never,
       reminderRepo: {} as never,
-      sceneStorage: { get: mock(() => Promise.resolve(null)) },
+      sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
       proposeTimeSessions,
       invitationService: invitationService as never,
       invitationRepo: invitationRepo as never,
       editMessage,
       sendMessageToUser: sendMessage,
+      conversationLogger: null as never,
     });
 
     const ctx = makeCtx('tomorrow 15:00');
@@ -88,11 +89,12 @@ describe('message handler: propose time session', () => {
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: {} as never,
       reminderRepo: {} as never,
-      sceneStorage: { get: mock(() => Promise.resolve(null)) },
+      sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
       proposeTimeSessions,
       invitationService: invitationService as never,
       invitationRepo: invitationRepo as never,
       notifyInviterProposal,
+      conversationLogger: null as never,
     });
 
     const ctx = makeCtx('tomorrow 15:00');
@@ -113,8 +115,9 @@ describe('message handler: propose time session', () => {
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: {} as never,
       reminderRepo: {} as never,
-      sceneStorage: { get: mock(() => Promise.resolve(null)) },
+      sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
       proposeTimeSessions,
+      conversationLogger: null as never,
     });
 
     await handler(ctx as never);
@@ -134,9 +137,10 @@ describe('message handler: propose time session', () => {
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: {} as never,
       reminderRepo: {} as never,
-      sceneStorage: { get: mock(() => Promise.resolve(null)) },
+      sceneStorage: { get: mock(() => Promise.resolve(null)), delete: mock(() => {}) },
       proposeTimeSessions,
       invitationService: invitationService as never,
+      conversationLogger: null as never,
     });
 
     const ctx = {

@@ -56,6 +56,7 @@ describe('handleCreateBirthdayEvent', () => {
       eventService,
       holidayService,
       chatHistory: chatHistoryRepo,
+      conversationLogger: null as never,
       userRepo,
       reminderRepo,
       birthdayService,

@@ -5,9 +5,18 @@ import { addMinutes } from 'date-fns';
 import { CB, t } from '../../config/constants.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { parseDuration, parseRecurrence, parseSimpleDate } from '../../utils/date.ts';
-import { eventActionsKeyboard, recurrenceEndKeyboard, recurrenceKeyboard, skipKeyboard } from '../keyboards.ts';
+import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
+import {
+  eventActionsKeyboard,
+  recurrenceEndKeyboard,
+  recurrenceKeyboard,
+  sceneHelpKeyboard,
+  skipKeyboard,
+} from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
+
+/** Step indices that accept only button presses. Text input on these triggers AI (scene-pause Trigger 2). */
+export const CALLBACK_ONLY_STEP_INDICES = new Set([3, 4]); // recurrence (3), recurrence-end (4)
 
 interface AddEventState {
   title?: string;
@@ -74,6 +83,7 @@ export function createAddEventScene(eventService: EventService) {
             lang === 'ru'
               ? 'Не могу разобрать дату. Попробуйте: "завтра 15:00"'
               : 'Can\'t parse that date. Try: "tomorrow 15:00"',
+            { reply_markup: sceneHelpKeyboard(lang) },
           );
           return;
         }
@@ -124,13 +134,14 @@ export function createAddEventScene(eventService: EventService) {
             lang === 'ru'
               ? 'Не понял. Примеры: 1ч, 30м, 1ч30м, 1 час 30 минут.'
               : "Can't parse. Examples: 1h, 30m, 1h30m, 1 hour 30 min.",
+            { reply_markup: sceneHelpKeyboard(lang) },
           );
           return;
         }
         await context.scene.update({ endAt: addMinutes(new Date(startAt), mins).toISOString() });
       })
-      // Step 3: Recurrence (keyboard + custom text)
-      .step(['message', 'callback_query'], async (context) => {
+      // Step 3: Recurrence (button selection only — text input is handled by AI via Trigger 2)
+      .step('callback_query', async (context) => {
         const lang = getSceneLang(context);
         if (context.scene.step.firstTime) {
           await context.send(t(lang).recurrence_prompt, {
@@ -139,44 +150,28 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        if (isCallbackQuery(context)) {
-          const data = getCallbackData(context)!;
-          const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
-          await answerCallback(context);
+        const data = getCallbackData(context)!;
+        const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
+        await answerCallback(context);
 
-          if (value === 'none') {
-            await context.scene.update({ recurrenceRule: null });
-            // Skip recurrence-end step (step 4) → jump to description (step 5)
-            await context.scene.step.go(5, true);
-            return;
-          }
-
-          if (value === 'custom') {
-            await context.send(t(lang).recurrence_custom_prompt);
-            return;
-          }
-
-          // DAILY, WEEKLY, MONTHLY, YEARLY
-          await context.scene.update({ recurrenceRule: `FREQ=${value}` });
+        if (value === 'none') {
+          await context.scene.update({ recurrenceRule: null });
+          // Skip recurrence-end step (step 4) → jump to description (step 5)
+          await context.scene.step.go(5, true);
           return;
         }
 
-        // Text input for custom recurrence
-        const text = getMessageText(context);
-        if (!text) return;
-
-        const parsed = parseRecurrence(text);
-        if (!parsed) {
-          await context.send(t(lang).recurrence_custom_prompt);
+        if (value === 'custom') {
+          await context.send(t(lang).recurrence_custom_prompt, { reply_markup: sceneHelpKeyboard(lang) });
           return;
         }
-        const rule = parsed.interval > 1 ? `FREQ=${parsed.freq};INTERVAL=${parsed.interval}` : `FREQ=${parsed.freq}`;
-        await context.scene.update({ recurrenceRule: rule });
+
+        // DAILY, WEEKLY, MONTHLY, YEARLY
+        await context.scene.update({ recurrenceRule: `FREQ=${value}` });
       })
-      // Step 4: Recurrence End (conditional — skipped if no recurrence)
-      .step(['message', 'callback_query'], async (context) => {
+      // Step 4: Recurrence End (button selection only — text input is handled by AI via Trigger 2)
+      .step('callback_query', async (context) => {
         const lang = getSceneLang(context);
-        const user = getSceneUser(context);
         if (context.scene.step.firstTime) {
           await context.send(t(lang).recurrence_end_prompt, {
             reply_markup: recurrenceEndKeyboard(lang),
@@ -184,70 +179,26 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        if (isCallbackQuery(context)) {
-          const data = getCallbackData(context)!;
-          const value = data.replace(`${CB.ADD_REC_END}:`, '');
-          await answerCallback(context);
+        const data = getCallbackData(context)!;
+        const value = data.replace(`${CB.ADD_REC_END}:`, '');
+        await answerCallback(context);
 
-          if (value === 'forever') {
-            // No change to RRULE
-            await context.scene.update({});
-            return;
-          }
-
-          if (value === 'until') {
-            await context.scene.update({ recEndMode: 'until' }, { step: undefined });
-            await context.send(t(lang).recurrence_until_prompt);
-            return;
-          }
-
-          if (value === 'count') {
-            await context.scene.update({ recEndMode: 'count' }, { step: undefined });
-            await context.send(t(lang).recurrence_count_prompt);
-            return;
-          }
-
+        if (value === 'forever') {
+          await context.scene.update({});
           return;
         }
 
-        // Text input — depends on recEndMode
-        const text = getMessageText(context);
-        if (!text) return;
-
-        const { recEndMode, recurrenceRule } = context.scene.state;
-
-        if (recEndMode === 'until') {
-          const parsed = parseSimpleDate(text, user?.timezone ?? 'UTC');
-          if (!parsed) {
-            await context.send(t(lang).recurrence_until_prompt);
-            return;
-          }
-          const untilStr = parsed
-            .toISOString()
-            .replace(/[-:]/g, '')
-            .replace(/\.\d{3}/, '');
-          await context.scene.update({
-            recurrenceRule: `${recurrenceRule};UNTIL=${untilStr}`,
-            recEndMode: undefined,
-          });
+        if (value === 'until') {
+          await context.scene.update({ recEndMode: 'until' }, { step: undefined });
+          await context.send(t(lang).recurrence_until_prompt, { reply_markup: sceneHelpKeyboard(lang) });
           return;
         }
 
-        if (recEndMode === 'count') {
-          const n = Number(text.trim());
-          if (!n || n < 1 || !Number.isInteger(n)) {
-            await context.send(t(lang).recurrence_count_prompt);
-            return;
-          }
-          await context.scene.update({
-            recurrenceRule: `${recurrenceRule};COUNT=${n}`,
-            recEndMode: undefined,
-          });
+        if (value === 'count') {
+          await context.scene.update({ recEndMode: 'count' }, { step: undefined });
+          await context.send(t(lang).recurrence_count_prompt, { reply_markup: sceneHelpKeyboard(lang) });
           return;
         }
-
-        // Shouldn't reach here, but handle gracefully
-        await context.scene.update({});
       })
       // Step 5: Description (text + skip button)
       .step(['message', 'callback_query'], async (context) => {

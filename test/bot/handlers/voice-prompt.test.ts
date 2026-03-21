@@ -20,6 +20,7 @@ function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
     eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
+    conversationLogger: { logUserMessage: mock(() => {}) },
     userRepo: { update: mock(() => {}) },
     reminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },

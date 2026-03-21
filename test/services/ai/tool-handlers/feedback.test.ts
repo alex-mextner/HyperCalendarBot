@@ -59,6 +59,7 @@ describe('handleSendFeedback', () => {
       feedbackRepo,
       botAdminId: ADMIN_ID,
       sendMessageToChat: mock(() => Promise.resolve()),
+      conversationLogger: null as never,
     };
   });
 

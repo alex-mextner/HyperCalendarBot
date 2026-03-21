@@ -13,6 +13,7 @@ import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
+import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
@@ -25,6 +26,7 @@ import { IntentExecutor } from '../services/intent/intent-executor.ts';
 import { IntentLearner } from '../services/intent/intent-learner.ts';
 import { IntentMatcher } from '../services/intent/intent-matcher.ts';
 import { NotificationPreferencesService } from '../services/notification/preferences.ts';
+import { ScenePauseService } from '../services/scene-pause.ts';
 import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
 import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
@@ -61,7 +63,7 @@ import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
-import { createCallbackHandler } from './handlers/callback.handler.ts';
+import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
@@ -169,6 +171,13 @@ export function createBot(
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
+  const conversationLogger = new ConversationLogger(db.chatHistory);
+  const kvStorage = scenesSetup.storage as unknown as {
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+  const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
@@ -224,6 +233,7 @@ export function createBot(
     eventService,
     holidayService,
     chatHistory: db.chatHistory,
+    conversationLogger,
     userRepo: db.users,
     reminderRepo: db.reminders,
     contactRepo: db.contacts,
@@ -332,6 +342,7 @@ export function createBot(
         reply_markup: keyboard,
       });
     },
+    scenePauseService,
   };
 
   bot
@@ -363,34 +374,73 @@ export function createBot(
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .use(async (context, next) => {
       const ctx = context as unknown as {
-        text?: string;
+        message?: { text?: string };
+        edited_message?: { text?: string };
+        callbackQuery?: { data?: string };
         dbUser?: User;
-        chatId?: number;
+        chatId?: number | bigint;
         send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
       };
-      const text = ctx.text;
-      if (text?.startsWith('/') && ctx.dbUser && ctx.chatId) {
-        const commandName = text.split(' ')[0] ?? text;
-        const chatId = Number(ctx.chatId);
-        // Only log private chat commands (group commands have chat_id != user_id)
-        if (chatId === ctx.dbUser.telegram_id) {
-          const userId = ctx.dbUser.telegram_id;
-          db.chatHistory.save(userId, 'user', JSON.stringify({ kind: 'command', name: commandName }));
-          // Capture the first text response from any command as assistant message
-          const originalSend = ctx.send?.bind(ctx);
-          if (originalSend) {
-            let saved = false;
-            ctx.send = async (responseText: string, opts?: Record<string, unknown>) => {
-              const result = await originalSend(responseText, opts);
-              if (!saved) {
-                db.chatHistory.save(userId, 'assistant', responseText);
-                saved = true;
-              }
-              return result;
-            };
-          }
+
+      const user = ctx.dbUser;
+      if (!user) return next();
+
+      const chatId = ctx.chatId ? Number(ctx.chatId) : undefined;
+      const isPrivate = !chatId || chatId === user.telegram_id;
+      const logChatId = isPrivate ? undefined : chatId;
+
+      // Incoming text message (regular or command)
+      const incomingText = ctx.message?.text;
+      if (incomingText) {
+        if (incomingText.startsWith('/')) {
+          conversationLogger.logCommand(user.telegram_id, incomingText.split(' ')[0]!, logChatId);
+        } else {
+          conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId);
         }
       }
+
+      // Edited message
+      const editedText = ctx.edited_message?.text;
+      if (editedText) {
+        conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
+      }
+
+      // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
+      const callbackData = ctx.callbackQuery?.data;
+      if (callbackData) {
+        const firstColon = callbackData.indexOf(':');
+        const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;
+        const payload = firstColon >= 0 ? callbackData.slice(firstColon + 1) : '';
+
+        if (action === 'ai_btn') {
+          const { answerText } = parseAiBtnPayload(payload);
+          conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId);
+        } else {
+          conversationLogger.logButtonPress(user.telegram_id, action, payload || undefined, logChatId);
+        }
+      }
+
+      // Wrap ctx.send and ctx.editText — logs every bot response (intent matcher, scenes, commands, callbacks)
+      // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
+      const originalSend = ctx.send?.bind(ctx);
+      if (originalSend) {
+        (ctx as { send: typeof originalSend }).send = async (text, opts) => {
+          const result = await originalSend(text, opts);
+          conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
+          return result;
+        };
+      }
+
+      const originalEditText = ctx.editText?.bind(ctx);
+      if (originalEditText) {
+        (ctx as { editText: typeof originalEditText }).editText = async (text, opts) => {
+          const result = await originalEditText(text, opts);
+          conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
+          return result;
+        };
+      }
+
       return next();
     })
     .extend(scenesSetup.plugin)
@@ -635,6 +685,10 @@ export function createBot(
         db.contacts,
         scenesSetup.scenes.timezoneScene,
         db.groupChats,
+        {
+          sceneStorage: kvStorage,
+          scenePauseService,
+        },
       )(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)

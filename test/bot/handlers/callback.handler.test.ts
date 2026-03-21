@@ -5,6 +5,7 @@ import {
   handleProposalDecline,
   handleSecretaryAccept,
   handleSecretaryDecline,
+  parseAiBtnPayload,
 } from '../../../src/bot/handlers/callback.handler.ts';
 
 function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
@@ -89,8 +90,7 @@ describe('createCallbackHandler', () => {
     // Should return without error
   });
 
-  test('ai_btn saves to chat history and triggers callback', async () => {
-    const chatHistoryRepo = { save: mock(() => {}) };
+  test('ai_btn triggers callback', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler(
       {} as never,
@@ -103,19 +103,16 @@ describe('createCallbackHandler', () => {
       undefined,
       undefined,
       undefined,
-      chatHistoryRepo as never,
+      undefined, // chatHistoryRepo
       onAiButtonClick,
     );
     const ctx = makeCtx('ai_btn:Да');
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-    // ai_btn does not save to history here — agent.run() → saveUserMessage() handles it
-    expect(chatHistoryRepo.save).not.toHaveBeenCalled();
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
   test('ai_btn with userId restriction allows matching user', async () => {
-    const chatHistoryRepo = { save: mock(() => {}) };
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler(
       {} as never,
@@ -128,37 +125,22 @@ describe('createCallbackHandler', () => {
       undefined,
       undefined,
       undefined,
-      chatHistoryRepo as never,
+      undefined, // chatHistoryRepo
       onAiButtonClick,
     );
     // User 100 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
-    expect(chatHistoryRepo.save).not.toHaveBeenCalled();
   });
 
   test('ai_btn with userId restriction blocks wrong user', async () => {
-    const chatHistoryRepo = { save: mock(() => {}) };
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      chatHistoryRepo as never,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
     // User 200 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Нет', { from: { id: 200 } });
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalledWith({ text: 'Не твой вопрос', show_alert: false });
     expect(ctx.editText).not.toHaveBeenCalled();
-    expect(chatHistoryRepo.save).not.toHaveBeenCalled();
   });
 
   test('share_evt:today shows events for today', async () => {
@@ -360,4 +342,22 @@ test('prop:decline: no-op if caller is not the target', async () => {
   await handleProposalDecline(10, 999, deps as never);
 
   expect(deps.proposalRepo.updateStatus).not.toHaveBeenCalled();
+});
+
+describe('parseAiBtnPayload', () => {
+  test('private chat — plain text payload', () => {
+    expect(parseAiBtnPayload('Да')).toEqual({ answerText: 'Да' });
+  });
+
+  test('group chat — userId:text payload', () => {
+    expect(parseAiBtnPayload('123:Нет')).toEqual({ answerText: 'Нет', restrictedToUserId: 123 });
+  });
+
+  test('non-numeric first segment treated as plain text', () => {
+    expect(parseAiBtnPayload('text:with:colons')).toEqual({ answerText: 'text:with:colons' });
+  });
+
+  test('non-numeric prefix with colons treated as plain text', () => {
+    expect(parseAiBtnPayload('yes:please')).toEqual({ answerText: 'yes:please' });
+  });
 });

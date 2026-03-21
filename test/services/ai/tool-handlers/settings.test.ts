@@ -52,6 +52,7 @@ describe('handleManageSettings', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
+      conversationLogger: null as never,
     };
   });
 

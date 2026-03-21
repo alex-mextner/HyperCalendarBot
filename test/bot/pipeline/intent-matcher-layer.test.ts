@@ -229,7 +229,6 @@ describe('createIntentMatcherLayer', () => {
       makeExecutor({ success: false, response: 'tool error: user not found' }),
       makeToolExecutor(),
       workflowSessions,
-      undefined,
       notifyAdmin,
     );
 
@@ -426,54 +425,4 @@ describe('needsSupplement', () => {
     expect(result.handled).toBe(true);
     expect('needsSupplement' in result).toBe(false);
   });
-
-  test('saves messages with groupChatId in group context', async () => {
-    const saveCalls: { role: string; chatId: number | undefined }[] = [];
-    const chatHistoryRepo = {
-      save: mock((_userId: number, role: string, _text: string, chatId?: number) => saveCalls.push({ role, chatId })),
-    };
-
-    const matcher = makeMatcher({ intentId: 1, captures: {} });
-    const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
-    const executor = makeExecutor({ success: true, response: 'события' });
-
-    const layer = createIntentMatcherLayer(
-      matcher,
-      repo,
-      executor,
-      makeToolExecutor(),
-      makeWorkflowStore(),
-      chatHistoryRepo as never,
-    );
-    await layer(makeCtx(), 'покажи события', {
-      groupContext: { isGroup: true, groupChatId: -100123 },
-    });
-
-    expect(saveCalls[0]?.chatId).toBe(-100123);
-    expect(saveCalls[1]?.chatId).toBe(-100123);
-  });
-});
-
-test('saves user message to chatHistory before auto-response', async () => {
-  const saveCalls: { role: string; text: string }[] = [];
-  const chatHistoryRepo = {
-    save: mock((_userId: number, role: string, text: string) => saveCalls.push({ role, text })),
-  };
-
-  const matcher = makeMatcher({ intentId: 1, captures: {} });
-  const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
-  const executor = makeExecutor({ success: true, response: 'ок, добавил' });
-
-  const layer = createIntentMatcherLayer(
-    matcher,
-    repo,
-    executor,
-    makeToolExecutor(),
-    makeWorkflowStore(),
-    chatHistoryRepo as never,
-  );
-  await layer(makeCtx(), 'добавь встречу');
-
-  expect(saveCalls[0]?.role).toBe('user');
-  expect(saveCalls[1]?.role).toBe('assistant');
 });

@@ -41,6 +41,7 @@ import {
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleCancelScene, handleResumeScene } from './tool-handlers/scenes.ts';
 import {
   handleAddTrigger,
   handleListTriggers,
@@ -337,6 +338,14 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'playwright_action':
       case 'applescript_run':
         return handleAssistantTool(ctx, toolName as AgentCommand['type'], input);
+
+      case 'resume_scene':
+        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleResumeScene(ctx, ctx.scenePauseService);
+
+      case 'cancel_scene':
+        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleCancelScene(ctx, ctx.scenePauseService);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

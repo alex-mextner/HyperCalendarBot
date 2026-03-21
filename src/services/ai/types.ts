@@ -17,6 +17,7 @@ import type { SharingSettingsRepository } from '../../database/repositories/shar
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { EventOccurrence, User } from '../../database/types.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
+import type { ConversationLogger } from '../conversation-logger.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
@@ -39,6 +40,7 @@ export interface AgentContext {
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
+  conversationLogger: ConversationLogger;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
   invitationService?: InvitationService;
@@ -94,6 +96,9 @@ export interface AgentContext {
   conflictChecker?: ConflictChecker;
   scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  scenePauseState?: import('../scene-pause.ts').ScenePauseState;
+  scenePauseService?: import('../scene-pause.ts').ScenePauseService;
+  sceneStorage?: { delete(key: string): Promise<void> };
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   birthdayService?: BirthdayService;

@@ -1040,6 +1040,21 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
     },
   },
   {
+    name: 'resume_scene',
+    description:
+      'Resume the wizard the user was filling in before asking for AI help. ' +
+      'Call this when you have answered the question and they should continue the wizard from where they left off.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'cancel_scene',
+    description:
+      'Cancel and discard the wizard the user was filling in. ' +
+      'Call this when you have completed the action via AI tools (e.g., created the event directly) ' +
+      'and the wizard is no longer needed, OR if the user wants to abort.',
+    input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
     name: 'remember_user_fact',
     description:
       'Save a fact about the user to long-term memory. Use to remember preferences, habits, important people, or anything useful for future conversations. Keep facts compact and specific. type=append adds a new fact; type=rewrite replaces all existing facts (use to consolidate or correct).',
