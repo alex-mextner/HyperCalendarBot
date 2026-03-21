@@ -30,7 +30,7 @@ describe('EventService', () => {
     const eventRepo = new EventRepository(db);
     const reminderRepo = new ReminderRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
-    service = new EventService(eventRepo, reminderRepo);
+    service = new EventService({ eventRepo, reminderRepo });
   });
 
   test('createEvent inserts event_reminders rows when materializer is provided', () => {
@@ -38,7 +38,11 @@ describe('EventService', () => {
     const prefsRepo = new NotificationPreferencesRepository(db);
     prefsRepo.ensureDefaults(USER_ID);
     const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
-    const svc = new EventService(new EventRepository(db), new ReminderRepository(db), mat);
+    const svc = new EventService({
+      eventRepo: new EventRepository(db),
+      reminderRepo: new ReminderRepository(db),
+      materializer: mat,
+    });
     const event = svc.createEvent({
       user_id: USER_ID,
       title: 'Coffee',
@@ -567,7 +571,7 @@ describe('EventService', () => {
       const callback = mock(() => {});
       const eventRepo = new EventRepository(db);
       const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, callback);
+      const svc = new EventService({ eventRepo, reminderRepo, onEventDeleted: callback });
 
       const event = svc.createEvent({
         user_id: USER_ID,
@@ -586,7 +590,7 @@ describe('EventService', () => {
       const callback = mock(() => {});
       const eventRepo = new EventRepository(db);
       const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
+      const svc = new EventService({ eventRepo, reminderRepo, onEventTimeChanged: callback });
 
       const event = svc.createEvent({
         user_id: USER_ID,
@@ -605,7 +609,7 @@ describe('EventService', () => {
       const callback = mock(() => {});
       const eventRepo = new EventRepository(db);
       const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
+      const svc = new EventService({ eventRepo, reminderRepo, onEventTimeChanged: callback });
 
       const event = svc.createEvent({
         user_id: USER_ID,
@@ -628,7 +632,7 @@ describe('EventService', () => {
       const pushSync = mock((_userId: number, _eventId: number, _action: 'create' | 'update' | 'delete') => {});
       const eventRepo = new EventRepository(db);
       const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, pushSync);
+      const svc = new EventService({ eventRepo, reminderRepo, pushSync });
       return { svc, pushSync };
     }
 

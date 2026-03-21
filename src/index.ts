@@ -237,7 +237,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       voiceSender,
     );
 
-    const voiceEventService = new EventService(db.events, db.reminders);
+    const voiceEventService = new EventService({ eventRepo: db.events, reminderRepo: db.reminders });
     const voiceHolidayService = new HolidayService(db.holidays);
 
     const { markStress, numbersToWords } = await import('./services/voice/stress-marker.ts');

@@ -38,7 +38,7 @@ describe('buildSystemPrompt', () => {
       timezone: 'Europe/Kyiv',
       language: 'en',
     });
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user,

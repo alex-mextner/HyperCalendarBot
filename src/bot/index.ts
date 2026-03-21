@@ -135,21 +135,18 @@ export function createBot(
   >,
 ) {
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
-  const eventService = new EventService(
-    db.events,
-    db.reminders,
+  const eventService = new EventService({
+    eventRepo: db.events,
+    reminderRepo: db.reminders,
     materializer,
-    undefined,
-    undefined,
-    undefined,
-    db.participants,
-    (userIds, text) => {
+    participantRepo: db.participants,
+    onParticipantsNotify: (userIds, text) => {
       for (const uid of userIds) {
         bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
       }
     },
-    domainEventBus,
-  );
+    domainEvents: domainEventBus,
+  });
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
   const birthdayService = new BirthdayService(

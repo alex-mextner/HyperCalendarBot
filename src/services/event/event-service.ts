@@ -16,18 +16,40 @@ export interface FreeSlot {
   durationMinutes: number;
 }
 
+export interface EventServiceDeps {
+  eventRepo: EventRepository;
+  reminderRepo: ReminderRepository;
+  materializer?: ReminderMaterializer;
+  pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void;
+  onEventDeleted?: (eventId: number, userId: number) => void;
+  onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void;
+  participantRepo?: ParticipantRepository;
+  onParticipantsNotify?: (userIds: number[], text: string) => void;
+  domainEvents?: DomainEventBus;
+}
+
 export class EventService {
-  constructor(
-    private eventRepo: EventRepository,
-    private reminderRepo: ReminderRepository,
-    private materializer?: ReminderMaterializer,
-    private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void,
-    private onEventDeleted?: (eventId: number, userId: number) => void,
-    private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void,
-    private participantRepo?: ParticipantRepository,
-    private onParticipantsNotify?: (userIds: number[], text: string) => void,
-    private domainEvents?: DomainEventBus,
-  ) {}
+  private eventRepo: EventRepository;
+  private reminderRepo: ReminderRepository;
+  private materializer?: ReminderMaterializer;
+  private pushSync?: (userId: number, eventId: number, action: 'create' | 'update' | 'delete') => void;
+  private onEventDeleted?: (eventId: number, userId: number) => void;
+  private onEventTimeChanged?: (eventId: number, userId: number, newStartAt: string) => void;
+  private participantRepo?: ParticipantRepository;
+  private onParticipantsNotify?: (userIds: number[], text: string) => void;
+  private domainEvents?: DomainEventBus;
+
+  constructor(deps: EventServiceDeps) {
+    this.eventRepo = deps.eventRepo;
+    this.reminderRepo = deps.reminderRepo;
+    this.materializer = deps.materializer;
+    this.pushSync = deps.pushSync;
+    this.onEventDeleted = deps.onEventDeleted;
+    this.onEventTimeChanged = deps.onEventTimeChanged;
+    this.participantRepo = deps.participantRepo;
+    this.onParticipantsNotify = deps.onParticipantsNotify;
+    this.domainEvents = deps.domainEvents;
+  }
 
   private getSyncUserId(event: CalendarEvent): number {
     return event.owner_type === 'group' && event.created_by ? event.created_by : event.user_id;
