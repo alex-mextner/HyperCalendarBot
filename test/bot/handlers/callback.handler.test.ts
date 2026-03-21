@@ -73,7 +73,7 @@ describe('createCallbackHandler', () => {
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalled();
     const text = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
-    expect(text).toBe('OK');
+    expect(text).toBe('❌ Закрыто');
   });
 
   test('handles unknown action gracefully', async () => {

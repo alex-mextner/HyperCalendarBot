@@ -108,7 +108,7 @@ describe('intent_accept callback handler', () => {
     const handler = makeHandler(intentRepo);
     const ctx = makeCtx(`intent_accept:${id}`);
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledWith('Intent approved ✅');
+    expect(ctx.answer).toHaveBeenCalledWith('✅ Intent approved');
     expect(intentRepo.getById(id)!.status).toBe('approved');
     expect(ctx.editText).toHaveBeenCalled();
     const editArg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
@@ -139,7 +139,7 @@ describe('intent_accept callback handler', () => {
     const handler = makeHandler(intentRepo);
     const ctx = makeCtx(`intent_reject:${id}`);
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledWith('Intent rejected ❌');
+    expect(ctx.answer).toHaveBeenCalledWith('❌ Intent rejected');
     expect(intentRepo.getById(id)!.status).toBe('rejected');
     expect(ctx.editText).toHaveBeenCalled();
     const editArg = (ctx.editText.mock.calls[0] as unknown[])[0] as string;

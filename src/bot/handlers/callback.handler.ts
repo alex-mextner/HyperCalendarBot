@@ -176,9 +176,7 @@ export function createCallbackHandler(
         await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState });
 
         const lang = user.language as 'en' | 'ru';
-        await ctx.send(
-          lang === 'ru' ? 'AI поможет. Просто напиши — что затрудняет?' : 'AI will help. Just tell me what you need.',
-        );
+        await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);
         return;
       }
 
@@ -186,11 +184,12 @@ export function createCallbackHandler(
       if (action === CB.EVENT_VIEW) {
         if (payload === 'cancel') {
           await ctx.answer();
-          return ctx.editText('OK');
+          return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.closed);
         }
         const eventId = Number(payload);
         const event = eventService.getEvent(eventId, user.telegram_id);
-        if (!event) return ctx.answer({ text: 'Not found' });
+        const lang = (user.language ?? 'en') as Lang;
+        if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
         const detail = formatEventDetail(event, user.timezone, user.language);
         await ctx.answer();
         return ctx.editText(detail, {
@@ -203,7 +202,7 @@ export function createCallbackHandler(
       if (action === CB.EVENT_EDIT) {
         if (payload === 'cancel') {
           await ctx.answer();
-          return ctx.editText('OK');
+          return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.editCancelled);
         }
         const colonIdx = payload.indexOf(':');
         if (colonIdx === -1) {
@@ -219,7 +218,7 @@ export function createCallbackHandler(
         const [eidStr, field] = payload.split(':');
         if (field === 'cancel' || eidStr === 'cancel') {
           await ctx.answer();
-          return ctx.editText('OK');
+          return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.editCancelled);
         }
         return handleEditFieldCallback(ctx, user, Number(eidStr), field!, editValueScene);
       }
@@ -228,7 +227,7 @@ export function createCallbackHandler(
       if (action === CB.EVENT_DELETE) {
         if (payload === 'cancel') {
           await ctx.answer();
-          return ctx.editText('OK');
+          return ctx.editText(t((user.language ?? 'en') as Lang).callbackErrors.deletionCancelled);
         }
         const colonIdx = payload.indexOf(':');
         if (colonIdx === -1) {
@@ -254,7 +253,7 @@ export function createCallbackHandler(
 
         if (scope === 'this') {
           const exception = eventService.editOccurrence(eventId, occurrenceDate, user.telegram_id);
-          if (!exception) return ctx.answer({ text: 'Error' });
+          if (!exception) return ctx.answer({ text: t(lang).callbackErrors.error });
           await ctx.answer();
           return ctx.editText(formatEventDetail(exception, user.timezone, lang), {
             parse_mode: 'HTML',
@@ -264,7 +263,7 @@ export function createCallbackHandler(
 
         if (scope === 'future') {
           const newTemplate = eventService.splitRecurrence(eventId, occurrenceDate, user.telegram_id);
-          if (!newTemplate) return ctx.answer({ text: 'Error' });
+          if (!newTemplate) return ctx.answer({ text: t(lang).callbackErrors.error });
           await ctx.answer();
           return ctx.editText(formatEventDetail(newTemplate, user.timezone, lang), {
             parse_mode: 'HTML',
@@ -335,7 +334,7 @@ export function createCallbackHandler(
             return ctx.editText(t(lang).gcal_disconnected);
           }
           await ctx.answer();
-          return ctx.editText('OK');
+          return ctx.editText(t(lang).callbackErrors.disconnectCancelled);
         }
         if (subAction === 'onboard') {
           if (subPayload === 'later') {
@@ -367,6 +366,7 @@ export function createCallbackHandler(
       // Image: daily agenda
       if (action === CB.IMG_DAILY && renderService) {
         const dateIso = payload;
+        const lang = (user.language ?? 'en') as Lang;
         await ctx.answer();
 
         const now = new Date();
@@ -418,14 +418,14 @@ export function createCallbackHandler(
               imageLogger.error({ err }, 'autoPin failed');
             });
           } else {
-            await ctx.answer({ text: '⚠️ Could not send image' });
+            await ctx.answer({ text: t(lang).callbackErrors.couldNotSendImage });
           }
         } catch (err) {
           imageLogger.error({ err }, 'Render failed');
           if (ctx.message) {
-            await ctx.message.send('⚠️ Image generation failed. Use text version above.');
+            await ctx.message.send(t(lang).callbackErrors.imageGenerationFailed);
           } else {
-            await ctx.answer({ text: '⚠️ Render failed' });
+            await ctx.answer({ text: t(lang).callbackErrors.renderFailed });
           }
         }
         return;
@@ -435,6 +435,7 @@ export function createCallbackHandler(
 
       if (action === CB.IMG_WEEKLY && renderService) {
         const weekStartIso = payload;
+        const lang = (user.language ?? 'en') as Lang;
         await ctx.answer();
 
         const now = new Date();
@@ -490,14 +491,14 @@ export function createCallbackHandler(
               imageLogger.error({ err }, 'autoPin failed');
             });
           } else {
-            await ctx.answer({ text: '⚠️ Could not send image' });
+            await ctx.answer({ text: t(lang).callbackErrors.couldNotSendImage });
           }
         } catch (err) {
           imageLogger.error({ err }, 'Render failed');
           if (ctx.message) {
-            await ctx.message.send('⚠️ Image generation failed. Use text version above.');
+            await ctx.message.send(t(lang).callbackErrors.imageGenerationFailed);
           } else {
-            await ctx.answer({ text: '⚠️ Render failed' });
+            await ctx.answer({ text: t(lang).callbackErrors.renderFailed });
           }
         }
         return;
@@ -529,7 +530,7 @@ export function createCallbackHandler(
             const proposedTime = new Date(baseTime + offsetMs).toISOString().replace(/\.\d{3}Z$/, 'Z');
             const propResult = invitationService.proposeTime(invId, user.telegram_id, proposedTime);
             if (!propResult.success) {
-              await ctx.answer({ text: propResult.error ?? 'Error' });
+              await ctx.answer({ text: propResult.error ?? t(lang).callbackErrors.error });
               return;
             }
             const formatted = formatProposedTime(proposedTime, user.timezone, lang);
@@ -561,7 +562,7 @@ export function createCallbackHandler(
         if (subAction === 'reschedule') {
           const reschedResult = invitationService.rescheduleFromProposal(invId, user.telegram_id);
           if (!reschedResult.success) {
-            await ctx.answer({ text: reschedResult.error ?? 'Error' });
+            await ctx.answer({ text: reschedResult.error ?? t(lang).callbackErrors.error });
             return;
           }
           const invitation = reschedResult.invitation!;
@@ -601,7 +602,7 @@ export function createCallbackHandler(
         if (subAction === 'dismiss') {
           const keepResult = invitationService.keepOriginalTime(invId, user.telegram_id);
           if (!keepResult.success) {
-            await ctx.answer({ text: keepResult.error ?? 'Error' });
+            await ctx.answer({ text: keepResult.error ?? t(lang).callbackErrors.error });
             return;
           }
           const invitation = keepResult.invitation!;
@@ -685,7 +686,7 @@ export function createCallbackHandler(
             await ctx.scene.enter(onboardingScene);
           }
         } else {
-          await ctx.answer(result.error ?? 'Error');
+          await ctx.answer(result.error ?? t(lang).callbackErrors.error);
         }
         return;
       }
@@ -694,25 +695,26 @@ export function createCallbackHandler(
       if (action === CB.EDIT_PROPOSAL && editProposalDeps) {
         const subAction = parts[1];
         const proposalId = Number(parts[2]);
+        const lang = (user.language ?? 'en') as Lang;
         const proposal = editProposalDeps.editProposalRepo.findById(proposalId);
 
         if (!proposal) {
-          await ctx.answer({ text: 'Proposal not found' });
+          await ctx.answer({ text: t(lang).callbackErrors.proposalNotFound });
           return;
         }
 
         if (proposal.status !== 'pending') {
-          await ctx.answer({ text: `Already ${proposal.status}` });
+          await ctx.answer({ text: t(lang).callbackErrors.proposalAlreadyProcessed(proposal.status) });
           return;
         }
 
         const ownerId = eventService.getEventOwnerId(proposal.event_id);
         if (!ownerId) {
-          await ctx.answer({ text: 'Not found' });
+          await ctx.answer({ text: t(lang).callbackErrors.notFound });
           return;
         }
         if (ownerId !== user.telegram_id) {
-          await ctx.answer({ text: 'Not authorized' });
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
           return;
         }
 
@@ -722,19 +724,27 @@ export function createCallbackHandler(
           editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
           await ctx.answer();
           await ctx.editText(
-            updated ? `✅ Proposal accepted. Event "${updated.title}" updated.` : '✅ Proposal accepted.',
+            updated
+              ? t(lang).callbackErrors.proposalAccepted(updated.title)
+              : t(lang).callbackErrors.proposalAcceptedNoEvent,
           );
 
+          // Proposer language unknown without DB lookup — use 'en' as fallback
           editProposalDeps
-            .sendMessage(proposal.proposer_id, `✅ Your edit proposal was accepted.`, { parse_mode: 'HTML' })
+            .sendMessage(proposal.proposer_id, t('en').callbackErrors.proposalAcceptedNotification, {
+              parse_mode: 'HTML',
+            })
             .catch(() => {});
         } else if (subAction === 'reject') {
           editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
           await ctx.answer();
-          await ctx.editText('❌ Proposal rejected.');
+          await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
+          // Proposer language unknown without DB lookup — use 'en' as fallback
           editProposalDeps
-            .sendMessage(proposal.proposer_id, `❌ Your edit proposal was rejected.`, { parse_mode: 'HTML' })
+            .sendMessage(proposal.proposer_id, t('en').callbackErrors.proposalRejectedNotification, {
+              parse_mode: 'HTML',
+            })
             .catch(() => {});
         }
         return;
@@ -744,11 +754,12 @@ export function createCallbackHandler(
       if (action === 'ai_btn') {
         const firstColon = data.indexOf(':');
         const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1));
+        const lang = (user.language ?? 'en') as Lang;
 
         // In groups, only the user who triggered the question can answer
         const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
         if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
-          await ctx.answer({ text: 'Не твой вопрос', show_alert: false });
+          await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
           return;
         }
 
@@ -786,9 +797,9 @@ export function createCallbackHandler(
           }
 
           const agenda = formatDayAgenda(occurrences, date.toISOString(), user.timezone, lang);
-          const hint = lang === 'ru' ? '↗️ Перешлите это сообщение' : '↗️ Forward this message';
+          const hint = t(lang).callbackErrors.forwardHint;
           await ctx.answer();
-          await ctx.editText(lang === 'ru' ? '✅ Отправлено ниже' : '✅ Sent below');
+          await ctx.editText(t(lang).callbackErrors.sentBelow);
           if (ctx.message) {
             await ctx.message.send(`${agenda}\n\n${hint}`, { parse_mode: 'HTML' });
           }
@@ -798,11 +809,11 @@ export function createCallbackHandler(
         if (subAction === 'evt') {
           const eventId = Number(subParts[1]);
           const event = eventService.getEvent(eventId, user.telegram_id);
-          if (!event) return ctx.answer({ text: 'Not found' });
+          if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
           const detail = formatEventDetail(event, user.timezone, lang);
-          const hint = lang === 'ru' ? '↗️ Перешлите это сообщение' : '↗️ Forward this message';
+          const hint = t(lang).callbackErrors.forwardHint;
           await ctx.answer();
-          await ctx.editText(lang === 'ru' ? '✅ Отправлено ниже' : '✅ Sent below');
+          await ctx.editText(t(lang).callbackErrors.sentBelow);
           if (ctx.message) {
             await ctx.message.send(`${detail}\n\n${hint}`, { parse_mode: 'HTML' });
           }
@@ -818,12 +829,12 @@ export function createCallbackHandler(
         const lang = (user.language ?? 'en') as Lang;
         if (payload === 'cancel') {
           await ctx.answer();
-          await ctx.editText(lang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+          await ctx.editText(t(lang).callbackErrors.cancelled);
           return;
         }
         const eventId = Number(payload);
         const event = eventService.getEvent(eventId, user.telegram_id);
-        if (!event) return ctx.answer({ text: 'Not found' });
+        if (!event) return ctx.answer({ text: t(lang).callbackErrors.notFound });
         await ctx.answer();
         const contacts = contactRepo ? contactRepo.list(user.telegram_id) : [];
         await ctx.editText(
@@ -840,7 +851,7 @@ export function createCallbackHandler(
         const invLang = (user.language ?? 'en') as Lang;
         if (payload === 'cancel') {
           await ctx.answer();
-          await ctx.editText(invLang === 'ru' ? '❌ Отменено' : '❌ Cancelled');
+          await ctx.editText(t(invLang).callbackErrors.cancelled);
           return;
         }
         const colonIdx = payload.indexOf(':');
@@ -850,18 +861,15 @@ export function createCallbackHandler(
         if (sub === 'picker' || sub === 'chat') {
           const event = eventService.getEvent(eventId, user.telegram_id);
           if (!event) {
-            await ctx.answer({ text: 'Not found' });
+            await ctx.answer({ text: t(invLang).callbackErrors.notFound });
             return;
           }
           await ctx.answer();
-          await ctx.editText(
-            invLang === 'ru' ? `📨 ${event.title}\nВыберите контакт:` : `📨 ${event.title}\nPick a contact:`,
-            { parse_mode: 'HTML' },
-          );
+          await ctx.editText(t(invLang).callbackErrors.invitePickContact(event.title), { parse_mode: 'HTML' });
           const { Keyboard } = await import('gramio');
           if (sub === 'picker') {
             const kb = new Keyboard()
-              .requestUsers(invLang === 'ru' ? '👤 Выбрать пользователя' : '👤 Select user', eventId, {
+              .requestUsers(t(invLang).callbackErrors.inviteSelectUser, eventId, {
                 user_is_bot: false,
                 max_quantity: 10,
                 request_name: true,
@@ -869,15 +877,15 @@ export function createCallbackHandler(
               })
               .resized()
               .oneTime();
-            await ctx.send(invLang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', { reply_markup: kb });
+            await ctx.send(t(invLang).callbackErrors.inviteTapButton, { reply_markup: kb });
           } else {
             const kb = new Keyboard()
-              .requestChat(invLang === 'ru' ? '👥 Выбрать группу' : '👥 Select group', eventId, {
+              .requestChat(t(invLang).callbackErrors.inviteSelectGroup, eventId, {
                 chat_is_channel: false,
               })
               .resized()
               .oneTime();
-            await ctx.send(invLang === 'ru' ? 'Нажмите кнопку ниже:' : 'Tap button below:', { reply_markup: kb });
+            await ctx.send(t(invLang).callbackErrors.inviteTapButton, { reply_markup: kb });
           }
           return;
         }
@@ -887,11 +895,11 @@ export function createCallbackHandler(
           const inviteeId = Number(sub);
           const ownerId = eventService.getEventOwnerId(eventId);
           if (!ownerId) {
-            await ctx.answer({ text: 'Not found' });
+            await ctx.answer({ text: t(invLang).callbackErrors.notFound });
             return;
           }
           if (ownerId !== user.telegram_id) {
-            await ctx.answer({ text: 'Not authorized' });
+            await ctx.answer({ text: t(invLang).callbackErrors.notAuthorized });
             return;
           }
           const event = eventService.getEvent(eventId, user.telegram_id);
@@ -899,7 +907,7 @@ export function createCallbackHandler(
           const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
           const result = forceInviteDeps.invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
           if (!result.success || !result.invitation) {
-            await ctx.answer({ text: result.error ?? 'Error' });
+            await ctx.answer({ text: result.error ?? t(invLang).callbackErrors.error });
             return;
           }
           const invitation = result.invitation;
@@ -920,7 +928,7 @@ export function createCallbackHandler(
               cmdLogger.error({ err: err, inviteeId }, 'Invite contact send failed');
             });
         } else {
-          await ctx.answer({ text: 'Not configured' });
+          await ctx.answer({ text: t(invLang).callbackErrors.notConfigured });
         }
         return;
       }
@@ -935,11 +943,11 @@ export function createCallbackHandler(
         // Security: verify user is event owner
         const ownerId = eventService.getEventOwnerId(eventId);
         if (!ownerId) {
-          await ctx.answer({ text: 'Not found' });
+          await ctx.answer({ text: t(invLang).callbackErrors.notFound });
           return;
         }
         if (ownerId !== user.telegram_id) {
-          await ctx.answer({ text: 'Not authorized' });
+          await ctx.answer({ text: t(invLang).callbackErrors.notAuthorized });
           return;
         }
 
@@ -949,7 +957,7 @@ export function createCallbackHandler(
         const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
 
         await ctx.answer();
-        await ctx.editText(invLang === 'ru' ? '⏳ Отправляем приглашения...' : '⏳ Sending invitations...');
+        await ctx.editText(t(invLang).callbackErrors.inviteSending);
 
         for (const inviteeId of inviteeIds) {
           const result = forceInviteDeps.invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
@@ -983,11 +991,11 @@ export function createCallbackHandler(
         const eventId = Number(payload);
         const ownerId = eventService.getEventOwnerId(eventId);
         if (!ownerId) {
-          await ctx.answer({ text: 'Not found' });
+          await ctx.answer({ text: t(invLang).callbackErrors.notFound });
           return;
         }
         if (ownerId !== user.telegram_id) {
-          await ctx.answer({ text: 'Not authorized' });
+          await ctx.answer({ text: t(invLang).callbackErrors.notAuthorized });
           return;
         }
         await ctx.answer();
@@ -1003,7 +1011,7 @@ export function createCallbackHandler(
       if (action === CB.INV_CANCEL) {
         const invLang = (user.language ?? 'en') as Lang;
         await ctx.answer();
-        await ctx.editText(invLang === 'ru' ? '❌ Приглашение отменено' : '❌ Invitation cancelled');
+        await ctx.editText(t(invLang).callbackErrors.invitationCancelled);
         return;
       }
 
@@ -1017,7 +1025,8 @@ export function createCallbackHandler(
         if (payload === 'change_tz') {
           if (!timezoneScene) {
             cmdLogger.error('timezoneScene not wired into createCallbackHandler');
-            await ctx.answer('Недоступно');
+            const lang = (user.language ?? 'en') as Lang;
+            await ctx.answer(t(lang).callbackErrors.unavailable);
             return;
           }
           const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
@@ -1061,20 +1070,22 @@ export function createCallbackHandler(
 
       // Feedback: admin closes a thread
       if (action === 'fb_close' && feedbackDeps) {
+        const lang = (user.language ?? 'en') as Lang;
         if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
-          await ctx.answer({ text: 'Not authorized' });
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
           return;
         }
         const threadId = Number(payload);
         const thread = feedbackDeps.feedbackRepo.getThread(threadId);
         if (!thread) {
-          await ctx.answer({ text: 'Thread not found' });
+          await ctx.answer({ text: t(lang).callbackErrors.threadNotFound });
           return;
         }
         feedbackDeps.feedbackRepo.closeThread(threadId);
-        await ctx.answer({ text: 'Thread closed' });
+        await ctx.answer({ text: t(lang).callbackErrors.threadClosed });
         await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
-        feedbackDeps.sendMessage(thread.user_id, 'Your feedback thread has been resolved.').catch((e: unknown) => {
+        // Thread user language unknown without DB lookup — use 'en' as fallback
+        feedbackDeps.sendMessage(thread.user_id, t('en').callbackErrors.feedbackThreadResolved).catch((e: unknown) => {
           cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
         });
         return;
@@ -1082,18 +1093,19 @@ export function createCallbackHandler(
 
       // Feedback: admin initiates a reply
       if (action === 'fb_reply' && feedbackDeps) {
+        const lang = (user.language ?? 'en') as Lang;
         if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
-          await ctx.answer({ text: 'Not authorized' });
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
           return;
         }
         const threadId = Number(payload);
         const thread = feedbackDeps.feedbackRepo.getThread(threadId);
         if (!thread) {
-          await ctx.answer({ text: 'Thread not found' });
+          await ctx.answer({ text: t(lang).callbackErrors.threadNotFound });
           return;
         }
         feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
-        await ctx.answer({ text: 'Send your reply message' });
+        await ctx.answer({ text: t(lang).callbackErrors.sendReplyMessage });
         return;
       }
 
@@ -1171,9 +1183,10 @@ export function createCallbackHandler(
       // Intent verification: accept
       if (action === 'intent_accept' && intentDeps) {
         const intentId = Number(payload);
+        const lang = (user.language ?? 'en') as Lang;
         intentDeps.intentRepo.updateStatus(intentId, 'approved');
         intentDeps.intentMatcher?.reload();
-        await ctx.answer('✅ Intent approved');
+        await ctx.answer(t(lang).callbackErrors.intentApproved);
         const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
         await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
         return;
@@ -1182,8 +1195,9 @@ export function createCallbackHandler(
       // Intent verification: reject
       if (action === 'intent_reject' && intentDeps) {
         const intentId = Number(payload);
+        const lang = (user.language ?? 'en') as Lang;
         intentDeps.intentRepo.updateStatus(intentId, 'rejected');
-        await ctx.answer('❌ Intent rejected');
+        await ctx.answer(t(lang).callbackErrors.intentRejected);
         const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
         await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
         return;
@@ -1192,6 +1206,7 @@ export function createCallbackHandler(
       // Intent verification: edit — store admin edit session
       if (action === 'intent_edit' && intentDeps) {
         const intentId = Number(payload);
+        const lang = (user.language ?? 'en') as Lang;
         if (intentDeps.adminEditSessions) {
           intentDeps.adminEditSessions.set(user.telegram_id, {
             intentId,
@@ -1199,7 +1214,7 @@ export function createCallbackHandler(
             createdAt: Date.now(),
           });
         }
-        await ctx.answer('Send edit instructions...');
+        await ctx.answer(t(lang).callbackErrors.sendEditInstructions);
         return;
       }
 
@@ -1255,7 +1270,10 @@ export function createCallbackHandler(
         return;
       }
       cmdLogger.error({ error: errStr, action }, 'Callback handler error');
-      await ctx.answer({ text: 'Error' }).catch((e) => cmdLogger.debug({ err: e }, 'answer() in error handler'));
+      const lang = (user?.language ?? 'en') as Lang;
+      await ctx
+        .answer({ text: t(lang).callbackErrors.error })
+        .catch((e) => cmdLogger.debug({ err: e }, 'answer() in error handler'));
     }
   };
 }

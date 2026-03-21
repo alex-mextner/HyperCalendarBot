@@ -57,12 +57,12 @@ function makeHandler(
 // ── EVENT_VIEW ──
 
 describe('EVENT_VIEW callback', () => {
-  test('cancel payload edits text to OK', async () => {
+  test('cancel payload edits text to closed', async () => {
     const ctx = makeCtx('ev:cancel');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Closed');
   });
 
   test('event not found returns answer with Not found', async () => {
@@ -103,12 +103,12 @@ describe('EVENT_VIEW callback', () => {
 // ── EVENT_EDIT ──
 
 describe('EVENT_EDIT callback', () => {
-  test('cancel payload edits text to OK', async () => {
+  test('cancel payload edits text to edit cancelled', async () => {
     const ctx = makeCtx('ee:cancel');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Edit cancelled');
   });
 
   test('one-off event delegates to handleEditCallback', async () => {
@@ -147,32 +147,32 @@ describe('EVENT_EDIT callback', () => {
 // ── EDIT_FIELD ──
 
 describe('EDIT_FIELD callback', () => {
-  test('cancel in event id position edits text to OK', async () => {
+  test('cancel in event id position edits text to edit cancelled', async () => {
     const ctx = makeCtx('ef:cancel');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Edit cancelled');
   });
 
-  test('cancel as field name edits text to OK', async () => {
+  test('cancel as field name edits text to edit cancelled', async () => {
     const ctx = makeCtx('ef:42:cancel');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Edit cancelled');
   });
 });
 
 // ── EVENT_DELETE ──
 
 describe('EVENT_DELETE callback', () => {
-  test('cancel payload edits text to OK', async () => {
+  test('cancel payload edits text to deletion cancelled', async () => {
     const ctx = makeCtx('ed:cancel');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Deletion cancelled');
   });
 
   test('one-off event delegates to handleDeleteCallback', async () => {
@@ -310,12 +310,12 @@ describe('GCAL callback', () => {
     expect(ctx.editText).toHaveBeenCalled();
   });
 
-  test('gcal disconnect no edits text to OK', async () => {
+  test('gcal disconnect no edits text to disconnect cancelled', async () => {
     const ctx = makeCtx('gc:disconnect:no');
     const handler = makeHandler();
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalled();
-    expect(ctx.editText).toHaveBeenCalledWith('OK');
+    expect(ctx.editText).toHaveBeenCalledWith('❌ Disconnection cancelled');
   });
 
   test('gcal onboard later deletes message', async () => {

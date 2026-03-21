@@ -190,6 +190,7 @@ export class CalendarBotAgent {
     ctx.sender = effectiveSender;
     const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
+      noPlaceholder: ctx.isGroup,
     });
     await writer.init();
 

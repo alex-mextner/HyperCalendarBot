@@ -371,6 +371,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupChatId?: number;
       groupTitle?: string;
       onBotResponse?: (messageId: number) => void;
+      incomingMessageId?: number;
     },
   ): AgentContext => {
     const activeFor = deps.secretaryRepo?.getActiveSecretaryFor(user.telegram_id) ?? [];
@@ -389,6 +390,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       user,
       chatId,
       messageText,
+      incomingMessageId: groupInfo?.incomingMessageId,
       isGroup: groupInfo?.isGroup ?? false,
       groupChatId: groupInfo?.groupChatId,
       groupTitle: groupInfo?.groupTitle,
@@ -870,6 +872,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     // In groups: only respond to replies, mentions, or calendar keywords
     const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
     const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+    let isGroupSessionMessage = false;
 
     // Propose-time session: invitee typing a new time in response to an invite (private chats only)
     if (!isGroup && deps.proposeTimeSessions) {
@@ -920,18 +923,21 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
       if (!isReplyToBot && !isGroupRelevant(text, botMention)) {
         if (!hasSession) return; // No trigger, no session — skip
-        // Session active but no keyword — tick and continue to AI
+        // Session active but no keyword — tick and keep typing indicator running
         deps.groupSessions!.tick(Number(chatId));
+        isGroupSessionMessage = true;
       }
     }
 
     // Build context info for group messages
     const from = (ctx as unknown as { from?: { first_name?: string; username?: string } }).from;
+    const incomingMsgId = (ctx as unknown as { id?: number }).id;
     let messagePrefix = '';
     if (isGroup && from) {
       const senderName = from.first_name ?? from.username ?? 'Unknown';
       const groupName = chat?.title ?? 'group';
-      messagePrefix = `[Group: ${groupName}, From: ${senderName}] `;
+      const msgIdPart = incomingMsgId ? `, msg_id:${incomingMsgId}` : '';
+      messagePrefix = `[Group: ${groupName}, From: ${senderName}${msgIdPart}] `;
     }
 
     const messageText = messagePrefix + text;
@@ -1020,6 +1026,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           isGroup: true as const,
           groupChatId: Number(chatId),
           groupTitle: chat?.title ?? undefined,
+          incomingMessageId: incomingMsgId,
           onBotResponse: deps.groupSessions
             ? (messageId: number) => {
                 if (deps.groupSessions!.hasActiveSession(Number(chatId))) {
@@ -1042,6 +1049,22 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       '--- Message pipeline start ---',
     );
 
-    await runPipeline(ctx, messageText, layers, groupContext);
+    if (isGroupSessionMessage && deps.botToken) {
+      const sendTyping = () =>
+        fetch(`${TG_API}/bot${deps.botToken}/sendChatAction`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ chat_id: Number(chatId), action: 'typing' }),
+        }).catch((e: unknown) => cmdLogger.debug({ err: e }, 'sendChatAction typing failed'));
+      sendTyping();
+      const typingInterval = setInterval(sendTyping, 6000);
+      try {
+        await runPipeline(ctx, messageText, layers, groupContext);
+      } finally {
+        clearInterval(typingInterval);
+      }
+    } else {
+      await runPipeline(ctx, messageText, layers, groupContext);
+    }
   };
 }

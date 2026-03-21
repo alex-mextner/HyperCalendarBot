@@ -56,14 +56,17 @@ export class TelegramStreamWriter {
   private plainResponseText = '';
   private userTranscript: string | undefined;
 
+  private noPlaceholder: boolean;
+
   constructor(
     private sender: TelegramSender,
     private chatId: number,
     private lang: string = 'en',
-    opts?: { userTranscript?: string; existingMessageId?: number },
+    opts?: { userTranscript?: string; existingMessageId?: number; noPlaceholder?: boolean },
   ) {
     this.userTranscript = opts?.userTranscript;
     this.messageId = opts?.existingMessageId ?? null;
+    this.noPlaceholder = opts?.noPlaceholder ?? false;
   }
 
   async init(): Promise<void> {
@@ -76,6 +79,10 @@ export class TelegramStreamWriter {
       const header = escapeHtml(this.userTranscript || '…');
       const result = await this.sender.sendMessage(this.chatId, `📞 👤 ${header}`, 'HTML');
       this.messageId = result.message_id;
+      return;
+    }
+    if (this.noPlaceholder) {
+      // Skip sending ⏳ — message will be created on finalize if AI responds
       return;
     }
     const result = await this.sender.sendMessage(this.chatId, '⏳');
@@ -218,7 +225,7 @@ export class TelegramStreamWriter {
     this.text = chunks[0]!;
     this.lastFlushedLength = 0;
 
-    // First chunk: edit existing message
+    // First chunk: edit existing placeholder or send fresh message
     if (this.messageId) {
       try {
         await this.sender.editMessageText(this.chatId, this.messageId, this.text, 'HTML');
@@ -228,6 +235,15 @@ export class TelegramStreamWriter {
         } catch (e) {
           aiLogger.error({ err: e }, 'Finalize edit failed');
         }
+      }
+    } else if (this.text.trim()) {
+      try {
+        const result = await this.sender.sendMessage(this.chatId, this.text, 'HTML');
+        this.messageId = result.message_id;
+      } catch {
+        await this.sender.sendMessage(this.chatId, this.text).catch((e: unknown) => {
+          aiLogger.error({ err: e }, 'Finalize send failed');
+        });
       }
     }
 

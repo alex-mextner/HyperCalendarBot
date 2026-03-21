@@ -77,7 +77,7 @@ describe('inv_force callback', () => {
     const ctx = makeCtx('inv_force:5:200', 'ru', 100);
     const handler = makeHandler(eventService, makeForceInviteDeps());
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Not authorized' });
+    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Нет доступа' });
   });
 
   test('sends invitations for each invitee when caller is owner', async () => {
@@ -115,7 +115,7 @@ describe('inv_retime callback', () => {
     const ctx = makeCtx('inv_retime:5', 'ru', 100);
     const handler = makeHandler(eventService, makeForceInviteDeps());
     await handler(ctx as never);
-    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Not authorized' });
+    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Нет доступа' });
   });
 
   test('shows retime prompt when caller is owner', async () => {

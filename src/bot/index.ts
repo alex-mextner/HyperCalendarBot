@@ -391,9 +391,12 @@ export function createBot(
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .use(async (context, next) => {
       const ctx = context as unknown as {
-        message?: { text?: string };
-        edited_message?: { text?: string };
-        callbackQuery?: { data?: string };
+        // GramIO exposes text as a direct shortcut on MessageContext, not via ctx.message.text
+        text?: string;
+        // GramIO update type string: "message" | "edited_message" | "callback_query" | ...
+        updateType?: string;
+        // Raw payload object — for callback_query updates this is the callback_query object with .data
+        payload?: { data?: string };
         dbUser?: User;
         chatId?: number | bigint;
         send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
@@ -408,7 +411,7 @@ export function createBot(
       const logChatId = isPrivate ? undefined : chatId;
 
       // Incoming text message (regular or command)
-      const incomingText = ctx.message?.text;
+      const incomingText = ctx.updateType === 'message' ? ctx.text : undefined;
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
           // /cal is an AI command — save args as plain user message, not a command event
@@ -425,13 +428,14 @@ export function createBot(
       }
 
       // Edited message
-      const editedText = ctx.edited_message?.text;
+      const editedText = ctx.updateType === 'edited_message' ? ctx.text : undefined;
       if (editedText) {
         conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
       }
 
       // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
-      const callbackData = ctx.callbackQuery?.data;
+      // ctx.payload is the raw callback_query object; .data is the callback data string
+      const callbackData = ctx.updateType === 'callback_query' ? ctx.payload?.data : undefined;
       if (callbackData) {
         const firstColon = callbackData.indexOf(':');
         const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;

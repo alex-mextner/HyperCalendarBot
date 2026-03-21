@@ -348,7 +348,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(messages[2]!.content as string).toContain('Show my events today');
   });
 
-  test('[SKIP] response in group discards message instead of finalizing', async () => {
+  test('[SKIP] response in group sends nothing (no placeholder, no delete)', async () => {
     const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
     const finalMsg = {
       content: [{ type: 'text', text: '[SKIP]' }],
@@ -368,11 +368,10 @@ describe('CalendarBotAgent.run()', () => {
 
     await agent.run(ctx);
 
-    // The placeholder should have been deleted
-    expect(deleteMessage).toHaveBeenCalledTimes(1);
-    // editMessageText should NOT be called for finalize (only intermediate flushes may happen)
-    // sendMessage is called once for init placeholder
-    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    // No ⏳ placeholder is sent in groups
+    expect(sender.sendMessage).toHaveBeenCalledTimes(0);
+    // Nothing to delete either
+    expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
   test('[SKIP] response in DM is NOT discarded', async () => {
