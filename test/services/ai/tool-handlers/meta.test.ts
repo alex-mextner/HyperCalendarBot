@@ -534,6 +534,90 @@ describe('handleCalculate', () => {
     expect(r.success).toBe(false);
     expect(r.error).toBeDefined();
   });
+
+  test('adds weeks to ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 2weeks' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-04-01T22:34:00.000Z');
+  });
+
+  test('adds 1 month to ISO datetime (end-of-month clamp)', () => {
+    const r = handleCalculate({ expression: '2026-01-31T12:00:00Z + 1month' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-02-28T12:00:00.000Z');
+  });
+
+  test('subtracts 1 month from ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-31T12:00:00Z - 1month' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-02-28T12:00:00.000Z');
+  });
+
+  test('adds 1 year to ISO datetime', () => {
+    const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 1year' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2027-03-18T22:34:00.000Z');
+  });
+
+  test('adds weeks to date-only', () => {
+    const r = handleCalculate({ expression: '2026-03-18 + 2weeks' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-04-01');
+  });
+
+  test('adds months to date-only', () => {
+    const r = handleCalculate({ expression: '2026-03-18 + 1month' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-04-18');
+  });
+
+  test('adds years to date-only', () => {
+    const r = handleCalculate({ expression: '2026-03-18 + 1year' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2027-03-18');
+  });
+
+  test('datetime diff less than 60 min', () => {
+    const r = handleCalculate({ expression: '2026-03-21T17:31:07Z - 2026-03-21T17:00:07Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('31 min');
+  });
+
+  test('datetime diff exact hours', () => {
+    const r = handleCalculate({ expression: '2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('1h');
+  });
+
+  test('datetime diff hours and minutes', () => {
+    const r = handleCalculate({ expression: '2026-03-21T19:30:00Z - 2026-03-21T17:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2h 30min');
+  });
+
+  test('datetime diff in days', () => {
+    const r = handleCalculate({ expression: '2026-03-25T12:00:00Z - 2026-03-21T12:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('4 days');
+  });
+
+  test('datetime diff 1 day (singular)', () => {
+    const r = handleCalculate({ expression: '2026-03-22T12:00:00Z - 2026-03-21T12:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('1 day');
+  });
+
+  test('datetime diff days and hours', () => {
+    const r = handleCalculate({ expression: '2026-03-22T18:00:00Z - 2026-03-21T12:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('1 day 6h');
+  });
+
+  test('date-only diff', () => {
+    const r = handleCalculate({ expression: '2026-04-10 - 2026-03-21' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('20 days');
+  });
 });
 
 describe('handleMakeCall', () => {

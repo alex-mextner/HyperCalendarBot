@@ -880,14 +880,14 @@ During a voice call the table is still sent to chat; you MUST mention it verball
   {
     name: 'calculate',
     description:
-      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days, YYYY-MM-DD ± N days.',
+      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration).',
     input_schema: {
       type: 'object' as const,
       properties: {
         expression: {
           type: 'string',
           description:
-            'Expression to evaluate. Examples: "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 31min", "2026-03-18 + 7days", "23:50 - 1hour"',
+            'Expression to evaluate. Examples: "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 31min", "2026-03-18T22:34:00Z + 2weeks", "2026-03-18T22:34:00Z + 1month", "2026-03-18T22:34:00Z + 1year", "2026-03-18 + 7days", "2026-03-18 + 2weeks", "2026-03-18 + 1month", "23:50 - 1hour", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"',
         },
       },
       required: ['expression'],

@@ -1,4 +1,5 @@
 import cityTimezones from 'city-timezones';
+import { addMonths, addYears, subMonths, subYears } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
@@ -653,39 +654,101 @@ function evalArithmetic(expr: string): number {
   return result;
 }
 
+const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?';
+const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
+
+function formatDiffMs(absMs: number): string {
+  const totalMin = Math.round(absMs / 60_000);
+  if (totalMin < 60) return `${totalMin} min`;
+  const h = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  if (h < 24) return min === 0 ? `${h}h` : `${h}h ${min}min`;
+  const days = Math.floor(h / 24);
+  const remH = h % 24;
+  const dayLabel = days === 1 ? 'day' : 'days';
+  return remH === 0 ? `${days} ${dayLabel}` : `${days} ${dayLabel} ${remH}h`;
+}
+
 export function handleCalculate(input: { expression: string }): ToolResult {
   const expr = input.expression.trim();
 
-  // ISO datetime + duration: "2026-03-18T22:34:00Z + 31min"
+  // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
+  const isoDatetimeDiffMatch = expr.match(new RegExp(`^(${ISO_DT_RE})\\s*-\\s*(${ISO_DT_RE})$`));
+  if (isoDatetimeDiffMatch) {
+    const [, aStr, bStr] = isoDatetimeDiffMatch;
+    const a = new Date(aStr!);
+    const b = new Date(bStr!);
+    if (Number.isNaN(a.getTime())) return { success: false, error: `Cannot parse datetime: ${aStr}` };
+    if (Number.isNaN(b.getTime())) return { success: false, error: `Cannot parse datetime: ${bStr}` };
+    return { success: true, output: formatDiffMs(Math.abs(a.getTime() - b.getTime())) };
+  }
+
+  // Date-only difference: "2026-04-10 - 2026-03-21"
+  const dateOnlyDiffMatch = expr.match(/^(\d{4}-\d{2}-\d{2})\s*-\s*(\d{4}-\d{2}-\d{2})$/);
+  if (dateOnlyDiffMatch) {
+    const [, aStr, bStr] = dateOnlyDiffMatch;
+    const a = new Date(`${aStr}T12:00:00Z`);
+    const b = new Date(`${bStr}T12:00:00Z`);
+    if (Number.isNaN(a.getTime())) return { success: false, error: `Cannot parse date: ${aStr}` };
+    if (Number.isNaN(b.getTime())) return { success: false, error: `Cannot parse date: ${bStr}` };
+    const days = Math.round(Math.abs(a.getTime() - b.getTime()) / 86_400_000);
+    return { success: true, output: `${days} days` };
+  }
+
+  // ISO datetime ± duration: "2026-03-18T22:34:00Z + 31min", "+ 1month", "+ 2weeks"
   const isoDatetimeMatch = expr.match(
-    /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?|d|days?)\b/i,
+    new RegExp(`^(${ISO_DT_RE})\\s*([+-])\\s*(\\d+(?:\\.\\d+)?)\\s*(${DURATION_UNITS})\\b`, 'i'),
   );
   if (isoDatetimeMatch) {
     const [, dateStr, op, amtStr, unit] = isoDatetimeMatch;
     const date = new Date(dateStr!);
     if (Number.isNaN(date.getTime())) return { success: false, error: `Cannot parse datetime: ${dateStr}` };
     const amt = parseFloat(amtStr!);
-    const sign = op === '+' ? 1 : -1;
     const unitL = unit!.toLowerCase();
+    if (unitL.startsWith('mo') || unitL.startsWith('month')) {
+      const n = Math.trunc(amt);
+      const result = op === '+' ? addMonths(date, n) : subMonths(date, n);
+      return { success: true, output: result.toISOString() };
+    }
+    if (unitL === 'y' || unitL.startsWith('year')) {
+      const n = Math.trunc(amt);
+      const result = op === '+' ? addYears(date, n) : subYears(date, n);
+      return { success: true, output: result.toISOString() };
+    }
+    const sign = op === '+' ? 1 : -1;
     let deltaMs: number;
     if (unitL.startsWith('min')) deltaMs = amt * 60_000;
-    else if (unitL.startsWith('h')) deltaMs = amt * 3_600_000;
+    else if (unitL === 'h' || unitL.startsWith('hr') || unitL.startsWith('hour')) deltaMs = amt * 3_600_000;
+    else if (unitL === 'w' || unitL.startsWith('week')) deltaMs = amt * 7 * 86_400_000;
     else deltaMs = amt * 86_400_000;
     return { success: true, output: new Date(date.getTime() + sign * deltaMs).toISOString() };
   }
 
-  // Date only + days: "2026-03-18 + 7days"
-  const dateOnlyMatch = expr.match(/^(\d{4}-\d{2}-\d{2})\s*([+-])\s*(\d+)\s*(d|days?)\b/i);
+  // Date-only ± duration: "2026-03-18 + 7days", "+ 2weeks", "+ 1month"
+  const dateOnlyMatch = expr.match(
+    new RegExp(`^(\\d{4}-\\d{2}-\\d{2})\\s*([+-])\\s*(\\d+)\\s*(${DURATION_UNITS})\\b`, 'i'),
+  );
   if (dateOnlyMatch) {
-    const [, dateStr, op, amtStr] = dateOnlyMatch;
+    const [, dateStr, op, amtStr, unit] = dateOnlyMatch;
     const date = new Date(`${dateStr}T12:00:00Z`);
     if (Number.isNaN(date.getTime())) return { success: false, error: `Cannot parse date: ${dateStr}` };
+    const amt = Number.parseInt(amtStr!, 10);
+    const unitL = unit!.toLowerCase();
+    if (unitL.startsWith('mo') || unitL.startsWith('month')) {
+      const result = op === '+' ? addMonths(date, amt) : subMonths(date, amt);
+      return { success: true, output: result.toISOString().slice(0, 10) };
+    }
+    if (unitL === 'y' || unitL.startsWith('year')) {
+      const result = op === '+' ? addYears(date, amt) : subYears(date, amt);
+      return { success: true, output: result.toISOString().slice(0, 10) };
+    }
     const sign = op === '+' ? 1 : -1;
-    const result = new Date(date.getTime() + sign * Number.parseInt(amtStr!, 10) * 86_400_000);
+    const weeks = unitL === 'w' || unitL.startsWith('week') ? 7 : 1;
+    const result = new Date(date.getTime() + sign * amt * weeks * 86_400_000);
     return { success: true, output: result.toISOString().slice(0, 10) };
   }
 
-  // HH:MM + duration: "22:34 + 31min"
+  // HH:MM ± duration: "22:34 + 31min"
   const timeMatch = expr.match(/^(\d{1,2}):(\d{2})\s*([+-])\s*(\d+(?:\.\d+)?)\s*(min|minutes?|h|hr|hours?)\b/i);
   if (timeMatch) {
     const [, h, m, op, amtStr, unit] = timeMatch;
@@ -717,6 +780,6 @@ export function handleCalculate(input: { expression: string }): ToolResult {
 
   return {
     success: false,
-    error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days, YYYY-MM-DD ± N days`,
+    error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime`,
   };
 }
