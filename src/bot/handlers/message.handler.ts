@@ -147,6 +147,19 @@ export interface MessageHandlerDeps {
   scenePauseService?: ScenePauseService;
 }
 
+// Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
+// Key: scene name, Value: set of step indices that are callback_query-only.
+const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', new Set([3, 4])]]);
+
+function isCallbackOnlyStep(rawScene: unknown): boolean {
+  try {
+    const parsed = JSON.parse(rawScene as string) as { name?: string; step?: number };
+    return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
+  } catch {
+    return false;
+  }
+}
+
 // Full words/phrases for calendar-related keyword matching in groups.
 // Uses word boundaries to avoid false positives (e.g., "планшет" ≠ "план").
 const CALENDAR_KEYWORDS = [
@@ -801,9 +814,30 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const sceneKey = `@gramio/scenes:${user.telegram_id}`;
     const activeScene = await deps.sceneStorage.get(sceneKey);
     if (activeScene) {
-      // If the scene is paused, let it fall through to the AI pipeline
       const isPaused = deps.scenePauseService ? (await deps.scenePauseService.get(user.telegram_id)) !== null : false;
-      if (!isPaused) return;
+
+      if (!isPaused) {
+        // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
+        if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
+          try {
+            const parsed = JSON.parse(activeScene as string) as {
+              name?: string;
+              step?: number;
+              state?: Record<string, unknown>;
+            };
+            await deps.scenePauseService.save(user.telegram_id, {
+              sceneName: parsed.name ?? 'unknown',
+              step: parsed.step ?? 0,
+              sceneState: parsed.state ?? {},
+            });
+          } catch {
+            return; // can't parse scene state — skip
+          }
+          // fall through to AI pipeline
+        } else {
+          return;
+        }
+      }
     }
 
     const chatId = ctx.chatId;
