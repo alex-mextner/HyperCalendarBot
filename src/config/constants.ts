@@ -322,6 +322,15 @@ export const MSG = {
           `Trigger created (id: ${id}): when ${topic}${condition ? ` and (${condition})` : ''} → "${action}"`,
         triggerRemoved: (id: string) => `Trigger ${id} removed.`,
       },
+      agent: {
+        connectMessage: (url: string) =>
+          `🔗 *Connect AI Assistant*\n\nDownload the macOS agent:\n${url}\n\nAfter installing, the app will show an activation command.`,
+        activatePrompt: 'Provide the code from the app: /activate <code>',
+        activated: '✅ Agent connected!',
+        activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
+        disconnected: '✅ Agent disconnected. AI assistant disabled.',
+        notConnected: 'Agent is not connected.',
+      },
     },
   },
   ru: {
@@ -582,6 +591,15 @@ export const MSG = {
         triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
           `Триггер создан (id: ${id}): когда ${topic}${condition ? ` и (${condition})` : ''} → «${action}»`,
         triggerRemoved: (id: string) => `Триггер ${id} удалён.`,
+      },
+      agent: {
+        connectMessage: (url: string) =>
+          `🔗 *Подключить AI Ассистент*\n\nСкачай агент для macOS:\n${url}\n\nПосле установки приложение само покажет команду активации.`,
+        activatePrompt: 'Укажи код из приложения: /activate <код>',
+        activated: '✅ Агент подключён!',
+        activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
+        disconnected: '✅ Агент отключён. AI ассистент выключен.',
+        notConnected: 'Агент не подключён.',
       },
     },
   },

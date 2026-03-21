@@ -65,7 +65,7 @@ describe('toolDefinitions', () => {
 
 describe('getToolDefinitions supplement_skip', () => {
   test('supplement_skip is absent when supplementMode is false', () => {
-    const tools = getToolDefinitions(undefined, false);
+    const tools = getToolDefinitions(undefined, undefined, false);
     expect(tools.some((t) => t.name === 'supplement_skip')).toBe(false);
   });
 
@@ -75,14 +75,53 @@ describe('getToolDefinitions supplement_skip', () => {
   });
 
   test('supplement_skip is present when supplementMode is true', () => {
-    const tools = getToolDefinitions(undefined, true);
+    const tools = getToolDefinitions(undefined, undefined, true);
     const tool = tools.find((t) => t.name === 'supplement_skip');
     expect(tool).toBeDefined();
     expect(tool?.input_schema?.properties).toEqual({});
   });
 
   test('supplement_skip does not appear in normal text mode', () => {
-    const tools = getToolDefinitions('text', false);
+    const tools = getToolDefinitions('text', undefined, false);
     expect(tools.some((t) => t.name === 'supplement_skip')).toBe(false);
+  });
+});
+
+const ASSISTANT_TOOLS = [
+  'claude_chat',
+  'claude_new_chat',
+  'claude_list_chats',
+  'claude_open_chat',
+  'claude_list_projects',
+  'claude_artifact',
+  'bash_execute',
+  'playwright_action',
+  'applescript_run',
+];
+
+describe('UserCapabilities gating', () => {
+  test('assistant tools hidden when both false', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: false }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools hidden when only assistantEnabled=true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: false }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools hidden when only agentConnected=true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: true }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+  });
+
+  test('assistant tools visible when both true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: true }).map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).toContain(tool);
+  });
+
+  test('no caps passed → assistant tools hidden', () => {
+    const names = getToolDefinitions('text').map((t) => t.name);
+    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
   });
 });

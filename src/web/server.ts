@@ -1,4 +1,8 @@
 // src/web/server.ts
+
+import type { AgentDispatcher } from '../agent/dispatcher.ts';
+import type { AgentRegistry } from '../agent/registry.ts';
+import { createAgentWsHandler, upgradeAgentWs } from '../agent/ws-server.ts';
 import type { EnvConfig } from '../config/env.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
@@ -12,13 +16,16 @@ interface OAuthStateLookup {
   del(stateId: string): Promise<void>;
 }
 
-interface WebServerDeps {
+export interface WebServerDeps {
   config: EnvConfig;
-  oauthService: GoogleOAuthService;
   userRepo: UserRepository;
-  syncRepo: GoogleSyncRepository;
-  calendarRepo: GoogleCalendarRepository;
-  stateLookup: OAuthStateLookup;
+  agentRegistry?: AgentRegistry;
+  agentDispatcher?: AgentDispatcher;
+  // Google Calendar — only populated when GOOGLE_CLIENT_ID is configured
+  oauthService?: GoogleOAuthService;
+  syncRepo?: GoogleSyncRepository;
+  calendarRepo?: GoogleCalendarRepository;
+  stateLookup?: OAuthStateLookup;
   onConnected?: (userId: number) => Promise<void>;
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
 }
@@ -26,20 +33,48 @@ interface WebServerDeps {
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
   const port = deps.config.OAUTH_SERVER_PORT ?? 3311;
 
-  const server = Bun.serve({
+  const agentWs =
+    deps.agentRegistry && deps.agentDispatcher
+      ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher)
+      : undefined;
+
+  const serveOptions = {
     port,
-    async fetch(req) {
+    ...(agentWs ? { websocket: agentWs } : {}),
+    async fetch(req: Request, server: { upgrade(req: Request, opts: { data: object }): boolean }) {
       const url = new URL(req.url);
+
+      if (url.pathname === '/ws/agent' && agentWs) {
+        if (!upgradeAgentWs(req, server)) {
+          return new Response('WebSocket upgrade failed', { status: 400 });
+        }
+        return;
+      }
 
       if (req.method === 'GET' && url.pathname === '/health') {
         return new Response('ok');
       }
 
       if (req.method === 'GET' && url.pathname === '/oauth/google/callback') {
-        return handleOAuthCallback(req, deps);
+        if (!deps.oauthService || !deps.syncRepo || !deps.calendarRepo || !deps.stateLookup) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return handleOAuthCallback(req, {
+          config: deps.config,
+          oauthService: deps.oauthService,
+          userRepo: deps.userRepo,
+          syncRepo: deps.syncRepo,
+          calendarRepo: deps.calendarRepo,
+          stateLookup: deps.stateLookup,
+          onConnected: deps.onConnected,
+        });
       }
 
       if (req.method === 'POST' && url.pathname === '/webhooks/google-calendar') {
+        if (!deps.calendarRepo) {
+          return new Response('Not Found', { status: 404 });
+        }
+
         const channelId = req.headers.get('x-goog-channel-id');
         const resourceId = req.headers.get('x-goog-resource-id');
         const resourceState = req.headers.get('x-goog-resource-state');
@@ -65,7 +100,11 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
 
       return new Response('Not Found', { status: 404 });
     },
-  });
+  };
+
+  // Bun.serve requires a discriminated union: either websocket is present or absent.
+  // We conditionally include it via spread, so cast at the framework boundary.
+  const server = Bun.serve(serveOptions as unknown as Parameters<typeof Bun.serve>[0]);
 
   webLogger.info({ port }, 'Web server started');
 

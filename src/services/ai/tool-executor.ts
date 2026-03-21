@@ -1,4 +1,6 @@
+import type { AgentCommand } from '../../agent/protocol.ts';
 import { logger } from '../../utils/logger.ts';
+import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import {
   handleCreateEvent,
@@ -324,6 +326,17 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleRemoveTrigger(ctx, input as never);
       case 'remember_user_fact':
         return handleRememberUserFact(ctx, input as { type: 'append' | 'rewrite'; content: string });
+
+      case 'claude_chat':
+      case 'claude_new_chat':
+      case 'claude_list_chats':
+      case 'claude_open_chat':
+      case 'claude_list_projects':
+      case 'claude_artifact':
+      case 'bash_execute':
+      case 'playwright_action':
+      case 'applescript_run':
+        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

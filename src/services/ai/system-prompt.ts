@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
+import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
 function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
@@ -34,7 +35,7 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
     .join('\n');
 }
 
-export function buildSystemPrompt(ctx: AgentContext): string {
+export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
 
@@ -271,6 +272,24 @@ Rules:
 - Do not add empty affirmations ("Great!", "Sure!").
 - Calling tools (to fix, undo, or enrich) is allowed and encouraged when appropriate.
 - Do not call ask_user or pick_users in supplement mode.`
+    : ''
+}${
+  caps?.assistantEnabled && caps?.agentConnected
+    ? `
+
+## AI Assistant (Computer Access)
+You can control the user's Mac:
+- \`claude_chat\` / \`claude_new_chat\` / \`claude_open_chat\` — interact with Claude Desktop chats
+- \`claude_list_chats\` / \`claude_list_projects\` / \`claude_artifact\` — browse Claude Desktop
+- \`bash_execute\` — run shell commands
+- \`playwright_action\` — browser automation (navigate, click, screenshot, extract)
+- \`applescript_run\` — control macOS apps via AppleScript
+
+Guidelines:
+- Confirm before destructive bash commands (rm, overwrite files)
+- Show screenshots when they help explain the result
+- If agent disconnects mid-task, inform the user and suggest retrying
+`
     : ''
 }`;
 }

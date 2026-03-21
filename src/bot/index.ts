@@ -1,5 +1,7 @@
 // src/bot/index.ts
 import { Bot, InlineKeyboard } from 'gramio';
+import { agentDispatcher } from '../agent/dispatcher.ts';
+import { agentRegistry } from '../agent/registry.ts';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { DatabaseService } from '../database/index.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
@@ -39,6 +41,7 @@ import type { TranscriptionService } from '../services/voice/transcription-servi
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
+import { createActivateCommand, createConnectCommand, createDisconnectCommand } from './commands/connect.command.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -297,6 +300,8 @@ export function createBot(
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
+    agentRegistry,
+    agentDispatcher,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     domainEvents: domainEventBus,
@@ -769,6 +774,15 @@ export function createBot(
         }
       } catch {}
     });
+
+  // AI Assistant commands (not in setMyCommands — internal use only)
+  const connectCommand = createConnectCommand(process.env.AGENT_DOWNLOAD_URL ?? '');
+  const activateCommand = createActivateCommand(agentRegistry);
+  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
+  bot
+    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
+    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
+    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
 
   // Google Calendar commands (registered after derive chain so dbUser is available)
   if (googleDeps) {

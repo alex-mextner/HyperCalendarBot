@@ -1,23 +1,40 @@
 // test/web/webhook-handler.test.ts
 import { describe, expect, mock, test } from 'bun:test';
+import type { WebServerDeps } from '../../src/web/server.ts';
 import { startWebServer } from '../../src/web/server.ts';
 
-function createMinimalDeps(overrides: Record<string, unknown> = {}) {
+function makePort() {
+  return 13311 + Math.floor(Math.random() * 1000);
+}
+
+function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   return {
-    config: { OAUTH_SERVER_PORT: 13311 + Math.floor(Math.random() * 1000) },
-    oauthService: {},
-    userRepo: {},
-    syncRepo: {},
-    calendarRepo: { findChannelByIds: mock(() => null) },
-    stateLookup: { get: mock(() => Promise.resolve(null)), del: mock(() => Promise.resolve()) },
+    config: { OAUTH_SERVER_PORT: makePort() } as WebServerDeps['config'],
+    userRepo: {} as WebServerDeps['userRepo'],
     ...overrides,
   };
 }
 
 describe('webhook handler', () => {
+  test('returns 404 when calendarRepo not configured', async () => {
+    const deps = baseDeps();
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+        method: 'POST',
+        headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1' },
+      });
+      expect(res.status).toBe(404);
+    } finally {
+      stop();
+    }
+  });
+
   test('returns 400 without required headers', async () => {
-    const deps = createMinimalDeps();
-    const { stop } = startWebServer(deps as never);
+    const deps = baseDeps({
+      calendarRepo: { findChannelByIds: mock(() => null) } as unknown as WebServerDeps['calendarRepo'],
+    });
+    const { stop } = startWebServer(deps);
     try {
       const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
         method: 'POST',
@@ -29,10 +46,10 @@ describe('webhook handler', () => {
   });
 
   test('returns 404 for unknown channel', async () => {
-    const deps = createMinimalDeps({
-      calendarRepo: { findChannelByIds: mock(() => null) },
+    const deps = baseDeps({
+      calendarRepo: { findChannelByIds: mock(() => null) } as unknown as WebServerDeps['calendarRepo'],
     });
-    const { stop } = startWebServer(deps as never);
+    const { stop } = startWebServer(deps);
     try {
       const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
         method: 'POST',
@@ -46,11 +63,11 @@ describe('webhook handler', () => {
 
   test('returns 200 and triggers onWebhook for valid channel', async () => {
     const onWebhook = mock(() => Promise.resolve());
-    const deps = createMinimalDeps({
-      calendarRepo: { findChannelByIds: mock(() => ({ id: 1 })) },
+    const deps = baseDeps({
+      calendarRepo: { findChannelByIds: mock(() => ({ id: 1 })) } as unknown as WebServerDeps['calendarRepo'],
       onWebhook,
     });
-    const { stop } = startWebServer(deps as never);
+    const { stop } = startWebServer(deps);
     try {
       const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
         method: 'POST',

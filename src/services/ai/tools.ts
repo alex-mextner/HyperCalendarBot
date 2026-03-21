@@ -300,7 +300,7 @@ export const toolDefinitions: ToolDefinition[] = [
         action: { type: 'string', enum: ['get', 'update'], description: 'Action to perform' },
         category: {
           type: 'string',
-          enum: ['general', 'notifications', 'calls', 'privacy', 'voice'],
+          enum: ['general', 'notifications', 'calls', 'privacy', 'voice', 'assistant'],
           description: 'Settings category. Required for update, optional for get (omit to get all).',
         },
         updates: {
@@ -1064,13 +1064,127 @@ const CALL_EXCLUDED_TOOLS = new Set(['make_call', 'render_day_image', 'render_we
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
 
-export function getToolDefinitions(inputMode?: string, supplementMode?: boolean): ToolDefinition[] {
+export interface UserCapabilities {
+  assistantEnabled: boolean;
+  agentConnected: boolean;
+}
+
+const assistantToolDefinitions: ToolDefinition[] = [
+  {
+    name: 'claude_chat',
+    description: 'Send a message to an existing Claude Desktop chat and stream the response',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        chat_id: { type: 'string' },
+        message: { type: 'string' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['chat_id', 'message'],
+    },
+  },
+  {
+    name: 'claude_new_chat',
+    description: 'Create a new Claude Desktop chat (optionally in a project) and send a first message',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        message: { type: 'string' },
+        project_id: { type: 'string' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['message'],
+    },
+  },
+  {
+    name: 'claude_list_chats',
+    description: 'List recent Claude Desktop chats with titles and IDs',
+    input_schema: {
+      type: 'object' as const,
+      properties: { limit: { type: 'number' } },
+    },
+  },
+  {
+    name: 'claude_open_chat',
+    description: 'Get messages from an existing Claude Desktop chat by ID',
+    input_schema: {
+      type: 'object' as const,
+      properties: { chat_id: { type: 'string' } },
+      required: ['chat_id'],
+    },
+  },
+  {
+    name: 'claude_list_projects',
+    description: 'List Claude Desktop projects',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+    },
+  },
+  {
+    name: 'claude_artifact',
+    description: 'Retrieve a Claude Desktop artifact by ID',
+    input_schema: {
+      type: 'object' as const,
+      properties: { artifact_id: { type: 'string' } },
+      required: ['artifact_id'],
+    },
+  },
+  {
+    name: 'bash_execute',
+    description: "Execute a bash command on the user's Mac. Returns stdout, stderr, exitCode.",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        command: { type: 'string' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'playwright_action',
+    description: "Automate the browser on the user's Mac: screenshot, navigate, click, fill, extract content",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        action: { type: 'string', enum: ['screenshot', 'navigate', 'click', 'fill', 'extract', 'evaluate'] },
+        params: { type: 'object' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['action', 'params'],
+    },
+  },
+  {
+    name: 'applescript_run',
+    description: "Run AppleScript on the user's Mac to control macOS apps or trigger Automator workflows",
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        script: { type: 'string' },
+        timeout_ms: { type: 'number' },
+      },
+      required: ['script'],
+    },
+  },
+];
+
+export function getToolDefinitions(
+  inputMode?: string,
+  caps?: UserCapabilities,
+  supplementMode?: boolean,
+): ToolDefinition[] {
   let tools: ToolDefinition[];
   if (inputMode === 'live_call') {
     tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
   } else {
     tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
   }
+
+  if (caps?.assistantEnabled === true && caps?.agentConnected === true) {
+    tools = [...tools, ...assistantToolDefinitions];
+  }
+
   if (supplementMode) {
     tools = [
       ...tools,

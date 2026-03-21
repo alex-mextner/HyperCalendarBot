@@ -814,4 +814,10 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '041_assistant_enabled',
+    up: (db) => {
+      db.exec(`ALTER TABLE users ADD COLUMN assistant_enabled INTEGER NOT NULL DEFAULT 0`);
+    },
+  },
 ];

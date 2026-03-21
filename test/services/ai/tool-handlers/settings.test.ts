@@ -273,4 +273,95 @@ describe('handleManageSettings', () => {
       expect(prefs.morning_agenda_enabled).toBe(1);
     });
   });
+
+  describe('assistant category', () => {
+    test('get assistant settings returns enabled/disabled status', () => {
+      const ctxWithAssistant = {
+        ...ctx,
+        user: { ...ctx.user, assistant_enabled: 0 },
+        agentRegistry: { isConnected: (_userId: number) => false },
+      };
+      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'get',
+        category: 'assistant',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('disabled');
+      expect(result.output).toContain('not connected');
+    });
+
+    test('get assistant settings shows connected when agent is connected', () => {
+      const ctxWithAssistant = {
+        ...ctx,
+        user: { ...ctx.user, assistant_enabled: 1 },
+        agentRegistry: { isConnected: (_userId: number) => true },
+      };
+      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'get',
+        category: 'assistant',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('enabled');
+      expect(result.output).toContain('connected');
+    });
+
+    test('update assistantEnabled=true calls userRepo.updateAssistantEnabled', () => {
+      let calledWith: [number, boolean] | null = null;
+      const ctxWithAssistant = {
+        ...ctx,
+        userRepo: {
+          ...ctx.userRepo,
+          updateAssistantEnabled: (userId: number, enabled: boolean) => {
+            calledWith = [userId, enabled];
+          },
+        },
+      };
+      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'update',
+        category: 'assistant',
+        assistantEnabled: true,
+      });
+      expect(result.success).toBe(true);
+      expect(calledWith!).toEqual([USER_ID, true]);
+      expect(result.output).toContain('enabled');
+    });
+
+    test('update assistantEnabled=false calls userRepo.updateAssistantEnabled with false', () => {
+      let calledWith: [number, boolean] | null = null;
+      const ctxWithAssistant = {
+        ...ctx,
+        userRepo: {
+          ...ctx.userRepo,
+          updateAssistantEnabled: (userId: number, enabled: boolean) => {
+            calledWith = [userId, enabled];
+          },
+        },
+      };
+      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'update',
+        category: 'assistant',
+        assistantEnabled: false,
+      });
+      expect(result.success).toBe(true);
+      expect(calledWith!).toEqual([USER_ID, false]);
+      expect(result.output).toContain('disabled');
+    });
+
+    test('update assistant reflects new value in ctx.user within same turn', () => {
+      const ctxWithAssistant = {
+        ...ctx,
+        user: { ...ctx.user, assistant_enabled: 0 },
+        userRepo: {
+          ...ctx.userRepo,
+          updateAssistantEnabled: () => {},
+        },
+      };
+      handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        action: 'update',
+        category: 'assistant',
+        assistantEnabled: true,
+      });
+      expect((ctxWithAssistant as unknown as AgentContext).user.assistant_enabled).toBe(1);
+    });
+  });
 });

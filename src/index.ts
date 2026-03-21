@@ -1,11 +1,14 @@
 // src/index.ts
 
+import { agentDispatcher } from './agent/dispatcher.ts';
+import { agentRegistry } from './agent/registry.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
+import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
@@ -22,7 +25,15 @@ const botRef: {
 };
 
 let googleDeps: GoogleBotDeps | undefined;
-let webServerHandle: { stop: () => void } | undefined;
+
+// Mutable deps — Google fields are filled in once GOOGLE_CLIENT_ID is confirmed
+const webServerDeps: WebServerDeps = {
+  config,
+  userRepo: db.users,
+  agentRegistry,
+  agentDispatcher,
+};
+const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
@@ -39,7 +50,6 @@ let mtprotoResolveUsername:
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
-  const { startWebServer } = await import('./web/server.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
@@ -113,29 +123,26 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     },
   };
 
-  webServerHandle = startWebServer({
-    config,
-    oauthService,
-    userRepo: db.users,
-    syncRepo: db.googleSync,
-    calendarRepo: db.googleCalendars,
-    stateLookup: stateStore,
-    onConnected: async (userId) => {
-      await queue.add('refresh-calendars', { type: 'refresh-calendars', userId });
-    },
-    onWebhook: async (channelId, resourceId) => {
-      const channel = db.googleCalendars.findChannelByIds(channelId, resourceId);
-      if (!channel) return;
-      const cal = db.googleCalendars.getCalendarById(channel.google_calendar_row_id);
-      if (!cal) return;
-      await queue.add('pull-sync', {
-        type: 'pull-sync',
-        userId: cal.user_id,
-        calendarId: cal.google_calendar_id,
-        trigger: 'webhook',
-      });
-    },
-  });
+  // Wire Google deps into the already-running web server
+  webServerDeps.oauthService = oauthService;
+  webServerDeps.syncRepo = db.googleSync;
+  webServerDeps.calendarRepo = db.googleCalendars;
+  webServerDeps.stateLookup = stateStore;
+  webServerDeps.onConnected = async (userId) => {
+    await queue.add('refresh-calendars', { type: 'refresh-calendars', userId });
+  };
+  webServerDeps.onWebhook = async (channelId, resourceId) => {
+    const channel = db.googleCalendars.findChannelByIds(channelId, resourceId);
+    if (!channel) return;
+    const cal = db.googleCalendars.getCalendarById(channel.google_calendar_row_id);
+    if (!cal) return;
+    await queue.add('pull-sync', {
+      type: 'pull-sync',
+      userId: cal.user_id,
+      calendarId: cal.google_calendar_id,
+      trigger: 'webhook',
+    });
+  };
 
   await setupSyncCron(queue);
   await setupWatchRenewalCron(queue);

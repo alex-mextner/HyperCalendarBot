@@ -9,6 +9,11 @@ describe('loadConfig', () => {
     process.env = { ...originalEnv };
   });
 
+  const setAgentVars = () => {
+    process.env.AGENT_JWT_SECRET = 'test-agent-secret-at-least-32-chars!!';
+    process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
+  };
+
   test('throws if BOT_TOKEN is missing', () => {
     delete process.env.BOT_TOKEN;
     expect(() => loadConfig()).toThrow('BOT_TOKEN');
@@ -20,9 +25,34 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('ANTHROPIC_API_KEY');
   });
 
+  test('throws if AGENT_JWT_SECRET is missing', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
+    delete process.env.AGENT_JWT_SECRET;
+    expect(() => loadConfig()).toThrow('AGENT_JWT_SECRET');
+  });
+
+  test('throws if AGENT_JWT_SECRET is too short', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
+    process.env.AGENT_JWT_SECRET = 'short';
+    expect(() => loadConfig()).toThrow('AGENT_JWT_SECRET');
+  });
+
+  test('throws if AGENT_DOWNLOAD_URL is missing', () => {
+    process.env.BOT_TOKEN = 'test-token';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    process.env.AGENT_JWT_SECRET = 'test-agent-secret-at-least-32-chars!!';
+    delete process.env.AGENT_DOWNLOAD_URL;
+    expect(() => loadConfig()).toThrow('AGENT_DOWNLOAD_URL');
+  });
+
   test('returns config with defaults when required vars are set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     delete process.env.NODE_ENV;
     delete process.env.AI_BASE_URL;
     delete process.env.AI_MODEL;
@@ -38,6 +68,7 @@ describe('loadConfig', () => {
   test('respects DATABASE_PATH override', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.DATABASE_PATH = '/tmp/test.db';
     const config = loadConfig();
     expect(config.DATABASE_PATH).toBe('/tmp/test.db');
@@ -46,6 +77,7 @@ describe('loadConfig', () => {
   test('loads custom AI_BASE_URL and AI_MODEL', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.AI_BASE_URL = 'https://custom.api';
     process.env.AI_MODEL = 'custom-model';
     const config = loadConfig();
@@ -56,6 +88,7 @@ describe('loadConfig', () => {
   test('REDIS_URL is optional (bot works without it)', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     delete process.env.REDIS_URL;
     delete process.env.GOOGLE_CLIENT_ID;
     const config = loadConfig();
@@ -93,6 +126,7 @@ describe('loadConfig', () => {
   test('loads all Google vars when present', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
     process.env.GOOGLE_CLIENT_SECRET = 'csec';
@@ -107,6 +141,7 @@ describe('loadConfig', () => {
   test('PUBLIC_DOMAIN derives GOOGLE_REDIRECT_URI when not explicit', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
     process.env.GOOGLE_CLIENT_SECRET = 'csec';
@@ -120,6 +155,7 @@ describe('loadConfig', () => {
   test('BOT_ADMIN_ID is undefined when not set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     delete process.env.BOT_ADMIN_ID;
     const config = loadConfig();
     expect(config.BOT_ADMIN_ID).toBeUndefined();
@@ -128,6 +164,7 @@ describe('loadConfig', () => {
   test('BOT_ADMIN_ID parses as number when set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.BOT_ADMIN_ID = '12345';
     const config = loadConfig();
     expect(config.BOT_ADMIN_ID).toBe(12345);
@@ -143,6 +180,7 @@ describe('loadConfig', () => {
   test('INTENT_LEARNER_DAILY_LIMIT defaults to 100', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     delete process.env.INTENT_LEARNER_DAILY_LIMIT;
     const config = loadConfig();
     expect(config.INTENT_LEARNER_DAILY_LIMIT).toBe(100);
@@ -151,6 +189,7 @@ describe('loadConfig', () => {
   test('INTENT_LEARNER_DAILY_LIMIT uses custom value when set', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.ANTHROPIC_API_KEY = 'test-key';
+    setAgentVars();
     process.env.INTENT_LEARNER_DAILY_LIMIT = '50';
     const config = loadConfig();
     expect(config.INTENT_LEARNER_DAILY_LIMIT).toBe(50);

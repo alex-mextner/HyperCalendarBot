@@ -6,7 +6,7 @@ import { createAnthropicClient } from './anthropic-client.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
-import { getToolDefinitions } from './tools.ts';
+import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
@@ -58,8 +58,12 @@ export class CalendarBotAgent {
     return this.sender;
   }
 
-  buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
-    const systemPrompt = buildSystemPrompt(ctx);
+  buildMessages(
+    ctx: AgentContext,
+    history: ChatHistoryMessage[],
+    caps?: UserCapabilities,
+  ): { systemPrompt: string; messages: MessageParam[] } {
+    const systemPrompt = buildSystemPrompt(ctx, caps);
 
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 10) : history;
@@ -109,8 +113,12 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    const caps: UserCapabilities = {
+      assistantEnabled: Boolean(ctx.user.assistant_enabled),
+      agentConnected: ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
+    };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
-    const { systemPrompt, messages } = this.buildMessages(ctx, history);
+    const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
       ? ({
@@ -119,7 +127,7 @@ export class CalendarBotAgent {
           sendMessageWithKeyboard: async () => ({ message_id: 0 }),
           sendButtons: async () => ({ message_id: 0 }),
           sendUserPicker: async () => ({ message_id: 0 }),
-          sendPhoto: async () => {},
+          sendPhoto: async () => ({ message_id: 0 }),
           sendInvitation: async () => null,
           sendEditProposal: async () => null,
           sendAsUser: async () => false,
@@ -131,6 +139,15 @@ export class CalendarBotAgent {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
     });
     await writer.init();
+
+    // Stream macOS agent chunks into the same writer so they appear live
+    // and land in the collapsed blockquote after commitIntermediate().
+    // tailText keeps only the last 3500 chars so Telegram never rejects the edit.
+    ctx.onAgentChunk = (text: string) => {
+      writer.appendText(text);
+      writer.tailText(3500);
+      writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
+    };
 
     this.saveUserMessage(ctx);
 
@@ -164,7 +181,7 @@ export class CalendarBotAgent {
               },
             ],
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
+            tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
           });
 
         let stream: ReturnType<typeof streamRequest>;

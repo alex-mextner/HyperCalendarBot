@@ -4,13 +4,14 @@ import type { AgentContext, ToolResult } from '../types.ts';
 
 interface ManageSettingsInput {
   action: 'get' | 'update';
-  category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
+  category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
   updates?: Record<string, unknown>;
+  assistantEnabled?: boolean;
 }
 
 export function handleManageSettings(ctx: AgentContext, input: ManageSettingsInput): ToolResult {
   if (input.action === 'get') return handleGet(ctx, input.category);
-  if (input.action === 'update') return handleUpdate(ctx, input.category, input.updates);
+  if (input.action === 'update') return handleUpdate(ctx, input.category, input.updates, input.assistantEnabled);
   return { success: false, error: `Unknown action: ${input.action}` };
 }
 
@@ -63,11 +64,31 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
     };
   }
 
+  if (category === 'assistant') {
+    const connected = ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false;
+    const enabled = Boolean(ctx.user.assistant_enabled);
+    return {
+      success: true,
+      output:
+        ctx.user.language === 'ru'
+          ? `🤖 AI Ассистент: ${enabled ? 'включён' : 'выключён'}\nАгент: ${connected ? 'подключён ✅' : 'не подключён ❌'}`
+          : `🤖 AI Assistant: ${enabled ? 'enabled' : 'disabled'}\nAgent: ${connected ? 'connected ✅' : 'not connected ❌'}`,
+    };
+  }
+
   return { success: true, output: JSON.stringify(category ? (result[category] ?? {}) : result) };
 }
 
-function handleUpdate(ctx: AgentContext, category?: string, updates?: Record<string, unknown>): ToolResult {
+function handleUpdate(
+  ctx: AgentContext,
+  category?: string,
+  updates?: Record<string, unknown>,
+  assistantEnabled?: boolean,
+): ToolResult {
   if (!category) return { success: false, error: 'category is required for update.' };
+
+  if (category === 'assistant') return updateAssistant(ctx, assistantEnabled);
+
   if (!updates || Object.keys(updates).length === 0) {
     return { success: false, error: 'updates are required for update.' };
   }
@@ -166,6 +187,21 @@ function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): Too
 
   const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
   return { success: true, output: t(ctx.user.language).aiTools.settings.privacyUpdated(lines.join(', ')) };
+}
+
+function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolResult {
+  if (typeof assistantEnabled !== 'boolean') {
+    return { success: false, output: 'Unknown action' };
+  }
+  ctx.userRepo.updateAssistantEnabled(ctx.user.telegram_id, assistantEnabled);
+  ctx.user = { ...ctx.user, assistant_enabled: assistantEnabled ? 1 : 0 };
+  return {
+    success: true,
+    output:
+      ctx.user.language === 'ru'
+        ? `AI Ассистент ${assistantEnabled ? 'включён' : 'выключён'}`
+        : `AI Assistant ${assistantEnabled ? 'enabled' : 'disabled'}`,
+  };
 }
 
 function updateVoice(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {

@@ -1,3 +1,5 @@
+import type { AgentDispatcher } from '../../agent/dispatcher.ts';
+import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -96,6 +98,9 @@ export interface AgentContext {
   recentEventsWindow?: EventOccurrence[];
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  agentRegistry?: AgentRegistry;
+  agentDispatcher?: AgentDispatcher;
+  onAgentChunk?: (text: string) => void;
 }
 
 /**

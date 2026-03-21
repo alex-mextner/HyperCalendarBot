@@ -3,6 +3,8 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
+import type { AgentDispatcher } from '../../agent/dispatcher.ts';
+import type { AgentRegistry } from '../../agent/registry.ts';
 import { t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -143,6 +145,8 @@ export interface MessageHandlerDeps {
   ) => Promise<void>;
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  agentRegistry?: AgentRegistry;
+  agentDispatcher?: AgentDispatcher;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -406,6 +410,8 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
           })(),
       birthdayService: deps.birthdayService,
       userMemoryRepo: deps.userMemoryRepo,
+      agentRegistry: deps.agentRegistry,
+      agentDispatcher: deps.agentDispatcher,
     };
   };
 }
