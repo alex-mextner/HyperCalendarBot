@@ -149,7 +149,7 @@ export interface MessageHandlerDeps {
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
 // Key: scene name, Value: set of step indices that are callback_query-only.
-const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', new Set([3, 4])]]);
+export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', new Set([3, 4])]]);
 
 function isCallbackOnlyStep(rawScene: unknown): boolean {
   try {
