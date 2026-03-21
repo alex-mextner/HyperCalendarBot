@@ -67,6 +67,7 @@ import {
   type WorkflowSessionStore,
 } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -148,8 +149,8 @@ export interface MessageHandlerDeps {
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
-// Key: scene name, Value: set of step indices that are callback_query-only.
-export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', new Set([3, 4])]]);
+// Step indices are owned by each scene and imported here to avoid duplication.
+export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
 
 function isCallbackOnlyStep(rawScene: unknown): boolean {
   try {
@@ -416,7 +417,9 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupMemberRepo: deps.groupMemberRepo,
       groupMemberService: deps.groupMemberService,
       sceneStorage: {
-        delete: (key: string) => Promise.resolve(deps.sceneStorage.delete(key)).then(() => {}),
+        delete: async (key: string) => {
+          await deps.sceneStorage.delete(key);
+        },
       },
     };
   };

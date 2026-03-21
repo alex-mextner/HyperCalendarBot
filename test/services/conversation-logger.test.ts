@@ -53,6 +53,13 @@ describe('ConversationLogger', () => {
     expect(repo._calls[0]![3]).toBe(999);
   });
 
+  test('logBotEdit saves assistant role with kind:bot_edit wrapper', () => {
+    const repo = makeRepo();
+    new ConversationLogger(repo).logBotEdit(123, 'corrected');
+    expect(repo._calls[0]![1]).toBe('assistant');
+    expect(JSON.parse(repo._calls[0]![2] as string)).toEqual({ kind: 'bot_edit', text: 'corrected' });
+  });
+
   test('logEditedMessage saves user role with kind:edited wrapper', () => {
     const repo = makeRepo();
     new ConversationLogger(repo).logEditedMessage(123, 'corrected');
@@ -89,7 +96,11 @@ describe('ConversationLogger — get_history format compatibility', () => {
     expect(formatActivityEvent({ kind: 'button', label: 'accept', detail: '42' })).toBe('[Button: "accept"] (42)');
   });
 
-  test('logEditedMessage format renders via formatActivityEvent (requires Task 2)', () => {
+  test('logBotEdit format renders via formatActivityEvent', () => {
+    expect(formatActivityEvent({ kind: 'bot_edit', text: 'corrected reply' })).toBe('[Bot edited: corrected reply]');
+  });
+
+  test('logEditedMessage format renders via formatActivityEvent', () => {
     expect(formatActivityEvent({ kind: 'edited', text: 'fixed text' })).toBe('[Edited: fixed text]');
   });
 });

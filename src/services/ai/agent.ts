@@ -59,6 +59,11 @@ export class CalendarBotAgent {
   }
 
   buildMessages(ctx: AgentContext, history: ChatHistoryMessage[]): { systemPrompt: string; messages: MessageParam[] } {
+    // IMPORTANT: history must already contain the current user message.
+    // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
+    // before the pipeline runs, so by the time agent.run() is called, it is present.
+    // If this agent is ever called outside that middleware (e.g. from tests or a new entry point),
+    // the caller is responsible for saving the message first.
     const systemPrompt = buildSystemPrompt(ctx);
 
     const relevantHistory =

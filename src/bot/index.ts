@@ -421,7 +421,7 @@ export function createBot(
       if (originalEditText) {
         (ctx as { editText: typeof originalEditText }).editText = async (text, opts) => {
           const result = await originalEditText(text, opts);
-          conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
+          conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
           return result;
         };
       }

@@ -20,6 +20,10 @@ describe('formatActivityEvent', () => {
     expect(formatActivityEvent({ kind: 'bot', text: 'Hello!' })).toBe('[Bot: Hello!]');
   });
 
+  test('bot_edit', () => {
+    expect(formatActivityEvent({ kind: 'bot_edit', text: 'corrected reply' })).toBe('[Bot edited: corrected reply]');
+  });
+
   test('edited', () => {
     expect(formatActivityEvent({ kind: 'edited', text: 'new text' })).toBe('[Edited: new text]');
   });

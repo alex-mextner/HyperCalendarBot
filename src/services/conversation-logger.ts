@@ -20,6 +20,10 @@ export class ConversationLogger {
     this.repo.save(userId, 'user', JSON.stringify({ kind: 'button', label, detail }), chatId);
   }
 
+  logBotEdit(userId: number, text: string, chatId?: number): void {
+    this.repo.save(userId, 'assistant', JSON.stringify({ kind: 'bot_edit', text }), chatId);
+  }
+
   logEditedMessage(userId: number, text: string, chatId?: number): void {
     this.repo.save(userId, 'user', JSON.stringify({ kind: 'edited', text }), chatId);
   }
