@@ -72,8 +72,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     async sendInvitation(inviteeId: number, text: string, invitationId: number, lang?: string) {
       const msgs = t((lang ?? 'en') as 'en' | 'ru');
       const kb = new InlineKeyboard()
-        .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitationId}`)
-        .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitationId}`)
+        .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitationId}`)
+        .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitationId}`)
         .row()
         .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitationId}`)
         .text(msgs.invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitationId}`);
@@ -91,8 +91,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     },
     async sendEditProposal(creatorId: number, text: string, proposalId: number) {
       const kb = new InlineKeyboard()
-        .text('Accept ✅', `${CB.EDIT_PROPOSAL}:accept:${proposalId}`)
-        .text('Reject ❌', `${CB.EDIT_PROPOSAL}:reject:${proposalId}`);
+        .text('✅ Accept', `${CB.EDIT_PROPOSAL}:accept:${proposalId}`)
+        .text('❌ Reject', `${CB.EDIT_PROPOSAL}:reject:${proposalId}`);
       try {
         const result = await bot.api.sendMessage({
           chat_id: creatorId,

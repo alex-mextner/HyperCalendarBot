@@ -64,8 +64,8 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
                 )
               : `📨 ${inviterName} ${lang === 'ru' ? 'приглашает вас на событие' : 'invites you to an event'}`;
             const kb = new InlineKeyboard()
-              .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-              .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+              .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+              .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
               .row()
               .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
               .text(t(lang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);

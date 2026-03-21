@@ -624,8 +624,8 @@ export function createCallbackHandler(
               const inviterName = inviterUser?.first_name ?? inviterUser?.username ?? `#${invitation.inviter_id}`;
               const originalText = t(inviteeLang).invitation_received(eventTitle, inviterName);
               const keyboard = new InlineKeyboard()
-                .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-                .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+                .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+                .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
                 .row()
                 .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
                 .text(t(inviteeLang).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
@@ -905,8 +905,8 @@ export function createCallbackHandler(
           const invitation = result.invitation;
           const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
           const kb = new InlineKeyboard()
-            .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-            .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+            .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+            .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
             .row()
             .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
           await ctx.answer();
@@ -958,8 +958,8 @@ export function createCallbackHandler(
           const invitation = result.invitation;
           const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
           const kb = new InlineKeyboard()
-            .text('Accept ✅', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-            .text('Decline ❌', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+            .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+            .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
             .row()
             .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`);
 
@@ -1003,7 +1003,7 @@ export function createCallbackHandler(
       if (action === CB.INV_CANCEL) {
         const invLang = (user.language ?? 'en') as Lang;
         await ctx.answer();
-        await ctx.editText(invLang === 'ru' ? 'Приглашение отменено ❌' : 'Invitation cancelled ❌');
+        await ctx.editText(invLang === 'ru' ? '❌ Приглашение отменено' : '❌ Invitation cancelled');
         return;
       }
 
@@ -1173,7 +1173,7 @@ export function createCallbackHandler(
         const intentId = Number(payload);
         intentDeps.intentRepo.updateStatus(intentId, 'approved');
         intentDeps.intentMatcher?.reload();
-        await ctx.answer('Intent approved ✅');
+        await ctx.answer('✅ Intent approved');
         const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
         await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
         return;
@@ -1183,7 +1183,7 @@ export function createCallbackHandler(
       if (action === 'intent_reject' && intentDeps) {
         const intentId = Number(payload);
         intentDeps.intentRepo.updateStatus(intentId, 'rejected');
-        await ctx.answer('Intent rejected ❌');
+        await ctx.answer('❌ Intent rejected');
         const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
         await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
         return;

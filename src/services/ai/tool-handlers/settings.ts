@@ -72,7 +72,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       output:
         ctx.user.language === 'ru'
           ? `🤖 AI Ассистент: ${enabled ? 'включён' : 'выключён'}\nАгент: ${connected ? 'подключён ✅' : 'не подключён ❌'}`
-          : `🤖 AI Assistant: ${enabled ? 'enabled' : 'disabled'}\nAgent: ${connected ? 'connected ✅' : 'not connected ❌'}`,
+          : `🤖 AI Assistant: ${enabled ? 'enabled' : 'disabled'}\nAgent: ${connected ? '✅ connected' : '❌ not connected'}`,
     };
   }
 

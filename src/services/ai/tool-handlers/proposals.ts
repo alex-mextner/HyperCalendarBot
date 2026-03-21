@@ -81,8 +81,8 @@ async function deliverProposalDm(
     `${proposal.summary}`;
 
   const keyboard = new InlineKeyboard()
-    .text('Принять ✅', `prop:accept:${proposal.id}`)
-    .text('Отклонить ❌', `prop:decline:${proposal.id}`);
+    .text('✅ Принять', `prop:accept:${proposal.id}`)
+    .text('❌ Отклонить', `prop:decline:${proposal.id}`);
 
   const targetUser = ctx.userRepo.findByTelegramId(targetId);
   const sender = ctx.sender;

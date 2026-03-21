@@ -29,8 +29,8 @@ async function sendSecretaryInvite(
     `Принять приглашение?`;
 
   const keyboard = new InlineKeyboard()
-    .text('Принять ✅', `sec:accept:${record.id}`)
-    .text('Отклонить ❌', `sec:decline:${record.id}`);
+    .text('✅ Принять', `sec:accept:${record.id}`)
+    .text('❌ Отклонить', `sec:decline:${record.id}`);
 
   const sender = ctx.sender;
 
