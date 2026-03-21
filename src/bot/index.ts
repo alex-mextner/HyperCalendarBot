@@ -161,13 +161,12 @@ export function createBot(
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
-  const scenePauseService = new ScenePauseService(
-    scenesSetup.storage as unknown as {
-      get(key: string): Promise<unknown>;
-      set(key: string, value: unknown): Promise<void>;
-      delete(key: string): Promise<void>;
-    },
-  );
+  const kvStorage = scenesSetup.storage as unknown as {
+    get(key: string): Promise<unknown>;
+    set(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<void>;
+  };
+  const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
@@ -666,10 +665,7 @@ export function createBot(
         scenesSetup.scenes.timezoneScene,
         db.groupChats,
         {
-          sceneStorage: scenesSetup.storage as {
-            get(key: string): Promise<unknown>;
-            delete(key: string): unknown;
-          },
+          sceneStorage: kvStorage,
           scenePauseService,
         },
       )(ctx as unknown as BotCallbackContext),
