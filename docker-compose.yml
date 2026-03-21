@@ -1,0 +1,24 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: hypercal-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  bot:
+    image: ghcr.io/alex-mextner/hypercalendarbot:latest
+    container_name: hypercal-bot
+    restart: unless-stopped
+    depends_on:
+      - redis
+    env_file: .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "3001:3311"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  redis-data:
