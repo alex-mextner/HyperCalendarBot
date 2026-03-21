@@ -32,7 +32,7 @@ type BotApiCtx = {
 
 type MsgCtx = { delete: () => Promise<unknown> };
 
-export function createTimezoneScene(db: DatabaseService) {
+export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
   return new Scene('timezone')
     .state<TimezoneState>()
     .params<TimezoneParams>()
@@ -74,7 +74,7 @@ export function createTimezoneScene(db: DatabaseService) {
         if (!cityInputMode) return;
         const text = (context as unknown as { text?: string }).text?.trim();
         if (!text) return;
-        const tz = await resolveCity(text);
+        const tz = await resolveCity(text, aiModel);
         if (tz) {
           await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
             reply_markup: timezoneConfirmKeyboard(lang),

@@ -129,6 +129,7 @@ export interface MessageHandlerDeps {
   workflowSessions?: WorkflowSessionStore;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
+  aiCityModel?: string;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
   // Admin reply sessions: adminId → { threadId, userId }
@@ -719,6 +720,7 @@ export async function tryHandleGroupTzInput(
   userId: number,
   text: string,
   groupChatRepo: GroupChatRepository,
+  aiModel?: string,
 ): Promise<boolean> {
   const entry = pendingGroupTzInput.get(userId);
   if (!entry) return false;
@@ -728,7 +730,7 @@ export async function tryHandleGroupTzInput(
     return false;
   }
 
-  const tz = await resolveCity(text.trim());
+  const tz = await resolveCity(text.trim(), aiModel);
   pendingGroupTzInput.delete(userId);
 
   if (!tz) {
@@ -882,7 +884,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       // Check pending group TZ input before relevance gate — the city name prompt
       // won't match any bot keyword, so it must be intercepted before the gate drops it
       if (deps.groupChatRepo) {
-        const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
+        const groupTzHandled = await tryHandleGroupTzInput(
+          ctx,
+          user.telegram_id,
+          text,
+          deps.groupChatRepo,
+          deps.aiCityModel,
+        );
         if (groupTzHandled) return;
       }
 
@@ -1001,6 +1009,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                 cmdLogger.error({ err: err, userId: uid }, 'Failed to persist last mentioned event from intent');
               });
             },
+            deps.conversationLogger,
           )
         : undefined;
 

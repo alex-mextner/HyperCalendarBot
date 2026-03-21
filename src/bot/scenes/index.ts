@@ -19,6 +19,7 @@ export function createScenesPlugin(
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
+  aiModel?: string,
 ) {
   const storage = createSceneStorage(db.db);
   // Cast satisfies GramIO's generic Storage<Data> structural contract:
@@ -28,8 +29,8 @@ export function createScenesPlugin(
   const addEventScene = createAddEventScene(eventService);
   const editValueScene = createEditValueScene(eventService);
   const importScene = createImportScene(eventService, botToken);
-  const timezoneScene = createTimezoneScene(db);
-  const onboardingScene = createOnboardingScene(db, gcalConfigured, prefsService, holidayService);
+  const timezoneScene = createTimezoneScene(db, aiModel);
+  const onboardingScene = createOnboardingScene(db, gcalConfigured, prefsService, holidayService, aiModel);
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
 
   return {

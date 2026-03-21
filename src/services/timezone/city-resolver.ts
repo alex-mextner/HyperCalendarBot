@@ -32,7 +32,7 @@ function getSuggestions(tzPrefix: string): string {
     .join(', ');
 }
 
-export async function resolveCity(input: string): Promise<string | null> {
+export async function resolveCity(input: string, model?: string): Promise<string | null> {
   const trimmed = input.trim();
 
   // 1. Direct IANA input
@@ -48,7 +48,7 @@ export async function resolveCity(input: string): Promise<string | null> {
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const response = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: model ?? 'claude-haiku-4-5-20251001',
       max_tokens: 64,
       system: SYSTEM_PROMPT,
       messages,
