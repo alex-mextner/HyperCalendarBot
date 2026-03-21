@@ -393,6 +393,36 @@ describe('needsSupplement', () => {
     expect('needsSupplement' in result).toBe(true);
   });
 
+  test('logs bot response to conversationLogger before returning needsSupplement', async () => {
+    const matcher = makeMatcher({ intentId: 1, captures: {} });
+    const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
+    const executor = makeExecutor({ success: true, response: 'Готово!' });
+    const logBotResponse = mock(() => {});
+    const logger = {
+      logBotResponse,
+    } as unknown as import('../../../src/services/conversation-logger.ts').ConversationLogger;
+
+    const layer = createIntentMatcherLayer(
+      matcher,
+      repo,
+      executor,
+      makeToolExecutor(),
+      makeWorkflowStore(),
+      undefined,
+      undefined,
+      undefined,
+      logger,
+    );
+    const ctx = makeCtx();
+    await layer(ctx, 'покажи события');
+
+    expect(logBotResponse).toHaveBeenCalledTimes(1);
+    const [callUserId, callText, callChatId] = logBotResponse.mock.calls[0] as unknown as [number, string, number];
+    expect(callUserId).toBe(ctx.dbUser.telegram_id);
+    expect(callText).toBe('Готово!');
+    expect(callChatId).toBe((ctx as unknown as { chatId: number }).chatId);
+  });
+
   test('suspended intent (ask_user) does NOT return needsSupplement', async () => {
     const matcher = makeMatcher({ intentId: 1, captures: {} });
     const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });

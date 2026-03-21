@@ -12,7 +12,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
-    conversationLogger: { logUserMessage: mock(() => {}) },
+    conversationLogger: { logUserMessage: mock(() => {}), logBotResponse: mock(() => {}) },
     userRepo: {},
     reminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },

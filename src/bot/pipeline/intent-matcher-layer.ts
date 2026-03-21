@@ -3,6 +3,7 @@
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
+import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
@@ -40,6 +41,7 @@ export function createIntentMatcherLayer(
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
   onEventMentioned?: (userId: number, eventId: number) => void,
+  conversationLogger?: ConversationLogger,
 ) {
   return async (
     ctx: BotCommandContext,
@@ -165,6 +167,7 @@ export function createIntentMatcherLayer(
           ? formatResponse(intent.format, result.response, user.timezone, user.language)
           : result.response;
       await ctx.send(formatted);
+      conversationLogger?.logBotResponse(userId, formatted, chatId);
       return { handled: true, needsSupplement: true };
     }
 
