@@ -1,4 +1,5 @@
 import { chromium } from 'playwright';
+import type { Browser } from 'playwright';
 
 export type PlaywrightAction =
   | { action: 'screenshot'; url?: string }
@@ -13,13 +14,61 @@ export interface PlaywrightResult {
   url?: string;
 }
 
+// Persistent browser — launched on first use, closed after 5min idle
+const IDLE_MS = 5 * 60 * 1000;
+let sharedBrowser: Browser | null = null;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function getBrowser(): Promise<Browser> {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+
+  if (sharedBrowser?.isConnected()) {
+    resetIdleTimer();
+    return sharedBrowser;
+  }
+
+  sharedBrowser = await chromium.launch({ headless: true });
+  sharedBrowser.on('disconnected', () => {
+    sharedBrowser = null;
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  });
+  resetIdleTimer();
+  return sharedBrowser;
+}
+
+function resetIdleTimer(): void {
+  idleTimer = setTimeout(() => {
+    sharedBrowser?.close().catch(() => {});
+    sharedBrowser = null;
+    idleTimer = null;
+  }, IDLE_MS);
+}
+
+/** Explicitly close the browser (called on app quit). */
+export async function closeBrowser(): Promise<void> {
+  if (idleTimer) {
+    clearTimeout(idleTimer);
+    idleTimer = null;
+  }
+  if (sharedBrowser) {
+    await sharedBrowser.close().catch(() => {});
+    sharedBrowser = null;
+  }
+}
+
 export async function playwrightAction(
   params: PlaywrightAction,
   timeoutMs = 30_000,
 ): Promise<PlaywrightResult> {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await getBrowser();
+  const page = await browser.newPage();
   try {
-    const page = await browser.newPage();
     page.setDefaultTimeout(timeoutMs);
 
     if (params.url) {
@@ -49,6 +98,6 @@ export async function playwrightAction(
       }
     }
   } finally {
-    await browser.close();
+    await page.close().catch(() => {});
   }
 }

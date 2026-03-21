@@ -2,7 +2,11 @@ import { describe, expect, mock, test } from 'bun:test';
 
 const mockBashExecute = mock(async () => ({ stdout: 'hello', stderr: '', exitCode: 0 }));
 const mockApplescriptRun = mock(async () => ({ output: 'ok', exitCode: 0 }));
-const mockClaudeChat = mock(async () => ({ response: 'answer', conversationId: 'conv-1' }));
+const mockClaudeChat = mock(async (_msg: string, _chatId?: string, onChunk?: (chunk: string) => void) => {
+  onChunk?.('Hello ');
+  onChunk?.('world');
+  return { response: 'Hello world', conversationId: 'conv-1' };
+});
 const mockGetOrgId = mock(async () => 'org-uuid');
 const mockListChats = mock(async () => [{ id: 'c1', name: 'Chat 1' }]);
 const mockListProjects = mock(async () => [{ id: 'p1', name: 'Project 1' }]);
@@ -83,6 +87,52 @@ describe('dispatch', () => {
       (r) => responses.push(r),
     );
     expect(mockPlaywrightAction).toHaveBeenCalled();
+    expect((responses[responses.length - 1] as { type: string }).type).toBe('done');
+  });
+
+  test('claude_chat streams chunks and sends done with conversationId', async () => {
+    const responses: unknown[] = [];
+    await dispatch({ id: '10', type: 'claude_chat', payload: { message: 'hi', chat_id: 'conv-abc' } }, (r) =>
+      responses.push(r),
+    );
+    expect(mockClaudeChat).toHaveBeenCalledWith('hi', 'conv-abc', expect.any(Function));
+    const chunks = responses.filter((r) => (r as { type: string }).type === 'chunk');
+    expect(chunks).toHaveLength(2);
+    expect((chunks[0] as { text: string }).text).toBe('Hello ');
+    expect((chunks[1] as { text: string }).text).toBe('world');
+    const done = responses[responses.length - 1] as { type: string; data: { conversationId: string } };
+    expect(done.type).toBe('done');
+    expect(done.data.conversationId).toBe('conv-1');
+  });
+
+  test('claude_new_chat starts a new conversation with no chat_id', async () => {
+    mockClaudeChat.mockClear();
+    const responses: unknown[] = [];
+    await dispatch({ id: '11', type: 'claude_new_chat', payload: { message: 'new topic' } }, (r) => responses.push(r));
+    const [msg, chatId] = mockClaudeChat.mock.calls[0] as [string, string | undefined];
+    expect(msg).toBe('new topic');
+    expect(chatId).toBeUndefined();
+    const done = responses[responses.length - 1] as { type: string; data: { conversationId: string } };
+    expect(done.type).toBe('done');
+    expect(done.data.conversationId).toBe('conv-1');
+  });
+
+  test('claude_open_chat opens existing chat with empty message', async () => {
+    mockClaudeChat.mockClear();
+    const responses: unknown[] = [];
+    await dispatch({ id: '12', type: 'claude_open_chat', payload: { chat_id: 'open-xyz' } }, (r) => responses.push(r));
+    const [msg, chatId] = mockClaudeChat.mock.calls[0] as [string, string | undefined];
+    expect(msg).toBe('');
+    expect(chatId).toBe('open-xyz');
+    expect((responses[0] as { type: string }).type).toBe('done');
+  });
+
+  test('claude_chat without chat_id passes undefined conversationId', async () => {
+    mockClaudeChat.mockClear();
+    const responses: unknown[] = [];
+    await dispatch({ id: '13', type: 'claude_chat', payload: { message: 'no conv' } }, (r) => responses.push(r));
+    const [, chatId] = mockClaudeChat.mock.calls[0] as [string, string | undefined];
+    expect(chatId).toBeUndefined();
     expect((responses[responses.length - 1] as { type: string }).type).toBe('done');
   });
 
