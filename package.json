@@ -38,10 +38,13 @@
     "date-holidays": "^3.26.9",
     "edge-tts": "^1.0.1",
     "geo-tz": "8.1.6",
+    "google-auth-library": "10.6.1",
     "googleapis": "^171.4.0",
     "gramio": "0.7.0",
-    "pino": "10.3.1",
+    "ioredis": "^5.10.1",
+    "jose": "^6.2.2",
     "marked": "^15.0.12",
+    "pino": "10.3.1",
     "playwright": "^1.58.2",
     "rrule": "2.8.1"
   }
