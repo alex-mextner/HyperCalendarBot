@@ -931,6 +931,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
     // Build context info for group messages
     const from = (ctx as unknown as { from?: { first_name?: string; username?: string } }).from;
+    // GramIO's MessageContext exposes .id as the Telegram message_id (confirmed via prototype inspection)
     const incomingMsgId = (ctx as unknown as { id?: number }).id;
     let messagePrefix = '';
     if (isGroup && from) {

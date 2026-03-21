@@ -729,8 +729,10 @@ export function createCallbackHandler(
               : t(lang).callbackErrors.proposalAcceptedNoEvent,
           );
 
+          const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
+          const proposerLang = (proposerUser?.language ?? lang) as Lang;
           editProposalDeps
-            .sendMessage(proposal.proposer_id, t(lang).callbackErrors.proposalAcceptedNotification, {
+            .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification, {
               parse_mode: 'HTML',
             })
             .catch(() => {});
@@ -739,8 +741,10 @@ export function createCallbackHandler(
           await ctx.answer();
           await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
+          const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
+          const proposerLang = (proposerUser?.language ?? lang) as Lang;
           editProposalDeps
-            .sendMessage(proposal.proposer_id, t(lang).callbackErrors.proposalRejectedNotification, {
+            .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification, {
               parse_mode: 'HTML',
             })
             .catch(() => {});
@@ -1082,9 +1086,13 @@ export function createCallbackHandler(
         feedbackDeps.feedbackRepo.closeThread(threadId);
         await ctx.answer({ text: t(lang).callbackErrors.threadClosed });
         await ctx.editText(`✅ Thread #${threadId} closed`).catch(() => {});
-        feedbackDeps.sendMessage(thread.user_id, t(lang).callbackErrors.feedbackThreadResolved).catch((e: unknown) => {
-          cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
-        });
+        const threadUser = userRepo?.findByTelegramId(thread.user_id);
+        const threadUserLang = (threadUser?.language ?? lang) as Lang;
+        feedbackDeps
+          .sendMessage(thread.user_id, t(threadUserLang).callbackErrors.feedbackThreadResolved)
+          .catch((e: unknown) => {
+            cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
+          });
         return;
       }
 

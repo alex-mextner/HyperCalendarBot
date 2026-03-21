@@ -33,6 +33,8 @@ export interface AgentContext {
   user: User;
   chatId: number;
   messageText: string;
+  /** Telegram message_id of the incoming message being processed. Used for set_reaction. */
+  incomingMessageId?: number;
   isGroup: boolean;
   groupChatId?: number;
   groupTitle?: string;
@@ -182,4 +184,5 @@ export interface TelegramSender {
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
+  setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
 }

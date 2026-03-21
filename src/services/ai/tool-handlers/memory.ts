@@ -1,3 +1,4 @@
+import { cmdLogger } from '../../../utils/logger.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 interface RememberUserFactInput {
@@ -17,4 +18,15 @@ export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFac
   }
 
   return { success: true, output: 'fact saved' };
+}
+
+export function handleSetReaction(ctx: AgentContext, input: { message_id: number; emoji: string }): ToolResult {
+  if (!ctx.sender?.setReaction) {
+    return { success: false, error: 'Reactions not available' };
+  }
+  const chatId = ctx.groupChatId ?? ctx.chatId;
+  ctx.sender
+    .setReaction(chatId, input.message_id, input.emoji)
+    .catch((err: unknown) => cmdLogger.error({ err, chatId, messageId: input.message_id }, 'set_reaction failed'));
+  return { success: true, output: '' };
 }

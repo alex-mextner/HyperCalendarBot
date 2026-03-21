@@ -128,5 +128,21 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     async deleteMessage(chatId: number, messageId: number) {
       await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });
     },
+    async setReaction(chatId: number, messageId: number, emoji: string) {
+      await (
+        bot.api as unknown as {
+          setMessageReaction(params: {
+            chat_id: number;
+            message_id: number;
+            reaction: { type: 'emoji'; emoji: string }[];
+            is_big?: boolean;
+          }): Promise<unknown>;
+        }
+      ).setMessageReaction({
+        chat_id: chatId,
+        message_id: messageId,
+        reaction: [{ type: 'emoji', emoji }],
+      });
+    },
   };
 }

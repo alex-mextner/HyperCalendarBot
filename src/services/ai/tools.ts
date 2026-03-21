@@ -1055,6 +1055,26 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
     input_schema: { type: 'object' as const, properties: {}, required: [] },
   },
   {
+    name: 'set_reaction',
+    description:
+      'Put an emoji reaction on a Telegram message. Use in group chats to react silently without sending a text reply — e.g. when you want to acknowledge a message, log feedback, or remember a fact without cluttering the chat. The message_id is visible in the [Group: ..., msg_id:XXXX] prefix of each incoming message.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        message_id: {
+          type: 'number',
+          description: 'Telegram message_id to react to. Read it from the msg_id field in the message prefix.',
+        },
+        emoji: {
+          type: 'string',
+          description:
+            'A single emoji supported by Telegram reactions, e.g. "👍", "❤️", "🔥", "👀", "😂", "🤔", "✍️", "🙏".',
+        },
+      },
+      required: ['message_id', 'emoji'],
+    },
+  },
+  {
     name: 'remember_user_fact',
     description:
       'Save a fact about the user to long-term memory. Use to remember preferences, habits, important people, or anything useful for future conversations. Keep facts compact and specific. type=append adds a new fact; type=rewrite replaces all existing facts (use to consolidate or correct).',

@@ -374,6 +374,33 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
+  test('response containing [SKIP] anywhere is discarded in group', async () => {
+    const streamEvents = [
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Got it ' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } },
+    ];
+    const finalMsg = {
+      content: [{ type: 'text', text: 'Got it [SKIP]' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    expect(sender.sendMessage).toHaveBeenCalledTimes(0);
+    expect(deleteMessage).toHaveBeenCalledTimes(0);
+  });
+
   test('[SKIP] response in DM is NOT discarded', async () => {
     const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
     const finalMsg = {

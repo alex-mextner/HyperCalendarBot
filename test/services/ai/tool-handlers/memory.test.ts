@@ -1,10 +1,10 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { UserMemoryRepository } from '../../../../src/database/repositories/user-memory.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
-import { handleRememberUserFact } from '../../../../src/services/ai/tool-handlers/memory.ts';
+import { handleRememberUserFact, handleSetReaction } from '../../../../src/services/ai/tool-handlers/memory.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 
 function makeCtx(db: Database, userId: number): AgentContext {
@@ -64,6 +64,63 @@ describe('handleRememberUserFact', () => {
     const ctx = makeCtx(db, USER_ID);
     const ctxWithout = { ...ctx, userMemoryRepo: undefined };
     const result = handleRememberUserFact(ctxWithout as AgentContext, { type: 'append', content: 'test' });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe('handleSetReaction', () => {
+  let db: Database;
+  const USER_ID = 42;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+  });
+
+  test('calls setReaction with groupChatId, messageId, and emoji', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    const setReaction = mock(() => Promise.resolve());
+    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.isGroup = true;
+    ctx.groupChatId = -100123;
+
+    const result = handleSetReaction(ctx, { message_id: 999, emoji: '👍' });
+
+    expect(result.success).toBe(true);
+    // Allow the fire-and-forget promise to settle
+    await Promise.resolve();
+    expect(setReaction).toHaveBeenCalledWith(-100123, 999, '👍');
+  });
+
+  test('falls back to chatId when groupChatId is absent', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    const setReaction = mock(() => Promise.resolve());
+    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.isGroup = false;
+
+    handleSetReaction(ctx, { message_id: 7, emoji: '😂' });
+
+    await Promise.resolve();
+    expect(setReaction).toHaveBeenCalledWith(USER_ID, 7, '😂');
+  });
+
+  test('returns error when setReaction is not available on sender', () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.sender = {} as AgentContext['sender'];
+
+    const result = handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Reactions not available');
+  });
+
+  test('returns error when sender is absent', () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.sender = undefined;
+
+    const result = handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
+
     expect(result.success).toBe(false);
   });
 });

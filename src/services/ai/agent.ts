@@ -185,6 +185,7 @@ export class CalendarBotAgent {
           sendEditProposal: async () => null,
           sendAsUser: async () => false,
           deleteMessage: async () => {},
+          setReaction: async () => {},
         } satisfies TelegramSender)
       : this.sender;
     ctx.sender = effectiveSender;
@@ -405,7 +406,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && finalText === '[SKIP]') {
+    if (ctx.isGroup && (finalText === '[SKIP]' || finalText.includes('[SKIP]'))) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

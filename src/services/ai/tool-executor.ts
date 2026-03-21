@@ -15,7 +15,7 @@ import {
 } from './tool-handlers/events.ts';
 import { handleSendFeedback } from './tool-handlers/feedback.ts';
 import { handleGetHistory } from './tool-handlers/history.ts';
-import { handleRememberUserFact } from './tool-handlers/memory.ts';
+import { handleRememberUserFact, handleSetReaction } from './tool-handlers/memory.ts';
 import {
   handleAddContact,
   handleAskUser,
@@ -329,6 +329,8 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleListTriggers(ctx);
       case 'remove_trigger':
         return handleRemoveTrigger(ctx, input as never);
+      case 'set_reaction':
+        return handleSetReaction(ctx, input as { message_id: number; emoji: string });
       case 'remember_user_fact':
         return handleRememberUserFact(ctx, input as { type: 'append' | 'rewrite'; content: string });
 
