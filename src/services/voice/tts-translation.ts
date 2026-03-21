@@ -12,10 +12,12 @@ Use natural spoken language suitable for text-to-speech synthesis.`;
 
 export class TtsTranslationService {
   private client: Anthropic;
+  private model: string;
   private cache = new Map<string, string>();
 
-  constructor(opts?: { apiKey?: string; baseUrl?: string }) {
+  constructor(opts?: { apiKey?: string; baseUrl?: string; model?: string }) {
     this.client = createAnthropicClient({ apiKey: opts?.apiKey, baseURL: opts?.baseUrl });
+    this.model = opts?.model ?? 'claude-haiku-4-5-20251001';
   }
 
   async translate(text: string, targetLang: string): Promise<string> {
@@ -26,7 +28,7 @@ export class TtsTranslationService {
     try {
       const systemPrompt = SYSTEM_PROMPT.replace('{language}', targetLang);
       const message = await this.client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: this.model,
         max_tokens: 1024,
         system: systemPrompt,
         messages: [{ role: 'user', content: text }],

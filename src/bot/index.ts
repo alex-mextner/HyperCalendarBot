@@ -3,6 +3,7 @@ import { Bot, InlineKeyboard } from 'gramio';
 import { agentDispatcher } from '../agent/dispatcher.ts';
 import { agentRegistry } from '../agent/registry.ts';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
+import type { EnvConfig } from '../config/env.ts';
 import type { DatabaseService } from '../database/index.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
@@ -122,6 +123,15 @@ export function createBot(
   eventMentionStore?: EventMentionStore,
   domainEventBus?: DomainEventBus,
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>,
+  envConfig?: Pick<
+    EnvConfig,
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'AGENT_DOWNLOAD_URL'
+    | 'INLINE_BOT_TOKEN'
+    | 'AI_FAST_MODEL'
+  >,
 ) {
   const eventService = new EventService(
     db.events,
@@ -166,7 +176,15 @@ export function createBot(
   );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
-  const scenesSetup = createScenesPlugin(db, eventService, token, !!googleDeps, prefsService, holidayService);
+  const scenesSetup = createScenesPlugin(
+    db,
+    eventService,
+    token,
+    !!googleDeps,
+    prefsService,
+    holidayService,
+    envConfig?.AI_FAST_MODEL,
+  );
 
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
@@ -206,10 +224,8 @@ export function createBot(
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
 
-  const botAdminId = process.env.BOT_ADMIN_ID ? Number.parseInt(process.env.BOT_ADMIN_ID, 10) : undefined;
-  const intentLearnerDailyLimit = process.env.INTENT_LEARNER_DAILY_LIMIT
-    ? Number.parseInt(process.env.INTENT_LEARNER_DAILY_LIMIT, 10)
-    : 100;
+  const botAdminId = envConfig?.BOT_ADMIN_ID;
+  const intentLearnerDailyLimit = envConfig?.INTENT_LEARNER_DAILY_LIMIT ?? 100;
 
   const intentLearner =
     botAdminId && !Number.isNaN(botAdminId)
@@ -273,7 +289,7 @@ export function createBot(
     googleCalendarRepo: googleDeps?.calendarRepo,
     deepLinkService,
     sceneStorage: scenesSetup.storage,
-    botUsername: process.env.BOT_USERNAME,
+    botUsername: envConfig?.BOT_USERNAME,
     botId: Number(token.split(':')[0]),
     groupSessions,
     groupMemberRepo: db.groupMembers,
@@ -302,6 +318,7 @@ export function createBot(
     adminEditSessions,
     adminReplySession,
     intentLearner,
+    aiCityModel: envConfig?.AI_FAST_MODEL,
     botAdminId,
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,
@@ -830,7 +847,7 @@ export function createBot(
     });
 
   // AI Assistant commands (not in setMyCommands — internal use only)
-  const connectCommand = createConnectCommand(process.env.AGENT_DOWNLOAD_URL ?? '');
+  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
   const activateCommand = createActivateCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
   bot
@@ -851,7 +868,7 @@ export function createBot(
   }
 
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
-  const inlineBotToken = process.env.INLINE_BOT_TOKEN;
+  const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;
   let inlineBot: Bot | undefined;
   if (inlineBotToken) {
     inlineBot = new Bot(inlineBotToken);

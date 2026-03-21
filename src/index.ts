@@ -1,6 +1,7 @@
 // src/index.ts
 
 import { agentDispatcher } from './agent/dispatcher.ts';
+import { initPairingSecret } from './agent/pairing.ts';
 import { agentRegistry } from './agent/registry.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
@@ -12,6 +13,10 @@ import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
+
+if (config.AGENT_JWT_SECRET) {
+  initPairingSecret(config.AGENT_JWT_SECRET);
+}
 
 // Mutable ref — patched after bot creation
 const botRef: {
@@ -176,7 +181,7 @@ if (config.REDIS_URL) {
   botLogger.info('Image render queue initialized');
 }
 
-if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !process.env.DISABLE_VOICE) {
+if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
     const { TtsService } = await import('./services/voice/tts-service.ts');
@@ -205,10 +210,11 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !pro
     const ttsTranslationService = new TtsTranslationService({
       apiKey: config.ANTHROPIC_API_KEY,
       baseUrl: config.AI_BASE_URL,
+      model: config.AI_FAST_MODEL,
     });
     const ttsService = new TtsService();
 
-    const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY ?? '';
+    const DEEPGRAM_API_KEY = config.DEEPGRAM_API_KEY ?? '';
     if (!DEEPGRAM_API_KEY) {
       botLogger.warn('DEEPGRAM_API_KEY is not set — STT will not work');
     }
@@ -464,14 +470,10 @@ if (config.HF_TOKEN) {
 }
 
 let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService | undefined;
-{
-  const pythonPath = '/tmp/tts-test/bin/python3';
-  const { existsSync } = await import('node:fs');
-  if (existsSync(pythonPath) && stressDictionary) {
-    const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
-    sileroTts = new SileroTtsService(pythonPath);
-    botLogger.info('Silero TTS initialized');
-  }
+if (config.SILERO_PYTHON_PATH && stressDictionary) {
+  const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
+  sileroTts = new SileroTtsService(config.SILERO_PYTHON_PATH);
+  botLogger.info('Silero TTS initialized');
 }
 
 // MTProto userbot for delivering messages to users who haven't started the bot
@@ -564,6 +566,15 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     mtprotoResolveUsername,
     eventMentionStore,
     domainEventBus,
+    undefined, // pushAiMessage — not used at this call site
+    {
+      BOT_ADMIN_ID: config.BOT_ADMIN_ID,
+      INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
+      BOT_USERNAME: config.BOT_USERNAME,
+      AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
+      INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
+      AI_FAST_MODEL: config.AI_FAST_MODEL,
+    },
   );
 
 // Patch bot ref to use real bot API
