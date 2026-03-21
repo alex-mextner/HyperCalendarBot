@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Shell Commands
+
+Never use absolute paths for common tools — they are on the shell PATH:
+- `git` not `/usr/bin/git`
+- `biome` not `node_modules/.bin/biome` (use `node_modules/.bin/biome` only as fallback if `biome` is not globally installed)
+- `tsc` not `node_modules/.bin/tsc`
+- `bun` not `/Users/ultra/.bun/bin/bun`
+
+## Bun
+
 Default to using Bun instead of Node.js.
 
 - Use `bun <file>` instead of `node <file>` or `ts-node <file>`
