@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger.ts';
+import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
@@ -12,10 +13,12 @@ import {
 } from './tool-handlers/events.ts';
 import { handleSendFeedback } from './tool-handlers/feedback.ts';
 import { handleGetHistory } from './tool-handlers/history.ts';
+import { handleRememberUserFact } from './tool-handlers/memory.ts';
 import {
   handleAddContact,
   handleAskUser,
   handleCalculate,
+  handleConvertToTimezone,
   handleEndCall,
   handleFindContact,
   handleFindUser,
@@ -23,6 +26,7 @@ import {
   handleGetContacts,
   handleGetGoogleCalendarStatus,
   handleGetHolidays,
+  handleGetTimezoneInfo,
   handleListGoogleCalendars,
   handleLookupStress,
   handleMakeCall,
@@ -133,7 +137,22 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleGetFreeSlots(ctx, input as { date: string; scope?: 'personal' | 'group' });
 
       case 'search_events':
-        return handleSearchEvents(ctx, input as { query: string; scope?: 'personal' | 'group' });
+        return handleSearchEvents(
+          ctx,
+          input as { query?: string; scope?: 'personal' | 'group'; event_type?: 'birthday' | 'regular' },
+        );
+
+      case 'create_birthday_event':
+        return handleCreateBirthdayEvent(
+          ctx,
+          input as {
+            celebrant_id: number;
+            date: { day: number; month: number };
+            year?: number;
+            custom_name?: string;
+            group_id?: number;
+          },
+        );
 
       case 'get_upcoming':
         return handleGetUpcoming(ctx, input as { limit?: number; scope?: 'personal' | 'group' });
@@ -263,6 +282,12 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'calculate':
         return handleCalculate(input as { expression: string });
 
+      case 'get_timezone_info':
+        return handleGetTimezoneInfo(input as { timezone: string | string[]; at?: string });
+
+      case 'convert_to_timezone':
+        return handleConvertToTimezone(input as { datetime: string; timezone: string });
+
       case 'list_calendar_access':
         return handleListCalendarAccess(ctx);
 
@@ -295,6 +320,8 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleListTriggers(ctx);
       case 'remove_trigger':
         return handleRemoveTrigger(ctx, input as never);
+      case 'remember_user_fact':
+        return handleRememberUserFact(ctx, input as { type: 'append' | 'rewrite'; content: string });
 
       case 'resume_scene':
         if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };

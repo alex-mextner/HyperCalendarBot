@@ -24,4 +24,16 @@ export class GroupMemberRepository {
       .prepare('SELECT * FROM group_members WHERE chat_id = ? ORDER BY last_seen_at DESC')
       .all(chatId) as GroupMember[];
   }
+
+  getGroupsForUser(userId: number): { chat_id: number; title: string | null }[] {
+    return this.db
+      .prepare(
+        `SELECT gm.chat_id, gc.title
+         FROM group_members gm
+         LEFT JOIN group_chats gc ON gc.chat_id = gm.chat_id
+         WHERE gm.user_id = ?
+         ORDER BY gm.last_seen_at DESC`,
+      )
+      .all(userId) as { chat_id: number; title: string | null }[];
+  }
 }

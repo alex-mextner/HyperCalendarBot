@@ -55,18 +55,40 @@ describe('handleToday', () => {
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
-  test('calls sendPhoto when renderService is provided', async () => {
+  test('does not call sendPhoto when renderService render fails', async () => {
     const { handleToday } = await import('../../../src/bot/commands/today.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
     const renderService = { render: mock(() => Promise.resolve(Buffer.from(''))) };
 
-    // renderDayImage is an internal call; stub it via renderService that throws
-    // to exercise the catch branch
+    // renderDayImage calls renderService.renderDirect which is missing → throws
     await handleToday(ctx as never, svc as never, undefined, renderService as never);
 
-    // render threw so sendPhoto should NOT be called, but send still was
     expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.sendPhoto).not.toHaveBeenCalled();
+  });
+
+  test('pins image after successful render', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const pinChatMessage = mock(() => Promise.resolve());
+    const ctx = {
+      dbUser: user,
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve({ id: 42 })),
+      bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
+    };
+    const svc = makeEventService();
+    const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
+
+    await handleToday(ctx as never, svc as never, undefined, renderService as never);
+    await Promise.resolve(); // flush fire-and-forget autoPin
+
+    expect(ctx.sendPhoto).toHaveBeenCalled();
+    expect(pinChatMessage).toHaveBeenCalledWith({
+      chat_id: user.telegram_id,
+      message_id: 42,
+      disable_notification: true,
+    });
   });
 
   test('shows holiday entries when holidayService returns them', async () => {

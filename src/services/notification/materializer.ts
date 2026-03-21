@@ -33,7 +33,7 @@ export interface MaterializeEventData {
 
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
-function allDayReminderUtc(dateStr: string, localTime: string, timezone: string): Date {
+export function allDayReminderUtc(dateStr: string, localTime: string, timezone: string): Date {
   const [h, m] = localTime.split(':').map(Number);
   const local = new TZDate(new Date(dateStr), timezone);
   local.setHours(h!, m!, 0, 0);

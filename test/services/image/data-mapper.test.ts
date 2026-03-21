@@ -3,9 +3,12 @@ import type { CalendarEvent, EventOccurrence } from '../../../src/database/types
 import {
   mapDailyAgendaData,
   mapEventCardData,
+  mapMonthlyCalendarData,
   mapWeeklyOverviewData,
 } from '../../../src/services/image/data-mapper.ts';
 import { THEME_LIGHT } from '../../../src/worker/templates/themes.ts';
+
+const BIRTHDAY_COLOR = '#EC4899';
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   return {
@@ -37,9 +40,41 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   } as CalendarEvent;
 }
 
-function makeOcc(overrides: Partial<CalendarEvent> = {}): EventOccurrence {
+function makeOcc(overrides: Partial<CalendarEvent> = {}, occStart?: string): EventOccurrence {
   const event = makeEvent(overrides);
-  return { event, occurrence_start: event.start_at, occurrence_end: event.end_at, is_exception: false };
+  return {
+    event,
+    occurrence_start: occStart ?? event.start_at,
+    occurrence_end: event.end_at,
+    is_exception: false,
+  };
+}
+
+// Birthday occurrence: all-day, 2026-05-10, born 1996 → turns 30
+function makeBirthdayOcc(): EventOccurrence {
+  return makeOcc(
+    {
+      title: 'Иван',
+      event_type: 'birthday',
+      all_day: 1,
+      start_at: '2026-05-10T00:00:00Z',
+      end_at: null,
+      birth_year: 1996,
+      recurrence_rule: 'FREQ=YEARLY',
+    },
+    '2026-05-10T00:00:00Z',
+  );
+}
+
+// Recurring non-birthday occurrence
+function makeRecurringOcc(): EventOccurrence {
+  return makeOcc({
+    id: 2,
+    title: 'Standup',
+    recurrence_rule: 'FREQ=DAILY',
+    start_at: '2026-03-09T08:00:00Z',
+    end_at: '2026-03-09T08:30:00Z',
+  });
 }
 
 describe('mapDailyAgendaData', () => {
@@ -132,6 +167,31 @@ describe('mapDailyAgendaData', () => {
     expect(result.timedEvents).toEqual([]);
     expect(result.allDayEvents).toEqual([]);
   });
+
+  test('birthday event gets pink color and age title (EN)', () => {
+    const result = mapDailyAgendaData({
+      occurrences: [makeBirthdayOcc()],
+      dateIso: '2026-05-10',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    const ev = result.allDayEvents[0]!;
+    expect(ev.calendarColor).toBe(BIRTHDAY_COLOR);
+    expect(ev.title).toContain('🎁');
+    expect(ev.title).toContain('turns 30');
+  });
+
+  test('birthday event gets Russian age plural (RU)', () => {
+    const result = mapDailyAgendaData({
+      occurrences: [makeBirthdayOcc()],
+      dateIso: '2026-05-10',
+      timezone: 'UTC',
+      locale: 'ru',
+      theme: THEME_LIGHT,
+    });
+    expect(result.allDayEvents[0]!.title).toContain('30 лет');
+  });
 });
 
 describe('mapWeeklyOverviewData', () => {
@@ -149,6 +209,116 @@ describe('mapWeeklyOverviewData', () => {
     expect(result.days[5]!.isWeekend).toBe(true);
     expect(result.days[6]!.isWeekend).toBe(true);
   });
+
+  test('birthday event gets pink color and age title (EN)', () => {
+    const bdayOcc = makeBirthdayOcc();
+    // override dates to fall on Monday 2026-03-09
+    bdayOcc.event.start_at = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_start = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_end = null;
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    const ev = result.days[0]!.events[0]!;
+    expect(ev.color).toBe(BIRTHDAY_COLOR);
+    expect(ev.title).toContain('🎁');
+    expect(ev.title).toContain('turns 30');
+  });
+
+  test('birthday event gets Russian age plural (RU)', () => {
+    const bdayOcc = makeBirthdayOcc();
+    bdayOcc.event.start_at = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_start = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_end = null;
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'ru',
+      theme: THEME_LIGHT,
+    });
+    expect(result.days[0]!.events[0]!.title).toContain('30 лет');
+  });
+
+  test('recurring non-birthday event gets 🔁 suffix', () => {
+    const recurOcc = makeRecurringOcc();
+    const occsByDay = new Map([['2026-03-09', [recurOcc]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.days[0]!.events[0]!.title).toContain('🔁');
+    expect(result.days[0]!.events[0]!.color).not.toBe(BIRTHDAY_COLOR);
+  });
+});
+
+describe('mapMonthlyCalendarData (makeDay)', () => {
+  test('birthday event in monthly view gets pink color and age (EN)', () => {
+    const bdayOcc = makeBirthdayOcc();
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2, // March
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+
+    // Find the day cell for March 9
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.color).toBe(BIRTHDAY_COLOR);
+    expect(march9.events[0]!.title).toContain('🎁');
+    expect(march9.events[0]!.title).toContain('turns 30');
+  });
+
+  test('birthday event in monthly view gets Russian age plural (RU)', () => {
+    const bdayOcc = makeBirthdayOcc();
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2,
+      timezone: 'UTC',
+      locale: 'ru',
+      theme: THEME_LIGHT,
+    });
+
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.title).toContain('30 лет');
+  });
+
+  test('recurring non-birthday event in monthly view gets 🔁 suffix', () => {
+    const recurOcc = makeRecurringOcc();
+    const occsByDay = new Map([['2026-03-09', [recurOcc]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2,
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.title).toContain('🔁');
+    expect(march9.events[0]!.color).not.toBe(BIRTHDAY_COLOR);
+  });
 });
 
 describe('mapEventCardData', () => {
@@ -164,5 +334,39 @@ describe('mapEventCardData', () => {
     expect(result.description).toBe('Review proposals');
     expect(result.timeFormatted).toContain('11:00');
     expect(result.duration).toBe('1h');
+  });
+
+  test('birthday event card gets pink color and age title (EN)', () => {
+    const result = mapEventCardData({
+      occurrence: makeBirthdayOcc(),
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.calendarColor).toBe(BIRTHDAY_COLOR);
+    expect(result.title).toContain('🎁');
+    expect(result.title).toContain('turns 30');
+  });
+
+  test('birthday event card gets Russian age plural (RU)', () => {
+    const result = mapEventCardData({
+      occurrence: makeBirthdayOcc(),
+      timezone: 'UTC',
+      locale: 'ru',
+      theme: THEME_LIGHT,
+    });
+    expect(result.title).toContain('30 лет');
+    expect(result.calendarColor).toBe(BIRTHDAY_COLOR);
+  });
+
+  test('regular event card gets theme color', () => {
+    const result = mapEventCardData({
+      occurrence: makeOcc(),
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.calendarColor).toBe(THEME_LIGHT.eventColors[0]!);
+    expect(result.title).toBe('Test Event');
   });
 });

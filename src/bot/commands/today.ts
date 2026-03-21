@@ -8,6 +8,7 @@ import { formatDayAgenda } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -68,9 +69,22 @@ export async function handleToday(
         holidays,
       );
       const file = new File([buffer], 'today.png', { type: 'image/png' });
-      await ctx.sendPhoto(file);
+      const sent = await ctx.sendPhoto(file);
+      autoPin(user.telegram_id, sent.id, {
+        pinChatMessage: (chatId, messageId, options) =>
+          ctx.bot.api.pinChatMessage({
+            chat_id: chatId,
+            message_id: messageId,
+            disable_notification: options.disable_notification,
+          }),
+        sendMessage: (chatId, text) => ctx.bot.api.sendMessage({ chat_id: chatId, text }),
+        isGroupChat: false,
+        groupChatRepo: groupRepo,
+      }).catch((err) => {
+        imageLogger.error({ err }, 'autoPin failed');
+      });
     } catch (err) {
-      imageLogger.error({ error: (err as Error).message }, 'Render failed');
+      imageLogger.error({ err }, 'Render failed');
     }
   }
 }

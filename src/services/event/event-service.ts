@@ -410,6 +410,10 @@ export class EventService {
       .slice(0, limit);
   }
 
+  searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
+    return this.eventRepo.searchWithEventType(userId, query, eventType);
+  }
+
   cancelOccurrence(templateId: number, userId: number, originalStartAt: string): CalendarEvent | null {
     const template = this.eventRepo.findById(templateId, userId);
     if (!template || !template.recurrence_rule) return null;

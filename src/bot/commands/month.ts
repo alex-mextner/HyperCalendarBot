@@ -7,6 +7,7 @@ import type { EventOccurrence, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { mapMonthlyCalendarData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
@@ -216,9 +217,22 @@ export async function handleMonth(
         userId: user.telegram_id,
       });
       const file = new File([buffer], 'month.png', { type: 'image/png' });
-      await ctx.sendPhoto(file);
+      const sent = await ctx.sendPhoto(file);
+      autoPin(user.telegram_id, sent.id, {
+        pinChatMessage: (chatId, messageId, options) =>
+          ctx.bot.api.pinChatMessage({
+            chat_id: chatId,
+            message_id: messageId,
+            disable_notification: options.disable_notification,
+          }),
+        sendMessage: (chatId, text) => ctx.bot.api.sendMessage({ chat_id: chatId, text }),
+        isGroupChat: false,
+        groupChatRepo: groupRepo,
+      }).catch((err) => {
+        imageLogger.error({ err }, 'autoPin failed');
+      });
     } catch (err) {
-      imageLogger.error({ error: (err as Error).message }, 'Month render failed');
+      imageLogger.error({ err }, 'Month render failed');
     }
   }
 }

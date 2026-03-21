@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
+import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
@@ -9,6 +10,15 @@ import type { EventSummary } from '../../intent/variable-resolver.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
+
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
+  // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
+  // the anchor landing on the wrong calendar day for UTC±10–12 offsets.
+  const d = new TZDate(`${dateStr}T12:00:00`, timezone);
+  return getDayRangeUtc(d, timezone);
+}
 
 function occurrenceToSummary(occ: EventOccurrence, timezone: string): EventSummary {
   const d = new TZDate(new Date(occ.occurrence_start), timezone);
@@ -169,9 +179,10 @@ interface GetEventInput {
 }
 
 interface SearchEventsInput {
-  query: string;
+  query?: string;
   scope?: Scope;
   owner_id?: number;
+  event_type?: 'birthday' | 'regular';
 }
 
 export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
@@ -182,12 +193,14 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
+  const tz = ctx.user.timezone;
+  const startDate = DATE_ONLY_RE.test(input.start_date) ? expandDateOnly(input.start_date, tz).start : input.start_date;
+  const endDate = DATE_ONLY_RE.test(input.end_date) ? expandDateOnly(input.end_date, tz).end : input.end_date;
   const occurrences =
     scope === 'group'
-      ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, input.start_date, input.end_date)
-      : ctx.eventService.getEventsInRange(userId, input.start_date, input.end_date);
+      ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startDate, endDate)
+      : ctx.eventService.getEventsInRange(userId, startDate, endDate);
 
-  const tz = ctx.user.timezone;
   const data = occurrences.map((occ) => occurrenceToSummary(occ, tz));
 
   if (occurrences.length === 0) {
@@ -283,6 +296,22 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
           event,
           conflictsWith: conflicts[0]!,
         });
+
+        const tz = ctx.user.timezone;
+        const conflictList = conflicts
+          .map((c) => {
+            const start = new TZDate(new Date(c.start_at), tz);
+            const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
+            const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
+            return `"${c.title}" (${timeRange})`;
+          })
+          .join(', ');
+
+        return {
+          success: true,
+          output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
+          agentHint: `⚠️ This event overlaps with: ${conflictList}. Warn the user about the overlap.`,
+        };
       }
     }
 
@@ -317,6 +346,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
+  let conflictHint: string | undefined;
   if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
     const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
     if (conflicts.length > 0) {
@@ -325,6 +355,17 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
         event: updated,
         conflictsWith: conflicts[0]!,
       });
+
+      const tz = ctx.user.timezone;
+      const conflictList = conflicts
+        .map((c) => {
+          const start = new TZDate(new Date(c.start_at), tz);
+          const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
+          const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
+          return `"${c.title}" (${timeRange})`;
+        })
+        .join(', ');
+      conflictHint = `⚠️ This event now overlaps with: ${conflictList}. Warn the user about the overlap.`;
     }
   }
 
@@ -342,7 +383,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
     }
   }
 
-  return { success: true, output };
+  return { success: true, output, agentHint: conflictHint };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
@@ -391,8 +432,8 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   }
   const events =
     scope === 'group'
-      ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
-      : ctx.eventService.searchEvents(userId, input.query);
+      ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query ?? '')
+      : ctx.eventService.searchWithEventType(userId, input.query ?? null, input.event_type ?? null);
 
   const tz = ctx.user.timezone;
   const data = events.map((e) =>

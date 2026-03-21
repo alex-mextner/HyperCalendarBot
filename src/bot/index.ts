@@ -10,6 +10,7 @@ import type { CreateEventData, UpdateEventData, User } from '../database/types.t
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
+import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
@@ -39,6 +40,7 @@ import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleBirthdays } from './commands/birthdays.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -135,6 +137,12 @@ export function createBot(
   );
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
+  const birthdayService = new BirthdayService(
+    db.events,
+    db.birthdayMeta,
+    db.eventReminders,
+    db.notificationPreferences,
+  );
   const groupSessions = new GroupSessionManager(db.groupSessions);
   const prefsService = new NotificationPreferencesService(db.notificationPreferences);
   const rateLimiter = new RateLimiter({
@@ -297,6 +305,8 @@ export function createBot(
     aiModel: aiConfig.model,
     sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
     proposeTimeSessions,
+    birthdayService,
+    userMemoryRepo: db.userMemory,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     domainEvents: domainEventBus,
@@ -467,6 +477,9 @@ export function createBot(
       handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats),
     )
     .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
+    .command('birthdays', (ctx) =>
+      handleBirthdays(ctx as unknown as BotCommandContext, birthdayService, db.groupChats, db.groupMembers),
+    )
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx as unknown as BotCommandContext, {
@@ -580,6 +593,9 @@ export function createBot(
                 ...(markup ? { reply_markup: markup as Record<string, unknown> } : {}),
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
+          },
+          sendPhoto: async (chatId: number, photo: File) => {
+            await bot.api.sendPhoto({ chat_id: chatId, photo });
           },
         },
         scenesSetup.scenes.onboardingScene,

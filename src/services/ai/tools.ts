@@ -191,13 +191,13 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'search_events',
-    description: 'Search events by title. Returns matching events.',
+    description: 'Search events by title. Returns matching events. Can also filter by event type (e.g. birthday).',
     input_schema: {
       type: 'object' as const,
       properties: {
         query: {
           type: 'string',
-          description: 'Search query to match against event titles',
+          description: 'Search query to match against event titles. Optional when using event_type filter.',
         },
         scope: {
           type: 'string',
@@ -209,8 +209,35 @@ export const toolDefinitions: ToolDefinition[] = [
           description:
             "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
+        event_type: {
+          type: 'string',
+          enum: ['birthday', 'regular'],
+          description: "Filter by event type. Use 'birthday' to list all birthday events.",
+        },
       },
-      required: ['query'],
+      required: [],
+    },
+  },
+  {
+    name: 'create_birthday_event',
+    description: 'Create a birthday event for a Telegram user. Auto-fetches their name from the database.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        celebrant_id: { type: 'number', description: 'Telegram user ID of the birthday person' },
+        date: {
+          type: 'object' as const,
+          properties: {
+            day: { type: 'number', description: 'Day of month' },
+            month: { type: 'number', description: 'Month number (1-12)' },
+          },
+          required: ['day', 'month'],
+        },
+        year: { type: 'number', description: 'Birth year (optional)' },
+        custom_name: { type: 'string', description: 'Override auto-fetched name' },
+        group_id: { type: 'number', description: 'Group calendar ID. Omit for personal calendar.' },
+      },
+      required: ['celebrant_id', 'date'],
     },
   },
   {
@@ -867,6 +894,63 @@ During a voice call the table is still sent to chat; you MUST mention it verball
     },
   },
   {
+    name: 'get_timezone_info',
+    description:
+      'Get accurate UTC offset, DST status, and local time for one or more IANA timezones. ' +
+      'ALWAYS use this tool — never guess offsets from memory. Training data about timezones is stale: ' +
+      'countries change DST rules, cancel DST, or shift permanently. ' +
+      'Pass `at` when scheduling a future event — the offset may differ from today due to DST transitions. ' +
+      'Example: scheduling a New York meeting in July while it is currently March — ' +
+      'the offset changes from -05:00 (winter) to -04:00 (summer). Without `at` you get the wrong offset. ' +
+      'Pass an ARRAY of timezones to compare them: the response includes each offset, which is ahead, ' +
+      'and (for exactly 2) the difference in hours — all pre-computed, no extra calculate call needed.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        timezone: {
+          oneOf: [
+            { type: 'string', description: 'Single IANA timezone (e.g. "America/New_York")' },
+            {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of IANA timezones to compare (e.g. ["Europe/Moscow", "America/New_York"])',
+            },
+          ],
+          description: 'IANA timezone name(s). Use array to compare multiple zones in one call.',
+        },
+        at: {
+          type: 'string',
+          description:
+            'ISO 8601 datetime to check offset at (default: now). ' +
+            'IMPORTANT: always pass the event datetime here when scheduling — DST may differ from today.',
+        },
+      },
+      required: ['timezone'],
+    },
+  },
+  {
+    name: 'convert_to_timezone',
+    description:
+      'Convert a UTC (or offset-aware) datetime to local time in any IANA timezone. ' +
+      'DST is applied automatically based on the exact datetime. ' +
+      'Use when the user gives a time in their timezone and you need the UTC equivalent, ' +
+      'or when showing a foreign time in local terms.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        datetime: {
+          type: 'string',
+          description: 'ISO 8601 datetime — UTC (e.g. "2026-07-15T14:00:00Z") or with offset',
+        },
+        timezone: {
+          type: 'string',
+          description: 'IANA timezone name (e.g. "America/New_York")',
+        },
+      },
+      required: ['datetime', 'timezone'],
+    },
+  },
+  {
     name: 'get_history',
     description:
       'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
@@ -969,6 +1053,24 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
       'Call this when you have completed the action via AI tools (e.g., created the event directly) ' +
       'and the wizard is no longer needed, OR if the user wants to abort.',
     input_schema: { type: 'object' as const, properties: {}, required: [] },
+  },
+  {
+    name: 'remember_user_fact',
+    description:
+      'Save a fact about the user to long-term memory. Use to remember preferences, habits, important people, or anything useful for future conversations. Keep facts compact and specific. type=append adds a new fact; type=rewrite replaces all existing facts (use to consolidate or correct).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['append', 'rewrite'],
+          description:
+            'append: add a new fact (preferred). rewrite: DESTRUCTIVE — deletes all existing facts and replaces with this one. Use rewrite only to correct wrong information or consolidate many facts into one.',
+        },
+        content: { type: 'string', description: 'The fact to remember. Be concise.' },
+      },
+      required: ['type', 'content'],
+    },
   },
 ];
 

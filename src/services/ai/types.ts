@@ -13,7 +13,8 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { EventOccurrence, User } from '../../database/types.ts';
+import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
@@ -95,6 +96,10 @@ export interface AgentContext {
   scenePauseState?: import('../scene-pause.ts').ScenePauseState;
   scenePauseService?: import('../scene-pause.ts').ScenePauseService;
   sceneStorage?: { delete(key: string): Promise<void> };
+  /** Events in a ±2-week window around now, preloaded for pattern detection. */
+  recentEventsWindow?: EventOccurrence[];
+  birthdayService?: BirthdayService;
+  userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
 }
 
 /**
@@ -157,7 +162,8 @@ export interface TelegramSender {
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
-  sendPhoto?(chatId: number, photo: File): Promise<void>;
+  sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
+  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<unknown>;
   sendInvitation?(
     inviteeId: number,
     text: string,

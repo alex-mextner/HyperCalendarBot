@@ -13,6 +13,23 @@ import type {
   Theme,
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
+import { ruPlural } from '../event/formatters.ts';
+
+const BIRTHDAY_COLOR = '#EC4899';
+
+function eventTitle(occ: EventOccurrence, locale: 'ru' | 'en'): string {
+  const ev = occ.event;
+  if (ev.event_type === 'birthday') {
+    let title = `🎁 ${ev.title}`;
+    if (ev.birth_year != null) {
+      const age = new Date(occ.occurrence_start).getUTCFullYear() - ev.birth_year;
+      title += locale === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`;
+    }
+    return title;
+  }
+  const isRecurring = !!(ev.recurrence_rule || ev.parent_event_id);
+  return isRecurring ? `${ev.title} 🔁` : ev.title;
+}
 
 function toMinutes(isoUtc: string, timezone: string): number {
   const d = new TZDate(new Date(isoUtc), timezone);
@@ -36,15 +53,22 @@ function getDayOfWeek(dateIso: string, locale: string): string {
   return labels.weekDaysFull[idx]!;
 }
 
-function mapToAgendaEvent(occ: EventOccurrence, tz: string, colorIdx: number, colors: string[]): AgendaEvent {
+function mapToAgendaEvent(
+  occ: EventOccurrence,
+  tz: string,
+  colorIdx: number,
+  colors: string[],
+  locale: 'ru' | 'en' = 'en',
+): AgendaEvent {
   const ev = occ.event;
+  const isBirthday = ev.event_type === 'birthday';
   return {
     id: ev.id,
-    title: ev.title,
+    title: eventTitle(occ, locale),
     startMinutes: toMinutes(occ.occurrence_start, tz),
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: ev.location ?? undefined,
-    calendarColor: colors[colorIdx % colors.length]!,
+    calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
     isAllDay: ev.all_day === 1,
   };
 }
@@ -72,8 +96,8 @@ export function mapDailyAgendaData(params: {
     currentTimeMinutes: params.currentTimeMinutes,
     isHoliday: params.isHoliday,
     holidayName: params.holidayName,
-    allDayEvents: allDay.map((o, i) => mapToAgendaEvent(o, timezone, i, theme.eventColors)),
-    timedEvents: timed.map((o, i) => mapToAgendaEvent(o, timezone, allDay.length + i, theme.eventColors)),
+    allDayEvents: allDay.map((o, i) => mapToAgendaEvent(o, timezone, i, theme.eventColors, locale)),
+    timedEvents: timed.map((o, i) => mapToAgendaEvent(o, timezone, allDay.length + i, theme.eventColors, locale)),
     theme,
     locale,
   };
@@ -115,7 +139,7 @@ export function mapWeeklyOverviewData(params: {
       isWeekend: i >= 5,
       events: occs.map(
         (o): MiniEvent => ({
-          title: o.event.title,
+          title: eventTitle(o, locale),
           startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, timezone),
           endMinutes:
             o.event.all_day === 1
@@ -123,7 +147,10 @@ export function mapWeeklyOverviewData(params: {
               : o.occurrence_end
                 ? toMinutes(o.occurrence_end, timezone)
                 : toMinutes(o.occurrence_start, timezone) + 60,
-          color: theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
+          color:
+            o.event.event_type === 'birthday'
+              ? BIRTHDAY_COLOR
+              : theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
           isAllDay: o.event.all_day === 1,
         }),
       ),
@@ -160,14 +187,14 @@ export function mapEventCardData(params: {
   const dayOfWeek = getDayOfWeek(dateIso, locale);
 
   return {
-    title: ev.title,
+    title: eventTitle(occurrence, locale),
     dateFormatted: `${dayOfWeek}, ${dateStr}`,
     timeFormatted: ev.all_day === 1 ? '' : `${formatTime(startMin)} – ${formatTime(endMin)}`,
     duration: ev.all_day === 1 ? '' : formatDuration(endMin - startMin),
     location: ev.location ?? undefined,
     description: ev.description?.slice(0, 200) ?? undefined,
     calendarName: 'HyperCalendar',
-    calendarColor: theme.eventColors[0]!,
+    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : theme.eventColors[0]!,
     isAllDay: ev.all_day === 1,
     theme,
     locale,
@@ -203,14 +230,14 @@ export function mapMonthlyCalendarData(params: {
     const prevYear = month === 0 ? year - 1 : year;
     const iso = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dow = allDays.length % 7;
-    allDays.push(makeDay(d, true, dow >= 5, iso, params));
+    allDays.push(makeDay(d, true, dow >= 5, iso, { ...params, locale }));
   }
 
   // Current month
   for (let d = 1; d <= daysInMonth; d++) {
     const iso = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
     const dow = allDays.length % 7;
-    allDays.push(makeDay(d, false, dow >= 5, iso, params));
+    allDays.push(makeDay(d, false, dow >= 5, iso, { ...params, locale }));
   }
 
   // Next month padding (fill to complete last week)
@@ -220,7 +247,7 @@ export function mapMonthlyCalendarData(params: {
     const nextYear = month === 11 ? year + 1 : year;
     const iso = `${nextYear}-${String(nextMonth + 1).padStart(2, '0')}-${String(nextD).padStart(2, '0')}`;
     const dow = allDays.length % 7;
-    allDays.push(makeDay(nextD, true, dow >= 5, iso, params));
+    allDays.push(makeDay(nextD, true, dow >= 5, iso, { ...params, locale }));
     nextD++;
   }
 
@@ -249,6 +276,7 @@ function makeDay(
     timezone: string;
     theme: Theme;
     todayIso?: string;
+    locale: 'ru' | 'en';
   },
 ): MonthDay {
   const occs = params.occurrencesByDay.get(iso) ?? [];
@@ -260,7 +288,7 @@ function makeDay(
     eventCount: occs.length,
     events: occs.map(
       (o, i): MiniEvent => ({
-        title: o.event.title,
+        title: eventTitle(o, params.locale),
         startMinutes: o.event.all_day === 1 ? 0 : toMinutes(o.occurrence_start, params.timezone),
         endMinutes:
           o.event.all_day === 1
@@ -268,7 +296,10 @@ function makeDay(
             : o.occurrence_end
               ? toMinutes(o.occurrence_end, params.timezone)
               : toMinutes(o.occurrence_start, params.timezone) + 60,
-        color: params.theme.eventColors[i % params.theme.eventColors.length]!,
+        color:
+          o.event.event_type === 'birthday'
+            ? BIRTHDAY_COLOR
+            : params.theme.eventColors[i % params.theme.eventColors.length]!,
         isAllDay: o.event.all_day === 1,
       }),
     ),

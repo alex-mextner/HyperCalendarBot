@@ -36,7 +36,7 @@ export async function handleSearch(
       return;
     }
 
-    const lines = results.slice(0, 10).map((e, i) => formatEventListItem(e, timezone, i));
+    const lines = results.slice(0, 10).map((e, i) => formatEventListItem(e, timezone, i, lang));
     await ctx.send(
       `🔍 ${lang === 'ru' ? `Найдено ${results.length}:` : `Found ${results.length}:`}\n\n${lines.join('\n')}`,
       { reply_markup: eventPickerKeyboard(results.slice(0, 10), timezone, CB.EVENT_VIEW) },
@@ -51,7 +51,7 @@ export async function handleSearch(
     return;
   }
 
-  const lines = results.slice(0, 10).map((e, i) => formatEventListItem(e, user.timezone, i));
+  const lines = results.slice(0, 10).map((e, i) => formatEventListItem(e, user.timezone, i, lang));
 
   await ctx.send(
     `🔍 ${lang === 'ru' ? `Найдено ${results.length}:` : `Found ${results.length}:`}\n\n${lines.join('\n')}`,

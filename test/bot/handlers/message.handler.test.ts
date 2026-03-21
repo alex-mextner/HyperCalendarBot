@@ -1,10 +1,15 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { createMessageHandler, stripJsonFences, toEventSummary } from '../../../src/bot/handlers/message.handler.ts';
+import {
+  buildAgentContextFactory,
+  createMessageHandler,
+  stripJsonFences,
+  toEventSummary,
+} from '../../../src/bot/handlers/message.handler.ts';
 
 function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
-    eventService: {},
+    eventService: { getEventsInRange: mock(() => []) },
     holidayService: {},
     chatHistory: {},
     conversationLogger: { logUserMessage: mock(() => {}) },
@@ -679,5 +684,24 @@ describe('stripJsonFences', () => {
   test('trims surrounding whitespace', () => {
     const json = '{"phrases":["ok"]}';
     expect(stripJsonFences(`  ${json}  `)).toBe(json);
+  });
+});
+
+describe('buildAgentContextFactory', () => {
+  const user = { telegram_id: 1, language: 'ru', timezone: 'UTC' } as never;
+
+  test('passes userMemoryRepo into AgentContext', () => {
+    const userMemoryRepo = { getAll: mock(() => []), append: mock(() => {}), rewrite: mock(() => {}) };
+    const deps = {
+      ...makeDeps({ userMemoryRepo }),
+      secretaryRepo: undefined,
+    };
+    const ctx = buildAgentContextFactory(deps as never)(user, 1, 'hi');
+    expect(ctx.userMemoryRepo).toBe(userMemoryRepo as never);
+  });
+
+  test('AgentContext.userMemoryRepo is undefined when not provided in deps', () => {
+    const ctx = buildAgentContextFactory(makeDeps() as never)(user, 1, 'hi');
+    expect(ctx.userMemoryRepo).toBeUndefined();
   });
 });

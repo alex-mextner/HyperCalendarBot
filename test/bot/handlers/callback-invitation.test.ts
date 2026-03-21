@@ -512,3 +512,161 @@ describe('propose-time callbacks', () => {
     expect(notifyDeps.editMessage).toHaveBeenCalled();
   });
 });
+
+describe('conflict image on accept', () => {
+  function makeHandlerWithRender(
+    invSvc: Record<string, unknown>,
+    notifyDeps: Record<string, unknown>,
+    eventRepo: Record<string, unknown>,
+    renderService: Record<string, unknown>,
+  ) {
+    return createCallbackHandler(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      renderService as never,
+      invSvc as never,
+      eventRepo as never,
+      undefined,
+      undefined,
+      undefined,
+      notifyDeps as never,
+    );
+  }
+
+  test('sends conflict image to inviter on accept when renderService provided', async () => {
+    const sendPhoto = mock(() => Promise.resolve());
+    const renderDirect = mock(() => Promise.resolve(Buffer.from('png')));
+    const sendMessage = mock(() => Promise.resolve());
+    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
+    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
+    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
+    const userRepo = {
+      findByTelegramId: mock(() => ({
+        telegram_id: 100,
+        first_name: 'Alice',
+        language: 'en',
+        username: null,
+        timezone: 'UTC',
+      })),
+    };
+    const eventRepo = {
+      findById: mock(() => event),
+      findVisibleOverlapping: mock(() => []),
+      isParticipant: mock(() => false),
+    };
+    const renderService = { renderDirect };
+    const notifyDeps = { userRepo, sendMessage, sendPhoto };
+    const ctx = {
+      data: 'inv:accept:1',
+      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: null },
+      answer: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(renderDirect).toHaveBeenCalledTimes(1);
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+    const [chatId] = sendPhoto.mock.calls[0] as unknown as [number, File];
+    expect(chatId).toBe(100);
+  });
+
+  test('invitee event titles are null for non-shared events in conflict image', async () => {
+    const sendPhoto = mock(() => Promise.resolve());
+    const renderDirect = mock(() => Promise.resolve(Buffer.from('png')));
+    const sendMessage = mock(() => Promise.resolve());
+    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
+    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
+    const inviteeEvent = { id: 99, title: 'Secret', start_at: '2026-03-20T09:00:00Z', end_at: '2026-03-20T10:30:00Z' };
+    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
+    const userRepo = {
+      findByTelegramId: mock((id: number) =>
+        id === 100
+          ? { telegram_id: 100, first_name: 'Alice', language: 'en', username: null, timezone: 'UTC' }
+          : { telegram_id: 200, first_name: 'Bob', language: 'en', username: 'bob', timezone: 'UTC' },
+      ),
+    };
+    // isParticipant returns false → organizer is NOT participant of invitee's event → title must be null
+    const eventRepo = {
+      findById: mock(() => event),
+      // organizer call returns [] (no own overlapping), invitee call returns [inviteeEvent]
+      findVisibleOverlapping: mock((userId: number) => (userId === 200 ? [inviteeEvent] : [])),
+      isParticipant: mock(() => false),
+    };
+    const renderService = { renderDirect };
+    const notifyDeps = { userRepo, sendMessage, sendPhoto };
+    const ctx = {
+      data: 'inv:accept:1',
+      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: 'bob' },
+      answer: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(renderDirect).toHaveBeenCalledTimes(1);
+    const renderArgs = renderDirect.mock.calls[0] as unknown as [
+      { data: { rows: { slots: { label: string | null }[] }[] } },
+    ];
+    const inviteeRow = renderArgs[0].data.rows[1]; // rows[0] = organizer, rows[1] = invitee
+    if (!inviteeRow) throw new Error('invitee row missing from renderDirect args');
+    // All slots for non-shared invitee events must have null label
+    for (const slot of inviteeRow.slots) {
+      expect(slot.label).toBeNull();
+    }
+  });
+
+  test('does not render when renderService missing', async () => {
+    const sendPhoto = mock(() => Promise.resolve());
+    const sendMessage = mock(() => Promise.resolve());
+    const inv = { id: 1, status: 'accepted', event_id: 5, inviter_id: 100, invitee_id: 200 };
+    const event = { id: 5, title: 'Party', start_at: '2026-03-20T10:00:00Z', end_at: '2026-03-20T11:00:00Z' };
+    const invSvc = { acceptInvitation: mock(() => ({ success: true, invitation: inv })) };
+    const userRepo = {
+      findByTelegramId: mock(() => ({
+        telegram_id: 100,
+        first_name: 'Alice',
+        language: 'en',
+        username: null,
+        timezone: 'UTC',
+      })),
+    };
+    const eventRepo = {
+      findById: mock(() => event),
+      findVisibleOverlapping: mock(() => []),
+      isParticipant: mock(() => false),
+    };
+    const notifyDeps = { userRepo, sendMessage, sendPhoto };
+    const ctx = {
+      data: 'inv:accept:1',
+      dbUser: { telegram_id: 200, language: 'en', timezone: 'UTC', first_name: 'Bob', username: null },
+      answer: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    const handler = createCallbackHandler(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      invSvc as never,
+      eventRepo as never,
+      undefined,
+      undefined,
+      undefined,
+      notifyDeps as never,
+    );
+    await handler(ctx as never);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(sendPhoto).not.toHaveBeenCalled();
+  });
+});

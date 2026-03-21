@@ -24,6 +24,7 @@ import type { CalendarEvent, User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
+import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
@@ -145,6 +146,8 @@ export interface MessageHandlerDeps {
     formattedTime: string,
     eventTitle: string,
   ) => Promise<void>;
+  birthdayService?: BirthdayService;
+  userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
   scenePauseService?: ScenePauseService;
 }
 
@@ -416,6 +419,16 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       groupChatRepo: deps.groupChatRepo,
       groupMemberRepo: deps.groupMemberRepo,
       groupMemberService: deps.groupMemberService,
+      recentEventsWindow: groupInfo?.isGroup
+        ? undefined
+        : (() => {
+            const now = new Date();
+            const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+            const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+            return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+          })(),
+      birthdayService: deps.birthdayService,
+      userMemoryRepo: deps.userMemoryRepo,
       sceneStorage: {
         delete: async (key: string) => {
           await deps.sceneStorage.delete(key);
@@ -874,6 +887,19 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       // Track member for fallback reminders
       if (deps.groupMemberRepo) {
         deps.groupMemberRepo.upsert(Number(chatId), user.telegram_id);
+      }
+
+      if (deps.birthdayService) {
+        deps.birthdayService
+          .runBatchSync([
+            {
+              telegram_id: user.telegram_id,
+              first_name: user.first_name,
+              language: user.language,
+              timezone: user.timezone,
+            },
+          ])
+          .catch((err) => cmdLogger.error({ err, userId: user.telegram_id }, 'Birthday sync failed'));
       }
 
       const hasSession = deps.groupSessions?.hasActiveSession(Number(chatId)) ?? false;

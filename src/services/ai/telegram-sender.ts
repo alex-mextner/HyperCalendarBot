@@ -59,7 +59,15 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       return { message_id: result.message_id };
     },
     async sendPhoto(chatId: number, photo: File) {
-      await bot.api.sendPhoto({ chat_id: chatId, photo });
+      const result = await bot.api.sendPhoto({ chat_id: chatId, photo });
+      return { message_id: result.message_id };
+    },
+    async pinChatMessage(chatId: number, messageId: number, options: { disable_notification: boolean }) {
+      return bot.api.pinChatMessage({
+        chat_id: chatId,
+        message_id: messageId,
+        disable_notification: options.disable_notification,
+      });
     },
     async sendInvitation(inviteeId: number, text: string, invitationId: number, lang?: string) {
       const msgs = t((lang ?? 'en') as 'en' | 'ru');

@@ -13,7 +13,9 @@ export class SharingSettingsRepository {
   constructor(private db: Database) {}
 
   ensureDefaults(userId: number): void {
-    this.db.prepare('INSERT OR IGNORE INTO sharing_settings (user_id) VALUES (?)').run(userId);
+    this.db
+      .prepare('INSERT OR IGNORE INTO sharing_settings (user_id, default_visibility) VALUES (?, ?)')
+      .run(userId, 'private');
   }
 
   get(userId: number): SharingSettings | null {

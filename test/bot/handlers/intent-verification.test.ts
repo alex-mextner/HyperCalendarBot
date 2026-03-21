@@ -272,7 +272,7 @@ describe('admin edit session in message handler', () => {
       const sendMsg = mock(() => Promise.resolve());
       const deps = {
         agent: { run: mock(() => Promise.resolve()) },
-        eventService: {},
+        eventService: { getEventsInRange: mock(() => []) },
         holidayService: {},
         chatHistory: {},
         userRepo: {},
@@ -325,7 +325,7 @@ describe('admin edit session in message handler', () => {
     const agentRun = mock(() => Promise.resolve());
     const deps = {
       agent: { run: agentRun },
-      eventService: {},
+      eventService: { getEventsInRange: mock(() => []) },
       holidayService: {},
       chatHistory: {},
       userRepo: {},

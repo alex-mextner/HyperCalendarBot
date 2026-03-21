@@ -8,8 +8,8 @@ export class EventRepository {
   create(data: CreateEventData): CalendarEvent {
     const result = this.db
       .prepare(`
-      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by, event_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `)
       .run(
         data.user_id,
@@ -26,6 +26,7 @@ export class EventRepository {
         data.owner_type ?? 'user',
         data.group_id ?? null,
         data.created_by ?? null,
+        data.event_type ?? null,
       );
     const id = Number(result.lastInsertRowid);
     if (data.owner_type === 'group' && data.group_id != null) {
@@ -89,7 +90,8 @@ export class EventRepository {
     return this.db
       .prepare(
         `
-      SELECT DISTINCT e.* FROM events e
+      SELECT DISTINCT e.*, m.birth_year FROM events e
+      LEFT JOIN birth_event_metadata m ON m.event_id = e.id
       WHERE e.recurrence_rule IS NOT NULL
         AND e.parent_event_id IS NULL
         AND e.is_cancelled = 0
@@ -387,10 +389,19 @@ export class EventRepository {
       );
   }
 
-  findVisibleOverlapping(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
-    return this.db
-      .prepare(
-        `
+  findVisibleOverlapping(userId: number, startUtc: string, endUtc: string, requesterId?: number): CalendarEvent[] {
+    const applyPrivacy = requesterId !== undefined && requesterId !== userId;
+    const privacyClause = applyPrivacy
+      ? `AND (
+          e.user_id = ?
+          OR COALESCE(
+            (SELECT visibility FROM event_visibility WHERE event_id = e.id),
+            (SELECT default_visibility FROM sharing_settings WHERE user_id = e.user_id),
+            'full'
+          ) != 'private'
+        )`
+      : '';
+    const sql = `
       SELECT DISTINCT e.* FROM events e
       WHERE e.is_cancelled = 0
         AND e.recurrence_rule IS NULL
@@ -407,10 +418,12 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           )
         )
+        ${privacyClause}
       ORDER BY e.start_at
-    `,
-      )
-      .all(endUtc, startUtc, startUtc, userId, userId) as CalendarEvent[];
+    `;
+    const params: (string | number)[] = [endUtc, startUtc, startUtc, userId, userId];
+    if (applyPrivacy) params.push(requesterId as number);
+    return this.db.prepare(sql).all(...params) as CalendarEvent[];
   }
 
   countInRange(userId: number, startUtc: string, endUtc: string): number {
@@ -452,8 +465,9 @@ export class EventRepository {
   getRecurringTemplatesForGroup(groupId: number): CalendarEvent[] {
     return this.db
       .prepare(`
-      SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+      SELECT e.*, m.birth_year FROM events e
+      LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+      WHERE e.owner_type = 'group' AND e.group_id = ? AND e.recurrence_rule IS NOT NULL AND e.parent_event_id IS NULL AND e.is_cancelled = 0
     `)
       .all(groupId) as CalendarEvent[];
   }
@@ -504,6 +518,60 @@ export class EventRepository {
       .prepare("DELETE FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ?")
       .run(id, groupId);
     return result.changes > 0;
+  }
+
+  getBirthdays(userId: number): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+           AND (e.owner_type IS NULL OR e.owner_type = 'user')
+         ORDER BY e.start_at`,
+      )
+      .all(userId) as CalendarEvent[];
+  }
+
+  getBirthdaysForGroup(groupId: number): CalendarEvent[] {
+    return this.db
+      .prepare(
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+           AND e.owner_type = 'group'
+         ORDER BY e.start_at`,
+      )
+      .all(groupId) as CalendarEvent[];
+  }
+
+  searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
+    const conditions: string[] = [
+      'e.user_id = ?',
+      'e.is_cancelled = 0',
+      "(e.owner_type IS NULL OR e.owner_type = 'user')",
+    ];
+    const params: (string | number | null)[] = [userId];
+
+    if (query) {
+      conditions.push('e.title LIKE ?');
+      params.push(`%${this.escapeLike(query)}%`);
+    }
+    if (eventType) {
+      if (eventType === 'regular') {
+        conditions.push('e.event_type IS NULL');
+      } else {
+        conditions.push('e.event_type = ?');
+        params.push(eventType);
+      }
+    }
+
+    return this.db
+      .prepare(
+        `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
+         LEFT JOIN birth_event_metadata m ON m.event_id = e.id
+         WHERE ${conditions.join(' AND ')} ORDER BY e.start_at`,
+      )
+      .all(...params) as CalendarEvent[];
   }
 
   findStartingWithin(withinMs: number): CalendarEvent[] {

@@ -40,7 +40,7 @@ describe('message handler: propose time session', () => {
 
     const handler = createMessageHandler({
       agent: { run: mock(() => Promise.resolve({ responseText: '' })) } as never,
-      eventService: {} as never,
+      eventService: { getEventsInRange: mock(() => []) } as never,
       holidayService: {} as never,
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: { findByTelegramId: mock(() => makeUser({ telegram_id: 100 })) } as never,
@@ -110,7 +110,7 @@ describe('message handler: propose time session', () => {
     const ctx = makeCtx('not a time at all');
     const handler = createMessageHandler({
       agent: { run: mock(() => Promise.resolve({ responseText: '' })) } as never,
-      eventService: {} as never,
+      eventService: { getEventsInRange: mock(() => []) } as never,
       holidayService: {} as never,
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: {} as never,
@@ -132,7 +132,7 @@ describe('message handler: propose time session', () => {
 
     const handler = createMessageHandler({
       agent: { run: mock(() => Promise.resolve({ responseText: '' })) } as never,
-      eventService: {} as never,
+      eventService: { getEventsInRange: mock(() => []) } as never,
       holidayService: {} as never,
       chatHistory: { save: mock(() => {}), getLast: mock(() => []) } as never,
       userRepo: {} as never,
