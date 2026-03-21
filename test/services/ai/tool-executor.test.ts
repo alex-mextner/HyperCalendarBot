@@ -186,6 +186,12 @@ describe('executeTool', () => {
     expect(result.error).toContain('Unknown tool');
   });
 
+  test('supplement_skip returns stopLoop:true', async () => {
+    const result = await executeTool(ctx, 'supplement_skip', {});
+    expect(result.success).toBe(true);
+    expect(result.stopLoop).toBe(true);
+  });
+
   describe('sharing tools', () => {
     let sharingCtx: AgentContext;
     let eventRepo: EventRepository;

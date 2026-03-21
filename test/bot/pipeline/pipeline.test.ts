@@ -104,4 +104,61 @@ describe('runPipeline', () => {
   test('works with empty layers array', async () => {
     await expect(runPipeline(makeCtx(), 'hello', [])).resolves.toBeUndefined();
   });
+
+  test('continues past layer that returns needsSupplement:true', async () => {
+    const calls: string[] = [];
+
+    const layer1: PipelineLayer = async () => {
+      calls.push('layer1');
+      return { handled: true, needsSupplement: true };
+    };
+    const layer2: PipelineLayer = async () => {
+      calls.push('layer2');
+      return { handled: true };
+    };
+
+    await runPipeline(makeCtx(), 'hello', [layer1, layer2]);
+    expect(calls).toEqual(['layer1', 'layer2']);
+  });
+
+  test('passes supplementMode:true to layers after needsSupplement', async () => {
+    let receivedSupplementMode: boolean | undefined;
+
+    const layer1: PipelineLayer = async () => ({ handled: true, needsSupplement: true });
+    const layer2: PipelineLayer = async (_ctx, _text, extra) => {
+      receivedSupplementMode = extra?.supplementMode;
+      return { handled: true };
+    };
+
+    await runPipeline(makeCtx(), 'hello', [layer1, layer2]);
+    expect(receivedSupplementMode).toBe(true);
+  });
+
+  test('does not pass supplementMode:true before needsSupplement fires', async () => {
+    let receivedBeforeIntent: boolean | undefined;
+
+    const layer1: PipelineLayer = async (_ctx, _text, extra) => {
+      receivedBeforeIntent = extra?.supplementMode;
+      return { handled: true, needsSupplement: true };
+    };
+
+    await runPipeline(makeCtx(), 'hello', [layer1]);
+    expect(receivedBeforeIntent).toBeFalsy();
+  });
+
+  test('plain handled:true still stops the pipeline', async () => {
+    const calls: string[] = [];
+
+    const layer1: PipelineLayer = async () => {
+      calls.push('layer1');
+      return { handled: true };
+    };
+    const layer2: PipelineLayer = async () => {
+      calls.push('layer2');
+      return { handled: true };
+    };
+
+    await runPipeline(makeCtx(), 'hello', [layer1, layer2]);
+    expect(calls).toEqual(['layer1']); // layer2 not reached
+  });
 });

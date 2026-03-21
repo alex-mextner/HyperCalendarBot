@@ -263,4 +263,25 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Never use markdown tables');
   });
+
+  describe('supplement mode section', () => {
+    test('supplement section absent when supplementMode is not set', () => {
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).not.toContain('Supplement Mode');
+    });
+
+    test('supplement section absent when supplementMode is false', () => {
+      ctx.supplementMode = false;
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).not.toContain('Supplement Mode');
+    });
+
+    test('supplement section present when supplementMode is true', () => {
+      ctx.supplementMode = true;
+      const prompt = buildSystemPrompt(ctx);
+      expect(prompt).toContain('Supplement Mode');
+      expect(prompt).toContain('supplement_skip');
+      expect(prompt).toContain('automatic rule-based response');
+    });
+  });
 });

@@ -75,6 +75,7 @@ export interface AgentContext {
   deepLinkService?: DeepLinkService;
   botUsername?: string;
   inputMode?: 'text' | 'voice_message' | 'live_call';
+  supplementMode?: boolean;
   /** Set to true by end_call tool to hang up after TTS plays. */
   callEndRequested?: boolean;
   stressDictionary?: StressDictionary;

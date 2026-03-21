@@ -153,3 +153,109 @@ describe('createAiAgentLayer', () => {
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('supplement mode', () => {
+  test('sends responseText with parse_mode HTML when supplement_skip not called', async () => {
+    const agent = {
+      run: mock(() =>
+        Promise.resolve({
+          responseText: '<b>Кстати</b>, событие повторяется.',
+          toolCalls: [],
+          toolResults: [],
+        }),
+      ),
+    } as unknown as CalendarBotAgent;
+    const ctx = makeCtx();
+
+    const layer = createAiAgentLayer({ agent, agentContextBuilder: makeContextBuilder() });
+    await layer(ctx, 'покажи события', { supplementMode: true });
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const [text, opts] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as [string, Record<string, unknown>];
+    expect(text).toBe('<b>Кстати</b>, событие повторяется.');
+    expect(opts?.parse_mode).toBe('HTML');
+  });
+
+  test('does NOT send when supplement_skip was called', async () => {
+    const agent = {
+      run: mock(() =>
+        Promise.resolve({
+          responseText: 'some text',
+          toolCalls: [{ name: 'supplement_skip', input: {} }],
+          toolResults: [{ success: true }],
+        }),
+      ),
+    } as unknown as CalendarBotAgent;
+    const ctx = makeCtx();
+
+    const layer = createAiAgentLayer({ agent, agentContextBuilder: makeContextBuilder() });
+    await layer(ctx, 'покажи события', { supplementMode: true });
+
+    expect(ctx.send).not.toHaveBeenCalled();
+  });
+
+  test('does NOT send when responseText is empty', async () => {
+    const agent = {
+      run: mock(() =>
+        Promise.resolve({
+          responseText: '',
+          toolCalls: [],
+          toolResults: [],
+        }),
+      ),
+    } as unknown as CalendarBotAgent;
+    const ctx = makeCtx();
+
+    const layer = createAiAgentLayer({ agent, agentContextBuilder: makeContextBuilder() });
+    await layer(ctx, 'покажи события', { supplementMode: true });
+
+    expect(ctx.send).not.toHaveBeenCalled();
+  });
+
+  test('IntentLearner is NOT called in supplement mode', async () => {
+    const analyzeFn = mock(() => Promise.resolve(null));
+    const toolCalls = [{ name: 'create_event', input: {} }];
+    const agent = {
+      run: mock(() => Promise.resolve({ responseText: 'ok', toolCalls, toolResults: [] })),
+    } as unknown as CalendarBotAgent;
+
+    const layer = createAiAgentLayer({
+      agent,
+      agentContextBuilder: makeContextBuilder(),
+      intentLearner: makeIntentLearner(analyzeFn),
+    });
+
+    await layer(makeCtx(), 'добавь встречу', { supplementMode: true });
+    await Bun.sleep(10);
+
+    expect(analyzeFn).not.toHaveBeenCalled();
+  });
+
+  test('agent error in supplement mode: stays silent, returns handled:true', async () => {
+    const agent = {
+      run: mock(() => Promise.reject(new Error('agent boom'))),
+    } as unknown as CalendarBotAgent;
+    const ctx = makeCtx();
+
+    const layer = createAiAgentLayer({ agent, agentContextBuilder: makeContextBuilder() });
+    const result = await layer(ctx, 'покажи события', { supplementMode: true });
+
+    expect(result.handled).toBe(true);
+    expect(ctx.send).not.toHaveBeenCalled(); // no error message to user
+  });
+
+  test('sets supplementMode on agentContext', async () => {
+    let capturedContext: AgentContext | undefined;
+    const agent = {
+      run: mock((agentCtx: AgentContext) => {
+        capturedContext = agentCtx;
+        return Promise.resolve({ responseText: '', toolCalls: [], toolResults: [] });
+      }),
+    } as unknown as CalendarBotAgent;
+
+    const layer = createAiAgentLayer({ agent, agentContextBuilder: makeContextBuilder() });
+    await layer(makeCtx(), 'hello', { supplementMode: true });
+
+    expect(capturedContext?.supplementMode).toBe(true);
+  });
+});

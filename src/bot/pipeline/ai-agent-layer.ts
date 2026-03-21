@@ -19,7 +19,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
   return async (
     ctx: BotCommandContext,
     messageText: string,
-    extra?: { feedbackContext?: FeedbackThreadContext; groupContext?: GroupContext },
+    extra?: { feedbackContext?: FeedbackThreadContext; groupContext?: GroupContext; supplementMode?: boolean },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const chatId = ctx.chatId;
@@ -31,16 +31,36 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       agentContext.feedbackContext = extra.feedbackContext;
     }
 
-    cmdLogger.info({ userId: user.telegram_id, messageText }, 'Routing to AI agent');
+    if (extra?.supplementMode) {
+      agentContext.supplementMode = true;
+    }
+
+    cmdLogger.info(
+      { userId: user.telegram_id, messageText, ...(extra?.supplementMode && { supplementMode: true }) },
+      'Routing to AI agent',
+    );
 
     try {
       const result = await deps.agent.run(agentContext);
+
+      if (extra?.supplementMode) {
+        const skipped = result.toolCalls.some((tc) => tc.name === 'supplement_skip');
+        if (!skipped && result.responseText) {
+          await ctx.send(result.responseText, { parse_mode: 'HTML' });
+        }
+        return { handled: true };
+      }
+
       if (deps.intentLearner && result.toolCalls.length > 0) {
         deps.intentLearner.analyze(messageText, result.toolCalls, result.toolResults).catch((err: unknown) => {
           cmdLogger.error({ err: err }, 'IntentLearner error');
         });
       }
     } catch (error) {
+      if (extra?.supplementMode) {
+        cmdLogger.warn({ err: error, userId: user.telegram_id }, 'AI supplement error (suppressed)');
+        return { handled: true };
+      }
       cmdLogger.error({ err: error, userId: user.telegram_id }, 'AI agent error');
       const lang = user.language as 'en' | 'ru';
       await ctx.send(t(lang).something_wrong);

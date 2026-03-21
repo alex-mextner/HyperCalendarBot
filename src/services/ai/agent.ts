@@ -84,13 +84,16 @@ export class CalendarBotAgent {
       messages.push({ role, content } as MessageParam);
     }
 
-    const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
-    messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
+    if (!ctx.supplementMode) {
+      const nowUtc = new Date().toISOString().slice(0, 19).replace('T', ' ');
+      messages.push({ role: 'user', content: `[${nowUtc}] ${ctx.messageText}` });
+    }
 
     return { systemPrompt, messages };
   }
 
   saveUserMessage(ctx: AgentContext): void {
+    if (ctx.supplementMode) return;
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
     ctx.chatHistory.save(ctx.user.telegram_id, 'user', ctx.messageText, chatId);
   }
@@ -109,8 +112,22 @@ export class CalendarBotAgent {
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id);
     const { systemPrompt, messages } = this.buildMessages(ctx, history);
 
-    ctx.sender = this.sender;
-    const writer = new TelegramStreamWriter(this.sender, ctx.chatId, ctx.user.language, {
+    const effectiveSender: TelegramSender = ctx.supplementMode
+      ? ({
+          sendMessage: async () => ({ message_id: 0 }),
+          editMessageText: async () => {},
+          sendMessageWithKeyboard: async () => ({ message_id: 0 }),
+          sendButtons: async () => ({ message_id: 0 }),
+          sendUserPicker: async () => ({ message_id: 0 }),
+          sendPhoto: async () => {},
+          sendInvitation: async () => null,
+          sendEditProposal: async () => null,
+          sendAsUser: async () => false,
+          deleteMessage: async () => {},
+        } satisfies TelegramSender)
+      : this.sender;
+    ctx.sender = effectiveSender;
+    const writer = new TelegramStreamWriter(effectiveSender, ctx.chatId, ctx.user.language, {
       userTranscript: ctx.inputMode === 'live_call' ? ctx.messageText : undefined,
     });
     await writer.init();
@@ -147,7 +164,7 @@ export class CalendarBotAgent {
               },
             ],
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode),
+            tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
           });
 
         let stream: ReturnType<typeof streamRequest>;
@@ -230,10 +247,12 @@ export class CalendarBotAgent {
             if (result.stopLoop) {
               // Tool requested to stop and wait for user input
               writer.clearToolLabel();
-              if (contentBlocks.length > 0) {
-                this.saveAssistantTurn(ctx, contentBlocks);
+              if (!ctx.supplementMode) {
+                if (contentBlocks.length > 0) {
+                  this.saveAssistantTurn(ctx, contentBlocks);
+                }
+                this.saveToolResults(ctx, toolResults);
               }
-              this.saveToolResults(ctx, toolResults);
               writer.commitIntermediate();
               await writer.finalize();
               return {

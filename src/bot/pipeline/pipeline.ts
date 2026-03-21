@@ -10,10 +10,17 @@ export async function runPipeline(
   groupContext?: GroupContext,
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
+  let supplementMode = false;
 
   for (const layer of layers) {
-    const result = await layer(ctx, messageText, { feedbackContext, groupContext });
-    if (result.handled) return;
+    const result = await layer(ctx, messageText, { feedbackContext, groupContext, supplementMode });
+    if (result.handled) {
+      if ('needsSupplement' in result) {
+        supplementMode = true;
+        continue;
+      }
+      return;
+    }
     if ('feedbackContext' in result) {
       feedbackContext = result.feedbackContext;
     }

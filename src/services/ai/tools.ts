@@ -1064,9 +1064,26 @@ const CALL_EXCLUDED_TOOLS = new Set(['make_call', 'render_day_image', 'render_we
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
 
-export function getToolDefinitions(inputMode?: string): ToolDefinition[] {
+export function getToolDefinitions(inputMode?: string, supplementMode?: boolean): ToolDefinition[] {
+  let tools: ToolDefinition[];
   if (inputMode === 'live_call') {
-    return toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
+    tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
+  } else {
+    tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
   }
-  return toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
+  if (supplementMode) {
+    tools = [
+      ...tools,
+      {
+        name: 'supplement_skip',
+        description: 'Call when the automatic response was correct and complete. Suppresses your response.',
+        input_schema: {
+          type: 'object' as const,
+          properties: {},
+          required: [],
+        },
+      },
+    ];
+  }
+  return tools;
 }

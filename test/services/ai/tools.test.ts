@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { toolDefinitions } from '../../../src/services/ai/tools.ts';
+import { getToolDefinitions, toolDefinitions } from '../../../src/services/ai/tools.ts';
 
 describe('toolDefinitions', () => {
   test('includes calculate tool', () => {
@@ -60,5 +60,29 @@ describe('toolDefinitions', () => {
   test('delete_event requires event_id', () => {
     const tool = toolDefinitions.find((t) => t.name === 'delete_event')!;
     expect(tool.input_schema.required).toContain('event_id');
+  });
+});
+
+describe('getToolDefinitions supplement_skip', () => {
+  test('supplement_skip is absent when supplementMode is false', () => {
+    const tools = getToolDefinitions(undefined, false);
+    expect(tools.some((t) => t.name === 'supplement_skip')).toBe(false);
+  });
+
+  test('supplement_skip is absent when supplementMode is undefined', () => {
+    const tools = getToolDefinitions();
+    expect(tools.some((t) => t.name === 'supplement_skip')).toBe(false);
+  });
+
+  test('supplement_skip is present when supplementMode is true', () => {
+    const tools = getToolDefinitions(undefined, true);
+    const tool = tools.find((t) => t.name === 'supplement_skip');
+    expect(tool).toBeDefined();
+    expect(tool?.input_schema?.properties).toEqual({});
+  });
+
+  test('supplement_skip does not appear in normal text mode', () => {
+    const tools = getToolDefinitions('text', false);
+    expect(tools.some((t) => t.name === 'supplement_skip')).toBe(false);
   });
 });

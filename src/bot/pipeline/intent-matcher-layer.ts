@@ -10,7 +10,7 @@ import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type { GroupContext, PipelineResult } from './types.ts';
+import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
 
 export interface WorkflowSession {
   intentId: number;
@@ -46,7 +46,11 @@ export function createIntentMatcherLayer(
   return async (
     ctx: BotCommandContext,
     messageText: string,
-    extra?: { groupContext?: GroupContext },
+    extra?: {
+      feedbackContext?: FeedbackThreadContext;
+      groupContext?: GroupContext;
+      supplementMode?: boolean;
+    },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const userId = user.telegram_id;
@@ -162,10 +166,14 @@ export function createIntentMatcherLayer(
         intent.format !== 'text'
           ? formatResponse(intent.format, result.response, user.timezone, user.language)
           : result.response;
-      await ctx.send(formatted);
+      // Save to history BEFORE sending — supplement agent calls getRecent() right after this
       if (chatHistoryRepo) {
-        chatHistoryRepo.save(userId, 'assistant', JSON.stringify({ kind: 'bot', text: formatted }));
+        const groupChatId = groupCtx?.groupChatId;
+        chatHistoryRepo.save(userId, 'user', messageText, groupChatId);
+        chatHistoryRepo.save(userId, 'assistant', JSON.stringify({ kind: 'bot', text: formatted }), groupChatId);
       }
+      await ctx.send(formatted);
+      return { handled: true, needsSupplement: true };
     }
 
     return { handled: true };

@@ -159,7 +159,7 @@ describe('Pipeline Integration', () => {
     }
   });
 
-  test('runPipeline stops at first handled layer', async () => {
+  test('runPipeline continues to next layer in supplement mode after intent match', async () => {
     const matcher = new IntentMatcher();
     const id = intentRepo.create({
       canonical_name: 'stop_here',
@@ -176,16 +176,17 @@ describe('Pipeline Integration', () => {
 
     const intentLayer = createIntentMatcherLayer(matcher, intentRepo, executor, toolExecutor, makeEmptyWorkflowStore());
 
-    const secondLayerCalled = { value: false };
-    const secondLayer = mock(async () => {
-      secondLayerCalled.value = true;
-      return { handled: false } as const;
+    let receivedSupplementMode: boolean | undefined;
+    const secondLayer = mock(async (_ctx: BotCommandContext, _text: string, extra?: { supplementMode?: boolean }) => {
+      receivedSupplementMode = extra?.supplementMode;
+      return { handled: true } as const;
     });
 
     await runPipeline(ctx, 'стоп', [intentLayer, secondLayer]);
 
     expect(toolExecutor).toHaveBeenCalled();
-    expect(secondLayer).not.toHaveBeenCalled();
+    expect(secondLayer).toHaveBeenCalled();
+    expect(receivedSupplementMode).toBe(true);
   });
 
   test('runPipeline passes feedbackContext from feedback layer to subsequent layers', async () => {

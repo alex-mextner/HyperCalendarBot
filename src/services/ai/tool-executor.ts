@@ -94,6 +94,9 @@ export async function executeTool(
 async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
   try {
     switch (toolName) {
+      case 'supplement_skip':
+        return { success: true, stopLoop: true };
+
       case 'get_events':
         return handleGetEvents(ctx, input as { start_date: string; end_date: string; scope?: 'personal' | 'group' });
 

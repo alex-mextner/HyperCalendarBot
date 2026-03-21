@@ -10,6 +10,7 @@ export interface FeedbackThreadContext {
 
 export type PipelineResult =
   | { handled: true }
+  | { handled: true; needsSupplement: true }
   | { handled: false }
   | { handled: false; feedbackContext: FeedbackThreadContext };
 
@@ -23,5 +24,9 @@ export interface GroupContext {
 export type PipelineLayer = (
   ctx: BotCommandContext,
   messageText: string,
-  extra?: { feedbackContext?: FeedbackThreadContext; groupContext?: GroupContext },
+  extra?: {
+    feedbackContext?: FeedbackThreadContext;
+    groupContext?: GroupContext;
+    supplementMode?: boolean;
+  },
 ) => Promise<PipelineResult>;

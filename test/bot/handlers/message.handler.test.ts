@@ -582,6 +582,72 @@ describe('voice reply TTS fallback', () => {
   });
 });
 
+describe('intent supplement integration', () => {
+  test('AI agent runs after successful intent match (supplement mode)', async () => {
+    const agentRun = mock(() =>
+      Promise.resolve({
+        responseText: '',
+        toolCalls: [{ name: 'supplement_skip', input: {} }],
+        toolResults: [{ success: true }],
+      }),
+    );
+
+    const intentMatcher = {
+      match: mock(() => ({ intentId: 1, captures: {} })),
+      load: mock(() => {}),
+    };
+    const intentRepo = {
+      getById: mock(() => ({
+        id: 1,
+        workflow: JSON.stringify({ steps: [] }),
+        format: 'text',
+        canonical_name: 'test_intent',
+        phrases: '[]',
+        trigger_words: '[]',
+        pattern: null,
+      })),
+    };
+    const intentExecutor = {
+      run: mock(() => Promise.resolve({ success: true, response: 'Вот твои события.' })),
+    };
+    const workflowSessions = {
+      get: mock(() => null),
+      set: mock(() => {}),
+      delete: mock(() => {}),
+      deleteByUser: mock(() => {}),
+    };
+
+    const deps = makeDeps({
+      agent: {
+        run: agentRun,
+        getSender: mock(() => ({})),
+      },
+      eventService: {
+        getEventsInRange: mock(() => []),
+        getLatestCreated: mock(() => null),
+        getEvent: mock(() => null),
+      },
+      chatHistory: {
+        save: mock(() => {}),
+      },
+      intentMatcher,
+      intentRepo,
+      intentExecutor,
+      workflowSessions,
+    });
+
+    const ctx = makeCtx({ text: 'покажи события' });
+    await createMessageHandler(deps as never)(ctx as never);
+
+    // auto-response was sent
+    expect(ctx.send).toHaveBeenCalledWith('Вот твои события.');
+    // AI supplement also ran
+    expect(agentRun).toHaveBeenCalledTimes(1);
+    // supplement_skip was called so no second ctx.send for supplement text
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('stripJsonFences', () => {
   test('passes through raw JSON untouched', () => {
     const json = '{"phrases":["привет"]}';

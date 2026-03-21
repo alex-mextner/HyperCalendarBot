@@ -184,4 +184,37 @@ describe('CalendarBotAgent', () => {
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('tool');
   });
+
+  describe('supplement mode', () => {
+    test('buildMessages does not append current user message when supplementMode is true', () => {
+      const agent = new CalendarBotAgent(config, sender);
+      const supplementCtx = { ...ctx, supplementMode: true };
+      const { messages } = agent.buildMessages(supplementCtx, []);
+      // In supplement mode, user message is already in history — no extra append
+      expect(messages.length).toBe(0);
+    });
+
+    test('buildMessages appends current user message when supplementMode is false', () => {
+      const agent = new CalendarBotAgent(config, sender);
+      const { messages } = agent.buildMessages(ctx, []);
+      // Normal mode: message is appended
+      expect(messages.length).toBe(1);
+      expect(messages[0]!.role).toBe('user');
+    });
+
+    test('saveUserMessage does not save when supplementMode is true', () => {
+      const agent = new CalendarBotAgent(config, sender);
+      const supplementCtx = { ...ctx, supplementMode: true };
+      agent.saveUserMessage(supplementCtx);
+      const history = supplementCtx.chatHistory.getRecent(USER_ID);
+      expect(history.filter((h) => h.role === 'user').length).toBe(0);
+    });
+
+    test('saveUserMessage saves when supplementMode is false', () => {
+      const agent = new CalendarBotAgent(config, sender);
+      agent.saveUserMessage(ctx);
+      const history = ctx.chatHistory.getRecent(USER_ID);
+      expect(history.filter((h) => h.role === 'user').length).toBe(1);
+    });
+  });
 });

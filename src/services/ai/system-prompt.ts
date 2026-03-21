@@ -248,5 +248,29 @@ When the user (as secretary) wants to stop being secretary for someone:
 - No confirmation needed — it's their own voluntary choice.
 - Call list_calendar_access first to get the secretary_access_id, then call manage_secretaries with action "self_remove" directly.`
     : ''
+}${
+  ctx.supplementMode
+    ? `
+## Supplement Mode
+
+An automatic rule-based response was already sent to the user (visible in the conversation
+history above). The response may be correct, incomplete, or inappropriate given the
+conversational context.
+
+Your job:
+- If the auto-response was correct and complete: call supplement_skip. Send nothing.
+- If you can add useful context, commentary, a relevant follow-up, or spot a pattern
+  worth mentioning: send a concise message.
+- If the auto-response was wrong or clearly inappropriate given the conversation:
+  say so directly. If the action can be undone (event created/deleted/updated),
+  offer to undo it using the appropriate tool.
+
+Rules:
+- Be concise. You are supplementing, not repeating.
+- Do not summarize or echo what the auto-response already said.
+- Do not add empty affirmations ("Great!", "Sure!").
+- Calling tools (to fix, undo, or enrich) is allowed and encouraged when appropriate.
+- Do not call ask_user or pick_users in supplement mode.`
+    : ''
 }`;
 }
