@@ -3,12 +3,17 @@ import { expect, jest, test } from 'bun:test';
 import {
   completePairing,
   generatePairingCode,
+  initPairingSecret,
   issueAgentJwt,
   PAIRING_TTL_MS,
   registerPendingConnection,
   verifyAgentJwt,
   verifyAgentJwtFull,
 } from '../../src/agent/pairing.ts';
+
+const TEST_SECRET = 'test-secret-at-least-32-characters!!';
+initPairingSecret(TEST_SECRET);
+
 import { AgentRegistry } from '../../src/agent/registry.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { runMigrations } from '../../src/database/schema.ts';
@@ -30,14 +35,12 @@ test('generatePairingCode matches format xxxx-xxxx', () => {
 });
 
 test('issueAgentJwt + verifyAgentJwt roundtrip', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const jwt = await issueAgentJwt(123456);
   const userId = await verifyAgentJwt(jwt);
   expect(userId).toBe(123456);
 });
 
 test('verifyAgentJwtFull returns userId and exp', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const jwt = await issueAgentJwt(999);
   const result = await verifyAgentJwtFull(jwt);
   expect(result?.userId).toBe(999);
@@ -46,12 +49,10 @@ test('verifyAgentJwtFull returns userId and exp', async () => {
 });
 
 test('verifyAgentJwtFull returns null for garbage', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   expect(await verifyAgentJwtFull('not.a.jwt')).toBeNull();
 });
 
 test('verifyAgentJwt returns null for garbage', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   expect(await verifyAgentJwt('not.a.jwt')).toBeNull();
 });
 
@@ -75,7 +76,6 @@ test('registerPendingConnection sends pair_error after TTL expires', () => {
 });
 
 test('completePairing success path: sends jwt and registers', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const registry = new AgentRegistry();
   const sent: string[] = [];
   const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as unknown as Parameters<

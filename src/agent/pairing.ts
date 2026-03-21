@@ -41,6 +41,7 @@ export function registerPendingConnection(code: string, ws: ServerWebSocket<WsDa
 }
 
 export async function completePairing(code: string, userId: number, registry: AgentRegistry): Promise<boolean> {
+  if (!secret()) return false;
   const pending = pendingConnections.get(code);
   if (!pending || Date.now() > pending.expiresAt) {
     pendingConnections.delete(code);
@@ -55,23 +56,31 @@ export async function completePairing(code: string, userId: number, registry: Ag
   return true;
 }
 
-function secret(): Uint8Array {
-  const s = process.env.AGENT_JWT_SECRET;
-  if (!s) throw new Error('AGENT_JWT_SECRET not set');
-  return new TextEncoder().encode(s);
+let _jwtSecret: Uint8Array | null = null;
+
+export function initPairingSecret(secret: string): void {
+  _jwtSecret = new TextEncoder().encode(secret);
+}
+
+function secret(): Uint8Array | null {
+  return _jwtSecret;
 }
 
 export async function issueAgentJwt(userId: number): Promise<string> {
+  const sec = secret();
+  if (!sec) throw new Error('AGENT_JWT_SECRET not configured');
   return new SignJWT({ sub: String(userId) })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('30d')
-    .sign(secret());
+    .sign(sec);
 }
 
 export async function verifyAgentJwt(token: string): Promise<number | null> {
+  const sec = secret();
+  if (!sec) return null;
   try {
-    const { payload } = await jwtVerify(token, secret());
+    const { payload } = await jwtVerify(token, sec);
     const n = Number(payload.sub);
     return Number.isFinite(n) ? n : null;
   } catch {
@@ -80,8 +89,10 @@ export async function verifyAgentJwt(token: string): Promise<number | null> {
 }
 
 export async function verifyAgentJwtFull(token: string): Promise<{ userId: number; exp: number } | null> {
+  const sec = secret();
+  if (!sec) return null;
   try {
-    const { payload } = await jwtVerify(token, secret());
+    const { payload } = await jwtVerify(token, sec);
     const n = Number(payload.sub);
     if (!Number.isFinite(n) || typeof payload.exp !== 'number') return null;
     return { userId: n, exp: payload.exp };

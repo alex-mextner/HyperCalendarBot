@@ -1,8 +1,11 @@
 import { expect, jest, test } from 'bun:test';
 import { AgentDispatcher } from '../../src/agent/dispatcher.ts';
-import { issueAgentJwt, verifyAgentJwt } from '../../src/agent/pairing.ts';
+import { initPairingSecret, issueAgentJwt, verifyAgentJwt } from '../../src/agent/pairing.ts';
 import { AgentRegistry } from '../../src/agent/registry.ts';
 import { createAgentWsHandler, upgradeAgentWs } from '../../src/agent/ws-server.ts';
+
+const TEST_SECRET = 'test-secret-at-least-32-characters!!';
+initPairingSecret(TEST_SECRET);
 
 function setup() {
   const registry = new AgentRegistry();
@@ -90,7 +93,6 @@ test('upgradeAgentWs sets _token=null when no Authorization header', () => {
 });
 
 test('open with valid JWT registers connection', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const { registry, handler } = setup();
   const jwt = await issueAgentJwt(99);
   const sent: string[] = [];
@@ -105,7 +107,6 @@ test('open with valid JWT registers connection', async () => {
 });
 
 test('open with fresh JWT does NOT push token_refreshed', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const { handler } = setup();
   // issueAgentJwt issues a 30d token — far from expiry
   const jwt = await issueAgentJwt(77);
@@ -120,11 +121,10 @@ test('open with fresh JWT does NOT push token_refreshed', async () => {
 });
 
 test('open with near-expiry JWT pushes token_refreshed with valid new JWT', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const { handler } = setup();
   // Issue a JWT that expires in 3 days (< 7-day threshold)
   const { SignJWT } = await import('jose');
-  const secret = new TextEncoder().encode(process.env.AGENT_JWT_SECRET);
+  const secret = new TextEncoder().encode(TEST_SECRET);
   const shortJwt = await new SignJWT({ sub: '88' })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -160,7 +160,6 @@ test('open without token closes connection after 30s if still unauthenticated', 
 });
 
 test('open without token does NOT close if authenticated before timeout', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   jest.useFakeTimers();
   const { registry, handler } = setup();
   const closeCalls: { code: number; reason: string }[] = [];
@@ -209,7 +208,6 @@ test('message: chunk/done/error are forwarded to dispatcher', async () => {
 });
 
 test('open with invalid JWT closes connection with 4001', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
   const { registry, handler } = setup();
   const closeCalls: { code: number; reason: string }[] = [];
   const w = {
