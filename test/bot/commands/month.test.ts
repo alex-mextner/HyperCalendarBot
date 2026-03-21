@@ -100,6 +100,31 @@ describe('handleMonth', () => {
     const opts = callArgs[1] as Record<string, unknown>;
     expect(opts.reply_markup).toBeDefined();
   });
+
+  test('pins image after successful month render', async () => {
+    const { handleMonth } = await import('../../../src/bot/commands/month.ts');
+    const pinChatMessage = mock(() => Promise.resolve());
+    const ctx = {
+      dbUser: user,
+      send: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve({ id: 55 })),
+      bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
+    };
+    const svc = makeEventService();
+    const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
+
+    // yearMonth undefined → triggers image render (only on initial /month command)
+    await handleMonth(ctx as never, svc as never, undefined, renderService as never);
+    await Promise.resolve(); // flush fire-and-forget autoPin
+
+    expect(ctx.sendPhoto).toHaveBeenCalled();
+    expect(pinChatMessage).toHaveBeenCalledWith({
+      chat_id: user.telegram_id,
+      message_id: 55,
+      disable_notification: true,
+    });
+  });
 });
 
 describe('handleMonth group context', () => {

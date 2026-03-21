@@ -397,6 +397,7 @@ export function createCallbackHandler(
       }
 
       // Image: weekly overview
+
       if (action === CB.IMG_WEEKLY && renderService) {
         const weekStartIso = payload;
         await ctx.answer();
@@ -439,8 +440,8 @@ export function createCallbackHandler(
           const file = new File([buffer], 'week.png', { type: 'image/png' });
           if (ctx.message) {
             const sent = await ctx.message.sendPhoto(file);
-            const weekChatId = Number(ctx.chatId ?? user.telegram_id);
-            autoPin(weekChatId, sent.id, {
+            const chatId = Number(ctx.chatId ?? user.telegram_id);
+            autoPin(chatId, sent.id, {
               pinChatMessage: (cid, messageId, options) =>
                 ctx.bot.api.pinChatMessage({
                   chat_id: cid,
