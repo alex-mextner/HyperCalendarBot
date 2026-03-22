@@ -21,17 +21,6 @@ interface TimezoneParams {
   settingsChatId: number;
 }
 
-type BotApiCtx = {
-  bot: {
-    api: {
-      editMessageText: (p: Record<string, unknown>) => Promise<unknown>;
-      deleteMessage: (p: { chat_id: number; message_id: number }) => Promise<unknown>;
-    };
-  };
-};
-
-type MsgCtx = { delete: () => Promise<unknown> };
-
 export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
   return new Scene('timezone')
     .state<TimezoneState>()
@@ -54,10 +43,9 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
         .text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
 
       // onEnter is called from stg:change_tz callback_query — editText replaces the settings message
-      const cbCtx = context as unknown as {
-        editText: (text: string, opts?: unknown) => Promise<unknown>;
-      };
-      await cbCtx.editText(chooserText, { reply_markup: chooserKb });
+      await (context as { editText: (text: string, opts?: unknown) => Promise<unknown> }).editText(chooserText, {
+        reply_markup: chooserKb,
+      });
     })
     .step(['message', 'location', 'callback_query'], async (context) => {
       const user = getSceneUser(context);
@@ -72,7 +60,7 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
       // Handle typed city name (only after entering city input mode)
       if (context.is('message')) {
         if (!cityInputMode) return;
-        const text = (context as unknown as { text?: string }).text?.trim();
+        const text = context.text?.trim();
         if (!text) return;
         const tz = await resolveCity(text, aiModel);
         if (tz) {
@@ -92,15 +80,13 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
 
       // Handle location shared via reply keyboard
       if (context.is('location')) {
-        const { latitude, longitude } = (
-          context as unknown as { eventLocation: { latitude: number; longitude: number } }
-        ).eventLocation;
+        const { latitude, longitude } = context.eventLocation;
         const tz = resolveTimezone(latitude, longitude);
         const display = getTimezoneDisplay(tz);
         // Delete the geo request message now that location is received
         if (geoMsgId) {
-          const bot = (context as unknown as BotApiCtx).bot;
-          const chatId = (context as unknown as { chatId?: number }).chatId ?? 0;
+          const { bot } = context;
+          const chatId = context.chatId ?? 0;
           bot.api
             .deleteMessage({ chat_id: chatId, message_id: geoMsgId })
             .catch((err: unknown) => botLogger.warn({ err }, 'tz scene: failed to delete geo message'));
@@ -114,40 +100,36 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
 
       // Handle callback
       if (context.is('callback_query')) {
-        const data = (context as unknown as { data: string }).data;
+        const data = context.data;
         if (!data) return;
         const parts = data.split(':');
         const action = parts[0];
-        const cbCtx = context as unknown as {
-          answer: () => Promise<unknown>;
-          editText: (text: string, opts?: unknown) => Promise<unknown>;
-        };
 
         // Geo pick — show geo reply keyboard via new message, save its ID
         if (action === CB.TZ_GEO_PICK) {
-          await cbCtx.answer();
+          await context.answer();
           const display = getTimezoneDisplay(user.timezone);
           const geoPromptText =
             lang === 'ru'
               ? `🌍 Текущий: ${display}\n\nПоделись геолокацией:`
               : `🌍 Current: ${display}\n\nShare your location:`;
           const cancelKb = new InlineKeyboard().text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
-          await cbCtx.editText(geoPromptText, { reply_markup: cancelKb });
+          await context.editText(geoPromptText, { reply_markup: cancelKb });
           const geoMsg = await context.send(lang === 'ru' ? '📍 Нажми кнопку ниже:' : '📍 Tap the button below:', {
             reply_markup: timezoneMethodKeyboard(lang),
           });
-          await context.scene.update({ geoMsgId: (geoMsg as unknown as { id: number }).id }, { step: undefined });
+          await context.scene.update({ geoMsgId: geoMsg.id }, { step: undefined });
           return;
         }
 
         // Enter city input mode
         if (action === CB.TZ_TYPE_CITY) {
-          await cbCtx.answer();
+          await context.answer();
           const display = getTimezoneDisplay(user.timezone);
           const header = lang === 'ru' ? `🌍 Текущий: ${display}\n\n` : `🌍 Current: ${display}\n\n`;
           const promptText = header + cityInputPrompt(lang).replace(/^🌍 /, '');
           const cancelKb = new InlineKeyboard().text(lang === 'ru' ? '← Назад' : '← Back', CB.TZ_CANCEL);
-          await cbCtx.editText(promptText, { reply_markup: cancelKb });
+          await context.editText(promptText, { reply_markup: cancelKb });
           // Send city prompt as new message — removes any stale reply keyboard
           await context.send(cityInputPrompt(lang), removeKeyboard());
           await context.scene.update({ cityInputMode: true }, { step: undefined });
@@ -156,19 +138,19 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
 
         // Cancel — restore general settings
         if (action === CB.TZ_CANCEL) {
-          await cbCtx.answer();
+          await context.answer();
           await context.scene.exit();
           const { text: settingsText, kb: settingsKb } = buildGeneralView(user);
-          await cbCtx.editText(settingsText, { reply_markup: settingsKb });
+          await context.editText(settingsText, { reply_markup: settingsKb });
           // If geo request was active: delete its message and remove reply keyboard
           if (geoMsgId) {
-            const bot = (context as unknown as BotApiCtx).bot;
-            const chatId = (context as unknown as { chatId?: number }).chatId ?? 0;
+            const { bot } = context;
+            const chatId = context.chatId ?? 0;
             bot.api
               .deleteMessage({ chat_id: chatId, message_id: geoMsgId })
               .catch((err: unknown) => botLogger.warn({ err }, 'tz scene: failed to delete geo message'));
             const tempMsg = await context.send('.', removeKeyboard());
-            (tempMsg as unknown as MsgCtx).delete().catch((err: unknown) => {
+            tempMsg.delete().catch((err: unknown) => {
               botLogger.warn({ err }, 'tz scene: failed to delete temp remove-keyboard message');
             });
           }
@@ -179,17 +161,17 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
         if (action === CB.ONBOARD_TZ) {
           const pendingTz = context.scene.state.detectedTz;
           if (!pendingTz) {
-            await cbCtx.answer();
+            await context.answer();
             return;
           }
           const updatedUser = db.users.update(user.telegram_id, { timezone: pendingTz });
           await context.scene.exit();
           // Edit the confirm message to show success
-          await cbCtx.editText(`✅ ${getTimezoneDisplay(pendingTz)}`);
+          await context.editText(`✅ ${getTimezoneDisplay(pendingTz)}`);
           // Restore general settings in the original settings message
           if (updatedUser && params.settingsMsgId && params.settingsChatId) {
             const { text: settingsText, kb: settingsKb } = buildGeneralView(updatedUser);
-            const bot = (context as unknown as BotApiCtx).bot;
+            const { bot } = context;
             await bot.api.editMessageText({
               chat_id: params.settingsChatId,
               message_id: params.settingsMsgId,
@@ -197,19 +179,18 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
               reply_markup: settingsKb,
             });
           }
-          await cbCtx.answer();
+          await context.answer();
           return;
         }
 
         // Retry — delete the confirm message, user can type another city
         if (action === CB.ONBOARD_TZ_RETRY) {
-          await cbCtx.answer();
-          const msg = (context as unknown as { message?: MsgCtx }).message;
-          await msg?.delete();
+          await context.answer();
+          await context.message?.delete();
           return;
         }
 
-        await cbCtx.answer();
+        await context.answer();
       }
     });
 }
