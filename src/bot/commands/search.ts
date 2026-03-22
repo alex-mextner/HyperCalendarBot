@@ -5,7 +5,7 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventListItem } from '../../services/event/formatters.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { eventPickerKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -25,8 +25,8 @@ export async function handleSearch(
     return;
   }
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? user.timezone;
     const results = eventService.searchEventsForGroup(groupId, query);

@@ -6,7 +6,7 @@ import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { formatDateHeader, formatTime, parseSimpleDate } from '../../utils/date.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export async function handleFree(
@@ -19,8 +19,8 @@ export async function handleFree(
   const lang = user.language as 'en' | 'ru';
   const args = (ctx.args as string)?.trim();
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {

@@ -55,8 +55,8 @@ export async function handleBirthdays(
   const lang = user.language as 'en' | 'ru';
 
   let groupCalendars: { groupId: number; title: string }[] = [];
-  if (isGroup(ctx as unknown as Parameters<typeof isGroup>[0])) {
-    const groupId = getGroupId(ctx as unknown as Parameters<typeof getGroupId>[0]);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const group = groupChatRepo?.findByChatId(groupId) ?? null;
     groupCalendars = group ? [{ groupId, title: group.title ?? String(groupId) }] : [];

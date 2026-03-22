@@ -55,7 +55,7 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import { type CtxWithChat, isGroup } from '../group-context.ts';
+import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
@@ -412,7 +412,7 @@ export function createCallbackHandler(
                   disable_notification: options.disable_notification,
                 }),
               sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
-              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {
               imageLogger.error({ err }, 'autoPin failed');
@@ -485,7 +485,7 @@ export function createCallbackHandler(
                   disable_notification: options.disable_notification,
                 }),
               sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
-              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {
               imageLogger.error({ err }, 'autoPin failed');

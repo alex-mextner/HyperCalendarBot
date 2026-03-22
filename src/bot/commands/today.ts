@@ -10,7 +10,7 @@ import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export async function handleToday(
@@ -23,8 +23,8 @@ export async function handleToday(
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {

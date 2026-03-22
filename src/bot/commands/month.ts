@@ -10,7 +10,7 @@ import type { RenderService } from '../../services/image/render-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { monthNavKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -24,8 +24,8 @@ export async function handleMonth(
   const user = ctx.dbUser as User;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
