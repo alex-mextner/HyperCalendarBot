@@ -460,7 +460,7 @@ export function createBot(
     .extend(scenesSetup.plugin)
     // Commands
     .command('start', (ctx) =>
-      handleStart(ctx as unknown as BotCommandContext, {
+      handleStart(ctx as BotCommandContext, {
         onboardingScene: scenesSetup.scenes.onboardingScene,
         deepLinkService,
         eventService,
@@ -468,40 +468,36 @@ export function createBot(
         userRepo: db.users,
       }),
     )
-    .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
-    .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
+    .command('ping', (ctx) => handlePing(ctx as BotCommandContext))
+    .command('help', (ctx) => handleHelp(ctx as BotCommandContext))
     .command('today', (ctx) =>
-      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
+      handleToday(ctx as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
+      handleTomorrow(ctx as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('week', (ctx) =>
-      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
+      handleWeek(ctx as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
     )
     .command('month', (ctx) =>
-      handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService, db.groupChats),
+      handleMonth(ctx as BotCommandContext, eventService, undefined, renderService, db.groupChats),
     )
     .command('add', (ctx) =>
-      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene, db.groupChats),
+      handleAdd(ctx as BotCommandContext, eventService, scenesSetup.scenes.addEventScene, db.groupChats),
     )
-    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('free', (ctx) =>
-      handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
-    )
-    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext, db.groupChats))
-    .command('import', (ctx) =>
-      handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats),
-    )
-    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
+    .command('edit', (ctx) => handleEdit(ctx as BotCommandContext, eventService, db.groupChats))
+    .command('delete', (ctx) => handleDelete(ctx as BotCommandContext, eventService, db.groupChats))
+    .command('search', (ctx) => handleSearch(ctx as BotCommandContext, eventService, db.groupChats))
+    .command('free', (ctx) => handleFree(ctx as BotCommandContext, eventService, holidayService, db.groupChats))
+    .command('settings', (ctx) => handleSettings(ctx as BotCommandContext, db.groupChats))
+    .command('import', (ctx) => handleImport(ctx as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats))
+    .command('holidays', (ctx) => handleHolidays(ctx as BotCommandContext, holidayService, db.groupChats))
     .command('birthdays', (ctx) =>
-      handleBirthdays(ctx as unknown as BotCommandContext, birthdayService, db.groupChats, db.groupMembers),
+      handleBirthdays(ctx as BotCommandContext, birthdayService, db.groupChats, db.groupMembers),
     )
     // Sharing commands
     .command('invite', (ctx) =>
-      handleInvite(ctx as unknown as BotCommandContext, {
+      handleInvite(ctx as BotCommandContext, {
         invitationService,
         eventService,
         invRepo: db.invitations,
@@ -518,15 +514,13 @@ export function createBot(
         },
       }),
     )
-    .command('invitations', (ctx) =>
-      handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
-    )
+    .command('invitations', (ctx) => handleInvitations(ctx as BotCommandContext, db.invitations, db.events, db.users))
     .command('share', (ctx) =>
-      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService, db.groupChats),
+      handleShare(ctx as BotCommandContext, eventService, privacyService, deepLinkService, db.groupChats),
     )
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {
-      const calCtx = ctx as unknown as BotCommandContext;
+      const calCtx = ctx as BotCommandContext;
       const user = calCtx.dbUser as User | undefined;
       if (!user) return;
       const text = (calCtx.args ?? '').trim();
@@ -822,7 +816,7 @@ export function createBot(
       }
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
-    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as unknown as BotCommandContext))
+    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, err: error }, 'Bot error');
@@ -839,6 +833,8 @@ export function createBot(
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
   const activateCommand = createActivateCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
+  // ConnectCtx.send() returns Promise<void> but GramIO ctx.send() returns Promise<MessageContext>.
+  // TypeScript rejects a single cast across these incompatible return types — double cast required.
   bot
     .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
     .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
@@ -848,12 +844,12 @@ export function createBot(
   if (googleDeps) {
     bot
       .command('connect_google', (ctx) =>
-        handleConnectGoogle(ctx as unknown as BotCommandContext, {
+        handleConnectGoogle(ctx as BotCommandContext, {
           oauthService: googleDeps.oauthService,
           stateStore: googleDeps.stateStore,
         }),
       )
-      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
+      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as BotCommandContext));
   }
 
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
