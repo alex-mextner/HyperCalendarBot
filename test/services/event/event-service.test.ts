@@ -57,6 +57,31 @@ describe('EventService', () => {
     expect(thirtyMinRow!.remind_at_utc).toBe('2099-06-01T17:01:00.000Z');
   });
 
+  test('createEvent uses explicit reminder_minutes for materialization, not user prefs', () => {
+    const eventReminderRepo = new EventReminderRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
+    prefsRepo.ensureDefaults(USER_ID);
+    // User prefs say 30 min, but event is created with explicit 5-min reminder
+    prefsRepo.update(USER_ID, { default_reminder_intervals: JSON.stringify([30]) });
+    const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const svc = new EventService({
+      eventRepo: new EventRepository(db),
+      reminderRepo: new ReminderRepository(db),
+      materializer: mat,
+    });
+    const event = svc.createEvent({
+      user_id: USER_ID,
+      title: 'Custom Reminder Event',
+      start_at: '2099-06-01T10:00:00Z',
+      timezone: TZ,
+      reminder_minutes: [5],
+    });
+    const rows = eventReminderRepo.getForEvent(event.id);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.interval_minutes).toBe(5);
+    expect(rows[0]!.remind_at_utc).toBe('2099-06-01T09:55:00.000Z');
+  });
+
   test('createEvent creates event with default reminder', () => {
     const event = service.createEvent({
       user_id: USER_ID,

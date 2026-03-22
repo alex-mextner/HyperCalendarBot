@@ -49,11 +49,16 @@ export class EventService {
       this.reminderRepo.create(event.id, mins);
     }
     if (this.materializer) {
+      // Prefer explicit reminder_minutes from CreateEventData over event.reminder_overrides
+      // (reminder_minutes is not persisted to events.reminder_overrides in the DB)
+      const overrides = data.reminder_minutes
+        ? JSON.stringify(data.reminder_minutes)
+        : (event.reminder_overrides ?? null);
       this.materializer.materialize(
         {
           id: event.id,
           start_at: event.start_at,
-          reminder_overrides: event.reminder_overrides ?? null,
+          reminder_overrides: overrides,
           all_day: event.all_day,
           user_timezone: event.timezone,
         },
