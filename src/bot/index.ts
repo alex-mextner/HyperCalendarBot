@@ -75,20 +75,21 @@ import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
+import type { SceneKvStorage } from './scenes/storage.ts';
 import type { BotCallbackContext, BotCommandContext } from './types.ts';
 
-/**
- * GramIO's base Context class doesn't expose `from` or derived properties
- * in its type definition — they come from TargetMixin on specific update
- * contexts. We use a narrow interface and cast where needed.
- */
-interface GramIOContextWithFrom {
-  from?: { id: number };
-}
-
-interface GramIOContextWithDerived {
+/** GramIO context properties not exposed on the base Context type. */
+interface GramIOBaseContext {
+  // GramIO exposes text as a direct shortcut on MessageContext, not via ctx.message.text
+  text?: string;
+  // GramIO update type string: "message" | "edited_message" | "callback_query" | ...
+  updateType?: string;
+  // Raw payload object — for callback_query updates this is the callback_query object with .data
+  payload?: { data?: string };
   dbUser?: User;
-  send(text: string): Promise<unknown>;
+  chatId?: number | bigint;
+  send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+  editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
 }
 
 export interface GoogleBotDeps {
@@ -189,11 +190,7 @@ export function createBot(
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
-  const kvStorage = scenesSetup.storage as unknown as {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown): Promise<void>;
-    delete(key: string): Promise<void>;
-  };
+  const kvStorage = scenesSetup.storage as SceneKvStorage;
   const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
@@ -264,7 +261,7 @@ export function createBot(
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as unknown as AgentContext['callSettingsRepo'],
+    callSettingsRepo: db.callSettings as AgentContext['callSettingsRepo'],
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -363,19 +360,20 @@ export function createBot(
 
   bot
     .derive(createUserResolver(db))
-    .use((context, next) =>
-      runWithChatId(Number((context as unknown as { chatId?: number | bigint }).chatId ?? 0), next),
-    )
+    .use((context, next) => {
+      const chatId = 'chatId' in context ? Number((context as { chatId: number | bigint }).chatId) : 0;
+      return runWithChatId(chatId, next);
+    })
     .use(async (context, next) => {
-      const ctx = context as unknown as GramIOContextWithFrom;
-      const userId = ctx.from?.id;
+      const from = 'from' in context ? (context as { from?: { id: number } }).from : undefined;
+      const userId = from?.id;
       if (!userId) return next();
       const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
       if (!allowed) {
         if (firstBlock && 'send' in context) {
-          const derived = context as unknown as GramIOContextWithDerived;
-          const lang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
-          await derived.send(t(lang).rate_limited);
+          const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
+          const lang = (dbUser?.language ?? 'en') as 'en' | 'ru';
+          await (context as { send(text: string): Promise<unknown> }).send(t(lang).rate_limited);
         }
         return;
       }
@@ -389,18 +387,7 @@ export function createBot(
     )
     .use(createCallbackFallback(scenesSetup.storage) as never)
     .use(async (context, next) => {
-      const ctx = context as unknown as {
-        // GramIO exposes text as a direct shortcut on MessageContext, not via ctx.message.text
-        text?: string;
-        // GramIO update type string: "message" | "edited_message" | "callback_query" | ...
-        updateType?: string;
-        // Raw payload object — for callback_query updates this is the callback_query object with .data
-        payload?: { data?: string };
-        dbUser?: User;
-        chatId?: number | bigint;
-        send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-        editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-      };
+      const ctx = context as unknown as GramIOBaseContext;
 
       const user = ctx.dbUser;
       if (!user) return next();
@@ -841,9 +828,9 @@ export function createBot(
       botLogger.error({ kind, err: error }, 'Bot error');
       try {
         if (context && 'send' in context) {
-          const derived = context as unknown as GramIOContextWithDerived;
-          const errLang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
-          derived.send(t(errLang).something_wrong);
+          const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
+          const errLang = (dbUser?.language ?? 'en') as 'en' | 'ru';
+          (context as { send(text: string): Promise<unknown> }).send(t(errLang).something_wrong);
         }
       } catch {}
     });

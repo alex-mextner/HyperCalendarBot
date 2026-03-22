@@ -8,7 +8,7 @@ export interface ScenePauseState {
 type KvStorage = {
   get(key: string): Promise<unknown>;
   set(key: string, value: unknown): Promise<void>;
-  delete(key: string): Promise<void>;
+  delete(key: string): Promise<boolean | undefined>;
 };
 
 const pauseKey = (userId: number) => `scene-pause:${userId}`;
