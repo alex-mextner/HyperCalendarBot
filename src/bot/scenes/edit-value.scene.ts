@@ -1,6 +1,7 @@
 // src/bot/scenes/edit-value.scene.ts
 import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
+import type { AnyBot } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -40,7 +41,7 @@ export function createEditValueScene(eventService: EventService) {
       // but step 0 is "message", so firstTime won't fire on entry
       .onEnter(async (context) => {
         const lang = getSceneLang(context);
-        const params = (context as unknown as { scene: { params: EditValueParams } }).scene.params;
+        const params = context.scene.params;
         await context.send(EDIT_PROMPTS[params.field]?.[lang] ?? 'Send new value:');
       })
       .step('message', async (context) => {
@@ -52,7 +53,7 @@ export function createEditValueScene(eventService: EventService) {
         }
 
         const { eventId, field } = context.scene.params;
-        const text = (context as unknown as { text?: string }).text;
+        const text = context.text;
         if (!text) return;
 
         const updateData: Record<string, unknown> = {};
@@ -103,11 +104,7 @@ export function createEditValueScene(eventService: EventService) {
         if (updated) {
           const detail = formatEventDetail(updated, user.timezone, lang);
           const editText = `${t(lang).event_updated(updated.title)}\n\n${detail}`;
-          const bot = (
-            context as unknown as {
-              bot: { api: { editMessageText: (p: Record<string, unknown>) => Promise<unknown> } };
-            }
-          ).bot;
+          const bot = (context as { bot: AnyBot }).bot;
           await bot.api.editMessageText({
             chat_id: chatId,
             message_id: messageId,

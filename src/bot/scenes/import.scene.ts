@@ -3,6 +3,7 @@ import { Scene } from '@gramio/scenes';
 import type { EventService } from '../../services/event/event-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
 import { parseIcs } from '../../services/ics/parser.ts';
+import type { GramIOMessageExtras } from '../types.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
 interface ImportParams {
@@ -25,12 +26,7 @@ export function createImportScene(eventService: EventService, botToken: string) 
     }
 
     // Check for document
-    const ctx = context as unknown as {
-      document?: { file_id: string; file_name?: string };
-      getFile(): Promise<{ file_path: string }>;
-      text?: string;
-    };
-
+    const ctx = context as typeof context & GramIOMessageExtras;
     if (!ctx.document) {
       await context.send(
         lang === 'ru'
