@@ -55,7 +55,6 @@ export class TelegramStreamWriter {
   private intermediateChunks: string[] = [];
   private plainResponseText = '';
   private userTranscript: string | undefined;
-
   private noPlaceholder: boolean;
 
   constructor(
@@ -144,17 +143,19 @@ export class TelegramStreamWriter {
   }
 
   async flush(force: boolean): Promise<void> {
-    if (!this.messageId) return;
-
     const delta = this.text.length - this.lastFlushedLength;
-    const now = Date.now();
-    const timeSinceFlush = now - this.lastFlushTime;
+    const timeSinceFlush = Date.now() - this.lastFlushTime;
 
-    if (!force && (delta < MIN_FLUSH_DELTA || timeSinceFlush < FLUSH_INTERVAL_MS)) {
-      return;
-    }
-
+    // Check content thresholds before creating a placeholder (avoids sending ⏳ for [SKIP])
+    if (!force && (delta < MIN_FLUSH_DELTA || timeSinceFlush < FLUSH_INTERVAL_MS)) return;
     if (delta === 0 && !this.toolLabel) return;
+
+    if (!this.messageId) {
+      if (!this.noPlaceholder) return;
+      // Lazy: materialize the placeholder now that we have substantial content to show
+      const result = await this.sender.sendMessage(this.chatId, '⏳');
+      this.messageId = result.message_id;
+    }
 
     let displayText = markdownToHtml(this.text) || '⏳';
     if (this.toolLabel) {

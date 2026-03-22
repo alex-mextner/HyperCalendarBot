@@ -406,7 +406,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && (finalText === '[SKIP]' || finalText.includes('[SKIP]'))) {
+    if (ctx.isGroup && (finalText.trim() === '[SKIP]' || finalText.includes('[SKIP]'))) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

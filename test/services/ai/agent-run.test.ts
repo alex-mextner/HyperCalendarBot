@@ -420,6 +420,25 @@ describe('CalendarBotAgent.run()', () => {
     expect(sender.editMessageText).toHaveBeenCalled();
   });
 
+  test('[SKIP] with trailing whitespace is still discarded in group', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]\n' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '[SKIP]\n' }],
+      stop_reason: 'end_turn',
+    };
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    await agent.run(ctx);
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+  });
+
   test('onBotResponse callback is called after finalize with message ID', async () => {
     const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } }];
     const finalMsg = {
