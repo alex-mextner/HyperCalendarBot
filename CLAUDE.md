@@ -429,6 +429,53 @@ Telegram doesn't publish exact numbers — limits are dynamic. Practical rules:
 - Scheduled up to: **365 days** ahead
 - Poll question: **1–255 chars**; answer option: **1–100 chars**; options: **2–12**
 
+## Deployment
+
+### Server
+
+- **Host**: 104.248.84.190 (Digital Ocean, 1 CPU, shared with other projects)
+- **SSH**: `root@` for docker/sudo, `www-data@` for files. www-data has no passwordless sudo.
+- **Deploy path**: `/var/www/hypercal.invntrm.ru`
+- **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS, imports `/var/www/*/Caddyfile`)
+
+### Shared server — DO NOT touch other projects
+
+The server runs multiple PM2 services alongside our Docker containers:
+- `expensesyncbot` — `/var/www/ExpenseSyncBot`
+- `log-viewer` — `/var/www/log-viewer` (port 3002)
+- `psy_froggy_bot` — `/var/www/psy_froggy_bot`
+
+**Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.**
+Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
+
+### Docker
+
+- Bot + Redis via `docker-compose.yml`, Docker Compose v2 plugin.
+- GHCR private registry — deploy step must `docker login ghcr.io` before pull.
+- `docker compose` requires root (www-data not in docker group).
+- Resource limits: bot 1G/0.9cpu, redis 256M/0.5cpu (server is 1 CPU — never exceed 1.0).
+- GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `DEPLOY_PATH`.
+
+### Dockerfile
+
+- Base: `debian:bookworm-slim` + bun installed via `bun.sh/install` script (version pinned).
+- NOT `oven/bun:1-debian` — bun Docker Hub tags lag behind releases.
+- `ln -s bun node` required — Playwright CLI uses `#!/usr/bin/env node`.
+- `bun install --ignore-scripts` — skips lefthook postinstall (needs git, absent in Docker).
+
+### bun lockfile and --frozen-lockfile
+
+`--frozen-lockfile` is **cross-platform incompatible**: a macOS arm64 lockfile fails on linux amd64
+even with the same bun version and build hash. Platform-specific optional deps (e.g.
+`@rollup/rollup-darwin-arm64` vs `@rollup/rollup-linux-x64-gnu`) cause the mismatch.
+`bun install` without `--frozen` does NOT rewrite an existing lockfile, but `--frozen-lockfile`
+considers the difference a violation.
+
+- **CI** (linux): `bun install` → `bun install --frozen-lockfile` — validates lockfile integrity.
+- **Docker** (linux): `bun install --ignore-scripts` — respects lockfile version pins, adjusts
+  only platform-specific optional deps.
+- **Local** (macOS): `bun install` — generates/updates lockfile normally.
+
 ## Documentation
 
 - Specs: `docs/specs/` — design documents and feature specifications
