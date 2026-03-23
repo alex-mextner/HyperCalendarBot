@@ -59,7 +59,9 @@ def resample_to_16k(pcm_48k: bytes) -> bytes:
     return arr_16k.tobytes()
 
 async def main():
-    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
+    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data",
+                 device_model="iPhone 16 Pro", system_version="18.3.2",
+                 app_version="11.4", lang_code="en", system_lang_code="en-US")
     calls = PyTgCalls(app)
 
     play_task: asyncio.Task | None = None
