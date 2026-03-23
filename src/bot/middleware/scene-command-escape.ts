@@ -35,7 +35,7 @@ const SCENE_CANCEL_MESSAGES: Record<string, Record<string, string>> = {
  * Must be registered BEFORE the scenes plugin.
  */
 export function createSceneCommandEscape(storage: Storage) {
-  return async (context: unknown, next: () => Promise<void>) => {
+  return async (context: object, next: () => Promise<unknown>) => {
     const ctx = context as MessageContext;
     if (!ctx.is('message')) return next();
 

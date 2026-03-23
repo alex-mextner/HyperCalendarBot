@@ -10,9 +10,7 @@ export interface SceneKvStorage {
 
 export function createSceneStorage(db: Database) {
   return sqliteStorage({
-    // @gramio/storage-sqlite's Node.js type expects node:sqlite DatabaseSync,
-    // but at runtime Bun uses bun:sqlite Database. Types are structurally incompatible.
-    db: db as never,
+    db,
     tableName: 'gramio_scenes',
     $ttl: 30 * 60, // 30 min TTL (in seconds) for scene data
   });

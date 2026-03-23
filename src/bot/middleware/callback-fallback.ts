@@ -22,7 +22,7 @@ interface CallbackContext {
  * Telegram's button spinner hanging forever.
  */
 export function createCallbackFallback(sceneStorage: Storage) {
-  return async (context: unknown, next: () => Promise<void>) => {
+  return async (context: object, next: () => Promise<unknown>) => {
     const ctx = context as CallbackContext;
     if (!ctx.is('callback_query')) return next();
 

@@ -382,12 +382,12 @@ export function createBot(
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
     .use(
       createSceneCommandEscape(
-        // Storage<Record<string, any>> vs Storage: delete() returns MaybePromise<boolean>
-        // vs Promise<void> — generic invariance makes these mutually incompatible for a single cast.
+        // SceneKvStorage.delete() returns Promise<boolean | undefined>;
+        // createSceneCommandEscape expects Promise<void> — single cast required.
         scenesSetup.storage as unknown as Parameters<typeof createSceneCommandEscape>[0],
-      ) as never,
+      ),
     )
-    .use(createCallbackFallback(scenesSetup.storage) as never)
+    .use(createCallbackFallback(scenesSetup.storage))
     .use(async (context, next) => {
       // GramIO's Context has a protected `updateType` field, making the derived bot context
       // and GramIOBaseContext mutually incompatible for a direct cast. Double cast required.
