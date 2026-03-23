@@ -19,7 +19,11 @@
       "Bash(uv pip:*)",
       "Bash(ffmpeg -version)",
       "Bash(node_modules/.bin/biome check:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(node -e \"require\\(''''./src/services/intent/learner-prompt.ts''''\\)\")",
+      "Bash(bun --eval \"import ''''./src/services/intent/learner-prompt.ts''''\")",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(node_modules/.bin/biome lint:*)"
     ]
   }
 }

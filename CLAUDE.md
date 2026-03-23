@@ -260,7 +260,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   New files must have corresponding test files. No shipping untested code.
 - **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
-- **Before every commit**: run `codex exec review --uncommitted` and address any issues found.
+- **Before every commit**: after your own review, run `codex exec review --uncommitted` and address any issues it finds before committing. This 2-stage review is mandatory even if the user just says "commit" — that is not permission to skip it.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
 ## MTProto / Pyrogram
