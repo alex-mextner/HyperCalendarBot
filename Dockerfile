@@ -11,7 +11,7 @@ RUN apt-get update && \
 # Lockfile pins all versions; --frozen-lockfile is impossible cross-platform
 # (macOS arm64 lockfile ≠ linux amd64 due to platform-specific optional deps)
 COPY package.json bun.lock ./
-RUN bun install --ignore-scripts
+RUN bun install --production
 
 # Install chromium + all system dependencies required by playwright
 RUN ./node_modules/.bin/playwright install --with-deps chromium
