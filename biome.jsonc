@@ -40,7 +40,7 @@
           "options": {
             "types": {
               "object": {
-                "message": "Use a specific interface or 'Record<string, unknown>' instead of 'object'."
+                "message": "Use a specific interface instead of 'object'."
               }
             }
           }

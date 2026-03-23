@@ -61,6 +61,7 @@ import type { TranscriptionService } from '../../services/voice/transcription-se
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import type { JsonObject } from '../../utils/types.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -532,7 +533,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: Record<string, unknown>;
+    workflow: JsonObject;
     format: string;
   }> | null = null;
   let lastError: unknown;
@@ -576,7 +577,7 @@ async function handleIntentEditInstruction(
         phrases: string[];
         trigger_words: string[];
         pattern: string | null;
-        workflow: Record<string, unknown>;
+        workflow: JsonObject;
         format: string;
       }>;
       break;
@@ -844,7 +845,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             const parsed = JSON.parse(activeScene as string) as {
               name?: string;
               step?: number;
-              state?: Record<string, unknown>;
+              state?: JsonObject;
             };
             await deps.scenePauseService.save(user.telegram_id, {
               sceneName: parsed.name ?? 'unknown',

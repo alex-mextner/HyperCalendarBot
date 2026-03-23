@@ -16,7 +16,7 @@ interface EscapeCtx {
   is(type: string): boolean;
   from?: { id: number };
   dbUser?: User;
-  send(text: string, opts?: Record<string, unknown>): Promise<void>;
+  send(text: string, opts?: { reply_markup?: { remove_keyboard?: boolean } }): Promise<void>;
   text?: string;
 }
 

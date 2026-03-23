@@ -1,3 +1,4 @@
+import type { InlineKeyboard, TelegramInlineKeyboardMarkup } from 'gramio';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
@@ -95,7 +96,11 @@ export interface AgentContext {
   };
   feedbackRepo?: FeedbackRepository;
   botAdminId?: number;
-  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
+  sendMessageToChat?: (
+    chatId: number,
+    text: string,
+    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup },
+  ) => Promise<unknown>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   domainEvents?: DomainEventBus;
   conflictChecker?: ConflictChecker;

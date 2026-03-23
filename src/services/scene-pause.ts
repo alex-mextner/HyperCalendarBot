@@ -1,8 +1,10 @@
 // src/services/scene-pause.ts
+import type { JsonObject } from '../utils/types.ts';
+
 export interface ScenePauseState {
   sceneName: string;
   step: number;
-  sceneState: Record<string, unknown>;
+  sceneState: JsonObject;
 }
 
 type KvStorage = {

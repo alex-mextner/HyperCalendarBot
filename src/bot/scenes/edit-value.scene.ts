@@ -3,6 +3,7 @@ import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
 import type { AnyBot } from 'gramio';
 import { t } from '../../config/constants.ts';
+import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
@@ -56,7 +57,7 @@ export function createEditValueScene(eventService: EventService) {
         const text = context.text;
         if (!text) return;
 
-        const updateData: Record<string, unknown> = {};
+        const updateData: UpdateEventData = {};
 
         if (field === 'title') {
           updateData.title = text;

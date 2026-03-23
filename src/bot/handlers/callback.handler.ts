@@ -46,6 +46,7 @@ import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
+import type { JsonObject } from '../../utils/types.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -99,15 +100,19 @@ export function createCallbackHandler(
     sendMessage: (
       chatId: number,
       text: string,
-      options: { parse_mode: string; reply_markup?: unknown },
+      options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
     ) => Promise<void>;
-    editMessage?: (chatId: number, messageId: number, text: string, markup?: unknown) => Promise<void>;
+    editMessage?: (chatId: number, messageId: number, text: string, markup?: InlineKeyboard) => Promise<void>;
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   onboardingScene?: AnyScene,
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendMessage: (
+      chatId: number,
+      text: string,
+      options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown' },
+    ) => Promise<void>;
   },
   callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
@@ -163,12 +168,12 @@ export function createCallbackHandler(
 
         let sceneName = 'unknown';
         let step = 0;
-        let sceneState: Record<string, unknown> = {};
+        let sceneState: JsonObject = {};
         try {
-          const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
+          const parsed = JSON.parse(rawScene as string) as JsonObject;
           sceneName = (parsed.name as string) ?? 'unknown';
           step = (parsed.step as number) ?? 0;
-          sceneState = (parsed.state as Record<string, unknown>) ?? {};
+          sceneState = (parsed.state as JsonObject) ?? {};
         } catch {
           // proceed with defaults
         }
@@ -1293,7 +1298,7 @@ export interface ForceInviteDeps {
   sendMessage: (
     chatId: number,
     text: string,
-    options: { parse_mode: string; reply_markup?: unknown },
+    options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
   ) => Promise<{ message_id: number }>;
 }
 
@@ -1456,7 +1461,7 @@ async function notifyInviterProposal(
     sendMessage: (
       chatId: number,
       text: string,
-      options: { parse_mode: string; reply_markup?: unknown },
+      options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
     ) => Promise<void>;
   },
 ): Promise<void> {
@@ -1477,7 +1482,11 @@ async function notifyInviter(
   respondent: User,
   deps: {
     userRepo: UserRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendMessage: (
+      chatId: number,
+      text: string,
+      options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown' },
+    ) => Promise<void>;
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   eventRepo?: EventRepository,

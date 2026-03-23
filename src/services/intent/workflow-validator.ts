@@ -1,3 +1,4 @@
+import type { JsonObject } from '../../utils/types.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 
 /** Variables that the intent workflow executor can resolve. */
@@ -61,7 +62,7 @@ function extractExprs(obj: unknown): Array<{ expr: string; path: string }> {
         walk(value[i], `${path}[${i}]`);
       }
     } else if (value !== null && typeof value === 'object') {
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(value as JsonObject)) {
         walk(v, path ? `${path}.${k}` : k);
       }
     }
@@ -72,13 +73,13 @@ function extractExprs(obj: unknown): Array<{ expr: string; path: string }> {
 }
 
 /** Collect all "as" field values from Level 2 steps in the workflow. */
-function extractAsFields(workflow: Record<string, unknown>): string[] {
+function extractAsFields(workflow: JsonObject): string[] {
   const found: string[] = [];
   const steps = workflow.steps;
   if (!Array.isArray(steps)) return found;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const as = (step as Record<string, unknown>).as;
+      const as = (step as JsonObject).as;
       if (typeof as === 'string') found.push(as);
     }
   }
@@ -86,13 +87,13 @@ function extractAsFields(workflow: Record<string, unknown>): string[] {
 }
 
 /** Collect variable names stored by ask_user steps (the name before any | filter). */
-function extractAskUserNames(workflow: Record<string, unknown>): Set<string> {
+function extractAskUserNames(workflow: JsonObject): Set<string> {
   const names = new Set<string>();
   const steps = workflow.steps;
   if (!Array.isArray(steps)) return names;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const s = step as Record<string, unknown>;
+      const s = step as JsonObject;
       if (s.call === 'ask_user' && typeof s.as === 'string') {
         const name = s.as.includes('|') ? s.as.slice(0, s.as.indexOf('|')) : s.as;
         names.add(name.trim());
@@ -106,13 +107,13 @@ function extractAskUserNames(workflow: Record<string, unknown>): Set<string> {
  * Collect variable names stored by non-ask_user steps via their "as" field.
  * These become top-level variables accessible as {{name}} or {{name.field}}.
  */
-function extractStepOutputNames(workflow: Record<string, unknown>): Set<string> {
+function extractStepOutputNames(workflow: JsonObject): Set<string> {
   const names = new Set<string>();
   const steps = workflow.steps;
   if (!Array.isArray(steps)) return names;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const s = step as Record<string, unknown>;
+      const s = step as JsonObject;
       if (s.call !== 'ask_user' && typeof s.as === 'string') {
         const name = s.as.includes('|') ? s.as.slice(0, s.as.indexOf('|')) : s.as;
         names.add(name.trim());
@@ -126,10 +127,7 @@ function extractStepOutputNames(workflow: Record<string, unknown>): Set<string> 
  * Validate that all {{expr}} references in a workflow are resolvable.
  * Returns a list of human-readable error strings (empty = valid).
  */
-export function validateWorkflowVariables(
-  workflow: Record<string, unknown>,
-  pattern: string | null | undefined,
-): string[] {
+export function validateWorkflowVariables(workflow: JsonObject, pattern: string | null | undefined): string[] {
   const errors: string[] = [];
   const capGroups = pattern ? countCapturingGroups(pattern) : 0;
   const askUserNames = extractAskUserNames(workflow);

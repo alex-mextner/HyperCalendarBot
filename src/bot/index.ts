@@ -89,8 +89,11 @@ interface GramIOBaseContext {
   from?: { id: number };
   dbUser?: User;
   chatId?: number | bigint;
-  send?: (text: string, opts?: Record<string, unknown>) => Promise<void>;
-  editText?: (text: string, opts?: Record<string, unknown>) => Promise<void>;
+  send?: (text: string, opts?: { reply_markup?: InlineKeyboard | { remove_keyboard: boolean } }) => Promise<void>;
+  editText?: (
+    text: string,
+    opts?: { reply_markup?: InlineKeyboard | { remove_keyboard: boolean }; parse_mode?: string },
+  ) => Promise<void>;
 }
 
 export interface GoogleBotDeps {
@@ -576,23 +579,23 @@ export function createBot(
           sendMessage: async (
             chatId: number,
             text: string,
-            options: { parse_mode: string; reply_markup?: unknown },
+            options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
           ) => {
             await bot.api.sendMessage({
               chat_id: chatId,
               text,
-              parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown',
-              ...(options.reply_markup ? { reply_markup: options.reply_markup as Record<string, unknown> } : {}),
+              parse_mode: options.parse_mode,
+              ...(options.reply_markup ? { reply_markup: options.reply_markup } : {}),
             } as Parameters<typeof bot.api.sendMessage>[0]);
           },
-          editMessage: async (chatId: number, messageId: number, text: string, markup?: unknown) => {
+          editMessage: async (chatId: number, messageId: number, text: string, markup?: InlineKeyboard) => {
             await bot.api
               .editMessageText({
                 chat_id: chatId,
                 message_id: messageId,
                 text,
                 parse_mode: 'HTML',
-                ...(markup ? { reply_markup: markup as Record<string, unknown> } : {}),
+                ...(markup ? { reply_markup: markup } : {}),
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },

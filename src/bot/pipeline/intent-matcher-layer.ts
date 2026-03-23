@@ -9,14 +9,15 @@ import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import type { JsonObject } from '../../utils/types.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
 
 export interface WorkflowSession {
   intentId: number;
   stepIndex: number;
-  stepResults: Record<string, unknown>;
-  workflow: Record<string, unknown>;
+  stepResults: JsonObject;
+  workflow: JsonObject;
   captures: Record<string, string>;
   createdAt: number;
 }
@@ -97,9 +98,9 @@ export function createIntentMatcherLayer(
     const intent = intentRepo.getById(match.intentId);
     if (!intent) return { handled: false };
 
-    let workflow: Record<string, unknown>;
+    let workflow: JsonObject;
     try {
-      workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+      workflow = JSON.parse(intent.workflow) as JsonObject;
     } catch {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
       return { handled: false };

@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { DeepLinkRepository } from '../../database/repositories/deep-link.repository';
 import type { DeepLink, DeepLinkType } from '../../database/types';
+import type { JsonObject } from '../../utils/types.ts';
 
 interface ResolvedDeepLink {
   type: DeepLinkType;
-  payload: Record<string, unknown>;
+  payload: JsonObject;
   createdBy: number;
 }
 

@@ -1,5 +1,6 @@
 import { TZDate } from '@date-fns/tz';
 import { cmdLogger } from '../../utils/logger.ts';
+import type { JsonObject } from '../../utils/types.ts';
 import type { ToolResult } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
@@ -26,7 +27,7 @@ function applyAsFilter(raw: string, value: unknown): { name: string; value: unkn
   return { name, value: processed };
 }
 
-function storeResult(as: string, rawValue: unknown, stepResults: Record<string, unknown>): void {
+function storeResult(as: string, rawValue: unknown, stepResults: JsonObject): void {
   const { name, value } = applyAsFilter(as, rawValue);
   stepResults[name] = value;
 }
@@ -34,8 +35,8 @@ function storeResult(as: string, rawValue: unknown, stepResults: Record<string, 
 type ToolExecutorFn = (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>;
 
 /** Build the initial step-results map pre-populated with event and group context from UserContext. */
-function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {
-  const pre: Record<string, unknown> = {};
+function buildEventStepResults(userCtx: ExecutorUserContext): JsonObject {
+  const pre: JsonObject = {};
   if (userCtx.lastAddedEvent) pre.last_added_event = userCtx.lastAddedEvent;
   if (userCtx.lastMentionedEvent) pre.last_mentioned_event = userCtx.lastMentionedEvent;
   pre.group = {
@@ -77,25 +78,25 @@ interface ExecutorResult {
   response?: string;
   suspended?: boolean;
   suspendedAt?: number;
-  stepResults?: Record<string, unknown>;
+  stepResults?: JsonObject;
   /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
   mentionedEventId?: number;
 }
 
 interface ResumeState {
   stepIndex: number;
-  stepResults: Record<string, unknown>;
+  stepResults: JsonObject;
   userAnswer: string;
 }
 
 interface Level1Tool {
   name: string;
-  input: Record<string, unknown>;
+  input: JsonObject;
 }
 
 interface Level2Step {
   call?: string;
-  input?: Record<string, unknown>;
+  input?: JsonObject;
   as?: string;
   when?: string;
   respond?: string;
@@ -128,7 +129,7 @@ async function runLevel1(
   const eventCtx = buildEventStepResults(userCtx);
 
   for (const tool of tools) {
-    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as Record<string, unknown>;
+    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as JsonObject;
     const result = await executeTool(tool.name, resolvedInput);
     if (!result.success) {
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
@@ -147,7 +148,7 @@ function extractEventSummary(data: unknown): { id: number; title: string } | nul
   if (data === null || typeof data !== 'object') return null;
   const first = Array.isArray(data) ? data[0] : data;
   if (first === null || typeof first !== 'object') return null;
-  const r = first as Record<string, unknown>;
+  const r = first as JsonObject;
   if (typeof r.id === 'number' && typeof r.title === 'string') return { id: r.id, title: r.title };
   return null;
 }
@@ -160,7 +161,7 @@ async function runLevel2(
   resumeState?: ResumeState,
   i18n?: I18nMap,
 ): Promise<ExecutorResult> {
-  const stepResults: Record<string, unknown> = {
+  const stepResults: JsonObject = {
     ...buildEventStepResults(userCtx),
     ...(resumeState?.stepResults ?? {}),
   };
@@ -194,8 +195,8 @@ async function runLevel2(
     if (suspendedStep?.as) {
       const { name } = applyAsFilter(suspendedStep.as, resumeState.userAnswer);
       if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
-      (stepResults.ask as Record<string, unknown>)[name] = filteredAnswer;
-      (stepResults.tool_outputs as Record<string, unknown>)[name] = filteredAnswer;
+      (stepResults.ask as JsonObject)[name] = filteredAnswer;
+      (stepResults.tool_outputs as JsonObject)[name] = filteredAnswer;
     }
 
     startIndex = resumeState.stepIndex + 1;
@@ -276,7 +277,7 @@ async function runLevel2(
       storeResult(step.as, valueToStore, stepResults);
       // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
       const { name: outputName, value: outputValue } = applyAsFilter(step.as, valueToStore);
-      (stepResults.tool_outputs as Record<string, unknown>)[outputName] = outputValue;
+      (stepResults.tool_outputs as JsonObject)[outputName] = outputValue;
     }
   }
 
@@ -288,7 +289,7 @@ export class IntentExecutor {
    * Run a workflow (Level 1 or Level 2).
    */
   async run(
-    workflow: Record<string, unknown>,
+    workflow: JsonObject,
     captures: Record<string, string>,
     userCtx: ExecutorUserContext,
     executeTool: ToolExecutorFn,

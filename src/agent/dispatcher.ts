@@ -1,5 +1,6 @@
 // src/agent/dispatcher.ts
 import { randomUUID } from 'node:crypto';
+import type { JsonObject } from '../utils/types.ts';
 import type { AgentCommand, AgentResponse } from './protocol.ts';
 import { type AgentRegistry, agentRegistry } from './registry.ts';
 
@@ -20,7 +21,7 @@ export class AgentDispatcher {
   send(
     userId: number,
     type: AgentCommand['type'],
-    payload: Record<string, unknown>,
+    payload: JsonObject,
     onChunk?: ChunkHandler,
   ): Promise<{ data: unknown; exitCode?: number }> {
     const conn = this.registry.get(userId);

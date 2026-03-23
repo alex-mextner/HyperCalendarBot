@@ -10,6 +10,7 @@ import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
+import type { JsonObject } from './utils/types.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 const config = loadConfig();
@@ -652,9 +653,9 @@ if (config.REDIS_URL) {
       if (!match) return { handled: false };
       const intent = msgDeps.intentRepo.getById(match.intentId);
       if (!intent) return { handled: false };
-      let workflow: Record<string, unknown>;
+      let workflow: JsonObject;
       try {
-        workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+        workflow = JSON.parse(intent.workflow) as JsonObject;
       } catch {
         return { handled: false };
       }
