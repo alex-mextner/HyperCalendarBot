@@ -533,7 +533,7 @@ export function createBot(
         );
         return;
       }
-      const chat = (calCtx as unknown as { chat?: { type: string; title?: string } }).chat;
+      const chat = calCtx.chat;
       const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
       const chatId = calCtx.chatId;
       if (!chatId) return;
@@ -689,7 +689,7 @@ export function createBot(
           sceneStorage: kvStorage,
           scenePauseService,
         },
-      )(ctx as unknown as BotCallbackContext),
+      )(ctx as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>
@@ -714,23 +714,13 @@ export function createBot(
     )
     // Private chat: user blocked the bot — clear pending workflow sessions
     .on('my_chat_member', (ctx) => {
-      const update = (
-        ctx as unknown as {
-          myChatMember?: {
-            chat: { type: string };
-            from: { id: number };
-            new_chat_member: { status: string };
-          };
-        }
-      ).myChatMember;
-      if (!update) return;
-      if (update.chat.type !== 'private') return;
-      if (update.new_chat_member.status !== 'kicked') return;
-      db.workflowSessions.deleteByUser(update.from.id);
+      if (ctx.chat.type !== 'private') return;
+      if (ctx.newChatMember.status !== 'kicked') return;
+      db.workflowSessions.deleteByUser(ctx.from.id);
     })
     // Users shared from picker modal → send invitations
     .on('users_shared', async (ctx) => {
-      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      const user = (ctx as { dbUser?: User }).dbUser;
       if (!user) return;
       const eventId = ctx.requestId;
       const selected = ctx.users;
@@ -764,7 +754,7 @@ export function createBot(
 
       const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
       const resultText = `${header}\n${results.join('\n')}`;
-      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
+      await ctx.send(resultText, {
         reply_markup: { remove_keyboard: true },
       });
       // Build context for AI: who was requested + what happened
@@ -778,7 +768,7 @@ export function createBot(
         .join(', ');
       const contextMsg = `[User picker result] Invitations already sent by the bot — do NOT call send_invitation. Selected: ${selectedDetails}. Results:\n${results.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
-      const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+      const chatId = ctx.chatId;
       if (chatId) {
         agent
           .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
@@ -787,12 +777,11 @@ export function createBot(
     })
     // Group chat shared from picker → send invitation to group chat
     .on('chat_shared', async (ctx) => {
-      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      const user = (ctx as { dbUser?: User }).dbUser;
       if (!user) return;
-      const eventId = (ctx as unknown as { requestId?: number }).requestId;
-      const chat = (ctx as unknown as { chat_shared?: { chat_id: number } }).chat_shared;
-      if (!eventId || !chat) return;
-      const inviteeId = chat.chat_id;
+      const eventId = ctx.requestId;
+      const inviteeId = ctx.sharedChatId;
+      if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       if (invitationService) {
         const event = eventService.getEvent(eventId, user.telegram_id);
@@ -809,10 +798,7 @@ export function createBot(
         const resultText = inv.success
           ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
           : `❌ ${inv.error}`;
-        await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
-          resultText,
-          { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } },
-        );
+        await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
       }
     })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
