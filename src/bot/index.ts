@@ -80,12 +80,13 @@ import type { BotCallbackContext, BotCommandContext } from './types.ts';
 
 /** GramIO context properties not exposed on the base Context type. */
 interface GramIOBaseContext {
-  // GramIO exposes text as a direct shortcut on MessageContext, not via ctx.message.text
-  text?: string;
-  // GramIO update type string: "message" | "edited_message" | "callback_query" | ...
-  updateType?: string;
-  // Raw payload object — for callback_query updates this is the callback_query object with .data
-  payload?: { data?: string };
+  // Context.update is the raw TelegramUpdate object (public on Context base class)
+  update?: {
+    message?: { text?: string };
+    edited_message?: { text?: string };
+    callback_query?: { data?: string };
+  };
+  from?: { id: number };
   dbUser?: User;
   chatId?: number | bigint;
   send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
@@ -361,19 +362,18 @@ export function createBot(
   bot
     .derive(createUserResolver(db))
     .use((context, next) => {
-      const chatId = 'chatId' in context ? Number((context as { chatId: number | bigint }).chatId) : 0;
-      return runWithChatId(chatId, next);
+      const ctx = context as GramIOBaseContext;
+      return runWithChatId(ctx.chatId ? Number(ctx.chatId) : 0, next);
     })
     .use(async (context, next) => {
-      const from = 'from' in context ? (context as { from?: { id: number } }).from : undefined;
-      const userId = from?.id;
+      const ctx = context as GramIOBaseContext;
+      const userId = ctx.from?.id;
       if (!userId) return next();
       const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
       if (!allowed) {
-        if (firstBlock && 'send' in context) {
-          const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
-          const lang = (dbUser?.language ?? 'en') as 'en' | 'ru';
-          await (context as { send(text: string): Promise<unknown> }).send(t(lang).rate_limited);
+        if (firstBlock) {
+          const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
+          await ctx.send?.(t(lang).rate_limited);
         }
         return;
       }
@@ -383,9 +383,8 @@ export function createBot(
     .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
     .use(async (context, next) => {
-      // GramIO's Context has a protected `updateType` field, making the derived bot context
-      // and GramIOBaseContext mutually incompatible for a direct cast. Double cast required.
-      const ctx = context as unknown as GramIOBaseContext;
+      // Context.update is public on GramIO's base Context class — single cast is valid.
+      const ctx = context as GramIOBaseContext;
 
       const user = ctx.dbUser;
       if (!user) return next();
@@ -395,7 +394,7 @@ export function createBot(
       const logChatId = isPrivate ? undefined : chatId;
 
       // Incoming text message (regular or command)
-      const incomingText = ctx.updateType === 'message' ? ctx.text : undefined;
+      const incomingText = ctx.update?.message?.text;
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
           // /cal is an AI command — save args as plain user message, not a command event
@@ -412,14 +411,14 @@ export function createBot(
       }
 
       // Edited message
-      const editedText = ctx.updateType === 'edited_message' ? ctx.text : undefined;
+      const editedText = ctx.update?.edited_message?.text;
       if (editedText) {
         conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
       }
 
       // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
-      // ctx.payload is the raw callback_query object; .data is the callback data string
-      const callbackData = ctx.updateType === 'callback_query' ? ctx.payload?.data : undefined;
+      // ctx.update.callback_query.data is the callback data string
+      const callbackData = ctx.update?.callback_query?.data;
       if (callbackData) {
         const firstColon = callbackData.indexOf(':');
         const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;

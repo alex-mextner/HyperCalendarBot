@@ -1,6 +1,7 @@
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -70,12 +71,7 @@ export interface AgentContext {
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
-  callSettingsRepo?: {
-    get(userId: number): Record<string, unknown> | null;
-    ensureDefaults(userId: number): void;
-    setEnabled(userId: number, enabled: boolean): void;
-    setLanguage(userId: number, lang: string): void;
-  };
+  callSettingsRepo?: CallSettingsRepository;
   groupChatRepo?: GroupChatRepository;
   groupMemberRepo?: GroupMemberRepository;
   groupMemberService?: GroupMemberService;

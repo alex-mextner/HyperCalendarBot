@@ -1,4 +1,4 @@
-import { dlopen, FFIType, suffix } from 'bun:ffi';
+import { dlopen, FFIType, type Library, type Pointer, suffix } from 'bun:ffi';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { voiceLogger } from './types';
@@ -19,16 +19,23 @@ const LIB_SEARCH_PATHS = [
   join(import.meta.dir, '../../../lib', `libntgcalls.${suffix}`),
 ];
 
-interface NtgCallsSymbols {
-  ntg_init: () => number;
-  ntg_destroy: (handle: number) => number;
-  ntg_get_version: (bufferPtr: number) => number;
-}
+// Schema extracted as const so Library<typeof FFI_SCHEMA> resolves to the correct symbol types
+const FFI_SCHEMA = {
+  ntg_init: {
+    returns: FFIType.ptr,
+    args: [],
+  },
+  ntg_destroy: {
+    returns: FFIType.i32,
+    args: [FFIType.ptr],
+  },
+  ntg_get_version: {
+    returns: FFIType.i32,
+    args: [FFIType.ptr],
+  },
+} as const;
 
-interface NtgCallsLib {
-  symbols: NtgCallsSymbols;
-  close(): void;
-}
+type NtgCallsLib = Library<typeof FFI_SCHEMA>;
 
 let cachedLib: NtgCallsLib | null = null;
 let loadAttempted = false;
@@ -53,22 +60,7 @@ function loadLibrary(): NtgCallsLib {
 
   voiceLogger.info({ path: libPath }, 'Loading ntgcalls shared library');
 
-  const lib = dlopen(libPath, {
-    ntg_init: {
-      returns: FFIType.ptr,
-      args: [],
-    },
-    ntg_destroy: {
-      returns: FFIType.i32,
-      args: [FFIType.ptr],
-    },
-    ntg_get_version: {
-      returns: FFIType.i32,
-      args: [FFIType.ptr],
-    },
-  });
-
-  cachedLib = lib as unknown as NtgCallsLib;
+  cachedLib = dlopen(libPath, FFI_SCHEMA);
   return cachedLib;
 }
 
@@ -106,7 +98,7 @@ export function getNtgCallsLoadError(): string | null {
  * That shim is follow-up work (Task 5 note in plan).
  */
 export class NtgCalls {
-  private handle: number;
+  private handle: Pointer;
   private destroyed = false;
 
   constructor() {
@@ -135,7 +127,7 @@ export class NtgCalls {
   /**
    * Returns the raw FFI handle (for passing to future C shim functions).
    */
-  getHandle(): number {
+  getHandle(): Pointer {
     if (this.destroyed) {
       throw new Error('NtgCalls instance already destroyed');
     }
