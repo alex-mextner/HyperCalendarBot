@@ -20,6 +20,12 @@ jobs:
       - run: bun install
       - run: ./node_modules/.bin/playwright install --with-deps chromium
       - run: bun test
+      # Upload linux-resolved lockfile for Docker build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bun-lock-linux
+          path: bun.lock
+          retention-days: 1
 
   build:
     needs: test
@@ -29,6 +35,10 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+      # Replace macOS lockfile with linux-resolved one
+      - uses: actions/download-artifact@v4
+        with:
+          name: bun-lock-linux
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
