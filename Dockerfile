@@ -1,8 +1,8 @@
-FROM oven/bun:1.3.11-debian
+FROM oven/bun:1-debian
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install --ignore-scripts
 
 # Install chromium + all system dependencies required by playwright
 RUN ./node_modules/.bin/playwright install --with-deps chromium
