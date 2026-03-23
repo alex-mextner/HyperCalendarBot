@@ -54,7 +54,7 @@ export function createIntentMatcherLayer(
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser as User;
     const userId = user.telegram_id;
-    const chatId = Number((ctx as unknown as { chatId?: number | bigint }).chatId ?? userId);
+    const chatId = Number(ctx.chatId ?? userId);
     const groupCtx = extra?.groupContext;
 
     // 1. Check for active workflow session (resuming from ask_user).
