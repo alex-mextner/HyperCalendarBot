@@ -103,7 +103,7 @@ export async function handleEditFieldCallback(
   }
 
   const chatId = ctx.chatId!;
-  const messageId = (ctx.message as unknown as { id: number } | undefined)?.id ?? 0;
+  const messageId = ctx.message?.id ?? 0;
   await ctx.answer();
   await ctx.scene.enter(editValueScene, { eventId, field, chatId, messageId });
 }

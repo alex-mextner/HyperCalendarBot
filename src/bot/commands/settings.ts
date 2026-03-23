@@ -288,7 +288,7 @@ export async function handleSettingsCallback(
 ): Promise<void> {
   if (subAction === 'close') {
     await ctx.answer();
-    await (ctx as unknown as { message?: { delete: () => Promise<void> } }).message?.delete();
+    await ctx.message?.delete();
     return;
   }
 
