@@ -819,10 +819,15 @@ export function createBot(
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
   const activateCommand = createActivateCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
+  const toConnectCtx = (ctx: BotCommandContext) => ({
+    user: ctx.dbUser,
+    args: ctx.args,
+    send: (text: string) => ctx.send(text),
+  });
   bot
-    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
-    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
-    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
+    .command('connect', (ctx) => connectCommand(toConnectCtx(ctx as BotCommandContext)))
+    .command('activate', (ctx) => activateCommand(toConnectCtx(ctx as BotCommandContext)))
+    .command('disconnect', (ctx) => disconnectCommand(toConnectCtx(ctx as BotCommandContext)));
 
   // Google Calendar commands (registered after derive chain so dbUser is available)
   if (googleDeps) {
