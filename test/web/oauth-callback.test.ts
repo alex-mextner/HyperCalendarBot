@@ -52,7 +52,8 @@ describe('handleOAuthCallback', () => {
     const res = await handleOAuthCallback(req, deps as never);
     expect(res.status).toBe(200);
     expect(deps.userRepo.updateGoogleToken).toHaveBeenCalledTimes(1);
-    expect(deps.stateLookup.del).toHaveBeenCalledTimes(1);
+    expect(deps.stateLookup.get).toHaveBeenCalledWith('oauth:state:valid');
+    expect(deps.stateLookup.del).toHaveBeenCalledWith('oauth:state:valid');
   });
 
   test('shows denial page when error param present', async () => {
