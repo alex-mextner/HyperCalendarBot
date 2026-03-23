@@ -69,7 +69,7 @@ describe('CalendarBotAgent.run()', () => {
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC', language: 'en' });
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -418,6 +418,25 @@ describe('CalendarBotAgent.run()', () => {
 
     // In DM, [SKIP] should be finalized normally (editMessageText called)
     expect(sender.editMessageText).toHaveBeenCalled();
+  });
+
+  test('[SKIP] with trailing whitespace is still discarded in group', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]\n' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '[SKIP]\n' }],
+      stop_reason: 'end_turn',
+    };
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    await agent.run(ctx);
+    expect(deleteMessage).not.toHaveBeenCalled();
+    expect(sender.sendMessage).not.toHaveBeenCalled();
   });
 
   test('onBotResponse callback is called after finalize with message ID', async () => {

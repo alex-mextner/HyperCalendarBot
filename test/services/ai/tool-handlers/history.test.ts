@@ -38,7 +38,7 @@ describe('handleGetHistory', () => {
       chatId: USER_ID,
       messageText: 'test',
       isGroup: false,
-      eventService: new EventService(eventRepo, reminderRepo),
+      eventService: new EventService({ eventRepo, reminderRepo }),
       holidayService: new HolidayService(holidayRepo),
       chatHistory: chatHistoryRepo,
       userRepo,

@@ -39,7 +39,7 @@ describe('handleManageSettings', () => {
       username: 'tester',
     });
 
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
 
     ctx = {

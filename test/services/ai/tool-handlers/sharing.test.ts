@@ -86,7 +86,7 @@ describe('sharing tool handlers', () => {
     invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo);
     privacyService = new PrivacyService(sharingSettingsRepo);
     sharingService = new SharingService(eventRepo, privacyService);
-    eventService = new EventService(eventRepo, reminderRepo);
+    eventService = new EventService({ eventRepo, reminderRepo });
     deepLinkService = new DeepLinkService(new DeepLinkRepository(db));
 
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });

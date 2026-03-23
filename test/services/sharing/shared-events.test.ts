@@ -175,7 +175,7 @@ describe('acceptInvitation — adds participant', () => {
     participantRepo = new ParticipantRepository(db);
     invitationRepo = new InvitationRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
-    eventService = new EventService(eventRepo, new ReminderRepository(db));
+    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
     invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettings, participantRepo);
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
@@ -311,7 +311,7 @@ describe('acceptInvitation — conflict warnings', () => {
     invitationRepo = new InvitationRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
     const conflictChecker = new ConflictChecker(eventRepo);
-    eventService = new EventService(eventRepo, new ReminderRepository(db));
+    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
     invitationService = new InvitationService(
       invitationRepo,
       eventRepo,
@@ -425,7 +425,7 @@ describe('calendar views show participated events', () => {
     const userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
-    eventService = new EventService(eventRepo, new ReminderRepository(db));
+    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
@@ -546,7 +546,7 @@ describe('invitee deletes shared event = decline', () => {
     participantRepo = new ParticipantRepository(db);
     reminderRepo = new ReminderRepository(db);
     chatHistory = new ChatHistoryRepository(db);
-    eventService = new EventService(eventRepo, reminderRepo);
+    eventService = new EventService({ eventRepo, reminderRepo });
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
     inviteeUser = userRepo.findByTelegramId(INVITEE)!;
@@ -648,18 +648,14 @@ describe('creator delete notifies participants', () => {
 
   test('deleteEvent fires onParticipantsNotify for accepted participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
-    eventService = new EventService(
+    eventService = new EventService({
       eventRepo,
       reminderRepo,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       participantRepo,
-      (userIds, text) => {
+      onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
       },
-    );
+    });
 
     const event = eventService.createEvent({
       user_id: CREATOR,
@@ -678,18 +674,14 @@ describe('creator delete notifies participants', () => {
 
   test('deleteEvent does not fire callback when no accepted participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
-    eventService = new EventService(
+    eventService = new EventService({
       eventRepo,
       reminderRepo,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       participantRepo,
-      (userIds, text) => {
+      onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
       },
-    );
+    });
 
     const event = eventService.createEvent({
       user_id: CREATOR,
@@ -705,18 +697,14 @@ describe('creator delete notifies participants', () => {
 
   test('deleteEvent does not notify declined participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
-    eventService = new EventService(
+    eventService = new EventService({
       eventRepo,
       reminderRepo,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
       participantRepo,
-      (userIds, text) => {
+      onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
       },
-    );
+    });
 
     const event = eventService.createEvent({
       user_id: CREATOR,
@@ -756,7 +744,7 @@ describe('full shared event lifecycle', () => {
     chatHistory = new ChatHistoryRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
     const conflictChecker = new ConflictChecker(eventRepo);
-    eventService = new EventService(eventRepo, reminderRepo);
+    eventService = new EventService({ eventRepo, reminderRepo });
     invitationService = new InvitationService(
       invitationRepo,
       eventRepo,

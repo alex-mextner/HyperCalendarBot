@@ -32,7 +32,7 @@ describe('ConflictChecker', () => {
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
     const reminderRepo = new ReminderRepository(db);
-    eventService = new EventService(eventRepo, reminderRepo);
+    eventService = new EventService({ eventRepo, reminderRepo });
     checker = new ConflictChecker(eventRepo);
     userRepo.create({ telegram_id: USER, timezone: 'UTC' });
     userRepo.create({ telegram_id: OTHER, timezone: 'UTC' });

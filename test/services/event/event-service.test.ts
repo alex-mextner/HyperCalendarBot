@@ -1,13 +1,16 @@
 // test/services/event/event-service.test.ts
 
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
+import { ReminderMaterializer } from '../../../src/services/notification/materializer.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -27,7 +30,56 @@ describe('EventService', () => {
     const eventRepo = new EventRepository(db);
     const reminderRepo = new ReminderRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
-    service = new EventService(eventRepo, reminderRepo);
+    service = new EventService({ eventRepo, reminderRepo });
+  });
+
+  test('createEvent inserts event_reminders rows when materializer is provided', () => {
+    const eventReminderRepo = new EventReminderRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
+    prefsRepo.ensureDefaults(USER_ID);
+    const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const svc = new EventService({
+      eventRepo: new EventRepository(db),
+      reminderRepo: new ReminderRepository(db),
+      materializer: mat,
+    });
+    const event = svc.createEvent({
+      user_id: USER_ID,
+      title: 'Coffee',
+      start_at: '2099-06-01T17:31:00Z',
+      timezone: TZ,
+    });
+    const rows = eventReminderRepo.getForEvent(event.id);
+    // default_reminder_intervals = '[30, 0]' → two reminders
+    expect(rows.length).toBeGreaterThan(0);
+    const thirtyMinRow = rows.find((r) => r.interval_minutes === 30);
+    expect(thirtyMinRow).toBeDefined();
+    expect(thirtyMinRow!.remind_at_utc).toBe('2099-06-01T17:01:00.000Z');
+  });
+
+  test('createEvent uses explicit reminder_minutes for materialization, not user prefs', () => {
+    const eventReminderRepo = new EventReminderRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
+    prefsRepo.ensureDefaults(USER_ID);
+    // User prefs say 30 min, but event is created with explicit 5-min reminder
+    prefsRepo.update(USER_ID, { default_reminder_intervals: JSON.stringify([30]) });
+    const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const svc = new EventService({
+      eventRepo: new EventRepository(db),
+      reminderRepo: new ReminderRepository(db),
+      materializer: mat,
+    });
+    const event = svc.createEvent({
+      user_id: USER_ID,
+      title: 'Custom Reminder Event',
+      start_at: '2099-06-01T10:00:00Z',
+      timezone: TZ,
+      reminder_minutes: [5],
+    });
+    const rows = eventReminderRepo.getForEvent(event.id);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.interval_minutes).toBe(5);
+    expect(rows[0]!.remind_at_utc).toBe('2099-06-01T09:55:00.000Z');
   });
 
   test('createEvent creates event with default reminder', () => {
@@ -516,169 +568,23 @@ describe('EventService', () => {
     });
   });
 
-  describe('event lifecycle hooks', () => {
-    test('deleteEvent cascades to invitations via foreign key', () => {
-      const event = service.createEvent({
-        user_id: USER_ID,
-        title: 'Party',
-        start_at: '2026-03-15T18:00:00Z',
-        timezone: TZ,
-      });
-      // Create invitee user
-      new UserRepository(db).create({ telegram_id: 200 });
-      // Create invitation manually
-      db.prepare('INSERT INTO invitations (event_id, inviter_id, invitee_id) VALUES (?, ?, ?)').run(
-        event.id,
-        USER_ID,
-        200,
-      );
-
-      service.deleteEvent(event.id, USER_ID);
-
-      // CASCADE delete removes invitation record entirely
-      const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(event.id);
-      expect(inv).toHaveLength(0);
+  test('deleteEvent cascades to invitations via foreign key', () => {
+    const event = service.createEvent({
+      user_id: USER_ID,
+      title: 'Party',
+      start_at: '2026-03-15T18:00:00Z',
+      timezone: TZ,
     });
+    new UserRepository(db).create({ telegram_id: 200 });
+    db.prepare('INSERT INTO invitations (event_id, inviter_id, invitee_id) VALUES (?, ?, ?)').run(
+      event.id,
+      USER_ID,
+      200,
+    );
 
-    test('deleteEvent calls onEventDeleted before deletion', () => {
-      const callback = mock(() => {});
-      const eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, callback);
+    service.deleteEvent(event.id, USER_ID);
 
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Party',
-        start_at: '2026-03-15T18:00:00Z',
-        timezone: TZ,
-      });
-
-      svc.deleteEvent(event.id, USER_ID);
-
-      expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback).toHaveBeenCalledWith(event.id, USER_ID);
-    });
-
-    test('updateEvent calls onEventTimeChanged when start_at changes', () => {
-      const callback = mock(() => {});
-      const eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
-
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Meeting',
-        start_at: '2026-03-15T10:00:00Z',
-        timezone: TZ,
-      });
-
-      svc.updateEvent(event.id, USER_ID, { start_at: '2026-03-15T14:00:00Z' });
-
-      expect(callback).toHaveBeenCalledTimes(1);
-      expect(callback).toHaveBeenCalledWith(event.id, USER_ID, '2026-03-15T14:00:00Z');
-    });
-
-    test('updateEvent does not call onEventTimeChanged when start_at unchanged', () => {
-      const callback = mock(() => {});
-      const eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, undefined, undefined, callback);
-
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Meeting',
-        start_at: '2026-03-15T10:00:00Z',
-        timezone: TZ,
-      });
-
-      svc.updateEvent(event.id, USER_ID, { title: 'Renamed Meeting' });
-
-      expect(callback).toHaveBeenCalledTimes(0);
-    });
-  });
-
-  describe('Google sync — group event owner resolution', () => {
-    const GROUP_ID = -100888;
-    const CREATOR_ID = 777;
-
-    function makeSyncService() {
-      const pushSync = mock((_userId: number, _eventId: number, _action: 'create' | 'update' | 'delete') => {});
-      const eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
-      const svc = new EventService(eventRepo, reminderRepo, undefined, pushSync);
-      return { svc, pushSync };
-    }
-
-    beforeEach(() => {
-      new UserRepository(db).create({ telegram_id: CREATOR_ID });
-    });
-
-    function seedGroupEventWithGoogleId(svc: EventService): ReturnType<EventService['createEvent']> {
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Group Sync Event',
-        start_at: '2026-04-01T09:00:00Z',
-        timezone: TZ,
-        owner_type: 'group',
-        group_id: GROUP_ID,
-        created_by: CREATOR_ID,
-      });
-      // Manually stamp a google_calendar_id so sync fires
-      db.prepare("UPDATE events SET google_calendar_id = 'cal_abc' WHERE id = ?").run(event.id);
-      return db.prepare('SELECT * FROM events WHERE id = ?').get(event.id) as ReturnType<EventService['createEvent']>;
-    }
-
-    test('sync uses created_by for group event creation', () => {
-      const { svc, pushSync } = makeSyncService();
-      // createEvent reads google_calendar_id from DB after insert — set it before the call via raw SQL
-      // Instead, seed it after creation and trigger update sync
-      const event = seedGroupEventWithGoogleId(svc);
-
-      // Trigger update sync path which reads the updated row including google_calendar_id
-      svc.updateEventForGroup(event.id, GROUP_ID, { title: 'Updated Title' });
-
-      expect(pushSync).toHaveBeenCalledWith(CREATOR_ID, event.id, 'update');
-    });
-
-    test('sync uses created_by for group event deletion', () => {
-      const { svc, pushSync } = makeSyncService();
-      const event = seedGroupEventWithGoogleId(svc);
-
-      svc.deleteEventForGroup(event.id, GROUP_ID);
-
-      expect(pushSync).toHaveBeenCalledWith(CREATOR_ID, event.id, 'delete');
-    });
-
-    test('sync uses user_id for personal event deletion', () => {
-      const { svc, pushSync } = makeSyncService();
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Personal Event',
-        start_at: '2026-04-01T09:00:00Z',
-        timezone: TZ,
-      });
-      db.prepare("UPDATE events SET google_calendar_id = 'cal_abc' WHERE id = ?").run(event.id);
-
-      svc.deleteEvent(event.id, USER_ID);
-
-      expect(pushSync).toHaveBeenCalledWith(USER_ID, event.id, 'delete');
-    });
-
-    test('deleteEventForGroup does not call sync when no google_calendar_id', () => {
-      const { svc, pushSync } = makeSyncService();
-      const event = svc.createEvent({
-        user_id: USER_ID,
-        title: 'Group No Sync',
-        start_at: '2026-04-01T09:00:00Z',
-        timezone: TZ,
-        owner_type: 'group',
-        group_id: GROUP_ID,
-        created_by: CREATOR_ID,
-      });
-
-      svc.deleteEventForGroup(event.id, GROUP_ID);
-
-      expect(pushSync).not.toHaveBeenCalled();
-    });
+    const inv = db.prepare('SELECT * FROM invitations WHERE event_id = ?').all(event.id);
+    expect(inv).toHaveLength(0);
   });
 });

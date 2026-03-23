@@ -31,7 +31,7 @@ describe('handleGetFreeSlots', () => {
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,

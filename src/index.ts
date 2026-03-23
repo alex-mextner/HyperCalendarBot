@@ -195,6 +195,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     const { ThinkingPhrasePlayer } = await import('./services/voice/thinking-phrase-player.ts');
     const { CalendarBotAgent } = await import('./services/ai/agent.ts');
     const { EventService } = await import('./services/event/event-service.ts');
+    const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
     const { HolidayService } = await import('./services/holiday/holiday-service.ts');
     const { existsSync } = await import('node:fs');
 
@@ -237,7 +238,12 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       voiceSender,
     );
 
-    const voiceEventService = new EventService(db.events, db.reminders);
+    const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+    const voiceEventService = new EventService({
+      eventRepo: db.events,
+      reminderRepo: db.reminders,
+      materializer: voiceMaterializer,
+    });
     const voiceHolidayService = new HolidayService(db.holidays);
 
     const { markStress, numbersToWords } = await import('./services/voice/stress-marker.ts');

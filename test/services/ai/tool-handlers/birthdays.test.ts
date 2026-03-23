@@ -45,7 +45,7 @@ describe('handleCreateBirthdayEvent', () => {
     userRepo.create({ telegram_id: CELEBRANT_ID, first_name: 'Ivan', username: 'ivan_t', timezone: 'UTC' });
 
     birthdayService = new BirthdayService(eventRepo, metaRepo, eventReminderRepo, prefsRepo);
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
 
     ctx = {

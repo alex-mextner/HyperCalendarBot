@@ -43,7 +43,7 @@ describe('handleSendFeedback', () => {
       username: 'testuser',
     });
 
-    const eventService = new EventService(eventRepo, reminderRepo);
+    const eventService = new EventService({ eventRepo, reminderRepo });
     const holidayService = new HolidayService(holidayRepo);
 
     ctx = {
