@@ -28,11 +28,13 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - NODE_ENV=production
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     ports:
       - "3001:3311"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+      - /root/.cache/ms-playwright:/ms-playwright:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3311/health"]
       interval: 30s

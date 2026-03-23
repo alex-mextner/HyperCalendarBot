@@ -14,8 +14,9 @@ COPY package.json bun.lock ./
 RUN ln -s /usr/local/bin/bun /usr/local/bin/node
 RUN bun install --ignore-scripts
 
-# Install chromium + all system dependencies required by playwright
-RUN ./node_modules/.bin/playwright install --with-deps chromium
+# Install only system libraries required by Chromium (not the browser itself).
+# The Chromium binary is mounted from the host via docker-compose volume.
+RUN ./node_modules/.bin/playwright install-deps chromium
 
 # curl already installed above
 COPY src ./src
