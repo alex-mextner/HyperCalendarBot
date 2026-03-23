@@ -665,11 +665,8 @@ if (config.REDIS_URL) {
         username: agentCtx.user.username ?? undefined,
         firstName: agentCtx.user.first_name ?? undefined,
       };
-      const result = await intentExecutor.run(
-        workflow,
-        match.captures,
-        userCtx,
-        (toolName: string, input: Record<string, unknown>) => executeTool(agentCtx, toolName, input),
+      const result = await intentExecutor.run(workflow, match.captures, userCtx, (toolName: string, input: unknown) =>
+        executeTool(agentCtx, toolName, input),
       );
       if (result.response && agentCtx.sender) {
         await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);

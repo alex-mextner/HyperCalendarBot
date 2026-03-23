@@ -33,7 +33,7 @@ export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
   executor: IntentExecutor,
-  toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
+  toolExecutor: (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
   notifyAdmin?: (text: string) => Promise<unknown>,
   getEventContext?: (

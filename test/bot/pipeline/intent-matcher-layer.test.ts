@@ -64,7 +64,7 @@ function makeExecutor(result: Record<string, unknown> = { success: true, respons
 }
 
 function makeToolExecutor() {
-  return mock((_name: string, _input: Record<string, unknown>) => ({ success: true, output: 'ok' }));
+  return mock((_name: string, _input: unknown) => ({ success: true, output: 'ok' }));
 }
 
 describe('createIntentMatcherLayer', () => {

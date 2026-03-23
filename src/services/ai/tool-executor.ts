@@ -71,11 +71,7 @@ import type { AgentContext, ToolResult } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai' });
 
-export async function executeTool(
-  ctx: AgentContext,
-  toolName: string,
-  input: Record<string, unknown>,
-): Promise<ToolResult> {
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   try {
@@ -83,8 +79,9 @@ export async function executeTool(
 
     // Track which event was touched, for last_mentioned_event resolution in intents
     if (result.success) {
-      if (typeof input.event_id === 'number') {
-        ctx.onEventMentioned?.(input.event_id);
+      const inputRecord = input as Record<string, unknown>;
+      if (typeof inputRecord.event_id === 'number') {
+        ctx.onEventMentioned?.(inputRecord.event_id);
       } else if (toolName === 'create_event' && result.output) {
         const m = /^id:\s*(\d+)/m.exec(result.output);
         if (m?.[1]) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
@@ -98,7 +95,7 @@ export async function executeTool(
   }
 }
 
-async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
+async function dispatchTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   try {
     switch (toolName) {
       case 'supplement_skip':
@@ -315,21 +312,19 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         );
 
       case 'propose_calendar_change':
-        // input is Record<string, unknown> — no overlap with ProposeInput's required fields,
-        // so a direct cast is rejected by the compiler. Double cast required.
-        return handleProposeCalendarChange(ctx, input as unknown as ProposeInput);
+        return handleProposeCalendarChange(ctx, input as ProposeInput);
 
       case 'get_history':
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
 
       case 'schedule_ai_call':
-        return handleScheduleAiCall(ctx, input as unknown as ScheduleAiCallInput);
+        return handleScheduleAiCall(ctx, input as ScheduleAiCallInput);
       case 'schedule_ai_calls_list':
         return handleScheduleAiCallsList(ctx);
       case 'schedule_ai_call_cancel':
-        return handleScheduleAiCallCancel(ctx, input as unknown as TriggerIdInput);
+        return handleScheduleAiCallCancel(ctx, input as TriggerIdInput);
       case 'add_trigger':
-        return handleAddTrigger(ctx, input as unknown as TriggerInput);
+        return handleAddTrigger(ctx, input as TriggerInput);
       case 'list_triggers':
         return handleListTriggers(ctx);
       case 'remove_trigger':
@@ -348,7 +343,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'bash_execute':
       case 'playwright_action':
       case 'applescript_run':
-        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input);
+        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as Record<string, unknown>);
 
       case 'resume_scene':
         if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };

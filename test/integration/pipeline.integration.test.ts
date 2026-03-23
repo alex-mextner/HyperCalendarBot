@@ -58,7 +58,7 @@ describe('Pipeline Integration', () => {
     matcher.load(intentRepo.getApproved());
     const executor = new IntentExecutor();
 
-    const mockToolExecutor = mock((_name: string, _input: Record<string, unknown>) => ({
+    const mockToolExecutor = mock((_name: string, _input: unknown) => ({
       success: true,
       output: JSON.stringify([{ title: 'Test Meeting', start_at: '2026-03-17T10:00:00Z' }]),
     }));
@@ -115,8 +115,8 @@ describe('Pipeline Integration', () => {
     const executor = new IntentExecutor();
 
     const capturedInputs: Record<string, unknown>[] = [];
-    const mockToolExecutor = mock((_name: string, input: Record<string, unknown>) => {
-      capturedInputs.push(input);
+    const mockToolExecutor = mock((_name: string, input: unknown) => {
+      capturedInputs.push(input as Record<string, unknown>);
       return { success: true, output: '[]' };
     });
     const ctx = makeCtx(1);

@@ -31,7 +31,7 @@ function storeResult(as: string, rawValue: unknown, stepResults: Record<string, 
   stepResults[name] = value;
 }
 
-type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
+type ToolExecutorFn = (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>;
 
 /** Build the initial step-results map pre-populated with event and group context from UserContext. */
 function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {

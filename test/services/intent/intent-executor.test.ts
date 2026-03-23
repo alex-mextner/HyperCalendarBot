@@ -111,8 +111,8 @@ describe('IntentExecutor', () => {
         { call: 'send_invitation', input: { invitee_id: '{{tool_outputs.found_user.telegram_id}}' } },
       ],
     };
-    const mockExecutor = async (name: string, input: Record<string, unknown>) => {
-      calls.push({ name, input });
+    const mockExecutor = async (name: string, input: unknown) => {
+      calls.push({ name, input: input as Record<string, unknown> });
       if (name === 'find_user') {
         return { success: true as const, output: 'Found user', data: { telegram_id: 8888, name: 'Alice' } };
       }
@@ -131,8 +131,8 @@ describe('IntentExecutor', () => {
         { call: 'delete_event', input: { answer_was: '{{tool_outputs.confirm}}' } },
       ],
     };
-    const mockExecutor = async (name: string, input: Record<string, unknown>) => {
-      calls.push({ name, input });
+    const mockExecutor = async (name: string, input: unknown) => {
+      calls.push({ name, input: input as Record<string, unknown> });
       return { success: true as const, output: 'ok' };
     };
     const result = await executor.run(workflow, {}, userCtx, mockExecutor, {
@@ -498,9 +498,9 @@ describe('IntentExecutor', () => {
       ],
       i18n: { ru: { ampm: 'Утра или вечера?' }, en: { ampm: 'AM or PM?' } },
     };
-    const mock = (_name: string, input: Record<string, unknown>) => {
+    const mock = (_name: string, input: unknown) => {
       calls.push(_name);
-      inputs.push(input);
+      inputs.push(input as Record<string, unknown>);
       return { success: true, output: 'ok' };
     };
     // Resume from ask_user with answer "вечера"
