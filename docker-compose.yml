@@ -42,7 +42,7 @@ services:
       resources:
         limits:
           memory: 1g
-          cpus: "1.5"
+          cpus: "0.9"
 
 volumes:
   redis-data:
