@@ -820,14 +820,9 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     if (!user) return;
 
     // Voice message → transcribe → pass to AI agent
-    const voiceRaw = (
-      ctx as unknown as {
-        voice?: { payload?: { file_id: string; duration: number }; file_id?: string; duration?: number };
-      }
-    ).voice;
-    const voicePayload = voiceRaw?.payload ?? voiceRaw;
-    if (voicePayload?.file_id && deps.transcriptionService && deps.botToken) {
-      return handleVoiceMessage(ctx, user, voicePayload as { file_id: string; duration: number }, deps);
+    const voice = ctx.voice;
+    if (voice && deps.transcriptionService && deps.botToken) {
+      return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
     const text = ctx.text as string | undefined;
@@ -870,8 +865,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     if (!chatId) return;
 
     // In groups: only respond to replies, mentions, or calendar keywords
-    const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
-    const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+    const chat = ctx.chat;
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup';
     let isGroupSessionMessage = false;
 
     // Propose-time session: invitee typing a new time in response to an invite (private chats only)
@@ -897,7 +892,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         if (groupTzHandled) return;
       }
 
-      const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;
+      const reply = ctx.replyMessage;
       const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
 
@@ -930,13 +925,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     }
 
     // Build context info for group messages
-    const from = (ctx as unknown as { from?: { first_name?: string; username?: string } }).from;
-    // GramIO's MessageContext exposes .id as the Telegram message_id (confirmed via prototype inspection)
-    const incomingMsgId = (ctx as unknown as { id?: number }).id;
+    const from = ctx.from;
+    // GramIO's MessageContext exposes .id as the Telegram message_id via NodeMixinMetadata
+    const incomingMsgId = ctx.id;
     let messagePrefix = '';
     if (isGroup && from) {
-      const senderName = from.first_name ?? from.username ?? 'Unknown';
-      const groupName = chat?.title ?? 'group';
+      const senderName = from.firstName ?? from.username ?? 'Unknown';
+      const groupName = chat.title ?? 'group';
       const msgIdPart = incomingMsgId ? `, msg_id:${incomingMsgId}` : '';
       messagePrefix = `[Group: ${groupName}, From: ${senderName}${msgIdPart}] `;
     }
