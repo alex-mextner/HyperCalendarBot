@@ -328,7 +328,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: unknown)
       case 'list_triggers':
         return handleListTriggers(ctx);
       case 'remove_trigger':
-        return handleRemoveTrigger(ctx, input as unknown as TriggerIdInput);
+        return handleRemoveTrigger(ctx, input as TriggerIdInput);
       case 'set_reaction':
         return handleSetReaction(ctx, input as { message_id: number; emoji: string });
       case 'remember_user_fact':

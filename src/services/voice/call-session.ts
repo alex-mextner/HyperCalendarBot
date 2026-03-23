@@ -204,10 +204,9 @@ export class CallSession {
   private async runAgent(transcript: string): Promise<void> {
     try {
       const userRepo = this.cfg.agentContextBase?.userRepo;
-      const user = (userRepo?.findByTelegramId(this.cfg.userId) ?? {
-        telegram_id: this.cfg.userId,
-        language: this.cfg.language,
-      }) as unknown as User;
+      const user =
+        userRepo?.findByTelegramId(this.cfg.userId) ??
+        ({ telegram_id: this.cfg.userId, language: this.cfg.language } as User);
       const ctx = {
         ...(this.cfg.agentContextBase ?? {}),
         user,

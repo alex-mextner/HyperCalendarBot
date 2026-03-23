@@ -512,7 +512,7 @@ export function createBot(
             chat_id: chatId,
             text,
             parse_mode: options.parse_mode as 'HTML',
-            reply_markup: options.reply_markup as unknown as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
+            reply_markup: options.reply_markup as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
           });
           return { message_id: sent.message_id };
         },
@@ -667,9 +667,7 @@ export function createBot(
                   chat_id: chatId,
                   text,
                   parse_mode: options.parse_mode as 'HTML',
-                  reply_markup: options.reply_markup as unknown as Parameters<
-                    typeof bot.api.sendMessage
-                  >[0]['reply_markup'],
+                  reply_markup: options.reply_markup as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
                 });
                 return { message_id: sent.message_id };
               },
@@ -716,7 +714,7 @@ export function createBot(
             return null;
           }
         },
-      )(ctx as unknown as ChatMemberContext),
+      )(ctx as ChatMemberContext),
     )
     // Private chat: user blocked the bot — clear pending workflow sessions
     .on('my_chat_member', (ctx) => {
@@ -850,7 +848,7 @@ export function createBot(
     inlineBot
       .derive(createUserResolver(db))
       .on('inline_query', (ctx) =>
-        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as unknown as InlineQueryContext),
+        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
       )
       .onError(({ error }) => {
         botLogger.error({ err: error }, 'Inline bot error');
@@ -858,7 +856,7 @@ export function createBot(
   } else {
     // No separate inline bot — register on main bot
     bot.on('inline_query', (ctx) =>
-      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as unknown as InlineQueryContext),
+      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
     );
   }
 

@@ -33,10 +33,7 @@ export class FluxStreamingSTT {
     });
     const url = `wss://api.deepgram.com/v2/listen?${params}`;
     const createWs =
-      // Bun extends WebSocket constructor with a non-standard second-arg object supporting { headers }.
-      // The Web API types only allow string | string[] — double cast required.
-      this.deps.createWs ??
-      ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } } as unknown as string[]));
+      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } }));
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {
