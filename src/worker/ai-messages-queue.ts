@@ -50,12 +50,12 @@ export function createAiMessagesQueue(connection: ConnectionOptions) {
 
   return {
     queue,
-    async addDelayed(data: Record<string, unknown>, delayMs: number): Promise<string> {
-      const job = await queue.add('ai-schedule', data as unknown as AiMessageJobData, { delay: delayMs });
+    async addDelayed(data: AiMessageJobData, delayMs: number): Promise<string> {
+      const job = await queue.add('ai-schedule', data, { delay: delayMs });
       return job.id ?? '';
     },
-    async addRepeat(data: Record<string, unknown>, cron: string): Promise<void> {
-      await queue.add('ai-schedule', data as unknown as AiMessageJobData, { repeat: { pattern: cron } });
+    async addRepeat(data: AiMessageJobData, cron: string): Promise<void> {
+      await queue.add('ai-schedule', data, { repeat: { pattern: cron } });
     },
     async removeDelayed(scheduleId: string): Promise<void> {
       const delayed = await queue.getDelayed();

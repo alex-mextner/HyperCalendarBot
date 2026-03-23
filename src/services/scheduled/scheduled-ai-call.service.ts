@@ -13,9 +13,17 @@ export interface CreateScheduleInput {
   label: string | null;
 }
 
+export interface AiJobData {
+  userId: number;
+  message: string;
+  source: 'scheduled' | 'trigger';
+  scheduleId?: string;
+  triggerId?: string;
+}
+
 export interface QueueAdapter {
-  addDelayed(data: Record<string, unknown>, delayMs: number): Promise<string>;
-  addRepeat(data: Record<string, unknown>, cron: string): Promise<void>;
+  addDelayed(data: AiJobData, delayMs: number): Promise<string>;
+  addRepeat(data: AiJobData, cron: string): Promise<void>;
   removeDelayed(scheduleId: string): Promise<void>;
   removeRepeat(cron: string): Promise<void>;
 }

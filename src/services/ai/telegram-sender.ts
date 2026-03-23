@@ -1,4 +1,4 @@
-import type { Bot } from 'gramio';
+import type { Bot, TelegramReactionTypeEmojiEmoji } from 'gramio';
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { TelegramSender } from './types.ts';
@@ -129,19 +129,10 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });
     },
     async setReaction(chatId: number, messageId: number, emoji: string) {
-      await (
-        bot.api as unknown as {
-          setMessageReaction(params: {
-            chat_id: number;
-            message_id: number;
-            reaction: { type: 'emoji'; emoji: string }[];
-            is_big?: boolean;
-          }): Promise<unknown>;
-        }
-      ).setMessageReaction({
+      await bot.api.setMessageReaction({
         chat_id: chatId,
         message_id: messageId,
-        reaction: [{ type: 'emoji', emoji }],
+        reaction: [{ type: 'emoji', emoji: emoji as TelegramReactionTypeEmojiEmoji }],
       });
     },
   };

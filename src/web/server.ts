@@ -104,7 +104,7 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
 
   // Bun.serve requires a discriminated union: either websocket is present or absent.
   // We conditionally include it via spread, so cast at the framework boundary.
-  const server = Bun.serve(serveOptions as unknown as Parameters<typeof Bun.serve>[0]);
+  const server = Bun.serve(serveOptions as Parameters<typeof Bun.serve>[0]);
 
   webLogger.info({ port }, 'Web server started');
 

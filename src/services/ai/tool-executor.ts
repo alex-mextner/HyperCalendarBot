@@ -229,7 +229,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'manage_settings':
         return handleManageSettings(
           ctx,
-          input as unknown as {
+          input as {
             action: 'get' | 'update';
             category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
             updates?: Record<string, unknown>;
