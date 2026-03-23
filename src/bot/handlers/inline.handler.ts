@@ -51,7 +51,7 @@ export interface SettingsRepoLike {
 /**
  * Inline query context — minimal interface for Telegram inline queries.
  */
-interface InlineQueryContext {
+export interface InlineQueryContext {
   from?: { id: number };
   query: string;
   location?: { latitude: number; longitude: number };

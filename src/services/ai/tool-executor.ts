@@ -320,17 +320,23 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
 
       case 'schedule_ai_call':
-        return handleScheduleAiCall(ctx, input as never);
+        return handleScheduleAiCall(
+          ctx,
+          input as unknown as { message: string; run_at?: string; cron?: string; label?: string },
+        );
       case 'schedule_ai_calls_list':
         return handleScheduleAiCallsList(ctx);
       case 'schedule_ai_call_cancel':
-        return handleScheduleAiCallCancel(ctx, input as never);
+        return handleScheduleAiCallCancel(ctx, input as unknown as { id: string });
       case 'add_trigger':
-        return handleAddTrigger(ctx, input as never);
+        return handleAddTrigger(
+          ctx,
+          input as unknown as { topic: string; action: string; condition?: string; label?: string; once?: boolean },
+        );
       case 'list_triggers':
         return handleListTriggers(ctx);
       case 'remove_trigger':
-        return handleRemoveTrigger(ctx, input as never);
+        return handleRemoveTrigger(ctx, input as unknown as { id: string });
       case 'set_reaction':
         return handleSetReaction(ctx, input as { message_id: number; emoji: string });
       case 'remember_user_fact':

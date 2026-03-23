@@ -29,6 +29,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import type { RenderService } from '../../../../src/services/image/render-service.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -388,7 +389,7 @@ describe('meta tool handlers', () => {
           renderCalls.push(opts);
           return Promise.resolve(Buffer.from('png'));
         },
-      };
+      } as unknown as RenderService;
       ctx.sender = {
         sendMessage: (() => Promise.resolve({ message_id: 1 })) as never,
         editMessageText: (() => Promise.resolve()) as never,

@@ -22,6 +22,7 @@ import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { RenderService } from '../image/render-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
@@ -61,7 +62,7 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
+  renderService?: RenderService;
   notificationPrefs?: {
     getPrefs(userId: number): Record<string, unknown>;
     update(userId: number, patch: Record<string, unknown>): void;

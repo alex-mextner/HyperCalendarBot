@@ -1,7 +1,7 @@
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 
-interface ChatMemberContext {
+export interface ChatMemberContext {
   myChatMember?: {
     chat: { id: number; type: string; title?: string };
     from: { id: number };

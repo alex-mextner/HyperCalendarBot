@@ -1,5 +1,6 @@
 // src/services/voice/call-session.ts
 import { unlink as fsUnlink } from 'node:fs/promises';
+import type { User } from '../../database/types.ts';
 import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
@@ -206,7 +207,7 @@ export class CallSession {
       const user = (userRepo?.findByTelegramId(this.cfg.userId) ?? {
         telegram_id: this.cfg.userId,
         language: this.cfg.language,
-      }) as never;
+      }) as unknown as User;
       const ctx = {
         ...(this.cfg.agentContextBase ?? {}),
         user,

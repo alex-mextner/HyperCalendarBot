@@ -66,8 +66,8 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
-import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
-import { createInlineHandler } from './handlers/inline.handler.ts';
+import { type ChatMemberContext, createChatMemberHandler } from './handlers/chat-member.handler.ts';
+import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
@@ -512,7 +512,7 @@ export function createBot(
             chat_id: chatId,
             text,
             parse_mode: options.parse_mode as 'HTML',
-            reply_markup: options.reply_markup as never,
+            reply_markup: options.reply_markup as unknown as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
           });
           return { message_id: sent.message_id };
         },
@@ -667,7 +667,9 @@ export function createBot(
                   chat_id: chatId,
                   text,
                   parse_mode: options.parse_mode as 'HTML',
-                  reply_markup: options.reply_markup as never,
+                  reply_markup: options.reply_markup as unknown as Parameters<
+                    typeof bot.api.sendMessage
+                  >[0]['reply_markup'],
                 });
                 return { message_id: sent.message_id };
               },
@@ -714,7 +716,7 @@ export function createBot(
             return null;
           }
         },
-      )(ctx as never),
+      )(ctx as unknown as ChatMemberContext),
     )
     // Private chat: user blocked the bot — clear pending workflow sessions
     .on('my_chat_member', (ctx) => {
@@ -849,13 +851,17 @@ export function createBot(
     inlineBot = new Bot(inlineBotToken);
     inlineBot
       .derive(createUserResolver(db))
-      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
+      .on('inline_query', (ctx) =>
+        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as unknown as InlineQueryContext),
+      )
       .onError(({ error }) => {
         botLogger.error({ err: error }, 'Inline bot error');
       });
   } else {
     // No separate inline bot — register on main bot
-    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never));
+    bot.on('inline_query', (ctx) =>
+      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as unknown as InlineQueryContext),
+    );
   }
 
   return {

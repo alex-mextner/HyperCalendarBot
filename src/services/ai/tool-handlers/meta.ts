@@ -396,7 +396,7 @@ export function handleRenderDayImage(
   const isGroupChat = ctx.isGroup;
   const groupChatRepo = ctx.groupChatRepo;
 
-  renderDayImage(ctx.renderService as never, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
+  renderDayImage(ctx.renderService, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
     .then(async (buffer) => {
       const file = new File([buffer], 'day.png', { type: 'image/png' });
       const sent = await sender.sendPhoto!(chatId, file);
