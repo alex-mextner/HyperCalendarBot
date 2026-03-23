@@ -1,0 +1,35 @@
+hypercal.invntrm.ru {
+	# Google OAuth callback
+	handle /oauth/google/callback {
+		reverse_proxy localhost:3001
+	}
+
+	# Google Calendar webhooks
+	handle /webhooks/google-calendar {
+		reverse_proxy localhost:3001
+	}
+
+	# macOS agent WebSocket
+	handle /ws/agent {
+		reverse_proxy localhost:3001
+	}
+
+	# Health check
+	handle /health {
+		reverse_proxy localhost:3001
+	}
+
+	# Bot doesn't serve web pages
+	handle {
+		respond "HyperCalendarBot is running" 200
+	}
+
+	log {
+		output file /var/log/caddy/hypercal.invntrm.ru.log {
+			roll_size 50mb
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		format console
+	}
+}

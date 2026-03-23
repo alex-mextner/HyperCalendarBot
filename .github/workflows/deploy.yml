@@ -14,7 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: bun install
+      - run: ./node_modules/.bin/playwright install --with-deps chromium
       - run: bun test
 
   build:
@@ -46,7 +48,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: docker-compose.yml
+          source: docker-compose.yml,Caddyfile
           target: ${{ secrets.DEPLOY_PATH }}
       - uses: appleboy/ssh-action@v1
         with:
@@ -59,3 +61,4 @@ jobs:
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             docker compose down --remove-orphans || true
             docker compose up -d
+            caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true

@@ -7,6 +7,9 @@ RUN bun install --frozen-lockfile
 # Install chromium + all system dependencies required by playwright
 RUN ./node_modules/.bin/playwright install --with-deps chromium
 
+# curl is needed for Docker healthcheck
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
 COPY src ./src
 COPY scripts ./scripts
 COPY tsconfig.json bunfig.toml ./
