@@ -458,9 +458,14 @@ ssh root@104.248.84.190 'docker compose -f /var/www/hypercal.invntrm.ru/docker-c
 curl https://hypercal.invntrm.ru/health
 ```
 
-AI chat logs доступны через `docker compose logs bot` — содержат подробные логи общения
-бота через ИИ с пользователями: полные запросы, ответы, tool calls. Смотри при отладке
-неожиданного поведения ИИ.
+`logs/chats/{chatId}/{timestamp}.log` на сервере содержит подробные логи общения бота
+через ИИ с пользователями: system prompt, history, tool calls, ответы. Включается через
+`AI_DEBUG_LOGS=true`. Смотри при отладке неожиданного поведения ИИ.
+
+```bash
+# Последний лог для чата:
+ssh www-data@104.248.84.190 'ls -lt /var/www/hypercal.invntrm.ru/logs/chats/5153477378/ | head -3'
+```
 
 ### Shared server — DO NOT touch other projects
 

@@ -32,6 +32,7 @@ services:
       - "3001:3311"
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3311/health"]
       interval: 30s
