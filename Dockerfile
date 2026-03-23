@@ -11,6 +11,7 @@ RUN apt-get update && \
 # bun install respects lockfile version pins; --frozen-lockfile is validated
 # in CI (same platform). Docker adjusts only platform-specific optional deps.
 COPY package.json bun.lock ./
+RUN ln -s /usr/local/bin/bun /usr/local/bin/node
 RUN bun install --ignore-scripts
 
 # Install chromium + all system dependencies required by playwright
