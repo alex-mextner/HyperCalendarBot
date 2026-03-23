@@ -50,6 +50,9 @@ import {
   handleScheduleAiCall,
   handleScheduleAiCallCancel,
   handleScheduleAiCallsList,
+  type ScheduleAiCallInput,
+  type TriggerIdInput,
+  type TriggerInput,
 } from './tool-handlers/scheduled.ts';
 import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import { handleManageSettings } from './tool-handlers/settings.ts';
@@ -320,23 +323,17 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleGetHistory(ctx, input as { limit?: number; search?: string; before?: string; after?: string });
 
       case 'schedule_ai_call':
-        return handleScheduleAiCall(
-          ctx,
-          input as unknown as { message: string; run_at?: string; cron?: string; label?: string },
-        );
+        return handleScheduleAiCall(ctx, input as unknown as ScheduleAiCallInput);
       case 'schedule_ai_calls_list':
         return handleScheduleAiCallsList(ctx);
       case 'schedule_ai_call_cancel':
-        return handleScheduleAiCallCancel(ctx, input as unknown as { id: string });
+        return handleScheduleAiCallCancel(ctx, input as unknown as TriggerIdInput);
       case 'add_trigger':
-        return handleAddTrigger(
-          ctx,
-          input as unknown as { topic: string; action: string; condition?: string; label?: string; once?: boolean },
-        );
+        return handleAddTrigger(ctx, input as unknown as TriggerInput);
       case 'list_triggers':
         return handleListTriggers(ctx);
       case 'remove_trigger':
-        return handleRemoveTrigger(ctx, input as unknown as { id: string });
+        return handleRemoveTrigger(ctx, input as unknown as TriggerIdInput);
       case 'set_reaction':
         return handleSetReaction(ctx, input as { message_id: number; emoji: string });
       case 'remember_user_fact':

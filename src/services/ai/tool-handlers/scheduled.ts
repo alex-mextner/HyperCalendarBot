@@ -13,10 +13,26 @@ function requireTriggerRepo(ctx: AgentContext): ToolResult | null {
   return null;
 }
 
-export async function handleScheduleAiCall(
-  ctx: AgentContext,
-  input: { message: string; run_at?: string; cron?: string; label?: string },
-): Promise<ToolResult> {
+export interface ScheduleAiCallInput {
+  message: string;
+  run_at?: string;
+  cron?: string;
+  label?: string;
+}
+
+export interface TriggerInput {
+  topic: string;
+  action: string;
+  condition?: string;
+  label?: string;
+  once?: boolean;
+}
+
+export interface TriggerIdInput {
+  id: string;
+}
+
+export async function handleScheduleAiCall(ctx: AgentContext, input: ScheduleAiCallInput): Promise<ToolResult> {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
   try {
@@ -46,17 +62,14 @@ export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
   return { success: true, output: lines.join('\n'), data: schedules };
 }
 
-export async function handleScheduleAiCallCancel(ctx: AgentContext, input: { id: string }): Promise<ToolResult> {
+export async function handleScheduleAiCallCancel(ctx: AgentContext, input: TriggerIdInput): Promise<ToolResult> {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
   await ctx.scheduledCallService!.cancel(input.id, ctx.user.telegram_id);
   return { success: true, output: t(ctx.user.language).aiTools.scheduled.scheduleCancelled(input.id) };
 }
 
-export function handleAddTrigger(
-  ctx: AgentContext,
-  input: { topic: string; action: string; condition?: string; label?: string; once?: boolean },
-): ToolResult {
+export function handleAddTrigger(ctx: AgentContext, input: TriggerInput): ToolResult {
   const err = requireTriggerRepo(ctx);
   if (err) return err;
 
@@ -109,7 +122,7 @@ export function handleListTriggers(ctx: AgentContext): ToolResult {
   return { success: true, output: lines.join('\n'), data: triggers };
 }
 
-export function handleRemoveTrigger(ctx: AgentContext, input: { id: string }): ToolResult {
+export function handleRemoveTrigger(ctx: AgentContext, input: TriggerIdInput): ToolResult {
   const err = requireTriggerRepo(ctx);
   if (err) return err;
   ctx.triggerService!.repo.remove(input.id, ctx.user.telegram_id);

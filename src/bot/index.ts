@@ -825,12 +825,10 @@ export function createBot(
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
   const activateCommand = createActivateCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
-  // ConnectCtx.send() returns Promise<void> but GramIO ctx.send() returns Promise<MessageContext>.
-  // TypeScript rejects a single cast across these incompatible return types — double cast required.
   bot
-    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
-    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
-    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
+    .command('connect', (ctx) => connectCommand(ctx as Parameters<typeof connectCommand>[0]))
+    .command('activate', (ctx) => activateCommand(ctx as Parameters<typeof activateCommand>[0]))
+    .command('disconnect', (ctx) => disconnectCommand(ctx as Parameters<typeof disconnectCommand>[0]));
 
   // Google Calendar commands (registered after derive chain so dbUser is available)
   if (googleDeps) {
