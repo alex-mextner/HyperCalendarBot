@@ -759,7 +759,7 @@ export function createCallbackHandler(
         const lang = (user.language ?? 'en') as Lang;
 
         // In groups, only the user who triggered the question can answer
-        const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+        const clickerId = ctx.from?.id ?? user.telegram_id;
         if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
           await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
           return;
@@ -767,9 +767,7 @@ export function createCallbackHandler(
 
         await ctx.answer();
         await ctx.editText(`✅ ${answerText}`);
-        const cbChatId =
-          (ctx as unknown as { chat?: { id: number } }).chat?.id ??
-          (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
+        const cbChatId = ctx.message?.chat?.id;
         if (onAiButtonClick && cbChatId) {
           onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
             cmdLogger.error({ err: e }, 'AI button continuation failed');
@@ -1031,8 +1029,8 @@ export function createCallbackHandler(
             await ctx.answer(t(lang).callbackErrors.unavailable);
             return;
           }
-          const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
-          const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
+          const settingsMsgId = ctx.message?.id ?? 0;
+          const settingsChatId = ctx.chatId ?? 0;
           await ctx.answer();
           await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
           return;
@@ -1050,7 +1048,7 @@ export function createCallbackHandler(
 
       // Group settings: timezone picker
       if (action === CB.GROUP_SETTINGS_TZ && groupRepo) {
-        const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        const chatId = ctx.chatId;
         if (!chatId) {
           await ctx.answer();
           return;
@@ -1192,7 +1190,7 @@ export function createCallbackHandler(
         intentDeps.intentRepo.updateStatus(intentId, 'approved');
         intentDeps.intentMatcher?.reload();
         await ctx.answer(t(lang).callbackErrors.intentApproved);
-        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        const currentText = ctx.message?.text ?? '';
         await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
         return;
       }
@@ -1203,7 +1201,7 @@ export function createCallbackHandler(
         const lang = (user.language ?? 'en') as Lang;
         intentDeps.intentRepo.updateStatus(intentId, 'rejected');
         await ctx.answer(t(lang).callbackErrors.intentRejected);
-        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        const currentText = ctx.message?.text ?? '';
         await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
         return;
       }
