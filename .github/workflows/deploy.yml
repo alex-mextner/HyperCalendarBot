@@ -44,6 +44,8 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      packages: read
     steps:
       - uses: actions/checkout@v4
       - uses: appleboy/scp-action@v0.1.7
@@ -54,14 +56,18 @@ jobs:
           source: docker-compose.yml,Caddyfile
           target: ${{ secrets.DEPLOY_PATH }}
       - uses: appleboy/ssh-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           command_timeout: 10m
+          envs: GH_TOKEN
           script: |
             cd ${{ secrets.DEPLOY_PATH }}
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
+            docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
             docker compose down --remove-orphans || true
             docker compose up -d
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
