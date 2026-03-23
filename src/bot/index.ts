@@ -833,8 +833,31 @@ export function createBot(
           { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } },
         );
       }
-    })
-    // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
+    });
+
+  // AI Assistant commands (not in setMyCommands — internal use only)
+  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
+  const activateCommand = createActivateCommand(agentRegistry);
+  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
+  bot
+    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
+    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
+    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
+
+  // Google Calendar commands (must be before .on('message') catch-all)
+  if (googleDeps) {
+    bot
+      .command('connect_google', (ctx) =>
+        handleConnectGoogle(ctx as unknown as BotCommandContext, {
+          oauthService: googleDeps.oauthService,
+          stateStore: googleDeps.stateStore,
+        }),
+      )
+      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
+  }
+
+  // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
+  bot
     .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as unknown as BotCommandContext))
     // Error handler
     .onError(({ context, kind, error }) => {
@@ -847,27 +870,6 @@ export function createBot(
         }
       } catch {}
     });
-
-  // AI Assistant commands (not in setMyCommands — internal use only)
-  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
-  const activateCommand = createActivateCommand(agentRegistry);
-  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
-  bot
-    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
-    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
-    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
-
-  // Google Calendar commands (registered after derive chain so dbUser is available)
-  if (googleDeps) {
-    bot
-      .command('connect_google', (ctx) =>
-        handleConnectGoogle(ctx as unknown as BotCommandContext, {
-          oauthService: googleDeps.oauthService,
-          stateStore: googleDeps.stateStore,
-        }),
-      )
-      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
-  }
 
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
   const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;

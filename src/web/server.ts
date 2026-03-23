@@ -28,6 +28,8 @@ export interface WebServerDeps {
   stateLookup?: OAuthStateLookup;
   onConnected?: (userId: number) => Promise<void>;
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
+  // Telegram bot webhook — set when PUBLIC_DOMAIN is configured
+  telegramWebhookHandler?: (req: Request) => Response | Promise<Response>;
 }
 
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
@@ -68,6 +70,13 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
           stateLookup: deps.stateLookup,
           onConnected: deps.onConnected,
         });
+      }
+
+      if (req.method === 'POST' && url.pathname === '/webhook/telegram') {
+        if (!deps.telegramWebhookHandler) {
+          return new Response('Not Found', { status: 404 });
+        }
+        return deps.telegramWebhookHandler(req);
       }
 
       if (req.method === 'POST' && url.pathname === '/webhooks/google-calendar') {

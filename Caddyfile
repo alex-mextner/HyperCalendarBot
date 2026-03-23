@@ -1,4 +1,9 @@
 hypercal.invntrm.ru {
+	# Telegram bot webhook
+	handle /webhook/telegram {
+		reverse_proxy localhost:3001
+	}
+
 	# Google OAuth callback
 	handle /oauth/google/callback {
 		reverse_proxy localhost:3001
