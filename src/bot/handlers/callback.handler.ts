@@ -46,7 +46,6 @@ import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
-import type { JsonObject } from '../../utils/types.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -169,12 +168,12 @@ export function createCallbackHandler(
 
         let sceneName = 'unknown';
         let step = 0;
-        let sceneState: JsonObject = {};
+        let sceneState: Record<string, unknown> = {};
         try {
-          const parsed = JSON.parse(rawScene as string) as JsonObject;
+          const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
           sceneName = (parsed.name as string) ?? 'unknown';
           step = (parsed.step as number) ?? 0;
-          sceneState = (parsed.state as JsonObject) ?? {};
+          sceneState = (parsed.state as Record<string, unknown>) ?? {};
         } catch {
           // proceed with defaults
         }

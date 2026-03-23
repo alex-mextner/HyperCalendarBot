@@ -4,6 +4,7 @@ import type { CreateIntentData } from '../../database/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
+import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflowVariables } from './workflow-validator.ts';
 
 interface ToolCallRecord {
@@ -196,8 +197,15 @@ export class IntentLearner {
         return null;
       }
 
+      // Validate workflow schema
+      const workflowResult = WorkflowSchema.safeParse(parsed.workflow);
+      if (!workflowResult.success) {
+        cmdLogger.warn({ attempt, errors: workflowResult.error.issues }, 'IntentLearner workflow has invalid schema');
+        return null;
+      }
+
       // Validate template variables in workflow
-      const varErrors = validateWorkflowVariables(parsed.workflow, parsed.pattern ?? null);
+      const varErrors = validateWorkflowVariables(workflowResult.data, parsed.pattern ?? null);
       if (varErrors.length > 0) {
         cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow has invalid variables');
 
@@ -223,7 +231,7 @@ export class IntentLearner {
         phrases: parsed.phrases,
         trigger_words: parsed.trigger_words,
         pattern: parsed.pattern,
-        workflow: parsed.workflow,
+        workflow: workflowResult.data,
         format: parsed.format || 'text',
         source_message: message,
       };

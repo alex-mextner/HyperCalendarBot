@@ -1,10 +1,10 @@
 import { TZDate } from '@date-fns/tz';
 import { cmdLogger } from '../../utils/logger.ts';
-import type { JsonObject } from '../../utils/types.ts';
 import type { ToolResult } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
-import { type UserContext as ExecutorUserContext, type I18nMap, resolveVariables } from './variable-resolver.ts';
+import { type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
+import type { I18nMap, Level1Tool, Level2Step, Workflow } from './workflow-schema.ts';
 
 /**
  * Parse "varName|filter" from an `as` field.
@@ -27,7 +27,7 @@ function applyAsFilter(raw: string, value: unknown): { name: string; value: unkn
   return { name, value: processed };
 }
 
-function storeResult(as: string, rawValue: unknown, stepResults: JsonObject): void {
+function storeResult(as: string, rawValue: unknown, stepResults: Record<string, unknown>): void {
   const { name, value } = applyAsFilter(as, rawValue);
   stepResults[name] = value;
 }
@@ -35,8 +35,8 @@ function storeResult(as: string, rawValue: unknown, stepResults: JsonObject): vo
 type ToolExecutorFn = (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>;
 
 /** Build the initial step-results map pre-populated with event and group context from UserContext. */
-function buildEventStepResults(userCtx: ExecutorUserContext): JsonObject {
-  const pre: JsonObject = {};
+function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {
+  const pre: Record<string, unknown> = {};
   if (userCtx.lastAddedEvent) pre.last_added_event = userCtx.lastAddedEvent;
   if (userCtx.lastMentionedEvent) pre.last_mentioned_event = userCtx.lastMentionedEvent;
   pre.group = {
@@ -78,29 +78,15 @@ interface ExecutorResult {
   response?: string;
   suspended?: boolean;
   suspendedAt?: number;
-  stepResults?: JsonObject;
+  stepResults?: Record<string, unknown>;
   /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
   mentionedEventId?: number;
 }
 
 interface ResumeState {
   stepIndex: number;
-  stepResults: JsonObject;
+  stepResults: Record<string, unknown>;
   userAnswer: string;
-}
-
-interface Level1Tool {
-  name: string;
-  input: JsonObject;
-}
-
-interface Level2Step {
-  call?: string;
-  input?: JsonObject;
-  as?: string;
-  when?: string;
-  respond?: string;
-  stop?: boolean;
 }
 
 /**
@@ -129,7 +115,7 @@ async function runLevel1(
   const eventCtx = buildEventStepResults(userCtx);
 
   for (const tool of tools) {
-    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as JsonObject;
+    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as Record<string, unknown>;
     const result = await executeTool(tool.name, resolvedInput);
     if (!result.success) {
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
@@ -148,7 +134,7 @@ function extractEventSummary(data: unknown): { id: number; title: string } | nul
   if (data === null || typeof data !== 'object') return null;
   const first = Array.isArray(data) ? data[0] : data;
   if (first === null || typeof first !== 'object') return null;
-  const r = first as JsonObject;
+  const r = first as Record<string, unknown>;
   if (typeof r.id === 'number' && typeof r.title === 'string') return { id: r.id, title: r.title };
   return null;
 }
@@ -161,7 +147,7 @@ async function runLevel2(
   resumeState?: ResumeState,
   i18n?: I18nMap,
 ): Promise<ExecutorResult> {
-  const stepResults: JsonObject = {
+  const stepResults: Record<string, unknown> = {
     ...buildEventStepResults(userCtx),
     ...(resumeState?.stepResults ?? {}),
   };
@@ -195,8 +181,8 @@ async function runLevel2(
     if (suspendedStep?.as) {
       const { name } = applyAsFilter(suspendedStep.as, resumeState.userAnswer);
       if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
-      (stepResults.ask as JsonObject)[name] = filteredAnswer;
-      (stepResults.tool_outputs as JsonObject)[name] = filteredAnswer;
+      (stepResults.ask as Record<string, unknown>)[name] = filteredAnswer;
+      (stepResults.tool_outputs as Record<string, unknown>)[name] = filteredAnswer;
     }
 
     startIndex = resumeState.stepIndex + 1;
@@ -277,7 +263,7 @@ async function runLevel2(
       storeResult(step.as, valueToStore, stepResults);
       // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
       const { name: outputName, value: outputValue } = applyAsFilter(step.as, valueToStore);
-      (stepResults.tool_outputs as JsonObject)[outputName] = outputValue;
+      (stepResults.tool_outputs as Record<string, unknown>)[outputName] = outputValue;
     }
   }
 
@@ -289,22 +275,15 @@ export class IntentExecutor {
    * Run a workflow (Level 1 or Level 2).
    */
   async run(
-    workflow: JsonObject,
+    workflow: Workflow,
     captures: Record<string, string>,
     userCtx: ExecutorUserContext,
     executeTool: ToolExecutorFn,
     resumeState?: ResumeState,
   ): Promise<ExecutorResult> {
-    const i18n = workflow.i18n as I18nMap | undefined;
-
-    if (Array.isArray(workflow.tools)) {
-      return runLevel1(workflow.tools as Level1Tool[], captures, userCtx, executeTool, i18n);
+    if ('tools' in workflow) {
+      return runLevel1(workflow.tools, captures, userCtx, executeTool, workflow.i18n);
     }
-
-    if (Array.isArray(workflow.steps)) {
-      return runLevel2(workflow.steps as Level2Step[], captures, userCtx, executeTool, resumeState, i18n);
-    }
-
-    return { success: false, response: 'Invalid workflow: missing tools or steps' };
+    return runLevel2(workflow.steps, captures, userCtx, executeTool, resumeState, workflow.i18n);
   }
 }

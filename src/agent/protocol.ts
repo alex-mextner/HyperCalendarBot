@@ -1,7 +1,5 @@
 // src/agent/protocol.ts
 
-import type { JsonObject } from '../utils/types.ts';
-
 export interface AgentPairRequest {
   type: 'pair';
   code: string;
@@ -27,7 +25,7 @@ export interface AgentCommand {
     | 'bash_execute'
     | 'playwright_action'
     | 'applescript_run';
-  payload: JsonObject;
+  payload: Record<string, unknown>;
 }
 
 export interface AgentResponse {

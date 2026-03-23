@@ -8,9 +8,9 @@ import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
+import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
-import type { JsonObject } from './utils/types.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 const config = loadConfig();
@@ -653,9 +653,9 @@ if (config.REDIS_URL) {
       if (!match) return { handled: false };
       const intent = msgDeps.intentRepo.getById(match.intentId);
       if (!intent) return { handled: false };
-      let workflow: JsonObject;
+      let workflow: Workflow;
       try {
-        workflow = JSON.parse(intent.workflow) as JsonObject;
+        workflow = WorkflowSchema.parse(JSON.parse(intent.workflow));
       } catch {
         return { handled: false };
       }
