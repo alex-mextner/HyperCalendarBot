@@ -52,6 +52,8 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
       const settings = ctx.sharingSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
+        // SharingSettings has no index signature, so spreading with rest is not directly assignable
+        // to Record<string, unknown>. Double cast required at this framework boundary.
         const { user_id: _uid, updated_at: _uat, ...rest } = settings as unknown as Record<string, unknown>;
         result.privacy = rest;
       }

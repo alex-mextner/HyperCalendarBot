@@ -312,6 +312,8 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         );
 
       case 'propose_calendar_change':
+        // input is Record<string, unknown> — no overlap with ProposeInput's required fields,
+        // so a direct cast is rejected by the compiler. Double cast required.
         return handleProposeCalendarChange(ctx, input as unknown as ProposeInput);
 
       case 'get_history':
