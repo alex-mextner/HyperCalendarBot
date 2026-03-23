@@ -7,7 +7,7 @@ import type { UserRepository } from '../../database/repositories/user.repository
 export interface ConnectCtx {
   user?: { telegram_id?: number; language?: string };
   args?: string | null;
-  send: (text: string) => Promise<unknown>;
+  send: (text: string) => Promise<void>;
 }
 
 export function createConnectCommand(downloadUrl: string) {

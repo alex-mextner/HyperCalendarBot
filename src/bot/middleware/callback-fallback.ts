@@ -1,15 +1,16 @@
 // src/bot/middleware/callback-fallback.ts
 
+import type { Next } from 'gramio';
 import type { User } from '../../database/types.ts';
 
 interface Storage {
   get(key: string): Promise<unknown>;
 }
 
-interface CallbackContext {
+interface CallbackCtx {
   is(type: string): boolean;
   from?: { id: number };
-  answer(opts?: { text?: string; show_alert?: boolean }): Promise<unknown>;
+  answer(opts?: { text?: string; show_alert?: boolean }): Promise<true>;
   dbUser?: User;
 }
 
@@ -22,8 +23,8 @@ interface CallbackContext {
  * Telegram's button spinner hanging forever.
  */
 export function createCallbackFallback(sceneStorage: Storage) {
-  return async (context: object, next: () => Promise<unknown>) => {
-    const ctx = context as CallbackContext;
+  return async (context: unknown, next: Next) => {
+    const ctx = context as CallbackCtx;
     if (!ctx.is('callback_query')) return next();
 
     let answered = false;

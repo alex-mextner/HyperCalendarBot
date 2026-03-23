@@ -89,8 +89,8 @@ interface GramIOBaseContext {
   from?: { id: number };
   dbUser?: User;
   chatId?: number | bigint;
-  send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-  editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+  send?: (text: string, opts?: Record<string, unknown>) => Promise<void>;
+  editText?: (text: string, opts?: Record<string, unknown>) => Promise<void>;
 }
 
 export interface GoogleBotDeps {
@@ -817,9 +817,9 @@ export function createBot(
   const activateCommand = createActivateCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
   bot
-    .command('connect', (ctx) => connectCommand(ctx as Parameters<typeof connectCommand>[0]))
-    .command('activate', (ctx) => activateCommand(ctx as Parameters<typeof activateCommand>[0]))
-    .command('disconnect', (ctx) => disconnectCommand(ctx as Parameters<typeof disconnectCommand>[0]));
+    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
+    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
+    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
 
   // Google Calendar commands (registered after derive chain so dbUser is available)
   if (googleDeps) {
