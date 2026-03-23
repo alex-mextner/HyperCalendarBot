@@ -9,6 +9,7 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { NotificationPreferencesRow } from '../../database/repositories/notification-preferences.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
@@ -64,7 +65,7 @@ export interface AgentContext {
   onEventMentioned?: (eventId: number) => void;
   renderService?: RenderService;
   notificationPrefs?: {
-    getPrefs(userId: number): Record<string, unknown>;
+    getPrefs(userId: number): NotificationPreferencesRow;
     update(userId: number, patch: Record<string, unknown>): void;
     ensureDefaults(userId: number): void;
   };

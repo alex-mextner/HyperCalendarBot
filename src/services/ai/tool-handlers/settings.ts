@@ -41,7 +41,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
       const settings = ctx.callSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
-        const { user_id: _uid, updated_at: _uat, ...rest } = settings as Record<string, unknown>;
+        const { user_id: _uid, updated_at: _uat, ...rest } = settings;
         result.calls = rest;
       }
     }
@@ -52,9 +52,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
       ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
       const settings = ctx.sharingSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
-        // SharingSettings has no index signature, so spreading with rest is not directly assignable
-        // to Record<string, unknown>. Double cast required at this framework boundary.
-        const { user_id: _uid, updated_at: _uat, ...rest } = settings as unknown as Record<string, unknown>;
+        const { user_id: _uid, updated_at: _uat, ...rest } = settings;
         result.privacy = rest;
       }
     }

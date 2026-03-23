@@ -278,7 +278,7 @@ export function createBot(
         }
       : undefined,
     notificationPrefs: {
-      getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
+      getPrefs: (userId: number) => prefsService.getOrCreate(userId),
       update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
@@ -380,13 +380,7 @@ export function createBot(
       return next();
     })
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
-    .use(
-      createSceneCommandEscape(
-        // SceneKvStorage.delete() returns Promise<boolean | undefined>;
-        // createSceneCommandEscape expects Promise<void> — single cast required.
-        scenesSetup.storage as unknown as Parameters<typeof createSceneCommandEscape>[0],
-      ),
-    )
+    .use(createSceneCommandEscape(scenesSetup.storage))
     .use(createCallbackFallback(scenesSetup.storage))
     .use(async (context, next) => {
       // GramIO's Context has a protected `updateType` field, making the derived bot context

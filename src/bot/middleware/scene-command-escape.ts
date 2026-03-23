@@ -8,7 +8,7 @@ interface SceneData {
 
 interface Storage {
   get(key: string): Promise<unknown>;
-  delete(key: string): Promise<void>;
+  delete(key: string): boolean | undefined | Promise<boolean | undefined>;
 }
 
 interface MessageContext {

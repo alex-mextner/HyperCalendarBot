@@ -5,8 +5,9 @@ function createMockStorage(data: Record<string, unknown> = {}) {
   const store = new Map(Object.entries(data));
   return {
     get: mock(async (key: string) => store.get(key) ?? null),
-    delete: mock(async (key: string) => {
+    delete: mock(async (key: string): Promise<boolean | undefined> => {
       store.delete(key);
+      return undefined;
     }),
   };
 }

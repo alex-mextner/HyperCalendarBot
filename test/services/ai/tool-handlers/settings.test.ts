@@ -257,7 +257,20 @@ describe('handleManageSettings', () => {
     });
 
     test('update notifications with prefs configured', () => {
-      const prefs: Record<string, unknown> = {};
+      const prefs = {
+        user_id: 1,
+        morning_agenda_enabled: 0,
+        morning_agenda_time: '08:00',
+        morning_agenda_format: 'short',
+        default_reminder_intervals: '[15]',
+        evening_review_enabled: 0,
+        evening_review_time: '20:00',
+        evening_review_format: 'short',
+        quiet_hours_enabled: 0,
+        quiet_hours_start: null as string | null,
+        quiet_hours_end: null as string | null,
+        updated_at: '2024-01-01',
+      };
       ctx.notificationPrefs = {
         ensureDefaults: () => {},
         getPrefs: () => prefs,
