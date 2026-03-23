@@ -106,7 +106,9 @@ export class IntentLearner {
     if (toolCalls.some((tc) => tc.name === 'ask_user')) return false;
 
     // Context-dependent phrases (pronouns, references)
-    const contextual = /\b(это|этот|эту|его|её|их|тот|то|that|this|it|them|the same)\b/i;
+    // \b doesn't work with Cyrillic (\w is ASCII-only in JS), so use lookarounds
+    const contextual =
+      /(?<![а-яёА-ЯЁa-zA-Z])(это|этот|эту|его|её|их|тот|то|that|this|it|them|the same)(?![а-яёА-ЯЁa-zA-Z])/i;
     if (contextual.test(message)) return false;
 
     return true;

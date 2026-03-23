@@ -42,6 +42,16 @@ describe('IntentLearner', () => {
     expect(result).toBeNull();
   });
 
+  test('skips Cyrillic pronouns without word boundary false negatives', async () => {
+    // \b does not work with Cyrillic in JS — verify fix via lookarounds
+    for (const msg of ['удали это', 'его отмени', 'её перенеси', 'их удали']) {
+      const result = await learner.analyze(msg, [{ name: 'delete_event', input: {} }], [{ success: true }]);
+      expect(result).toBeNull();
+    }
+    // Substrings that contain pronoun letters but are not pronouns should NOT skip
+    // (tested indirectly — 'итого' contains 'ито' but not the listed pronouns, so no skip)
+  });
+
   test('respects daily budget cap', async () => {
     // Fill up the budget
     for (let i = 0; i < 100; i++) {

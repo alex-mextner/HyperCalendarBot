@@ -36,7 +36,7 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
       } else {
         // No JWT — allow pairing window, then close if still unauthenticated
         setTimeout(() => {
-          if (ws.data.userId === null) {
+          if (ws.data.userId === null && typeof ws.close === 'function') {
             ws.close(4002, 'Authentication timeout');
           }
         }, 30_000);

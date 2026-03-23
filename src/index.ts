@@ -823,4 +823,23 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-bot.start({ dropPendingUpdates: true });
+if (config.PUBLIC_DOMAIN) {
+  const { webhookHandler } = await import('gramio');
+  const webhookSecret = crypto.randomUUID();
+  const webhookUrl = `https://${config.PUBLIC_DOMAIN}/webhook/telegram`;
+
+  webServerDeps.telegramWebhookHandler = webhookHandler(bot, 'Bun.serve', {
+    secretToken: webhookSecret,
+  }) as (req: Request) => Response;
+
+  bot.start({
+    webhook: {
+      url: webhookUrl,
+      secret_token: webhookSecret,
+    },
+    dropPendingUpdates: true,
+  });
+  botLogger.info({ webhookUrl }, 'Bot started (webhook mode)');
+} else {
+  bot.start({ dropPendingUpdates: true });
+}

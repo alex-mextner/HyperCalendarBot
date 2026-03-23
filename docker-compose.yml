@@ -3,22 +3,49 @@ services:
     image: redis:7-alpine
     container_name: hypercal-redis
     restart: unless-stopped
+    command: redis-server --appendonly yes --appendfsync everysec
     volumes:
       - redis-data:/data
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: "0.5"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   bot:
     image: ghcr.io/alex-mextner/hypercalendarbot:latest
     container_name: hypercal-bot
     restart: unless-stopped
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     env_file: .env
     environment:
       - REDIS_URL=redis://redis:6379
+      - NODE_ENV=production
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     ports:
       - "3001:3311"
     volumes:
       - ./data:/app/data
+      - ./logs:/app/logs
+      - /root/.cache/ms-playwright:/ms-playwright:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3311/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+          cpus: "0.9"
 
 volumes:
   redis-data:

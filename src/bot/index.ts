@@ -806,7 +806,6 @@ export function createBot(
         }
       } catch {}
     });
-
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
   const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;
   let inlineBot: Bot | undefined;

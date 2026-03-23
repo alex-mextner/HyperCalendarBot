@@ -40,11 +40,12 @@ export async function handleOAuthCallback(req: Request, deps: OAuthCallbackDeps)
     return new Response('Missing code or state', { status: 400 });
   }
 
-  const payload = await deps.stateLookup.get(state);
+  const stateKey = `oauth:state:${state}`;
+  const payload = await deps.stateLookup.get(stateKey);
   if (!payload) {
     return new Response('State expired or invalid', { status: 400 });
   }
-  await deps.stateLookup.del(state);
+  await deps.stateLookup.del(stateKey);
 
   const { telegram_user_id: userId } = JSON.parse(payload) as { telegram_user_id: number };
 
