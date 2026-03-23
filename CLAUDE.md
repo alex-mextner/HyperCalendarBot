@@ -234,6 +234,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Multi-step DB operations are atomic**: SELECT followed by UPDATE on the same rows must be wrapped in `db.transaction(...)`. Without it, concurrent writes can cause notifications to fire for rows that changed state between the two queries.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
 - **Fix broken things immediately** when you find them.
+- **Comments hygiene**: when refactoring, verify no useful comments were accidentally deleted.
+  Check: `git diff | grep "^-.*\/\/"`. Never silently drop comments.
 - **Never add temporal context comments**: "improved", "better", "new", "refactored from".
   Comments must be evergreen — describe the code as it is now.
 - **Never add instructional comments**: "copy this pattern", "use this instead", "prefer X over Y".
@@ -252,6 +254,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
   5. Refactor while keeping tests green
 - **Tests must exercise production code**: never reimplement logic in tests.
 - **Never delete a failing test**. Investigate and fix the root cause.
+- **NEVER ignore test/system output** — logs and messages often contain CRITICAL information.
+  Read test output, don't just check pass/fail. Warnings in logs point to real bugs.
 - **Changing tests to match code is a red flag**: always analyze WHY.
 - **Every commit must have tests**: no committing code without corresponding test coverage.
   New tool handlers, new utilities, new AI tools, bug fixes — all need tests in the same commit.
@@ -260,7 +264,13 @@ Optional features that depend on an env var must deactivate gracefully when the 
   New files must have corresponding test files. No shipping untested code.
 - **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
-- **Before every commit**: after your own review, run `codex exec review --uncommitted` and address any issues it finds before committing. This 2-stage review is mandatory even if the user just says "commit" — that is not permission to skip it.
+- **NEVER use `git add -A`** without checking `git status` first.
+- **Deferred findings**: when skipping a review finding (out of scope, pre-existing), create a GitHub
+  issue for it. Don't silently drop known issues.
+- **Before every commit** (3-stage review, mandatory even if the user just says "commit"):
+  1. Run `bunx knip` — fix unused exports, dependencies, and files.
+  2. Self-review your own changes.
+  3. Run `codex exec review --uncommitted` — address any issues it finds.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
 ## MTProto / Pyrogram
@@ -438,6 +448,20 @@ Telegram doesn't publish exact numbers — limits are dynamic. Practical rules:
 - **Deploy path**: `/var/www/hypercal.invntrm.ru`
 - **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS, imports `/var/www/*/Caddyfile`)
 
+### Диагностика
+
+```bash
+# Docker logs (pino JSON):
+ssh root@104.248.84.190 'docker compose -f /var/www/hypercal.invntrm.ru/docker-compose.yml logs -f --tail 100 bot'
+
+# Health check:
+curl https://hypercal.invntrm.ru/health
+```
+
+AI chat logs доступны через `docker compose logs bot` — содержат подробные логи общения
+бота через ИИ с пользователями: полные запросы, ответы, tool calls. Смотри при отладке
+неожиданного поведения ИИ.
+
 ### Shared server — DO NOT touch other projects
 
 The server runs multiple PM2 services alongside our Docker containers:
@@ -475,6 +499,15 @@ considers the difference a violation.
 - **Docker** (linux): `bun install --ignore-scripts` — respects lockfile version pins, adjusts
   only platform-specific optional deps.
 - **Local** (macOS): `bun install` — generates/updates lockfile normally.
+
+## MCP Tools
+
+Use these MCP servers proactively whenever they can help:
+
+- **serena** — semantic code navigation and editing. Use `find_symbol`, `get_symbols_overview`,
+  `find_referencing_symbols` over reading entire files.
+- **context7** — up-to-date library documentation. Use when working with external libraries
+  (GramIO, Anthropic SDK, Bun APIs, etc.) to get current docs instead of guessing from memory.
 
 ## Documentation
 
