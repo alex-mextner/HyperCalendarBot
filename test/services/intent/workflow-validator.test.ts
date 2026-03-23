@@ -290,4 +290,43 @@ describe('validateWorkflowVariables', () => {
     expect(errors[0]).toContain('eq(');
     expect(errors[0]).toContain('ternary(');
   });
+
+  test('{{tool_outputs.found_user}} is valid when a step defines as: "found_user"', () => {
+    const workflow = {
+      steps: [
+        { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
+        { call: 'send_invitation', input: { invitee_id: '{{tool_outputs.found_user.telegram_id}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, '^@(\\w+)$')).toEqual([]);
+  });
+
+  test('{{tool_outputs.event_time}} is valid when calculate step defines as: "event_time"', () => {
+    const workflow = {
+      steps: [
+        { call: 'calculate', input: { expression: '{{dates.now}}+{{$1}}min' }, as: 'event_time' },
+        { call: 'create_event', input: { start_at: '{{tool_outputs.event_time}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, '^через (\\d+) минут')).toEqual([]);
+  });
+
+  test('{{tool_outputs.missing}} is rejected when no step defines that name', () => {
+    const workflow = {
+      steps: [{ call: 'create_event', input: { invitee_id: '{{tool_outputs.missing.id}}' } }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('tool_outputs.missing');
+  });
+
+  test('{{tool_outputs.confirm}} is valid when ask_user defines as: "confirm"', () => {
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'Подтверди?' }, as: 'confirm' },
+        { call: 'delete_event', input: { id: '{{tool_outputs.confirm}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
 });

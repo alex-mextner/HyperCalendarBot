@@ -103,6 +103,47 @@ describe('IntentExecutor', () => {
     expect(result.success).toBe(true);
   });
 
+  test('tool output with data is accessible via tool_outputs namespace in next step', async () => {
+    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const workflow = {
+      steps: [
+        { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
+        { call: 'send_invitation', input: { invitee_id: '{{tool_outputs.found_user.telegram_id}}' } },
+      ],
+    };
+    const mockExecutor = async (name: string, input: Record<string, unknown>) => {
+      calls.push({ name, input });
+      if (name === 'find_user') {
+        return { success: true as const, output: 'Found user', data: { telegram_id: 8888, name: 'Alice' } };
+      }
+      return { success: true as const, output: 'ok' };
+    };
+    const result = await executor.run(workflow, { $1: 'alice' }, userCtx, mockExecutor);
+    expect(result.success).toBe(true);
+    expect(calls[1]!.input.invitee_id).toBe(8888);
+  });
+
+  test('ask_user answer is accessible via tool_outputs namespace after resume', async () => {
+    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'Confirm?' }, as: 'confirm' },
+        { call: 'delete_event', input: { answer_was: '{{tool_outputs.confirm}}' } },
+      ],
+    };
+    const mockExecutor = async (name: string, input: Record<string, unknown>) => {
+      calls.push({ name, input });
+      return { success: true as const, output: 'ok' };
+    };
+    const result = await executor.run(workflow, {}, userCtx, mockExecutor, {
+      stepIndex: 0,
+      stepResults: {},
+      userAnswer: 'да',
+    });
+    expect(result.success).toBe(true);
+    expect(calls[0]!.input.answer_was).toBe('да');
+  });
+
   test('async tool failure propagates correctly', async () => {
     const workflow = {
       steps: [{ call: 'find_user', input: { username: '{{$1}}' }, as: 'found' }],

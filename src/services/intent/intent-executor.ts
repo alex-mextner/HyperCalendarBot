@@ -165,6 +165,11 @@ async function runLevel2(
     ...(resumeState?.stepResults ?? {}),
   };
 
+  // tool_outputs namespace: accumulates all step outputs saved via "as" field
+  if (!stepResults.tool_outputs || typeof stepResults.tool_outputs !== 'object') {
+    stepResults.tool_outputs = {};
+  }
+
   // Make captures ($1, $2, ...) accessible in `when` expressions as numbers when possible
   for (const [k, v] of Object.entries(captures)) {
     const num = Number(v);
@@ -185,11 +190,12 @@ async function runLevel2(
     if (!Array.isArray(stepResults.choices)) stepResults.choices = [];
     (stepResults.choices as unknown[]).push(filteredAnswer);
 
-    // Store under ask.* namespace
+    // Store under ask.* namespace and tool_outputs.*
     if (suspendedStep?.as) {
       const { name } = applyAsFilter(suspendedStep.as, resumeState.userAnswer);
       if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
       (stepResults.ask as Record<string, unknown>)[name] = filteredAnswer;
+      (stepResults.tool_outputs as Record<string, unknown>)[name] = filteredAnswer;
     }
 
     startIndex = resumeState.stepIndex + 1;
@@ -268,6 +274,9 @@ async function runLevel2(
             ? parseToolOutput(result.output)
             : undefined;
       storeResult(step.as, valueToStore, stepResults);
+      // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
+      const { name: outputName, value: outputValue } = applyAsFilter(step.as, valueToStore);
+      (stepResults.tool_outputs as Record<string, unknown>)[outputName] = outputValue;
     }
   }
 

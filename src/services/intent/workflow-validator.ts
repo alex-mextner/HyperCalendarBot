@@ -103,6 +103,26 @@ function extractAskUserNames(workflow: Record<string, unknown>): Set<string> {
 }
 
 /**
+ * Collect variable names stored by non-ask_user steps via their "as" field.
+ * These become top-level variables accessible as {{name}} or {{name.field}}.
+ */
+function extractStepOutputNames(workflow: Record<string, unknown>): Set<string> {
+  const names = new Set<string>();
+  const steps = workflow.steps;
+  if (!Array.isArray(steps)) return names;
+  for (const step of steps) {
+    if (step !== null && typeof step === 'object') {
+      const s = step as Record<string, unknown>;
+      if (s.call !== 'ask_user' && typeof s.as === 'string') {
+        const name = s.as.includes('|') ? s.as.slice(0, s.as.indexOf('|')) : s.as;
+        names.add(name.trim());
+      }
+    }
+  }
+  return names;
+}
+
+/**
  * Validate that all {{expr}} references in a workflow are resolvable.
  * Returns a list of human-readable error strings (empty = valid).
  */
@@ -113,6 +133,7 @@ export function validateWorkflowVariables(
   const errors: string[] = [];
   const capGroups = pattern ? countCapturingGroups(pattern) : 0;
   const askUserNames = extractAskUserNames(workflow);
+  const stepOutputNames = extractStepOutputNames(workflow);
 
   // Validate filter chains in "as" fields (e.g. "choice|lower")
   for (const asValue of extractAsFields(workflow)) {
@@ -170,9 +191,22 @@ export function validateWorkflowVariables(
             `${loc}{{${expr}}} — capture group $${n} does not exist in pattern (pattern has ${capGroups} capturing group${capGroups === 1 ? '' : 's'})`,
           );
         }
+      } else if (varName.startsWith('tool_outputs.')) {
+        // {{tool_outputs.name}} or {{tool_outputs.name.field}} — step/ask_user output namespace
+        const afterPrefix = varName.slice('tool_outputs.'.length);
+        const outputName = afterPrefix.split('.')[0]!;
+        const allOutputNames = new Set([...stepOutputNames, ...askUserNames]);
+        if (!allOutputNames.has(outputName)) {
+          errors.push(
+            `${loc}{{${expr}}} — tool_outputs.${outputName} is not defined; ` +
+              `no step with as: "${outputName}" found`,
+          );
+        }
       } else if (!ALLOWED_VARS.has(varName)) {
         errors.push(
-          `${loc}{{${expr}}} — unknown variable "${varName}"; allowed: ${[...ALLOWED_VARS].join(', ')}, or $1..$N from pattern capture groups`,
+          `${loc}{{${expr}}} — unknown variable "${varName}"; allowed: ${[...ALLOWED_VARS].join(', ')}, ` +
+            `or $1..$N from pattern capture groups, ` +
+            `or tool_outputs.<name> for step outputs (as: "name" on any step)`,
         );
       }
     }

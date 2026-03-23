@@ -220,21 +220,22 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
   const lang = ctx.user.language;
   const unknownName = t(lang).aiTools.meta.unknownName;
   if (user) {
+    const name = user.first_name ?? user.username ?? unknownName;
     return {
       success: true,
-      output: t(lang).aiTools.meta.foundUser(user.telegram_id, user.first_name ?? user.username ?? unknownName),
+      output: t(lang).aiTools.meta.foundUser(user.telegram_id, name),
+      data: { telegram_id: user.telegram_id, name },
     };
   }
 
   if (ctx.resolveUsername) {
     const resolved = await ctx.resolveUsername(username);
     if (resolved) {
+      const name = resolved.firstName ?? resolved.username ?? unknownName;
       return {
         success: true,
-        output: t(lang).aiTools.meta.foundUserMtproto(
-          resolved.id,
-          resolved.firstName ?? resolved.username ?? unknownName,
-        ),
+        output: t(lang).aiTools.meta.foundUserMtproto(resolved.id, name),
+        data: { telegram_id: resolved.id, name },
       };
     }
   }
