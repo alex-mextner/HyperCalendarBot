@@ -280,7 +280,7 @@ export function createBot(
       : undefined,
     notificationPrefs: {
       getPrefs: (userId: number) => prefsService.getOrCreate(userId),
-      update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
+      update: db.notificationPreferences.update.bind(db.notificationPreferences),
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
     googleCalendarRepo: googleDeps?.calendarRepo,

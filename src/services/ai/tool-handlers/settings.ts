@@ -1,4 +1,5 @@
 import { t } from '../../../config/constants.ts';
+import type { NotificationPreferencesUpdate } from '../../../database/repositories/notification-preferences.repository.ts';
 import type { UpdateUserData } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
@@ -139,16 +140,16 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
   if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
   ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
 
-  const patch: Record<string, unknown> = {};
+  const patch: NotificationPreferencesUpdate = {};
   if (updates.morning_agenda_enabled !== undefined)
     patch.morning_agenda_enabled = updates.morning_agenda_enabled ? 1 : 0;
-  if (updates.morning_agenda_time !== undefined) patch.morning_agenda_time = updates.morning_agenda_time;
+  if (updates.morning_agenda_time !== undefined) patch.morning_agenda_time = updates.morning_agenda_time as string;
   if (updates.evening_review_enabled !== undefined)
     patch.evening_review_enabled = updates.evening_review_enabled ? 1 : 0;
-  if (updates.evening_review_time !== undefined) patch.evening_review_time = updates.evening_review_time;
+  if (updates.evening_review_time !== undefined) patch.evening_review_time = updates.evening_review_time as string;
   if (updates.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = updates.quiet_hours_enabled ? 1 : 0;
-  if (updates.quiet_hours_start !== undefined) patch.quiet_hours_start = updates.quiet_hours_start;
-  if (updates.quiet_hours_end !== undefined) patch.quiet_hours_end = updates.quiet_hours_end;
+  if (updates.quiet_hours_start !== undefined) patch.quiet_hours_start = updates.quiet_hours_start as string | null;
+  if (updates.quiet_hours_end !== undefined) patch.quiet_hours_end = updates.quiet_hours_end as string | null;
   if (updates.default_reminder_minutes !== undefined) {
     patch.default_reminder_intervals = JSON.stringify(updates.default_reminder_minutes);
   }
