@@ -8,10 +8,10 @@ RUN apt-get update && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
-# Lockfile pins all versions; --frozen-lockfile is impossible cross-platform
-# (macOS arm64 lockfile ≠ linux amd64 due to platform-specific optional deps)
+# bun install respects lockfile version pins; --frozen-lockfile is validated
+# in CI (same platform). Docker adjusts only platform-specific optional deps.
 COPY package.json bun.lock ./
-RUN sha256sum bun.lock && bun --version && bun install --frozen-lockfile --ignore-scripts
+RUN bun install --ignore-scripts
 
 # Install chromium + all system dependencies required by playwright
 RUN ./node_modules/.bin/playwright install --with-deps chromium

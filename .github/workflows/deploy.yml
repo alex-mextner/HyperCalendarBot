@@ -18,17 +18,10 @@ jobs:
           bun-version: "1.3.11"
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: bun install
-      - run: sha256sum bun.lock > /tmp/lock-after-install.txt && cat /tmp/lock-after-install.txt
+      # Validate lockfile integrity (same platform — linux/linux)
       - run: bun install --frozen-lockfile --ignore-scripts
-        name: Verify lockfile is self-consistent
       - run: ./node_modules/.bin/playwright install --with-deps chromium
       - run: bun test
-      # Upload linux-resolved lockfile for Docker build
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bun-lock-linux
-          path: bun.lock
-          retention-days: 1
 
   build:
     needs: test
@@ -38,12 +31,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      # Replace macOS lockfile with linux-resolved one
-      - uses: actions/download-artifact@v4
-        with:
-          name: bun-lock-linux
-      - run: sha256sum bun.lock
-        name: Verify artifact lockfile checksum
       - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
