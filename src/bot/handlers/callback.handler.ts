@@ -152,7 +152,8 @@ export function createCallbackHandler(
     const data = ctx.data as string;
     if (!data) return;
 
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return;
     const parts = data.split(':');
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');

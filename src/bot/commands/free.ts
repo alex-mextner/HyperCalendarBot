@@ -2,7 +2,6 @@
 
 import { t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { formatDateHeader, formatTime, parseSimpleDate } from '../../utils/date.ts';
@@ -15,7 +14,8 @@ export async function handleFree(
   holidayService?: HolidayService,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
   const args = (ctx.args as string)?.trim();
 

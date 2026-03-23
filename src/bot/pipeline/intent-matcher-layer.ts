@@ -1,7 +1,6 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
@@ -53,7 +52,8 @@ export function createIntentMatcherLayer(
       supplementMode?: boolean;
     },
   ): Promise<PipelineResult> => {
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
     const userId = user.telegram_id;
     const chatId = Number(ctx.chatId ?? userId);
     const groupCtx = extra?.groupContext;

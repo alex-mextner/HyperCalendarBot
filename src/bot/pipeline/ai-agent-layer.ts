@@ -1,7 +1,6 @@
 // src/bot/pipeline/ai-agent-layer.ts
 
 import { t } from '../../config/constants.ts';
-import type { User } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
@@ -28,7 +27,8 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       supplementAutoResponse?: string;
     },
   ): Promise<PipelineResult> => {
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
     const chatId = ctx.chatId;
     if (!chatId) return { handled: false };
 

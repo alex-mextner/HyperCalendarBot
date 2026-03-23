@@ -17,7 +17,8 @@ export async function handleAdd(
   addEventScene: AnyScene,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
   const args = ctx.args as string | undefined;
 

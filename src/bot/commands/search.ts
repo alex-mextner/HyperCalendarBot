@@ -2,7 +2,6 @@
 
 import { CB, t } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventListItem } from '../../services/event/formatters.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
@@ -14,7 +13,8 @@ export async function handleSearch(
   eventService: EventService,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
   const query = (ctx.args as string)?.trim();
 

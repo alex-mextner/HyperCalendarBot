@@ -5,7 +5,6 @@ import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
@@ -21,7 +20,8 @@ export interface StartDeps {
 }
 
 export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
 
   // Handle deep links (s_ = shared event, i_ = invitation, g_ = group context)

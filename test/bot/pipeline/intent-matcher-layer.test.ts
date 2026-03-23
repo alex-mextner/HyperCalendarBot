@@ -418,7 +418,7 @@ describe('needsSupplement', () => {
 
     expect(logBotResponse).toHaveBeenCalledTimes(1);
     const [callUserId, callText, callChatId] = logBotResponse.mock.calls[0] as unknown as [number, string, number];
-    expect(callUserId).toBe(ctx.dbUser.telegram_id);
+    expect(callUserId).toBe(ctx.dbUser!.telegram_id);
     expect(callText).toBe('Готово!');
     expect(callChatId).toBe((ctx as unknown as { chatId: number }).chatId);
   });

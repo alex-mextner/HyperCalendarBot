@@ -241,7 +241,8 @@ function buildVoiceView(voiceEnabled: number | null): { text: string; kb: Inline
 // ─── Group settings ──────────────────────────────────────────────────────────
 
 async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   const groupId = getGroupId(ctx);
   if (groupId === null) return;

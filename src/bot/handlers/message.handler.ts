@@ -817,7 +817,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   };
 
   return async (ctx: BotCommandContext) => {
-    const user = ctx.dbUser as User | undefined;
+    const user = ctx.dbUser;
     if (!user) return;
 
     // Voice message → transcribe → pass to AI agent
