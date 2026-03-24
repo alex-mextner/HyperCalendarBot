@@ -23,7 +23,15 @@
       "Bash(node -e \"require\\(''''./src/services/intent/learner-prompt.ts''''\\)\")",
       "Bash(bun --eval \"import ''''./src/services/intent/learner-prompt.ts''''\")",
       "Bash(node_modules/.bin/tsc --noEmit)",
-      "Bash(node_modules/.bin/biome lint:*)"
+      "Bash(node_modules/.bin/biome lint:*)",
+      "Bash(gh secret:*)",
+      "Bash(docker-compose config:*)",
+      "mcp__playwright__browser_fill_form",
+      "Bash(node_modules/.bin/biome explain:*)",
+      "Bash(bash /tmp/audit.sh)",
+      "Bash(bunx knip:*)",
+      "Bash(open:*)",
+      "Bash(BASE=/Users/ultra/xp/hypercalendarbot/.worktrees/remove-unknown-casts)"
     ]
   }
 }
