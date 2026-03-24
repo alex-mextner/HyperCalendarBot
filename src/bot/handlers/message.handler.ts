@@ -42,6 +42,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -531,7 +532,7 @@ async function handleIntentEditInstruction(
     phrases: z.array(z.string()).parse(JSON.parse(intent.phrases)),
     trigger_words: z.array(z.string()).parse(JSON.parse(intent.trigger_words)),
     pattern: intent.pattern,
-    workflow: z.record(z.string(), z.unknown()).parse(JSON.parse(intent.workflow)),
+    workflow: WorkflowSchema.parse(JSON.parse(intent.workflow)),
     format: intent.format,
   });
 
@@ -585,7 +586,7 @@ async function handleIntentEditInstruction(
           phrases: z.array(z.string()).optional(),
           trigger_words: z.array(z.string()).optional(),
           pattern: z.string().nullable().optional(),
-          workflow: z.record(z.string(), z.unknown()).optional(),
+          workflow: WorkflowSchema.optional(),
           format: z.string().optional(),
         })
         .parse(JSON.parse(text));
@@ -873,7 +874,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               .object({
                 name: z.string().optional(),
                 step: z.number().optional(),
-                state: z.record(z.string(), z.unknown()).optional(),
+                state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
               })
               .parse(JSON.parse(activeScene as string));
             await deps.scenePauseService.save(user.telegram_id, {

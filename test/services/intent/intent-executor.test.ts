@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
+import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 describe('IntentExecutor', () => {
   let executor: IntentExecutor;
@@ -71,7 +72,7 @@ describe('IntentExecutor', () => {
   });
 
   test('workflow suspends on ask_user', async () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'search_events', input: {}, as: 'results' },
         { when: 'results.length > 1', call: 'ask_user', input: { question: 'Which?' }, as: 'choice' },
@@ -105,7 +106,7 @@ describe('IntentExecutor', () => {
 
   test('tool output with data is accessible via tool_outputs namespace in next step', async () => {
     const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
         { call: 'send_invitation', input: { invitee_id: '{{tool_outputs.found_user.telegram_id}}' } },
@@ -125,7 +126,7 @@ describe('IntentExecutor', () => {
 
   test('ask_user answer is accessible via tool_outputs namespace after resume', async () => {
     const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'Confirm?' }, as: 'confirm' },
         { call: 'delete_event', input: { answer_was: '{{tool_outputs.confirm}}' } },
@@ -158,7 +159,7 @@ describe('IntentExecutor', () => {
   });
 
   test('ask_user step returns question text in response', async () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'На 22 число или 22:00?' }, as: 'answer' },
         { call: 'create_event', input: { title: 'Встреча' } },
@@ -198,7 +199,7 @@ describe('IntentExecutor', () => {
 
   test('choices[0] accessible in when condition after auto-accumulation', async () => {
     const calls: string[] = [];
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'Q' } },
         { when: 'choices[0] == "время"', call: 'create_event', input: { title: 'test' } },
@@ -248,7 +249,7 @@ describe('IntentExecutor', () => {
   });
 
   test('ask_user answer stored with filter from "as" field (e.g. |lower)', async () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice|lower' },
         { when: 'ask.choice == "время"', call: 'create_event', input: { title: 'test' }, as: 'result' },
@@ -482,7 +483,7 @@ describe('IntentExecutor', () => {
   test('AM/PM workflow: "вечера" answer → create with hour + 12', async () => {
     const calls: string[] = [];
     const inputs: Record<string, unknown>[] = [];
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { when: 'isAmPmAmbiguous($1)', call: 'ask_user', input: { question: '{{t.ampm}}' }, as: 'ampm|lower' },
         {
@@ -546,8 +547,8 @@ describe('IntentExecutor', () => {
     // Regression: get_history-style workflow where the only step is a tool call without `as`.
     // Previously runLevel2 returned { success: true, stepResults } with no response field,
     // causing silent delivery failure in intent-matcher-layer.
-    const workflow = {
-      steps: [{ call: 'get_history', input: { limit: 50 } }],
+    const workflow: Workflow = {
+      steps: [{ call: 'get_history', input: { limit: '50' } }],
     };
     const historyText = '[2026-03-20 10:00] [user] Покажи нашу переписку';
     const mockExecutor = () => ({ success: true, output: historyText });
@@ -557,8 +558,8 @@ describe('IntentExecutor', () => {
   });
 
   test('Level 2: last tool output becomes response even with as field', async () => {
-    const workflow = {
-      steps: [{ call: 'get_history', input: { limit: 10 }, as: 'history' }],
+    const workflow: Workflow = {
+      steps: [{ call: 'get_history', input: { limit: '10' }, as: 'history' }],
     };
     const output = 'some history';
     const mockExecutor = () => ({ success: true, output });
@@ -568,7 +569,7 @@ describe('IntentExecutor', () => {
   });
 
   test('resume from suspended workflow', async () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'search_events', input: {}, as: 'results' },
         { when: 'results.length > 1', call: 'ask_user', input: { question: 'Which?' }, as: 'choice' },

@@ -4,10 +4,23 @@ import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
 import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 
+/** JSON-safe value for serialized step results (no functions — those are added at runtime). */
+const JsonSafeSchema: z.ZodType<JsonSafe> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(JsonSafeSchema),
+    z.record(z.string(), JsonSafeSchema),
+  ]),
+);
+type JsonSafe = string | number | boolean | null | JsonSafe[] | { [key: string]: JsonSafe };
+
 const WorkflowSessionSchema = z.object({
   intentId: z.number(),
   stepIndex: z.number(),
-  stepResults: z.record(z.string(), z.unknown()),
+  stepResults: z.record(z.string(), JsonSafeSchema),
   workflow: WorkflowSchema,
   captures: z.record(z.string(), z.string()),
   createdAt: z.number(),

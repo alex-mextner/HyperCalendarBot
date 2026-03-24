@@ -5,6 +5,7 @@ import type { BotCommandContext } from '../../../src/bot/types.ts';
 import type { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import type { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
+import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 const TTL_MS = 5 * 60 * 1000;
 
@@ -296,7 +297,7 @@ describe('createIntentMatcherLayer', () => {
 
   test('trims whitespace when resuming workflow', async () => {
     const userId = 15;
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice' },
         { when: 'choice == "время"', call: 'create_event', input: { title: 'Встреча' } },

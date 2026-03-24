@@ -1,9 +1,8 @@
 // src/agent/ws-server.ts
 import type { ServerWebSocket } from 'bun';
-import { z } from 'zod';
 import type { AgentDispatcher } from './dispatcher.ts';
 import { issueAgentJwt, registerPendingConnection, verifyAgentJwtFull, type WsData } from './pairing.ts';
-import type { AgentInbound, AgentTokenRefreshed } from './protocol.ts';
+import { AgentInboundSchema, type AgentTokenRefreshed } from './protocol.ts';
 import type { AgentRegistry } from './registry.ts';
 
 const REFRESH_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
@@ -51,9 +50,9 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
       } catch {
         return;
       }
-      const result = z.object({ type: z.string() }).passthrough().safeParse(parsed);
+      const result = AgentInboundSchema.safeParse(parsed);
       if (!result.success) return;
-      const msg = result.data as AgentInbound;
+      const msg = result.data;
 
       if (msg.type === 'ping') {
         if (ws.data.userId) registry.updatePing(ws.data.userId);

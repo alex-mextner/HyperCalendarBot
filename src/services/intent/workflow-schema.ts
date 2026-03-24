@@ -1,21 +1,28 @@
 import { z } from 'zod';
 
+/**
+ * Tool input values in workflow DSL are always strings — either literal values
+ * or template expressions like "{{$1}}", "{{dates.today}}", "{{user.timezone}}".
+ * The variable-resolver evaluates templates at runtime into concrete types.
+ */
+const ToolInputSchema = z.record(z.string(), z.string());
+
 const Level1ToolSchema = z.object({
   name: z.string(),
-  input: z.record(z.string(), z.unknown()),
+  input: ToolInputSchema,
 });
 
 const Level2StepSchema = z.object({
   call: z.string().optional(),
-  input: z.record(z.string(), z.unknown()).optional(),
+  input: ToolInputSchema.optional(),
   as: z.string().optional(),
   when: z.string().optional(),
   respond: z.string().optional(),
   stop: z.boolean().optional(),
 });
 
-/** i18n dictionary: language code → key → string or nested value */
-const I18nMapSchema = z.record(z.string(), z.record(z.string(), z.unknown()));
+/** i18n dictionary: language code → key → translated string */
+const I18nMapSchema = z.record(z.string(), z.record(z.string(), z.string()));
 
 const Level1WorkflowSchema = z.object({
   tools: z.array(Level1ToolSchema),

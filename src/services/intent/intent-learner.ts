@@ -14,7 +14,7 @@ const LearnerResponseSchema = z.object({
   phrases: z.array(z.string()),
   trigger_words: z.array(z.string()).optional(),
   pattern: z.string().optional(),
-  workflow: z.record(z.string(), z.unknown()),
+  workflow: WorkflowSchema,
   format: z.string().optional(),
 });
 

@@ -1,10 +1,13 @@
 // src/services/scene-pause.ts
 import { z } from 'zod';
 
+/** Scene state values are JSON-safe primitives stored by GramIO wizard scenes. */
+type SceneStateValue = string | number | boolean | null;
+
 export interface ScenePauseState {
   sceneName: string;
   step: number;
-  sceneState: { [key: string]: unknown };
+  sceneState: { [key: string]: SceneStateValue };
 }
 
 type KvStorage = {
@@ -31,7 +34,7 @@ export class ScenePauseService {
         .object({
           sceneName: z.string(),
           step: z.number(),
-          sceneState: z.record(z.string(), z.unknown()),
+          sceneState: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
         })
         .safeParse(json);
       return result.success ? result.data : null;

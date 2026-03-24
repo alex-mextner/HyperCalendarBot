@@ -166,13 +166,13 @@ export function createCallbackHandler(
 
         let sceneName = 'unknown';
         let step = 0;
-        let sceneState: { [key: string]: unknown } = {};
+        let sceneState: { [key: string]: string | number | boolean | null } = {};
         try {
           const parsed = z
             .object({
               name: z.string().optional(),
               step: z.number().optional(),
-              state: z.record(z.string(), z.unknown()).optional(),
+              state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
             })
             .parse(JSON.parse(rawScene as string));
           sceneName = parsed.name ?? 'unknown';
