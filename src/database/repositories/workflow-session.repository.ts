@@ -4,23 +4,63 @@ import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
 import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 
-/** JSON-safe value for serialized step results (no functions — those are added at runtime). */
-const JsonSafeSchema: z.ZodType<JsonSafe> = z.lazy(() =>
+/** Recursive JSON-safe type for tool output values (objects, arrays, primitives). */
+type ToolOutputValue = string | number | boolean | null | ToolOutputValue[] | { [k: string]: ToolOutputValue };
+const ToolOutputValueSchema: z.ZodType<ToolOutputValue> = z.lazy(() =>
   z.union([
     z.string(),
     z.number(),
     z.boolean(),
     z.null(),
-    z.array(JsonSafeSchema),
-    z.record(z.string(), JsonSafeSchema),
+    z.array(ToolOutputValueSchema),
+    z.record(z.string(), ToolOutputValueSchema),
   ]),
 );
-type JsonSafe = string | number | boolean | null | JsonSafe[] | { [key: string]: JsonSafe };
+
+const EventSummarySchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  date: z.string(),
+  time: z.string().optional(),
+  all_day: z.boolean(),
+  end_at: z.string().optional(),
+  description: z.string().optional(),
+  location: z.string().optional(),
+  recurrence_rule: z.string().optional(),
+});
+
+/**
+ * Schema for serialized step results stored in the DB.
+ * Runtime-only fields (isPastHour, isPastDay, etc.) are NOT serialized — they are
+ * re-added by buildEventStepResults() on resume.
+ *
+ * Known keys: last_added_event, last_mentioned_event (EventSummary), group, user,
+ * tool_outputs, choices, ask, and $1/$2/... regex captures.
+ */
+const StepResultsSchema = z
+  .object({
+    last_added_event: EventSummarySchema.optional(),
+    last_mentioned_event: EventSummarySchema.optional(),
+    group: z.object({ is_group: z.boolean(), chat_id: z.number().nullable() }).optional(),
+    user: z
+      .object({
+        id: z.number(),
+        language: z.string(),
+        timezone: z.string(),
+        username: z.string().optional(),
+        first_name: z.string().optional(),
+      })
+      .optional(),
+    tool_outputs: z.record(z.string(), ToolOutputValueSchema).optional(),
+    choices: z.array(z.union([z.string(), z.number()])).optional(),
+    ask: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+  })
+  .catchall(z.union([z.string(), z.number()]));
 
 const WorkflowSessionSchema = z.object({
   intentId: z.number(),
   stepIndex: z.number(),
-  stepResults: z.record(z.string(), JsonSafeSchema),
+  stepResults: StepResultsSchema,
   workflow: WorkflowSchema,
   captures: z.record(z.string(), z.string()),
   createdAt: z.number(),

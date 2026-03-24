@@ -1,7 +1,11 @@
 // src/services/scene-pause.ts
 import { z } from 'zod';
 
-/** Scene state values are JSON-safe primitives stored by GramIO wizard scenes. */
+/**
+ * Union of all field types across wizard scene states (AddEventState, TimezoneState, OnboardingState).
+ * Scene-pause doesn't know which scene was active, so it must accept any scene's field types.
+ * If a new scene state adds a non-primitive field type, extend this union.
+ */
 type SceneStateValue = string | number | boolean | null;
 
 export interface ScenePauseState {
