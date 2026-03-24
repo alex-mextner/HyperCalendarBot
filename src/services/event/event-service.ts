@@ -2,6 +2,7 @@
 
 import { DEFAULTS } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
@@ -21,6 +22,7 @@ export interface EventServiceDeps {
   reminderRepo: ReminderRepository;
   materializer?: ReminderMaterializer;
   participantRepo?: ParticipantRepository;
+  groupMemberRepo?: GroupMemberRepository;
   onParticipantsNotify?: (userIds: number[], text: string) => void;
   domainEvents?: DomainEventBus;
 }
@@ -30,6 +32,7 @@ export class EventService {
   private reminderRepo: ReminderRepository;
   private materializer?: ReminderMaterializer;
   private participantRepo?: ParticipantRepository;
+  private groupMemberRepo?: GroupMemberRepository;
   private onParticipantsNotify?: (userIds: number[], text: string) => void;
   private domainEvents?: DomainEventBus;
 
@@ -38,6 +41,7 @@ export class EventService {
     this.reminderRepo = deps.reminderRepo;
     this.materializer = deps.materializer;
     this.participantRepo = deps.participantRepo;
+    this.groupMemberRepo = deps.groupMemberRepo;
     this.onParticipantsNotify = deps.onParticipantsNotify;
     this.domainEvents = deps.domainEvents;
   }
@@ -174,7 +178,20 @@ export class EventService {
     const recurring: EventOccurrence[] = [];
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
-      const expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      let expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+
+      // Clip group event occurrences to membership window
+      if (template.owner_type === 'group' && template.group_id && this.groupMemberRepo) {
+        const membership = this.groupMemberRepo.getMembership(template.group_id, userId);
+        if (membership) {
+          expanded = expanded.filter(
+            (occ) =>
+              occ.occurrence_start >= membership.joined_at &&
+              (!membership.left_at || occ.occurrence_start < membership.left_at),
+          );
+        }
+      }
+
       recurring.push(...expanded);
     }
 

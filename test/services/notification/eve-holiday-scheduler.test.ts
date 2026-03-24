@@ -94,6 +94,17 @@ function setupDb(): Database {
     FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
     UNIQUE(user_id, date)
   )`);
+  db.run(`CREATE TABLE IF NOT EXISTS group_members (
+    chat_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+    last_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    joined_at TEXT NOT NULL DEFAULT (datetime('now')),
+    left_at TEXT,
+    PRIMARY KEY (chat_id, user_id)
+  )`);
+  db.run(`CREATE TABLE IF NOT EXISTS event_participants (
+    event_id INTEGER NOT NULL, user_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    PRIMARY KEY (event_id, user_id)
+  )`);
   return db;
 }
 

@@ -820,4 +820,11 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE users ADD COLUMN assistant_enabled INTEGER NOT NULL DEFAULT 0`);
     },
   },
+  {
+    name: '042_group_members_membership_dates',
+    up: (db) => {
+      db.exec(`ALTER TABLE group_members ADD COLUMN joined_at TEXT NOT NULL DEFAULT (datetime('now'))`);
+      db.exec(`ALTER TABLE group_members ADD COLUMN left_at TEXT`);
+    },
+  },
 ];

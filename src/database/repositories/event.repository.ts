@@ -2,6 +2,30 @@
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
+// SQL fragment: group event visible to user if they are an active member
+// who joined before the event was created. For one-off events.
+// Expects 1 bind param (userId).
+function groupVisibleSql(alias: string): string {
+  const col = alias ? `${alias}.` : '';
+  return `(${col}owner_type = 'group' AND EXISTS (
+    SELECT 1 FROM group_members gm
+    WHERE gm.chat_id = ${col}group_id AND gm.user_id = ?
+      AND gm.left_at IS NULL
+      AND ${col}created_at >= gm.joined_at
+  ))`;
+}
+
+// SQL fragment: group recurring template visible to a member (active or left).
+// Returns templates for any group where user has a membership record.
+// The service layer clips occurrences to [joined_at, left_at] window.
+function groupMemberAnySql(alias: string): string {
+  const col = alias ? `${alias}.` : '';
+  return `(${col}owner_type = 'group' AND EXISTS (
+    SELECT 1 FROM group_members gm
+    WHERE gm.chat_id = ${col}group_id AND gm.user_id = ?
+  ))`;
+}
+
 export class EventRepository {
   constructor(private db: Database) {}
 
@@ -40,7 +64,7 @@ export class EventRepository {
       .prepare(
         `SELECT * FROM events WHERE id = ? AND is_cancelled = 0
          AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR (owner_type = 'group' AND created_by = ?))`,
+           OR ${groupVisibleSql('')})`,
       )
       .get(id, userId, userId) as CalendarEvent | null;
   }
@@ -50,7 +74,7 @@ export class EventRepository {
       .prepare(
         `SELECT * FROM events WHERE is_cancelled = 0
          AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR (owner_type = 'group' AND created_by = ?))
+           OR ${groupVisibleSql('')})
          ORDER BY id DESC LIMIT 1`,
       )
       .get(userId, userId) as CalendarEvent | null;
@@ -66,7 +90,7 @@ export class EventRepository {
       .prepare(
         `SELECT * FROM events WHERE start_at >= ? AND start_at <= ? AND is_cancelled = 0
          AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR (owner_type = 'group' AND created_by = ?))
+           OR ${groupVisibleSql('')})
          ORDER BY start_at`,
       )
       .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
@@ -79,7 +103,7 @@ export class EventRepository {
       WHERE start_at >= ? AND start_at <= ?
         AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-          OR (owner_type = 'group' AND created_by = ?))
+          OR ${groupVisibleSql('')})
       ORDER BY start_at
     `)
       .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
@@ -91,7 +115,7 @@ export class EventRepository {
       SELECT * FROM events
       WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-          OR (owner_type = 'group' AND created_by = ?))
+          OR ${groupMemberAnySql('')})
     `)
       .all(userId, userId) as CalendarEvent[];
   }
@@ -107,7 +131,7 @@ export class EventRepository {
         AND e.is_cancelled = 0
         AND (
           (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-          OR (e.owner_type = 'group' AND e.created_by = ?)
+          OR ${groupMemberAnySql('e')}
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -129,7 +153,7 @@ export class EventRepository {
         AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
         AND (
           (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-          OR (e.owner_type = 'group' AND e.created_by = ?)
+          OR ${groupVisibleSql('e')}
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -193,7 +217,7 @@ export class EventRepository {
       .prepare(
         `DELETE FROM events WHERE id = ?
          AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR (owner_type = 'group' AND created_by = ?))`,
+           OR ${groupVisibleSql('')})`,
       )
       .run(id, userId, userId);
     return result.changes > 0;
@@ -210,7 +234,7 @@ export class EventRepository {
         AND e.parent_event_id IS NULL
         AND (
           (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-          OR (e.owner_type = 'group' AND e.created_by = ?)
+          OR ${groupVisibleSql('e')}
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -239,7 +263,7 @@ export class EventRepository {
       SELECT * FROM events
       WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-          OR (owner_type = 'group' AND created_by = ?))
+          OR ${groupVisibleSql('')})
       ORDER BY start_at ASC
       LIMIT ?
     `)
@@ -563,7 +587,7 @@ export class EventRepository {
     const conditions: string[] = [
       'e.is_cancelled = 0',
       `((e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-        OR (e.owner_type = 'group' AND e.created_by = ?))`,
+        OR ${groupVisibleSql('e')})`,
     ];
     const params: (string | number | null)[] = [userId, userId];
 

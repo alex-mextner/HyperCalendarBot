@@ -31,8 +31,9 @@ describe('SharingService', () => {
   }
 
   test('getAgendaForSharing returns group-owned events created by the user', () => {
-    const { service, eventRepo } = setup();
+    const { db, service, eventRepo } = setup();
     const GROUP_ID = -100777;
+    db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
     eventRepo.create({
       user_id: USER_ID,
       title: 'Group Standup',

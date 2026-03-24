@@ -810,6 +810,7 @@ describe('event tool handlers', () => {
     const GROUP_ID = -100888;
 
     test('handleGetEvents (personal) returns group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Drinks',
@@ -859,6 +860,7 @@ describe('event tool handlers', () => {
     });
 
     test('handleDeleteEvent (personal) succeeds for group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -894,6 +896,7 @@ describe('event tool handlers', () => {
     });
 
     test('handleSearchEvents (personal) returns group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Planning',
@@ -937,6 +940,7 @@ describe('event tool handlers', () => {
     });
 
     test('handleUpdateEvent (personal) succeeds for group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',

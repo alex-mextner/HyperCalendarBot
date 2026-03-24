@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
@@ -29,8 +30,9 @@ describe('EventService', () => {
     db = createTestDb();
     const eventRepo = new EventRepository(db);
     const reminderRepo = new ReminderRepository(db);
+    const groupMemberRepo = new GroupMemberRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
-    service = new EventService({ eventRepo, reminderRepo });
+    service = new EventService({ eventRepo, reminderRepo, groupMemberRepo });
   });
 
   test('createEvent inserts event_reminders rows when materializer is provided', () => {
@@ -218,6 +220,15 @@ describe('EventService', () => {
 
   describe('group calendar', () => {
     const GROUP_ID = -100999;
+
+    // Ensure the user is an active member of the test group for visibility tests
+    function ensureMembership(userId = USER_ID, chatId = GROUP_ID, joinedAt = '2026-01-01T00:00:00Z') {
+      db.prepare(
+        `INSERT INTO group_members (chat_id, user_id, joined_at, left_at)
+         VALUES (?, ?, ?, NULL)
+         ON CONFLICT (chat_id, user_id) DO UPDATE SET joined_at = ?, left_at = NULL`,
+      ).run(chatId, userId, joinedAt, joinedAt);
+    }
 
     test('createEvent() with group scope sets owner_type and group_id', () => {
       const event = service.createEvent({
@@ -443,6 +454,7 @@ describe('EventService', () => {
     });
 
     test('getEventsInRange() returns group-owned events created by the user', () => {
+      ensureMembership();
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Drinks',
@@ -484,6 +496,7 @@ describe('EventService', () => {
     });
 
     test('getEvent() finds group-owned events created by the user', () => {
+      ensureMembership();
       const event = service.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -517,6 +530,7 @@ describe('EventService', () => {
     });
 
     test('deleteEvent() succeeds for group-owned events created by the user', () => {
+      ensureMembership();
       const event = service.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -553,6 +567,7 @@ describe('EventService', () => {
     });
 
     test('getEventsInRange() expands group-owned recurring events created by the user', () => {
+      ensureMembership();
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Weekly',
@@ -587,6 +602,7 @@ describe('EventService', () => {
     });
 
     test('getUpcoming() includes group-owned recurring events created by the user', () => {
+      ensureMembership();
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Standup',
