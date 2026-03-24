@@ -77,7 +77,7 @@ export const MSG = {
     country_skip: 'Skip',
     agenda_prompt: "I can send you a morning summary of your day's events.\n\nChoose a time for the daily agenda:",
     onboard_done:
-      "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a message in plain text — I understand natural language and can create, edit, search events for you.",
+      "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a text or voice message — I understand natural language and can create, edit, search events for you.",
     no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
     no_events: 'No events in this range.',
     event_created: (title: string) => `✅ Created: "${title}"`,
@@ -386,7 +386,7 @@ export const MSG = {
     country_skip: 'Пропустить',
     agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВыберите время для утренней сводки:',
     onboard_done:
-      '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите мне текстом — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
+      '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите или отправьте голосовое — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
     no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,
     no_events: 'Нет событий за этот период.',
     event_created: (title: string) => `✅ Создано: "${title}"`,
