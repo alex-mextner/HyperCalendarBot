@@ -33,6 +33,25 @@ export function formatResponse(format: string, toolOutput: string, timezone: str
 }
 
 function formatText(output: string): string {
+  const trimmed = output.trim();
+  // Fast path: not JSON-like — return as-is (most tool outputs are human-readable strings)
+  if ((!trimmed.startsWith('{') && !trimmed.startsWith('[')) || trimmed.length < 3) {
+    return output;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return output;
+  }
+  // JSON object — try to extract a human-readable field
+  if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+    const obj = parsed as Record<string, unknown>;
+    for (const key of ['output', 'message', 'text', 'result']) {
+      if (typeof obj[key] === 'string') return obj[key] as string;
+    }
+  }
+  // JSON but no extractable text — return raw as last resort
   return output;
 }
 

@@ -554,6 +554,7 @@ export interface InsertEventReminderData {
 export interface DueReminderRow extends EventReminderRow {
   event_title: string;
   event_start_at: string;
+  event_end_at: string | null;
   event_location: string | null;
 }
 

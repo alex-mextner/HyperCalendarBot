@@ -288,6 +288,71 @@ describe('NotificationScheduler', () => {
     expect(callEnqueued.length).toBe(1);
   });
 
+  test('event_reminder payload is formatted text, not raw event JSON', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Moscow', 'ru')");
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at) VALUES (1, 42, 'Стендап', '2026-03-15T10:00:00Z', '2026-03-15T10:30:00Z')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:45:00Z', 15, '15 minutes')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedLogId = 0;
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'event_reminder') capturedLogId = logId;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-15T09:45:30Z'));
+    expect(capturedLogId).toBeGreaterThan(0);
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    const parsed = JSON.parse(log.payload!) as { text: string; event_id: number };
+    expect(parsed.event_id).toBe(1);
+    expect(parsed.text).toContain('⏰');
+    expect(parsed.text).toContain('Стендап');
+    expect(parsed.text).toContain('через 15 минут');
+    expect(parsed.text).toContain('13:00'); // Moscow = UTC+3
+    expect(parsed.text).not.toContain('"event_title"');
+  });
+
+  test('event_reminder_batch payload is formatted text', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Standup', '2026-03-15T10:00:00Z')");
+    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (2, 42, 'Call', '2026-03-15T10:00:00Z')");
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:30:00Z', 30, '30 minutes')",
+    );
+    db.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (2, 42, '2026-03-15T09:30:00Z', 30, '30 minutes')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedLogId = 0;
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'event_reminder_batch') capturedLogId = logId;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-15T09:30:30Z'));
+    expect(capturedLogId).toBeGreaterThan(0);
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    const parsed = JSON.parse(log.payload!) as { text: string; event_ids: number[] };
+    expect(parsed.event_ids).toEqual([1, 2]);
+    expect(parsed.text).toContain('Reminders:');
+    expect(parsed.text).toContain('Standup');
+    expect(parsed.text).toContain('Call');
+    expect(parsed.text).not.toContain('"event_title"');
+  });
+
   test('morning_agenda payload is rendered text, not raw JSON', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
     db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");

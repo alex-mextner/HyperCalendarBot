@@ -36,7 +36,7 @@ describe('processNotification', () => {
       type: 'event_reminder',
       reference_key: 'er:1',
       channel: 'telegram_text',
-      payload: '{"event_title":"Call","interval_label":"15 minutes"}',
+      payload: '{"text":"⏰ Reminder: Call in 15 minutes\\n\\n🕐 10:00","event_id":1}',
     })!;
 
     const sendMessage = mock(() => Promise.resolve());
@@ -47,13 +47,13 @@ describe('processNotification', () => {
     expect(sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  test('sends with keyboard when buildReminderKeyboard provided and event_id present', async () => {
+  test('sends with keyboard when sendWithKeyboard provided and event_id present', async () => {
     const logId = logRepo.insert({
       user_id: 42,
       type: 'event_reminder',
       reference_key: 'er:10',
       channel: 'telegram_text',
-      payload: '{"event_id":7,"event_title":"Call","interval_label":"15 min"}',
+      payload: '{"text":"⏰ Reminder: Call in 15 min\\n\\n🕐 10:00","event_id":7}',
     })!;
 
     const sendMessage = mock(() => Promise.resolve());
@@ -68,6 +68,10 @@ describe('processNotification', () => {
 
     expect(sendWithKeyboard).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
+    // Verify formatted text is sent, not raw JSON
+    const callArgs = sendWithKeyboard.mock.calls[0] as unknown as [number, string, unknown];
+    expect(callArgs[1]).toContain('⏰');
+    expect(callArgs[1]).not.toContain('"event_id"');
     const row = logRepo.getById(logId);
     expect(row!.status).toBe('sent');
   });
@@ -78,7 +82,7 @@ describe('processNotification', () => {
       type: 'event_reminder',
       reference_key: 'er:11',
       channel: 'telegram_text',
-      payload: '{"event_title":"NoId","interval_label":"15 min"}',
+      payload: '{"text":"⏰ Reminder: NoId in 15 min\\n\\n🕐 10:00"}',
     })!;
 
     const sendMessage = mock(() => Promise.resolve());

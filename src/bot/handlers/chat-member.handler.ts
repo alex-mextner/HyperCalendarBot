@@ -15,7 +15,7 @@ function groupWelcome(lang: 'en' | 'ru'): string {
       '• ❌ /unshare — убрать расшаренное событие\n' +
       '• 🤖 Упомяни меня или напиши /cal + текст для управления через ИИ\n\n' +
       'В личке: личные события, напоминания, /week, /month, импорт и многое другое.\n\n' +
-      '💡 Сделай меня администратором — и я смогу закреплять актуальный календарь, давать ссылку на группу в уведомлениях участникам и отслеживать кто присоединился или вышел из группы.'
+      '💡 Сделай меня администратором — и я смогу закреплять актуальный календарь, давать ссылку на группу в уведомлениях и не показывать групповой календарь тем, кто вышел из чата.'
     );
   }
   return (
@@ -26,7 +26,7 @@ function groupWelcome(lang: 'en' | 'ru'): string {
     '• ❌ /unshare — remove your shared event\n' +
     '• 🤖 Mention me or use /cal + text to manage the calendar with AI\n\n' +
     'In DM: personal events, reminders, /week, /month, import and more.\n\n' +
-    '💡 Make me an admin — and I can pin the calendar automatically, include a group link in notifications to members, and track who joins or leaves the group.'
+    '💡 Make me an admin — and I can pin the calendar automatically, include a group link in notifications, and hide the group calendar from people who leave the chat.'
   );
 }
 

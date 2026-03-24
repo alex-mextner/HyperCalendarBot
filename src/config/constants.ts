@@ -77,7 +77,7 @@ export const MSG = {
     country_skip: 'Skip',
     agenda_prompt: "I can send you a morning summary of your day's events.\n\nChoose a time for the daily agenda:",
     onboard_done:
-      "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a message in plain text — I understand natural language and can create, edit, search events for you.",
+      "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a text or voice message — I understand natural language and can create, edit, search events for you.",
     no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
     no_events: 'No events in this range.',
     event_created: (title: string) => `✅ Created: "${title}"`,
@@ -217,7 +217,7 @@ export const MSG = {
       `✏️ Event updated in ${groupRef}\n👤 Updated by: ${organizerLink}`,
     feature_tour_btn: '📖 All Features',
     feature_tour: [
-      '<b>🤖 AI Assistant</b>\nJust text me naturally: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". I understand context and execute commands.',
+      '<b>🤖 AI Assistant</b>\nJust text or voice-message me: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". All bot features are available through chat — I understand context and execute commands.',
       '<b>📅 Calendar Management</b>\n/add — step-by-step event creation\n/today, /week, /month — different views\n/edit, /delete — modify events\n/free — find available time slots\nRecurring events with flexible rules.',
       '<b>🔔 Smart Reminders</b>\n/settings — morning agenda, evening review, quiet hours, voice calls, privacy\nMultiple reminders per event (15min, 1h, etc.)\nCustomizable notification intervals.',
       '<b>🌍 Holidays</b>\n/holidays — browse and subscribe to holidays from 100+ countries\nHolidays appear alongside your events in daily agenda.',
@@ -386,7 +386,7 @@ export const MSG = {
     country_skip: 'Пропустить',
     agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВыберите время для утренней сводки:',
     onboard_done:
-      '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите мне текстом — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
+      '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите или отправьте голосовое — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
     no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,
     no_events: 'Нет событий за этот период.',
     event_created: (title: string) => `✅ Создано: "${title}"`,
@@ -526,7 +526,7 @@ export const MSG = {
       `✏️ Событие обновлено в ${groupRef}\n👤 Изменил: ${organizerLink}`,
     feature_tour_btn: '📖 Все функции',
     feature_tour: [
-      '<b>🤖 AI-ассистент</b>\nПросто напишите мне: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Я понимаю контекст и выполняю команды.',
+      '<b>🤖 AI-ассистент</b>\nПросто напишите или отправьте голосовое: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Все функции бота доступны через чат — я понимаю контекст и выполняю команды.',
       '<b>📅 Управление календарём</b>\n/add — пошаговое создание\n/today, /week, /month — разные виды\n/edit, /delete — редактирование\n/free — свободные слоты\nПовторяющиеся события с гибкими правилами.',
       '<b>🔔 Умные напоминания</b>\n/settings — утренняя сводка, вечерний обзор, тихие часы, голосовые звонки, приватность\nНесколько напоминаний на событие (15 мин, 1 ч и т.д.)',
       '<b>🌍 Праздники</b>\n/holidays — подписка на праздники 100+ стран\nПраздники отображаются в ежедневной повестке.',

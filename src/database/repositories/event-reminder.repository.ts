@@ -16,7 +16,7 @@ export class EventReminderRepository {
   getDue(windowStart: string, windowEnd: string): DueReminderRow[] {
     return this.db
       .prepare(
-        `SELECT er.*, e.title AS event_title, e.start_at AS event_start_at, e.location AS event_location
+        `SELECT er.*, e.title AS event_title, e.start_at AS event_start_at, e.end_at AS event_end_at, e.location AS event_location
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
          WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0`,
