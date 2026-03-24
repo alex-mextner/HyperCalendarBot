@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -169,7 +170,9 @@ export class BirthdayService {
         return;
       }
       const stdout = await new Response(proc.stdout).text();
-      result = JSON.parse(stdout);
+      result = z
+        .record(z.string(), z.object({ day: z.number(), month: z.number(), year: z.number().optional() }).nullable())
+        .parse(JSON.parse(stdout));
     } catch (err) {
       birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
       return;

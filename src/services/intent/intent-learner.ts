@@ -1,4 +1,5 @@
 // src/services/intent/intent-learner.ts
+import { z } from 'zod';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { CreateIntentData } from '../../database/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
@@ -6,6 +7,16 @@ import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflowVariables } from './workflow-validator.ts';
+
+const LearnerResponseSchema = z.object({
+  skip: z.boolean().optional(),
+  canonical_name: z.string(),
+  phrases: z.array(z.string()),
+  trigger_words: z.array(z.string()).optional(),
+  pattern: z.string().optional(),
+  workflow: z.record(z.string(), z.unknown()),
+  format: z.string().optional(),
+});
 
 interface ToolCallRecord {
   name: string;
@@ -74,7 +85,7 @@ export class IntentLearner {
         if (existing.status === 'approved') {
           let existingPhrases: string[];
           try {
-            existingPhrases = JSON.parse(existing.phrases) as string[];
+            existingPhrases = z.array(z.string()).parse(JSON.parse(existing.phrases));
           } catch {
             existingPhrases = [];
           }
@@ -179,16 +190,8 @@ export class IntentLearner {
         .replace(/\s*```\s*$/, '')
         .trim();
 
-      // Parse JSON response
-      const parsed = JSON.parse(json) as {
-        skip?: boolean;
-        canonical_name: string;
-        phrases: string[];
-        trigger_words?: string[];
-        pattern?: string;
-        workflow: { [key: string]: unknown };
-        format: string;
-      };
+      // Parse and validate JSON response
+      const parsed = LearnerResponseSchema.parse(JSON.parse(json));
 
       if (parsed.skip) return null;
 

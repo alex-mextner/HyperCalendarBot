@@ -1,4 +1,5 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
@@ -97,16 +98,23 @@ export class CalendarBotAgent {
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
 
+    const ContentBlocksSchema = z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough());
+    const ActivityEventSchema = z.object({ kind: z.string() }).passthrough();
+
     for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
       try {
-        const parsed = JSON.parse(msg.content);
-        if (Array.isArray(parsed)) {
-          content = parsed as Anthropic.ContentBlockParam[];
-        } else if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
-          content = withTimestamp(formatActivityEvent(parsed as ActivityEvent), msg.created_at);
+        const raw = JSON.parse(msg.content);
+        const blocksResult = ContentBlocksSchema.safeParse(raw);
+        if (blocksResult.success) {
+          content = blocksResult.data as Anthropic.ContentBlockParam[];
         } else {
-          content = withTimestamp(msg.content, msg.created_at);
+          const activityResult = ActivityEventSchema.safeParse(raw);
+          if (activityResult.success) {
+            content = withTimestamp(formatActivityEvent(activityResult.data as ActivityEvent), msg.created_at);
+          } else {
+            content = withTimestamp(msg.content, msg.created_at);
+          }
         }
       } catch {
         content = withTimestamp(msg.content, msg.created_at);

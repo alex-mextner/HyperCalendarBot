@@ -1,4 +1,5 @@
 import { TZDate } from '@date-fns/tz';
+import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { ToolResult } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
@@ -92,9 +93,18 @@ interface ResumeState {
 /**
  * Parse tool output: if valid JSON, return parsed value; otherwise return raw string.
  */
+const ToolOutputSchema = z.union([
+  z.string(),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.unknown()),
+  z.record(z.string(), z.unknown()),
+]);
+
 function parseToolOutput(output: string): unknown {
   try {
-    return JSON.parse(output);
+    return ToolOutputSchema.parse(JSON.parse(output));
   } catch {
     return output;
   }

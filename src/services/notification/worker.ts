@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 
@@ -38,11 +39,13 @@ export async function processNotification(
 
     if (data.type === 'event_reminder' || data.type === 'event_reminder_batch') {
       try {
-        const parsed = JSON.parse(rawPayload) as {
-          text?: string;
-          event_id?: number;
-          event_ids?: number[];
-        };
+        const parsed = z
+          .object({
+            text: z.string().optional(),
+            event_id: z.number().optional(),
+            event_ids: z.array(z.number()).optional(),
+          })
+          .parse(JSON.parse(rawPayload));
         if (parsed.text) {
           text = parsed.text;
         }

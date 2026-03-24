@@ -16,7 +16,7 @@ export class TriggerService {
   subscribe(): void {
     for (const topic of ALL_TOPICS) {
       this.bus.on(topic, (payload) => {
-        this.handleEvent(topic, payload as DomainEventMap[DomainEventTopic]).catch((err: unknown) => {
+        this.handleEvent(topic, payload).catch((err: unknown) => {
           triggerLogger.error({ err, topic }, 'TriggerService: unhandled error in handleEvent');
         });
       });
@@ -31,7 +31,7 @@ export class TriggerService {
     for (const trigger of triggers) {
       if (trigger.condition) {
         try {
-          const passes = evaluate(trigger.condition, payload as { [key: string]: unknown });
+          const passes = evaluate(trigger.condition, payload);
           if (!passes) continue;
         } catch (err: unknown) {
           triggerLogger.warn(

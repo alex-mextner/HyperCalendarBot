@@ -254,7 +254,12 @@ const basePendingProposal = {
   action: 'create' as const,
   payload: JSON.stringify({
     action: 'create',
-    event: { title: 'Ретро', start_at: '2099-03-20T15:00:00Z', end_at: '2099-03-20T16:00:00Z' },
+    event: {
+      title: 'Ретро',
+      start_at: '2099-03-20T15:00:00Z',
+      end_at: '2099-03-20T16:00:00Z',
+      timezone: 'UTC',
+    },
   }),
   summary: 'добавить Ретро',
   group_chat_id: -100,

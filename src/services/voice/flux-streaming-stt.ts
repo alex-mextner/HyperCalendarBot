@@ -1,3 +1,12 @@
+import { z } from 'zod';
+
+const FluxMessageSchema = z.object({
+  type: z.string().optional(),
+  event: z.string().optional(),
+  transcript: z.string().optional(),
+  end_of_turn_confidence: z.number().optional(),
+});
+
 export interface FluxStreamingSTTEvents {
   onStartOfTurn: () => void;
   onEndOfTurn: (confidence: number, transcript: string) => void;
@@ -40,12 +49,7 @@ export class FluxStreamingSTT {
       try {
         // Flux uses ListenV2TurnInfo with an `event` sub-field; connection
         // confirmation arrives as ListenV2Connected (ignored here).
-        const data = JSON.parse(event.data as string) as {
-          type?: string;
-          event?: string;
-          transcript?: string;
-          end_of_turn_confidence?: number;
-        };
+        const data = FluxMessageSchema.parse(JSON.parse(event.data as string));
         if (data.type !== 'TurnInfo') return;
         if (data.event === 'StartOfTurn') {
           events.onStartOfTurn();

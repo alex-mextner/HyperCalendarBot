@@ -1,5 +1,6 @@
 // src/bot/commands/invite.ts
 
+import type { InlineKeyboard } from 'gramio';
 import { CB } from '../../config/constants.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
@@ -13,7 +14,7 @@ import type { BotCommandContext } from '../types.ts';
 type SendMessageFn = (
   chatId: number,
   text: string,
-  options: { parse_mode: string; reply_markup?: unknown },
+  options: { parse_mode: string; reply_markup?: InlineKeyboard },
 ) => Promise<{ message_id: number }>;
 
 export interface InviteDeps {

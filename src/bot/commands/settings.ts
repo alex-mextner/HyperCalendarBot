@@ -1,5 +1,6 @@
 // src/bot/commands/settings.ts
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import { CB } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
@@ -340,7 +341,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'edit_reminders' || subAction.startsWith('toggle_reminder:')) {
     const prefs = prefsService.getOrCreate(user.telegram_id);
-    let intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+    let intervals = z.array(z.number()).parse(JSON.parse(prefs.default_reminder_intervals));
 
     if (subAction.startsWith('toggle_reminder:')) {
       const val = Number.parseInt(subAction.split(':')[1]!, 10);
@@ -365,7 +366,7 @@ export async function handleSettingsCallback(
     subAction === 'toggle_quiet'
   ) {
     const prefs = prefsService.getOrCreate(user.telegram_id);
-    const intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+    const intervals = z.array(z.number()).parse(JSON.parse(prefs.default_reminder_intervals));
     const { text, kb } = buildNotificationsView(
       !!prefs.morning_agenda_enabled,
       prefs.morning_agenda_time,

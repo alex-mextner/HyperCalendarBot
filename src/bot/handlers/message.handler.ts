@@ -4,6 +4,7 @@ import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import { t } from '../../config/constants.ts';
@@ -162,7 +163,9 @@ export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', C
 
 function isCallbackOnlyStep(rawScene: unknown): boolean {
   try {
-    const parsed = JSON.parse(rawScene as string) as { name?: string; step?: number };
+    const parsed = z
+      .object({ name: z.string().optional(), step: z.number().optional() })
+      .parse(JSON.parse(rawScene as string));
     return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
   } catch {
     return false;
@@ -525,10 +528,10 @@ async function handleIntentEditInstruction(
   }
 
   const currentJson = JSON.stringify({
-    phrases: JSON.parse(intent.phrases),
-    trigger_words: JSON.parse(intent.trigger_words),
+    phrases: z.array(z.string()).parse(JSON.parse(intent.phrases)),
+    trigger_words: z.array(z.string()).parse(JSON.parse(intent.trigger_words)),
     pattern: intent.pattern,
-    workflow: JSON.parse(intent.workflow),
+    workflow: z.record(z.string(), z.unknown()).parse(JSON.parse(intent.workflow)),
     format: intent.format,
   });
 
@@ -577,13 +580,15 @@ async function handleIntentEditInstruction(
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
-      updated = JSON.parse(text) as Partial<{
-        phrases: string[];
-        trigger_words: string[];
-        pattern: string | null;
-        workflow: { [key: string]: unknown };
-        format: string;
-      }>;
+      updated = z
+        .object({
+          phrases: z.array(z.string()).optional(),
+          trigger_words: z.array(z.string()).optional(),
+          pattern: z.string().nullable().optional(),
+          workflow: z.record(z.string(), z.unknown()).optional(),
+          format: z.string().optional(),
+        })
+        .parse(JSON.parse(text));
       break;
     } catch (err) {
       lastError = err;
@@ -605,7 +610,11 @@ async function handleIntentEditInstruction(
     const fresh = intentRepo.getById(session.intentId)!;
     const preview = [
       `✏️ Intent #${fresh.id} updated: <b>${fresh.canonical_name}</b>`,
-      `Phrases: ${(JSON.parse(fresh.phrases) as string[]).map((p) => `"${p}"`).join(', ')}`,
+      `Phrases: ${z
+        .array(z.string())
+        .parse(JSON.parse(fresh.phrases))
+        .map((p) => `"${p}"`)
+        .join(', ')}`,
       fresh.pattern ? `Pattern: ${fresh.pattern}` : 'Pattern: none',
       `Workflow: ${fresh.workflow}`,
       `Format: ${fresh.format}`,
@@ -860,11 +869,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
         if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
           try {
-            const parsed = JSON.parse(activeScene as string) as {
-              name?: string;
-              step?: number;
-              state?: { [key: string]: unknown };
-            };
+            const parsed = z
+              .object({
+                name: z.string().optional(),
+                step: z.number().optional(),
+                state: z.record(z.string(), z.unknown()).optional(),
+              })
+              .parse(JSON.parse(activeScene as string));
             await deps.scenePauseService.save(user.telegram_id, {
               sceneName: parsed.name ?? 'unknown',
               step: parsed.step ?? 0,

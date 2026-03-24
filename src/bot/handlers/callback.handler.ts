@@ -3,6 +3,7 @@
 import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
@@ -167,10 +168,16 @@ export function createCallbackHandler(
         let step = 0;
         let sceneState: { [key: string]: unknown } = {};
         try {
-          const parsed = JSON.parse(rawScene as string) as { [key: string]: unknown };
-          sceneName = (parsed.name as string) ?? 'unknown';
-          step = (parsed.step as number) ?? 0;
-          sceneState = (parsed.state as { [key: string]: unknown }) ?? {};
+          const parsed = z
+            .object({
+              name: z.string().optional(),
+              step: z.number().optional(),
+              state: z.record(z.string(), z.unknown()).optional(),
+            })
+            .parse(JSON.parse(rawScene as string));
+          sceneName = parsed.name ?? 'unknown';
+          step = parsed.step ?? 0;
+          sceneState = parsed.state ?? {};
         } catch {
           // proceed with defaults
         }
@@ -725,7 +732,29 @@ export function createCallbackHandler(
         }
 
         if (subAction === 'accept') {
-          const changes = JSON.parse(proposal.changes) as UpdateEventData;
+          const changes: UpdateEventData = z
+            .object({
+              title: z.string().optional(),
+              description: z.string().nullable().optional(),
+              category: z.string().nullable().optional(),
+              start_at: z.string().optional(),
+              end_at: z.string().nullable().optional(),
+              all_day: z.boolean().optional(),
+              timezone: z.string().optional(),
+              location: z.string().nullable().optional(),
+              recurrence_rule: z.string().nullable().optional(),
+              recurrence_end_at: z.string().nullable().optional(),
+              reminder_overrides: z.string().nullable().optional(),
+              google_calendar_id: z.string().nullable().optional(),
+              google_event_id: z.string().nullable().optional(),
+              google_etag: z.string().nullable().optional(),
+              sync_status: z
+                .enum(['local_only', 'synced', 'pending_push', 'pending_pull', 'conflict', 'push_failed'])
+                .optional(),
+              sync_version: z.number().optional(),
+              last_synced_at: z.string().nullable().optional(),
+            })
+            .parse(JSON.parse(proposal.changes));
           const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
           editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
           await ctx.answer();
@@ -1155,13 +1184,13 @@ export function createCallbackHandler(
           let responseText = '';
           if (lastAssistant) {
             try {
-              const blocks = JSON.parse(lastAssistant.content) as { type: string; text?: string }[];
-              responseText = Array.isArray(blocks)
-                ? blocks
-                    .filter((b) => b.type === 'text')
-                    .map((b) => b.text ?? '')
-                    .join('')
-                : lastAssistant.content;
+              const blocks = z
+                .array(z.object({ type: z.string(), text: z.string().optional() }))
+                .parse(JSON.parse(lastAssistant.content));
+              responseText = blocks
+                .filter((b) => b.type === 'text')
+                .map((b) => b.text ?? '')
+                .join('');
             } catch {
               responseText = lastAssistant.content;
             }
@@ -1382,12 +1411,53 @@ export async function handleProposalAccept(id: number, callerId: number, deps: P
     return;
   }
 
-  const payloadData = JSON.parse(proposal.payload) as {
-    action: string;
-    event?: Omit<CreateEventData, 'user_id'>;
-    event_id?: number;
-    changes?: UpdateEventData;
-  };
+  const ProposalPayloadSchema = z.object({
+    action: z.string(),
+    event: z
+      .object({
+        title: z.string(),
+        description: z.string().optional(),
+        category: z.string().optional(),
+        start_at: z.string(),
+        end_at: z.string().optional(),
+        all_day: z.boolean().optional(),
+        timezone: z.string(),
+        location: z.string().optional(),
+        recurrence_rule: z.string().optional(),
+        recurrence_end_at: z.string().optional(),
+        reminder_minutes: z.array(z.number()).optional(),
+        owner_type: z.enum(['user', 'group']).optional(),
+        group_id: z.number().optional(),
+        created_by: z.number().optional(),
+        event_type: z.literal('birthday').optional(),
+      })
+      .optional(),
+    event_id: z.number().optional(),
+    changes: z
+      .object({
+        title: z.string().optional(),
+        description: z.string().nullable().optional(),
+        category: z.string().nullable().optional(),
+        start_at: z.string().optional(),
+        end_at: z.string().nullable().optional(),
+        all_day: z.boolean().optional(),
+        timezone: z.string().optional(),
+        location: z.string().nullable().optional(),
+        recurrence_rule: z.string().nullable().optional(),
+        recurrence_end_at: z.string().nullable().optional(),
+        reminder_overrides: z.string().nullable().optional(),
+        google_calendar_id: z.string().nullable().optional(),
+        google_event_id: z.string().nullable().optional(),
+        google_etag: z.string().nullable().optional(),
+        sync_status: z
+          .enum(['local_only', 'synced', 'pending_push', 'pending_pull', 'conflict', 'push_failed'])
+          .optional(),
+        sync_version: z.number().optional(),
+        last_synced_at: z.string().nullable().optional(),
+      })
+      .optional(),
+  });
+  const payloadData = ProposalPayloadSchema.parse(JSON.parse(proposal.payload));
 
   let result: { id: number; title?: string } | boolean | null | undefined;
   if (proposal.action === 'create' && payloadData.event) {

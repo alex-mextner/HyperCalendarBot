@@ -1,5 +1,6 @@
 // src/agent/ws-server.ts
 import type { ServerWebSocket } from 'bun';
+import { z } from 'zod';
 import type { AgentDispatcher } from './dispatcher.ts';
 import { issueAgentJwt, registerPendingConnection, verifyAgentJwtFull, type WsData } from './pairing.ts';
 import type { AgentInbound, AgentTokenRefreshed } from './protocol.ts';
@@ -44,12 +45,15 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
     },
 
     message(ws: ServerWebSocket<WsData>, raw: string) {
-      let msg: AgentInbound;
+      let parsed: unknown;
       try {
-        msg = JSON.parse(raw) as AgentInbound;
+        parsed = JSON.parse(raw);
       } catch {
         return;
       }
+      const result = z.object({ type: z.string() }).passthrough().safeParse(parsed);
+      if (!result.success) return;
+      const msg = result.data as AgentInbound;
 
       if (msg.type === 'ping') {
         if (ws.data.userId) registry.updatePing(ws.data.userId);

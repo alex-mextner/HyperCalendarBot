@@ -59,7 +59,12 @@ function computeExpiresAt(input: ProposeInput): string {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function buildPayload(input: ProposeInput): unknown {
+type ProposalPayload =
+  | { action: 'create'; event: Omit<CreateEventData, 'user_id'> | undefined }
+  | { action: 'update'; event_id: number | undefined; changes: UpdateEventData | undefined }
+  | { action: 'delete'; event_id: number | undefined };
+
+function buildPayload(input: ProposeInput): ProposalPayload {
   if (input.action === 'create') return { action: 'create', event: input.event };
   if (input.action === 'update') return { action: 'update', event_id: input.event_id, changes: input.changes };
   return { action: 'delete', event_id: input.event_id };

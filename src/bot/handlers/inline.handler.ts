@@ -1,5 +1,6 @@
 // src/bot/handlers/inline.handler.ts
 
+import type { AnswerInlineQueryParams, TelegramInlineQueryResult } from 'gramio';
 import { resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 
@@ -55,7 +56,7 @@ export interface InlineQueryContext {
   from?: { id: number };
   query: string;
   location?: { latitude: number; longitude: number };
-  answerInlineQuery: (results: unknown[], options?: { [key: string]: unknown }) => Promise<true>;
+  answerInlineQuery: (results: TelegramInlineQueryResult[], params?: Partial<AnswerInlineQueryParams>) => Promise<true>;
 }
 
 export class InlineDebouncer {
@@ -134,14 +135,14 @@ export function createInlineHandler(
       // Photo support will be enabled when image serving is configured
 
       // Convert to Telegram InlineQueryResult format
-      const results = items.map((item) => ({
-        type: item.type,
+      const results: TelegramInlineQueryResult[] = items.map((item) => ({
+        type: 'article' as const,
         id: item.id,
         title: item.title,
         description: item.description,
         input_message_content: {
           message_text: item.messageText,
-          parse_mode: 'HTML',
+          parse_mode: 'HTML' as const,
         },
       }));
 

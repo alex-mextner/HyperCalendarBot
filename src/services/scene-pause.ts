@@ -1,4 +1,6 @@
 // src/services/scene-pause.ts
+import { z } from 'zod';
+
 export interface ScenePauseState {
   sceneName: string;
   step: number;
@@ -24,7 +26,15 @@ export class ScenePauseService {
     const raw = await this.storage.get(pauseKey(userId));
     if (!raw) return null;
     try {
-      return JSON.parse(raw as string) as ScenePauseState;
+      const json: unknown = JSON.parse(raw as string);
+      const result = z
+        .object({
+          sceneName: z.string(),
+          step: z.number(),
+          sceneState: z.record(z.string(), z.unknown()),
+        })
+        .safeParse(json);
+      return result.success ? result.data : null;
     } catch {
       return null;
     }
