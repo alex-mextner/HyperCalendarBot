@@ -429,10 +429,15 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
-            const now = new Date();
-            const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
-            const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
-            return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            try {
+              const now = new Date();
+              const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+              const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+              return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            } catch (err) {
+              cmdLogger.error({ err, userId: user.telegram_id }, 'Failed to build schedule context');
+              return [];
+            }
           })(),
       birthdayService: deps.birthdayService,
       userMemoryRepo: deps.userMemoryRepo,
