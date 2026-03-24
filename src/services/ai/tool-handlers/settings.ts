@@ -2,7 +2,7 @@ import { t } from '../../../config/constants.ts';
 import type { NotificationPreferencesUpdate, UpdateUserData } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
-interface ManageSettingsInput {
+export interface ManageSettingsInput {
   action: 'get' | 'update';
   category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
   updates?: { [key: string]: unknown };
