@@ -1,5 +1,6 @@
 // src/database/repositories/workflow-session.repository.ts
 import type { Database } from 'bun:sqlite';
+import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/intent-matcher-layer.ts';
 
 const TTL_MS = 5 * 60 * 1000;
@@ -16,11 +17,17 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
       this.delete(chatId, userId);
       return null;
     }
-    try {
-      return JSON.parse(row.data) as WorkflowSession;
-    } catch {
-      return null;
-    }
+    const result = z
+      .object({
+        intentId: z.number(),
+        stepIndex: z.number(),
+        stepResults: z.record(z.string(), z.unknown()),
+        workflow: z.record(z.string(), z.unknown()),
+        captures: z.record(z.string(), z.string()),
+        createdAt: z.number(),
+      })
+      .safeParse(JSON.parse(row.data));
+    return result.success ? result.data : null;
   }
 
   set(chatId: number, userId: number, session: WorkflowSession): void {

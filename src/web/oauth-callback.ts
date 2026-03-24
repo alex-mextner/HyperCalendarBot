@@ -1,4 +1,5 @@
 // src/web/oauth-callback.ts
+import { z } from 'zod';
 import type { EnvConfig } from '../config/env.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
@@ -47,7 +48,7 @@ export async function handleOAuthCallback(req: Request, deps: OAuthCallbackDeps)
   }
   await deps.stateLookup.del(stateKey);
 
-  const { telegram_user_id: userId } = JSON.parse(payload) as { telegram_user_id: number };
+  const { telegram_user_id: userId } = z.object({ telegram_user_id: z.number() }).parse(JSON.parse(payload));
 
   try {
     const tokens = await deps.oauthService.exchangeCode(code);

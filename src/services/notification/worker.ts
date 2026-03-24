@@ -1,15 +1,16 @@
+import { z } from 'zod';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 
+const TelegramErrorSchema = z.object({
+  code: z.number(),
+  payload: z.object({ retry_after: z.number().optional() }).optional(),
+});
+
 export function parseTelegramError(err: unknown): { code: number; retryAfter?: number } | null {
-  if (typeof err !== 'object' || err === null) return null;
-  const e = err as Record<string, unknown>;
-  if (typeof e.code !== 'number') return null;
-  const retryAfter =
-    typeof e.payload === 'object' && e.payload !== null
-      ? ((e.payload as Record<string, unknown>).retry_after as number | undefined)
-      : undefined;
-  return { code: e.code, retryAfter };
+  const result = TelegramErrorSchema.safeParse(err);
+  if (!result.success) return null;
+  return { code: result.data.code, retryAfter: result.data.payload?.retry_after };
 }
 
 export interface NotificationJobData {
@@ -39,11 +40,13 @@ export async function processNotification(
 
     if (data.type === 'event_reminder' || data.type === 'event_reminder_batch') {
       try {
-        const parsed = JSON.parse(rawPayload) as {
-          text?: string;
-          event_id?: number;
-          event_ids?: number[];
-        };
+        const parsed = z
+          .object({
+            text: z.string().optional(),
+            event_id: z.number().optional(),
+            event_ids: z.array(z.number()).optional(),
+          })
+          .parse(JSON.parse(rawPayload));
         if (parsed.text) {
           text = parsed.text;
         }

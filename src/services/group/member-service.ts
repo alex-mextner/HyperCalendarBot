@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { logger } from '../../utils/logger.ts';
@@ -21,7 +22,7 @@ export class GroupMemberService {
       const exitCode = await proc.exited;
       if (exitCode === 0) {
         const stdout = await new Response(proc.stdout).text();
-        const members = JSON.parse(stdout) as { id: number }[];
+        const members = z.array(z.object({ id: z.number() })).parse(JSON.parse(stdout));
         const memberIds = members.map((m) => m.id);
         return memberIds.filter((id) => this.userRepo.findByTelegramId(id) !== null);
       }

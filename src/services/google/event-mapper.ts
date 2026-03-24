@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 interface LocalEventForGoogle {
   id: number;
   title: string;
@@ -87,7 +89,7 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.reminder_overrides) {
-    const minutes: number[] = JSON.parse(local.reminder_overrides);
+    const minutes = z.array(z.number()).parse(JSON.parse(local.reminder_overrides));
     event.reminders = {
       useDefault: false,
       overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),

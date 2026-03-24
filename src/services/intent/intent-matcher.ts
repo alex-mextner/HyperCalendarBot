@@ -1,5 +1,6 @@
 // src/services/intent/intent-matcher.ts
 
+import { z } from 'zod';
 import type { Intent } from '../../database/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { normalize, tokenize } from './normalizer.ts';
@@ -26,7 +27,7 @@ export class IntentMatcher {
     for (const intent of intents) {
       let phrases: string[];
       try {
-        phrases = JSON.parse(intent.phrases) as string[];
+        phrases = z.array(z.string()).parse(JSON.parse(intent.phrases));
       } catch {
         cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON, skipping');
         continue;
@@ -38,7 +39,7 @@ export class IntentMatcher {
       if (intent.pattern) {
         let triggerWords: string[];
         try {
-          triggerWords = JSON.parse(intent.trigger_words) as string[];
+          triggerWords = z.array(z.string()).parse(JSON.parse(intent.trigger_words));
         } catch {
           cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON, skipping pattern');
           continue;

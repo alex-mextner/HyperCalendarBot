@@ -46,7 +46,7 @@ describe('createInlineHandler location auto-update', () => {
       from: { id: 100 },
       query: '',
       location: { latitude: 44.8, longitude: 20.5 }, // Belgrade
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     });
 
     expect(updateMock).toHaveBeenCalled();
@@ -72,7 +72,7 @@ describe('createInlineHandler location auto-update', () => {
     await handler({
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     });
 
     expect(updateMock).not.toHaveBeenCalled();

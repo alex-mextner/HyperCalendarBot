@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { formatTime } from '../../utils/date.ts';
 
 /**
@@ -40,7 +41,7 @@ function formatText(output: string): string {
   }
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    parsed = z.unknown().parse(JSON.parse(trimmed));
   } catch {
     return output;
   }
@@ -56,13 +57,15 @@ function formatText(output: string): string {
 }
 
 function formatEventsList(output: string, timezone: string, language: string): string {
-  const events = JSON.parse(output);
-  if (!Array.isArray(events) || events.length === 0) {
+  const events = z
+    .array(z.object({ title: z.string(), start_at: z.string(), end_at: z.string().optional() }))
+    .parse(JSON.parse(output));
+  if (events.length === 0) {
     return language === 'ru' ? 'Нет событий' : 'No events';
   }
 
   return events
-    .map((e: { title: string; start_at: string; end_at?: string }) => {
+    .map((e) => {
       const startTime = formatTime(e.start_at, timezone);
       let timeStr = startTime;
 
@@ -77,13 +80,13 @@ function formatEventsList(output: string, timezone: string, language: string): s
 }
 
 function formatFreeSlots(output: string, timezone: string, _language: string): string {
-  const slots = JSON.parse(output);
-  if (!Array.isArray(slots) || slots.length === 0) {
+  const slots = z.array(z.object({ start: z.string(), end: z.string() })).parse(JSON.parse(output));
+  if (slots.length === 0) {
     return '';
   }
 
   return slots
-    .map((slot: { start: string; end: string }) => {
+    .map((slot) => {
       const startTime = formatTime(slot.start, timezone);
       const endTime = formatTime(slot.end, timezone);
       return `${startTime}–${endTime}`;
@@ -92,43 +95,33 @@ function formatFreeSlots(output: string, timezone: string, _language: string): s
 }
 
 function formatSearchResults(output: string, timezone: string, _language: string): string {
-  const events = JSON.parse(output);
-  if (!Array.isArray(events) || events.length === 0) {
+  const events = z.array(z.object({ title: z.string(), start_at: z.string() })).parse(JSON.parse(output));
+  if (events.length === 0) {
     return '';
   }
 
   return events
-    .map(
-      (
-        e: {
-          title: string;
-          start_at: string;
-        },
-        index: number,
-      ) => {
-        const time = formatTime(e.start_at, timezone);
-        return `${index + 1}. ${time}  ${e.title}`;
-      },
-    )
+    .map((e, index) => {
+      const time = formatTime(e.start_at, timezone);
+      return `${index + 1}. ${time}  ${e.title}`;
+    })
     .join('\n');
 }
 
 function formatHolidays(output: string, _language: string): string {
-  const holidays = JSON.parse(output);
-  if (!Array.isArray(holidays) || holidays.length === 0) {
+  const holidays = z.array(z.object({ name: z.string(), date: z.string() })).parse(JSON.parse(output));
+  if (holidays.length === 0) {
     return '';
   }
 
-  return holidays.map((h: { name: string; date: string }) => `${h.name} (${h.date})`).join('\n');
+  return holidays.map((h) => `${h.name} (${h.date})`).join('\n');
 }
 
 function formatSettings(output: string, _language: string): string {
-  const settings = JSON.parse(output);
-  if (typeof settings !== 'object' || settings === null) {
-    return '';
-  }
+  const result = z.record(z.string(), z.unknown()).safeParse(JSON.parse(output));
+  if (!result.success) return '';
 
-  return Object.entries(settings)
+  return Object.entries(result.data)
     .map(([key, value]) => `${key}: ${value}`)
     .join('\n');
 }

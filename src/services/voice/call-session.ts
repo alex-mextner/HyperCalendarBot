@@ -1,5 +1,6 @@
 // src/services/voice/call-session.ts
 import { unlink as fsUnlink } from 'node:fs/promises';
+import { z } from 'zod';
 import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
@@ -49,12 +50,15 @@ export class CallSession {
 
   async handleMessage(data: string): Promise<void> {
     if (this.ended) return;
-    let msg: { type: string };
+    let raw: unknown;
     try {
-      msg = JSON.parse(data) as { type: string };
+      raw = JSON.parse(data);
     } catch {
       return;
     }
+    const result = z.object({ type: z.string() }).safeParse(raw);
+    if (!result.success) return;
+    const msg = result.data;
 
     switch (msg.type) {
       case 'CALL_CONNECTED':

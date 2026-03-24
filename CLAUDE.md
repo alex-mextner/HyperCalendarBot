@@ -224,10 +224,31 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
-  `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- **No `any`/`as any`/`Function`** — proper typing only.
+- **No bare `object` type** — use a specific interface or `{ [key: string]: unknown }`. `object` accepts any non-primitive but gives no information about shape.
+- **No `Record<string, unknown>`** — entirely banned. Known shape → specific interface or Zod-inferred type. Parse boundary → `unknown`, validate with Zod before use.
+- **No `{ [key: string]: unknown }`** index signatures — entirely banned. Use a specific interface or Zod-inferred type.
+- **`JSON.parse` must always go through Zod** — never use the raw return value. Always `z.something().parse(JSON.parse(...))` or `z.something().safeParse(JSON.parse(...))`.
+- **Use `mitt` for typed event emitters** instead of Node.js `EventEmitter`. `mitt<EventMap>()` is fully typed on its event map with no internal casts.
+- **No `as SomeType` casts** — fix the types, don't paper over them. If a library produces a poor type, fork + patch the library, submit upstream PR.
+- **No `as unknown as ConcreteType`** — double cast that bypasses all TypeScript checks. No acceptable use case.
+- **No `export type { Foo }` re-exports from repository/service files** — consumers must import types directly from their canonical source (`database/types.ts`, domain `types.ts`). Re-exports create two valid import paths and make the canonical location ambiguous.
+- **Type co-location**: types live in the same file as the code that owns them. Types shared across layers → small domain `types.ts`. Never a global dumping ground. Avoid circular deps.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **No silent fallbacks for missing required values** — `ctx.message?.id ?? 0` and similar patterns
+  hide bugs: downstream code receives a meaningless sentinel and fails in an unrelated place with a
+  confusing error. When a value is required, guard and return early:
+  ```ts
+  // Bad — messageId: 0 causes editMessageText to fail later with a cryptic API error
+  const messageId = ctx.message?.id ?? 0;
+  // Good — fail immediately, log the context
+  if (!ctx.message) {
+    logger.warn({ chatId: ctx.chatId }, 'callback has no message');
+    return;
+  }
+  const messageId = ctx.message.id;
+  ```
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
 - **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).

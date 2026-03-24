@@ -1,5 +1,6 @@
 // src/index.ts
 
+import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
 import { agentRegistry } from './agent/registry.ts';
@@ -524,7 +525,9 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
         return null;
       }
       try {
-        return JSON.parse(stdout.trim()) as { id: number; firstName?: string; username?: string };
+        return z
+          .object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() })
+          .parse(JSON.parse(stdout.trim()));
       } catch {
         botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
         return null;
@@ -654,7 +657,7 @@ if (config.REDIS_URL) {
       if (!intent) return { handled: false };
       let workflow: Record<string, unknown>;
       try {
-        workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+        workflow = z.record(z.string(), z.unknown()).parse(JSON.parse(intent.workflow));
       } catch {
         return { handled: false };
       }

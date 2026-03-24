@@ -1,4 +1,5 @@
 import { TZDate } from '@date-fns/tz';
+import { z } from 'zod';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 
@@ -54,14 +55,14 @@ export class ReminderMaterializer {
       return;
     }
 
-    const overrides = event.reminder_overrides ? (JSON.parse(event.reminder_overrides) as number[]) : null;
+    const overrides = event.reminder_overrides ? z.array(z.number()).parse(JSON.parse(event.reminder_overrides)) : null;
 
     let intervals: number[];
     if (overrides) {
       intervals = overrides;
     } else {
       const prefs = this.prefsRepo.get(userId);
-      intervals = prefs ? (JSON.parse(prefs.default_reminder_intervals) as number[]) : [30, 0];
+      intervals = prefs ? z.array(z.number()).parse(JSON.parse(prefs.default_reminder_intervals)) : [30, 0];
     }
 
     const eventStart = new Date(event.start_at);

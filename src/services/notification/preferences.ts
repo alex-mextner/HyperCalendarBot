@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type {
   NotificationPreferencesRepository,
   NotificationPreferencesRow,
@@ -13,7 +14,7 @@ export class NotificationPreferencesService {
 
   resolveDefaultIntervals(userId: number): number[] {
     const prefs = this.getOrCreate(userId);
-    return JSON.parse(prefs.default_reminder_intervals) as number[];
+    return z.array(z.number()).parse(JSON.parse(prefs.default_reminder_intervals));
   }
 
   updateMorningTime(userId: number, time: string): void {

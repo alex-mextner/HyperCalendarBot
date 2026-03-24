@@ -1,6 +1,7 @@
 // src/services/ai/tool-handlers/history.ts
 
 import { isValid, parseISO } from 'date-fns';
+import { z } from 'zod';
 import { t } from '../../../config/constants.ts';
 import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -13,19 +14,23 @@ interface GetHistoryInput {
 }
 
 function formatContent(content: string): string {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
-        .map((b: { text: string }) => b.text)
-        .join(' ');
-    }
-    if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
-      return formatActivityEvent(parsed as ActivityEvent);
-    }
+    parsed = z.unknown().parse(JSON.parse(content));
   } catch {
-    // plain text
+    return content;
+  }
+  if (Array.isArray(parsed)) {
+    return parsed
+      .filter(
+        (b): b is { type: string; text: string } =>
+          typeof b === 'object' && b !== null && b.type === 'text' && typeof b.text === 'string',
+      )
+      .map((b) => b.text)
+      .join(' ');
+  }
+  if (parsed !== null && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>).kind === 'string') {
+    return formatActivityEvent(parsed as ActivityEvent);
   }
   return content;
 }

@@ -1,4 +1,5 @@
 import { TZDate } from '@date-fns/tz';
+import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { ToolResult } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
@@ -107,7 +108,7 @@ interface Level2Step {
  */
 function parseToolOutput(output: string): unknown {
   try {
-    return JSON.parse(output);
+    return z.unknown().parse(JSON.parse(output));
   } catch {
     return output;
   }

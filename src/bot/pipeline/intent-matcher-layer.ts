@@ -1,5 +1,6 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
+import { z } from 'zod';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
@@ -99,7 +100,7 @@ export function createIntentMatcherLayer(
 
     let workflow: Record<string, unknown>;
     try {
-      workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+      workflow = z.record(z.string(), z.unknown()).parse(JSON.parse(intent.workflow));
     } catch {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
       return { handled: false };

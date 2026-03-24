@@ -1,12 +1,16 @@
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 import type { DeepLinkRepository } from '../../database/repositories/deep-link.repository';
 import type { DeepLink, DeepLinkType } from '../../database/types';
 
-interface ResolvedDeepLink {
-  type: DeepLinkType;
-  payload: Record<string, unknown>;
-  createdBy: number;
-}
+const SharedEventPayloadSchema = z.object({ event_id: z.number() });
+const InvitationPayloadSchema = z.object({ invitation_id: z.number(), event_id: z.number() });
+const GroupContextPayloadSchema = z.object({ chat_id: z.number() });
+
+export type ResolvedDeepLink =
+  | { type: 'shared_event'; payload: z.infer<typeof SharedEventPayloadSchema>; createdBy: number }
+  | { type: 'invitation'; payload: z.infer<typeof InvitationPayloadSchema>; createdBy: number }
+  | { type: 'group_context'; payload: z.infer<typeof GroupContextPayloadSchema>; createdBy: number };
 
 export class DeepLinkService {
   constructor(private repo: DeepLinkRepository) {}
@@ -52,11 +56,18 @@ export class DeepLinkService {
 
     this.repo.incrementUsedCount(code);
 
-    return {
-      type: link.type,
-      payload: JSON.parse(link.payload),
-      createdBy: link.created_by,
-    };
+    const raw: unknown = JSON.parse(link.payload);
+
+    switch (link.type as DeepLinkType) {
+      case 'shared_event':
+        return { type: 'shared_event', payload: SharedEventPayloadSchema.parse(raw), createdBy: link.created_by };
+      case 'invitation':
+        return { type: 'invitation', payload: InvitationPayloadSchema.parse(raw), createdBy: link.created_by };
+      case 'group_context':
+        return { type: 'group_context', payload: GroupContextPayloadSchema.parse(raw), createdBy: link.created_by };
+      default:
+        return null;
+    }
   }
 
   generateUrl(code: string, botUsername: string): string {

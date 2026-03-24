@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export interface NovaStreamingSTTEvents {
   onInterim: (transcript: string) => void;
   onFinal: (transcript: string) => void;
@@ -34,10 +36,12 @@ export class NovaStreamingSTT {
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data as string) as {
-          is_final: boolean;
-          channel?: { alternatives?: { transcript: string }[] };
-        };
+        const data = z
+          .object({
+            is_final: z.boolean(),
+            channel: z.object({ alternatives: z.array(z.object({ transcript: z.string() })).optional() }).optional(),
+          })
+          .parse(JSON.parse(event.data as string));
         const transcript = data.channel?.alternatives?.[0]?.transcript ?? '';
         if (!transcript) return;
         if (data.is_final) events.onFinal(transcript);
