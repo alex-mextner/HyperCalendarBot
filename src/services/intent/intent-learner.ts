@@ -201,6 +201,23 @@ export class IntentLearner {
       const workflowResult = WorkflowSchema.safeParse(parsed.workflow);
       if (!workflowResult.success) {
         cmdLogger.warn({ attempt, errors: workflowResult.error.issues }, 'IntentLearner workflow has invalid schema');
+
+        if (attempt < MAX_RETRIES) {
+          const schemaErrors = workflowResult.error.issues.map((i) => `- ${i.path.join('.') || 'root'}: ${i.message}`);
+          const errorFeedback = [
+            'The workflow does not match the required schema. Fix it and return corrected JSON.',
+            'Schema errors:',
+            ...schemaErrors,
+          ].join('\n');
+          conversationMessages.push({ role: 'assistant', content: text });
+          conversationMessages.push({ role: 'user', content: errorFeedback });
+          continue;
+        }
+
+        cmdLogger.error(
+          { errors: workflowResult.error.issues },
+          'IntentLearner: workflow schema still invalid after retries, skipping',
+        );
         return null;
       }
 
