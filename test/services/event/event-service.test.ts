@@ -442,7 +442,7 @@ describe('EventService', () => {
       expect(occurrences.every((o) => o.event.title === 'Daily Group Standup')).toBe(true);
     });
 
-    test('getEventsInRange() does not return group-owned events', () => {
+    test('getEventsInRange() returns group-owned events created by the user', () => {
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Drinks',
@@ -462,10 +462,28 @@ describe('EventService', () => {
       const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-01T23:59:59Z');
       const titles = occurrences.map((o) => o.event.title);
       expect(titles).toContain('Personal Task');
-      expect(titles).not.toContain('Group Drinks');
+      expect(titles).toContain('Group Drinks');
     });
 
-    test('getEvent() returns null for group-owned events', () => {
+    test('getEventsInRange() does not return group-owned events created by another user', () => {
+      const OTHER_USER = 999;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Drinks By Other',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-01T23:59:59Z');
+      const titles = occurrences.map((o) => o.event.title);
+      expect(titles).not.toContain('Group Drinks By Other');
+    });
+
+    test('getEvent() finds group-owned events created by the user', () => {
       const event = service.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -477,10 +495,28 @@ describe('EventService', () => {
       });
 
       const found = service.getEvent(event.id, USER_ID);
+      expect(found).not.toBeNull();
+      expect(found!.title).toBe('Group Meeting');
+    });
+
+    test('getEvent() returns null for group-owned events created by another user', () => {
+      const OTHER_USER = 998;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting By Other',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const found = service.getEvent(event.id, USER_ID);
       expect(found).toBeNull();
     });
 
-    test('deleteEvent() returns false for group-owned events', () => {
+    test('deleteEvent() succeeds for group-owned events created by the user', () => {
       const event = service.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -492,6 +528,23 @@ describe('EventService', () => {
       });
 
       const deleted = service.deleteEvent(event.id, USER_ID);
+      expect(deleted).toBe(true);
+    });
+
+    test('deleteEvent() returns false for group-owned events created by another user', () => {
+      const OTHER_USER = 997;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      const event = service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting By Other',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const deleted = service.deleteEvent(event.id, USER_ID);
       expect(deleted).toBe(false);
 
       // Group event must still exist
@@ -499,7 +552,7 @@ describe('EventService', () => {
       expect(found).not.toBeNull();
     });
 
-    test('getEventsInRange() does not expand group-owned recurring events in personal context', () => {
+    test('getEventsInRange() expands group-owned recurring events created by the user', () => {
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Weekly',
@@ -512,10 +565,28 @@ describe('EventService', () => {
       });
 
       const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-30T23:59:59Z');
-      expect(occurrences.some((o) => o.event.title === 'Group Weekly')).toBe(false);
+      expect(occurrences.some((o) => o.event.title === 'Group Weekly')).toBe(true);
     });
 
-    test('getUpcoming() does not include group-owned recurring events', () => {
+    test('getEventsInRange() does not expand group-owned recurring events created by another user', () => {
+      const OTHER_USER = 996;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Weekly By Other',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=WEEKLY',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const occurrences = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-30T23:59:59Z');
+      expect(occurrences.some((o) => o.event.title === 'Group Weekly By Other')).toBe(false);
+    });
+
+    test('getUpcoming() includes group-owned recurring events created by the user', () => {
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Standup',
@@ -535,8 +606,27 @@ describe('EventService', () => {
 
       const upcoming = service.getUpcoming(USER_ID, 10);
       const titles = upcoming.map((e) => e.title);
-      expect(titles).not.toContain('Group Standup');
+      expect(titles).toContain('Group Standup');
       expect(titles).toContain('Personal Yoga');
+    });
+
+    test('getUpcoming() does not include group-owned recurring events created by another user', () => {
+      const OTHER_USER = 995;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      service.createEvent({
+        user_id: USER_ID,
+        title: 'Group Standup By Other',
+        start_at: '2026-04-01T09:00:00Z',
+        timezone: 'UTC',
+        recurrence_rule: 'FREQ=DAILY',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const upcoming = service.getUpcoming(USER_ID, 10);
+      const titles = upcoming.map((e) => e.title);
+      expect(titles).not.toContain('Group Standup By Other');
     });
 
     test('getFreeSlotsForGroup() returns free slots based on group events', () => {

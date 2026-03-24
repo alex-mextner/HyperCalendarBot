@@ -38,17 +38,22 @@ export class EventRepository {
   findById(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(
-        "SELECT * FROM events WHERE id = ? AND user_id = ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user')",
+        `SELECT * FROM events WHERE id = ? AND is_cancelled = 0
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR (owner_type = 'group' AND created_by = ?))`,
       )
-      .get(id, userId) as CalendarEvent | null;
+      .get(id, userId, userId) as CalendarEvent | null;
   }
 
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
     return this.db
       .prepare(
-        "SELECT * FROM events WHERE user_id = ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user') ORDER BY id DESC LIMIT 1",
+        `SELECT * FROM events WHERE is_cancelled = 0
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR (owner_type = 'group' AND created_by = ?))
+         ORDER BY id DESC LIMIT 1`,
       )
-      .get(userId) as CalendarEvent | null;
+      .get(userId, userId) as CalendarEvent | null;
   }
 
   getOwnerId(eventId: number): number | null {
@@ -59,31 +64,36 @@ export class EventRepository {
   getByDateRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(
-        "SELECT * FROM events WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND (owner_type IS NULL OR owner_type = 'user') ORDER BY start_at",
+        `SELECT * FROM events WHERE start_at >= ? AND start_at <= ? AND is_cancelled = 0
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR (owner_type = 'group' AND created_by = ?))
+         ORDER BY start_at`,
       )
-      .all(userId, startUtc, endUtc) as CalendarEvent[];
+      .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
   }
 
   getInRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE user_id = ? AND start_at >= ? AND start_at <= ?
+      WHERE start_at >= ? AND start_at <= ?
         AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
-        AND (owner_type IS NULL OR owner_type = 'user')
+        AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+          OR (owner_type = 'group' AND created_by = ?))
       ORDER BY start_at
     `)
-      .all(userId, startUtc, endUtc) as CalendarEvent[];
+      .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
   }
 
   getRecurringTemplates(userId: number): CalendarEvent[] {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE user_id = ? AND recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
-        AND (owner_type IS NULL OR owner_type = 'user')
+      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+        AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+          OR (owner_type = 'group' AND created_by = ?))
     `)
-      .all(userId) as CalendarEvent[];
+      .all(userId, userId) as CalendarEvent[];
   }
 
   getVisibleRecurringTemplates(userId: number): CalendarEvent[] {
@@ -95,9 +105,9 @@ export class EventRepository {
       WHERE e.recurrence_rule IS NOT NULL
         AND e.parent_event_id IS NULL
         AND e.is_cancelled = 0
-        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
-          e.user_id = ?
+          (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
+          OR (e.owner_type = 'group' AND e.created_by = ?)
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -105,7 +115,7 @@ export class EventRepository {
         )
     `,
       )
-      .all(userId, userId) as CalendarEvent[];
+      .all(userId, userId, userId) as CalendarEvent[];
   }
 
   getVisibleUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -117,9 +127,9 @@ export class EventRepository {
       WHERE e.is_cancelled = 0
         AND e.parent_event_id IS NULL
         AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
-        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
-          e.user_id = ?
+          (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
+          OR (e.owner_type = 'group' AND e.created_by = ?)
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -129,7 +139,7 @@ export class EventRepository {
       LIMIT ?
     `,
       )
-      .all(nowIso, userId, userId, limit) as CalendarEvent[];
+      .all(nowIso, userId, userId, userId, limit) as CalendarEvent[];
   }
 
   getExceptions(parentEventId: number): CalendarEvent[] {
@@ -180,8 +190,12 @@ export class EventRepository {
 
   remove(id: number, userId: number): boolean {
     const result = this.db
-      .prepare("DELETE FROM events WHERE id = ? AND user_id = ? AND (owner_type IS NULL OR owner_type = 'user')")
-      .run(id, userId);
+      .prepare(
+        `DELETE FROM events WHERE id = ?
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR (owner_type = 'group' AND created_by = ?))`,
+      )
+      .run(id, userId, userId);
     return result.changes > 0;
   }
 
@@ -194,9 +208,9 @@ export class EventRepository {
         AND e.is_cancelled = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
-        AND (e.owner_type IS NULL OR e.owner_type = 'user')
         AND (
-          e.user_id = ?
+          (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
+          OR (e.owner_type = 'group' AND e.created_by = ?)
           OR e.id IN (
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
@@ -205,7 +219,7 @@ export class EventRepository {
       ORDER BY e.start_at
     `,
       )
-      .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
+      .all(startUtc, endUtc, userId, userId, userId) as CalendarEvent[];
   }
 
   isParticipant(eventId: number, userId: number): boolean {
@@ -223,12 +237,13 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE user_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0
-        AND (owner_type IS NULL OR owner_type = 'user')
+      WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0
+        AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+          OR (owner_type = 'group' AND created_by = ?))
       ORDER BY start_at ASC
       LIMIT ?
     `)
-      .all(userId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
+      .all(`%${this.escapeLike(query)}%`, userId, userId, limit) as CalendarEvent[];
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -546,11 +561,11 @@ export class EventRepository {
 
   searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
     const conditions: string[] = [
-      'e.user_id = ?',
       'e.is_cancelled = 0',
-      "(e.owner_type IS NULL OR e.owner_type = 'user')",
+      `((e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
+        OR (e.owner_type = 'group' AND e.created_by = ?))`,
     ];
-    const params: (string | number | null)[] = [userId];
+    const params: (string | number | null)[] = [userId, userId];
 
     if (query) {
       conditions.push('e.title LIKE ?');
