@@ -384,6 +384,12 @@ All user-facing bot messages must follow these rules:
   Add new strings to the `aiTools` namespace in `MSG.en` and `MSG.ru` in `constants.ts`.
   Inline ternaries (`lang === 'ru' ? ... : ...`) are only acceptable for strings that use `ruPlural`
   at the call site and cannot be expressed as simple catalog functions.
+- **Frame features as user benefit, not technical capability.** Never describe bot actions as surveillance
+  or tracking ("отслеживать кто вышел"). Instead explain what the user gains:
+  "автоматически обновлять групповой календарь когда участники приходят и уходят" (benefit)
+  vs "отслеживать кто присоединился или вышел" (creepy).
+  Same in English: "keep the group calendar up to date" (benefit)
+  vs "track who joins or leaves" (surveillance).
 
 ## Telegram Bot API Limits
 
