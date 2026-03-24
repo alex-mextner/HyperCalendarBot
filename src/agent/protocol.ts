@@ -59,15 +59,24 @@ export type AgentCommand =
     }
   | { id: string; type: 'applescript_run'; payload: { script: string; timeout_ms?: number } };
 
-export interface AgentResponse {
+export interface AgentChunkResponse {
   id: string;
-  type: 'chunk' | 'done' | 'error';
+  type: 'chunk';
+  text: string;
+}
+export interface AgentDoneResponse {
+  id: string;
+  type: 'done';
   text?: string;
-  /** Structured data from agent — JSON-safe primitives, arrays, or objects. */
   data?: string | number | boolean | null;
   exitCode?: number;
-  error?: string;
 }
+export interface AgentErrorResponse {
+  id: string;
+  type: 'error';
+  error: string;
+}
+export type AgentResponse = AgentChunkResponse | AgentDoneResponse | AgentErrorResponse;
 
 export interface AgentPing {
   type: 'ping';
@@ -87,12 +96,7 @@ export interface AgentTokenRefreshed {
 /** Zod schema for validating inbound WebSocket messages from the agent. */
 export const AgentInboundSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pair'), code: z.string() }),
-  z.object({
-    type: z.literal('chunk'),
-    id: z.string(),
-    text: z.string().optional(),
-    data: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
-  }),
+  z.object({ type: z.literal('chunk'), id: z.string(), text: z.string() }),
   z.object({
     type: z.literal('done'),
     id: z.string(),
@@ -103,7 +107,7 @@ export const AgentInboundSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('error'),
     id: z.string(),
-    error: z.string().optional(),
+    error: z.string(),
   }),
   z.object({ type: z.literal('ping') }),
 ]);

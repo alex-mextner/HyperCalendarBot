@@ -14,7 +14,7 @@ function notConnected(lang: string): ToolResult {
 export async function handleAssistantTool(
   ctx: AgentContext,
   toolName: AgentCommand['type'],
-  payload: { [key: string]: unknown },
+  payload: AgentCommand['payload'],
 ): Promise<ToolResult> {
   if (!ctx.agentRegistry?.isConnected(ctx.user.telegram_id)) {
     return notConnected(ctx.user.language);

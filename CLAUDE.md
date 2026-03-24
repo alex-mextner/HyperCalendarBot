@@ -244,8 +244,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   Zod array schema. For complex DB types, validate the structural shape with Zod.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
-  The only exception is `z.record(z.string(), z.unknown())` for workflow DSL `input` fields where
-  values contain template strings resolved at runtime.
+  No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
 - **`ToolResult.data` is typed** — never return `unknown` from tool handlers. Use `ToolResultData`
   union type from `src/services/ai/types.ts`. Add new variants when adding tools that return
   structured data.
@@ -278,6 +277,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   ```
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
+- **No silent `catch` blocks** — every `catch` must either log the error or have a comment explaining
+  WHY swallowing is safe. Acceptable patterns: JSON.parse with fallback (invalid input expected),
+  WebSocket keepalive (non-JSON packets expected), cleanup on shutdown (resource already gone).
+  Unacceptable: `catch { return; }` or `catch { return null; }` without logging or explanation.
+  When in doubt, `logger.warn({ err }, 'context')` — a warn is cheap, a hidden bug is not.
 - **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).
 - **Multi-step DB operations are atomic**: SELECT followed by UPDATE on the same rows must be wrapped in `db.transaction(...)`. Without it, concurrent writes can cause notifications to fire for rows that changed state between the two queries.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
