@@ -3,7 +3,7 @@
 import type { ConflictRow, ConflictScheduleData } from '../../worker/templates/conflict-schedule.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import type { ConflictResult } from '../invite/conflict-service.ts';
-import type { RenderService } from './render-service.ts';
+import type { ImageRenderer } from './render-service.ts';
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
 
@@ -12,7 +12,7 @@ function toMinutes(iso: string): number {
 }
 
 export async function renderConflictImage(
-  renderService: RenderService,
+  renderService: ImageRenderer,
   organizerId: number,
   organizerLabel: string,
   organizerEvents: { startAt: string; endAt: string; title: string }[],

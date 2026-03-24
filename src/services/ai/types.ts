@@ -22,13 +22,14 @@ import type { SharedEventRepository } from '../../database/repositories/shared-e
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { EventOccurrence, User } from '../../database/types.ts';
+import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
-import type { RenderService } from '../image/render-service.ts';
+import type { ImageRenderer } from '../image/render-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
@@ -68,7 +69,7 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: RenderService;
+  renderService?: ImageRenderer;
   notificationPrefs?: {
     getPrefs(userId: number): NotificationPreferencesRow;
     update(userId: number, patch: NotificationPreferencesUpdate): void;
@@ -155,27 +156,18 @@ export interface AgentConfig {
 }
 
 export interface TelegramSender {
-  sendMessage(
-    chatId: number,
-    text: string,
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-  ): Promise<{ message_id: number }>;
+  sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
   sendMessageWithKeyboard?(
     chatId: number,
     text: string,
     keyboard: import('gramio').InlineKeyboard,
   ): Promise<{ message_id: number }>;
-  editMessageText(
-    chatId: number,
-    messageId: number,
-    text: string,
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-  ): Promise<void>;
+  editMessageText(chatId: number, messageId: number, text: string, parseMode?: ParseMode): Promise<void>;
   sendButtons?(
     chatId: number,
     text: string,
     buttons: string[],
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+    parseMode?: ParseMode,
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;

@@ -200,6 +200,12 @@ export interface DiscardCallPayload {
   connectionId: bigint;
 }
 
+export interface GetDhConfigPayload {
+  _: 'messages.getDhConfig';
+  version: number;
+  randomLength: number;
+}
+
 interface InputPhoneCallPayload {
   _: 'inputPhoneCall';
   id: bigint;
@@ -966,12 +972,20 @@ export function handlePhoneCallUpdate(phoneCall: PhoneCallUpdate, handlers: Voic
 // Complete call orchestrator (full flow example)
 // ---------------------------------------------------------------------------
 
+/** Union of all MTProto payloads used by the call orchestrator. */
+export type MtprotoInvokePayload =
+  | GetDhConfigPayload
+  | RequestCallPayload
+  | AcceptCallPayload
+  | ConfirmCallPayload
+  | DiscardCallPayload;
+
 /**
  * Abstracts the MTProto transport layer.
  * Implement this interface to connect to an actual MTProto client.
  */
 export interface MtprotoTransport {
-  invoke<T>(method: string, params: object): Promise<T>;
+  invoke<T>(method: string, params: MtprotoInvokePayload): Promise<T>;
   onUpdate(handler: (update: { _: string; phoneCall?: PhoneCallUpdate }) => void): void;
 }
 

@@ -43,6 +43,7 @@ import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
+import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import { createActivateCommand, createConnectCommand, createDisconnectCommand } from './commands/connect.command.ts';
@@ -557,7 +558,7 @@ export function createBot(
           sendMessage: async (
             chatId: number,
             text: string,
-            options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
+            options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
           ) => {
             await bot.api.sendMessage({
               chat_id: chatId,
@@ -637,7 +638,7 @@ export function createBot(
               sendMessage: async (
                 chatId: number,
                 text: string,
-                options: { parse_mode: 'HTML' | 'MarkdownV2' | 'Markdown'; reply_markup?: InlineKeyboard },
+                options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
               ) => {
                 const sent = await bot.api.sendMessage({
                   chat_id: chatId,

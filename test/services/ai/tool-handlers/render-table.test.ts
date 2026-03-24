@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/meta.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
-import type { RenderService } from '../../../../src/services/image/render-service.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -13,7 +12,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     },
     renderService: {
       renderDirect: mock(() => Promise.resolve(Buffer.from('png'))),
-    } as unknown as RenderService,
+    },
     eventService: {} as never,
     userRepo: {} as never,
     holidayService: {} as never,
@@ -74,7 +73,7 @@ describe('handleRenderTable', () => {
     const ctx = makeCtx({
       renderService: {
         renderDirect: mock(() => Promise.reject(new Error('playwright down'))),
-      } as unknown as RenderService,
+      },
     });
     const result = handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
     // Synchronous return is still success

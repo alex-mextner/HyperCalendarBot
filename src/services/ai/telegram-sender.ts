@@ -1,6 +1,7 @@
 import type { Bot, TelegramReactionTypeEmojiEmoji } from 'gramio';
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
+import type { ParseMode } from '../../utils/telegram.ts';
 import type { TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
@@ -9,7 +10,7 @@ interface TelegramSenderOptions {
 
 export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions): TelegramSender {
   return {
-    async sendMessage(chatId: number, text: string, parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown') {
+    async sendMessage(chatId: number, text: string, parseMode?: ParseMode) {
       const result = await bot.api.sendMessage({
         chat_id: chatId,
         text,
@@ -25,12 +26,7 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
-    async editMessageText(
-      chatId: number,
-      messageId: number,
-      text: string,
-      parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-    ) {
+    async editMessageText(chatId: number, messageId: number, text: string, parseMode?: ParseMode) {
       await bot.api.editMessageText({
         chat_id: chatId,
         message_id: messageId,
@@ -38,13 +34,7 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
         ...(parseMode ? { parse_mode: parseMode } : {}),
       });
     },
-    async sendButtons(
-      chatId: number,
-      text: string,
-      buttons: string[],
-      parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-      userId?: number,
-    ) {
+    async sendButtons(chatId: number, text: string, buttons: string[], parseMode?: ParseMode, userId?: number) {
       const kb = new InlineKeyboard();
       for (const btn of buttons) {
         const cbData = userId ? `ai_btn:${userId}:${btn}` : `ai_btn:${btn}`;

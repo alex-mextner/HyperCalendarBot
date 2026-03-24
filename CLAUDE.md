@@ -225,6 +225,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
 - **No `any`/`as any`/`Function`** — proper typing only.
+- **No bare `object` type** — use `Record<string, unknown>` or a specific interface. `object` accepts
+  any non-primitive but gives no information about the shape — it's nearly as bad as `any`.
 - **No `Record<string, unknown>` as a lazy escape** — use a specific interface or Zod-inferred type
   when the shape is known at compile time. `Record<string, unknown>` is acceptable only for genuine
   runtime dynamic accumulators (e.g. step results built up during execution) where no typed interface
@@ -236,6 +238,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
 - **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
   There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **Type co-location**: interfaces and type aliases must live in the same file as the code that owns
+  them. Do not create a single global `types.ts` dumping ground. One exception: types shared across
+  multiple layers without a clear owner may live in a small domain-level `types.ts`
+  (e.g. `src/services/ai/types.ts`). Avoid circular deps — a type that is imported by many files
+  should not itself import from those files.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise

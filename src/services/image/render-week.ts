@@ -2,10 +2,10 @@ import { TZDate } from '@date-fns/tz';
 import type { EventOccurrence } from '../../database/types.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { mapWeeklyOverviewData } from './data-mapper.ts';
-import type { RenderService } from './render-service.ts';
+import type { ImageRenderer } from './render-service.ts';
 
 export async function renderWeekImage(
-  renderService: RenderService,
+  renderService: ImageRenderer,
   occurrences: EventOccurrence[],
   weekStartIso: string,
   timezone: string,
