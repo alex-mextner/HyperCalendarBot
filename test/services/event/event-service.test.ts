@@ -629,6 +629,107 @@ describe('EventService', () => {
       expect(titles).not.toContain('Group Standup By Other');
     });
 
+    describe('membership-aware filtering in personal view', () => {
+      const MEMBER_GROUP_ID = -200111;
+
+      function addMember(userId: number, chatId: number, joinedAt: string, leftAt: string | null = null) {
+        db.prepare(
+          `INSERT INTO group_members (chat_id, user_id, joined_at, left_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT (chat_id, user_id) DO UPDATE SET joined_at = ?, left_at = ?`,
+        ).run(chatId, userId, joinedAt, leftAt, joinedAt, leftAt);
+      }
+
+      function createGroupEvent(title: string, startAt: string, opts: { recurrence?: string } = {}) {
+        return service.createEvent({
+          user_id: USER_ID,
+          title,
+          start_at: startAt,
+          end_at: opts.recurrence ? undefined : new Date(new Date(startAt).getTime() + 3600000).toISOString(),
+          timezone: 'UTC',
+          owner_type: 'group',
+          group_id: MEMBER_GROUP_ID,
+          created_by: USER_ID,
+          recurrence_rule: opts.recurrence,
+        });
+      }
+
+      test('does not show group events when user is not a member of the group', () => {
+        // User created event in group but is NOT in group_members at all
+        createGroupEvent('Ghost Event', '2026-04-10T10:00:00Z');
+
+        const events = service.getEventsInRange(USER_ID, '2026-04-10T00:00:00Z', '2026-04-10T23:59:59Z');
+        expect(events.some((o) => o.event.title === 'Ghost Event')).toBe(false);
+      });
+
+      test('does not show group events after user left the group', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-03-01T00:00:00Z', '2026-04-05T00:00:00Z');
+        // Event AFTER user left
+        createGroupEvent('After Leaving', '2026-04-10T10:00:00Z');
+
+        const events = service.getEventsInRange(USER_ID, '2026-04-10T00:00:00Z', '2026-04-10T23:59:59Z');
+        expect(events.some((o) => o.event.title === 'After Leaving')).toBe(false);
+      });
+
+      test('shows group events while user is an active member', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-03-01T00:00:00Z', null); // still active
+        createGroupEvent('Active Member Event', '2026-04-10T10:00:00Z');
+
+        const events = service.getEventsInRange(USER_ID, '2026-04-10T00:00:00Z', '2026-04-10T23:59:59Z');
+        expect(events.some((o) => o.event.title === 'Active Member Event')).toBe(true);
+      });
+
+      test('does not show group events created before user joined', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-04-15T00:00:00Z', null);
+        // Event created before joining
+        createGroupEvent('Before Joining', '2026-04-10T10:00:00Z');
+
+        const events = service.getEventsInRange(USER_ID, '2026-04-10T00:00:00Z', '2026-04-10T23:59:59Z');
+        expect(events.some((o) => o.event.title === 'Before Joining')).toBe(false);
+      });
+
+      test('recurring: does not show occurrences after user left the group', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-03-01T00:00:00Z', '2026-04-08T00:00:00Z');
+        createGroupEvent('Weekly Team Sync', '2026-04-01T09:00:00Z', { recurrence: 'FREQ=WEEKLY' });
+
+        // Query the full month — should see occurrences only before left_at
+        const events = service.getEventsInRange(USER_ID, '2026-04-01T00:00:00Z', '2026-04-30T23:59:59Z');
+        const syncEvents = events.filter((o) => o.event.title === 'Weekly Team Sync');
+        // Apr 1 (before left), Apr 8 would be ON left_at day → excluded
+        // So only Apr 1 should show
+        expect(syncEvents.length).toBe(1);
+        expect(syncEvents[0]!.occurrence_start).toContain('2026-04-01');
+      });
+
+      test('recurring: does not show occurrences before user joined', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-04-15T00:00:00Z', null);
+        createGroupEvent('Daily Standup', '2026-04-01T09:00:00Z', { recurrence: 'FREQ=DAILY' });
+
+        // Query Apr 10-20 — should only see occurrences from Apr 15+
+        const events = service.getEventsInRange(USER_ID, '2026-04-10T00:00:00Z', '2026-04-20T23:59:59Z');
+        const standups = events.filter((o) => o.event.title === 'Daily Standup');
+        for (const s of standups) {
+          expect(s.occurrence_start >= '2026-04-15T00:00:00Z').toBe(true);
+        }
+        expect(standups.length).toBe(6); // Apr 15, 16, 17, 18, 19, 20
+      });
+
+      test('search does not return group events when user is not a member', () => {
+        createGroupEvent('Team Planning', '2026-04-10T10:00:00Z');
+        // No membership record → not visible
+        const results = service.searchEvents(USER_ID, 'Planning');
+        expect(results.some((e) => e.title === 'Team Planning')).toBe(false);
+      });
+
+      test('getUpcoming does not include group events after user left', () => {
+        addMember(USER_ID, MEMBER_GROUP_ID, '2026-03-01T00:00:00Z', '2026-04-01T00:00:00Z');
+        createGroupEvent('Future Group Event', '2026-05-01T10:00:00Z');
+
+        const upcoming = service.getUpcoming(USER_ID, 10);
+        expect(upcoming.some((e) => e.title === 'Future Group Event')).toBe(false);
+      });
+    });
+
     test('getFreeSlotsForGroup() returns free slots based on group events', () => {
       service.createEvent({
         user_id: USER_ID,
