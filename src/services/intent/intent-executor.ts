@@ -1,5 +1,6 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
@@ -107,14 +108,13 @@ const ToolOutputSchema = z.union([
   ToolOutputMapSchema,
 ]);
 
+const ToolOutputCodec = jsonCodec(ToolOutputSchema);
+
 type ParsedToolOutput = z.infer<typeof ToolOutputSchema>;
 
 function parseToolOutput(output: string): ParsedToolOutput | string {
-  try {
-    return ToolOutputSchema.parse(JSON.parse(output));
-  } catch {
-    return output;
-  }
+  const result = ToolOutputCodec.safeParse(output);
+  return result.success ? result.data : output;
 }
 
 /**

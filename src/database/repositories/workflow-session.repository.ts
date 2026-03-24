@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite';
 import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
 import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 
 /** Recursive JSON-safe type for tool output values (objects, arrays, primitives). */
 type ToolOutputValue = string | number | boolean | null | ToolOutputValue[] | { [k: string]: ToolOutputValue };
@@ -66,6 +67,8 @@ const WorkflowSessionSchema = z.object({
   createdAt: z.number(),
 });
 
+const WorkflowSessionCodec = jsonCodec(WorkflowSessionSchema);
+
 const TTL_MS = 5 * 60 * 1000;
 
 export class WorkflowSessionRepository implements WorkflowSessionStore {
@@ -80,11 +83,8 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
       this.delete(chatId, userId);
       return null;
     }
-    try {
-      return WorkflowSessionSchema.parse(JSON.parse(row.data));
-    } catch {
-      return null;
-    }
+    const result = WorkflowSessionCodec.safeParse(row.data);
+    return result.success ? result.data : null;
   }
 
   set(chatId: number, userId: number, session: WorkflowSession): void {

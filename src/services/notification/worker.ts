@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 
 export function parseTelegramError(err: unknown): { code: number; retryAfter?: number } | null {
@@ -39,13 +40,13 @@ export async function processNotification(
 
     if (data.type === 'event_reminder' || data.type === 'event_reminder_batch') {
       try {
-        const parsed = z
-          .object({
+        const parsed = jsonCodec(
+          z.object({
             text: z.string().optional(),
             event_id: z.number().optional(),
             event_ids: z.array(z.number()).optional(),
-          })
-          .parse(JSON.parse(rawPayload));
+          }),
+        ).parse(rawPayload);
         if (parsed.text) {
           text = parsed.text;
         }

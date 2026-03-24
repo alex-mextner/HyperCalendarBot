@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { CreateIntentData } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
@@ -17,6 +18,9 @@ const LearnerResponseSchema = z.object({
   workflow: WorkflowSchema,
   format: z.string().optional(),
 });
+
+const LearnerResponseCodec = jsonCodec(LearnerResponseSchema);
+const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 interface ToolCallRecord {
   name: string;
@@ -85,7 +89,7 @@ export class IntentLearner {
         if (existing.status === 'approved') {
           let existingPhrases: string[];
           try {
-            existingPhrases = z.array(z.string()).parse(JSON.parse(existing.phrases));
+            existingPhrases = StringArrayCodec.parse(existing.phrases);
           } catch {
             existingPhrases = [];
           }
@@ -191,7 +195,7 @@ export class IntentLearner {
         .trim();
 
       // Parse and validate JSON response
-      const parsed = LearnerResponseSchema.parse(JSON.parse(json));
+      const parsed = LearnerResponseCodec.parse(json);
 
       if (parsed.skip) return null;
 

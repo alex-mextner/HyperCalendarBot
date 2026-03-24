@@ -2,8 +2,11 @@
 
 import { z } from 'zod';
 import type { Intent } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { normalize, tokenize } from './normalizer.ts';
+
+const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 interface MatchResult {
   intentId: number;
@@ -27,7 +30,7 @@ export class IntentMatcher {
     for (const intent of intents) {
       let phrases: string[];
       try {
-        phrases = z.array(z.string()).parse(JSON.parse(intent.phrases));
+        phrases = StringArrayCodec.parse(intent.phrases);
       } catch {
         cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON, skipping');
         continue;
@@ -39,7 +42,7 @@ export class IntentMatcher {
       if (intent.pattern) {
         let triggerWords: string[];
         try {
-          triggerWords = z.array(z.string()).parse(JSON.parse(intent.trigger_words));
+          triggerWords = StringArrayCodec.parse(intent.trigger_words);
         } catch {
           cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON, skipping pattern');
           continue;

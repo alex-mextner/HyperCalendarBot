@@ -1,5 +1,15 @@
 import { z } from 'zod';
 import { formatTime } from '../../utils/date.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
+const EventsListCodec = jsonCodec(
+  z.array(z.object({ title: z.string(), start_at: z.string(), end_at: z.string().optional() })),
+);
+const FreeSlotsCodec = jsonCodec(z.array(z.object({ start: z.string(), end: z.string() })));
+const SearchResultsCodec = jsonCodec(z.array(z.object({ title: z.string(), start_at: z.string() })));
+const HolidaysCodec = jsonCodec(z.array(z.object({ name: z.string(), date: z.string() })));
+const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /**
  * Format tool output into a user-friendly response string.
@@ -39,14 +49,8 @@ function formatText(output: string): string {
   if ((!trimmed.startsWith('{') && !trimmed.startsWith('[')) || trimmed.length < 3) {
     return output;
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch {
-    return output;
-  }
   // JSON object — try to extract a human-readable field
-  const result = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).safeParse(parsed);
+  const result = TextMapCodec.safeParse(trimmed);
   if (result.success) {
     for (const key of ['output', 'message', 'text', 'result']) {
       const val = result.data[key];
@@ -58,9 +62,7 @@ function formatText(output: string): string {
 }
 
 function formatEventsList(output: string, timezone: string, language: string): string {
-  const events = z
-    .array(z.object({ title: z.string(), start_at: z.string(), end_at: z.string().optional() }))
-    .parse(JSON.parse(output));
+  const events = EventsListCodec.parse(output);
   if (events.length === 0) {
     return language === 'ru' ? 'Нет событий' : 'No events';
   }
@@ -81,7 +83,7 @@ function formatEventsList(output: string, timezone: string, language: string): s
 }
 
 function formatFreeSlots(output: string, timezone: string, _language: string): string {
-  const slots = z.array(z.object({ start: z.string(), end: z.string() })).parse(JSON.parse(output));
+  const slots = FreeSlotsCodec.parse(output);
   if (slots.length === 0) {
     return '';
   }
@@ -96,7 +98,7 @@ function formatFreeSlots(output: string, timezone: string, _language: string): s
 }
 
 function formatSearchResults(output: string, timezone: string, _language: string): string {
-  const events = z.array(z.object({ title: z.string(), start_at: z.string() })).parse(JSON.parse(output));
+  const events = SearchResultsCodec.parse(output);
   if (events.length === 0) {
     return '';
   }
@@ -110,7 +112,7 @@ function formatSearchResults(output: string, timezone: string, _language: string
 }
 
 function formatHolidays(output: string, _language: string): string {
-  const holidays = z.array(z.object({ name: z.string(), date: z.string() })).parse(JSON.parse(output));
+  const holidays = HolidaysCodec.parse(output);
   if (holidays.length === 0) {
     return '';
   }
@@ -119,9 +121,7 @@ function formatHolidays(output: string, _language: string): string {
 }
 
 function formatSettings(output: string, _language: string): string {
-  const result = z
-    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
-    .safeParse(JSON.parse(output));
+  const result = SettingsCodec.safeParse(output);
   if (!result.success) {
     return '';
   }

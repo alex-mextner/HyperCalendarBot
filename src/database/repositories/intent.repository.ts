@@ -1,6 +1,9 @@
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import type { CreateIntentData, Intent, IntentStatus } from '../types.ts';
+
+const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 export class IntentRepository {
   constructor(private db: Database) {}
@@ -40,7 +43,7 @@ export class IntentRepository {
     const intent = this.getById(id);
     if (!intent) return;
 
-    const existingPhrases = z.array(z.string()).parse(JSON.parse(intent.phrases));
+    const existingPhrases = StringArrayCodec.parse(intent.phrases);
     const phraseSet = new Set(existingPhrases);
 
     for (const phrase of newPhrases) {
