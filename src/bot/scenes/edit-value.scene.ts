@@ -55,7 +55,7 @@ export function createEditValueScene(eventService: EventService) {
         const text = (context as unknown as { text?: string }).text;
         if (!text) return;
 
-        const updateData: Record<string, unknown> = {};
+        const updateData: { [key: string]: unknown } = {};
 
         if (field === 'title') {
           updateData.title = text;
@@ -105,7 +105,7 @@ export function createEditValueScene(eventService: EventService) {
           const editText = `${t(lang).event_updated(updated.title)}\n\n${detail}`;
           const bot = (
             context as unknown as {
-              bot: { api: { editMessageText: (p: Record<string, unknown>) => Promise<unknown> } };
+              bot: { api: { editMessageText: (p: { [key: string]: unknown }) => Promise<unknown> } };
             }
           ).bot;
           await bot.api.editMessageText({

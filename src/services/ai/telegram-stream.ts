@@ -27,7 +27,7 @@ const TOOL_LABELS: Record<string, Record<string, string>> = {
 
 const MAX_ARG_LENGTH = 50;
 
-function formatToolInput(input: Record<string, unknown>): string {
+function formatToolInput(input: { [key: string]: unknown }): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined || value === null) continue;
@@ -107,7 +107,7 @@ export class TelegramStreamWriter {
     return this.plainResponseText;
   }
 
-  setToolLabel(toolName: string, input?: Record<string, unknown>): void {
+  setToolLabel(toolName: string, input?: { [key: string]: unknown }): void {
     const labels = TOOL_LABELS[toolName];
     const label = labels?.[this.lang] ?? labels?.en ?? toolName;
     const details = input ? formatToolInput(input) : '';

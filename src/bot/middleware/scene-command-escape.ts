@@ -15,7 +15,7 @@ interface MessageContext {
   is(type: string): boolean;
   from?: { id: number };
   dbUser?: User;
-  send(text: string, opts?: Record<string, unknown>): Promise<unknown>;
+  send(text: string, opts?: { [key: string]: unknown }): Promise<unknown>;
   text?: string;
 }
 

@@ -224,8 +224,17 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
-  `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- **No `any`/`as any`/`Function`** — proper typing only.
+- **No `Record<string, unknown>`** — this utility type alias is entirely banned:
+  - Known shape at compile time → specific interface or Zod-inferred type
+  - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
+  - Truly dynamic runtime accumulator → explicit index signature `{ [key: string]: unknown }`
+  - Opaque external data → `unknown`
+- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface.
+- **Type co-location**: types live close to the code that owns them. Don't scatter types globally;
+  create domain-level `types.ts` files (e.g. `services/scheduled/types.ts`, `bot/pipeline/types.ts`).
+  DB row types belong in `database/types.ts`.
+- `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise

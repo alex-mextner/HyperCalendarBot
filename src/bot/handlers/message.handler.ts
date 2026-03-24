@@ -64,12 +64,9 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
-import {
-  createIntentMatcherLayer,
-  type WorkflowSession,
-  type WorkflowSessionStore,
-} from '../pipeline/intent-matcher-layer.ts';
+import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -539,7 +536,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: Record<string, unknown>;
+    workflow: { [key: string]: unknown };
     format: string;
   }> | null = null;
   let lastError: unknown;
@@ -583,7 +580,7 @@ async function handleIntentEditInstruction(
         phrases: string[];
         trigger_words: string[];
         pattern: string | null;
-        workflow: Record<string, unknown>;
+        workflow: { [key: string]: unknown };
         format: string;
       }>;
       break;
@@ -872,7 +869,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             const parsed = JSON.parse(activeScene as string) as {
               name?: string;
               step?: number;
-              state?: Record<string, unknown>;
+              state?: { [key: string]: unknown };
             };
             await deps.scenePauseService.save(user.telegram_id, {
               sceneName: parsed.name ?? 'unknown',

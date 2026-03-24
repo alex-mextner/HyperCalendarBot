@@ -56,8 +56,8 @@ export function createOnboardingScene(
         db.users.update(context.from.id, { language: lang });
 
         const cbCtx = context as unknown as {
-          editText: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
+          editText: (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
+          answer: (opts?: { [key: string]: unknown }) => Promise<unknown>;
         };
         await cbCtx.editText(`${lang === 'ru' ? 'Язык: Русский' : 'Language: English'} \u2705`);
         await cbCtx.answer();
@@ -119,7 +119,7 @@ export function createOnboardingScene(
           const parts = data.split(':');
           const action = parts[0];
           const cbCtx = context as unknown as {
-            answer: (opts?: Record<string, unknown>) => Promise<unknown>;
+            answer: (opts?: { [key: string]: unknown }) => Promise<unknown>;
           };
 
           if (action === CB.ONBOARD_TZ) {
@@ -172,7 +172,7 @@ export function createOnboardingScene(
         }
 
         const cbCtx = context as unknown as {
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
+          answer: (opts?: { [key: string]: unknown }) => Promise<unknown>;
         };
         await cbCtx.answer();
         await context.scene.update({ country: payload });
@@ -214,7 +214,7 @@ export function createOnboardingScene(
         // Complete onboarding
         db.users.update(context.from.id, { onboarding_completed: 1 });
         const cbCtx = context as unknown as {
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
+          answer: (opts?: { [key: string]: unknown }) => Promise<unknown>;
         };
         await cbCtx.answer();
 

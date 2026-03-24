@@ -26,16 +26,16 @@ function applyAsFilter(raw: string, value: unknown): { name: string; value: unkn
   return { name, value: processed };
 }
 
-function storeResult(as: string, rawValue: unknown, stepResults: Record<string, unknown>): void {
+function storeResult(as: string, rawValue: unknown, stepResults: { [key: string]: unknown }): void {
   const { name, value } = applyAsFilter(as, rawValue);
   stepResults[name] = value;
 }
 
-type ToolExecutorFn = (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>;
+type ToolExecutorFn = (toolName: string, input: { [key: string]: unknown }) => ToolResult | Promise<ToolResult>;
 
 /** Build the initial step-results map pre-populated with event and group context from UserContext. */
-function buildEventStepResults(userCtx: ExecutorUserContext): Record<string, unknown> {
-  const pre: Record<string, unknown> = {};
+function buildEventStepResults(userCtx: ExecutorUserContext): { [key: string]: unknown } {
+  const pre: { [key: string]: unknown } = {};
   if (userCtx.lastAddedEvent) pre.last_added_event = userCtx.lastAddedEvent;
   if (userCtx.lastMentionedEvent) pre.last_mentioned_event = userCtx.lastMentionedEvent;
   pre.group = {
@@ -77,25 +77,25 @@ interface ExecutorResult {
   response?: string;
   suspended?: boolean;
   suspendedAt?: number;
-  stepResults?: Record<string, unknown>;
+  stepResults?: { [key: string]: unknown };
   /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
   mentionedEventId?: number;
 }
 
 interface ResumeState {
   stepIndex: number;
-  stepResults: Record<string, unknown>;
+  stepResults: { [key: string]: unknown };
   userAnswer: string;
 }
 
 interface Level1Tool {
   name: string;
-  input: Record<string, unknown>;
+  input: { [key: string]: unknown };
 }
 
 interface Level2Step {
   call?: string;
-  input?: Record<string, unknown>;
+  input?: { [key: string]: unknown };
   as?: string;
   when?: string;
   respond?: string;
@@ -128,7 +128,7 @@ async function runLevel1(
   const eventCtx = buildEventStepResults(userCtx);
 
   for (const tool of tools) {
-    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as Record<string, unknown>;
+    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n) as { [key: string]: unknown };
     const result = await executeTool(tool.name, resolvedInput);
     if (!result.success) {
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
@@ -147,7 +147,7 @@ function extractEventSummary(data: unknown): { id: number; title: string } | nul
   if (data === null || typeof data !== 'object') return null;
   const first = Array.isArray(data) ? data[0] : data;
   if (first === null || typeof first !== 'object') return null;
-  const r = first as Record<string, unknown>;
+  const r = first as { [key: string]: unknown };
   if (typeof r.id === 'number' && typeof r.title === 'string') return { id: r.id, title: r.title };
   return null;
 }
@@ -160,7 +160,7 @@ async function runLevel2(
   resumeState?: ResumeState,
   i18n?: I18nMap,
 ): Promise<ExecutorResult> {
-  const stepResults: Record<string, unknown> = {
+  const stepResults: { [key: string]: unknown } = {
     ...buildEventStepResults(userCtx),
     ...(resumeState?.stepResults ?? {}),
   };
@@ -194,8 +194,8 @@ async function runLevel2(
     if (suspendedStep?.as) {
       const { name } = applyAsFilter(suspendedStep.as, resumeState.userAnswer);
       if (!stepResults.ask || typeof stepResults.ask !== 'object') stepResults.ask = {};
-      (stepResults.ask as Record<string, unknown>)[name] = filteredAnswer;
-      (stepResults.tool_outputs as Record<string, unknown>)[name] = filteredAnswer;
+      (stepResults.ask as { [key: string]: unknown })[name] = filteredAnswer;
+      (stepResults.tool_outputs as { [key: string]: unknown })[name] = filteredAnswer;
     }
 
     startIndex = resumeState.stepIndex + 1;
@@ -243,10 +243,9 @@ async function runLevel2(
     }
 
     // Execute tool
-    const resolvedInput = resolveVariables(step.input ?? {}, captures, userCtx, stepResults, i18n) as Record<
-      string,
-      unknown
-    >;
+    const resolvedInput = resolveVariables(step.input ?? {}, captures, userCtx, stepResults, i18n) as {
+      [key: string]: unknown;
+    };
 
     const result = await executeTool(step.call, resolvedInput);
     if (!result.success) {
@@ -276,7 +275,7 @@ async function runLevel2(
       storeResult(step.as, valueToStore, stepResults);
       // Also store in tool_outputs namespace for {{tool_outputs.name.*}} access
       const { name: outputName, value: outputValue } = applyAsFilter(step.as, valueToStore);
-      (stepResults.tool_outputs as Record<string, unknown>)[outputName] = outputValue;
+      (stepResults.tool_outputs as { [key: string]: unknown })[outputName] = outputValue;
     }
   }
 
@@ -288,7 +287,7 @@ export class IntentExecutor {
    * Run a workflow (Level 1 or Level 2).
    */
   async run(
-    workflow: Record<string, unknown>,
+    workflow: { [key: string]: unknown },
     captures: Record<string, string>,
     userCtx: ExecutorUserContext,
     executeTool: ToolExecutorFn,

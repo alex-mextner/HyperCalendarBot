@@ -31,3 +31,20 @@ export type PipelineLayer = (
     supplementAutoResponse?: string;
   },
 ) => Promise<PipelineResult>;
+
+export interface WorkflowSession {
+  intentId: number;
+  stepIndex: number;
+  stepResults: { [key: string]: unknown };
+  workflow: { [key: string]: unknown };
+  captures: Record<string, string>;
+  createdAt: number;
+}
+
+export interface WorkflowSessionStore {
+  get(chatId: number, userId: number): WorkflowSession | null;
+  set(chatId: number, userId: number, session: WorkflowSession): void;
+  delete(chatId: number, userId: number): void;
+  /** Delete all sessions for a user across all chats (e.g. when user blocks the bot). */
+  deleteByUser(userId: number): void;
+}

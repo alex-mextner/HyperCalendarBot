@@ -652,9 +652,9 @@ if (config.REDIS_URL) {
       if (!match) return { handled: false };
       const intent = msgDeps.intentRepo.getById(match.intentId);
       if (!intent) return { handled: false };
-      let workflow: Record<string, unknown>;
+      let workflow: { [key: string]: unknown };
       try {
-        workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
+        workflow = JSON.parse(intent.workflow) as { [key: string]: unknown };
       } catch {
         return { handled: false };
       }
@@ -669,7 +669,7 @@ if (config.REDIS_URL) {
         workflow,
         match.captures,
         userCtx,
-        (toolName: string, input: Record<string, unknown>) => executeTool(agentCtx, toolName, input),
+        (toolName: string, input: { [key: string]: unknown }) => executeTool(agentCtx, toolName, input),
       );
       if (result.response && agentCtx.sender) {
         await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);

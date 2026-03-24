@@ -55,7 +55,7 @@ interface InlineQueryContext {
   from?: { id: number };
   query: string;
   location?: { latitude: number; longitude: number };
-  answerInlineQuery: (results: unknown[], options?: Record<string, unknown>) => Promise<void>;
+  answerInlineQuery: (results: unknown[], options?: { [key: string]: unknown }) => Promise<void>;
 }
 
 export class InlineDebouncer {

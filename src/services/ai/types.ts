@@ -61,15 +61,15 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
+  renderService?: { renderDirect(opts: { [key: string]: unknown }): Promise<Buffer> };
   notificationPrefs?: {
-    getPrefs(userId: number): Record<string, unknown>;
-    update(userId: number, patch: Record<string, unknown>): void;
+    getPrefs(userId: number): { [key: string]: unknown };
+    update(userId: number, patch: { [key: string]: unknown }): void;
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
   callSettingsRepo?: {
-    get(userId: number): Record<string, unknown> | null;
+    get(userId: number): { [key: string]: unknown } | null;
     ensureDefaults(userId: number): void;
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
@@ -94,7 +94,7 @@ export interface AgentContext {
   };
   feedbackRepo?: FeedbackRepository;
   botAdminId?: number;
-  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
+  sendMessageToChat?: (chatId: number, text: string, options?: { [key: string]: unknown }) => Promise<unknown>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   domainEvents?: DomainEventBus;
   conflictChecker?: ConflictChecker;

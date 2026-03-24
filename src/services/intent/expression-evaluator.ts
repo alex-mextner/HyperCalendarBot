@@ -40,7 +40,7 @@ class Parser {
     return t !== undefined && t.type === 'op' && ops.includes(t.value);
   }
 
-  parse(context: Record<string, unknown>): boolean {
+  parse(context: { [key: string]: unknown }): boolean {
     if (this.tokens.length === 0) {
       throw new Error('Empty expression');
     }
@@ -51,7 +51,7 @@ class Parser {
     return Boolean(result);
   }
 
-  private parseOrExpr(context: Record<string, unknown>): unknown {
+  private parseOrExpr(context: { [key: string]: unknown }): unknown {
     let left = this.parseAndExpr(context);
     while (this.isOp('||')) {
       this.consume();
@@ -61,7 +61,7 @@ class Parser {
     return left;
   }
 
-  private parseAndExpr(context: Record<string, unknown>): unknown {
+  private parseAndExpr(context: { [key: string]: unknown }): unknown {
     let left = this.parseComparison(context);
     while (this.isOp('&&')) {
       this.consume();
@@ -71,7 +71,7 @@ class Parser {
     return left;
   }
 
-  private parseComparison(context: Record<string, unknown>): unknown {
+  private parseComparison(context: { [key: string]: unknown }): unknown {
     const left = this.parseValue(context);
 
     if (this.isOp('==', '!=', '>', '<', '>=', '<=')) {
@@ -83,7 +83,7 @@ class Parser {
     return left;
   }
 
-  private parseValue(context: Record<string, unknown>): unknown {
+  private parseValue(context: { [key: string]: unknown }): unknown {
     const t = this.peek();
     if (t === undefined) throw new Error('Expected a value but reached end of expression');
 
@@ -109,7 +109,7 @@ class Parser {
     throw new Error(`Unexpected token: ${JSON.stringify(t)}`);
   }
 
-  private parsePropertyAccess(context: Record<string, unknown>): unknown {
+  private parsePropertyAccess(context: { [key: string]: unknown }): unknown {
     const rootToken = this.consume();
     if (rootToken.type !== 'ident') {
       throw new Error(`Expected identifier, got ${JSON.stringify(rootToken)}`);
@@ -155,7 +155,7 @@ class Parser {
         if (value === undefined || value === null) {
           throw new Error(`Cannot access property '${prop}' of ${String(value)}`);
         }
-        value = (value as Record<string, unknown>)[prop];
+        value = (value as { [key: string]: unknown })[prop];
         continue;
       }
 
@@ -216,7 +216,7 @@ function applyComparison(op: string, left: unknown, right: unknown): boolean {
  * NO function calls, NO assignments, NO arbitrary code execution.
  * @throws Error on invalid expression
  */
-export function evaluate(expression: string, context: Record<string, unknown>): boolean {
+export function evaluate(expression: string, context: { [key: string]: unknown }): boolean {
   const trimmed = expression.trim();
   if (trimmed.length === 0) {
     throw new Error('Empty expression');

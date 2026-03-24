@@ -2,16 +2,9 @@ import { logger } from '../../utils/logger.ts';
 import { evaluate } from '../intent/expression-evaluator.ts';
 import { ALL_TOPICS, type DomainEventBus, type DomainEventMap, type DomainEventTopic } from './domain-event-bus.ts';
 import type { TriggerRepository } from './trigger.repository.ts';
+import type { AiMessageJobData } from './types.ts';
 
 const triggerLogger = logger.child({ module: 'trigger-service' });
-
-export interface AiMessageJobData {
-  userId: number;
-  message: string;
-  source: 'scheduled' | 'trigger';
-  scheduleId?: string;
-  triggerId?: string;
-}
 
 export class TriggerService {
   constructor(
@@ -38,7 +31,7 @@ export class TriggerService {
     for (const trigger of triggers) {
       if (trigger.condition) {
         try {
-          const passes = evaluate(trigger.condition, payload as Record<string, unknown>);
+          const passes = evaluate(trigger.condition, payload as { [key: string]: unknown });
           if (!passes) continue;
         } catch (err: unknown) {
           triggerLogger.warn(

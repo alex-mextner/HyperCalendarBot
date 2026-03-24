@@ -47,7 +47,7 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
 
 export interface AgentToolCallRecord {
   name: string;
-  input: Record<string, unknown>;
+  input: { [key: string]: unknown };
 }
 
 export interface AgentToolResultRecord {
@@ -298,12 +298,12 @@ export class CalendarBotAgent {
               { tool: block.name, input: block.input, userId: ctx.user.telegram_id, chatId: ctx.chatId },
               'Tool call',
             );
-            dbg?.logToolCall(block.name, block.input as Record<string, unknown>);
+            dbg?.logToolCall(block.name, block.input as { [key: string]: unknown });
 
-            writer.setToolLabel(block.name, block.input as Record<string, unknown>);
+            writer.setToolLabel(block.name, block.input as { [key: string]: unknown });
             await writer.flush(true);
 
-            const result = await executeTool(ctx, block.name, block.input as Record<string, unknown>);
+            const result = await executeTool(ctx, block.name, block.input);
 
             writer.markToolResult(result.success);
             aiLogger.info(
@@ -312,7 +312,7 @@ export class CalendarBotAgent {
             );
             dbg?.logToolResult(block.name, result.success, result.output, result.error);
 
-            allToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+            allToolCalls.push({ name: block.name, input: block.input as { [key: string]: unknown } });
             allToolResults.push({ success: result.success, output: result.output });
 
             toolResults.push({

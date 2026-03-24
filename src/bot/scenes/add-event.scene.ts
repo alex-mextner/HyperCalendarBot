@@ -45,7 +45,7 @@ function isCallbackQuery(context: unknown): boolean {
 }
 
 async function answerCallback(context: unknown): Promise<void> {
-  const ctx = context as { answer?: (opts?: Record<string, unknown>) => Promise<unknown> };
+  const ctx = context as { answer?: (opts?: { [key: string]: unknown }) => Promise<unknown> };
   await ctx.answer?.();
 }
 

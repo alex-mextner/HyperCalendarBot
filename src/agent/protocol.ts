@@ -25,7 +25,7 @@ export interface AgentCommand {
     | 'bash_execute'
     | 'playwright_action'
     | 'applescript_run';
-  payload: Record<string, unknown>;
+  payload: unknown;
 }
 
 export interface AgentResponse {

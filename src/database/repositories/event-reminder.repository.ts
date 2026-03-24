@@ -1,23 +1,7 @@
 import type { Database } from 'bun:sqlite';
+import type { EventReminderRow, InsertEventReminderData } from '../types.ts';
 
-export interface EventReminderRow {
-  id: number;
-  event_id: number;
-  user_id: number;
-  remind_at_utc: string;
-  interval_minutes: number;
-  interval_label: string;
-  sent: number;
-  created_at: string;
-}
-
-export interface InsertEventReminderData {
-  event_id: number;
-  user_id: number;
-  remind_at_utc: string;
-  interval_minutes: number;
-  interval_label: string;
-}
+export type { EventReminderRow, InsertEventReminderData };
 
 export interface DueReminderRow extends EventReminderRow {
   event_title: string;

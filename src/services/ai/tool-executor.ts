@@ -68,11 +68,7 @@ import type { AgentContext, ToolResult } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai' });
 
-export async function executeTool(
-  ctx: AgentContext,
-  toolName: string,
-  input: Record<string, unknown>,
-): Promise<ToolResult> {
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   try {
@@ -80,8 +76,9 @@ export async function executeTool(
 
     // Track which event was touched, for last_mentioned_event resolution in intents
     if (result.success) {
-      if (typeof input.event_id === 'number') {
-        ctx.onEventMentioned?.(input.event_id);
+      const inputRecord = input as { [key: string]: unknown };
+      if (typeof inputRecord.event_id === 'number') {
+        ctx.onEventMentioned?.(inputRecord.event_id);
       } else if (toolName === 'create_event' && result.output) {
         const m = /^id:\s*(\d+)/m.exec(result.output);
         if (m?.[1]) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
@@ -95,7 +92,7 @@ export async function executeTool(
   }
 }
 
-async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<string, unknown>): Promise<ToolResult> {
+async function dispatchTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   try {
     switch (toolName) {
       case 'supplement_skip':
@@ -232,7 +229,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
           input as unknown as {
             action: 'get' | 'update';
             category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
-            updates?: Record<string, unknown>;
+            updates?: { [key: string]: unknown };
           },
         );
 
@@ -343,7 +340,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
       case 'bash_execute':
       case 'playwright_action':
       case 'applescript_run':
-        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input);
+        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as { [key: string]: unknown });
 
       case 'resume_scene':
         if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };

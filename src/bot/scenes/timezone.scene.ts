@@ -24,7 +24,7 @@ interface TimezoneParams {
 type BotApiCtx = {
   bot: {
     api: {
-      editMessageText: (p: Record<string, unknown>) => Promise<unknown>;
+      editMessageText: (p: { [key: string]: unknown }) => Promise<unknown>;
       deleteMessage: (p: { chat_id: number; message_id: number }) => Promise<unknown>;
     };
   };

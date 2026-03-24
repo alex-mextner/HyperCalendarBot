@@ -20,7 +20,7 @@ export class AgentDispatcher {
   send(
     userId: number,
     type: AgentCommand['type'],
-    payload: Record<string, unknown>,
+    payload: unknown,
     onChunk?: ChunkHandler,
   ): Promise<{ data: unknown; exitCode?: number }> {
     const conn = this.registry.get(userId);

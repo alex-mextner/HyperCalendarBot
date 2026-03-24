@@ -1,12 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { DeepLinkRepository } from '../../database/repositories/deep-link.repository';
-import type { DeepLink, DeepLinkType } from '../../database/types';
+import type { DeepLink } from '../../database/types';
 
-interface ResolvedDeepLink {
-  type: DeepLinkType;
-  payload: Record<string, unknown>;
-  createdBy: number;
-}
+type ResolvedDeepLink =
+  | { type: 'shared_event'; payload: { event_id: number }; createdBy: number }
+  | { type: 'invitation'; payload: { invitation_id: number; event_id: number }; createdBy: number }
+  | { type: 'group_context'; payload: { chat_id: number }; createdBy: number };
 
 export class DeepLinkService {
   constructor(private repo: DeepLinkRepository) {}
@@ -54,9 +53,9 @@ export class DeepLinkService {
 
     return {
       type: link.type,
-      payload: JSON.parse(link.payload),
+      payload: JSON.parse(link.payload) as ResolvedDeepLink['payload'],
       createdBy: link.created_by,
-    };
+    } as ResolvedDeepLink;
   }
 
   generateUrl(code: string, botUsername: string): string {

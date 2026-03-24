@@ -154,7 +154,7 @@ export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?:
     ? `${mostEast} is ${diffHours}h ahead of ${mostWest}`
     : `Ranked west→east: ${entries.map((e) => `${e.timezone} (${e.utc_offset})`).join(', ')}. ${mostEast} is furthest ahead.`;
 
-  const result: Record<string, unknown> = { timezones: entries, ahead };
+  const result: { [key: string]: unknown } = { timezones: entries, ahead };
   if (isTwo) {
     result.difference_minutes = diffMinutes;
     result.difference_hours = diffHours;

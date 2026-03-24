@@ -3,11 +3,11 @@ import { notifyLogger } from '../../utils/logger.ts';
 
 export function parseTelegramError(err: unknown): { code: number; retryAfter?: number } | null {
   if (typeof err !== 'object' || err === null) return null;
-  const e = err as Record<string, unknown>;
+  const e = err as { [key: string]: unknown };
   if (typeof e.code !== 'number') return null;
   const retryAfter =
     typeof e.payload === 'object' && e.payload !== null
-      ? ((e.payload as Record<string, unknown>).retry_after as number | undefined)
+      ? ((e.payload as { [key: string]: unknown }).retry_after as number | undefined)
       : undefined;
   return { code: e.code, retryAfter };
 }

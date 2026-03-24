@@ -3,17 +3,12 @@ import { Queue, Worker } from 'bullmq';
 import type { AgentContextBuilder } from '../bot/agent-context-factory.ts';
 import type { User } from '../database/types.ts';
 import type { AgentContext } from '../services/ai/types.ts';
+import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { logger } from '../utils/logger.ts';
 
-const queueLogger = logger.child({ module: 'ai-messages' });
+export type { AiMessageJobData };
 
-export interface AiMessageJobData {
-  userId: number;
-  message: string;
-  source: 'scheduled' | 'trigger';
-  scheduleId?: string;
-  triggerId?: string;
-}
+const queueLogger = logger.child({ module: 'ai-messages' });
 
 export interface SyntheticPipelineRunnerDeps {
   contextBuilder: AgentContextBuilder;
@@ -50,12 +45,12 @@ export function createAiMessagesQueue(connection: ConnectionOptions) {
 
   return {
     queue,
-    async addDelayed(data: Record<string, unknown>, delayMs: number): Promise<string> {
-      const job = await queue.add('ai-schedule', data as unknown as AiMessageJobData, { delay: delayMs });
+    async addDelayed(data: AiMessageJobData, delayMs: number): Promise<string> {
+      const job = await queue.add('ai-schedule', data, { delay: delayMs });
       return job.id ?? '';
     },
-    async addRepeat(data: Record<string, unknown>, cron: string): Promise<void> {
-      await queue.add('ai-schedule', data as unknown as AiMessageJobData, { repeat: { pattern: cron } });
+    async addRepeat(data: AiMessageJobData, cron: string): Promise<void> {
+      await queue.add('ai-schedule', data, { repeat: { pattern: cron } });
     },
     async removeDelayed(scheduleId: string): Promise<void> {
       const delayed = await queue.getDelayed();

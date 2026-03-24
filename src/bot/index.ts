@@ -33,7 +33,7 @@ import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
 import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
 import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
-import type { AiMessageJobData } from '../services/scheduled/trigger.service.ts';
+import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
@@ -281,8 +281,8 @@ export function createBot(
         }
       : undefined,
     notificationPrefs: {
-      getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
-      update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
+      getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as { [key: string]: unknown },
+      update: (userId: number, patch: { [key: string]: unknown }) => db.notificationPreferences.update(userId, patch),
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
@@ -399,8 +399,8 @@ export function createBot(
         payload?: { data?: string };
         dbUser?: User;
         chatId?: number | bigint;
-        send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-        editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+        send?: (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
+        editText?: (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
       };
 
       const user = ctx.dbUser;
@@ -605,7 +605,7 @@ export function createBot(
               chat_id: chatId,
               text,
               parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown',
-              ...(options.reply_markup ? { reply_markup: options.reply_markup as Record<string, unknown> } : {}),
+              ...(options.reply_markup ? { reply_markup: options.reply_markup as { [key: string]: unknown } } : {}),
             } as Parameters<typeof bot.api.sendMessage>[0]);
           },
           editMessage: async (chatId: number, messageId: number, text: string, markup?: unknown) => {
@@ -615,7 +615,7 @@ export function createBot(
                 message_id: messageId,
                 text,
                 parse_mode: 'HTML',
-                ...(markup ? { reply_markup: markup as Record<string, unknown> } : {}),
+                ...(markup ? { reply_markup: markup as { [key: string]: unknown } } : {}),
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },
@@ -784,9 +784,12 @@ export function createBot(
 
       const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
       const resultText = `${header}\n${results.join('\n')}`;
-      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
-        reply_markup: { remove_keyboard: true },
-      });
+      await (ctx as unknown as { send(text: string, opts?: { [key: string]: unknown }): Promise<void> }).send(
+        resultText,
+        {
+          reply_markup: { remove_keyboard: true },
+        },
+      );
       // Build context for AI: who was requested + what happened
       const selectedDetails = selected
         .map((s) => {
@@ -829,7 +832,7 @@ export function createBot(
         const resultText = inv.success
           ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
           : `❌ ${inv.error}`;
-        await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
+        await (ctx as unknown as { send(text: string, opts?: { [key: string]: unknown }): Promise<void> }).send(
           resultText,
           { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } },
         );
