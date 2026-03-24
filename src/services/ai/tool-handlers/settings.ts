@@ -1,6 +1,5 @@
 import { t } from '../../../config/constants.ts';
-import type { NotificationPreferencesUpdate } from '../../../database/repositories/notification-preferences.repository.ts';
-import type { UpdateUserData } from '../../../database/types.ts';
+import type { NotificationPreferencesUpdate, UpdateUserData } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 interface ManageSettingsInput {

@@ -1,7 +1,5 @@
-import type {
-  NotificationPreferencesRepository,
-  NotificationPreferencesRow,
-} from '../../database/repositories/notification-preferences.repository.ts';
+import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import type { NotificationPreferencesRow } from '../../database/types.ts';
 
 export class NotificationPreferencesService {
   constructor(private repo: NotificationPreferencesRepository) {}

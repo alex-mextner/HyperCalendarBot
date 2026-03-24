@@ -11,17 +11,18 @@ import type { GoogleCalendarRepository } from '../../database/repositories/googl
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
-import type {
-  NotificationPreferencesRow,
-  NotificationPreferencesUpdate,
-} from '../../database/repositories/notification-preferences.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { EventOccurrence, User } from '../../database/types.ts';
+import type {
+  EventOccurrence,
+  NotificationPreferencesRow,
+  NotificationPreferencesUpdate,
+  User,
+} from '../../database/types.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';

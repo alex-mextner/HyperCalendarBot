@@ -1,27 +1,7 @@
 import type { Database } from 'bun:sqlite';
+import type { CreateTriggerData, Trigger } from './types.ts';
 
-export interface Trigger {
-  id: string;
-  user_id: number;
-  topic: string;
-  condition: string | null;
-  action: string;
-  label: string | null;
-  once: number;
-  enabled: number;
-  fire_count: number;
-  last_fired_at: string | null;
-  created_at: string;
-}
-
-export interface CreateTriggerData {
-  userId: number;
-  topic: string;
-  action: string;
-  condition: string | null;
-  label: string | null;
-  once: boolean;
-}
+export type { CreateTriggerData, Trigger };
 
 export class TriggerRepository {
   constructor(private db: Database) {}

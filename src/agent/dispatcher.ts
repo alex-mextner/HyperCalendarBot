@@ -28,7 +28,7 @@ export class AgentDispatcher {
     const id = randomUUID();
     return new Promise((resolve, reject) => {
       this.pending.set(id, { userId, resolve, reject, onChunk });
-      conn.ws.send(JSON.stringify({ id, type, payload } satisfies AgentCommand));
+      conn.ws.send(JSON.stringify({ id, type, payload }));
     });
   }
 

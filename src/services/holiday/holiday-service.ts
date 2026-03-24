@@ -1,5 +1,6 @@
 import Holidays from 'date-holidays';
-import type { HolidayRepository, HolidaySubscriptionRow } from '../../database/repositories/holiday.repository.ts';
+import type { HolidayRepository } from '../../database/repositories/holiday.repository.ts';
+import type { HolidaySubscriptionRow } from '../../database/types.ts';
 
 export interface HolidayEntry {
   date: string;

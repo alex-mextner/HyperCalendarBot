@@ -2,10 +2,10 @@ import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
-import type { NotificationLogRow } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import type { NotificationLogRow } from '../../../src/database/types.ts';
 import { NotificationRenderer } from '../../../src/services/notification/renderer.ts';
 import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
 

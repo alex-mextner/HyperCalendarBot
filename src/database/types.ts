@@ -548,3 +548,103 @@ export interface InsertEventReminderData {
   interval_minutes: number;
   interval_label: string;
 }
+
+export interface DueReminderRow extends EventReminderRow {
+  event_title: string;
+  event_start_at: string;
+  event_location: string | null;
+}
+
+// --- Holiday ---
+
+export interface HolidayCountryRow {
+  code: string;
+  name: string;
+  region: string;
+}
+
+export interface HolidayRow {
+  id: number;
+  country_code: string;
+  date: string;
+  name: string;
+  type: string;
+  year: number;
+}
+
+export interface HolidaySubscriptionRow {
+  id: number;
+  user_id: number;
+  country_code: string;
+  is_primary: number;
+  notify: number;
+  created_at: string;
+}
+
+export interface HolidayOverrideRow {
+  id: number;
+  user_id: number;
+  date: string;
+  is_day_off: number;
+  created_at: string;
+}
+
+export interface InsertHolidayData {
+  country_code: string;
+  date: string;
+  name: string;
+  type: string;
+  year: number;
+}
+
+// --- Notification Log ---
+
+export interface NotificationLogRow {
+  id: number;
+  user_id: number;
+  type: string;
+  reference_key: string;
+  status: string;
+  channel: string;
+  payload: string | null;
+  error: string | null;
+  attempts: number;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface InsertNotificationLogData {
+  user_id: number;
+  type: string;
+  reference_key: string;
+  channel: string;
+  payload: string;
+}
+
+// --- Notification Preferences ---
+
+export interface NotificationPreferencesRow {
+  user_id: number;
+  morning_agenda_enabled: number;
+  morning_agenda_time: string;
+  morning_agenda_format: string;
+  default_reminder_intervals: string;
+  evening_review_enabled: number;
+  evening_review_time: string;
+  evening_review_format: string;
+  quiet_hours_enabled: number;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  updated_at: string;
+}
+
+export type NotificationPreferencesUpdate = Partial<Omit<NotificationPreferencesRow, 'user_id' | 'updated_at'>>;
+
+// --- User Memory ---
+
+export interface UserMemoryEntry {
+  id: number;
+  user_id: number;
+  content: string;
+  created_at: string;
+}

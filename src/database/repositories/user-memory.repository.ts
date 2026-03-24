@@ -1,11 +1,7 @@
 import type { Database } from 'bun:sqlite';
+import type { UserMemoryEntry } from '../types.ts';
 
-export interface UserMemoryEntry {
-  id: number;
-  user_id: number;
-  content: string;
-  created_at: string;
-}
+export type { UserMemoryEntry };
 
 export class UserMemoryRepository {
   constructor(private db: Database) {}

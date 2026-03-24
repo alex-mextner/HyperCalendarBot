@@ -46,3 +46,28 @@ export interface QueueAdapter {
   removeDelayed(scheduleId: string): Promise<void>;
   removeRepeat(cron: string): Promise<void>;
 }
+
+/** DB row from ai_triggers table. */
+export interface Trigger {
+  id: string;
+  user_id: number;
+  topic: string;
+  condition: string | null;
+  action: string;
+  label: string | null;
+  once: number;
+  enabled: number;
+  fire_count: number;
+  last_fired_at: string | null;
+  created_at: string;
+}
+
+/** INSERT input for ai_triggers table. */
+export interface CreateTriggerData {
+  userId: number;
+  topic: string;
+  action: string;
+  condition: string | null;
+  label: string | null;
+  once: boolean;
+}

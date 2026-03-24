@@ -13,20 +13,24 @@ export interface AgentPairError {
   reason: 'expired' | 'invalid';
 }
 
-export interface AgentCommand {
-  id: string;
-  type:
-    | 'claude_chat'
-    | 'claude_new_chat'
-    | 'claude_list_chats'
-    | 'claude_open_chat'
-    | 'claude_list_projects'
-    | 'claude_artifact'
-    | 'bash_execute'
-    | 'playwright_action'
-    | 'applescript_run';
-  payload: unknown;
-}
+export type AgentCommand =
+  | { id: string; type: 'claude_chat'; payload: { chat_id: string; message: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_new_chat'; payload: { message: string; project_id?: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_list_chats'; payload: { limit?: number } }
+  | { id: string; type: 'claude_open_chat'; payload: { chat_id: string } }
+  | { id: string; type: 'claude_list_projects'; payload: Record<never, never> }
+  | { id: string; type: 'claude_artifact'; payload: { artifact_id: string } }
+  | { id: string; type: 'bash_execute'; payload: { command: string; timeout_ms?: number } }
+  | {
+      id: string;
+      type: 'playwright_action';
+      payload: {
+        action: 'screenshot' | 'navigate' | 'click' | 'fill' | 'extract' | 'evaluate';
+        params: { [key: string]: unknown };
+        timeout_ms?: number;
+      };
+    }
+  | { id: string; type: 'applescript_run'; payload: { script: string; timeout_ms?: number } };
 
 export interface AgentResponse {
   id: string;
