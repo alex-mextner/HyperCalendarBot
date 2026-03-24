@@ -328,6 +328,7 @@ export function createBot(
     userMemoryRepo: db.userMemory,
     agentRegistry,
     agentDispatcher,
+    onboardingScene: scenesSetup.scenes.onboardingScene,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     domainEvents: domainEventBus,

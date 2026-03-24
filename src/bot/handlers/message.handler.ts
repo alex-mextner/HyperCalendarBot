@@ -154,6 +154,8 @@ export interface MessageHandlerDeps {
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
+  // Onboarding scene for mandatory timezone/language setup
+  onboardingScene?: unknown;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -823,6 +825,22 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser as User | undefined;
     if (!user) return;
+
+    // Mandatory onboarding: redirect to setup if user hasn't completed it (private chats only)
+    if (!user.onboarding_completed && deps.onboardingScene) {
+      const chat = (ctx as unknown as { chat?: { type: string } }).chat;
+      const isPrivate = !chat?.type || chat.type === 'private';
+      if (isPrivate) {
+        // Check if a scene is already active (e.g. onboarding already in progress)
+        const sceneKey = `@gramio/scenes:${user.telegram_id}`;
+        const activeScene = await deps.sceneStorage.get(sceneKey);
+        if (!activeScene) {
+          const sceneCtx = ctx as unknown as { scene: { enter: (scene: unknown) => Promise<void> } };
+          await sceneCtx.scene.enter(deps.onboardingScene);
+        }
+        return;
+      }
+    }
 
     // Voice message → transcribe → pass to AI agent
     const voiceRaw = (
