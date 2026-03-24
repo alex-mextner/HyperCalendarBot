@@ -249,6 +249,19 @@ Optional features that depend on an env var must deactivate gracefully when the 
   imports harder to audit.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **No silent fallbacks for missing required values** — `ctx.message?.id ?? 0` and similar patterns
+  hide bugs: downstream code receives a meaningless sentinel and fails in an unrelated place with a
+  confusing error. When a value is required, guard and return early:
+  ```ts
+  // Bad — messageId: 0 causes editMessageText to fail later with a cryptic API error
+  const messageId = ctx.message?.id ?? 0;
+  // Good — fail immediately, log the context
+  if (!ctx.message) {
+    logger.warn({ chatId: ctx.chatId }, 'callback has no message');
+    return;
+  }
+  const messageId = ctx.message.id;
+  ```
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
 - **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).
