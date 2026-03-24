@@ -1402,18 +1402,16 @@ export async function handleProposalAccept(id: number, callerId: number, deps: P
       event_id: z.number().optional(),
       changes: z.record(z.string(), z.unknown()).optional(),
     })
-    .parse(JSON.parse(proposal.payload)) as {
-    action: string;
-    event?: Omit<CreateEventData, 'user_id'>;
-    event_id?: number;
-    changes?: UpdateEventData;
-  };
+    .parse(JSON.parse(proposal.payload));
+
+  const event = payloadData.event as Omit<CreateEventData, 'user_id'> | undefined;
+  const changes = payloadData.changes as UpdateEventData | undefined;
 
   let result: { id: number; title?: string } | boolean | null | undefined;
-  if (proposal.action === 'create' && payloadData.event) {
-    result = deps.eventService.createEvent(proposal.target_id, payloadData.event);
-  } else if (proposal.action === 'update' && payloadData.event_id !== undefined && payloadData.changes) {
-    result = deps.eventService.updateEvent(payloadData.event_id, proposal.target_id, payloadData.changes);
+  if (proposal.action === 'create' && event) {
+    result = deps.eventService.createEvent(proposal.target_id, event);
+  } else if (proposal.action === 'update' && payloadData.event_id !== undefined && changes) {
+    result = deps.eventService.updateEvent(payloadData.event_id, proposal.target_id, changes);
   } else if (proposal.action === 'delete' && payloadData.event_id !== undefined) {
     result = deps.eventService.deleteEvent(payloadData.event_id, proposal.target_id);
   }

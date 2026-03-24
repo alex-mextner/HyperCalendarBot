@@ -1,5 +1,4 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
@@ -101,7 +100,7 @@ export class CalendarBotAgent {
     for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
       try {
-        const parsed = z.unknown().parse(JSON.parse(msg.content));
+        const parsed: unknown = JSON.parse(msg.content);
         if (Array.isArray(parsed)) {
           content = parsed as Anthropic.ContentBlockParam[];
         } else if (
