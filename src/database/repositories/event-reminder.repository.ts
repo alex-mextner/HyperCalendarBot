@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { DueReminderRow, EventReminderRow, InsertEventReminderData } from '../types.ts';
 
-export type { DueReminderRow, EventReminderRow, InsertEventReminderData };
-
 export class EventReminderRepository {
   constructor(private db: Database) {}
 

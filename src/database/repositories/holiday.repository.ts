@@ -7,8 +7,6 @@ import type {
   InsertHolidayData,
 } from '../types.ts';
 
-export type { HolidayCountryRow, HolidayOverrideRow, HolidayRow, HolidaySubscriptionRow, InsertHolidayData };
-
 export class HolidayRepository {
   constructor(private db: Database) {}
 

@@ -10,15 +10,7 @@ import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type {
-  FeedbackThreadContext,
-  GroupContext,
-  PipelineResult,
-  WorkflowSession,
-  WorkflowSessionStore,
-} from './types.ts';
-
-export type { WorkflowSession, WorkflowSessionStore };
+import type { FeedbackThreadContext, GroupContext, PipelineResult, WorkflowSessionStore } from './types.ts';
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,

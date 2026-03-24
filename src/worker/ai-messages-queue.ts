@@ -6,8 +6,6 @@ import type { AgentContext } from '../services/ai/types.ts';
 import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { logger } from '../utils/logger.ts';
 
-export type { AiMessageJobData };
-
 const queueLogger = logger.child({ module: 'ai-messages' });
 
 export interface SyntheticPipelineRunnerDeps {

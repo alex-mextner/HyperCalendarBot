@@ -67,7 +67,7 @@ import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
-import { type ChatMemberContext, createChatMemberHandler } from './handlers/chat-member.handler.ts';
+import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
@@ -693,7 +693,7 @@ export function createBot(
             return null;
           }
         },
-      )(ctx as ChatMemberContext),
+      )(ctx),
     )
     // Private chat: user blocked the bot — clear pending workflow sessions
     .on('my_chat_member', (ctx) => {
@@ -703,17 +703,7 @@ export function createBot(
     })
     // Group member join/leave tracking (requires bot to be admin)
     .on('chat_member', (ctx) => {
-      const update = (
-        ctx as unknown as {
-          chatMember?: {
-            chat: { id: number; type: string };
-            new_chat_member: { status: string; user: { id: number } };
-            old_chat_member: { status: string };
-          };
-        }
-      ).chatMember;
-      if (!update) return;
-      const { chat, new_chat_member: newMember } = update;
+      const { chat, newChatMember: newMember } = ctx;
       if (chat.type !== 'group' && chat.type !== 'supergroup') return;
 
       const userId = newMember.user.id;

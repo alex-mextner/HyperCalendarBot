@@ -243,6 +243,10 @@ Optional features that depend on an env var must deactivate gracefully when the 
   multiple layers without a clear owner may live in a small domain-level `types.ts`
   (e.g. `src/services/ai/types.ts`). Avoid circular deps — a type that is imported by many files
   should not itself import from those files.
+- **No `export type { Foo }` re-exports from repository/service files** — consumers must import
+  types directly from their canonical source (`database/types.ts`, domain `types.ts`). A re-export
+  creates two valid import paths for the same type, making the canonical location ambiguous and
+  imports harder to audit.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise

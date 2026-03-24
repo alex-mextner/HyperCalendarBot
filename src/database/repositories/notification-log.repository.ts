@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { InsertNotificationLogData, NotificationLogRow } from '../types.ts';
 
-export type { InsertNotificationLogData, NotificationLogRow };
-
 export class NotificationLogRepository {
   constructor(private db: Database) {}
 

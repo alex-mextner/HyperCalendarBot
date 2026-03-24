@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { GroupMember } from '../types.ts';
 
-export type { GroupMember };
-
 export class GroupMemberRepository {
   constructor(private db: Database) {}
 

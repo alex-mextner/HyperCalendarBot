@@ -1,8 +1,7 @@
 // src/bot/keyboards.ts
 import { InlineKeyboard, Keyboard } from 'gramio';
 import { CB, t } from '../config/constants.ts';
-import type { Contact } from '../database/repositories/contact.repository.ts';
-import type { CalendarEvent } from '../database/types.ts';
+import type { CalendarEvent, Contact } from '../database/types.ts';
 import { formatTime } from '../utils/date.ts';
 
 // ── Onboarding ──

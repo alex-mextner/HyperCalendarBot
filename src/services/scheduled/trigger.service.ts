@@ -4,8 +4,6 @@ import { ALL_TOPICS, type DomainEventBus, type DomainEventMap, type DomainEventT
 import type { TriggerRepository } from './trigger.repository.ts';
 import type { AiMessageJobData } from './types.ts';
 
-export type { AiMessageJobData };
-
 const triggerLogger = logger.child({ module: 'trigger-service' });
 
 export class TriggerService {

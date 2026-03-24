@@ -2,9 +2,9 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createFeedbackRouterLayer } from '../../src/bot/pipeline/feedback-router-layer.ts';
-import type { WorkflowSessionStore } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../../src/bot/pipeline/pipeline.ts';
+import type { WorkflowSessionStore } from '../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../src/bot/types.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { FeedbackRepository } from '../../src/database/repositories/feedback.repository.ts';

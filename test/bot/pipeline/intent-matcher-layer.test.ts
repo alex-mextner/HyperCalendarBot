@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import type { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import type { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';

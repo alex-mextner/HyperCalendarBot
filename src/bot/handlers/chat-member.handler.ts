@@ -1,14 +1,6 @@
+import type { AnyBot, ChatMemberContext } from 'gramio';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-
-export interface ChatMemberContext {
-  myChatMember?: {
-    chat: { id: number; type: string; title?: string };
-    from: { id: number };
-    new_chat_member: { status: string };
-    old_chat_member: { status: string };
-  };
-}
 
 const ACTIVE_STATUSES = new Set(['member', 'administrator', 'creator']);
 const INACTIVE_STATUSES = new Set(['left', 'kicked']);
@@ -44,11 +36,11 @@ export function createChatMemberHandler(
   getUserLanguage: (userId: number) => 'en' | 'ru',
   exportInviteLink: (chatId: number) => Promise<string | null>,
 ) {
-  return async (ctx: ChatMemberContext): Promise<void> => {
-    const update = ctx.myChatMember;
-    if (!update) return;
-
-    const { chat, from, new_chat_member: newMember, old_chat_member: oldMember } = update;
+  return async (ctx: ChatMemberContext<AnyBot>): Promise<void> => {
+    const chat = ctx.chat;
+    const from = ctx.from;
+    const newMember = ctx.newChatMember;
+    const oldMember = ctx.oldChatMember;
 
     if (chat.type !== 'group' && chat.type !== 'supergroup') return;
 

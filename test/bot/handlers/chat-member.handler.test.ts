@@ -16,6 +16,13 @@ function makeDeps(lang: 'en' | 'ru' = 'en') {
   };
 }
 
+type Ctx = {
+  chat: { id: number; type: string; title?: string };
+  from: { id: number };
+  newChatMember: { status: string };
+  oldChatMember: { status: string };
+};
+
 describe('createChatMemberHandler', () => {
   test('upserts group when bot added to group', async () => {
     const { createChatMemberHandler } = await import('../../../src/bot/handlers/chat-member.handler');
@@ -23,14 +30,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'left' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'left' },
+    };
+    await handler(ctx as never);
 
     expect(groupRepo.upsertGroup).toHaveBeenCalledWith({
       chat_id: -1001234,
@@ -45,14 +51,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'left' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'left' },
+    };
+    await handler(ctx as never);
 
     expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
     const text = (sendMessage.mock.calls[0] as unknown[])[1] as string;
@@ -65,14 +70,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'left' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'left' },
+    };
+    await handler(ctx as never);
 
     expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
     const text = (sendMessage.mock.calls[0] as unknown[])[1] as string;
@@ -85,14 +89,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'restricted' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'restricted' },
+    };
+    await handler(ctx as never);
 
     expect(sendMessage).toHaveBeenCalledWith(-1001234, expect.stringContaining('/agenda'));
   });
@@ -103,14 +106,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'administrator' },
-        old_chat_member: { status: 'member' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'administrator' },
+      oldChatMember: { status: 'member' },
+    };
+    await handler(ctx as never);
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
@@ -121,14 +123,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'left' },
-        old_chat_member: { status: 'member' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'left' },
+      oldChatMember: { status: 'member' },
+    };
+    await handler(ctx as never);
 
     expect(groupRepo.deactivate).toHaveBeenCalledWith(-1001234);
     expect(sendMessage).not.toHaveBeenCalled();
@@ -140,14 +141,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup' },
-        from: { id: 100 },
-        new_chat_member: { status: 'kicked' },
-        old_chat_member: { status: 'member' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup' },
+      from: { id: 100 },
+      newChatMember: { status: 'kicked' },
+      oldChatMember: { status: 'member' },
+    };
+    await handler(ctx as never);
 
     expect(groupRepo.deactivate).toHaveBeenCalledWith(-1001234);
   });
@@ -158,14 +158,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: 100, type: 'private' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'left' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: 100, type: 'private' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'left' },
+    };
+    await handler(ctx as never);
 
     expect(groupRepo.upsertGroup).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
@@ -177,14 +176,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'member' },
-        old_chat_member: { status: 'left' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'member' },
+      oldChatMember: { status: 'left' },
+    };
+    await handler(ctx as never);
 
     const text = (sendMessage.mock.calls[0] as unknown[])[1] as string;
     expect(text).toContain('admin');
@@ -199,14 +197,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'administrator' },
-        old_chat_member: { status: 'member' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'administrator' },
+      oldChatMember: { status: 'member' },
+    };
+    await handler(ctx as never);
 
     await new Promise((r) => setTimeout(r, 0));
     expect(exportInviteLink).toHaveBeenCalledWith(-1001234);
@@ -219,14 +216,13 @@ describe('createChatMemberHandler', () => {
 
     const handler = createChatMemberHandler(groupRepo as never, sendMessage, getUserLanguage, exportInviteLink);
 
-    await handler({
-      myChatMember: {
-        chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
-        from: { id: 100 },
-        new_chat_member: { status: 'administrator' },
-        old_chat_member: { status: 'administrator' },
-      },
-    });
+    const ctx: Ctx = {
+      chat: { id: -1001234, type: 'supergroup', title: 'Dev Team' },
+      from: { id: 100 },
+      newChatMember: { status: 'administrator' },
+      oldChatMember: { status: 'administrator' },
+    };
+    await handler(ctx as never);
 
     await new Promise((r) => setTimeout(r, 0));
     expect(exportInviteLink).not.toHaveBeenCalled();

@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { NotificationPreferencesRow, NotificationPreferencesUpdate } from '../types.ts';
 
-export type { NotificationPreferencesRow, NotificationPreferencesUpdate };
-
 export class NotificationPreferencesRepository {
   constructor(private db: Database) {}
 

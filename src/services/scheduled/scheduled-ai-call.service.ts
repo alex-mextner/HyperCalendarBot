@@ -1,8 +1,6 @@
 import { logger } from '../../utils/logger.ts';
-import type { ScheduledAiCall, ScheduledAiCallRepository } from './scheduled-ai-call.repository.ts';
-import type { AiMessageJobData, CreateScheduleInput, QueueAdapter } from './types.ts';
-
-export type { AiMessageJobData, CreateScheduleInput, QueueAdapter };
+import type { ScheduledAiCallRepository } from './scheduled-ai-call.repository.ts';
+import type { CreateScheduleInput, QueueAdapter, ScheduledAiCall } from './types.ts';
 
 const scheduleLogger = logger.child({ module: 'scheduled-ai-call' });
 

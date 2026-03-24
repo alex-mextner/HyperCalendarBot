@@ -1,6 +1,7 @@
 // src/bot/handlers/message.handler.ts
 
 import { TZDate } from '@date-fns/tz';
+import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
@@ -64,12 +65,9 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
-import {
-  createIntentMatcherLayer,
-  type WorkflowSession,
-  type WorkflowSessionStore,
-} from '../pipeline/intent-matcher-layer.ts';
+import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -155,7 +153,7 @@ export interface MessageHandlerDeps {
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
   // Onboarding scene for mandatory timezone/language setup
-  onboardingScene?: unknown;
+  onboardingScene?: AnyScene;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -828,15 +826,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
     // Mandatory onboarding: redirect to setup if user hasn't completed it (private chats only)
     if (!user.onboarding_completed && deps.onboardingScene) {
-      const chat = (ctx as unknown as { chat?: { type: string } }).chat;
-      const isPrivate = !chat?.type || chat.type === 'private';
+      const isPrivate = ctx.chat.type === 'private';
       if (isPrivate) {
         // Check if a scene is already active (e.g. onboarding already in progress)
         const sceneKey = `@gramio/scenes:${user.telegram_id}`;
         const activeScene = await deps.sceneStorage.get(sceneKey);
         if (!activeScene) {
-          const sceneCtx = ctx as unknown as { scene: { enter: (scene: unknown) => Promise<void> } };
-          await sceneCtx.scene.enter(deps.onboardingScene);
+          await ctx.scene.enter(deps.onboardingScene);
         }
         return;
       }

@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { CreateTriggerData, Trigger } from './types.ts';
 
-export type { CreateTriggerData, Trigger };
-
 export class TriggerRepository {
   constructor(private db: Database) {}
 

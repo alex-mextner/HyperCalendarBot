@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { Contact } from '../types.ts';
 
-export type { Contact };
-
 export class ContactRepository {
   constructor(private db: Database) {}
 

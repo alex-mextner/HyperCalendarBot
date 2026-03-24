@@ -1,8 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { CreateScheduleData, ScheduledAiCall } from './types.ts';
 
-export type { CreateScheduleData, ScheduledAiCall };
-
 export class ScheduledAiCallRepository {
   constructor(private db: Database) {}
 
