@@ -514,6 +514,13 @@ Use these MCP servers proactively whenever they can help:
 - **context7** — up-to-date library documentation. Use when working with external libraries
   (GramIO, Anthropic SDK, Bun APIs, etc.) to get current docs instead of guessing from memory.
 
+## Memory
+
+- **Actively save to memory**: every significant user instruction, decision, finding, or project state change.
+- **Regularly update CLAUDE.md**: when recurring patterns, new rules, or important conventions emerge from work sessions — add them here so they persist across all conversations.
+- When the user gives an instruction that applies beyond the current session, save it to memory AND consider whether it belongs in CLAUDE.md.
+- Check memory at the start of each session for context on ongoing work.
+
 ## Documentation
 
 - Specs: `docs/specs/` — design documents and feature specifications
