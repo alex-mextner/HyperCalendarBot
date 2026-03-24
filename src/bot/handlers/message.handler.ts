@@ -154,6 +154,8 @@ export interface MessageHandlerDeps {
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
+  // Onboarding scene for mandatory timezone/language setup
+  onboardingScene?: unknown;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -429,10 +431,15 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
-            const now = new Date();
-            const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
-            const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
-            return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            try {
+              const now = new Date();
+              const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+              const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+              return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            } catch (err) {
+              cmdLogger.error({ err, userId: user.telegram_id }, 'Failed to build schedule context');
+              return [];
+            }
           })(),
       birthdayService: deps.birthdayService,
       userMemoryRepo: deps.userMemoryRepo,
@@ -818,6 +825,22 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   return async (ctx: BotCommandContext) => {
     const user = ctx.dbUser;
     if (!user) return;
+
+    // Mandatory onboarding: redirect to setup if user hasn't completed it (private chats only)
+    if (!user.onboarding_completed && deps.onboardingScene) {
+      const chat = (ctx as unknown as { chat?: { type: string } }).chat;
+      const isPrivate = !chat?.type || chat.type === 'private';
+      if (isPrivate) {
+        // Check if a scene is already active (e.g. onboarding already in progress)
+        const sceneKey = `@gramio/scenes:${user.telegram_id}`;
+        const activeScene = await deps.sceneStorage.get(sceneKey);
+        if (!activeScene) {
+          const sceneCtx = ctx as unknown as { scene: { enter: (scene: unknown) => Promise<void> } };
+          await sceneCtx.scene.enter(deps.onboardingScene);
+        }
+        return;
+      }
+    }
 
     // Voice message → transcribe → pass to AI agent
     const voice = ctx.voice;

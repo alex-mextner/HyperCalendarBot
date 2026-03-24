@@ -518,6 +518,8 @@ export interface GroupMember {
   chat_id: number;
   user_id: number;
   last_seen_at: string;
+  joined_at: string;
+  left_at: string | null;
 }
 
 export interface Contact {

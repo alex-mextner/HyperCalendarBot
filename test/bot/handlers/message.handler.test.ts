@@ -120,6 +120,83 @@ describe('createMessageHandler', () => {
     });
   });
 
+  describe('mandatory onboarding gate', () => {
+    test('redirects to onboarding when user has not completed it', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).toHaveBeenCalledWith(onboardingScene);
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('does not redirect when onboarding is completed', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      await handler(ctx as never);
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not redirect in group chats', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        text: 'встреча завтра',
+        chat: { type: 'group', title: 'Work' },
+      });
+      await handler(ctx as never);
+      // Group messages with keywords still go through (no redirect)
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not redirect if scene already active (onboarding in progress)', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        onboardingScene,
+        sceneStorage: { get: mock(() => Promise.resolve(JSON.stringify({ name: 'onboarding', step: 1 }))) },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).not.toHaveBeenCalled();
+    });
+
+    test('redirects voice messages to onboarding too', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        onboardingScene,
+        transcriptionService: { transcribe: mock(() => Promise.resolve('привет')) },
+        botToken: 'test-token',
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        text: undefined,
+        voice: { file_id: 'voice_123', duration: 5 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).toHaveBeenCalledWith(onboardingScene);
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+  });
+
   test('ignores messages without dbUser', async () => {
     const deps = makeDeps();
     const handler = createMessageHandler(deps as never);

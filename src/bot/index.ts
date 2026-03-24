@@ -127,6 +127,7 @@ export function createBot(
     reminderRepo: db.reminders,
     materializer,
     participantRepo: db.participants,
+    groupMemberRepo: db.groupMembers,
     onParticipantsNotify: (userIds, text) => {
       for (const uid of userIds) {
         bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
@@ -314,6 +315,7 @@ export function createBot(
     userMemoryRepo: db.userMemory,
     agentRegistry,
     agentDispatcher,
+    onboardingScene: scenesSetup.scenes.onboardingScene,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     domainEvents: domainEventBus,
@@ -698,6 +700,30 @@ export function createBot(
       if (ctx.chat.type !== 'private') return;
       if (ctx.newChatMember.status !== 'kicked') return;
       db.workflowSessions.deleteByUser(ctx.from.id);
+    })
+    // Group member join/leave tracking (requires bot to be admin)
+    .on('chat_member', (ctx) => {
+      const update = (
+        ctx as unknown as {
+          chatMember?: {
+            chat: { id: number; type: string };
+            new_chat_member: { status: string; user: { id: number } };
+            old_chat_member: { status: string };
+          };
+        }
+      ).chatMember;
+      if (!update) return;
+      const { chat, new_chat_member: newMember } = update;
+      if (chat.type !== 'group' && chat.type !== 'supergroup') return;
+
+      const userId = newMember.user.id;
+      if (newMember.status === 'left' || newMember.status === 'kicked') {
+        db.groupMembers.leave(chat.id, userId);
+        botLogger.info({ chatId: chat.id, userId }, 'Group member left');
+      } else if (newMember.status === 'member' || newMember.status === 'administrator') {
+        db.groupMembers.upsert(chat.id, userId);
+        botLogger.info({ chatId: chat.id, userId }, 'Group member joined');
+      }
     })
     // Users shared from picker modal → send invitations
     .on('users_shared', async (ctx) => {
