@@ -1,7 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
-import type { ToolResult } from '../ai/types.ts';
+import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
 import { type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
@@ -92,17 +92,24 @@ interface ResumeState {
 
 /**
  * Parse tool output: if valid JSON, return parsed value; otherwise return raw string.
+ * Known array element shapes: event lists, free slots, search results, holidays.
+ * Known object shapes: settings maps, text output wrappers.
  */
+const ToolOutputItemSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]).optional());
+const ToolOutputMapSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]));
+
 const ToolOutputSchema = z.union([
   z.string(),
   z.number(),
   z.boolean(),
   z.null(),
-  z.array(z.unknown()),
-  z.record(z.string(), z.unknown()),
+  z.array(ToolOutputItemSchema),
+  ToolOutputMapSchema,
 ]);
 
-function parseToolOutput(output: string): unknown {
+type ParsedToolOutput = z.infer<typeof ToolOutputSchema>;
+
+function parseToolOutput(output: string): ParsedToolOutput | string {
   try {
     return ToolOutputSchema.parse(JSON.parse(output));
   } catch {
@@ -140,12 +147,15 @@ async function runLevel1(
 /**
  * Execute a Level 2 workflow: { steps: [...] }
  */
-function extractEventSummary(data: unknown): { id: number; title: string } | null {
-  if (data === null || typeof data !== 'object') return null;
-  const first = Array.isArray(data) ? data[0] : data;
-  if (first === null || typeof first !== 'object') return null;
-  const r = first as { [key: string]: unknown };
-  if (typeof r.id === 'number' && typeof r.title === 'string') return { id: r.id, title: r.title };
+function extractEventSummary(data: ToolResultData): { id: number; title: string } | null {
+  if (Array.isArray(data)) {
+    const first = data[0];
+    if (first && 'id' in first && 'title' in first && typeof first.id === 'number' && typeof first.title === 'string')
+      return { id: first.id, title: first.title };
+    return null;
+  }
+  if ('id' in data && 'title' in data && typeof data.id === 'number' && typeof data.title === 'string')
+    return { id: data.id, title: data.title };
   return null;
 }
 

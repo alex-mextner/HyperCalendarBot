@@ -238,6 +238,20 @@ Optional features that depend on an env var must deactivate gracefully when the 
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
 - **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
   There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
+  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
+  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
+  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
+  of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
+  The only exception is `z.record(z.string(), z.unknown())` for workflow DSL `input` fields where
+  values contain template strings resolved at runtime.
+- **`ToolResult.data` is typed** — never return `unknown` from tool handlers. Use `ToolResultData`
+  union type from `src/services/ai/types.ts`. Add new variants when adding tools that return
+  structured data.
+- **Tool output schemas must be concrete** — `parseToolOutput` in intent-executor validates JSON
+  against known shapes (event lists, free slots, settings maps, etc.). When adding a new response
+  format, add its schema to `ToolOutputSchema`.
 - **Type co-location**: interfaces and type aliases must live in the same file as the code that owns
   them. Do not create a single global `types.ts` dumping ground. One exception: types shared across
   multiple layers without a clear owner may live in a small domain-level `types.ts`

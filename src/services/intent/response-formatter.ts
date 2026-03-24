@@ -46,7 +46,7 @@ function formatText(output: string): string {
     return output;
   }
   // JSON object — try to extract a human-readable field
-  const result = z.record(z.string(), z.unknown()).safeParse(parsed);
+  const result = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).safeParse(parsed);
   if (result.success) {
     for (const key of ['output', 'message', 'text', 'result']) {
       const val = result.data[key];
@@ -119,7 +119,9 @@ function formatHolidays(output: string, _language: string): string {
 }
 
 function formatSettings(output: string, _language: string): string {
-  const result = z.record(z.string(), z.unknown()).safeParse(JSON.parse(output));
+  const result = z
+    .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))
+    .safeParse(JSON.parse(output));
   if (!result.success) {
     return '';
   }

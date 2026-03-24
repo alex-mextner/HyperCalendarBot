@@ -33,7 +33,6 @@ export async function handleAssistantTool(
     return {
       success: result.exitCode === undefined || result.exitCode === 0,
       output: text + exitInfo,
-      data: result.data,
     };
   } catch (err) {
     return {

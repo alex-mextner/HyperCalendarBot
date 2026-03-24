@@ -31,7 +31,9 @@ import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
+import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
+import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
@@ -120,6 +122,15 @@ export interface AgentContext {
   onAgentChunk?: (text: string) => void;
 }
 
+/** Structured data from tool handlers for intent executor consumption. */
+export type ToolResultData =
+  | EventSummary
+  | EventSummary[]
+  | { telegram_id: number; name: string }
+  | ScheduledAiCall[]
+  | Trigger[]
+  | [];
+
 /**
  * Result returned by every tool handler.
  *
@@ -146,7 +157,7 @@ export interface ToolResult {
    * Structured data for intent executor consumption.
    * Never sent to AI or user directly — side-channel for workflows.
    */
-  data?: unknown;
+  data?: ToolResultData;
 }
 
 export interface AgentConfig {
