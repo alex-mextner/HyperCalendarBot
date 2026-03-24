@@ -24,7 +24,14 @@ export interface AgendaEvent {
 export interface ReminderData {
   title: string;
   startTime: string;
-  endTime: string;
+  endTime?: string;
+  location: string | null;
+  intervalLabel: string;
+}
+
+export interface BatchReminderItem {
+  title: string;
+  startTime: string;
   location: string | null;
   intervalLabel: string;
 }
@@ -40,12 +47,37 @@ export interface WeeklyDigestDay {
   events: WeeklyDigestEvent[];
 }
 
+const INTERVAL_RU: Record<string, string> = {
+  'at start': 'сейчас',
+  '5 minutes': '5 минут',
+  '10 minutes': '10 минут',
+  '15 minutes': '15 минут',
+  '30 minutes': '30 минут',
+  '1 hour': '1 час',
+  '2 hours': '2 часа',
+  '1 day': '1 день',
+  '7 days before': '7 дней',
+  'day of': 'сегодня',
+};
+
+export function localizeInterval(lang: string, label: string): string {
+  if (lang !== 'ru') return label;
+  if (INTERVAL_RU[label]) return INTERVAL_RU[label]!;
+  const minMatch = label.match(/^(\d+) min$/);
+  if (minMatch) return `${minMatch[1]} мин`;
+  const hourMatch = label.match(/^(\d+(?:\.\d+)?)h$/);
+  if (hourMatch) return `${Math.round(Number.parseFloat(hourMatch[1]!))} ч`;
+  return label;
+}
+
 const LABELS = {
   en: {
     morning: "Good morning! Here's your day:",
     evening: "Tomorrow's schedule:",
     reminder: 'Reminder:',
+    reminders: 'Reminders',
     inLabel: 'in',
+    startingNow: 'starting now!',
     eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
     goodNight: 'Good night!',
     haveADay: 'Have a productive day!',
@@ -57,7 +89,9 @@ const LABELS = {
     morning: 'Доброе утро! Ваш день:',
     evening: 'Расписание на завтра:',
     reminder: 'Напоминание:',
+    reminders: 'Напоминания',
     inLabel: 'через',
+    startingNow: 'начинается!',
     eventsCount: (n: number) => {
       if (n === 1) return '1 событие';
       if (n >= 2 && n <= 4) return `${n} события`;
@@ -91,12 +125,36 @@ export class NotificationRenderer {
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
     const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const localized = localizeInterval(lang, data.intervalLabel);
     const lines: string[] = [];
-    lines.push(`⏰ ${l.reminder} ${data.title} ${l.inLabel} ${data.intervalLabel}`);
+    if (data.intervalLabel === 'at start') {
+      lines.push(`⏰ ${data.title} — ${l.startingNow}`);
+    } else {
+      lines.push(`⏰ ${l.reminder} ${data.title} ${l.inLabel} ${localized}`);
+    }
     lines.push('');
-    lines.push(`🕐 ${data.startTime} — ${data.endTime}`);
+    if (data.endTime && data.endTime !== data.startTime) {
+      lines.push(`🕐 ${data.startTime} — ${data.endTime}`);
+    } else {
+      lines.push(`🕐 ${data.startTime}`);
+    }
     if (data.location) {
       lines.push(`📍 ${data.location}`);
+    }
+    return { channel: 'telegram_text', text: lines.join('\n') };
+  }
+
+  renderBatchReminder(lang: string, items: BatchReminderItem[]): RenderedNotification {
+    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const lines: string[] = [];
+    lines.push(`⏰ ${l.reminders}:`);
+    lines.push('');
+    for (const item of items) {
+      const localized = localizeInterval(lang, item.intervalLabel);
+      const intervalText = item.intervalLabel === 'at start' ? l.startingNow : `${l.inLabel} ${localized}`;
+      let line = `• ${item.title} — ${item.startTime} (${intervalText})`;
+      if (item.location) line += `\n  📍 ${item.location}`;
+      lines.push(line);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }

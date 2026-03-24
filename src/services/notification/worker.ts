@@ -33,23 +33,35 @@ export async function processNotification(
   if (!log || log.status === 'sent') return;
 
   try {
-    const text = log.payload ?? 'Notification';
+    const rawPayload = log.payload ?? 'Notification';
+    let text = rawPayload;
+    let eventId: number | undefined;
 
-    if (sendWithKeyboard && (data.type === 'event_reminder' || data.type === 'event_reminder_batch')) {
-      const parsed = JSON.parse(text) as { event_id?: number };
-      const eventId = parsed.event_id;
-      if (eventId !== undefined) {
-        const keyboard: ReminderKeyboard = {
-          inline_keyboard: [[{ text: '⏰ +5 мин', callback_data: `snooze:5:${eventId}` }]],
+    if (data.type === 'event_reminder' || data.type === 'event_reminder_batch') {
+      try {
+        const parsed = JSON.parse(rawPayload) as {
+          text?: string;
+          event_id?: number;
+          event_ids?: number[];
         };
-        await sendWithKeyboard(data.telegramId, text, keyboard);
-        logRepo.markSent(data.logId);
-        notifyLogger.info({ logId: data.logId, type: data.type }, 'Notification sent');
-        return;
+        if (parsed.text) {
+          text = parsed.text;
+        }
+        eventId = parsed.event_id ?? parsed.event_ids?.[0];
+      } catch {
+        // Non-JSON or legacy payload — send as-is
       }
     }
 
-    await sendMessage(data.telegramId, text);
+    if (sendWithKeyboard && eventId !== undefined) {
+      const keyboard: ReminderKeyboard = {
+        inline_keyboard: [[{ text: '⏰ +5 мин', callback_data: `snooze:5:${eventId}` }]],
+      };
+      await sendWithKeyboard(data.telegramId, text, keyboard);
+    } else {
+      await sendMessage(data.telegramId, text);
+    }
+
     logRepo.markSent(data.logId);
     notifyLogger.info({ logId: data.logId, type: data.type }, 'Notification sent');
   } catch (err) {

@@ -162,10 +162,7 @@ export function createIntentMatcherLayer(
 
     // 8. Format and send response
     if (result.response) {
-      const formatted =
-        intent.format !== 'text'
-          ? formatResponse(intent.format, result.response, user.timezone, user.language)
-          : result.response;
+      const formatted = formatResponse(intent.format, result.response, user.timezone, user.language);
       await ctx.send(formatted);
       conversationLogger?.logBotResponse(userId, formatted, chatId);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
