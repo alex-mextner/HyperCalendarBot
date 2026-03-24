@@ -1,4 +1,4 @@
-import type { InlineKeyboard, TelegramInlineKeyboardMarkup } from 'gramio';
+import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramMessage } from 'gramio';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
@@ -100,7 +100,7 @@ export interface AgentContext {
     chatId: number,
     text: string,
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup },
-  ) => Promise<unknown>;
+  ) => Promise<TelegramMessage>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   domainEvents?: DomainEventBus;
   conflictChecker?: ConflictChecker;
@@ -180,7 +180,7 @@ export interface TelegramSender {
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
-  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<unknown>;
+  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<true>;
   sendInvitation?(
     inviteeId: number,
     text: string,

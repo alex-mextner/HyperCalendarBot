@@ -1,4 +1,4 @@
-import { InlineKeyboard } from 'gramio';
+import { InlineKeyboard, type TelegramMessage } from 'gramio';
 import type { CalendarProposalRepository } from '../../../database/repositories/calendar-proposal.repository.ts';
 import type { CreateEventData, UpdateEventData } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
@@ -119,11 +119,11 @@ async function notifyGroupChat(
   const targetName = targetUser?.first_name ?? targetUser?.username ?? `User ${targetId}`;
   const targetHandle = targetUser?.username ? ` (@${targetUser.username})` : '';
 
-  const msg = (await ctx.sendMessageToChat(
+  const msg: TelegramMessage = await ctx.sendMessageToChat(
     ctx.chatId,
     `Отправил предложение ${targetName}${targetHandle}. Она/он ответит в личных сообщениях.`,
     { reply_markup: new InlineKeyboard().url('→ Написать боту', `https://t.me/${ctx.botUsername ?? 'bot'}`) },
-  )) as { message_id: number };
+  );
 
   if (msg?.message_id) {
     repo.setGroupMessageId(proposal.id, msg.message_id);

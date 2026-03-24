@@ -27,7 +27,7 @@ interface LearnerConfig {
   model?: string;
   dailyLimit: number;
   adminId?: number;
-  sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<unknown>;
+  sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<void>;
 }
 
 export class IntentLearner {

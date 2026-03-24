@@ -135,7 +135,7 @@ export interface MessageHandlerDeps {
   // Admin reply sessions: adminId → { threadId, userId }
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
-  sendMessageToUser?: (chatId: number, text: string) => Promise<unknown>;
+  sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;

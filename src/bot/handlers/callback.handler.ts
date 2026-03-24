@@ -118,7 +118,7 @@ export function createCallbackHandler(
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
     adminReplySession: Map<number, { threadId: number; userId: number }>;
-    sendMessage: (chatId: number, text: string) => Promise<unknown>;
+    sendMessage: (chatId: number, text: string) => Promise<void>;
     adminId?: number;
   },
   userRepo?: UserRepository,
@@ -416,7 +416,9 @@ export function createCallbackHandler(
                   message_id: messageId,
                   disable_notification: options.disable_notification,
                 }),
-              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
+              sendMessage: async (cid, text) => {
+                await ctx.bot.api.sendMessage({ chat_id: cid, text });
+              },
               isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {
@@ -489,7 +491,9 @@ export function createCallbackHandler(
                   message_id: messageId,
                   disable_notification: options.disable_notification,
                 }),
-              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
+              sendMessage: async (cid, text) => {
+                await ctx.bot.api.sendMessage({ chat_id: cid, text });
+              },
               isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {

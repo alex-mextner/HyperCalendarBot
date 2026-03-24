@@ -401,8 +401,10 @@ export function handleRenderDayImage(
       const file = new File([buffer], 'day.png', { type: 'image/png' });
       const sent = await sender.sendPhoto!(chatId, file);
       autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as const),
+        sendMessage: async (cId, text) => {
+          await sender.sendMessage(cId, text);
+        },
         isGroupChat,
         groupChatRepo,
       }).catch((err) => {
@@ -446,8 +448,10 @@ export function handleRenderTable(
       const file = new File([buffer], 'table.png', { type: 'image/png' });
       const sent = await sender.sendPhoto!(chatId, file);
       autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as const),
+        sendMessage: async (cId, text) => {
+          await sender.sendMessage(cId, text);
+        },
         isGroupChat,
         groupChatRepo,
       }).catch((err) => {

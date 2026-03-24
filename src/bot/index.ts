@@ -216,12 +216,13 @@ export function createBot(
           model: aiConfig.model,
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
-          sendToAdmin: (text, replyMarkup) =>
-            bot.api.sendMessage({
+          sendToAdmin: async (text, replyMarkup) => {
+            await bot.api.sendMessage({
               chat_id: botAdminId,
               text,
               reply_markup: replyMarkup,
-            }),
+            });
+          },
         })
       : undefined;
 
@@ -304,7 +305,9 @@ export function createBot(
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,
     aiModel: aiConfig.model,
-    sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
+    sendMessageToUser: async (chatId: number, text: string) => {
+      await bot.api.sendMessage({ chat_id: chatId, text });
+    },
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
@@ -585,7 +588,9 @@ export function createBot(
         {
           feedbackRepo,
           adminReplySession,
-          sendMessage: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+          sendMessage: async (chatId: number, text: string) => {
+            await bot.api.sendMessage({ chat_id: chatId, text });
+          },
           adminId: botAdminId,
         },
         db.users,
@@ -780,13 +785,31 @@ export function createBot(
     .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
     // AI Assistant commands (not in setMyCommands — internal use only)
     .command('connect', (ctx) =>
-      connectCommand({ user: ctx.dbUser, args: ctx.args, send: (text: string) => ctx.send(text) }),
+      connectCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
     )
     .command('activate', (ctx) =>
-      activateCommand({ user: ctx.dbUser, args: ctx.args, send: (text: string) => ctx.send(text) }),
+      activateCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
     )
     .command('disconnect', (ctx) =>
-      disconnectCommand({ user: ctx.dbUser, args: ctx.args, send: (text: string) => ctx.send(text) }),
+      disconnectCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
     )
     // Google Calendar commands (registered in main chain so derived context is available)
     .command('connect_google', (ctx) =>

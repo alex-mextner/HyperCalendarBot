@@ -227,7 +227,9 @@ export async function handleMonth(
             message_id: messageId,
             disable_notification: options.disable_notification,
           }),
-        sendMessage: (chatId, text) => ctx.bot.api.sendMessage({ chat_id: chatId, text }),
+        sendMessage: async (chatId, text) => {
+          await ctx.bot.api.sendMessage({ chat_id: chatId, text });
+        },
         isGroupChat: false,
         groupChatRepo: groupRepo,
       }).catch((err) => {

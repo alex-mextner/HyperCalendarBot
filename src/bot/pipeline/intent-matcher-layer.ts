@@ -35,7 +35,7 @@ export function createIntentMatcherLayer(
   executor: IntentExecutor,
   toolExecutor: (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
-  notifyAdmin?: (text: string) => Promise<unknown>,
+  notifyAdmin?: (text: string) => Promise<void>,
   getEventContext?: (
     userId: number,
     timezone: string,
