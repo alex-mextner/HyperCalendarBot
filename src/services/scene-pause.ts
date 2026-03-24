@@ -2,7 +2,7 @@
 export interface ScenePauseState {
   sceneName: string;
   step: number;
-  sceneState: Record<string, unknown>;
+  sceneState: { [key: string]: unknown };
 }
 
 type KvStorage = {

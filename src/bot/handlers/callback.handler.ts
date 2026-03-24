@@ -165,12 +165,12 @@ export function createCallbackHandler(
 
         let sceneName = 'unknown';
         let step = 0;
-        let sceneState: Record<string, unknown> = {};
+        let sceneState: { [key: string]: unknown } = {};
         try {
-          const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
+          const parsed = JSON.parse(rawScene as string) as { [key: string]: unknown };
           sceneName = (parsed.name as string) ?? 'unknown';
           step = (parsed.step as number) ?? 0;
-          sceneState = (parsed.state as Record<string, unknown>) ?? {};
+          sceneState = (parsed.state as { [key: string]: unknown }) ?? {};
         } catch {
           // proceed with defaults
         }

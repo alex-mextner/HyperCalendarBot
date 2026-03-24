@@ -1,10 +1,7 @@
 import type { Database } from 'bun:sqlite';
+import type { GroupMember } from '../types.ts';
 
-export interface GroupMember {
-  chat_id: number;
-  user_id: number;
-  last_seen_at: string;
-}
+export type { GroupMember };
 
 export class GroupMemberRepository {
   constructor(private db: Database) {}

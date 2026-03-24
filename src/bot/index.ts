@@ -33,7 +33,7 @@ import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
 import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
 import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
-import type { AiMessageJobData } from '../services/scheduled/trigger.service.ts';
+import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
@@ -427,8 +427,8 @@ export function createBot(
       // Wrap send and editText — logs every bot response (intent matcher, scenes, commands, callbacks)
       // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
       // GramIO attaches send/editText at runtime on specific contexts; accessed here at the framework boundary.
-      type SendFn = (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-      type EditTextFn = (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
+      type SendFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
+      type EditTextFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
       const mutableCtx = context as { send?: SendFn; editText?: EditTextFn };
 
       const originalSend = mutableCtx.send?.bind(mutableCtx);

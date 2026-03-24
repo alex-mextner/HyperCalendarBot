@@ -10,24 +10,15 @@ import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
+import type {
+  FeedbackThreadContext,
+  GroupContext,
+  PipelineResult,
+  WorkflowSession,
+  WorkflowSessionStore,
+} from './types.ts';
 
-export interface WorkflowSession {
-  intentId: number;
-  stepIndex: number;
-  stepResults: Record<string, unknown>;
-  workflow: Workflow;
-  captures: Record<string, string>;
-  createdAt: number;
-}
-
-export interface WorkflowSessionStore {
-  get(chatId: number, userId: number): WorkflowSession | null;
-  set(chatId: number, userId: number, session: WorkflowSession): void;
-  delete(chatId: number, userId: number): void;
-  /** Delete all sessions for a user across all chats (e.g. when user blocks the bot). */
-  deleteByUser(userId: number): void;
-}
+export type { WorkflowSession, WorkflowSessionStore };
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,

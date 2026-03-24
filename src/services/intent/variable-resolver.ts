@@ -57,7 +57,7 @@ export interface UserContext {
  * Access a nested path like "results[0].id" or "results.length" in an object.
  * Returns undefined if any segment of the path doesn't exist.
  */
-function accessPath(obj: Record<string, unknown>, path: string): unknown {
+function accessPath(obj: { [key: string]: unknown }, path: string): unknown {
   // Parse path into segments: "results[0].id" → ["results", 0, "id"]
   const segments: (string | number)[] = [];
   const raw = path.replace(/\[(\d+)\]/g, '.$1');
@@ -74,7 +74,7 @@ function accessPath(obj: Record<string, unknown>, path: string): unknown {
       if (!Array.isArray(current)) return undefined;
       current = (current as unknown[])[seg];
     } else {
-      current = (current as Record<string, unknown>)[seg];
+      current = (current as { [key: string]: unknown })[seg];
     }
   }
   return current;
@@ -90,7 +90,7 @@ function resolveVar(
   name: string,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: Record<string, unknown>,
+  stepResults?: { [key: string]: unknown },
   i18n?: I18nMap,
 ): unknown {
   const now = new TZDate(new Date(), userCtx.timezone);
@@ -140,7 +140,7 @@ function resolveVar(
       // t.* namespace — lazy i18n lookup
       if (name.startsWith('t.') && i18n) {
         const key = name.slice(2);
-        const langDict: Record<string, unknown> = i18n[userCtx.language] ?? i18n.en ?? {};
+        const langDict: { [key: string]: unknown } = i18n[userCtx.language] ?? i18n.en ?? {};
         const raw = langDict[key];
         if (raw === undefined) return undefined;
         // Lazy: resolve any {{}} inside the i18n string with current context
@@ -172,7 +172,7 @@ export function resolveVariables(
   template: unknown,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: Record<string, unknown>,
+  stepResults?: { [key: string]: unknown },
   i18n?: I18nMap,
 ): unknown {
   if (typeof template === 'string') {
@@ -217,8 +217,8 @@ export function resolveVariables(
   }
 
   if (template !== null && typeof template === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(template as Record<string, unknown>)) {
+    const result: { [key: string]: unknown } = {};
+    for (const [key, value] of Object.entries(template as { [key: string]: unknown })) {
       result[key] = resolveVariables(value, captures, userCtx, stepResults, i18n);
     }
     return result;

@@ -225,13 +225,13 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
 - **No `any`/`as any`/`Function`** — proper typing only.
-- **No bare `object` type** — use `Record<string, unknown>` or a specific interface. `object` accepts
-  any non-primitive but gives no information about the shape — it's nearly as bad as `any`.
-- **No `Record<string, unknown>` as a lazy escape** — use a specific interface or Zod-inferred type
-  when the shape is known at compile time. `Record<string, unknown>` is acceptable only for genuine
-  runtime dynamic accumulators (e.g. step results built up during execution) where no typed interface
-  can describe the structure. At parse boundaries (DB JSON columns, external API responses), use Zod
-  schemas and infer types from them instead of casting.
+- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
+  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `Record<string, unknown>`** — this utility type alias is entirely banned:
+  - Known shape at compile time → specific interface or Zod-inferred type
+  - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
+  - Truly dynamic runtime accumulator → explicit index signature `{ [key: string]: unknown }`
+  - Opaque external data → `unknown`
 - **No `as SomeType` casts** — fix the types, don't paper over them. If a library produces a poor type,
   fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
   The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site

@@ -532,7 +532,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: Record<string, unknown>;
+    workflow: { [key: string]: unknown };
     format: string;
   }> | null = null;
   let lastError: unknown;
@@ -576,7 +576,7 @@ async function handleIntentEditInstruction(
         phrases: string[];
         trigger_words: string[];
         pattern: string | null;
-        workflow: Record<string, unknown>;
+        workflow: { [key: string]: unknown };
         format: string;
       }>;
       break;
@@ -844,7 +844,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             const parsed = JSON.parse(activeScene as string) as {
               name?: string;
               step?: number;
-              state?: Record<string, unknown>;
+              state?: { [key: string]: unknown };
             };
             await deps.scenePauseService.save(user.telegram_id, {
               sceneName: parsed.name ?? 'unknown',

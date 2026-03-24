@@ -62,7 +62,7 @@ function extractExprs(obj: unknown): Array<{ expr: string; path: string }> {
         walk(value[i], `${path}[${i}]`);
       }
     } else if (value !== null && typeof value === 'object') {
-      for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(value as { [key: string]: unknown })) {
         walk(v, path ? `${path}.${k}` : k);
       }
     }
@@ -79,7 +79,7 @@ function extractAsFields(workflow: Workflow): string[] {
   if (!Array.isArray(steps)) return found;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const as = (step as Record<string, unknown>).as;
+      const as = (step as { [key: string]: unknown }).as;
       if (typeof as === 'string') found.push(as);
     }
   }
@@ -93,7 +93,7 @@ function extractAskUserNames(workflow: Workflow): Set<string> {
   if (!Array.isArray(steps)) return names;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const s = step as Record<string, unknown>;
+      const s = step as { [key: string]: unknown };
       if (s.call === 'ask_user' && typeof s.as === 'string') {
         const name = s.as.includes('|') ? s.as.slice(0, s.as.indexOf('|')) : s.as;
         names.add(name.trim());
@@ -113,7 +113,7 @@ function extractStepOutputNames(workflow: Workflow): Set<string> {
   if (!Array.isArray(steps)) return names;
   for (const step of steps) {
     if (step !== null && typeof step === 'object') {
-      const s = step as Record<string, unknown>;
+      const s = step as { [key: string]: unknown };
       if (s.call !== 'ask_user' && typeof s.as === 'string') {
         const name = s.as.includes('|') ? s.as.slice(0, s.as.indexOf('|')) : s.as;
         names.add(name.trim());

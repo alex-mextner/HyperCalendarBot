@@ -343,7 +343,7 @@ export interface CreateIntentData {
   phrases: string[];
   trigger_words?: string[];
   pattern?: string;
-  workflow: Record<string, unknown>;
+  workflow: { [key: string]: unknown };
   format: string;
   source_message?: string;
 }
@@ -510,4 +510,41 @@ export interface BirthEventMetadata {
 export interface BirthdaySyncState {
   user_id: number;
   synced_at: string;
+}
+
+// --- Repository row types ---
+
+export interface GroupMember {
+  chat_id: number;
+  user_id: number;
+  last_seen_at: string;
+}
+
+export interface Contact {
+  id: number;
+  user_id: number;
+  name: string;
+  username: string | null;
+  telegram_id: number | null;
+  preferred_name: string | null;
+  created_at: string;
+}
+
+export interface EventReminderRow {
+  id: number;
+  event_id: number;
+  user_id: number;
+  remind_at_utc: string;
+  interval_minutes: number;
+  interval_label: string;
+  sent: number;
+  created_at: string;
+}
+
+export interface InsertEventReminderData {
+  event_id: number;
+  user_id: number;
+  remind_at_utc: string;
+  interval_minutes: number;
+  interval_label: string;
 }

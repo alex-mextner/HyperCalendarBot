@@ -79,7 +79,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
 
     // Track which event was touched, for last_mentioned_event resolution in intents
     if (result.success) {
-      const inputRecord = input as Record<string, unknown>;
+      const inputRecord = input as { [key: string]: unknown };
       if (typeof inputRecord.event_id === 'number') {
         ctx.onEventMentioned?.(inputRecord.event_id);
       } else if (toolName === 'create_event' && result.output) {
@@ -232,7 +232,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: unknown)
           input as {
             action: 'get' | 'update';
             category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
-            updates?: Record<string, unknown>;
+            updates?: { [key: string]: unknown };
           },
         );
 
@@ -343,7 +343,7 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: unknown)
       case 'bash_execute':
       case 'playwright_action':
       case 'applescript_run':
-        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as Record<string, unknown>);
+        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as { [key: string]: unknown });
 
       case 'resume_scene':
         if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };

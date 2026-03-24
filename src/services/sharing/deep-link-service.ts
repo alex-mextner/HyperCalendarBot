@@ -1,12 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import type { DeepLinkRepository } from '../../database/repositories/deep-link.repository';
-import type { DeepLink, DeepLinkType } from '../../database/types';
+import type { DeepLink } from '../../database/types';
 
-interface ResolvedDeepLink {
-  type: DeepLinkType;
-  payload: Record<string, unknown>;
-  createdBy: number;
-}
+type ResolvedDeepLink =
+  | { type: 'shared_event'; payload: { event_id: number }; createdBy: number }
+  | { type: 'invitation'; payload: { invitation_id: number; event_id: number }; createdBy: number }
+  | { type: 'group_context'; payload: { chat_id: number }; createdBy: number };
 
 export class DeepLinkService {
   constructor(private repo: DeepLinkRepository) {}
@@ -52,11 +51,20 @@ export class DeepLinkService {
 
     this.repo.incrementUsedCount(code);
 
-    return {
-      type: link.type,
-      payload: JSON.parse(link.payload),
-      createdBy: link.created_by,
-    };
+    const parsed: unknown = JSON.parse(link.payload);
+    const createdBy = link.created_by;
+
+    if (link.type === 'shared_event') {
+      return { type: 'shared_event', payload: parsed as { event_id: number }, createdBy };
+    }
+    if (link.type === 'invitation') {
+      return {
+        type: 'invitation',
+        payload: parsed as { invitation_id: number; event_id: number },
+        createdBy,
+      };
+    }
+    return { type: 'group_context', payload: parsed as { chat_id: number }, createdBy };
   }
 
   generateUrl(code: string, botUsername: string): string {

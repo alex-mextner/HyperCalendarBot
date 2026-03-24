@@ -6,7 +6,7 @@ import type { AgentContext, ToolResult } from '../types.ts';
 interface ManageSettingsInput {
   action: 'get' | 'update';
   category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
-  updates?: Record<string, unknown>;
+  updates?: { [key: string]: unknown };
   assistantEnabled?: boolean;
 }
 
@@ -17,7 +17,7 @@ export function handleManageSettings(ctx: AgentContext, input: ManageSettingsInp
 }
 
 function handleGet(ctx: AgentContext, category?: string): ToolResult {
-  const result: Record<string, unknown> = {};
+  const result: { [key: string]: unknown } = {};
 
   if (!category || category === 'general') {
     result.general = {
@@ -83,7 +83,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
 function handleUpdate(
   ctx: AgentContext,
   category?: string,
-  updates?: Record<string, unknown>,
+  updates?: { [key: string]: unknown },
   assistantEnabled?: boolean,
 ): ToolResult {
   if (!category) return { success: false, error: 'category is required for update.' };
@@ -103,7 +103,7 @@ function handleUpdate(
   return { success: false, error: `Unknown category: ${category}` };
 }
 
-function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
+function updateGeneral(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
   const patch: UpdateUserData = {};
   if (updates.timezone !== undefined) patch.timezone = updates.timezone as string;
   if (updates.language !== undefined) patch.language = updates.language as 'en' | 'ru';
@@ -136,7 +136,7 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
   return { success: true, output };
 }
 
-function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
+function updateNotifications(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
   if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
   ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
 
@@ -162,7 +162,7 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
   };
 }
 
-function updateCalls(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
+function updateCalls(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
   if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
   ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
   if (updates.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled as boolean);
@@ -171,7 +171,7 @@ function updateCalls(ctx: AgentContext, updates: Record<string, unknown>): ToolR
   return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
 }
 
-function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
+function updatePrivacy(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
   if (!ctx.sharingSettingsRepo) return { success: false, error: 'Sharing settings are not configured.' };
 
   const patch: Record<string, string | number> = {};
@@ -205,7 +205,7 @@ function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolRes
   };
 }
 
-function updateVoice(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
+function updateVoice(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
   if (updates.voice_response_enabled === undefined) {
     return { success: false, error: 'No voice settings provided.' };
   }

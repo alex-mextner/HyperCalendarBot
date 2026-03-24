@@ -43,7 +43,7 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
   const serveOptions = {
     port,
     ...(agentWs ? { websocket: agentWs } : {}),
-    async fetch(req: Request, server: { upgrade(req: Request, opts: { data: object }): boolean }) {
+    async fetch(req: Request, server: { upgrade(req: Request, opts: { data: unknown }): boolean }) {
       const url = new URL(req.url);
 
       if (url.pathname === '/ws/agent' && agentWs) {

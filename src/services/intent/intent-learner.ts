@@ -9,7 +9,7 @@ import { validateWorkflowVariables } from './workflow-validator.ts';
 
 interface ToolCallRecord {
   name: string;
-  input: Record<string, unknown>;
+  input: { [key: string]: unknown };
 }
 
 interface ToolResultRecord {
@@ -186,7 +186,7 @@ export class IntentLearner {
         phrases: string[];
         trigger_words?: string[];
         pattern?: string;
-        workflow: Record<string, unknown>;
+        workflow: { [key: string]: unknown };
         format: string;
       };
 
