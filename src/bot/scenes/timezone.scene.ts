@@ -10,7 +10,7 @@ import { buildGeneralView } from '../commands/settings.ts';
 import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import { getSceneLang, getSceneUser } from './helpers.ts';
 
-interface TimezoneState {
+export interface TimezoneState {
   detectedTz?: string;
   cityInputMode?: boolean;
   geoMsgId?: number;

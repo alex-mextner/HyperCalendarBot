@@ -29,9 +29,9 @@ describe('ScenePauseService', () => {
 
   test('save → get returns the saved state', async () => {
     const state: ScenePauseState = {
-      sceneName: 'add-event',
+      sceneName: 'add_event',
       step: 2,
-      sceneState: { title: 'Team meeting', date: '2026-03-20' },
+      sceneState: { title: 'Team meeting', startAt: '2026-03-20T10:00:00Z' },
     };
 
     await service.save(123, state);
@@ -42,7 +42,7 @@ describe('ScenePauseService', () => {
 
   test('clear → get returns null', async () => {
     const state: ScenePauseState = {
-      sceneName: 'edit-value',
+      sceneName: 'onboarding',
       step: 1,
       sceneState: {},
     };
@@ -63,14 +63,14 @@ describe('ScenePauseService', () => {
 
   test('different userIds are independent', async () => {
     const stateA: ScenePauseState = {
-      sceneName: 'add-event',
+      sceneName: 'add_event',
       step: 1,
-      sceneState: { a: 1 },
+      sceneState: { title: 'Meeting' },
     };
     const stateB: ScenePauseState = {
       sceneName: 'timezone',
       step: 0,
-      sceneState: { b: 2 },
+      sceneState: { detectedTz: 'Europe/Kyiv' },
     };
 
     await service.save(1001, stateA);

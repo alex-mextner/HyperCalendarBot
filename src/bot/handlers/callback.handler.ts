@@ -59,6 +59,9 @@ import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
 import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import type { AddEventState } from '../scenes/add-event.scene.ts';
+import type { OnboardingState } from '../scenes/onboarding.scene.ts';
+import type { TimezoneState } from '../scenes/timezone.scene.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -164,25 +167,42 @@ export function createCallbackHandler(
         const rawScene = await scenePauseDeps.sceneStorage.get(`@gramio/scenes:${user.telegram_id}`);
         if (!rawScene) return;
 
-        let sceneName = 'unknown';
-        let step = 0;
-        let sceneState: { [key: string]: string | number | boolean | null } = {};
         try {
           const parsed = z
             .object({
-              name: z.string().optional(),
-              step: z.number().optional(),
+              name: z.string(),
+              step: z.number(),
               state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
             })
             .parse(JSON.parse(rawScene as string));
-          sceneName = parsed.name ?? 'unknown';
-          step = parsed.step ?? 0;
-          sceneState = parsed.state ?? {};
+          const sceneName = parsed.name;
+          const step = parsed.step;
+          const state = parsed.state ?? {};
+          // Build pause state matching scene name to its typed state
+          if (sceneName === 'add_event') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'add_event',
+              step,
+              sceneState: state as AddEventState,
+            });
+          } else if (sceneName === 'timezone') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'timezone',
+              step,
+              sceneState: state as TimezoneState,
+            });
+          } else if (sceneName === 'onboarding') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'onboarding',
+              step,
+              sceneState: state as OnboardingState,
+            });
+          } else if (sceneName === 'edit_value' || sceneName === 'import') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState: {} });
+          }
         } catch {
-          // proceed with defaults
+          // proceed with defaults — scene state unparseable
         }
-
-        await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState });
 
         const lang = user.language as 'en' | 'ru';
         await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);

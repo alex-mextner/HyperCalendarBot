@@ -23,7 +23,7 @@ import {
 
 const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
 
-interface OnboardingState {
+export interface OnboardingState {
   lang?: 'en' | 'ru';
   detectedTz?: string;
   timezone?: string;

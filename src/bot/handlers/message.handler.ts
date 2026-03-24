@@ -70,7 +70,10 @@ import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts'
 import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
+import type { AddEventState } from '../scenes/add-event.scene.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
+import type { OnboardingState } from '../scenes/onboarding.scene.ts';
+import type { TimezoneState } from '../scenes/timezone.scene.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -872,16 +875,35 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           try {
             const parsed = z
               .object({
-                name: z.string().optional(),
-                step: z.number().optional(),
+                name: z.string(),
+                step: z.number(),
                 state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
               })
               .parse(JSON.parse(activeScene as string));
-            await deps.scenePauseService.save(user.telegram_id, {
-              sceneName: parsed.name ?? 'unknown',
-              step: parsed.step ?? 0,
-              sceneState: parsed.state ?? {},
-            });
+            const step = parsed.step;
+            const state = parsed.state ?? {};
+            const name = parsed.name;
+            if (name === 'add_event') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'add_event',
+                step,
+                sceneState: state as AddEventState,
+              });
+            } else if (name === 'timezone') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'timezone',
+                step,
+                sceneState: state as TimezoneState,
+              });
+            } else if (name === 'onboarding') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'onboarding',
+                step,
+                sceneState: state as OnboardingState,
+              });
+            } else if (name === 'edit_value' || name === 'import') {
+              await deps.scenePauseService.save(user.telegram_id, { sceneName: name, step, sceneState: {} });
+            }
           } catch {
             return; // can't parse scene state — skip
           }
