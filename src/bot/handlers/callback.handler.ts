@@ -1035,7 +1035,11 @@ export function createCallbackHandler(
             await ctx.answer(t(lang).callbackErrors.unavailable);
             return;
           }
-          const settingsMsgId = ctx.message?.id ?? 0;
+          if (!ctx.message) {
+            cmdLogger.warn({ chatId: ctx.chatId }, 'change_tz callback has no message');
+            return;
+          }
+          const settingsMsgId = ctx.message.id;
           const settingsChatId = ctx.chatId ?? 0;
           await ctx.answer();
           await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });

@@ -1,6 +1,17 @@
 // src/database/repositories/workflow-session.repository.ts
 import type { Database } from 'bun:sqlite';
+import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
+import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+
+const WorkflowSessionSchema = z.object({
+  intentId: z.number(),
+  stepIndex: z.number(),
+  stepResults: z.record(z.string(), z.unknown()),
+  workflow: WorkflowSchema,
+  captures: z.record(z.string(), z.string()),
+  createdAt: z.number(),
+});
 
 const TTL_MS = 5 * 60 * 1000;
 
@@ -17,7 +28,7 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
       return null;
     }
     try {
-      return JSON.parse(row.data) as WorkflowSession;
+      return WorkflowSessionSchema.parse(JSON.parse(row.data));
     } catch {
       return null;
     }

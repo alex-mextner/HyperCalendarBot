@@ -244,18 +244,14 @@ describe('handleEditFieldCallback', () => {
     });
   });
 
-  test('uses messageId 0 when message is undefined', async () => {
+  test('returns early without entering scene when message is undefined', async () => {
     const { handleEditFieldCallback } = await import('../../../src/bot/commands/edit.ts');
     const ctx = makeCallbackCtx({ message: undefined });
     const editValueScene = { name: 'edit_value' };
 
     await handleEditFieldCallback(ctx as never, user as never, 3, 'time', editValueScene as never);
 
-    expect(ctx.scene.enter).toHaveBeenCalledWith(editValueScene, {
-      eventId: 3,
-      field: 'time',
-      chatId: 42,
-      messageId: 0,
-    });
+    expect(ctx.scene.enter).not.toHaveBeenCalled();
+    expect(ctx.answer).not.toHaveBeenCalled();
   });
 });
