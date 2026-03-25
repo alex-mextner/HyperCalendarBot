@@ -312,4 +312,17 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('(none yet)');
   });
+
+  test('instructs AI that user times are local and must be converted to UTC', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('CRITICAL');
+    expect(prompt).toContain('local timezone');
+    expect(prompt).toContain('NEVER append "Z" to a local time');
+    expect(prompt).toContain('calculate');
+  });
+
+  test('does not tell AI to pass LITERAL times to tools', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).not.toContain('pass the LITERAL date/time');
+  });
 });
