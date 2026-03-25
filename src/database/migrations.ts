@@ -823,7 +823,9 @@ export const migrations: Migration[] = [
   {
     name: '042_group_members_membership_dates',
     up: (db) => {
-      db.exec(`ALTER TABLE group_members ADD COLUMN joined_at TEXT NOT NULL DEFAULT (datetime('now'))`);
+      // SQLite ALTER TABLE ADD COLUMN requires constant defaults — datetime('now') is not allowed.
+      db.exec(`ALTER TABLE group_members ADD COLUMN joined_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'`);
+      db.exec(`UPDATE group_members SET joined_at = datetime('now')`);
       db.exec(`ALTER TABLE group_members ADD COLUMN left_at TEXT`);
     },
   },
