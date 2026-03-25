@@ -37,6 +37,7 @@ export function createEditValueScene(eventService: EventService, userComposer: U
   return (
     new Scene('edit_value')
       .params<EditValueParams>()
+      // extend() AFTER params() — params() uses Modify which replaces Derives.global
       .extend(userComposer)
       // onEnter sends prompt — because scene is entered from callback_query
       // but step 0 is "message", so firstTime won't fire on entry

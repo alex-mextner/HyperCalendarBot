@@ -169,6 +169,23 @@ BullMQ on Redis, three queues:
 
 Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding`. Scene state is persisted in SQLite (not in-memory) so restarts don't break active flows.
 
+**Scene context typing** uses `Composer.derive()` + `scene.extend(composer)` to propagate
+`dbUser`, `lang`, `userTimezone` into step handler context without casts. Key details:
+
+- `Plugin.derive()` widens return type to `Record<string, unknown>` (Hooks.Derive constraint).
+  `Composer.derive()` uses `DeriveHandler<T, D>` with proper generic inference — use Composer.
+- **`extend()` MUST come AFTER `params()` and `state()`**. `params()` uses `Modify<Derives>`
+  which replaces `Derives.global`; `state()` uses `Derives &` (intersection, preserves).
+  If `extend()` is before `params()`, the derived props disappear from the type.
+  ```ts
+  // Correct order:
+  new Scene('name').params<P>().state<S>().extend(userComposer).step(...)
+  // Wrong — params() replaces global, losing extend:
+  new Scene('name').extend(userComposer).params<P>().step(...)
+  ```
+- Scene shared types (`AddEventState`, `OnboardingState`, `TimezoneState`, `SceneKvStorage`)
+  live in `src/bot/scenes/types.ts`.
+
 ### Database
 
 `bun:sqlite` WAL mode. All access goes through repositories in `src/database/repositories/`. Schema defined as sequential migrations in `src/database/migrations.ts`. Key tables: `users`, `events`, `reminders`, `invitations`, `intents`, `chat_history`, `calendar_secretaries`, `calendar_proposals`, `contacts`, `event_participants`.
