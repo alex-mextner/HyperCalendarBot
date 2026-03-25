@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AddEventState } from '../bot/scenes/add-event.scene.ts';
 import type { OnboardingState } from '../bot/scenes/onboarding.scene.ts';
 import type { TimezoneState } from '../bot/scenes/timezone.scene.ts';
+import { jsonCodec } from '../utils/json-codec.ts';
 
 /** Discriminated union of all wizard scene pause states. When adding a new scene, extend this union. */
 export type ScenePauseState =
@@ -65,13 +66,8 @@ export class ScenePauseService {
   async get(userId: number): Promise<ScenePauseState | null> {
     const raw = await this.storage.get(pauseKey(userId));
     if (!raw) return null;
-    try {
-      const json: unknown = JSON.parse(raw as string);
-      const result = ScenePauseSchema.safeParse(json);
-      return result.success ? result.data : null;
-    } catch {
-      return null;
-    }
+    const result = jsonCodec(ScenePauseSchema).safeParse(raw as string);
+    return result.success ? result.data : null;
   }
 
   async clear(userId: number): Promise<void> {

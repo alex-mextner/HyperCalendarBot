@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { createAnthropicClient } from './anthropic-client.ts';
@@ -98,26 +99,23 @@ export class CalendarBotAgent {
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
 
-    const ContentBlocksSchema = z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough());
-    const ActivityEventSchema = z.object({ kind: z.string() }).passthrough();
+    const ContentBlocksCodec = jsonCodec(
+      z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()),
+    );
+    const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
 
     for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
-      try {
-        const raw = JSON.parse(msg.content);
-        const blocksResult = ContentBlocksSchema.safeParse(raw);
-        if (blocksResult.success) {
-          content = blocksResult.data as Anthropic.ContentBlockParam[];
+      const blocksResult = ContentBlocksCodec.safeParse(msg.content);
+      if (blocksResult.success) {
+        content = blocksResult.data as Anthropic.ContentBlockParam[];
+      } else {
+        const activityResult = ActivityEventCodec.safeParse(msg.content);
+        if (activityResult.success) {
+          content = withTimestamp(formatActivityEvent(activityResult.data as ActivityEvent), msg.created_at);
         } else {
-          const activityResult = ActivityEventSchema.safeParse(raw);
-          if (activityResult.success) {
-            content = withTimestamp(formatActivityEvent(activityResult.data as ActivityEvent), msg.created_at);
-          } else {
-            content = withTimestamp(msg.content, msg.created_at);
-          }
+          content = withTimestamp(msg.content, msg.created_at);
         }
-      } catch {
-        content = withTimestamp(msg.content, msg.created_at);
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
 

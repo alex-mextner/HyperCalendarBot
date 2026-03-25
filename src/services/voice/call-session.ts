@@ -2,6 +2,7 @@
 import { unlink as fsUnlink } from 'node:fs/promises';
 import { z } from 'zod';
 import type { User } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
@@ -51,13 +52,7 @@ export class CallSession {
 
   async handleMessage(data: string): Promise<void> {
     if (this.ended) return;
-    let raw: unknown;
-    try {
-      raw = JSON.parse(data);
-    } catch {
-      return;
-    }
-    const result = z.object({ type: z.string() }).safeParse(raw);
+    const result = jsonCodec(z.object({ type: z.string() })).safeParse(data);
     if (!result.success) return;
     const msg = result.data;
 

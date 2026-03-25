@@ -4,6 +4,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { BirthEventMetadata, CalendarEvent } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { allDayReminderUtc } from '../notification/materializer.ts';
 
@@ -170,9 +171,9 @@ export class BirthdayService {
         return;
       }
       const stdout = await new Response(proc.stdout).text();
-      result = z
-        .record(z.string(), z.object({ day: z.number(), month: z.number(), year: z.number().optional() }).nullable())
-        .parse(JSON.parse(stdout));
+      result = jsonCodec(
+        z.record(z.string(), z.object({ day: z.number(), month: z.number(), year: z.number().optional() }).nullable()),
+      ).parse(stdout);
     } catch (err) {
       birthdayLogger.error({ err }, 'Failed to spawn batch fetch-birthdays.py');
       return;

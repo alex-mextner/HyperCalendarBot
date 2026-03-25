@@ -63,6 +63,7 @@ import {
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
@@ -165,15 +166,12 @@ export interface MessageHandlerDeps {
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
 
+const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
+
 function isCallbackOnlyStep(rawScene: unknown): boolean {
-  try {
-    const parsed = z
-      .object({ name: z.string().optional(), step: z.number().optional() })
-      .parse(JSON.parse(rawScene as string));
-    return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
-  } catch {
-    return false;
-  }
+  const result = SceneStepCodec.safeParse(rawScene as string);
+  if (!result.success) return false;
+  return CALLBACK_ONLY_STEPS.get(result.data.name ?? '')?.has(result.data.step ?? -1) ?? false;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -531,11 +529,13 @@ async function handleIntentEditInstruction(
     return;
   }
 
+  const StringArrayCodec = jsonCodec(z.array(z.string()));
+  const WorkflowCodec = jsonCodec(WorkflowSchema);
   const currentJson = JSON.stringify({
-    phrases: z.array(z.string()).parse(JSON.parse(intent.phrases)),
-    trigger_words: z.array(z.string()).parse(JSON.parse(intent.trigger_words)),
+    phrases: StringArrayCodec.parse(intent.phrases),
+    trigger_words: StringArrayCodec.parse(intent.trigger_words),
     pattern: intent.pattern,
-    workflow: WorkflowSchema.parse(JSON.parse(intent.workflow)),
+    workflow: WorkflowCodec.parse(intent.workflow),
     format: intent.format,
   });
 
@@ -584,15 +584,15 @@ async function handleIntentEditInstruction(
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
-      updated = z
-        .object({
+      updated = jsonCodec(
+        z.object({
           phrases: z.array(z.string()).optional(),
           trigger_words: z.array(z.string()).optional(),
           pattern: z.string().nullable().optional(),
           workflow: WorkflowSchema.optional(),
           format: z.string().optional(),
-        })
-        .parse(JSON.parse(text));
+        }),
+      ).parse(text);
       break;
     } catch (err) {
       lastError = err;
@@ -614,9 +614,7 @@ async function handleIntentEditInstruction(
     const fresh = intentRepo.getById(session.intentId)!;
     const preview = [
       `✏️ Intent #${fresh.id} updated: <b>${fresh.canonical_name}</b>`,
-      `Phrases: ${z
-        .array(z.string())
-        .parse(JSON.parse(fresh.phrases))
+      `Phrases: ${StringArrayCodec.parse(fresh.phrases)
         .map((p) => `"${p}"`)
         .join(', ')}`,
       fresh.pattern ? `Pattern: ${fresh.pattern}` : 'Pattern: none',
@@ -873,13 +871,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
         if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
           try {
-            const parsed = z
-              .object({
+            const parsed = jsonCodec(
+              z.object({
                 name: z.string(),
                 step: z.number(),
                 state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-              })
-              .parse(JSON.parse(activeScene as string));
+              }),
+            ).parse(activeScene as string);
             const step = parsed.step;
             const state = parsed.state ?? {};
             const name = parsed.name;

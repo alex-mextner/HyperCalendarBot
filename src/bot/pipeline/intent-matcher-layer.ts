@@ -8,9 +8,12 @@ import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineResult, WorkflowSessionStore } from './types.ts';
+
+const WorkflowCodec = jsonCodec(WorkflowSchema);
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,
@@ -81,13 +84,12 @@ export function createIntentMatcherLayer(
     const intent = intentRepo.getById(match.intentId);
     if (!intent) return { handled: false };
 
-    let workflow: Workflow;
-    try {
-      workflow = WorkflowSchema.parse(JSON.parse(intent.workflow));
-    } catch {
+    const workflowResult = WorkflowCodec.safeParse(intent.workflow);
+    if (!workflowResult.success) {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
       return { handled: false };
     }
+    const workflow: Workflow = workflowResult.data;
 
     // 4. Execute
     const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};

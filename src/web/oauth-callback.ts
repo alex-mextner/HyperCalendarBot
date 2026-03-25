@@ -6,6 +6,7 @@ import type { GoogleSyncRepository } from '../database/repositories/google-sync.
 import type { UserRepository } from '../database/repositories/user.repository.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { encrypt } from '../utils/crypto.ts';
+import { jsonCodec } from '../utils/json-codec.ts';
 import { webLogger } from '../utils/logger.ts';
 
 interface OAuthStateLookup {
@@ -48,7 +49,7 @@ export async function handleOAuthCallback(req: Request, deps: OAuthCallbackDeps)
   }
   await deps.stateLookup.del(stateKey);
 
-  const { telegram_user_id: userId } = z.object({ telegram_user_id: z.number() }).parse(JSON.parse(payload));
+  const { telegram_user_id: userId } = jsonCodec(z.object({ telegram_user_id: z.number() })).parse(payload);
 
   try {
     const tokens = await deps.oauthService.exchangeCode(code);

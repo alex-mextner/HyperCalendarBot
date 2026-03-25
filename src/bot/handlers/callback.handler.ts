@@ -46,6 +46,7 @@ import {
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
@@ -168,13 +169,13 @@ export function createCallbackHandler(
         if (!rawScene) return;
 
         try {
-          const parsed = z
-            .object({
+          const parsed = jsonCodec(
+            z.object({
               name: z.string(),
               step: z.number(),
               state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
-            })
-            .parse(JSON.parse(rawScene as string));
+            }),
+          ).parse(rawScene as string);
           const sceneName = parsed.name;
           const step = parsed.step;
           const state = parsed.state ?? {};
@@ -752,8 +753,8 @@ export function createCallbackHandler(
         }
 
         if (subAction === 'accept') {
-          const changes: UpdateEventData = z
-            .object({
+          const changes: UpdateEventData = jsonCodec(
+            z.object({
               title: z.string().optional(),
               description: z.string().nullable().optional(),
               category: z.string().nullable().optional(),
@@ -773,8 +774,8 @@ export function createCallbackHandler(
                 .optional(),
               sync_version: z.number().optional(),
               last_synced_at: z.string().nullable().optional(),
-            })
-            .parse(JSON.parse(proposal.changes));
+            }),
+          ).parse(proposal.changes);
           const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
           editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
           await ctx.answer();
@@ -1204,9 +1205,9 @@ export function createCallbackHandler(
           let responseText = '';
           if (lastAssistant) {
             try {
-              const blocks = z
-                .array(z.object({ type: z.string(), text: z.string().optional() }))
-                .parse(JSON.parse(lastAssistant.content));
+              const blocks = jsonCodec(z.array(z.object({ type: z.string(), text: z.string().optional() }))).parse(
+                lastAssistant.content,
+              );
               responseText = blocks
                 .filter((b) => b.type === 'text')
                 .map((b) => b.text ?? '')
@@ -1477,7 +1478,7 @@ export async function handleProposalAccept(id: number, callerId: number, deps: P
       })
       .optional(),
   });
-  const payloadData = ProposalPayloadSchema.parse(JSON.parse(proposal.payload));
+  const payloadData = jsonCodec(ProposalPayloadSchema).parse(proposal.payload);
 
   let result: { id: number; title?: string } | boolean | null | undefined;
   if (proposal.action === 'create' && payloadData.event) {

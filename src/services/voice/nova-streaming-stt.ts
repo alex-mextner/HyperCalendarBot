@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 
 const NovaMessageSchema = z.object({
   is_final: z.boolean(),
@@ -8,6 +9,8 @@ const NovaMessageSchema = z.object({
     })
     .optional(),
 });
+
+const NovaMessageCodec = jsonCodec(NovaMessageSchema);
 
 export interface NovaStreamingSTTEvents {
   onInterim: (transcript: string) => void;
@@ -45,7 +48,7 @@ export class NovaStreamingSTT {
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
-        const data = NovaMessageSchema.parse(JSON.parse(event.data as string));
+        const data = NovaMessageCodec.parse(event.data as string);
         const transcript = data.channel?.alternatives?.[0]?.transcript ?? '';
         if (!transcript) return;
         if (data.is_final) events.onFinal(transcript);

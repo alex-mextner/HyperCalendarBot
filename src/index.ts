@@ -11,6 +11,7 @@ import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
@@ -525,14 +526,14 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
         botLogger.warn({ username, stderr: stderr.slice(0, 200) }, 'resolve-username.py failed');
         return null;
       }
-      try {
-        return z
-          .object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() })
-          .parse(JSON.parse(stdout.trim()));
-      } catch {
+      const parseResult = jsonCodec(
+        z.object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() }),
+      ).safeParse(stdout.trim());
+      if (!parseResult.success) {
         botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
         return null;
       }
+      return parseResult.data;
     };
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
@@ -656,12 +657,9 @@ if (config.REDIS_URL) {
       if (!match) return { handled: false };
       const intent = msgDeps.intentRepo.getById(match.intentId);
       if (!intent) return { handled: false };
-      let workflow: Workflow;
-      try {
-        workflow = WorkflowSchema.parse(JSON.parse(intent.workflow));
-      } catch {
-        return { handled: false };
-      }
+      const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
+      if (!workflowResult.success) return { handled: false };
+      const workflow: Workflow = workflowResult.data;
       const userCtx = {
         userId: agentCtx.user.telegram_id,
         language: agentCtx.user.language,
