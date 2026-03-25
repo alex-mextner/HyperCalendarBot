@@ -69,7 +69,7 @@ describe('processNotification', () => {
     expect(sendWithKeyboard).toHaveBeenCalledTimes(1);
     expect(sendMessage).not.toHaveBeenCalled();
     // Verify formatted text is sent, not raw JSON
-    const callArgs = sendWithKeyboard.mock.calls[0] as unknown as [number, string, unknown];
+    const callArgs = sendWithKeyboard.mock.calls[0]! as unknown as [number, string, unknown];
     expect(callArgs[1]).toContain('⏰');
     expect(callArgs[1]).not.toContain('"event_id"');
     const row = logRepo.getById(logId);

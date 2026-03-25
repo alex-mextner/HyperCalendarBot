@@ -99,7 +99,12 @@ describe('createInlineHandler', () => {
 
     await handler(ctx);
     const args = ctx.answerInlineQuery.mock.calls[0] as unknown[];
-    const results = args[0] as Array<Record<string, unknown>>;
+    const results = args[0] as Array<{
+      type: string;
+      id: string;
+      title: string;
+      input_message_content: { message_text: string; parse_mode: string };
+    }>;
     const result = results[0]!;
     expect(result.type).toBe('article');
     expect(result.id).toBe('evt_1');
@@ -223,7 +228,7 @@ describe('createInlineHandler', () => {
 
     await handler(ctx);
     const args = ctx.answerInlineQuery.mock.calls[0] as unknown[];
-    const options = args[1] as Record<string, unknown>;
+    const options = args[1] as { cache_time: number };
     expect(options.cache_time).toBe(30);
   });
 });

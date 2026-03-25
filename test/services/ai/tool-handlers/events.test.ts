@@ -686,7 +686,7 @@ describe('event tool handlers', () => {
     });
 
     function makeMemberService(memberIds: number[]): GroupMemberService {
-      return { getRegisteredMembers: mock(async () => memberIds) } as unknown as GroupMemberService;
+      return { getRegisteredMembers: mock(async () => memberIds) } as Partial<GroupMemberService> as GroupMemberService;
     }
 
     test('handleCreateEvent notifies all group members including creator', async () => {

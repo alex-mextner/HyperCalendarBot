@@ -5,10 +5,17 @@ import {
   handleProposalDecline,
   handleSecretaryAccept,
   handleSecretaryDecline,
+  type ProposalDeps,
   parseAiBtnPayload,
+  type SecretaryDeps,
 } from '../../../src/bot/handlers/callback.handler.ts';
 
-function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
+interface MockCallbackCtxOverrides {
+  from?: { id: number };
+  data?: undefined;
+}
+
+function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
   return {
     data,
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
@@ -20,7 +27,7 @@ function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeHandler(overrides: Record<string, unknown> = {}) {
+function makeHandler(overrides: { [key: string]: unknown } = {}) {
   const eventService = {
     getEvent: mock(() => ({
       id: 1,
@@ -171,7 +178,7 @@ const pendingRecord = {
   updated_at: '',
 };
 
-function makeDeps(overrides: Record<string, unknown> = {}) {
+function makeDeps(overrides: Partial<SecretaryDeps> & { [key: string]: unknown } = {}) {
   return {
     secretaryRepo: {
       findById: mock(() => pendingRecord),
@@ -222,7 +229,7 @@ test('sec:accept: no-op if caller is not the secretary', async () => {
 test('sec:accept: no-op if record is not pending', async () => {
   const deps = makeDeps({
     secretaryRepo: {
-      findById: mock(() => ({ ...pendingRecord, status: 'active' })),
+      findById: mock(() => ({ ...pendingRecord, status: 'active' as const })),
       updateStatus: mock(() => true),
     },
   });
@@ -271,7 +278,7 @@ const basePendingProposal = {
   updated_at: '',
 };
 
-function makeProposalDeps(overrides: Record<string, unknown> = {}) {
+function makeProposalDeps(overrides: Partial<ProposalDeps> & { [key: string]: unknown } = {}) {
   return {
     proposalRepo: {
       findById: mock(() => basePendingProposal),
@@ -300,7 +307,7 @@ test('prop:accept: executes create payload as target_id=2, edits DM and group', 
 
 test('prop:accept: event gone → notifies both parties, does not crash', async () => {
   const deps = makeProposalDeps({
-    eventService: { createEvent: mock(() => null) },
+    eventService: { createEvent: mock(() => null), updateEvent: mock(() => null), deleteEvent: mock(() => true) },
   });
   await handleProposalAccept(10, basePendingProposal.target_id, deps as never);
 
@@ -311,7 +318,7 @@ test('prop:accept: event gone → notifies both parties, does not crash', async 
 test('prop:accept: no-op if status != pending, edits DM only', async () => {
   const deps = makeProposalDeps({
     proposalRepo: {
-      findById: mock(() => ({ ...basePendingProposal, status: 'expired' })),
+      findById: mock(() => ({ ...basePendingProposal, status: 'expired' as const })),
       updateStatus: mock(() => true),
     },
   });

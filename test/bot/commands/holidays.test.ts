@@ -1,20 +1,24 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { GroupChat } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
 
 function makeGroupRepo(country: string | null) {
   return {
-    findByChatId: mock(() => ({
-      chat_id: -100,
-      country,
-      timezone: null,
-      title: null,
-      added_by: 1,
-      added_at: '',
-      is_active: 1,
-      pin_hint_shown: 0,
-    })),
+    findByChatId: mock(
+      () =>
+        ({
+          chat_id: -100,
+          country,
+          timezone: null,
+          title: null,
+          added_by: 1,
+          added_at: '',
+          is_active: 1,
+          pin_hint_shown: 0,
+        }) satisfies Partial<GroupChat>,
+    ),
   };
 }
 
@@ -36,7 +40,21 @@ function makeCallbackCtx(overrides = {}) {
   };
 }
 
-function makeHolidayService(overrides: Record<string, unknown> = {}) {
+function makeHolidayService(
+  overrides: Partial<{
+    getSubscriptions: ReturnType<typeof mock>;
+    getCountryName: ReturnType<typeof mock>;
+    getUpcomingHolidays: ReturnType<typeof mock>;
+    getUpcomingForCountry: ReturnType<typeof mock>;
+    getAvailableRegions: ReturnType<typeof mock>;
+    getCountriesForRegion: ReturnType<typeof mock>;
+    subscribeUser: ReturnType<typeof mock>;
+    unsubscribeUser: ReturnType<typeof mock>;
+    setPrimary: ReturnType<typeof mock>;
+    toggleNotify: ReturnType<typeof mock>;
+    getSubscription: ReturnType<typeof mock>;
+  }> = {},
+) {
   return {
     getSubscriptions: mock(() => []),
     getCountryName: mock((code: string) => `Country-${code}`),

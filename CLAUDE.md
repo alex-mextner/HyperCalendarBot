@@ -257,6 +257,15 @@ Optional features that depend on an env var must deactivate gracefully when the 
   There is no acceptable use case. If you think you need it, the types are wrong — fix them.
 - **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
   It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
+- **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test
+  files (`test/`), partial mocks that implement a subset of an interface are allowed to use
+  `as unknown as RealType` under these conditions:
+  1. The cast is inside a **centralized factory function** (`makeCtx`, `makeDeps`, `mockWs`),
+     never inline at the test call site
+  2. The factory parameter is typed as `Partial<RealInterface>`, not `Record<string, unknown>`
+  3. `as never` remains banned everywhere — use `as unknown as X` in test factories
+  4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
+     (bun:test types `calls` as `unknown[][]` — no way around it)
 - **`JSON.parse` must always go through Zod** — never use the raw return value. Always
   `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
   For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
@@ -324,6 +333,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   4. Run the test — confirm it passes
   5. Refactor while keeping tests green
 - **Tests must exercise production code**: never reimplement logic in tests.
+  Import helpers/utilities from `src/` — don't copy-paste them into test files.
 - **Never delete a failing test**. Investigate and fix the root cause.
 - **NEVER ignore test/system output** — logs and messages often contain CRITICAL information.
   Read test output, don't just check pass/fail. Warnings in logs point to real bugs.
@@ -333,6 +343,38 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
+- **Centralize test casts in factory functions** — never write `as unknown as X` inline at the
+  test call site. Casts are allowed only inside `makeCtx`/`makeDeps`/`mockWs`-style factories
+  (see "Test-only cast exceptions" in Coding Guidelines). The factory parameter must be
+  `Partial<RealInterface>`, not `Record<string, unknown>`.
+  ```ts
+  // Bad — inline cast at call site, no type checking
+  const ctx = { send: mock(() => {}) } as unknown as AgentContext;
+  // Good — cast centralized in factory, overrides are typed
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+    return { ...baseCtx, ...overrides } as unknown as AgentContext;
+  }
+  const ctx = makeCtx({ send: mock(() => {}) }); // no cast here
+  ```
+- **No `Record<string, unknown>` in mock factories** — use `Partial<ConcreteInterface>` for
+  override parameters. `Record<string, unknown>` defeats the purpose of typed tests: you can pass
+  any garbage and the test will happily compile. When the production interface changes, tests using
+  `Record<string, unknown>` won't break — which means they stop protecting you.
+  ```ts
+  // Bad — any shape accepted, no compile-time checks
+  function makeCtx(overrides: Record<string, unknown> = {}) { ... }
+  // Good — only valid properties accepted
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext { ... }
+  ```
+- **Tests must assert behavior, not mock wiring** — "mock was called with X" is a weak assertion.
+  Prefer asserting the observable outcome (return value, DB state, sent message content).
+  Mock-call assertions are acceptable only when the side effect IS the behavior (e.g., verifying
+  a Telegram message was sent with specific text).
+- **No stub tests** — `test.todo()`, `expect(true).toBe(true)`, empty test bodies, tests that
+  assert only that a function doesn't throw. Every test must assert something meaningful about
+  the code's behavior. If you can't write a meaningful assertion, the test shouldn't exist.
+- **Deleting a stub/broken test requires replacement** — when removing a low-quality test, write
+  at least 2-3 proper tests covering the same production code. Never reduce total coverage.
 - **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
 - **NEVER use `git add -A`** without checking `git status` first.

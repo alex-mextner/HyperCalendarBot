@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 
-function makeCtx(data: string, language = 'en', extras: Record<string, unknown> = {}) {
+function makeCtx(data: string, language = 'en', extras: { chat?: unknown; message?: unknown } = {}) {
   return {
     data,
     dbUser: { telegram_id: 100, language, timezone: 'UTC' },
@@ -13,7 +13,7 @@ function makeCtx(data: string, language = 'en', extras: Record<string, unknown> 
   };
 }
 
-function makeEventService(overrides: Record<string, unknown> = {}) {
+function makeEventService(overrides: { [key: string]: unknown } = {}) {
   return {
     getEvent: mock(() => null),
     getEventsForDay: mock(() => []),
@@ -28,7 +28,7 @@ function makeEventService(overrides: Record<string, unknown> = {}) {
 
 function makeHandler(
   overrides: {
-    eventService?: Record<string, unknown>;
+    eventService?: { [key: string]: unknown };
     editValueScene?: unknown;
     holidayService?: unknown;
     prefsService?: unknown;
@@ -94,7 +94,7 @@ describe('EVENT_VIEW callback', () => {
     expect(ctx.editText).toHaveBeenCalled();
     const callArgs = ctx.editText.mock.calls[0] as unknown[];
     expect(callArgs[0]).toContain('Standup');
-    const opts = callArgs[1] as Record<string, unknown>;
+    const opts = callArgs[1] as { parse_mode: string; reply_markup: unknown };
     expect(opts.parse_mode).toBe('HTML');
     expect(opts.reply_markup).toBeDefined();
   });

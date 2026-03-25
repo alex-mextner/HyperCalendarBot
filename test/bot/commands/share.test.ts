@@ -304,10 +304,8 @@ describe('handleShare', () => {
     await handleShare(ctx as never, eventService as never, {} as never, {} as never, groupRepo as never);
     expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
     expect(eventService.getUpcoming).not.toHaveBeenCalled();
-    const [msg, opts] = (ctx.send as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
-      string,
-      { reply_markup: unknown },
-    ];
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
     expect(msg).toContain('Поделиться');
     expect(opts?.reply_markup).toBeDefined();
   });

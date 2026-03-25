@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleSnoozeCallback } from '../../../src/bot/handlers/snooze-callback.ts';
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+function makeCtx(overrides: { [key: string]: unknown } = {}) {
   return {
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),

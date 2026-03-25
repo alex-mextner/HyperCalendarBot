@@ -1,7 +1,16 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackFallback } from '../../../src/bot/middleware/callback-fallback.ts';
+import type { User } from '../../../src/database/types.ts';
 
-function createFakeContext(overrides: Record<string, unknown> = {}) {
+/** Shape matching the CallbackCtx interface inside callback-fallback.ts */
+interface FakeCallbackCtx {
+  is: (type: string) => boolean;
+  from: { id: number };
+  answer: (...args: unknown[]) => Promise<unknown>;
+  dbUser: Partial<User>;
+}
+
+function createFakeContext(overrides: Partial<FakeCallbackCtx> = {}): FakeCallbackCtx {
   return {
     is: (type: string) => type === 'callback_query',
     from: { id: 123 },
@@ -58,14 +67,13 @@ describe('callbackFallback', () => {
       has: mock(async () => false),
     };
     const middleware = createCallbackFallback(storage);
-    const answerMock = mock(async () => {});
+    const answerMock = mock(async (..._args: unknown[]) => {});
     const ctx = createFakeContext({ answer: answerMock });
     await middleware(ctx, async () => {
       // downstream does NOT answer (scene step didn't handle callback_query)
     });
     expect(answerMock).toHaveBeenCalledTimes(1);
-    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
-    expect(callArgs.text).toContain('progress');
+    expect((answerMock.mock.calls[0]![0] as { text: string }).text).toContain('progress');
   });
 
   test('answers with "expired" message when no scene active', async () => {
@@ -76,12 +84,11 @@ describe('callbackFallback', () => {
       has: mock(async () => false),
     };
     const middleware = createCallbackFallback(storage);
-    const answerMock = mock(async () => {});
+    const answerMock = mock(async (..._args: unknown[]) => {});
     const ctx = createFakeContext({ answer: answerMock });
     await middleware(ctx, async () => {});
     expect(answerMock).toHaveBeenCalledTimes(1);
-    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
-    expect(callArgs.text).toContain('expired');
+    expect((answerMock.mock.calls[0]![0] as { text: string }).text).toContain('expired');
   });
 
   test('uses Russian message for ru users in scene', async () => {
@@ -92,11 +99,10 @@ describe('callbackFallback', () => {
       has: mock(async () => false),
     };
     const middleware = createCallbackFallback(storage);
-    const answerMock = mock(async () => {});
+    const answerMock = mock(async (..._args: unknown[]) => {});
     const ctx = createFakeContext({ answer: answerMock, dbUser: { language: 'ru' } });
     await middleware(ctx, async () => {});
-    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
-    expect(callArgs.text).toContain('/cancel');
+    expect((answerMock.mock.calls[0]![0] as { text: string }).text).toContain('/cancel');
   });
 
   test('uses Russian message for ru users without scene', async () => {
@@ -107,10 +113,9 @@ describe('callbackFallback', () => {
       has: mock(async () => false),
     };
     const middleware = createCallbackFallback(storage);
-    const answerMock = mock(async () => {});
+    const answerMock = mock(async (..._args: unknown[]) => {});
     const ctx = createFakeContext({ answer: answerMock, dbUser: { language: 'ru' } });
     await middleware(ctx, async () => {});
-    const callArgs = (answerMock.mock.calls[0] as unknown as [{ text: string }])[0] as { text: string };
-    expect(callArgs.text).toContain('устарело');
+    expect((answerMock.mock.calls[0]![0] as { text: string }).text).toContain('устарело');
   });
 });

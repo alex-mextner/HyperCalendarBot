@@ -12,7 +12,7 @@ function makeCtx(data: string, userId = 200, lang = 'en') {
   };
 }
 
-function makeHandler(eventService: Record<string, unknown>, forceInviteDeps?: Record<string, unknown>) {
+function makeHandler(eventService: { [key: string]: unknown }, forceInviteDeps?: { [key: string]: unknown }) {
   return createCallbackHandler(
     eventService as never, // eventService
     {} as never, // editValueScene

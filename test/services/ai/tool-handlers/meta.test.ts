@@ -623,14 +623,20 @@ describe('handleCalculate', () => {
 
 describe('handleMakeCall', () => {
   test('blocks make_call during live_call', () => {
-    const liveCtx = { user: { telegram_id: 1, language: 'en' }, inputMode: 'live_call' } as unknown as AgentContext;
+    const liveCtx = {
+      user: { telegram_id: 1, language: 'en' },
+      inputMode: 'live_call',
+    } as Partial<AgentContext> as AgentContext;
     const result = handleMakeCall(liveCtx, { text: 'reminder' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('live call');
   });
 
   test('returns error when callQueue not available', () => {
-    const noQueueCtx = { user: { telegram_id: 1, language: 'en' }, inputMode: undefined } as unknown as AgentContext;
+    const noQueueCtx = {
+      user: { telegram_id: 1, language: 'en' },
+      inputMode: undefined,
+    } as Partial<AgentContext> as AgentContext;
     const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
     expect(result.success).toBe(false);
   });

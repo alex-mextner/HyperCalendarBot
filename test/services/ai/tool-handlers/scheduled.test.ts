@@ -33,7 +33,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     scheduledCallService,
     triggerService: { repo: triggerRepo },
     ...overrides,
-  } as unknown as AgentContext;
+  } as Partial<AgentContext> as AgentContext;
 }
 
 describe('handleAddTrigger', () => {

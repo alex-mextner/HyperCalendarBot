@@ -17,7 +17,7 @@ function createMockApi(
     status?: string;
     updated?: string;
     etag?: string;
-    extendedProperties?: Record<string, unknown>;
+    extendedProperties?: { [key: string]: unknown };
   }>,
   nextSyncToken = 'token-1',
 ) {

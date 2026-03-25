@@ -136,10 +136,10 @@ describe('handleSendFeedback', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
-    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as unknown as [
+    const [chatId, text, options] = sendMessageToChat.mock.calls[0]! as unknown as [
       number,
       string,
-      Record<string, unknown>,
+      { [key: string]: unknown },
     ];
     expect(chatId).toBe(ADMIN_ID);
     expect(text).toContain('feature');

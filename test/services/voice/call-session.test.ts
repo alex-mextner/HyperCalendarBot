@@ -153,7 +153,7 @@ test('Nova STT onError triggers error phrase', async () => {
   let capturedOnError: ((err: Error) => void) | undefined;
   nova.connect = mock((events: { onError: (err: Error) => void }) => {
     capturedOnError = events.onError;
-  }) as unknown as typeof nova.connect;
+  }) as typeof nova.connect;
   const { session, ws } = makeSession({ createNovaStt: () => nova as never });
 
   await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
@@ -259,7 +259,7 @@ test('TTS receives markdown-stripped text', async () => {
   let onFinalCb: ((t: string) => void) | undefined;
   nova.connect = mock((events: { onFinal: (t: string) => void }) => {
     onFinalCb = events.onFinal;
-  }) as unknown as typeof nova.connect;
+  }) as typeof nova.connect;
   const { session } = makeSession({ agent: agent as never, tts, createNovaStt: () => nova as never });
 
   await session.handleMessage(JSON.stringify({ type: 'CALL_CONNECTED' }));
@@ -279,7 +279,7 @@ test('agent runs only once when VAD_END follows classify respond', async () => {
   let interimCallback: ((t: string) => void) | null = null;
   nova.connect = mock((events: { onInterim: (t: string) => void }) => {
     interimCallback = events.onInterim;
-  }) as unknown as typeof nova.connect;
+  }) as typeof nova.connect;
   const agent = makeAgentMock();
   const { session } = makeSession({ createNovaStt: () => nova as never, agent: agent as never });
 

@@ -1,9 +1,12 @@
 import { describe, expect, mock, test } from 'bun:test';
-import type { BotCallbackContext, BotCommandContext } from '../../../src/bot/types.ts';
+import type { NotificationPreferencesRow, User } from '../../../src/database/types.ts';
 
-type MockCtx = { mock: { calls: unknown[][] } };
+/** Extract the first positional argument from a mock's call history. */
+function firstCallArg<T>(fn: ReturnType<typeof mock>, index = 0): T {
+  return fn.mock.calls[0]![index] as T;
+}
 
-function makeUser(overrides: Record<string, unknown> = {}) {
+function makeUser(overrides: Partial<User> = {}): Partial<User> {
   return {
     telegram_id: 100,
     language: 'ru',
@@ -17,7 +20,7 @@ function makeCommandCtx(user = makeUser()) {
   return {
     dbUser: user,
     send: mock(() => Promise.resolve()),
-  } as unknown as BotCommandContext;
+  };
 }
 
 function makeCallbackCtx() {
@@ -25,10 +28,10 @@ function makeCallbackCtx() {
     dbUser: makeUser(),
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
-  } as unknown as BotCallbackContext;
+  };
 }
 
-function makePrefsService(overrides: Record<string, unknown> = {}) {
+function makePrefsService(overrides: Partial<NotificationPreferencesRow> = {}) {
   return {
     getOrCreate: mock(() => ({
       user_id: 100,
@@ -49,7 +52,7 @@ function makePrefsService(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeGroupRepo(overrides: Record<string, unknown> = {}) {
+function makeGroupRepo(overrides: Partial<{ findByChatId: ReturnType<typeof mock> }> = {}) {
   return {
     findByChatId: mock(() => null),
     ...overrides,
@@ -61,10 +64,11 @@ describe('handleSettings', () => {
     const { handleSettings } = await import('../../../src/bot/commands/settings.ts');
     const ctx = makeCommandCtx();
 
-    await handleSettings(ctx, makeGroupRepo() as never);
+    await handleSettings(ctx as never, makeGroupRepo() as never);
 
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const [text, opts] = (ctx.send as unknown as MockCtx).mock.calls[0] as [string, { reply_markup: unknown }];
+    const text = firstCallArg<string>(ctx.send, 0);
+    const opts = firstCallArg<{ reply_markup: unknown }>(ctx.send, 1);
     expect(text).toContain('Настройки');
     expect(opts?.reply_markup).toBeDefined();
   });
@@ -76,7 +80,7 @@ describe('settingsCategoryKeyboard', () => {
     const kb = settingsCategoryKeyboard();
     expect(kb).toBeDefined();
     // InlineKeyboard serialises to { inline_keyboard: [...] }
-    const serialized = kb.toJSON?.() ?? (kb as unknown as { inline_keyboard: unknown[][] }).inline_keyboard;
+    const serialized = kb.toJSON?.() ?? kb;
     expect(serialized).toBeDefined();
   });
 });
@@ -87,11 +91,11 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'back', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'back', prefsService as never);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.editText).toHaveBeenCalledTimes(1);
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Настройки');
   });
 
@@ -100,9 +104,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'general', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'general', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Europe/Moscow');
     expect(text).toContain('Русский');
     expect(text).toContain('RU');
@@ -113,9 +117,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'notifications', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'notifications', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('08:00');
     expect(text).toContain('15');
   });
@@ -125,9 +129,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService({ morning_agenda_enabled: 1, evening_review_enabled: 0 });
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'notifications', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'notifications', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('✅');
     expect(text).toContain('❌');
   });
@@ -137,9 +141,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'calls', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'calls', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Голосовые звонки');
     expect(text).toContain('❌');
   });
@@ -153,9 +157,15 @@ describe('handleSettingsCallback', () => {
       get: mock(() => ({ enabled: 1, language: 'ru' })),
     };
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'calls', prefsService as never, callSettingsRepo as never);
+    await handleSettingsCallback(
+      ctx as never,
+      makeUser() as never,
+      'calls',
+      prefsService as never,
+      callSettingsRepo as never,
+    );
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('✅');
     expect(text).toContain('Голосовые звонки');
   });
@@ -165,9 +175,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'privacy', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'privacy', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Приватность');
     expect(text).toContain('Приватно');
   });
@@ -186,7 +196,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'privacy',
       prefsService as never,
@@ -194,7 +204,7 @@ describe('handleSettingsCallback', () => {
       sharingSettingsRepo as never,
     );
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Полный доступ');
     expect(text).toContain('✅'); // inline_mode_enabled
     expect(text).toContain('❌'); // allow_invitations false
@@ -205,9 +215,9 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'voice', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'voice', prefsService as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Голосовые ответы');
     expect(text).toContain('❌');
   });
@@ -217,10 +227,10 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_morning', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'toggle_morning', prefsService as never);
 
     expect(prefsService.toggleMorningAgenda).toHaveBeenCalledWith(100);
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Уведомления');
   });
 
@@ -229,10 +239,10 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_evening', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'toggle_evening', prefsService as never);
 
     expect(prefsService.toggleEveningReview).toHaveBeenCalledWith(100);
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Уведомления');
   });
 
@@ -241,10 +251,10 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_quiet', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'toggle_quiet', prefsService as never);
 
     expect(prefsService.toggleQuietHours).toHaveBeenCalledWith(100);
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Уведомления');
   });
 
@@ -259,7 +269,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'toggle_calls',
       prefsService as never,
@@ -268,7 +278,7 @@ describe('handleSettingsCallback', () => {
 
     expect(callSettingsRepo.ensureDefaults).toHaveBeenCalledTimes(1);
     expect(callSettingsRepo.setEnabled).toHaveBeenCalledWith(100, true);
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Голосовые звонки');
   });
 
@@ -283,7 +293,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'cycle_visibility',
       prefsService as never,
@@ -292,7 +302,7 @@ describe('handleSettingsCallback', () => {
     );
 
     expect(sharingSettingsRepo.update).toHaveBeenCalledWith(100, { default_visibility: 'free_busy' });
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Приватность');
   });
 
@@ -307,7 +317,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'toggle_inline',
       prefsService as never,
@@ -329,7 +339,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'toggle_invitations',
       prefsService as never,
@@ -350,7 +360,7 @@ describe('handleSettingsCallback', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser({ voice_response_enabled: 1 }) as never,
       'toggle_voice',
       prefsService as never,
@@ -360,7 +370,7 @@ describe('handleSettingsCallback', () => {
     );
 
     expect(userRepo.update).toHaveBeenCalledWith(100, { voice_response_enabled: 0 });
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Голосовые ответы');
   });
 
@@ -369,7 +379,7 @@ describe('handleSettingsCallback', () => {
     const ctx = makeCallbackCtx();
     const prefsService = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'unknown_action', prefsService as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'unknown_action', prefsService as never);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.editText).not.toHaveBeenCalled();
@@ -382,9 +392,9 @@ describe('stg:general with buttons', () => {
     const ctx = makeCallbackCtx();
     const prefs = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'general', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'general', prefs as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string, unknown];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).not.toContain('/timezone');
     expect(text).toContain('Часовой пояс');
     expect(text).toContain('Язык');
@@ -398,10 +408,10 @@ describe('stg:show_countries', () => {
     const ctx = makeCallbackCtx();
     const prefs = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'show_countries', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'show_countries', prefs as never);
 
     expect(ctx.editText).toHaveBeenCalled();
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string, unknown];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Выберите страну');
   });
 });
@@ -417,7 +427,7 @@ describe('stg:set_lang', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'set_lang:en',
       prefs as never,
@@ -442,7 +452,7 @@ describe('stg:set_country', () => {
     };
 
     await handleSettingsCallback(
-      ctx,
+      ctx as never,
       makeUser() as never,
       'set_country:DE',
       prefs as never,
@@ -460,13 +470,14 @@ describe('stg:close', () => {
   test('deletes the message', async () => {
     const { handleSettingsCallback } = await import('../../../src/bot/commands/settings.ts');
     const deleteFn = mock(() => Promise.resolve());
+    const base = makeCallbackCtx();
     const ctx = {
-      ...makeCallbackCtx(),
+      ...base,
       message: { delete: deleteFn },
-    } as unknown as BotCallbackContext;
+    };
     const prefs = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'close', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'close', prefs as never);
 
     expect(deleteFn).toHaveBeenCalled();
   });
@@ -478,9 +489,9 @@ describe('stg:notifications no AI text', () => {
     const ctx = makeCallbackCtx();
     const prefs = makePrefsService();
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'notifications', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'notifications', prefs as never);
 
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string, unknown];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).not.toContain('напишите AI');
     expect(text).not.toContain('Чтобы изменить');
   });
@@ -492,10 +503,10 @@ describe('stg:edit_reminders', () => {
     const ctx = makeCallbackCtx();
     const prefs = makePrefsService({ default_reminder_intervals: '[15, 30]' });
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'edit_reminders', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'edit_reminders', prefs as never);
 
     expect(ctx.editText).toHaveBeenCalled();
-    const [text] = (ctx.editText as unknown as MockCtx).mock.calls[0] as [string, unknown];
+    const text = firstCallArg<string>(ctx.editText, 0);
     expect(text).toContain('Интервалы');
   });
 });
@@ -510,7 +521,7 @@ describe('stg:toggle_reminder', () => {
       updateDefaultIntervals: updateFn,
     };
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_reminder:15', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'toggle_reminder:15', prefs as never);
 
     expect(updateFn).toHaveBeenCalledWith(100, expect.arrayContaining([15, 30]));
   });
@@ -524,7 +535,7 @@ describe('stg:toggle_reminder', () => {
       updateDefaultIntervals: updateFn,
     };
 
-    await handleSettingsCallback(ctx, makeUser() as never, 'toggle_reminder:15', prefs as never);
+    await handleSettingsCallback(ctx as never, makeUser() as never, 'toggle_reminder:15', prefs as never);
 
     expect(updateFn).toHaveBeenCalledWith(100, [30]);
   });

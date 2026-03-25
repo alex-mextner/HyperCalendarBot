@@ -114,9 +114,9 @@ describe('Pipeline Integration', () => {
     matcher.load(intentRepo.getApproved());
     const executor = new IntentExecutor();
 
-    const capturedInputs: Record<string, unknown>[] = [];
+    const capturedInputs: { [key: string]: unknown }[] = [];
     const mockToolExecutor = mock((_name: string, input: unknown) => {
-      capturedInputs.push(input as Record<string, unknown>);
+      capturedInputs.push(input as { [key: string]: unknown });
       return { success: true, output: '[]' };
     });
     const ctx = makeCtx(1);

@@ -89,7 +89,7 @@ describe('IntentLearner', () => {
           content: [{ type: 'text', text: `\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\`` }],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ) as unknown as Response;
+      ) as Response;
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
@@ -111,7 +111,7 @@ describe('IntentLearner', () => {
           stop_reason: 'max_tokens',
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ) as unknown as Response;
+      ) as Response;
 
     const originalWarn = cmdLogger.warn.bind(cmdLogger);
     const originalError = cmdLogger.error.bind(cmdLogger);
@@ -165,7 +165,7 @@ describe('IntentLearner', () => {
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(payload) }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      }) as unknown as Response;
+      });
     };
 
     try {
@@ -193,7 +193,7 @@ describe('IntentLearner', () => {
       return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(invalidPayload) }] }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
-      }) as unknown as Response;
+      });
     };
 
     try {

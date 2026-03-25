@@ -6,6 +6,7 @@ import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 import type { EventService } from '../../../src/services/event/event-service.ts';
 
+/** DatabaseService and EventService have private members; boundary cast once here */
 const mockDb = { users: { findOrCreate: () => ({ language: 'en', timezone: 'UTC' }) } } as unknown as DatabaseService;
 const mockComposer = createUserResolverComposer(mockDb);
 

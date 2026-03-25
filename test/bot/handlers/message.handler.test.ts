@@ -6,7 +6,7 @@ import {
   toEventSummary,
 } from '../../../src/bot/handlers/message.handler.ts';
 
-function makeDeps(overrides: Record<string, unknown> = {}) {
+function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
     eventService: { getEventsInRange: mock(() => []) },
@@ -21,7 +21,19 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+interface MockCtxOverrides {
+  dbUser?: Partial<import('../../../src/database/types.ts').User> | undefined;
+  text?: string | undefined;
+  chatId?: number;
+  chat?: { type: string; title?: string };
+  from?: { firstName?: string; username?: string; id?: number; first_name?: string };
+  send?: ReturnType<typeof mock>;
+  voice?: { file_id: string; duration: number };
+  scene?: { enter: ReturnType<typeof mock> };
+  replyMessage?: { from: { id: number } };
+}
+
+function makeCtx(overrides: MockCtxOverrides = {}) {
   return {
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
     text: 'привет',
@@ -445,7 +457,7 @@ describe('createMessageHandler', () => {
   });
 
   describe('voice messages', () => {
-    function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+    function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
       return makeDeps({
         transcriptionService: { transcribe: mock(() => Promise.resolve('создай встречу на завтра')) },
         botToken: 'test-token',
@@ -453,7 +465,7 @@ describe('createMessageHandler', () => {
       });
     }
 
-    function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+    function makeVoiceCtx(overrides: MockCtxOverrides = {}) {
       return makeCtx({
         text: undefined,
         voice: { file_id: 'voice_123', duration: 5 },
@@ -664,7 +676,7 @@ describe('voice reply TTS fallback', () => {
   const audioBuffer = Buffer.from('fake-audio');
   const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
 
-  function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+  function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
     return makeDeps({
       agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ бота' })) },
       sendVoice: mock(() => Promise.resolve()),
@@ -675,7 +687,7 @@ describe('voice reply TTS fallback', () => {
     });
   }
 
-  function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+  function makeVoiceCtx(overrides: MockCtxOverrides = {}) {
     return makeCtx({
       dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 },
       voice: { file_id: 'test-file-id', duration: 5 },

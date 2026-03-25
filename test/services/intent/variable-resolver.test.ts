@@ -41,9 +41,9 @@ describe('resolveVariables', () => {
 
   test('resolves variables in nested objects', () => {
     const input = { start_date: '{{dates.today}}', nested: { end_date: '{{dates.tomorrow}}' } };
-    const result = resolveVariables(input, {}, userCtx) as Record<string, unknown>;
+    const result = resolveVariables(input, {}, userCtx) as { [key: string]: unknown };
     expect(result.start_date as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect((result.nested as Record<string, unknown>).end_date as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect((result.nested as { [key: string]: unknown }).end_date as string).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
   test('mixed text with variables', () => {

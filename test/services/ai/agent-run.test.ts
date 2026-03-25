@@ -26,13 +26,22 @@ function createTestDb() {
  * streamEvents: array of SSE-like event objects the stream yields.
  * finalMessage: the final aggregated message returned by stream.finalMessage().
  */
-function createMockAnthropicClient(
-  streamEvents: Array<Record<string, unknown>>,
-  finalMessage: {
-    content: Array<{ type: string; text?: string; id?: string; name?: string; input?: unknown }>;
-    stop_reason: string;
-  },
-) {
+interface MockStreamEvent {
+  type: string;
+  delta?: { type: string; text?: string; stop_reason?: string };
+  content_block?: { type: string; name?: string };
+}
+
+interface MockFinalMessage {
+  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: { [key: string]: unknown } }>;
+  stop_reason: string;
+}
+
+function setPrivateField<T>(obj: T, field: string, value: unknown): void {
+  Object.defineProperty(obj, field, { value, writable: true, configurable: true });
+}
+
+function createMockAnthropicClient(streamEvents: MockStreamEvent[], finalMessage: MockFinalMessage) {
   return {
     messages: {
       stream: mock(() => {
@@ -107,7 +116,7 @@ describe('CalendarBotAgent.run()', () => {
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
     // Replace the internal client with our mock
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     // Middleware saves user message before pipeline runs
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
@@ -180,7 +189,7 @@ describe('CalendarBotAgent.run()', () => {
     };
 
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     // Middleware saves user message before pipeline runs
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
@@ -209,7 +218,7 @@ describe('CalendarBotAgent.run()', () => {
     };
 
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     // Middleware saves user message before pipeline runs
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
@@ -239,7 +248,7 @@ describe('CalendarBotAgent.run()', () => {
     };
 
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     await agent.run(ctx);
 
@@ -258,7 +267,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     await agent.run(ctx);
 
@@ -267,14 +276,14 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('run() passes system prompt with cache_control', async () => {
-    const streamEvents: Array<Record<string, unknown>> = [];
+    const streamEvents: MockStreamEvent[] = [];
     const finalMsg = {
       content: [{ type: 'text', text: 'hi' }],
       stop_reason: 'end_turn',
     };
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     await agent.run(ctx);
 
@@ -357,7 +366,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -386,7 +395,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -410,7 +419,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     ctx.isGroup = false;
 
@@ -428,7 +437,7 @@ describe('CalendarBotAgent.run()', () => {
     };
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
     ctx.isGroup = true;
@@ -448,7 +457,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const onBotResponse = mock(() => {});
     ctx.onBotResponse = onBotResponse;
@@ -469,7 +478,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -495,7 +504,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -520,7 +529,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -573,10 +582,10 @@ describe('CalendarBotAgent.run()', () => {
     const debugLogger = {
       createRunContext: mock(() => null),
       endSession,
-    } as unknown as AiDebugLogger;
+    } as Partial<AiDebugLogger> as AiDebugLogger;
 
     const agent = new CalendarBotAgent({ ...config, debugLogger }, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
     const result = await agent.run(ctx);
@@ -635,7 +644,7 @@ describe('CalendarBotAgent.run()', () => {
     };
 
     const agent = new CalendarBotAgent(config, sender);
-    (agent as unknown as { client: unknown }).client = mockClient;
+    setPrivateField(agent, 'client', mockClient);
 
     const result = await agent.run({ ...ctx, inputMode: 'voice_message' });
 

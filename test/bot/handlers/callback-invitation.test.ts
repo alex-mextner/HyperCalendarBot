@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
 
-function makeCtx(data: string, language = 'en') {
+function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
   return {
     data,
     dbUser: { telegram_id: 200, language, timezone: 'UTC' },
@@ -10,7 +10,7 @@ function makeCtx(data: string, language = 'en') {
   };
 }
 
-function makeHandler(invitationService: Record<string, unknown>) {
+function makeHandler(invitationService: unknown) {
   return createCallbackHandler(
     {} as never, // eventService
     {} as never, // editValueScene
@@ -124,9 +124,9 @@ describe('invitation callbacks', () => {
 
 describe('inviter notification on response', () => {
   function makeHandlerWithNotify(
-    invitationService: Record<string, unknown>,
-    notifyDeps: { userRepo: Record<string, unknown>; sendMessage: ReturnType<typeof mock> },
-    eventRepo?: Record<string, unknown>,
+    invitationService: unknown,
+    notifyDeps: { userRepo: { findByTelegramId: ReturnType<typeof mock> }; sendMessage: ReturnType<typeof mock> },
+    eventRepo?: { findById: ReturnType<typeof mock> },
   ) {
     return createCallbackHandler(
       {} as never, // eventService
@@ -170,11 +170,11 @@ describe('inviter notification on response', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
-    expect(chatId).toBe(100);
-    expect(text).toContain('Party');
-    expect(text).toContain('accepted');
-    expect(text).toContain('✅');
+    const call0 = sendMessage.mock.calls[0] as unknown[];
+    expect(call0[0]).toBe(100);
+    expect(call0[1] as string).toContain('Party');
+    expect(call0[1] as string).toContain('accepted');
+    expect(call0[1] as string).toContain('✅');
   });
 
   test('notifies inviter when invitation is declined', async () => {
@@ -199,10 +199,10 @@ describe('inviter notification on response', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
-    expect(chatId).toBe(100);
-    expect(text).toContain('declined');
-    expect(text).toContain('❌');
+    const call0 = sendMessage.mock.calls[0] as unknown[];
+    expect(call0[0]).toBe(100);
+    expect(call0[1] as string).toContain('declined');
+    expect(call0[1] as string).toContain('❌');
   });
 
   test('notifies inviter in their language', async () => {
@@ -226,9 +226,9 @@ describe('inviter notification on response', () => {
     await handler(ctx as never);
     await new Promise((r) => setTimeout(r, 50));
 
-    const [, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
-    expect(text).toContain('принял');
-    expect(text).toContain('Встреча');
+    const call0 = sendMessage.mock.calls[0] as unknown[];
+    expect(call0[1] as string).toContain('принял');
+    expect(call0[1] as string).toContain('Встреча');
   });
 
   test('does not notify when response fails', async () => {
@@ -276,11 +276,15 @@ describe('inviter notification on response', () => {
 
 describe('propose-time callbacks', () => {
   function makeHandlerWithPropose(
-    invitationService: Record<string, unknown>,
+    invitationService: unknown,
     proposeTimeSessions?: Map<number, { invitationId: number }>,
-    invitationRepo?: Record<string, unknown>,
-    eventRepoArg?: Record<string, unknown>,
-    notifyDeps?: Record<string, unknown>,
+    invitationRepo?: { findById: ReturnType<typeof mock> },
+    eventRepoArg?: { findById: ReturnType<typeof mock> },
+    notifyDeps?: {
+      userRepo: { findByTelegramId: ReturnType<typeof mock> };
+      sendMessage: ReturnType<typeof mock>;
+      editMessage?: ReturnType<typeof mock>;
+    },
   ) {
     return createCallbackHandler(
       {} as never,
@@ -515,10 +519,18 @@ describe('propose-time callbacks', () => {
 
 describe('conflict image on accept', () => {
   function makeHandlerWithRender(
-    invSvc: Record<string, unknown>,
-    notifyDeps: Record<string, unknown>,
-    eventRepo: Record<string, unknown>,
-    renderService: Record<string, unknown>,
+    invSvc: unknown,
+    notifyDeps: {
+      userRepo: { findByTelegramId: ReturnType<typeof mock> };
+      sendMessage: ReturnType<typeof mock>;
+      sendPhoto?: ReturnType<typeof mock>;
+    },
+    eventRepo: {
+      findById: ReturnType<typeof mock>;
+      findVisibleOverlapping?: ReturnType<typeof mock>;
+      isParticipant?: ReturnType<typeof mock>;
+    },
+    renderService: { renderDirect: ReturnType<typeof mock> },
   ) {
     return createCallbackHandler(
       {} as never,
@@ -572,8 +584,8 @@ describe('conflict image on accept', () => {
     await new Promise((r) => setTimeout(r, 100));
     expect(renderDirect).toHaveBeenCalledTimes(1);
     expect(sendPhoto).toHaveBeenCalledTimes(1);
-    const [chatId] = sendPhoto.mock.calls[0] as unknown as [number, File];
-    expect(chatId).toBe(100);
+    const photoCall = sendPhoto.mock.calls[0] as unknown[];
+    expect(photoCall[0]).toBe(100);
   });
 
   test('invitee event titles are null for non-shared events in conflict image', async () => {
@@ -611,10 +623,9 @@ describe('conflict image on accept', () => {
     await new Promise((r) => setTimeout(r, 100));
 
     expect(renderDirect).toHaveBeenCalledTimes(1);
-    const renderArgs = renderDirect.mock.calls[0] as unknown as [
-      { data: { rows: { slots: { label: string | null }[] }[] } },
-    ];
-    const inviteeRow = renderArgs[0].data.rows[1]; // rows[0] = organizer, rows[1] = invitee
+    const renderCall = renderDirect.mock.calls[0] as unknown[];
+    const renderArg = renderCall[0] as { data: { rows: { slots: { label: string | null }[] }[] } };
+    const inviteeRow = renderArg.data.rows[1]; // rows[0] = organizer, rows[1] = invitee
     if (!inviteeRow) throw new Error('invitee row missing from renderDirect args');
     // All slots for non-shared invitee events must have null label
     for (const slot of inviteeRow.slots) {
