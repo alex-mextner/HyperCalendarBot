@@ -74,7 +74,7 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
-            docker compose stop bot || true
-            docker compose rm -f bot || true
+            docker stop hypercal-bot || true
+            docker rm hypercal-bot || true
             docker compose up -d --no-deps bot
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
