@@ -71,6 +71,10 @@ export class DatabaseService {
     this.db = new Database(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
+    this.db.exec('PRAGMA busy_timeout = 5000');
+    this.db.exec('PRAGMA synchronous = NORMAL');
+    this.db.exec('PRAGMA cache_size = -16000');
+    this.db.exec('PRAGMA mmap_size = 268435456');
 
     dbLogger.info({ path: dbPath }, 'Database opened');
 

@@ -43,7 +43,7 @@ describe('SyncService', () => {
     eventRepo = new EventRepository(db);
     syncRepo = new GoogleSyncRepository(db);
     calendarRepo = new GoogleCalendarRepository(db);
-    service = new SyncService(eventRepo, syncRepo, calendarRepo);
+    service = new SyncService(db, eventRepo, syncRepo, calendarRepo);
 
     calendarRepo.upsertCalendar(1, {
       google_calendar_id: 'cal-1',
@@ -127,5 +127,69 @@ describe('SyncService', () => {
   test('resolveConflict returns keep_local when local is newer', () => {
     const result = service.resolveConflict({ updated_at: '2026-03-15T12:00:00Z' } as never, '2026-03-15T11:00:00Z');
     expect(result).toBe('keep_local');
+  });
+});
+
+describe('SyncService.initialSync — transaction atomicity', () => {
+  let db: Database;
+  let eventRepo: EventRepository;
+  let syncRepo: GoogleSyncRepository;
+  let calendarRepo: GoogleCalendarRepository;
+  let service: SyncService;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, migrations);
+    db.run("INSERT INTO users (telegram_id, username) VALUES (1, 'test')");
+    eventRepo = new EventRepository(db);
+    syncRepo = new GoogleSyncRepository(db);
+    calendarRepo = new GoogleCalendarRepository(db);
+    service = new SyncService(db, eventRepo, syncRepo, calendarRepo);
+    calendarRepo.upsertCalendar(1, {
+      google_calendar_id: 'cal-1',
+      calendar_name: 'Primary',
+      is_primary: true,
+      access_role: 'owner',
+    });
+  });
+
+  test('rolls back all inserts in a page when one fails mid-batch', async () => {
+    // Replace insertSyncedEvent to throw on the 2nd call
+    let callCount = 0;
+    const originalInsert = eventRepo.insertSyncedEvent.bind(eventRepo);
+    eventRepo.insertSyncedEvent = (data) => {
+      callCount++;
+      if (callCount === 2) throw new Error('Simulated DB error on insert 2');
+      return originalInsert(data);
+    };
+
+    const api = createMockApi(
+      [
+        { id: 'g1', summary: 'Event A', start: { dateTime: '2026-03-15T10:00:00Z' }, end: { dateTime: '2026-03-15T11:00:00Z' } },
+        { id: 'g2', summary: 'Event B', start: { dateTime: '2026-03-15T12:00:00Z' }, end: { dateTime: '2026-03-15T13:00:00Z' } },
+        { id: 'g3', summary: 'Event C', start: { dateTime: '2026-03-15T14:00:00Z' }, end: { dateTime: '2026-03-15T15:00:00Z' } },
+      ],
+      'token-x',
+    );
+
+    await expect(service.initialSync(api as never, 1, 'cal-1')).rejects.toThrow('Simulated DB error on insert 2');
+
+    // Transaction should have rolled back — 0 events in DB
+    const allEvents = db.prepare('SELECT * FROM events WHERE user_id = 1').all();
+    expect(allEvents).toHaveLength(0);
+  });
+
+  test('succeeds and all events persist when no failure', async () => {
+    const api = createMockApi(
+      [
+        { id: 'g1', summary: 'A', start: { dateTime: '2026-03-15T10:00:00Z' }, end: { dateTime: '2026-03-15T11:00:00Z' } },
+        { id: 'g2', summary: 'B', start: { dateTime: '2026-03-15T12:00:00Z' }, end: { dateTime: '2026-03-15T13:00:00Z' } },
+      ],
+      'token-y',
+    );
+    const count = await service.initialSync(api as never, 1, 'cal-1');
+    expect(count).toBe(2);
+    const allEvents = db.prepare('SELECT * FROM events WHERE user_id = 1').all();
+    expect(allEvents).toHaveLength(2);
   });
 });

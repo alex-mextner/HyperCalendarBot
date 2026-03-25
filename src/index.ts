@@ -12,6 +12,16 @@ import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
+process.on('uncaughtException', (error: Error) => {
+  botLogger.fatal({ err: error }, 'Uncaught exception');
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  botLogger.fatal({ err: reason instanceof Error ? reason : new Error(String(reason)) }, 'Unhandled promise rejection');
+  process.exit(1);
+});
+
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
@@ -77,6 +87,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   const { queue, worker } = createGoogleSyncQueue({
+    db: db.db,
     config,
     redisUrl: config.REDIS_URL,
     oauthService,
@@ -796,8 +807,7 @@ bot.onStart(async ({ info }) => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  botLogger.info('Shutting down...');
+async function shutdown(): Promise<void> {
   await bot.stop();
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
@@ -808,20 +818,27 @@ process.on('SIGINT', async () => {
   if (callQueueCleanup) await callQueueCleanup.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
+}
+
+async function shutdownWithTimeout(): Promise<void> {
+  await Promise.race([
+    shutdown(),
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout after 8s')), 8000)),
+  ]).catch((err: unknown) => {
+    botLogger.fatal({ err }, 'Shutdown timed out, forcing exit');
+    process.exit(1);
+  });
+}
+
+process.on('SIGINT', async () => {
+  botLogger.info('Shutting down...');
+  await shutdownWithTimeout();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  await bot.stop();
-  if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
-  if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
-  if (notificationQueueCleanup) await notificationQueueCleanup.close();
-  if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
-  if (syncQueueCleanup) await syncQueueCleanup.close();
-  if (imageQueueCleanup) await imageQueueCleanup.close();
-  if (callQueueCleanup) await callQueueCleanup.close();
-  if (webServerHandle) webServerHandle.stop();
-  db.close();
+  botLogger.info('Shutting down (SIGTERM)...');
+  await shutdownWithTimeout();
   process.exit(0);
 });
 

@@ -122,6 +122,7 @@ export function createCallbackHandler(
     intentRepo: IntentRepository;
     intentMatcher?: { reload: () => void };
     adminEditSessions?: Map<number, AdminEditSession>;
+    adminId?: number;
   },
   secretaryDeps?: SecretaryDeps,
   proposalDeps?: ProposalDeps,
@@ -1189,6 +1190,10 @@ export function createCallbackHandler(
       if (action === 'intent_accept' && intentDeps) {
         const intentId = Number(payload);
         const lang = (user.language ?? 'en') as Lang;
+        if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
+          return;
+        }
         intentDeps.intentRepo.updateStatus(intentId, 'approved');
         intentDeps.intentMatcher?.reload();
         await ctx.answer(t(lang).callbackErrors.intentApproved);
@@ -1201,6 +1206,10 @@ export function createCallbackHandler(
       if (action === 'intent_reject' && intentDeps) {
         const intentId = Number(payload);
         const lang = (user.language ?? 'en') as Lang;
+        if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
+          return;
+        }
         intentDeps.intentRepo.updateStatus(intentId, 'rejected');
         await ctx.answer(t(lang).callbackErrors.intentRejected);
         const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
@@ -1212,6 +1221,10 @@ export function createCallbackHandler(
       if (action === 'intent_edit' && intentDeps) {
         const intentId = Number(payload);
         const lang = (user.language ?? 'en') as Lang;
+        if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+          await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
+          return;
+        }
         if (intentDeps.adminEditSessions) {
           intentDeps.adminEditSessions.set(user.telegram_id, {
             intentId,
@@ -1274,7 +1287,7 @@ export function createCallbackHandler(
         await ctx.answer().catch((e) => cmdLogger.debug({ err: e }, 'answer() after duplicate click'));
         return;
       }
-      cmdLogger.error({ error: errStr, action }, 'Callback handler error');
+      cmdLogger.error({ err: error, action }, 'Callback handler error');
       const lang = (user?.language ?? 'en') as Lang;
       await ctx
         .answer({ text: t(lang).callbackErrors.error })

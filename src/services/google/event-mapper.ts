@@ -1,3 +1,5 @@
+import { syncLogger } from '../../utils/logger.ts';
+
 interface LocalEventForGoogle {
   id: number;
   title: string;
@@ -87,11 +89,18 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.reminder_overrides) {
-    const minutes: number[] = JSON.parse(local.reminder_overrides);
-    event.reminders = {
-      useDefault: false,
-      overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),
-    };
+    try {
+      const minutes: number[] = JSON.parse(local.reminder_overrides);
+      event.reminders = {
+        useDefault: false,
+        overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),
+      };
+    } catch (err) {
+      syncLogger.warn(
+        { err, eventId: local.id, raw: local.reminder_overrides },
+        'Failed to parse reminder_overrides, skipping',
+      );
+    }
   }
 
   return event;

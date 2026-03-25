@@ -31,8 +31,22 @@ export class NotificationPreferencesRepository {
   }
 
   update(userId: number, patch: NotificationPreferencesUpdate): void {
+    const ALLOWED_FIELDS = new Set([
+      'morning_agenda_enabled',
+      'morning_agenda_time',
+      'morning_agenda_format',
+      'default_reminder_intervals',
+      'evening_review_enabled',
+      'evening_review_time',
+      'evening_review_format',
+      'quiet_hours_enabled',
+      'quiet_hours_start',
+      'quiet_hours_end',
+    ]);
     const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
     if (entries.length === 0) return;
+    const invalid = entries.find(([k]) => !ALLOWED_FIELDS.has(k));
+    if (invalid !== undefined) throw new Error(`Unknown notification preference field: ${invalid[0]}`);
     const sets = entries.map(([k]) => `${k} = ?`).join(', ');
     const values = entries.map(([, v]) => v);
     this.db

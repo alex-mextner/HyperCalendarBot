@@ -170,3 +170,42 @@ describe('event-mapper', () => {
     });
   });
 });
+
+describe('localToGoogle — reminder_overrides resilience', () => {
+  const baseEvent = {
+    id: 1,
+    title: 'Test',
+    start_at: '2026-03-15T10:00:00Z',
+    end_at: '2026-03-15T11:00:00Z',
+    all_day: 0 as const,
+    timezone: 'UTC',
+    description: null,
+    location: null,
+    recurrence_rule: null,
+    sync_version: 0,
+  };
+
+  test('invalid JSON in reminder_overrides does not throw', () => {
+    expect(() =>
+      localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' }),
+    ).not.toThrow();
+  });
+
+  test('invalid JSON yields no reminders field', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: '{broken' });
+    expect(result.reminders).toBeUndefined();
+  });
+
+  test('null reminder_overrides yields no reminders field', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: null });
+    expect(result.reminders).toBeUndefined();
+  });
+
+  test('valid JSON still maps correctly after guard', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: '[10, 60]' });
+    expect(result.reminders?.overrides).toEqual([
+      { method: 'popup', minutes: 10 },
+      { method: 'popup', minutes: 60 },
+    ]);
+  });
+});

@@ -354,3 +354,117 @@ describe('admin edit session in message handler', () => {
     expect(agentRun).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('intent callback authorization guard', () => {
+  const ADMIN_ID = 100;
+  const NON_ADMIN_ID = 999;
+
+  let db: Database;
+  let intentRepo: IntentRepository;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    runMigrations(db, migrations);
+    intentRepo = new IntentRepository(db);
+  });
+
+  function makeHandlerWithAdmin(adminId: number) {
+    return createCallbackHandler(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { intentRepo, adminId },
+    );
+  }
+
+  function makeCtx(data: string, userId: number) {
+    return {
+      data,
+      dbUser: { telegram_id: userId, language: 'en', timezone: 'UTC' },
+      answer: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+      message: { chat: { id: userId }, send: mock(() => Promise.resolve()) },
+      chat: { id: userId },
+    };
+  }
+
+  function createIntent() {
+    return intentRepo.create({
+      canonical_name: `intent_${Date.now()}_${Math.random()}`,
+      phrases: ['test'],
+      workflow: { tools: [] },
+      format: 'text',
+    });
+  }
+
+  test('non-admin cannot accept intent', async () => {
+    const id = createIntent();
+    const handler = makeHandlerWithAdmin(ADMIN_ID);
+    const ctx = makeCtx(`intent_accept:${id}`, NON_ADMIN_ID);
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));
+    expect(intentRepo.getById(id)!.status).toBe('pending');
+  });
+
+  test('non-admin cannot reject intent', async () => {
+    const id = createIntent();
+    const handler = makeHandlerWithAdmin(ADMIN_ID);
+    const ctx = makeCtx(`intent_reject:${id}`, NON_ADMIN_ID);
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));
+    expect(intentRepo.getById(id)!.status).toBe('pending');
+  });
+
+  test('non-admin cannot trigger intent_edit session', async () => {
+    const id = createIntent();
+    const adminEditSessions = new Map<number, { intentId: number; state: 'awaiting_instructions'; createdAt: number }>();
+    const handler = createCallbackHandler(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined,
+      undefined,
+      { intentRepo, adminId: ADMIN_ID, adminEditSessions },
+    );
+    const ctx = makeCtx(`intent_edit:${id}`, NON_ADMIN_ID);
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));
+    expect(adminEditSessions.has(NON_ADMIN_ID)).toBe(false);
+  });
+
+  test('admin can accept intent', async () => {
+    const id = createIntent();
+    const handler = makeHandlerWithAdmin(ADMIN_ID);
+    const ctx = makeCtx(`intent_accept:${id}`, ADMIN_ID);
+    await handler(ctx as never);
+    expect(intentRepo.getById(id)!.status).toBe('approved');
+  });
+
+  test('admin can reject intent', async () => {
+    const id = createIntent();
+    const handler = makeHandlerWithAdmin(ADMIN_ID);
+    const ctx = makeCtx(`intent_reject:${id}`, ADMIN_ID);
+    await handler(ctx as never);
+    expect(intentRepo.getById(id)!.status).toBe('rejected');
+  });
+});

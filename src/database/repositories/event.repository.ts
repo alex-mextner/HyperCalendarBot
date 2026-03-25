@@ -324,10 +324,18 @@ export class EventRepository {
       last_synced_at?: string;
     },
   ): void {
+    const ALLOWED_FIELDS = new Set([
+      'google_event_id',
+      'google_calendar_id',
+      'google_etag',
+      'sync_status',
+      'last_synced_at',
+    ]);
     const fields: string[] = [];
     const values: (string | number)[] = [];
     for (const [k, v] of Object.entries(data)) {
       if (v !== undefined) {
+        if (!ALLOWED_FIELDS.has(k)) throw new Error(`Unknown sync field: ${k}`);
         fields.push(`${k} = ?`);
         values.push(v);
       }
