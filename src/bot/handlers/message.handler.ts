@@ -199,19 +199,12 @@ const CALENDAR_KEYWORDS = [
   'календар',
   'расписание',
   'расписани',
-  'когда',
-  'во сколько',
   'перенеси',
   'перенести',
   'перенос',
-  'отмени',
-  'отменить',
-  'отмена',
   'удали',
   'удалить',
-  'завтра',
   'послезавтра',
-  'сегодня',
   // EN — full words
   'event',
   'events',
@@ -224,8 +217,6 @@ const CALENDAR_KEYWORDS = [
   'appointment',
   'reschedule',
   'postpone',
-  'tomorrow',
-  'today',
 ];
 
 const KEYWORD_PATTERN = new RegExp(`(?:^|\\s|[,.!?])(?:${CALENDAR_KEYWORDS.join('|')})(?:\\s|[,.!?]|$)`, 'i');
