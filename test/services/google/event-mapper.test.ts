@@ -292,9 +292,7 @@ describe('localToGoogle — reminder_overrides resilience', () => {
   };
 
   test('invalid JSON in reminder_overrides does not throw', () => {
-    expect(() =>
-      localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' }),
-    ).not.toThrow();
+    expect(() => localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' })).not.toThrow();
   });
 
   test('invalid JSON yields no reminders field', () => {
