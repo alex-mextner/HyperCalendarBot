@@ -73,7 +73,7 @@ describe('handleSettings', () => {
 describe('settingsCategoryKeyboard', () => {
   test('returns InlineKeyboard instance', async () => {
     const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
-    const kb = settingsCategoryKeyboard();
+    const kb = settingsCategoryKeyboard('ru');
     expect(kb).toBeDefined();
     // InlineKeyboard serialises to { inline_keyboard: [...] }
     const serialized = kb.toJSON?.() ?? (kb as unknown as { inline_keyboard: unknown[][] }).inline_keyboard;
