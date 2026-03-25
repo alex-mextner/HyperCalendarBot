@@ -1,6 +1,8 @@
 // src/bot/commands/log.ts
+
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import { telegramMessageLink } from '../../database/repositories/action-log.repository.ts';
+import type { UserActionLog } from '../../database/types.ts';
 import { splitMessage } from '../../utils/telegram.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -20,7 +22,7 @@ export async function handleLog(
   const user = ctx.dbUser;
   if (!user) return;
 
-  if (adminId && user.telegram_id !== adminId) {
+  if (!adminId || user.telegram_id !== adminId) {
     await ctx.send('Admin only.');
     return;
   }
@@ -54,23 +56,7 @@ export async function handleLog(
   await sendEntries(ctx, entries, title);
 }
 
-async function sendEntries(
-  ctx: BotCommandContext,
-  entries: {
-    id: number;
-    user_id: number;
-    chat_id: number;
-    action_type: string;
-    action_name: string;
-    message_id: number | null;
-    input_summary: string | null;
-    result_summary: string | null;
-    target_event_id: number | null;
-    success: number;
-    created_at: string;
-  }[],
-  title: string,
-): Promise<void> {
+async function sendEntries(ctx: BotCommandContext, entries: UserActionLog[], title: string): Promise<void> {
   if (entries.length === 0) {
     await ctx.send(`${title}: no entries.`);
     return;

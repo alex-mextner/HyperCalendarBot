@@ -219,6 +219,9 @@ const SKIP_ACTION_LOG = new Set<string>([
   'set_reaction',
   'ask_user',
   'pick_users',
+  'render_day_image',
+  'render_week_image',
+  'render_table',
   'resume_scene',
   'cancel_scene',
   'get_action_log',
@@ -294,6 +297,7 @@ function summarizeInput(toolName: string, input: ToolInputMap[ToolName]): string
   if ('message' in input && typeof input.message === 'string') return input.message.slice(0, 200);
   if ('text' in input && typeof input.text === 'string') return input.text.slice(0, 200);
   if ('expression' in input && typeof input.expression === 'string') return input.expression;
+  if ('event_id' in input && typeof input.event_id === 'number') return `event #${input.event_id}`;
   return toolName;
 }
 

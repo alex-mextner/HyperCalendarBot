@@ -34,10 +34,6 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     const agentContext = deps.agentContextBuilder(user, Number(chatId), messageText, extra?.groupContext);
 
-    // Propagate chat_history row ID from middleware for action log linkage
-    const chatHistoryId = (ctx as { _chatHistoryId?: number })._chatHistoryId;
-    if (chatHistoryId) agentContext.chatHistoryId = chatHistoryId;
-
     if (extra?.feedbackContext) {
       agentContext.feedbackContext = extra.feedbackContext;
     }

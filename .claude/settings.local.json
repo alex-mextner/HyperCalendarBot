@@ -31,7 +31,8 @@
       "Bash(bash /tmp/audit.sh)",
       "Bash(bunx knip:*)",
       "Bash(open:*)",
-      "Bash(BASE=/Users/ultra/xp/hypercalendarbot/.worktrees/remove-unknown-casts)"
+      "Bash(BASE=/Users/ultra/xp/hypercalendarbot/.worktrees/remove-unknown-casts)",
+      "Bash(awk:*)"
     ]
   }
 }

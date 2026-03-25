@@ -406,7 +406,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
-    return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
+      data: eventToSummary(event, ctx.user.timezone),
+    };
   }
 
   const event = ctx.eventService.getEvent(input.event_id, userId);
@@ -424,7 +428,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   }
 
   ctx.eventService.deleteEvent(input.event_id, userId);
-  return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
+    data: eventToSummary(event, ctx.user.timezone),
+  };
 }
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {

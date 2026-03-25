@@ -231,6 +231,10 @@ export function createBot(
         })
       : undefined;
 
+  // Map user telegram_id → last chat_history row ID for action log linkage.
+  // Written in logging middleware, read in buildAgentContextFactory.
+  const chatHistoryIds = new Map<number, number>();
+
   const msgDeps = {
     agent,
     eventService,
@@ -317,6 +321,7 @@ export function createBot(
     birthdayService,
     userMemoryRepo: db.userMemory,
     actionLogRepo: db.actionLog,
+    chatHistoryIds,
     agentRegistry,
     agentDispatcher,
     onboardingScene: scenesSetup.scenes.onboardingScene,
@@ -395,14 +400,15 @@ export function createBot(
       // Incoming text message (regular or command)
       const incomingText = context.update?.message?.text;
       const incomingMsgId = context.update?.message?.message_id;
-      // Store chat_history row ID so downstream handlers can link action log entries
-      const mutableCtxAny = context as { _chatHistoryId?: number };
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
           // /cal is an AI command — save args as plain user message, not a command event
           const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
           if (calArgs) {
-            mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId);
+            chatHistoryIds.set(
+              user.telegram_id,
+              conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId),
+            );
           }
         } else if (incomingText.startsWith('/')) {
           const spaceIdx = incomingText.indexOf(' ');
@@ -419,7 +425,10 @@ export function createBot(
             input_summary: cmdArgs,
           });
         } else {
-          mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId);
+          chatHistoryIds.set(
+            user.telegram_id,
+            conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId),
+          );
         }
       }
 
@@ -438,7 +447,10 @@ export function createBot(
 
         if (action === 'ai_btn') {
           const { answerText } = parseAiBtnPayload(payload);
-          mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId);
+          chatHistoryIds.set(
+            user.telegram_id,
+            conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId),
+          );
         } else {
           conversationLogger.logButtonPress(user.telegram_id, action, payload || undefined, logChatId);
           // Log callback to action log
