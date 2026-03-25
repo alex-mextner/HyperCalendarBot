@@ -39,4 +39,15 @@ export class EventReminderRepository {
   deleteUnsentForUser(userId: number): void {
     this.db.prepare('DELETE FROM event_reminders WHERE user_id = ? AND sent = 0').run(userId);
   }
+
+  existsForEventAt(eventId: number, remindAtUtc: string): boolean {
+    const row = this.db
+      .prepare('SELECT 1 FROM event_reminders WHERE event_id = ? AND remind_at_utc = ?')
+      .get(eventId, remindAtUtc);
+    return row != null;
+  }
+
+  deleteUnsentForEvent(eventId: number): void {
+    this.db.prepare('DELETE FROM event_reminders WHERE event_id = ? AND sent = 0').run(eventId);
+  }
 }

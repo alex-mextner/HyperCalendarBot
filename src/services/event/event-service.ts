@@ -68,6 +68,10 @@ export class EventService {
         },
         event.user_id,
       );
+      // For recurring events, also materialize reminders for upcoming occurrences
+      if (event.recurrence_rule) {
+        this.materializeRecurringOccurrences(event, overrides);
+      }
     }
     if (this.domainEvents) {
       if (event.owner_type === 'group' && event.group_id) {
@@ -98,6 +102,10 @@ export class EventService {
         },
         updated.user_id,
       );
+      // For recurring events, also rematerialize upcoming occurrences
+      if (updated.recurrence_rule) {
+        this.materializeRecurringOccurrences(updated, updated.reminder_overrides ?? null);
+      }
     }
     if (this.domainEvents && updated && existing) {
       this.domainEvents.emit('myCalendar.updatedEvent', {
@@ -367,6 +375,9 @@ export class EventService {
         },
         updated.user_id,
       );
+      if (updated.recurrence_rule) {
+        this.materializeRecurringOccurrences(updated, updated.reminder_overrides ?? null);
+      }
     }
     return updated;
   }
@@ -428,5 +439,32 @@ export class EventService {
       original_start_at: originalStartAt,
       is_cancelled: true,
     });
+  }
+
+  private materializeRecurringOccurrences(event: CalendarEvent, reminderOverrides: string | null): void {
+    if (!this.materializer || !event.recurrence_rule) return;
+
+    const HORIZON_DAYS = 7;
+    const now = new Date();
+    const rangeStart = now.toISOString();
+    const rangeEnd = new Date(now.getTime() + HORIZON_DAYS * 24 * 60 * 60_000).toISOString();
+
+    const exceptions = this.eventRepo.getExceptions(event.id);
+    const occurrences = expandRecurrence(event, exceptions, rangeStart, rangeEnd);
+
+    for (const occ of occurrences) {
+      if (occ.is_exception && occ.event.is_cancelled) continue;
+      // Skip the base occurrence — already materialized by the caller
+      if (occ.occurrence_start === event.start_at) continue;
+
+      this.materializer.materializeForOccurrence(
+        event.id,
+        occ.occurrence_start,
+        event.user_id,
+        reminderOverrides,
+        event.all_day,
+        event.timezone,
+      );
+    }
   }
 }
