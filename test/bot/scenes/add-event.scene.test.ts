@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { Composer } from 'gramio';
 import { CALLBACK_ONLY_STEPS } from '../../../src/bot/handlers/message.handler.ts';
-import type { UserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
+import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { createAddEventScene } from '../../../src/bot/scenes/add-event.scene.ts';
 import { CB } from '../../../src/config/constants.ts';
+import type { DatabaseService } from '../../../src/database/index.ts';
 import type { EventService } from '../../../src/services/event/event-service.ts';
 
-const mockComposer = new Composer() as unknown as UserResolverComposer;
+const mockDb = { users: { findOrCreate: () => ({ language: 'en', timezone: 'UTC' }) } } as unknown as DatabaseService;
+const mockComposer = createUserResolverComposer(mockDb);
 
 describe('createAddEventScene', () => {
   test('creates scene with name "add_event"', () => {

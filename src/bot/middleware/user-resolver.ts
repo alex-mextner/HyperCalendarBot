@@ -3,6 +3,7 @@ import type { AnyBot, Context } from 'gramio';
 import { Composer } from 'gramio';
 import type { DatabaseService } from '../../database/index.ts';
 import type { User } from '../../database/types.ts';
+import type { DerivedProps } from '../types.ts';
 
 interface TelegramFrom {
   id: number;
@@ -47,12 +48,6 @@ export function createUserResolver(db: DatabaseService) {
   };
 }
 
-export interface UserDeriveResult {
-  dbUser: User | undefined;
-  userTimezone: string | undefined;
-  lang: 'en' | 'ru';
-}
-
 /**
  * Composer wrapping user resolver derive for scene type propagation.
  * Composer.derive() uses DeriveHandler<T, D> with proper generic inference (D extends object),
@@ -62,7 +57,7 @@ export interface UserDeriveResult {
 export function createUserResolverComposer(db: DatabaseService) {
   const resolver = createUserResolver(db);
   return new Composer().derive(
-    async (context): Promise<UserDeriveResult> => {
+    async (context): Promise<DerivedProps> => {
       return resolver(context as Context<AnyBot>);
     },
     { as: 'global' },
