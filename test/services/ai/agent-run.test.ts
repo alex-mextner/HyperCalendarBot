@@ -486,6 +486,56 @@ describe('CalendarBotAgent.run()', () => {
     expect(onBotResponse).not.toHaveBeenCalled();
   });
 
+  test('"..." response in group is discarded like [SKIP]', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '...' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '...' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    expect(sender.sendMessage).toHaveBeenCalledTimes(0);
+    expect(deleteMessage).toHaveBeenCalledTimes(0);
+  });
+
+  test('Unicode ellipsis "…" response in group is discarded like [SKIP]', async () => {
+    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '…' } }];
+    const finalMsg = {
+      content: [{ type: 'text', text: '…' }],
+      stop_reason: 'end_turn',
+    };
+
+    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
+    const agent = new CalendarBotAgent(config, sender);
+    (agent as unknown as { client: unknown }).client = mockClient;
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    expect(sender.sendMessage).toHaveBeenCalledTimes(0);
+    expect(deleteMessage).toHaveBeenCalledTimes(0);
+  });
+
   test('logAiTurn via ConversationLogger saves content blocks with chatId in group context', () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.isGroup = true;

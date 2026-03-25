@@ -212,6 +212,13 @@ const CALENDAR_KEYWORDS = [
   'завтра',
   'послезавтра',
   'сегодня',
+  'запись',
+  'записаться',
+  'записать',
+  'назначить',
+  'назначь',
+  'отложить',
+  'отложи',
   // EN — full words
   'event',
   'events',
@@ -228,7 +235,22 @@ const CALENDAR_KEYWORDS = [
   'today',
 ];
 
-const KEYWORD_PATTERN = new RegExp(`(?:^|\\s|[,.!?])(?:${CALENDAR_KEYWORDS.join('|')})(?:\\s|[,.!?]|$)`, 'i');
+// --- Fuzzy phonetic matching ---
+
+/** Russian phonetic normalization: canonicalize voiced/voiceless pairs, remove soft/hard signs. */
+function phoneticNormalize(word: string): string {
+  let s = word.toLowerCase();
+  s = s.replace(/ё/g, 'е');
+  s = s.replace(/[ъь]/g, '');
+  s = s.replace(/б/g, 'п');
+  s = s.replace(/в/g, 'ф');
+  s = s.replace(/г/g, 'к');
+  s = s.replace(/д/g, 'т');
+  s = s.replace(/ж/g, 'ш');
+  s = s.replace(/з/g, 'с');
+  s = s.replace(/(.)\1+/g, '$1');
+  return s;
+}
 
 function levenshtein(a: string, b: string): number {
   const m = a.length;
@@ -245,11 +267,59 @@ function levenshtein(a: string, b: string): number {
   return dp[m]![n]!;
 }
 
+/** Max Levenshtein distance allowed for a given normalized word length. */
+function maxEditDistance(len: number): number {
+  if (len <= 3) return 0;
+  if (len <= 5) return 1;
+  return 2;
+}
+
+/** Pre-computed normalized keyword forms for fuzzy matching. */
+const NORMALIZED_KEYWORDS = CALENDAR_KEYWORDS.map((kw) => {
+  const parts = kw.split(/\s+/);
+  return { normalized: parts.map(phoneticNormalize) };
+});
+
+/** Check if text contains any calendar keyword (fuzzy phonetic match). */
+function matchesKeywordFuzzy(text: string): boolean {
+  const inputWords = text
+    .toLowerCase()
+    .split(/[\s,.!?;:()]+/)
+    .filter((w) => w.length > 0);
+  const normalizedInput = inputWords.map(phoneticNormalize);
+
+  for (const kw of NORMALIZED_KEYWORDS) {
+    if (kw.normalized.length === 1) {
+      const kwNorm = kw.normalized[0]!;
+      for (const inputNorm of normalizedInput) {
+        const maxDist = maxEditDistance(kwNorm.length);
+        if (levenshtein(inputNorm, kwNorm) <= maxDist) return true;
+      }
+    } else {
+      // Multi-word keyword (e.g. "во сколько") — all parts must appear in sequence
+      for (let i = 0; i <= normalizedInput.length - kw.normalized.length; i++) {
+        let allMatch = true;
+        for (let j = 0; j < kw.normalized.length; j++) {
+          const inputNorm = normalizedInput[i + j]!;
+          const kwNorm = kw.normalized[j]!;
+          const maxDist = maxEditDistance(kwNorm.length);
+          if (levenshtein(inputNorm, kwNorm) > maxDist) {
+            allMatch = false;
+            break;
+          }
+        }
+        if (allMatch) return true;
+      }
+    }
+  }
+  return false;
+}
+
 const ADDRESS_TARGETS = ['календарь', 'calendar'];
 const ADDRESS_MAX_DISTANCE = 2;
 
-// Exact "календарь"/"calendar" words are already in KEYWORD_PATTERN.
-// This function handles typos only (e.g. "Каледарь,", "Calender,").
+// Exact "календарь"/"calendar" words are already in keyword list.
+// This function handles typos only in the address prefix (e.g. "Каледарь,", "Calender,").
 function startsWithCalendarAddress(text: string): boolean {
   const firstWord = (text.trim().split(/[\s,!.?:]+/)[0] ?? '').toLowerCase();
   if (firstWord.length < 5) return false;
@@ -259,7 +329,7 @@ function startsWithCalendarAddress(text: string): boolean {
 function isGroupRelevant(text: string, botUsername: string): boolean {
   if (botUsername && text.includes(`@${botUsername}`)) return true;
   if (startsWithCalendarAddress(text)) return true;
-  return KEYWORD_PATTERN.test(text);
+  return matchesKeywordFuzzy(text);
 }
 
 const TG_API = 'https://api.telegram.org';

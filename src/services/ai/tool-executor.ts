@@ -162,7 +162,7 @@ export interface ToolInputMap {
   add_trigger: TriggerInput;
   list_triggers: Record<never, never>;
   remove_trigger: TriggerIdInput;
-  set_reaction: { message_id: number; emoji: string };
+  set_reaction: { message_id?: number; emoji: string };
   remember_user_fact: { type: 'append' | 'rewrite'; content: string };
   claude_chat: AgentCommand['payload'];
   claude_new_chat: AgentCommand['payload'];

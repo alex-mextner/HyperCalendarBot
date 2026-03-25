@@ -1057,13 +1057,14 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
   {
     name: 'set_reaction',
     description:
-      'Put an emoji reaction on a Telegram message. Use in group chats to react silently without sending a text reply — e.g. when you want to acknowledge a message, log feedback, or remember a fact without cluttering the chat. The message_id is visible in the [Group: ..., msg_id:XXXX] prefix of each incoming message.',
+      'Put an emoji reaction on a Telegram message. Use in group chats to react silently. If message_id is omitted, reacts to the current incoming message.',
     input_schema: {
       type: 'object' as const,
       properties: {
         message_id: {
           type: 'number',
-          description: 'Telegram message_id to react to. Read it from the msg_id field in the message prefix.',
+          description:
+            'Telegram message_id to react to. Defaults to the current message if omitted. Only specify when reacting to a different message whose msg_id you see in the history prefix.',
         },
         emoji: {
           type: 'string',
@@ -1071,7 +1072,7 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
             'A single emoji supported by Telegram reactions, e.g. "👍", "❤️", "🔥", "👀", "😂", "🤔", "✍️", "🙏".',
         },
       },
-      required: ['message_id', 'emoji'],
+      required: ['emoji'],
     },
   },
   {

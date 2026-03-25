@@ -202,6 +202,7 @@ Instead, you MAY silently:
 - Call send_feedback if the message contains a bug report or feature request about the bot
 
 After any of these silent actions, output [SKIP] — no text.
+CRITICAL: After calling set_reaction, remember_user_fact, or send_feedback in "silent mode", you MUST output ONLY "[SKIP]" as your text. Do NOT add any commentary, explanation, or message. The reaction IS your response — no text needed.
 If none of those apply, output [SKIP] immediately with zero tool calls.
 
 Silent-only (no text) applies to:
