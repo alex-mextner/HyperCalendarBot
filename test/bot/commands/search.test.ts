@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type { CalendarEvent } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -12,7 +13,7 @@ function makeCtx(overrides = {}) {
   };
 }
 
-function makeEvent(overrides: Record<string, unknown> = {}) {
+function makeEvent(overrides: Partial<CalendarEvent> = {}) {
   return {
     id: 1,
     user_id: 100,
@@ -99,7 +100,7 @@ describe('handleSearch', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Found 15');
     // keyboard should only have 10 buttons max
-    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
     expect(opts.reply_markup).toBeDefined();
   });
 
@@ -163,7 +164,7 @@ describe('handleSearch', () => {
     await handleSearch(ctx as never, svc as never, groupRepo as never);
 
     expect(groupRepo.getTimezone).toHaveBeenCalledWith(-200);
-    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
     expect(opts).toHaveProperty('reply_markup');
   });
 
@@ -183,7 +184,7 @@ describe('handleSearch', () => {
 
     await handleSearch(ctx as never, svc as never, groupRepo as never);
 
-    // Falls back — still returns results without error
+    // Falls back -- still returns results without error
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Found 1');
   });

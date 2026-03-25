@@ -4,7 +4,9 @@ import { createOnboardingScene } from '../../../src/bot/scenes/onboarding.scene.
 import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 
-function makeDb() {
+/** Minimal mock of DatabaseService for onboarding scene + user resolver.
+ *  DatabaseService has private members; boundary cast needed. */
+function makeDb(): DatabaseService {
   return {
     users: {
       update: () => null,

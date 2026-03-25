@@ -19,6 +19,6 @@ describe('getTemplate', () => {
   });
 
   test('throws on unknown type', () => {
-    expect(() => getTemplate('unknown' as unknown as ImageType)).toThrow();
+    expect(() => getTemplate('unknown' as ImageType)).toThrow();
   });
 });

@@ -4,7 +4,9 @@ import { createTimezoneScene } from '../../../src/bot/scenes/timezone.scene.ts';
 import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
 
-function makeDb() {
+/** Minimal mock of DatabaseService with only the methods used by timezone scene + user resolver.
+ *  DatabaseService has a private `db` field so structural mocking needs a boundary cast. */
+function makeDb(): DatabaseService {
   return {
     users: {
       update: () => null,

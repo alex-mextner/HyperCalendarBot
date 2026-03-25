@@ -2,9 +2,8 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
-import type { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
-import type { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
-import type { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
+import type { Intent, User } from '../../../src/database/types.ts';
+import type { ToolResult } from '../../../src/services/ai/types.ts';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 const TTL_MS = 5 * 60 * 1000;
@@ -39,33 +38,95 @@ function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userI
   };
 }
 
-function makeUser(overrides: Record<string, unknown> = {}) {
+/** Executor result shape returned by IntentExecutor.run() */
+interface ExecutorResult {
+  success: boolean;
+  response?: string;
+  suspended?: boolean;
+  suspendedAt?: number;
+  stepResults?: { [key: string]: unknown };
+  mentionedEventId?: number;
+}
+
+/** Match result shape from IntentMatcher.match() */
+interface MatchResult {
+  intentId: number;
+  captures: { [key: string]: string };
+}
+
+/**
+ * Mock interfaces matching what createIntentMatcherLayer uses from its dependencies.
+ * IntentMatcher, IntentRepository, IntentExecutor are classes with private members,
+ * so structural mocks need a boundary assertion.
+ */
+interface MockMatcher {
+  match: ReturnType<typeof mock<(text: string) => MatchResult | null>>;
+  load: ReturnType<typeof mock<(intents: Intent[]) => void>>;
+}
+
+interface MockIntentRepo {
+  getById: ReturnType<typeof mock<(id: number) => Partial<Intent> | null>>;
+}
+
+interface MockExecutor {
+  run: ReturnType<typeof mock<(...args: unknown[]) => Promise<ExecutorResult>>>;
+}
+
+function makeUser(overrides: Partial<User> = {}): Partial<User> {
   return { telegram_id: 1, timezone: 'UTC', language: 'ru', ...overrides };
 }
 
-// chatId defaults to telegram_id — mirrors the layer's fallback for private chats
+// chatId defaults to telegram_id — mirrors the layer's fallback for private chats.
+// BotCommandContext extends MessageContext (many methods); the layer only uses dbUser, chatId, send.
 function makeCtx(user = makeUser()): BotCommandContext {
   return {
-    dbUser: user,
+    dbUser: user as User,
     chatId: user.telegram_id,
     send: mock(() => Promise.resolve()),
   } as unknown as BotCommandContext;
 }
 
-function makeMatcher(match: ReturnType<IntentMatcher['match']> = null): IntentMatcher {
-  return { match: mock(() => match), load: mock(() => {}) } as unknown as IntentMatcher;
+function makeMatcher(match: MatchResult | null = null): MockMatcher {
+  return { match: mock(() => match), load: mock(() => {}) };
 }
 
-function makeIntentRepo(intent: Record<string, unknown> | null = null): IntentRepository {
-  return { getById: mock(() => intent) } as unknown as IntentRepository;
+function makeIntentRepo(intent: Partial<Intent> | null = null): MockIntentRepo {
+  return { getById: mock(() => intent) };
 }
 
-function makeExecutor(result: Record<string, unknown> = { success: true, response: 'done' }): IntentExecutor {
-  return { run: mock(() => Promise.resolve(result)) } as unknown as IntentExecutor;
+function makeExecutor(result: ExecutorResult = { success: true, response: 'done' }): MockExecutor {
+  return { run: mock(() => Promise.resolve(result)) };
 }
 
 function makeToolExecutor() {
-  return mock((_name: string, _input: unknown) => ({ success: true, output: 'ok' }));
+  return mock((_name: string, _input: unknown): ToolResult => ({ success: true, output: 'ok' }));
+}
+
+/** Single boundary cast for createIntentMatcherLayer arguments.
+ *  IntentMatcher, IntentRepository, IntentExecutor all have private fields,
+ *  so structural mocks need `as unknown as` at this one place. */
+function callLayer(
+  matcher: MockMatcher,
+  repo: MockIntentRepo,
+  executor: MockExecutor,
+  toolExecutor: ReturnType<typeof makeToolExecutor>,
+  sessions: ReturnType<typeof makeWorkflowStore>,
+  notifyAdmin?: (text: string) => Promise<void>,
+  _unused1?: undefined,
+  _unused2?: undefined,
+  convLogger?: { logBotResponse: ReturnType<typeof mock> },
+) {
+  return createIntentMatcherLayer(
+    matcher as unknown as Parameters<typeof createIntentMatcherLayer>[0],
+    repo as unknown as Parameters<typeof createIntentMatcherLayer>[1],
+    executor as unknown as Parameters<typeof createIntentMatcherLayer>[2],
+    toolExecutor,
+    sessions,
+    notifyAdmin,
+    _unused1,
+    _unused2,
+    convLogger as unknown as Parameters<typeof createIntentMatcherLayer>[8],
+  );
 }
 
 describe('createIntentMatcherLayer', () => {
@@ -76,13 +137,7 @@ describe('createIntentMatcherLayer', () => {
   });
 
   test('returns handled:false when matcher finds no match', async () => {
-    const layer = createIntentMatcherLayer(
-      makeMatcher(null),
-      makeIntentRepo(),
-      makeExecutor(),
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(null), makeIntentRepo(), makeExecutor(), makeToolExecutor(), workflowSessions);
 
     const result = await layer(makeCtx(), 'hello');
     expect(result.handled).toBe(false);
@@ -90,14 +145,14 @@ describe('createIntentMatcherLayer', () => {
 
   test('returns handled:true when intent matches and executor returns response', async () => {
     const match = { intentId: 1, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 1,
       workflow: JSON.stringify({ tools: [{ name: 'get_events', input: {} }], format: 'text' }),
       format: 'text',
     };
     const ctx = makeCtx();
 
-    const layer = createIntentMatcherLayer(
+    const layer = callLayer(
       makeMatcher(match),
       makeIntentRepo(intent),
       makeExecutor({ success: true, response: 'Events found' }),
@@ -113,9 +168,9 @@ describe('createIntentMatcherLayer', () => {
   test('returns handled:false when intent not found in repo', async () => {
     const match = { intentId: 99, captures: {} };
 
-    const layer = createIntentMatcherLayer(
+    const layer = callLayer(
       makeMatcher(match),
-      makeIntentRepo(null), // repo returns null
+      makeIntentRepo(null),
       makeExecutor(),
       makeToolExecutor(),
       workflowSessions,
@@ -128,7 +183,7 @@ describe('createIntentMatcherLayer', () => {
   test('handles workflow suspension: stores session and returns handled:true', async () => {
     const userId = 42;
     const match = { intentId: 5, captures: { $1: 'tomorrow' } };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 5,
       workflow: JSON.stringify({ steps: [{ call: 'ask_user' }] }),
       format: 'text',
@@ -136,13 +191,7 @@ describe('createIntentMatcherLayer', () => {
     const executor = makeExecutor({ success: false, suspended: true, suspendedAt: 0, stepResults: {} });
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(match),
-      makeIntentRepo(intent),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(match), makeIntentRepo(intent), executor, makeToolExecutor(), workflowSessions);
 
     const result = await layer(ctx, 'create event tomorrow');
     expect(result.handled).toBe(true);
@@ -168,13 +217,7 @@ describe('createIntentMatcherLayer', () => {
       createdAt: Date.now(),
     });
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(null), // matcher returns null — but session should take priority
-      makeIntentRepo(null),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
 
     const result = await layer(ctx, 'yes');
     expect(result.handled).toBe(true);
@@ -198,13 +241,7 @@ describe('createIntentMatcherLayer', () => {
       createdAt: Date.now() - 6 * 60 * 1000, // 6 minutes ago
     });
 
-    const layer = createIntentMatcherLayer(
-      matcher,
-      makeIntentRepo(null),
-      makeExecutor(),
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(matcher, makeIntentRepo(null), makeExecutor(), makeToolExecutor(), workflowSessions);
 
     const result = await layer(ctx, 'too late');
     expect(result.handled).toBe(false);
@@ -216,15 +253,15 @@ describe('createIntentMatcherLayer', () => {
 
   test('returns handled:false and calls notifyAdmin when executor fails', async () => {
     const match = { intentId: 3, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 3,
       canonical_name: 'invite_user',
       workflow: JSON.stringify({ tools: [{ name: 'find_user', input: {} }] }),
       format: 'text',
     };
-    const notifyAdmin = mock(() => Promise.resolve());
+    const notifyAdmin = mock((_text: string) => Promise.resolve());
 
-    const layer = createIntentMatcherLayer(
+    const layer = callLayer(
       makeMatcher(match),
       makeIntentRepo(intent),
       makeExecutor({ success: false, response: 'tool error: user not found' }),
@@ -236,7 +273,7 @@ describe('createIntentMatcherLayer', () => {
     const result = await layer(makeCtx(), 'invite @bob');
     expect(result.handled).toBe(false);
     expect(notifyAdmin).toHaveBeenCalledTimes(1);
-    const msg = (notifyAdmin.mock.calls[0] as string[])[0];
+    const msg = notifyAdmin.mock.calls[0]![0];
     expect(msg).toContain('invite_user');
     expect(msg).toContain('id=3');
     expect(msg).toContain('tool error: user not found');
@@ -244,17 +281,17 @@ describe('createIntentMatcherLayer', () => {
 
   test('does not send response when executor returns no response', async () => {
     const match = { intentId: 2, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 2,
       workflow: JSON.stringify({ tools: [{ name: 'noop', input: {} }] }),
       format: 'text',
     };
     const ctx = makeCtx();
 
-    const layer = createIntentMatcherLayer(
+    const layer = callLayer(
       makeMatcher(match),
       makeIntentRepo(intent),
-      makeExecutor({ success: true }), // no response field
+      makeExecutor({ success: true }),
       makeToolExecutor(),
       workflowSessions,
     );
@@ -267,7 +304,7 @@ describe('createIntentMatcherLayer', () => {
   test('sends ask_user question to user when workflow suspends', async () => {
     const userId = 13;
     const match = { intentId: 5, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 5,
       workflow: JSON.stringify({ steps: [{ call: 'ask_user', input: { question: 'Date or time?' }, as: 'ans' }] }),
       format: 'text',
@@ -281,13 +318,7 @@ describe('createIntentMatcherLayer', () => {
     });
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(match),
-      makeIntentRepo(intent),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(match), makeIntentRepo(intent), executor, makeToolExecutor(), workflowSessions);
 
     const result = await layer(ctx, 'create event');
     expect(result.handled).toBe(true);
@@ -315,25 +346,19 @@ describe('createIntentMatcherLayer', () => {
       createdAt: Date.now(),
     });
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(null),
-      makeIntentRepo(null),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
 
     await layer(ctx, '  Время  ');
 
-    const runCall = (executor.run as ReturnType<typeof mock>).mock.calls[0] as unknown[];
-    const resumeState = runCall[4] as { userAnswer: string };
+    const runCallArgs = executor.run.mock.calls[0]!;
+    const resumeState = runCallArgs[4] as { userAnswer: string };
     expect(resumeState.userAnswer).toBe('Время');
   });
 
   test('does not send message when ask_user has no question text', async () => {
     const userId = 14;
     const match = { intentId: 6, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 6,
       workflow: JSON.stringify({ steps: [{ call: 'ask_user', as: 'ans' }] }),
       format: 'text',
@@ -341,13 +366,7 @@ describe('createIntentMatcherLayer', () => {
     const executor = makeExecutor({ success: false, suspended: true, suspendedAt: 0, stepResults: {} });
     const ctx = makeCtx(makeUser({ telegram_id: userId }));
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(match),
-      makeIntentRepo(intent),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(match), makeIntentRepo(intent), executor, makeToolExecutor(), workflowSessions);
 
     await layer(ctx, 'create event');
     expect(ctx.send).not.toHaveBeenCalled();
@@ -355,27 +374,21 @@ describe('createIntentMatcherLayer', () => {
 
   test('passes groupContext to executor as groupIsGroup and groupChatId', async () => {
     const match = { intentId: 10, captures: {} };
-    const intent = {
+    const intent: Partial<Intent> = {
       id: 10,
       workflow: JSON.stringify({ tools: [{ name: 'create_event', input: { scope: 'group' } }] }),
       format: 'text',
     };
     const executor = makeExecutor({ success: true, response: 'event created' });
 
-    const layer = createIntentMatcherLayer(
-      makeMatcher(match),
-      makeIntentRepo(intent),
-      executor,
-      makeToolExecutor(),
-      workflowSessions,
-    );
+    const layer = callLayer(makeMatcher(match), makeIntentRepo(intent), executor, makeToolExecutor(), workflowSessions);
 
     await layer(makeCtx(), 'сделай пьянку сегодня на 23', {
       groupContext: { isGroup: true, groupChatId: -100555, groupTitle: 'Test group' },
     });
 
-    const runCall = (executor.run as ReturnType<typeof mock>).mock.calls[0] as unknown[];
-    const userCtx = runCall[2] as { groupIsGroup: boolean; groupChatId: number };
+    const runCallArgs = executor.run.mock.calls[0]!;
+    const userCtx = runCallArgs[2] as { groupIsGroup: boolean; groupChatId: number };
     expect(userCtx.groupIsGroup).toBe(true);
     expect(userCtx.groupChatId).toBe(-100555);
   });
@@ -387,7 +400,7 @@ describe('needsSupplement', () => {
     const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
     const executor = makeExecutor({ success: true, response: 'done' });
 
-    const layer = createIntentMatcherLayer(matcher, repo, executor, makeToolExecutor(), makeWorkflowStore());
+    const layer = callLayer(matcher, repo, executor, makeToolExecutor(), makeWorkflowStore());
     const result = await layer(makeCtx(), 'покажи события');
 
     expect(result.handled).toBe(true);
@@ -398,12 +411,9 @@ describe('needsSupplement', () => {
     const matcher = makeMatcher({ intentId: 1, captures: {} });
     const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
     const executor = makeExecutor({ success: true, response: 'Готово!' });
-    const logBotResponse = mock(() => {});
-    const logger = {
-      logBotResponse,
-    } as unknown as import('../../../src/services/conversation-logger.ts').ConversationLogger;
+    const logBotResponse = mock((_userId: number, _text: string, _chatId?: number) => {});
 
-    const layer = createIntentMatcherLayer(
+    const layer = callLayer(
       matcher,
       repo,
       executor,
@@ -412,16 +422,16 @@ describe('needsSupplement', () => {
       undefined,
       undefined,
       undefined,
-      logger,
+      { logBotResponse },
     );
     const ctx = makeCtx();
     await layer(ctx, 'покажи события');
 
     expect(logBotResponse).toHaveBeenCalledTimes(1);
-    const [callUserId, callText, callChatId] = logBotResponse.mock.calls[0] as unknown as [number, string, number];
-    expect(callUserId).toBe(ctx.dbUser!.telegram_id);
-    expect(callText).toBe('Готово!');
-    expect(callChatId).toBe((ctx as unknown as { chatId: number }).chatId);
+    const callArgs = logBotResponse.mock.calls[0]!;
+    expect(callArgs[0]).toBe(ctx.dbUser!.telegram_id);
+    expect(callArgs[1]).toBe('Готово!');
+    expect(callArgs[2]).toBe(ctx.chatId);
   });
 
   test('suspended intent (ask_user) does NOT return needsSupplement', async () => {
@@ -430,7 +440,7 @@ describe('needsSupplement', () => {
     const executor = makeExecutor({ success: false, suspended: true, suspendedAt: 0, response: 'Утро или вечер?' });
 
     const workflowStore = makeWorkflowStore();
-    const layer = createIntentMatcherLayer(matcher, repo, executor, makeToolExecutor(), workflowStore);
+    const layer = callLayer(matcher, repo, executor, makeToolExecutor(), workflowStore);
     const result = await layer(makeCtx(), 'добавь встречу в 8');
 
     expect(result.handled).toBe(true);
@@ -450,7 +460,7 @@ describe('needsSupplement', () => {
     const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
     const executor = makeExecutor({ success: true, response: 'done' });
 
-    const layer = createIntentMatcherLayer(makeMatcher(), repo, executor, makeToolExecutor(), sessionStore);
+    const layer = callLayer(makeMatcher(), repo, executor, makeToolExecutor(), sessionStore);
     const result = await layer(makeCtx(), 'утро');
 
     expect(result.handled).toBe(true);

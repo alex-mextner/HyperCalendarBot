@@ -6,7 +6,7 @@ function makeCtx(duration = 60) {
   return {
     user: { telegram_id: 1, timezone: 'UTC', language: 'ru', default_event_duration_minutes: duration } as never,
     userRepo: {
-      update: (_id: number, data: Record<string, unknown>) => {
+      update: (_id: number, data: { [key: string]: unknown }) => {
         Object.assign(store, data);
         return { ...store, telegram_id: 1 };
       },

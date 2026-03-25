@@ -105,7 +105,7 @@ describe('IntentExecutor', () => {
   });
 
   test('tool output with data is accessible via tool_outputs namespace in next step', async () => {
-    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const calls: Array<{ name: string; input: { [key: string]: unknown } }> = [];
     const workflow: Workflow = {
       steps: [
         { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
@@ -113,7 +113,7 @@ describe('IntentExecutor', () => {
       ],
     };
     const mockExecutor = async (name: string, input: unknown) => {
-      calls.push({ name, input: input as Record<string, unknown> });
+      calls.push({ name, input: input as { [key: string]: unknown } });
       if (name === 'find_user') {
         return { success: true as const, output: 'Found user', data: { telegram_id: 8888, name: 'Alice' } };
       }
@@ -125,7 +125,7 @@ describe('IntentExecutor', () => {
   });
 
   test('ask_user answer is accessible via tool_outputs namespace after resume', async () => {
-    const calls: Array<{ name: string; input: Record<string, unknown> }> = [];
+    const calls: Array<{ name: string; input: { [key: string]: unknown } }> = [];
     const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'Confirm?' }, as: 'confirm' },
@@ -133,7 +133,7 @@ describe('IntentExecutor', () => {
       ],
     };
     const mockExecutor = async (name: string, input: unknown) => {
-      calls.push({ name, input: input as Record<string, unknown> });
+      calls.push({ name, input: input as { [key: string]: unknown } });
       return { success: true as const, output: 'ok' };
     };
     const result = await executor.run(workflow, {}, userCtx, mockExecutor, {
@@ -187,14 +187,14 @@ describe('IntentExecutor', () => {
       userAnswer: 'время',
     });
     expect(afterFirst.suspended).toBe(true);
-    expect((afterFirst.stepResults as Record<string, unknown>).choices).toEqual(['время']);
+    expect((afterFirst.stepResults as { [key: string]: unknown }).choices).toEqual(['время']);
 
     const final = await executor.run(workflow, {}, userCtx, mockExecutor, {
       stepIndex: 1,
       stepResults: { choices: ['время'] },
       userAnswer: 'утро',
     });
-    expect((final.stepResults as Record<string, unknown>).choices).toEqual(['время', 'утро']);
+    expect((final.stepResults as { [key: string]: unknown }).choices).toEqual(['время', 'утро']);
   });
 
   test('choices[0] accessible in when condition after auto-accumulation', async () => {
@@ -227,8 +227,8 @@ describe('IntentExecutor', () => {
       stepResults: {},
       userAnswer: 'ВРЕМЯ',
     });
-    const sr = result.stepResults as Record<string, unknown>;
-    const ask = sr.ask as Record<string, unknown>;
+    const sr = result.stepResults as { [key: string]: unknown };
+    const ask = sr.ask as { [key: string]: unknown };
     expect(ask).toBeDefined();
     expect(ask.date_or_time).toBe('время');
     // choices[] auto-accumulation stays flat
@@ -243,7 +243,7 @@ describe('IntentExecutor', () => {
     };
     const mock = () => ({ success: true, output: '["a","b"]' });
     const result = await executor.run(workflow, {}, userCtx, mock);
-    const sr = result.stepResults as Record<string, unknown>;
+    const sr = result.stepResults as { [key: string]: unknown };
     expect(sr.results).toBeDefined();
     expect(sr.ask).toBeUndefined();
   });
@@ -372,7 +372,7 @@ describe('IntentExecutor', () => {
     const result = await executor.run(workflow, {}, userCtx, mock);
     expect(result.success).toBe(true);
     // stepResults has no 'tool' call logged — condition was false
-    const sr = result.stepResults as Record<string, unknown>;
+    const sr = result.stepResults as { [key: string]: unknown };
     expect(sr).toBeDefined();
   });
 
@@ -482,7 +482,7 @@ describe('IntentExecutor', () => {
 
   test('AM/PM workflow: "вечера" answer → create with hour + 12', async () => {
     const calls: string[] = [];
-    const inputs: Record<string, unknown>[] = [];
+    const inputs: { [key: string]: unknown }[] = [];
     const workflow: Workflow = {
       steps: [
         { when: 'isAmPmAmbiguous($1)', call: 'ask_user', input: { question: '{{t.ampm}}' }, as: 'ampm|lower' },
@@ -501,7 +501,7 @@ describe('IntentExecutor', () => {
     };
     const mock = (_name: string, input: unknown) => {
       calls.push(_name);
-      inputs.push(input as Record<string, unknown>);
+      inputs.push(input as { [key: string]: unknown });
       return { success: true, output: 'ok' };
     };
     // Resume from ask_user with answer "вечера"

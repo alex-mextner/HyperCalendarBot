@@ -9,7 +9,7 @@ describe('ShareSessionManager', () => {
       set: mock(() => Promise.resolve('OK')),
       get: mock(() => Promise.resolve(null)),
       del: mock(() => Promise.resolve(1)),
-    } as unknown as RedisLike;
+    } as Partial<RedisLike> as RedisLike;
     const manager = new ShareSessionManager(redis);
     const id = await manager.create({
       userId: 100,
@@ -20,7 +20,7 @@ describe('ShareSessionManager', () => {
     });
     expect(id).toBeTruthy();
     expect(redis.set).toHaveBeenCalled();
-    const setArgs = (redis.set as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as unknown[];
+    const setArgs = (redis.set as ReturnType<typeof mock>).mock.calls[0]!;
     expect(setArgs[2]).toEqual({ ex: 300 });
   });
 
@@ -35,7 +35,7 @@ describe('ShareSessionManager', () => {
     const redis = {
       get: mock(() => Promise.resolve(sessionData)),
       del: mock(() => Promise.resolve(1)),
-    } as unknown as RedisLike;
+    } as Partial<RedisLike> as RedisLike;
     const manager = new ShareSessionManager(redis);
     const session = await manager.resolve('sess_abc');
     expect(session).not.toBeNull();
@@ -43,7 +43,7 @@ describe('ShareSessionManager', () => {
   });
 
   test('resolve returns null for expired session', async () => {
-    const redis = { get: mock(() => Promise.resolve(null)) } as unknown as RedisLike;
+    const redis = { get: mock(() => Promise.resolve(null)) } as Partial<RedisLike> as RedisLike;
     const manager = new ShareSessionManager(redis);
     expect(await manager.resolve('sess_gone')).toBeNull();
   });
@@ -58,7 +58,7 @@ describe('ShareSessionManager', () => {
     const redis = {
       get: mock(() => Promise.resolve(sessionData)),
       del: mock(() => Promise.resolve(1)),
-    } as unknown as RedisLike;
+    } as Partial<RedisLike> as RedisLike;
     const manager = new ShareSessionManager(redis);
     await manager.consume('sess_abc');
     expect(redis.del).toHaveBeenCalledWith('share_session:sess_abc');

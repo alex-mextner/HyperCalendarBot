@@ -324,6 +324,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   4. Run the test — confirm it passes
   5. Refactor while keeping tests green
 - **Tests must exercise production code**: never reimplement logic in tests.
+  Import helpers/utilities from `src/` — don't copy-paste them into test files.
 - **Never delete a failing test**. Investigate and fix the root cause.
 - **NEVER ignore test/system output** — logs and messages often contain CRITICAL information.
   Read test output, don't just check pass/fail. Warnings in logs point to real bugs.
@@ -333,6 +334,36 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
+- **No `as unknown as` in tests** — if you need a partial mock, use `Partial<RealType>` or build
+  a typed factory function. Double casts hide real type errors in tests, making them useless as
+  regression guards. When mock shape matches the production interface, no cast is needed.
+  ```ts
+  // Bad — hides type errors, test won't catch interface changes
+  const ctx = { send: mock(() => {}) } as unknown as AgentContext;
+  // Good — TypeScript will error if AgentContext changes
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+    return { ...baseCtx, ...overrides };
+  }
+  ```
+- **No `Record<string, unknown>` in mock factories** — use `Partial<ConcreteInterface>` for
+  override parameters. `Record<string, unknown>` defeats the purpose of typed tests: you can pass
+  any garbage and the test will happily compile. When the production interface changes, tests using
+  `Record<string, unknown>` won't break — which means they stop protecting you.
+  ```ts
+  // Bad — any shape accepted, no compile-time checks
+  function makeCtx(overrides: Record<string, unknown> = {}) { ... }
+  // Good — only valid properties accepted
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext { ... }
+  ```
+- **Tests must assert behavior, not mock wiring** — "mock was called with X" is a weak assertion.
+  Prefer asserting the observable outcome (return value, DB state, sent message content).
+  Mock-call assertions are acceptable only when the side effect IS the behavior (e.g., verifying
+  a Telegram message was sent with specific text).
+- **No stub tests** — `test.todo()`, `expect(true).toBe(true)`, empty test bodies, tests that
+  assert only that a function doesn't throw. Every test must assert something meaningful about
+  the code's behavior. If you can't write a meaningful assertion, the test shouldn't exist.
+- **Deleting a stub/broken test requires replacement** — when removing a low-quality test, write
+  at least 2-3 proper tests covering the same production code. Never reduce total coverage.
 - **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
 - **NEVER use `git add -A`** without checking `git status` first.

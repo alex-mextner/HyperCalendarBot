@@ -81,7 +81,7 @@ describe('handleSetReaction', () => {
   test('calls setReaction with groupChatId, messageId, and emoji', async () => {
     const ctx = makeCtx(db, USER_ID);
     const setReaction = mock(() => Promise.resolve());
-    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.isGroup = true;
     ctx.groupChatId = -100123;
 
@@ -94,7 +94,7 @@ describe('handleSetReaction', () => {
   test('falls back to chatId when groupChatId is absent', async () => {
     const ctx = makeCtx(db, USER_ID);
     const setReaction = mock(() => Promise.resolve());
-    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.isGroup = false;
 
     await handleSetReaction(ctx, { message_id: 7, emoji: '😂' });
@@ -125,7 +125,7 @@ describe('handleSetReaction', () => {
     const ctx = makeCtx(db, USER_ID);
     ctx.sender = {
       setReaction: mock(() => Promise.reject(new Error('Bad Request: message not found'))),
-    } as unknown as AgentContext['sender'];
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.groupChatId = -100123;
     const result = await handleSetReaction(ctx, { message_id: 999, emoji: '👍' });
     expect(result.success).toBe(false);
@@ -137,7 +137,7 @@ describe('handleSetReaction', () => {
     ctx.incomingMessageId = 42;
     ctx.groupChatId = -100123;
     const setReaction = mock(() => Promise.resolve());
-    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     const result = await handleSetReaction(ctx, { emoji: '👍' });
     expect(result.success).toBe(true);
     expect(setReaction).toHaveBeenCalledWith(-100123, 42, '👍');
@@ -148,7 +148,7 @@ describe('handleSetReaction', () => {
     ctx.groupChatId = -100123;
     ctx.sender = {
       setReaction: mock(() => Promise.resolve()),
-    } as unknown as AgentContext['sender'];
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
     const result = await handleSetReaction(ctx, { emoji: '👍' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('message_id');

@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { AgentRegistry } from '../../../../src/agent/registry.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -7,6 +8,7 @@ import { HolidayRepository } from '../../../../src/database/repositories/holiday
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import type { NotificationPreferencesUpdate } from '../../../../src/database/types.ts';
 import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -274,8 +276,8 @@ describe('handleManageSettings', () => {
       ctx.notificationPrefs = {
         ensureDefaults: () => {},
         getPrefs: () => prefs,
-        update: (...args: unknown[]) => {
-          Object.assign(prefs, args[1] as Record<string, unknown>);
+        update: (_userId: number, patch: NotificationPreferencesUpdate) => {
+          Object.assign(prefs, patch);
         },
       };
       const result = handleManageSettings(ctx, {
@@ -289,13 +291,16 @@ describe('handleManageSettings', () => {
   });
 
   describe('assistant category', () => {
+    function withAssistantCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+      return Object.assign({}, ctx, overrides);
+    }
+
     test('get assistant settings returns enabled/disabled status', () => {
-      const ctxWithAssistant = {
-        ...ctx,
+      const aCtx = withAssistantCtx({
         user: { ...ctx.user, assistant_enabled: 0 },
-        agentRegistry: { isConnected: (_userId: number) => false },
-      };
-      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => false }),
+      });
+      const result = handleManageSettings(aCtx, {
         action: 'get',
         category: 'assistant',
       });
@@ -305,12 +310,11 @@ describe('handleManageSettings', () => {
     });
 
     test('get assistant settings shows connected when agent is connected', () => {
-      const ctxWithAssistant = {
-        ...ctx,
+      const aCtx = withAssistantCtx({
         user: { ...ctx.user, assistant_enabled: 1 },
-        agentRegistry: { isConnected: (_userId: number) => true },
-      };
-      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => true }),
+      });
+      const result = handleManageSettings(aCtx, {
         action: 'get',
         category: 'assistant',
       });
@@ -321,16 +325,14 @@ describe('handleManageSettings', () => {
 
     test('update assistantEnabled=true calls userRepo.updateAssistantEnabled', () => {
       let calledWith: [number, boolean] | null = null;
-      const ctxWithAssistant = {
-        ...ctx,
-        userRepo: {
-          ...ctx.userRepo,
+      const aCtx = withAssistantCtx({
+        userRepo: Object.assign(Object.create(ctx.userRepo), {
           updateAssistantEnabled: (userId: number, enabled: boolean) => {
             calledWith = [userId, enabled];
           },
-        },
-      };
-      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        }),
+      });
+      const result = handleManageSettings(aCtx, {
         action: 'update',
         category: 'assistant',
         assistantEnabled: true,
@@ -342,16 +344,14 @@ describe('handleManageSettings', () => {
 
     test('update assistantEnabled=false calls userRepo.updateAssistantEnabled with false', () => {
       let calledWith: [number, boolean] | null = null;
-      const ctxWithAssistant = {
-        ...ctx,
-        userRepo: {
-          ...ctx.userRepo,
+      const aCtx = withAssistantCtx({
+        userRepo: Object.assign(Object.create(ctx.userRepo), {
           updateAssistantEnabled: (userId: number, enabled: boolean) => {
             calledWith = [userId, enabled];
           },
-        },
-      };
-      const result = handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        }),
+      });
+      const result = handleManageSettings(aCtx, {
         action: 'update',
         category: 'assistant',
         assistantEnabled: false,
@@ -362,20 +362,18 @@ describe('handleManageSettings', () => {
     });
 
     test('update assistant reflects new value in ctx.user within same turn', () => {
-      const ctxWithAssistant = {
-        ...ctx,
+      const aCtx = withAssistantCtx({
         user: { ...ctx.user, assistant_enabled: 0 },
-        userRepo: {
-          ...ctx.userRepo,
+        userRepo: Object.assign(Object.create(ctx.userRepo), {
           updateAssistantEnabled: () => {},
-        },
-      };
-      handleManageSettings(ctxWithAssistant as unknown as AgentContext, {
+        }),
+      });
+      handleManageSettings(aCtx, {
         action: 'update',
         category: 'assistant',
         assistantEnabled: true,
       });
-      expect((ctxWithAssistant as unknown as AgentContext).user.assistant_enabled).toBe(1);
+      expect(aCtx.user.assistant_enabled).toBe(1);
     });
   });
 });
