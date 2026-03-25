@@ -4,9 +4,16 @@ WORKDIR /app
 # Install bun — version pinned to match lockfile
 ARG BUN_VERSION=1.3.11
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip ca-certificates && \
+    apt-get install -y --no-install-recommends \
+      curl unzip ca-certificates python3 python3-venv && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
+
+# Python venv — pyrogram-only deps for birthday/username/message scripts.
+# Heavy deps (torch, ntgcalls, silero) run on host, not in container.
+COPY requirements.docker.txt ./
+RUN python3 -m venv venv && \
+    venv/bin/pip install --no-cache-dir -r requirements.docker.txt
 
 # bun install respects lockfile version pins; --frozen-lockfile is validated
 # in CI (same platform). Docker adjusts only platform-specific optional deps.

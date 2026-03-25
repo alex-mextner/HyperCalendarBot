@@ -1,0 +1,4 @@
+# Minimal Python deps for Docker — pyrogram-based scripts only.
+# Heavy deps (torch, ntgcalls, silero) run on host, not in container.
+pyrofork>=2.3
+tgcrypto>=1.2
