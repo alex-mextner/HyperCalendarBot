@@ -204,6 +204,7 @@ const CALENDAR_KEYWORDS = [
   'перенос',
   'удали',
   'удалить',
+  'послезавтра',
   // EN — full words
   'event',
   'events',

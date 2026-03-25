@@ -30,6 +30,7 @@ const CALENDAR_KEYWORDS = [
   'перенос',
   'удали',
   'удалить',
+  'послезавтра',
   'event',
   'events',
   'meeting',
