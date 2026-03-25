@@ -399,12 +399,15 @@ if (config.REDIS_URL) {
     setupProposalExpiryCron,
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
+    setupRecurringRemindersCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
   const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
+  const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
 
+  const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const cronBirthdayService = new BirthdayService(
     db.events,
     db.birthdayMeta,
@@ -442,6 +445,9 @@ if (config.REDIS_URL) {
         await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
       }
     },
+    onRecurringReminders: () => {
+      cronMaterializer.materializeUpcomingRecurringReminders(db.events);
+    },
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
@@ -449,6 +455,7 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
+  await setupRecurringRemindersCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {

@@ -9,7 +9,8 @@ export type BotTaskJobType =
   | 'cron-sharing-cleanup'
   | 'cron-proposal-expiry'
   | 'cron-session-cleanup'
-  | 'cron-birthday-sync';
+  | 'cron-birthday-sync'
+  | 'cron-recurring-reminders';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -22,6 +23,7 @@ interface BotTasksQueueDeps {
   onProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
+  onRecurringReminders?: () => void;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -58,6 +60,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-birthday-sync') {
         if (deps.onBirthdaySync) await deps.onBirthdaySync();
+        return;
+      }
+      if (job.data.type === 'cron-recurring-reminders') {
+        deps.onRecurringReminders?.();
         return;
       }
     },
@@ -116,4 +122,13 @@ export async function setupBirthdaySyncCron(queue: Queue<BotTaskJobData>): Promi
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'birthday-sync-tick' },
   );
   botTasksLogger.info('Birthday sync cron scheduled (daily)');
+}
+
+export async function setupRecurringRemindersCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'recurring-reminders-tick',
+    { type: 'cron-recurring-reminders' },
+    { repeat: { every: 6 * 60 * 60_000 }, removeOnComplete: true, jobId: 'recurring-reminders-tick' },
+  );
+  botTasksLogger.info('Recurring reminders cron scheduled (every 6h)');
 }

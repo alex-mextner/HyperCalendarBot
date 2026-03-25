@@ -613,6 +613,15 @@ export class EventRepository {
       .all(...params) as CalendarEvent[];
   }
 
+  getAllRecurringTemplates(): CalendarEvent[] {
+    return this.db
+      .prepare(`
+      SELECT * FROM events
+      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+    `)
+      .all() as CalendarEvent[];
+  }
+
   findStartingWithin(withinMs: number): CalendarEvent[] {
     const now = new Date().toISOString();
     const until = new Date(Date.now() + withinMs).toISOString();
