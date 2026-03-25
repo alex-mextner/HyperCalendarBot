@@ -1,8 +1,6 @@
 // src/services/scene-pause.ts
 import { z } from 'zod';
-import type { AddEventState } from '../bot/scenes/add-event.scene.ts';
-import type { OnboardingState } from '../bot/scenes/onboarding.scene.ts';
-import type { TimezoneState } from '../bot/scenes/timezone.scene.ts';
+import type { AddEventState, OnboardingState, TimezoneState } from '../bot/scenes/types.ts';
 import { jsonCodec } from '../utils/json-codec.ts';
 
 /** Discriminated union of all wizard scene pause states. When adding a new scene, extend this union. */

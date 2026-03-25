@@ -1,5 +1,7 @@
 // src/database/types.ts
 
+import type { Workflow } from '../services/intent/workflow-schema.ts';
+
 // ── Sync enums ──
 
 export type SyncStatus = 'local_only' | 'synced' | 'pending_push' | 'pending_pull' | 'conflict' | 'push_failed';
@@ -343,7 +345,7 @@ export interface CreateIntentData {
   phrases: string[];
   trigger_words?: string[];
   pattern?: string;
-  workflow: { [key: string]: unknown };
+  workflow: Workflow;
   format: string;
   source_message?: string;
 }

@@ -42,7 +42,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
-import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -71,10 +71,8 @@ import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts'
 import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
 import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
-import type { AddEventState } from '../scenes/add-event.scene.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
-import type { OnboardingState } from '../scenes/onboarding.scene.ts';
-import type { TimezoneState } from '../scenes/timezone.scene.ts';
+import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -544,7 +542,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: { [key: string]: unknown };
+    workflow: Workflow;
     format: string;
   }> | null = null;
   let lastError: unknown;

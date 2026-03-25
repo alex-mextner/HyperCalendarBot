@@ -21,15 +21,9 @@ import {
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
+import type { OnboardingState } from './types.ts';
 
 const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
-
-export interface OnboardingState {
-  lang?: 'en' | 'ru';
-  detectedTz?: string;
-  timezone?: string;
-  country?: string;
-}
 
 export function createOnboardingScene(
   db: DatabaseService,

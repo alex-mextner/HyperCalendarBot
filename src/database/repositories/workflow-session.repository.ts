@@ -2,6 +2,7 @@
 import type { Database } from 'bun:sqlite';
 import { z } from 'zod';
 import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
+import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 
@@ -45,7 +46,7 @@ const StepResultsSchema = z
     group: z.object({ is_group: z.boolean(), chat_id: z.number().nullable() }).optional(),
     user: z
       .object({
-        id: z.number(),
+        id: z.number().optional(),
         language: z.string(),
         timezone: z.string(),
         username: z.string().optional(),
@@ -57,6 +58,34 @@ const StepResultsSchema = z
     ask: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   })
   .catchall(z.union([z.string(), z.number()]));
+
+/**
+ * TypeScript type for step results.
+ *
+ * Defined manually rather than via z.infer because Zod v4's catchall with
+ * z.union([z.string(), z.number()]) produces a broken intersection where
+ * object-typed explicit fields (tool_outputs, group, etc.) collide with the
+ * string|number index signature, making them `never`.
+ *
+ * The Zod schema (StepResultsSchema) is still used for runtime validation.
+ */
+export interface StepResults {
+  last_added_event?: EventSummary;
+  last_mentioned_event?: EventSummary;
+  group?: { is_group: boolean; chat_id: number | null };
+  user?: {
+    id?: number;
+    language: string;
+    timezone: string;
+    username?: string;
+    first_name?: string;
+  };
+  tool_outputs?: { [k: string]: ToolOutputValue };
+  choices?: (string | number)[];
+  ask?: { [k: string]: string | number };
+  /** Dynamic keys: regex captures ($1, $2, ...) and other runtime values. */
+  [key: string]: unknown;
+}
 
 const WorkflowSessionSchema = z.object({
   intentId: z.number(),

@@ -7,6 +7,7 @@
  * Tokenization is delegated to the shared lexer (lexer.ts).
  */
 
+import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { type Token, tokenize } from './lexer.ts';
 
 const DANGEROUS_PROPS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -40,7 +41,7 @@ class Parser {
     return t !== undefined && t.type === 'op' && ops.includes(t.value);
   }
 
-  parse(context: object): boolean {
+  parse(context: StepResults): boolean {
     if (this.tokens.length === 0) {
       throw new Error('Empty expression');
     }
@@ -51,7 +52,7 @@ class Parser {
     return Boolean(result);
   }
 
-  private parseOrExpr(context: object): unknown {
+  private parseOrExpr(context: StepResults): unknown {
     let left = this.parseAndExpr(context);
     while (this.isOp('||')) {
       this.consume();
@@ -61,7 +62,7 @@ class Parser {
     return left;
   }
 
-  private parseAndExpr(context: object): unknown {
+  private parseAndExpr(context: StepResults): unknown {
     let left = this.parseComparison(context);
     while (this.isOp('&&')) {
       this.consume();
@@ -71,7 +72,7 @@ class Parser {
     return left;
   }
 
-  private parseComparison(context: object): unknown {
+  private parseComparison(context: StepResults): unknown {
     const left = this.parseValue(context);
 
     if (this.isOp('==', '!=', '>', '<', '>=', '<=')) {
@@ -83,7 +84,7 @@ class Parser {
     return left;
   }
 
-  private parseValue(context: object): unknown {
+  private parseValue(context: StepResults): unknown {
     const t = this.peek();
     if (t === undefined) throw new Error('Expected a value but reached end of expression');
 
@@ -109,7 +110,7 @@ class Parser {
     throw new Error(`Unexpected token: ${JSON.stringify(t)}`);
   }
 
-  private parsePropertyAccess(context: object): unknown {
+  private parsePropertyAccess(context: StepResults): unknown {
     const rootToken = this.consume();
     if (rootToken.type !== 'ident') {
       throw new Error(`Expected identifier, got ${JSON.stringify(rootToken)}`);
@@ -120,7 +121,7 @@ class Parser {
       throw new Error(`Access to '${rootKey}' is not allowed`);
     }
 
-    let value: unknown = Reflect.get(context, rootKey);
+    let value = context[rootKey];
 
     // Function call: ident(arg, arg, ...)
     if (this.peek()?.type === 'lparen') {
@@ -216,7 +217,7 @@ function applyComparison(op: string, left: unknown, right: unknown): boolean {
  * NO function calls, NO assignments, NO arbitrary code execution.
  * @throws Error on invalid expression
  */
-export function evaluate(expression: string, context: object): boolean {
+export function evaluate(expression: string, context: StepResults): boolean {
   const trimmed = expression.trim();
   if (trimmed.length === 0) {
     throw new Error('Empty expression');

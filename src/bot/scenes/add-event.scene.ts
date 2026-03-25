@@ -14,19 +14,10 @@ import {
   skipKeyboard,
 } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
+import type { AddEventState } from './types.ts';
 
 /** Step indices that accept only button presses. Text input on these triggers AI (scene-pause Trigger 2). */
 export const CALLBACK_ONLY_STEP_INDICES = new Set([3, 4]); // recurrence (3), recurrence-end (4)
-
-export interface AddEventState {
-  title?: string;
-  startAt?: string;
-  endAt?: string;
-  recurrenceRule?: string | null;
-  recEndMode?: 'until' | 'count';
-  description?: string;
-  location?: string;
-}
 
 export function applyDefaultDuration(startAt: string, defaultMinutes: number): string {
   return addMinutes(new Date(startAt), defaultMinutes).toISOString();

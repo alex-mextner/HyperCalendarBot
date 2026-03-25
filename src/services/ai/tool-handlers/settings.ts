@@ -1,22 +1,104 @@
 import { t } from '../../../config/constants.ts';
-import type { NotificationPreferencesUpdate, UpdateUserData } from '../../../database/types.ts';
+import type {
+  NotificationPreferencesRow,
+  NotificationPreferencesUpdate,
+  SharingSettings,
+  UpdateUserData,
+  UserCallSettings,
+  Visibility,
+} from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
-export interface ManageSettingsInput {
-  action: 'get' | 'update';
-  category?: 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
-  updates?: { [key: string]: unknown };
-  assistantEnabled?: boolean;
+// ── Update interfaces (match AI tool schema in tools.ts) ──
+
+interface GeneralUpdates {
+  timezone?: string;
+  language?: 'en' | 'ru';
+  country_code?: string;
+  default_event_duration_minutes?: number;
 }
+
+interface NotificationUpdates {
+  morning_agenda_enabled?: boolean;
+  morning_agenda_time?: string;
+  evening_review_enabled?: boolean;
+  evening_review_time?: string;
+  quiet_hours_enabled?: boolean;
+  quiet_hours_start?: string | null;
+  quiet_hours_end?: string | null;
+  default_reminder_minutes?: number[];
+}
+
+interface CallUpdates {
+  enabled?: boolean;
+  language?: string;
+}
+
+interface PrivacyUpdates {
+  default_visibility?: Visibility;
+  inline_mode_enabled?: boolean;
+  allow_invitations?: boolean;
+}
+
+interface VoiceUpdates {
+  voice_response_enabled?: boolean | null;
+}
+
+// ── Get result interfaces ──
+
+type SettingsCategory = 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
+
+interface GeneralSettingsResult {
+  timezone: string;
+  language: 'en' | 'ru';
+  username: string;
+  first_name: string;
+  country_code: string;
+  default_event_duration_minutes: number;
+}
+
+interface VoiceSettingsResult {
+  voice_response_enabled: number | null;
+}
+
+type CallSettingsResult = Omit<UserCallSettings, 'user_id' | 'updated_at'>;
+type PrivacySettingsResult = Omit<SharingSettings, 'user_id' | 'updated_at'>;
+
+type ResultCategory = Exclude<SettingsCategory, 'assistant'>;
+
+interface AllSettingsResult {
+  general?: GeneralSettingsResult;
+  notifications?: NotificationPreferencesRow;
+  calls?: CallSettingsResult;
+  privacy?: PrivacySettingsResult;
+  voice?: VoiceSettingsResult;
+}
+
+export type ManageSettingsInput =
+  | { action: 'get'; category?: SettingsCategory }
+  | { action: 'update'; category: 'general'; updates?: GeneralUpdates }
+  | { action: 'update'; category: 'notifications'; updates?: NotificationUpdates }
+  | { action: 'update'; category: 'calls'; updates?: CallUpdates }
+  | { action: 'update'; category: 'privacy'; updates?: PrivacyUpdates }
+  | { action: 'update'; category: 'voice'; updates?: VoiceUpdates }
+  | { action: 'update'; category: 'assistant'; assistantEnabled?: boolean }
+  | {
+      action: 'update';
+      category?: undefined;
+      updates?: GeneralUpdates | NotificationUpdates | CallUpdates | PrivacyUpdates | VoiceUpdates;
+    };
 
 export function handleManageSettings(ctx: AgentContext, input: ManageSettingsInput): ToolResult {
-  if (input.action === 'get') return handleGet(ctx, input.category);
-  if (input.action === 'update') return handleUpdate(ctx, input.category, input.updates, input.assistantEnabled);
-  return { success: false, error: `Unknown action: ${input.action}` };
+  switch (input.action) {
+    case 'get':
+      return handleGet(ctx, input.category);
+    case 'update':
+      return handleUpdate(ctx, input);
+  }
 }
 
-function handleGet(ctx: AgentContext, category?: string): ToolResult {
-  const result: { [key: string]: unknown } = {};
+function handleGet(ctx: AgentContext, category?: SettingsCategory): ToolResult {
+  const result: AllSettingsResult = {};
 
   if (!category || category === 'general') {
     result.general = {
@@ -76,39 +158,49 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
     };
   }
 
-  return { success: true, output: JSON.stringify(category ? (result[category] ?? {}) : result) };
+  if (category) {
+    const resultCategory: ResultCategory = category;
+    const categoryResult = result[resultCategory];
+    return { success: true, output: JSON.stringify(categoryResult ?? {}) };
+  }
+
+  return { success: true, output: JSON.stringify(result) };
 }
 
-function handleUpdate(
-  ctx: AgentContext,
-  category?: string,
-  updates?: { [key: string]: unknown },
-  assistantEnabled?: boolean,
-): ToolResult {
-  if (!category) return { success: false, error: 'category is required for update.' };
+type UpdateInput = Extract<ManageSettingsInput, { action: 'update' }>;
 
-  if (category === 'assistant') return updateAssistant(ctx, assistantEnabled);
+function handleUpdate(ctx: AgentContext, input: UpdateInput): ToolResult {
+  if (!input.category) return { success: false, error: 'category is required for update.' };
 
-  if (!updates || Object.keys(updates).length === 0) {
+  if (input.category === 'assistant') {
+    return updateAssistant(ctx, input.assistantEnabled);
+  }
+
+  if (!input.updates || Object.keys(input.updates).length === 0) {
     return { success: false, error: 'updates are required for update.' };
   }
 
-  if (category === 'general') return updateGeneral(ctx, updates);
-  if (category === 'notifications') return updateNotifications(ctx, updates);
-  if (category === 'calls') return updateCalls(ctx, updates);
-  if (category === 'privacy') return updatePrivacy(ctx, updates);
-  if (category === 'voice') return updateVoice(ctx, updates);
-
-  return { success: false, error: `Unknown category: ${category}` };
+  switch (input.category) {
+    case 'general':
+      return updateGeneral(ctx, input.updates);
+    case 'notifications':
+      return updateNotifications(ctx, input.updates);
+    case 'calls':
+      return updateCalls(ctx, input.updates);
+    case 'privacy':
+      return updatePrivacy(ctx, input.updates);
+    case 'voice':
+      return updateVoice(ctx, input.updates);
+  }
 }
 
-function updateGeneral(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
+function updateGeneral(ctx: AgentContext, updates: GeneralUpdates): ToolResult {
   const patch: UpdateUserData = {};
-  if (updates.timezone !== undefined) patch.timezone = updates.timezone as string;
-  if (updates.language !== undefined) patch.language = updates.language as 'en' | 'ru';
-  if (updates.country_code !== undefined) patch.country_code = updates.country_code as string;
+  if (updates.timezone !== undefined) patch.timezone = updates.timezone;
+  if (updates.language !== undefined) patch.language = updates.language;
+  if (updates.country_code !== undefined) patch.country_code = updates.country_code;
   if (updates.default_event_duration_minutes !== undefined) {
-    const mins = updates.default_event_duration_minutes as number;
+    const mins = updates.default_event_duration_minutes;
     if (!Number.isInteger(mins) || mins <= 0 || mins > 1440) {
       return { success: false, error: 'default_event_duration_minutes must be a positive integer between 1 and 1440.' };
     }
@@ -135,20 +227,20 @@ function updateGeneral(ctx: AgentContext, updates: { [key: string]: unknown }): 
   return { success: true, output };
 }
 
-function updateNotifications(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
+function updateNotifications(ctx: AgentContext, updates: NotificationUpdates): ToolResult {
   if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
   ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
 
   const patch: NotificationPreferencesUpdate = {};
   if (updates.morning_agenda_enabled !== undefined)
     patch.morning_agenda_enabled = updates.morning_agenda_enabled ? 1 : 0;
-  if (updates.morning_agenda_time !== undefined) patch.morning_agenda_time = updates.morning_agenda_time as string;
+  if (updates.morning_agenda_time !== undefined) patch.morning_agenda_time = updates.morning_agenda_time;
   if (updates.evening_review_enabled !== undefined)
     patch.evening_review_enabled = updates.evening_review_enabled ? 1 : 0;
-  if (updates.evening_review_time !== undefined) patch.evening_review_time = updates.evening_review_time as string;
+  if (updates.evening_review_time !== undefined) patch.evening_review_time = updates.evening_review_time;
   if (updates.quiet_hours_enabled !== undefined) patch.quiet_hours_enabled = updates.quiet_hours_enabled ? 1 : 0;
-  if (updates.quiet_hours_start !== undefined) patch.quiet_hours_start = updates.quiet_hours_start as string | null;
-  if (updates.quiet_hours_end !== undefined) patch.quiet_hours_end = updates.quiet_hours_end as string | null;
+  if (updates.quiet_hours_start !== undefined) patch.quiet_hours_start = updates.quiet_hours_start;
+  if (updates.quiet_hours_end !== undefined) patch.quiet_hours_end = updates.quiet_hours_end;
   if (updates.default_reminder_minutes !== undefined) {
     patch.default_reminder_intervals = JSON.stringify(updates.default_reminder_minutes);
   }
@@ -161,20 +253,19 @@ function updateNotifications(ctx: AgentContext, updates: { [key: string]: unknow
   };
 }
 
-function updateCalls(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
+function updateCalls(ctx: AgentContext, updates: CallUpdates): ToolResult {
   if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
   ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  if (updates.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled as boolean);
-  if (updates.language !== undefined)
-    ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language as string);
+  if (updates.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled);
+  if (updates.language !== undefined) ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language);
   return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
 }
 
-function updatePrivacy(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
+function updatePrivacy(ctx: AgentContext, updates: PrivacyUpdates): ToolResult {
   if (!ctx.sharingSettingsRepo) return { success: false, error: 'Sharing settings are not configured.' };
 
-  const patch: Record<string, string | number> = {};
-  if (updates.default_visibility !== undefined) patch.default_visibility = updates.default_visibility as string;
+  const patch: Partial<Omit<SharingSettings, 'user_id' | 'updated_at'>> = {};
+  if (updates.default_visibility !== undefined) patch.default_visibility = updates.default_visibility;
   if (updates.inline_mode_enabled !== undefined) patch.inline_mode_enabled = updates.inline_mode_enabled ? 1 : 0;
   if (updates.allow_invitations !== undefined) patch.allow_invitations = updates.allow_invitations ? 1 : 0;
 
@@ -204,7 +295,7 @@ function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolRes
   };
 }
 
-function updateVoice(ctx: AgentContext, updates: { [key: string]: unknown }): ToolResult {
+function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
   if (updates.voice_response_enabled === undefined) {
     return { success: false, error: 'No voice settings provided.' };
   }

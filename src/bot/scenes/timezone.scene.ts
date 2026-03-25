@@ -10,11 +10,7 @@ import { buildGeneralView } from '../commands/settings.ts';
 import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
-export interface TimezoneState {
-  detectedTz?: string;
-  cityInputMode?: boolean;
-  geoMsgId?: number;
-}
+import type { TimezoneState } from './types.ts';
 
 interface TimezoneParams {
   settingsMsgId: number;

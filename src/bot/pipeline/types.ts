@@ -1,12 +1,13 @@
 // src/bot/pipeline/types.ts
 
+import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import type { Workflow } from '../../services/intent/workflow-schema.ts';
 import type { BotCommandContext } from '../types.ts';
 
 export interface WorkflowSession {
   intentId: number;
   stepIndex: number;
-  stepResults: { [key: string]: unknown };
+  stepResults: StepResults;
   workflow: Workflow;
   captures: { [key: string]: string };
   createdAt: number;

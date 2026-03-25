@@ -238,6 +238,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
 - **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
   There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
+  It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
 - **`JSON.parse` must always go through Zod** — never use the raw return value. Always
   `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
   For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching

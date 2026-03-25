@@ -1,5 +1,5 @@
 /** DB row from scheduled_ai_calls table. */
-export interface ScheduledAiCall {
+export type ScheduledAiCall = {
   id: string;
   user_id: number;
   message: string;
@@ -10,7 +10,7 @@ export interface ScheduledAiCall {
   run_count: number;
   last_run_at: string | null;
   created_at: string;
-}
+};
 
 /** INSERT input for scheduled_ai_calls table. */
 export interface CreateScheduleData {
@@ -48,7 +48,7 @@ export interface QueueAdapter {
 }
 
 /** DB row from ai_triggers table. */
-export interface Trigger {
+export type Trigger = {
   id: string;
   user_id: number;
   topic: string;
@@ -60,7 +60,7 @@ export interface Trigger {
   fire_count: number;
   last_fired_at: string | null;
   created_at: string;
-}
+};
 
 /** INSERT input for ai_triggers table. */
 export interface CreateTriggerData {

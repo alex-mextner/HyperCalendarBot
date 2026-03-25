@@ -76,7 +76,7 @@ import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
-import type { SceneKvStorage } from './scenes/storage.ts';
+import type { SceneKvStorage } from './scenes/types.ts';
 
 export interface GoogleBotDeps {
   oauthService: GoogleOAuthService;

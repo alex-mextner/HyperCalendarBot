@@ -10,12 +10,19 @@ import {
   startOfWeek,
   subDays,
 } from 'date-fns';
+import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
 import type { I18nMap } from './workflow-schema.ts';
 
-/** Event summary available as template variables in intent workflows. */
-export interface EventSummary {
+/**
+ * Event summary available as template variables in intent workflows.
+ *
+ * Defined as a type alias (not interface) so that it satisfies TypeScript's
+ * index signature assignability — required when storing EventSummary values
+ * in { [k: string]: ToolOutputValue } maps.
+ */
+export type EventSummary = {
   id: number;
   title: string;
   /** YYYY-MM-DD in user's timezone */
@@ -32,7 +39,7 @@ export interface EventSummary {
   location?: string;
   /** RFC 5545 recurrence rule — present only for recurring events */
   recurrence_rule?: string;
-}
+};
 
 export interface UserContext {
   timezone: string;
@@ -90,7 +97,7 @@ function resolveVar(
   name: string,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: { [key: string]: unknown },
+  stepResults?: StepResults,
   i18n?: I18nMap,
 ): unknown {
   const now = new TZDate(new Date(), userCtx.timezone);
@@ -140,7 +147,7 @@ function resolveVar(
       // t.* namespace — lazy i18n lookup
       if (name.startsWith('t.') && i18n) {
         const key = name.slice(2);
-        const langDict: { [key: string]: unknown } = i18n[userCtx.language] ?? i18n.en ?? {};
+        const langDict: { [key: string]: string } = i18n[userCtx.language] ?? i18n.en ?? {};
         const raw = langDict[key];
         if (raw === undefined) return undefined;
         // Lazy: resolve any {{}} inside the i18n string with current context
@@ -172,7 +179,7 @@ export function resolveVariables(
   template: unknown,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: { [key: string]: unknown },
+  stepResults?: StepResults,
   i18n?: I18nMap,
 ): unknown {
   if (typeof template === 'string') {

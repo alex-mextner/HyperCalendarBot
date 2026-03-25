@@ -68,6 +68,7 @@ import {
   handleShareEvent,
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
+import { toolSchemas } from './tool-schemas.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
 /**
@@ -205,6 +206,18 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
 }
 
 async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
+  const schema = toolSchemas[toolName];
+  if (schema) {
+    const result = schema.safeParse(input);
+    if (!result.success) {
+      return {
+        success: false,
+        output: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
+      };
+    }
+    input = result.data as ToolInputMap[ToolName];
+  }
+
   try {
     switch (toolName) {
       case 'supplement_skip':
