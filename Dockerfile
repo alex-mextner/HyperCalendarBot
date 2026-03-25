@@ -30,12 +30,5 @@ COPY src ./src
 COPY scripts ./scripts
 COPY tsconfig.json bunfig.toml ./
 
-# Generate stress dictionary from OpenRussian if not mounted via volume
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
-    git clone --depth 1 https://github.com/Badestrand/russian-dictionary /tmp/russian-dictionary && \
-    bun scripts/generate-stress-dict.ts && \
-    rm -rf /tmp/russian-dictionary && \
-    apt-get purge -y git && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
-
 EXPOSE 3311
 CMD ["bun", "run", "start"]
