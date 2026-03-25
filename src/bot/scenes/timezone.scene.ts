@@ -8,7 +8,7 @@ import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/tim
 import { botLogger } from '../../utils/logger.ts';
 import { buildGeneralView } from '../commands/settings.ts';
 import { cityInputPrompt, removeKeyboard, timezoneConfirmKeyboard, timezoneMethodKeyboard } from '../keyboards.ts';
-import { getSceneLang, getSceneUser } from './helpers.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 export interface TimezoneState {
   detectedTz?: string;
@@ -21,13 +21,13 @@ interface TimezoneParams {
   settingsChatId: number;
 }
 
-export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
+export function createTimezoneScene(db: DatabaseService, userComposer: UserResolverComposer, aiModel?: string) {
   return new Scene('timezone')
     .state<TimezoneState>()
     .params<TimezoneParams>()
+    .extend(userComposer)
     .onEnter(async (context) => {
-      const lang = getSceneLang(context);
-      const user = getSceneUser(context);
+      const { lang, dbUser: user } = context;
       if (!user) return;
 
       const display = getTimezoneDisplay(user.timezone);
@@ -48,12 +48,12 @@ export function createTimezoneScene(db: DatabaseService, aiModel?: string) {
       });
     })
     .step(['message', 'location', 'callback_query'], async (context) => {
-      const user = getSceneUser(context);
+      const { dbUser: user } = context;
       if (!user) {
         await context.scene.exit();
         return;
       }
-      const lang = getSceneLang(context);
+      const { lang } = context;
       const params = context.scene.params as TimezoneParams;
       const { cityInputMode, geoMsgId } = context.scene.state;
 

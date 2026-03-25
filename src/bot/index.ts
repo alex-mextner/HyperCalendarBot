@@ -73,7 +73,7 @@ import { buildAgentContextFactory, createMessageHandler } from './handlers/messa
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
-import { createUserResolver } from './middleware/user-resolver.ts';
+import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/storage.ts';
@@ -163,10 +163,12 @@ export function createBot(
   );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
+  const userComposer = createUserResolverComposer(db);
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
     token,
+    userComposer,
     !!googleDeps,
     prefsService,
     holidayService,

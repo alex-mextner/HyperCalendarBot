@@ -1,14 +1,13 @@
 // src/bot/scenes/edit-value.scene.ts
 import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
-import type { AnyBot } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
 import { eventActionsKeyboard, sceneHelpKeyboard } from '../keyboards.ts';
-import { getSceneLang, getSceneUser } from './helpers.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 interface EditValueParams {
   eventId: number;
@@ -34,20 +33,20 @@ const EDIT_PROMPTS: Record<string, Record<string, string>> = {
   },
 };
 
-export function createEditValueScene(eventService: EventService) {
+export function createEditValueScene(eventService: EventService, userComposer: UserResolverComposer) {
   return (
     new Scene('edit_value')
       .params<EditValueParams>()
+      .extend(userComposer)
       // onEnter sends prompt — because scene is entered from callback_query
       // but step 0 is "message", so firstTime won't fire on entry
       .onEnter(async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         const params = context.scene.params;
         await context.send(EDIT_PROMPTS[params.field]?.[lang] ?? 'Send new value:');
       })
       .step('message', async (context) => {
-        const lang = getSceneLang(context);
-        const user = getSceneUser(context);
+        const { lang, dbUser: user } = context;
         if (!user) {
           await context.scene.exit();
           return;
@@ -105,8 +104,7 @@ export function createEditValueScene(eventService: EventService) {
         if (updated) {
           const detail = formatEventDetail(updated, user.timezone, lang);
           const editText = `${t(lang).event_updated(updated.title)}\n\n${detail}`;
-          const bot = (context as { bot: AnyBot }).bot;
-          await bot.api.editMessageText({
+          await context.bot.api.editMessageText({
             chat_id: chatId,
             message_id: messageId,
             text: editText,

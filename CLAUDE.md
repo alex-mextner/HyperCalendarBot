@@ -401,6 +401,12 @@ When renaming variables, constants, config keys, or any other interface:
 - Find similar working code in the same codebase. Compare working vs broken.
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
+- **Library type limitations — clone and investigate**: when a dependency produces poor types
+  (`unknown`, missing generics, no `.derive()` on a class), don't guess or cast. Clone the library
+  source into `~/xp/` in a background agent and read the actual code. Often the library already has
+  the capability you need (e.g. `.extend()` instead of `.derive()`) or the fix is a small PR.
+  This "recon by fire" approach — start investigating as if you'll patch, but pivot if the source
+  reveals a built-in solution — avoids both blind casting and unnecessary library forks.
 
 ## Session Wrap-Up
 

@@ -20,6 +20,7 @@ import {
   timezoneConfirmKeyboard,
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
 
@@ -32,6 +33,7 @@ export interface OnboardingState {
 
 export function createOnboardingScene(
   db: DatabaseService,
+  userComposer: UserResolverComposer,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
@@ -40,6 +42,7 @@ export function createOnboardingScene(
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
+      .extend(userComposer)
       // onEnter sends welcome — because scene is entered from /start (message)
       // but step 0 is "callback_query", so firstTime won't fire on entry
       .onEnter(async (context) => {

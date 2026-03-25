@@ -13,7 +13,7 @@ import {
   sceneHelpKeyboard,
   skipKeyboard,
 } from '../keyboards.ts';
-import { getSceneLang, getSceneUser } from './helpers.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
 /** Step indices that accept only button presses. Text input on these triggers AI (scene-pause Trigger 2). */
 export const CALLBACK_ONLY_STEP_INDICES = new Set([3, 4]); // recurrence (3), recurrence-end (4)
@@ -28,39 +28,23 @@ export interface AddEventState {
   location?: string;
 }
 
-function getCallbackData(context: unknown): string | undefined {
-  return (context as { data?: string }).data;
-}
-
-function getMessageText(context: unknown): string | undefined {
-  return (context as { text?: string }).text;
-}
-
 export function applyDefaultDuration(startAt: string, defaultMinutes: number): string {
   return addMinutes(new Date(startAt), defaultMinutes).toISOString();
 }
 
-function isCallbackQuery(context: unknown): boolean {
-  return typeof getCallbackData(context) === 'string';
-}
-
-async function answerCallback(context: unknown): Promise<void> {
-  const ctx = context as { answer?: (opts?: { text?: string; show_alert?: boolean }) => Promise<true> };
-  await ctx.answer?.();
-}
-
-export function createAddEventScene(eventService: EventService) {
+export function createAddEventScene(eventService: EventService, userComposer: UserResolverComposer) {
   return (
     new Scene('add_event')
       .state<AddEventState>()
+      .extend(userComposer)
       // Step 0: Title (text only)
       .step('message', async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_title_prompt);
           return;
         }
-        const text = getMessageText(context);
+        const text = context.text;
         if (!text?.trim()) {
           await context.send(t(lang).add_title_prompt);
           return;
@@ -69,13 +53,12 @@ export function createAddEventScene(eventService: EventService) {
       })
       // Step 1: Date/Time (text only)
       .step('message', async (context) => {
-        const lang = getSceneLang(context);
-        const user = getSceneUser(context);
+        const { lang, dbUser: user } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_time_prompt);
           return;
         }
-        const text = getMessageText(context);
+        const text = context.text;
         if (!text) return;
         const parsed = parseSimpleDate(text, user?.timezone ?? 'UTC');
         if (!parsed) {
@@ -91,7 +74,7 @@ export function createAddEventScene(eventService: EventService) {
       })
       // Step 2: Duration (text + skip button)
       .step(['message', 'callback_query'], async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_duration_prompt, {
             reply_markup: skipKeyboard(lang, 2),
@@ -100,12 +83,11 @@ export function createAddEventScene(eventService: EventService) {
         }
 
         // Handle skip callback
-        if (isCallbackQuery(context)) {
-          const data = getCallbackData(context)!;
+        if (context.is('callback_query')) {
+          const data = context.data;
           if (data === `${CB.ADD_SKIP}:2`) {
-            await answerCallback(context);
-            const sceneUser = getSceneUser(context);
-            const defaultMins = sceneUser?.default_event_duration_minutes ?? 60;
+            await context.answer();
+            const defaultMins = context.dbUser?.default_event_duration_minutes ?? 60;
             const { startAt } = context.scene.state;
             if (startAt) {
               await context.scene.update({ endAt: applyDefaultDuration(startAt, defaultMins) });
@@ -114,12 +96,12 @@ export function createAddEventScene(eventService: EventService) {
             }
             return;
           }
-          await answerCallback(context);
+          await context.answer();
           return;
         }
 
         // Handle text input
-        const text = getMessageText(context);
+        const text = context.text;
         if (!text) return;
 
         const { startAt } = context.scene.state;
@@ -142,7 +124,7 @@ export function createAddEventScene(eventService: EventService) {
       })
       // Step 3: Recurrence (button selection only — text input is handled by AI via Trigger 2)
       .step('callback_query', async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).recurrence_prompt, {
             reply_markup: recurrenceKeyboard(lang),
@@ -150,9 +132,10 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        const data = getCallbackData(context)!;
+        const data = context.data;
+        if (!data) return;
         const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
-        await answerCallback(context);
+        await context.answer();
 
         if (value === 'none') {
           await context.scene.update({ recurrenceRule: null });
@@ -171,7 +154,7 @@ export function createAddEventScene(eventService: EventService) {
       })
       // Step 4: Recurrence End (button selection only — text input is handled by AI via Trigger 2)
       .step('callback_query', async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).recurrence_end_prompt, {
             reply_markup: recurrenceEndKeyboard(lang),
@@ -179,9 +162,10 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        const data = getCallbackData(context)!;
+        const data = context.data;
+        if (!data) return;
         const value = data.replace(`${CB.ADD_REC_END}:`, '');
-        await answerCallback(context);
+        await context.answer();
 
         if (value === 'forever') {
           await context.scene.update({});
@@ -202,7 +186,7 @@ export function createAddEventScene(eventService: EventService) {
       })
       // Step 5: Description (text + skip button)
       .step(['message', 'callback_query'], async (context) => {
-        const lang = getSceneLang(context);
+        const { lang } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_description_prompt, {
             reply_markup: skipKeyboard(lang, 5),
@@ -210,25 +194,24 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        if (isCallbackQuery(context)) {
-          const data = getCallbackData(context)!;
+        if (context.is('callback_query')) {
+          const data = context.data;
           if (data === `${CB.ADD_SKIP}:5`) {
-            await answerCallback(context);
+            await context.answer();
             await context.scene.update({});
             return;
           }
-          await answerCallback(context);
+          await context.answer();
           return;
         }
 
-        const text = getMessageText(context);
+        const text = context.text;
         if (!text) return;
         await context.scene.update({ description: text });
       })
       // Step 6: Location → create event (text + skip button)
       .step(['message', 'callback_query'], async (context) => {
-        const lang = getSceneLang(context);
-        const user = getSceneUser(context);
+        const { lang, dbUser: user } = context;
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_location_prompt, {
             reply_markup: skipKeyboard(lang, 6),
@@ -239,17 +222,17 @@ export function createAddEventScene(eventService: EventService) {
 
         let location: string | undefined;
 
-        if (isCallbackQuery(context)) {
-          const data = getCallbackData(context)!;
+        if (context.is('callback_query')) {
+          const data = context.data;
           if (data === `${CB.ADD_SKIP}:6`) {
-            await answerCallback(context);
+            await context.answer();
             location = undefined;
           } else {
-            await answerCallback(context);
+            await context.answer();
             return;
           }
         } else {
-          const text = getMessageText(context);
+          const text = context.text;
           if (!text) return;
           location = text;
         }
