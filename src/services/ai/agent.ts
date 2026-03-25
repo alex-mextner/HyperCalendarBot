@@ -412,7 +412,8 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && (finalText.trim() === '[SKIP]' || finalText.includes('[SKIP]'))) {
+    const trimmed = finalText.trim();
+    if (ctx.isGroup && (trimmed === '[SKIP]' || finalText.includes('[SKIP]') || trimmed === '...' || trimmed === '…')) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
