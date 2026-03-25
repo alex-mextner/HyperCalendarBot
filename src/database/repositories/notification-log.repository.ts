@@ -1,26 +1,5 @@
 import type { Database } from 'bun:sqlite';
-
-export interface NotificationLogRow {
-  id: number;
-  user_id: number;
-  type: string;
-  reference_key: string;
-  status: string;
-  channel: string;
-  payload: string | null;
-  error: string | null;
-  attempts: number;
-  created_at: string;
-  sent_at: string | null;
-}
-
-export interface InsertNotificationLogData {
-  user_id: number;
-  type: string;
-  reference_key: string;
-  channel: string;
-  payload: string;
-}
+import type { InsertNotificationLogData, NotificationLogRow } from '../types.ts';
 
 export class NotificationLogRepository {
   constructor(private db: Database) {}

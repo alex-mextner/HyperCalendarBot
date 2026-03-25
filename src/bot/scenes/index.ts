@@ -4,6 +4,7 @@ import type { DatabaseService } from '../../database/index.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 import { createAddEventScene } from './add-event.scene.ts';
 import { wrapWithChatId } from './chat-scoped-storage.ts';
 import { createEditValueScene } from './edit-value.scene.ts';
@@ -16,6 +17,7 @@ export function createScenesPlugin(
   db: DatabaseService,
   eventService: EventService,
   botToken: string,
+  userComposer: UserResolverComposer,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
@@ -26,11 +28,18 @@ export function createScenesPlugin(
   // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
   const scopedStorage = wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
 
-  const addEventScene = createAddEventScene(eventService);
-  const editValueScene = createEditValueScene(eventService);
-  const importScene = createImportScene(eventService, botToken);
-  const timezoneScene = createTimezoneScene(db, aiModel);
-  const onboardingScene = createOnboardingScene(db, gcalConfigured, prefsService, holidayService, aiModel);
+  const addEventScene = createAddEventScene(eventService, userComposer);
+  const editValueScene = createEditValueScene(eventService, userComposer);
+  const importScene = createImportScene(eventService, botToken, userComposer);
+  const timezoneScene = createTimezoneScene(db, userComposer, aiModel);
+  const onboardingScene = createOnboardingScene(
+    db,
+    userComposer,
+    gcalConfigured,
+    prefsService,
+    holidayService,
+    aiModel,
+  );
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
 
   return {

@@ -1,30 +1,5 @@
 import type { Database } from 'bun:sqlite';
-
-export interface EventReminderRow {
-  id: number;
-  event_id: number;
-  user_id: number;
-  remind_at_utc: string;
-  interval_minutes: number;
-  interval_label: string;
-  sent: number;
-  created_at: string;
-}
-
-export interface InsertEventReminderData {
-  event_id: number;
-  user_id: number;
-  remind_at_utc: string;
-  interval_minutes: number;
-  interval_label: string;
-}
-
-export interface DueReminderRow extends EventReminderRow {
-  event_title: string;
-  event_start_at: string;
-  event_end_at: string | null;
-  event_location: string | null;
-}
+import type { DueReminderRow, EventReminderRow, InsertEventReminderData } from '../types.ts';
 
 export class EventReminderRepository {
   constructor(private db: Database) {}
@@ -41,8 +16,7 @@ export class EventReminderRepository {
   getDue(windowStart: string, windowEnd: string): DueReminderRow[] {
     return this.db
       .prepare(
-        `SELECT er.*, e.title AS event_title, e.start_at AS event_start_at,
-                e.end_at AS event_end_at, e.location AS event_location
+        `SELECT er.*, e.title AS event_title, e.start_at AS event_start_at, e.end_at AS event_end_at, e.location AS event_location
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
          WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0`,

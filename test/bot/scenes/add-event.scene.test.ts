@@ -1,13 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import { CALLBACK_ONLY_STEPS } from '../../../src/bot/handlers/message.handler.ts';
+import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { createAddEventScene } from '../../../src/bot/scenes/add-event.scene.ts';
 import { CB } from '../../../src/config/constants.ts';
+import type { DatabaseService } from '../../../src/database/index.ts';
 import type { EventService } from '../../../src/services/event/event-service.ts';
+
+const mockDb = { users: { findOrCreate: () => ({ language: 'en', timezone: 'UTC' }) } } as unknown as DatabaseService;
+const mockComposer = createUserResolverComposer(mockDb);
 
 describe('createAddEventScene', () => {
   test('creates scene with name "add_event"', () => {
     const mockEventService = {} as unknown as EventService;
-    const scene = createAddEventScene(mockEventService);
+    const scene = createAddEventScene(mockEventService, mockComposer);
     expect(scene.name).toBe('add_event');
     expect(scene.stepsCount).toBe(7);
   });

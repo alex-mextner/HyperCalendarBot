@@ -1,4 +1,6 @@
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
 
 export interface ShareSession {
   userId: number;
@@ -30,7 +32,16 @@ export class ShareSessionManager {
   async resolve(id: string): Promise<ShareSession | null> {
     const raw = await this.redis.get(`${KEY_PREFIX}${id}`);
     if (!raw) return null;
-    return JSON.parse(raw);
+    return jsonCodec(
+      z.object({
+        userId: z.number(),
+        targetType: z.enum(['user', 'group']),
+        targetId: z.number(),
+        contentType: z.enum(['agenda', 'event']),
+        period: z.enum(['today', 'tomorrow', 'week']).optional(),
+        eventId: z.number().optional(),
+      }),
+    ).parse(raw);
   }
 
   async consume(id: string): Promise<ShareSession | null> {

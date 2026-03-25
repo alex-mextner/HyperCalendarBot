@@ -49,6 +49,7 @@ describe('RedisEventMentionStore', () => {
       async set(key: string, value: string, opts?: { ex?: number }) {
         data.set(key, value);
         if (ttlCapture && opts) Object.assign(ttlCapture, opts);
+        return 'OK';
       },
       async get(key: string): Promise<string | null> {
         return data.get(key) ?? null;

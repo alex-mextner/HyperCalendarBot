@@ -1,8 +1,10 @@
 // src/bot/handlers/message.handler.ts
 
 import { TZDate } from '@date-fns/tz';
+import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import { t } from '../../config/constants.ts';
@@ -40,6 +42,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -60,17 +63,16 @@ import {
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
-import {
-  createIntentMatcherLayer,
-  type WorkflowSession,
-  type WorkflowSessionStore,
-} from '../pipeline/intent-matcher-layer.ts';
+import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
+import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -135,7 +137,7 @@ export interface MessageHandlerDeps {
   // Admin reply sessions: adminId → { threadId, userId }
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
-  sendMessageToUser?: (chatId: number, text: string) => Promise<unknown>;
+  sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
@@ -155,20 +157,19 @@ export interface MessageHandlerDeps {
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
   // Onboarding scene for mandatory timezone/language setup
-  onboardingScene?: unknown;
+  onboardingScene?: AnyScene;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
 
+const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
+
 function isCallbackOnlyStep(rawScene: unknown): boolean {
-  try {
-    const parsed = JSON.parse(rawScene as string) as { name?: string; step?: number };
-    return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
-  } catch {
-    return false;
-  }
+  const result = SceneStepCodec.safeParse(rawScene as string);
+  if (!result.success) return false;
+  return CALLBACK_ONLY_STEPS.get(result.data.name ?? '')?.has(result.data.step ?? -1) ?? false;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -526,11 +527,13 @@ async function handleIntentEditInstruction(
     return;
   }
 
+  const StringArrayCodec = jsonCodec(z.array(z.string()));
+  const WorkflowCodec = jsonCodec(WorkflowSchema);
   const currentJson = JSON.stringify({
-    phrases: JSON.parse(intent.phrases),
-    trigger_words: JSON.parse(intent.trigger_words),
+    phrases: StringArrayCodec.parse(intent.phrases),
+    trigger_words: StringArrayCodec.parse(intent.trigger_words),
     pattern: intent.pattern,
-    workflow: JSON.parse(intent.workflow),
+    workflow: WorkflowCodec.parse(intent.workflow),
     format: intent.format,
   });
 
@@ -539,7 +542,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: Record<string, unknown>;
+    workflow: Workflow;
     format: string;
   }> | null = null;
   let lastError: unknown;
@@ -579,13 +582,15 @@ async function handleIntentEditInstruction(
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
-      updated = JSON.parse(text) as Partial<{
-        phrases: string[];
-        trigger_words: string[];
-        pattern: string | null;
-        workflow: Record<string, unknown>;
-        format: string;
-      }>;
+      updated = jsonCodec(
+        z.object({
+          phrases: z.array(z.string()).optional(),
+          trigger_words: z.array(z.string()).optional(),
+          pattern: z.string().nullable().optional(),
+          workflow: WorkflowSchema.optional(),
+          format: z.string().optional(),
+        }),
+      ).parse(text);
       break;
     } catch (err) {
       lastError = err;
@@ -607,7 +612,9 @@ async function handleIntentEditInstruction(
     const fresh = intentRepo.getById(session.intentId)!;
     const preview = [
       `✏️ Intent #${fresh.id} updated: <b>${fresh.canonical_name}</b>`,
-      `Phrases: ${(JSON.parse(fresh.phrases) as string[]).map((p) => `"${p}"`).join(', ')}`,
+      `Phrases: ${StringArrayCodec.parse(fresh.phrases)
+        .map((p) => `"${p}"`)
+        .join(', ')}`,
       fresh.pattern ? `Pattern: ${fresh.pattern}` : 'Pattern: none',
       `Workflow: ${fresh.workflow}`,
       `Format: ${fresh.format}`,
@@ -823,34 +830,27 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   };
 
   return async (ctx: BotCommandContext) => {
-    const user = ctx.dbUser as User | undefined;
+    const user = ctx.dbUser;
     if (!user) return;
 
     // Mandatory onboarding: redirect to setup if user hasn't completed it (private chats only)
     if (!user.onboarding_completed && deps.onboardingScene) {
-      const chat = (ctx as unknown as { chat?: { type: string } }).chat;
-      const isPrivate = !chat?.type || chat.type === 'private';
+      const isPrivate = ctx.chat.type === 'private';
       if (isPrivate) {
         // Check if a scene is already active (e.g. onboarding already in progress)
         const sceneKey = `@gramio/scenes:${user.telegram_id}`;
         const activeScene = await deps.sceneStorage.get(sceneKey);
         if (!activeScene) {
-          const sceneCtx = ctx as unknown as { scene: { enter: (scene: unknown) => Promise<void> } };
-          await sceneCtx.scene.enter(deps.onboardingScene);
+          await ctx.scene.enter(deps.onboardingScene);
         }
         return;
       }
     }
 
     // Voice message → transcribe → pass to AI agent
-    const voiceRaw = (
-      ctx as unknown as {
-        voice?: { payload?: { file_id: string; duration: number }; file_id?: string; duration?: number };
-      }
-    ).voice;
-    const voicePayload = voiceRaw?.payload ?? voiceRaw;
-    if (voicePayload?.file_id && deps.transcriptionService && deps.botToken) {
-      return handleVoiceMessage(ctx, user, voicePayload as { file_id: string; duration: number }, deps);
+    const voice = ctx.voice;
+    if (voice && deps.transcriptionService && deps.botToken) {
+      return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
     const text = ctx.text as string | undefined;
@@ -869,16 +869,37 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
         if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
           try {
-            const parsed = JSON.parse(activeScene as string) as {
-              name?: string;
-              step?: number;
-              state?: Record<string, unknown>;
-            };
-            await deps.scenePauseService.save(user.telegram_id, {
-              sceneName: parsed.name ?? 'unknown',
-              step: parsed.step ?? 0,
-              sceneState: parsed.state ?? {},
-            });
+            const parsed = jsonCodec(
+              z.object({
+                name: z.string(),
+                step: z.number(),
+                state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+              }),
+            ).parse(activeScene as string);
+            const step = parsed.step;
+            const state = parsed.state ?? {};
+            const name = parsed.name;
+            if (name === 'add_event') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'add_event',
+                step,
+                sceneState: state as AddEventState,
+              });
+            } else if (name === 'timezone') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'timezone',
+                step,
+                sceneState: state as TimezoneState,
+              });
+            } else if (name === 'onboarding') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'onboarding',
+                step,
+                sceneState: state as OnboardingState,
+              });
+            } else if (name === 'edit_value' || name === 'import') {
+              await deps.scenePauseService.save(user.telegram_id, { sceneName: name, step, sceneState: {} });
+            }
           } catch {
             return; // can't parse scene state — skip
           }
@@ -893,8 +914,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     if (!chatId) return;
 
     // In groups: only respond to replies, mentions, or calendar keywords
-    const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
-    const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+    const chat = ctx.chat;
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup';
     let isGroupSessionMessage = false;
 
     // Propose-time session: invitee typing a new time in response to an invite (private chats only)
@@ -920,7 +941,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         if (groupTzHandled) return;
       }
 
-      const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;
+      const reply = ctx.replyMessage;
       const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
 
@@ -953,13 +974,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     }
 
     // Build context info for group messages
-    const from = (ctx as unknown as { from?: { first_name?: string; username?: string } }).from;
-    // GramIO's MessageContext exposes .id as the Telegram message_id (confirmed via prototype inspection)
-    const incomingMsgId = (ctx as unknown as { id?: number }).id;
+    const from = ctx.from;
+    // GramIO's MessageContext exposes .id as the Telegram message_id via NodeMixinMetadata
+    const incomingMsgId = ctx.id;
     let messagePrefix = '';
     if (isGroup && from) {
-      const senderName = from.first_name ?? from.username ?? 'Unknown';
-      const groupName = chat?.title ?? 'group';
+      const senderName = from.firstName ?? from.username ?? 'Unknown';
+      const groupName = chat.title ?? 'group';
       const msgIdPart = incomingMsgId ? `, msg_id:${incomingMsgId}` : '';
       messagePrefix = `[Group: ${groupName}, From: ${senderName}${msgIdPart}] `;
     }

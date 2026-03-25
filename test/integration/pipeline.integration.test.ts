@@ -2,9 +2,9 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createFeedbackRouterLayer } from '../../src/bot/pipeline/feedback-router-layer.ts';
-import type { WorkflowSessionStore } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../../src/bot/pipeline/pipeline.ts';
+import type { WorkflowSessionStore } from '../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../src/bot/types.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { FeedbackRepository } from '../../src/database/repositories/feedback.repository.ts';
@@ -58,7 +58,7 @@ describe('Pipeline Integration', () => {
     matcher.load(intentRepo.getApproved());
     const executor = new IntentExecutor();
 
-    const mockToolExecutor = mock((_name: string, _input: Record<string, unknown>) => ({
+    const mockToolExecutor = mock((_name: string, _input: unknown) => ({
       success: true,
       output: JSON.stringify([{ title: 'Test Meeting', start_at: '2026-03-17T10:00:00Z' }]),
     }));
@@ -115,8 +115,8 @@ describe('Pipeline Integration', () => {
     const executor = new IntentExecutor();
 
     const capturedInputs: Record<string, unknown>[] = [];
-    const mockToolExecutor = mock((_name: string, input: Record<string, unknown>) => {
-      capturedInputs.push(input);
+    const mockToolExecutor = mock((_name: string, input: unknown) => {
+      capturedInputs.push(input as Record<string, unknown>);
       return { success: true, output: '[]' };
     });
     const ctx = makeCtx(1);

@@ -34,7 +34,17 @@
         "useNodejsImportProtocol": "error",
         "useConst": "error",
         "useTemplate": "error",
-        "noNonNullAssertion": "off"
+        "noNonNullAssertion": "off",
+        "noRestrictedTypes": {
+          "level": "error",
+          "options": {
+            "types": {
+              "object": {
+                "message": "Use a specific interface instead of 'object'."
+              }
+            }
+          }
+        }
       },
       "complexity": {
         "noForEach": "off"

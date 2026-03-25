@@ -154,7 +154,7 @@ export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?:
     ? `${mostEast} is ${diffHours}h ahead of ${mostWest}`
     : `Ranked west→east: ${entries.map((e) => `${e.timezone} (${e.utc_offset})`).join(', ')}. ${mostEast} is furthest ahead.`;
 
-  const result: Record<string, unknown> = { timezones: entries, ahead };
+  const result: { [key: string]: unknown } = { timezones: entries, ahead };
   if (isTwo) {
     result.difference_minutes = diffMinutes;
     result.difference_hours = diffHours;
@@ -396,13 +396,15 @@ export function handleRenderDayImage(
   const isGroupChat = ctx.isGroup;
   const groupChatRepo = ctx.groupChatRepo;
 
-  renderDayImage(ctx.renderService as never, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
+  renderDayImage(ctx.renderService, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
     .then(async (buffer) => {
       const file = new File([buffer], 'day.png', { type: 'image/png' });
       const sent = await sender.sendPhoto!(chatId, file);
       autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as const),
+        sendMessage: async (cId, text) => {
+          await sender.sendMessage(cId, text);
+        },
         isGroupChat,
         groupChatRepo,
       }).catch((err) => {
@@ -446,8 +448,10 @@ export function handleRenderTable(
       const file = new File([buffer], 'table.png', { type: 'image/png' });
       const sent = await sender.sendPhoto!(chatId, file);
       autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text),
+        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as const),
+        sendMessage: async (cId, text) => {
+          await sender.sendMessage(cId, text);
+        },
         isGroupChat,
         groupChatRepo,
       }).catch((err) => {

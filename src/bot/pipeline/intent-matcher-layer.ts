@@ -1,41 +1,27 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
+import type { FeedbackThreadContext, GroupContext, PipelineResult, WorkflowSessionStore } from './types.ts';
 
-export interface WorkflowSession {
-  intentId: number;
-  stepIndex: number;
-  stepResults: Record<string, unknown>;
-  workflow: Record<string, unknown>;
-  captures: Record<string, string>;
-  createdAt: number;
-}
-
-export interface WorkflowSessionStore {
-  get(chatId: number, userId: number): WorkflowSession | null;
-  set(chatId: number, userId: number, session: WorkflowSession): void;
-  delete(chatId: number, userId: number): void;
-  /** Delete all sessions for a user across all chats (e.g. when user blocks the bot). */
-  deleteByUser(userId: number): void;
-}
+const WorkflowCodec = jsonCodec(WorkflowSchema);
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
   executor: IntentExecutor,
-  toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
+  toolExecutor: (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
-  notifyAdmin?: (text: string) => Promise<unknown>,
+  notifyAdmin?: (text: string) => Promise<void>,
   getEventContext?: (
     userId: number,
     timezone: string,
@@ -52,9 +38,10 @@ export function createIntentMatcherLayer(
       supplementMode?: boolean;
     },
   ): Promise<PipelineResult> => {
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
     const userId = user.telegram_id;
-    const chatId = Number((ctx as unknown as { chatId?: number | bigint }).chatId ?? userId);
+    const chatId = Number(ctx.chatId ?? userId);
     const groupCtx = extra?.groupContext;
 
     // 1. Check for active workflow session (resuming from ask_user).
@@ -97,13 +84,12 @@ export function createIntentMatcherLayer(
     const intent = intentRepo.getById(match.intentId);
     if (!intent) return { handled: false };
 
-    let workflow: Record<string, unknown>;
-    try {
-      workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
-    } catch {
+    const workflowResult = WorkflowCodec.safeParse(intent.workflow);
+    if (!workflowResult.success) {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
       return { handled: false };
     }
+    const workflow: Workflow = workflowResult.data;
 
     // 4. Execute
     const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};

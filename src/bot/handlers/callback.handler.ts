@@ -3,6 +3,7 @@
 import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
@@ -45,7 +46,9 @@ import {
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
+import type { ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -55,8 +58,9 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import { type CtxWithChat, isGroup } from '../group-context.ts';
+import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
+import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
 import { handleNotifyCallback } from './notify-callback.ts';
 import { handleSnoozeCallback } from './snooze-callback.ts';
@@ -99,22 +103,22 @@ export function createCallbackHandler(
     sendMessage: (
       chatId: number,
       text: string,
-      options: { parse_mode: string; reply_markup?: unknown },
+      options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
     ) => Promise<void>;
-    editMessage?: (chatId: number, messageId: number, text: string, markup?: unknown) => Promise<void>;
+    editMessage?: (chatId: number, messageId: number, text: string, markup?: InlineKeyboard) => Promise<void>;
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   onboardingScene?: AnyScene,
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendMessage: (chatId: number, text: string, options: { parse_mode: ParseMode }) => Promise<void>;
   },
   callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
     adminReplySession: Map<number, { threadId: number; userId: number }>;
-    sendMessage: (chatId: number, text: string) => Promise<unknown>;
+    sendMessage: (chatId: number, text: string) => Promise<void>;
     adminId?: number;
   },
   userRepo?: UserRepository,
@@ -147,7 +151,8 @@ export function createCallbackHandler(
     const data = ctx.data as string;
     if (!data) return;
 
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return;
     const parts = data.split(':');
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');
@@ -161,19 +166,42 @@ export function createCallbackHandler(
         const rawScene = await scenePauseDeps.sceneStorage.get(`@gramio/scenes:${user.telegram_id}`);
         if (!rawScene) return;
 
-        let sceneName = 'unknown';
-        let step = 0;
-        let sceneState: Record<string, unknown> = {};
         try {
-          const parsed = JSON.parse(rawScene as string) as Record<string, unknown>;
-          sceneName = (parsed.name as string) ?? 'unknown';
-          step = (parsed.step as number) ?? 0;
-          sceneState = (parsed.state as Record<string, unknown>) ?? {};
+          const parsed = jsonCodec(
+            z.object({
+              name: z.string(),
+              step: z.number(),
+              state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+            }),
+          ).parse(rawScene as string);
+          const sceneName = parsed.name;
+          const step = parsed.step;
+          const state = parsed.state ?? {};
+          // Build pause state matching scene name to its typed state
+          if (sceneName === 'add_event') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'add_event',
+              step,
+              sceneState: state as AddEventState,
+            });
+          } else if (sceneName === 'timezone') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'timezone',
+              step,
+              sceneState: state as TimezoneState,
+            });
+          } else if (sceneName === 'onboarding') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, {
+              sceneName: 'onboarding',
+              step,
+              sceneState: state as OnboardingState,
+            });
+          } else if (sceneName === 'edit_value' || sceneName === 'import') {
+            await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState: {} });
+          }
         } catch {
-          // proceed with defaults
+          // proceed with defaults — scene state unparseable
         }
-
-        await scenePauseDeps.scenePauseService.save(user.telegram_id, { sceneName, step, sceneState });
 
         const lang = user.language as 'en' | 'ru';
         await ctx.send(t(lang).callbackErrors.sceneHelpPrompt);
@@ -411,8 +439,10 @@ export function createCallbackHandler(
                   message_id: messageId,
                   disable_notification: options.disable_notification,
                 }),
-              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
-              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              sendMessage: async (cid, text) => {
+                await ctx.bot.api.sendMessage({ chat_id: cid, text });
+              },
+              isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {
               imageLogger.error({ err }, 'autoPin failed');
@@ -484,8 +514,10 @@ export function createCallbackHandler(
                   message_id: messageId,
                   disable_notification: options.disable_notification,
                 }),
-              sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }),
-              isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+              sendMessage: async (cid, text) => {
+                await ctx.bot.api.sendMessage({ chat_id: cid, text });
+              },
+              isGroupChat: isGroup(ctx),
               groupChatRepo: groupRepo,
             }).catch((err) => {
               imageLogger.error({ err }, 'autoPin failed');
@@ -719,7 +751,29 @@ export function createCallbackHandler(
         }
 
         if (subAction === 'accept') {
-          const changes = JSON.parse(proposal.changes) as UpdateEventData;
+          const changes: UpdateEventData = jsonCodec(
+            z.object({
+              title: z.string().optional(),
+              description: z.string().nullable().optional(),
+              category: z.string().nullable().optional(),
+              start_at: z.string().optional(),
+              end_at: z.string().nullable().optional(),
+              all_day: z.boolean().optional(),
+              timezone: z.string().optional(),
+              location: z.string().nullable().optional(),
+              recurrence_rule: z.string().nullable().optional(),
+              recurrence_end_at: z.string().nullable().optional(),
+              reminder_overrides: z.string().nullable().optional(),
+              google_calendar_id: z.string().nullable().optional(),
+              google_event_id: z.string().nullable().optional(),
+              google_etag: z.string().nullable().optional(),
+              sync_status: z
+                .enum(['local_only', 'synced', 'pending_push', 'pending_pull', 'conflict', 'push_failed'])
+                .optional(),
+              sync_version: z.number().optional(),
+              last_synced_at: z.string().nullable().optional(),
+            }),
+          ).parse(proposal.changes);
           const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
           editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
           await ctx.answer();
@@ -759,7 +813,7 @@ export function createCallbackHandler(
         const lang = (user.language ?? 'en') as Lang;
 
         // In groups, only the user who triggered the question can answer
-        const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+        const clickerId = ctx.from?.id ?? user.telegram_id;
         if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
           await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
           return;
@@ -767,9 +821,7 @@ export function createCallbackHandler(
 
         await ctx.answer();
         await ctx.editText(`✅ ${answerText}`);
-        const cbChatId =
-          (ctx as unknown as { chat?: { id: number } }).chat?.id ??
-          (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
+        const cbChatId = ctx.message?.chat?.id;
         if (onAiButtonClick && cbChatId) {
           onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
             cmdLogger.error({ err: e }, 'AI button continuation failed');
@@ -1031,8 +1083,12 @@ export function createCallbackHandler(
             await ctx.answer(t(lang).callbackErrors.unavailable);
             return;
           }
-          const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
-          const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
+          if (!ctx.message) {
+            cmdLogger.warn({ chatId: ctx.chatId }, 'change_tz callback has no message');
+            return;
+          }
+          const settingsMsgId = ctx.message.id;
+          const settingsChatId = ctx.chatId ?? 0;
           await ctx.answer();
           await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
           return;
@@ -1050,7 +1106,7 @@ export function createCallbackHandler(
 
       // Group settings: timezone picker
       if (action === CB.GROUP_SETTINGS_TZ && groupRepo) {
-        const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+        const chatId = ctx.chatId;
         if (!chatId) {
           await ctx.answer();
           return;
@@ -1147,13 +1203,13 @@ export function createCallbackHandler(
           let responseText = '';
           if (lastAssistant) {
             try {
-              const blocks = JSON.parse(lastAssistant.content) as { type: string; text?: string }[];
-              responseText = Array.isArray(blocks)
-                ? blocks
-                    .filter((b) => b.type === 'text')
-                    .map((b) => b.text ?? '')
-                    .join('')
-                : lastAssistant.content;
+              const blocks = jsonCodec(z.array(z.object({ type: z.string(), text: z.string().optional() }))).parse(
+                lastAssistant.content,
+              );
+              responseText = blocks
+                .filter((b) => b.type === 'text')
+                .map((b) => b.text ?? '')
+                .join('');
             } catch {
               responseText = lastAssistant.content;
             }
@@ -1192,7 +1248,7 @@ export function createCallbackHandler(
         intentDeps.intentRepo.updateStatus(intentId, 'approved');
         intentDeps.intentMatcher?.reload();
         await ctx.answer(t(lang).callbackErrors.intentApproved);
-        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        const currentText = ctx.message?.text ?? '';
         await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
         return;
       }
@@ -1203,7 +1259,7 @@ export function createCallbackHandler(
         const lang = (user.language ?? 'en') as Lang;
         intentDeps.intentRepo.updateStatus(intentId, 'rejected');
         await ctx.answer(t(lang).callbackErrors.intentRejected);
-        const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+        const currentText = ctx.message?.text ?? '';
         await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
         return;
       }
@@ -1295,7 +1351,7 @@ export interface ForceInviteDeps {
   sendMessage: (
     chatId: number,
     text: string,
-    options: { parse_mode: string; reply_markup?: unknown },
+    options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
   ) => Promise<{ message_id: number }>;
 }
 
@@ -1374,12 +1430,53 @@ export async function handleProposalAccept(id: number, callerId: number, deps: P
     return;
   }
 
-  const payloadData = JSON.parse(proposal.payload) as {
-    action: string;
-    event?: Omit<CreateEventData, 'user_id'>;
-    event_id?: number;
-    changes?: UpdateEventData;
-  };
+  const ProposalPayloadSchema = z.object({
+    action: z.string(),
+    event: z
+      .object({
+        title: z.string(),
+        description: z.string().optional(),
+        category: z.string().optional(),
+        start_at: z.string(),
+        end_at: z.string().optional(),
+        all_day: z.boolean().optional(),
+        timezone: z.string(),
+        location: z.string().optional(),
+        recurrence_rule: z.string().optional(),
+        recurrence_end_at: z.string().optional(),
+        reminder_minutes: z.array(z.number()).optional(),
+        owner_type: z.enum(['user', 'group']).optional(),
+        group_id: z.number().optional(),
+        created_by: z.number().optional(),
+        event_type: z.literal('birthday').optional(),
+      })
+      .optional(),
+    event_id: z.number().optional(),
+    changes: z
+      .object({
+        title: z.string().optional(),
+        description: z.string().nullable().optional(),
+        category: z.string().nullable().optional(),
+        start_at: z.string().optional(),
+        end_at: z.string().nullable().optional(),
+        all_day: z.boolean().optional(),
+        timezone: z.string().optional(),
+        location: z.string().nullable().optional(),
+        recurrence_rule: z.string().nullable().optional(),
+        recurrence_end_at: z.string().nullable().optional(),
+        reminder_overrides: z.string().nullable().optional(),
+        google_calendar_id: z.string().nullable().optional(),
+        google_event_id: z.string().nullable().optional(),
+        google_etag: z.string().nullable().optional(),
+        sync_status: z
+          .enum(['local_only', 'synced', 'pending_push', 'pending_pull', 'conflict', 'push_failed'])
+          .optional(),
+        sync_version: z.number().optional(),
+        last_synced_at: z.string().nullable().optional(),
+      })
+      .optional(),
+  });
+  const payloadData = jsonCodec(ProposalPayloadSchema).parse(proposal.payload);
 
   let result: { id: number; title?: string } | boolean | null | undefined;
   if (proposal.action === 'create' && payloadData.event) {
@@ -1458,7 +1555,7 @@ async function notifyInviterProposal(
     sendMessage: (
       chatId: number,
       text: string,
-      options: { parse_mode: string; reply_markup?: unknown },
+      options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
     ) => Promise<void>;
   },
 ): Promise<void> {
@@ -1479,7 +1576,7 @@ async function notifyInviter(
   respondent: User,
   deps: {
     userRepo: UserRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
+    sendMessage: (chatId: number, text: string, options: { parse_mode: ParseMode }) => Promise<void>;
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
   },
   eventRepo?: EventRepository,

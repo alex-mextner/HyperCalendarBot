@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+const NumberArrayCodec = jsonCodec(z.array(z.number()));
+
 interface LocalEventForGoogle {
   id: number;
   title: string;
@@ -87,7 +92,7 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.reminder_overrides) {
-    const minutes: number[] = JSON.parse(local.reminder_overrides);
+    const minutes = NumberArrayCodec.parse(local.reminder_overrides);
     event.reminders = {
       useDefault: false,
       overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),

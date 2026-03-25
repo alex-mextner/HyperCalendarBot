@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
 import { createIntentMatcherLayer } from '../../../src/bot/pipeline/intent-matcher-layer.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import type { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import type { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
+import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 const TTL_MS = 5 * 60 * 1000;
 
@@ -64,7 +65,7 @@ function makeExecutor(result: Record<string, unknown> = { success: true, respons
 }
 
 function makeToolExecutor() {
-  return mock((_name: string, _input: Record<string, unknown>) => ({ success: true, output: 'ok' }));
+  return mock((_name: string, _input: unknown) => ({ success: true, output: 'ok' }));
 }
 
 describe('createIntentMatcherLayer', () => {
@@ -296,7 +297,7 @@ describe('createIntentMatcherLayer', () => {
 
   test('trims whitespace when resuming workflow', async () => {
     const userId = 15;
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice' },
         { when: 'choice == "время"', call: 'create_event', input: { title: 'Встреча' } },
@@ -418,7 +419,7 @@ describe('needsSupplement', () => {
 
     expect(logBotResponse).toHaveBeenCalledTimes(1);
     const [callUserId, callText, callChatId] = logBotResponse.mock.calls[0] as unknown as [number, string, number];
-    expect(callUserId).toBe(ctx.dbUser.telegram_id);
+    expect(callUserId).toBe(ctx.dbUser!.telegram_id);
     expect(callText).toBe('Готово!');
     expect(callChatId).toBe((ctx as unknown as { chatId: number }).chatId);
   });

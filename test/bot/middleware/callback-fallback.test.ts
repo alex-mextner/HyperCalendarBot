@@ -5,7 +5,7 @@ function createFakeContext(overrides: Record<string, unknown> = {}) {
   return {
     is: (type: string) => type === 'callback_query',
     from: { id: 123 },
-    answer: mock(async () => {}),
+    answer: mock(async (): Promise<true> => true),
     dbUser: { language: 'en' },
     ...overrides,
   };

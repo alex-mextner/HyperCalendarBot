@@ -27,7 +27,7 @@ function makeCtx(overrides: Record<string, unknown> = {}) {
     text: 'привет',
     chatId: 100,
     chat: { type: 'private' },
-    from: { first_name: 'Alex', username: 'alex' },
+    from: { firstName: 'Alex', username: 'alex' },
     send: mock(() => Promise.resolve()),
     ...overrides,
   };
@@ -248,7 +248,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'встреча в 15:00',
           chat: { type: 'supergroup', title: 'Team' },
-          from: { first_name: 'Alex' },
+          from: { firstName: 'Alex' },
         }) as never,
       );
       const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as { messageText: string };
@@ -324,7 +324,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'ок буду',
           chat: { type: 'group', title: 'Chat' },
-          replyToMessage: { from: { id: 500 } },
+          replyMessage: { from: { id: 500 } },
         }) as never,
       );
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
@@ -337,7 +337,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'ок буду',
           chat: { type: 'group', title: 'Chat' },
-          replyToMessage: { from: { id: 999 } },
+          replyMessage: { from: { id: 999 } },
         }) as never,
       );
       expect(deps.agent.run).toHaveBeenCalledTimes(1);

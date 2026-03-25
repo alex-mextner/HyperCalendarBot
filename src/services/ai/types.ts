@@ -1,6 +1,8 @@
+import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramMessage } from 'gramio';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
+import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
@@ -15,14 +17,23 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { EventOccurrence, User } from '../../database/types.ts';
+import type {
+  EventOccurrence,
+  NotificationPreferencesRow,
+  NotificationPreferencesUpdate,
+  User,
+} from '../../database/types.ts';
+import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
 import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { ImageRenderer } from '../image/render-service.ts';
+import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
+import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
@@ -61,19 +72,14 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
+  renderService?: ImageRenderer;
   notificationPrefs?: {
-    getPrefs(userId: number): Record<string, unknown>;
-    update(userId: number, patch: Record<string, unknown>): void;
+    getPrefs(userId: number): NotificationPreferencesRow;
+    update(userId: number, patch: NotificationPreferencesUpdate): void;
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
-  callSettingsRepo?: {
-    get(userId: number): Record<string, unknown> | null;
-    ensureDefaults(userId: number): void;
-    setEnabled(userId: number, enabled: boolean): void;
-    setLanguage(userId: number, lang: string): void;
-  };
+  callSettingsRepo?: CallSettingsRepository;
   groupChatRepo?: GroupChatRepository;
   groupMemberRepo?: GroupMemberRepository;
   groupMemberService?: GroupMemberService;
@@ -94,7 +100,11 @@ export interface AgentContext {
   };
   feedbackRepo?: FeedbackRepository;
   botAdminId?: number;
-  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
+  sendMessageToChat?: (
+    chatId: number,
+    text: string,
+    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup },
+  ) => Promise<TelegramMessage>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   domainEvents?: DomainEventBus;
   conflictChecker?: ConflictChecker;
@@ -111,6 +121,15 @@ export interface AgentContext {
   agentDispatcher?: AgentDispatcher;
   onAgentChunk?: (text: string) => void;
 }
+
+/** Structured data from tool handlers for intent executor consumption. */
+export type ToolResultData =
+  | EventSummary
+  | EventSummary[]
+  | { telegram_id: number; name: string }
+  | ScheduledAiCall[]
+  | Trigger[]
+  | [];
 
 /**
  * Result returned by every tool handler.
@@ -138,7 +157,7 @@ export interface ToolResult {
    * Structured data for intent executor consumption.
    * Never sent to AI or user directly — side-channel for workflows.
    */
-  data?: unknown;
+  data?: ToolResultData;
 }
 
 export interface AgentConfig {
@@ -149,32 +168,23 @@ export interface AgentConfig {
 }
 
 export interface TelegramSender {
-  sendMessage(
-    chatId: number,
-    text: string,
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-  ): Promise<{ message_id: number }>;
+  sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
   sendMessageWithKeyboard?(
     chatId: number,
     text: string,
     keyboard: import('gramio').InlineKeyboard,
   ): Promise<{ message_id: number }>;
-  editMessageText(
-    chatId: number,
-    messageId: number,
-    text: string,
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
-  ): Promise<void>;
+  editMessageText(chatId: number, messageId: number, text: string, parseMode?: ParseMode): Promise<void>;
   sendButtons?(
     chatId: number,
     text: string,
     buttons: string[],
-    parseMode?: 'HTML' | 'MarkdownV2' | 'Markdown',
+    parseMode?: ParseMode,
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
-  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<unknown>;
+  pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<true>;
   sendInvitation?(
     inviteeId: number,
     text: string,

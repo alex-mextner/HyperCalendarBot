@@ -1,3 +1,17 @@
+import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+const NovaMessageSchema = z.object({
+  is_final: z.boolean(),
+  channel: z
+    .object({
+      alternatives: z.array(z.object({ transcript: z.string() })).optional(),
+    })
+    .optional(),
+});
+
+const NovaMessageCodec = jsonCodec(NovaMessageSchema);
+
 export interface NovaStreamingSTTEvents {
   onInterim: (transcript: string) => void;
   onFinal: (transcript: string) => void;
@@ -29,15 +43,12 @@ export class NovaStreamingSTT {
     });
     const url = `wss://api.deepgram.com/v1/listen?${params}`;
     const createWs =
-      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } } as never));
+      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } }));
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
-        const data = JSON.parse(event.data as string) as {
-          is_final: boolean;
-          channel?: { alternatives?: { transcript: string }[] };
-        };
+        const data = NovaMessageCodec.parse(event.data as string);
         const transcript = data.channel?.alternatives?.[0]?.transcript ?? '';
         if (!transcript) return;
         if (data.is_final) events.onFinal(transcript);

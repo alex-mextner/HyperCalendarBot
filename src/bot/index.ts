@@ -33,7 +33,7 @@ import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
 import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
 import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
-import type { AiMessageJobData } from '../services/scheduled/trigger.service.ts';
+import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
 import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
@@ -43,6 +43,7 @@ import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
+import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import { createActivateCommand, createConnectCommand, createDisconnectCommand } from './commands/connect.command.ts';
@@ -67,29 +68,15 @@ import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
-import { createInlineHandler } from './handlers/inline.handler.ts';
+import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
-import { createUserResolver } from './middleware/user-resolver.ts';
+import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
-import type { BotCallbackContext, BotCommandContext } from './types.ts';
-
-/**
- * GramIO's base Context class doesn't expose `from` or derived properties
- * in its type definition — they come from TargetMixin on specific update
- * contexts. We use a narrow interface and cast where needed.
- */
-interface GramIOContextWithFrom {
-  from?: { id: number };
-}
-
-interface GramIOContextWithDerived {
-  dbUser?: User;
-  send(text: string): Promise<unknown>;
-}
+import type { SceneKvStorage } from './scenes/types.ts';
 
 export interface GoogleBotDeps {
   oauthService: GoogleOAuthService;
@@ -176,10 +163,12 @@ export function createBot(
   );
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
+  const userComposer = createUserResolverComposer(db);
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
     token,
+    userComposer,
     !!googleDeps,
     prefsService,
     holidayService,
@@ -190,11 +179,7 @@ export function createBot(
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
-  const kvStorage = scenesSetup.storage as unknown as {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown): Promise<void>;
-    delete(key: string): Promise<void>;
-  };
+  const kvStorage = scenesSetup.storage as SceneKvStorage;
   const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
@@ -235,12 +220,13 @@ export function createBot(
           model: aiConfig.model,
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
-          sendToAdmin: (text, replyMarkup) =>
-            bot.api.sendMessage({
+          sendToAdmin: async (text, replyMarkup) => {
+            await bot.api.sendMessage({
               chat_id: botAdminId,
               text,
               reply_markup: replyMarkup,
-            }),
+            });
+          },
         })
       : undefined;
 
@@ -265,7 +251,7 @@ export function createBot(
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as unknown as AgentContext['callSettingsRepo'],
+    callSettingsRepo: db.callSettings as AgentContext['callSettingsRepo'],
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -282,8 +268,8 @@ export function createBot(
         }
       : undefined,
     notificationPrefs: {
-      getPrefs: (userId: number) => prefsService.getOrCreate(userId) as unknown as Record<string, unknown>,
-      update: (userId: number, patch: Record<string, unknown>) => db.notificationPreferences.update(userId, patch),
+      getPrefs: (userId: number) => prefsService.getOrCreate(userId),
+      update: db.notificationPreferences.update.bind(db.notificationPreferences),
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
@@ -323,7 +309,9 @@ export function createBot(
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,
     aiModel: aiConfig.model,
-    sendMessageToUser: (chatId: number, text: string) => bot.api.sendMessage({ chat_id: chatId, text }),
+    sendMessageToUser: async (chatId: number, text: string) => {
+      await bot.api.sendMessage({ chat_id: chatId, text });
+    },
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
@@ -363,56 +351,47 @@ export function createBot(
     scenePauseService,
   };
 
+  // AI Assistant commands (not in setMyCommands — internal use only)
+  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
+  const activateCommand = createActivateCommand(agentRegistry);
+  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
+
   bot
     .derive(createUserResolver(db))
-    .use((context, next) =>
-      runWithChatId(Number((context as unknown as { chatId?: number | bigint }).chatId ?? 0), next),
-    )
+    .use((context, next) => {
+      const chatId =
+        context.update?.message?.chat?.id ??
+        context.update?.callback_query?.message?.chat?.id ??
+        context.update?.my_chat_member?.chat?.id;
+      return runWithChatId(chatId ?? 0, next);
+    })
     .use(async (context, next) => {
-      const ctx = context as unknown as GramIOContextWithFrom;
-      const userId = ctx.from?.id;
+      const userId = context.update?.message?.from?.id ?? context.update?.callback_query?.from?.id;
       if (!userId) return next();
       const { allowed, firstBlock } = rateLimiter.checkWithWarning(userId);
       if (!allowed) {
-        if (firstBlock && 'send' in context) {
-          const derived = context as unknown as GramIOContextWithDerived;
-          const lang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
-          await derived.send(t(lang).rate_limited);
+        if (firstBlock) {
+          const lang = (context.dbUser?.language ?? 'en') as 'en' | 'ru';
+          const ctxWithSend = context as { send?: (text: string) => Promise<unknown> };
+          await ctxWithSend.send?.(t(lang).rate_limited);
         }
         return;
       }
       return next();
     })
     // Storage<Record<string, any>> is not assignable to Storage (unparameterized) due to generic invariance
-    .use(
-      createSceneCommandEscape(
-        scenesSetup.storage as unknown as Parameters<typeof createSceneCommandEscape>[0],
-      ) as never,
-    )
-    .use(createCallbackFallback(scenesSetup.storage) as never)
+    .use(createSceneCommandEscape(scenesSetup.storage))
+    .use(createCallbackFallback(scenesSetup.storage))
     .use(async (context, next) => {
-      const ctx = context as unknown as {
-        // GramIO exposes text as a direct shortcut on MessageContext, not via ctx.message.text
-        text?: string;
-        // GramIO update type string: "message" | "edited_message" | "callback_query" | ...
-        updateType?: string;
-        // Raw payload object — for callback_query updates this is the callback_query object with .data
-        payload?: { data?: string };
-        dbUser?: User;
-        chatId?: number | bigint;
-        send?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-        editText?: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-      };
-
-      const user = ctx.dbUser;
+      const user = context.dbUser;
       if (!user) return next();
 
-      const chatId = ctx.chatId ? Number(ctx.chatId) : undefined;
+      const chatId = context.update?.message?.chat?.id ?? context.update?.callback_query?.message?.chat?.id;
       const isPrivate = !chatId || chatId === user.telegram_id;
       const logChatId = isPrivate ? undefined : chatId;
 
       // Incoming text message (regular or command)
-      const incomingText = ctx.updateType === 'message' ? ctx.text : undefined;
+      const incomingText = context.update?.message?.text;
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
           // /cal is an AI command — save args as plain user message, not a command event
@@ -429,14 +408,13 @@ export function createBot(
       }
 
       // Edited message
-      const editedText = ctx.updateType === 'edited_message' ? ctx.text : undefined;
+      const editedText = context.update?.edited_message?.text;
       if (editedText) {
         conversationLogger.logEditedMessage(user.telegram_id, editedText, logChatId);
       }
 
       // Callback query (button press or ai_btn answer) — universal, no per-handler logging needed
-      // ctx.payload is the raw callback_query object; .data is the callback data string
-      const callbackData = ctx.updateType === 'callback_query' ? ctx.payload?.data : undefined;
+      const callbackData = context.update?.callback_query?.data;
       if (callbackData) {
         const firstColon = callbackData.indexOf(':');
         const action = firstColon >= 0 ? callbackData.slice(0, firstColon) : callbackData;
@@ -450,20 +428,25 @@ export function createBot(
         }
       }
 
-      // Wrap ctx.send and ctx.editText — logs every bot response (intent matcher, scenes, commands, callbacks)
+      // Wrap send and editText — logs every bot response (intent matcher, scenes, commands, callbacks)
       // Note: AI agent uses TelegramSender.sendMessage() directly; those are logged via logAiTurn
-      const originalSend = ctx.send?.bind(ctx);
+      // GramIO attaches send/editText at runtime on specific contexts; accessed here at the framework boundary.
+      type SendFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
+      type EditTextFn = (text: string, opts?: { [key: string]: unknown }) => Promise<unknown>;
+      const mutableCtx = context as { send?: SendFn; editText?: EditTextFn };
+
+      const originalSend = mutableCtx.send?.bind(mutableCtx);
       if (originalSend) {
-        (ctx as { send: typeof originalSend }).send = async (text, opts) => {
+        mutableCtx.send = async (text, opts) => {
           const result = await originalSend(text, opts);
           conversationLogger.logBotResponse(user.telegram_id, text, logChatId);
           return result;
         };
       }
 
-      const originalEditText = ctx.editText?.bind(ctx);
+      const originalEditText = mutableCtx.editText?.bind(mutableCtx);
       if (originalEditText) {
-        (ctx as { editText: typeof originalEditText }).editText = async (text, opts) => {
+        mutableCtx.editText = async (text, opts) => {
           const result = await originalEditText(text, opts);
           conversationLogger.logBotEdit(user.telegram_id, text, logChatId);
           return result;
@@ -475,7 +458,7 @@ export function createBot(
     .extend(scenesSetup.plugin)
     // Commands
     .command('start', (ctx) =>
-      handleStart(ctx as unknown as BotCommandContext, {
+      handleStart(ctx, {
         onboardingScene: scenesSetup.scenes.onboardingScene,
         deepLinkService,
         eventService,
@@ -483,40 +466,24 @@ export function createBot(
         userRepo: db.users,
       }),
     )
-    .command('ping', (ctx) => handlePing(ctx as unknown as BotCommandContext))
-    .command('help', (ctx) => handleHelp(ctx as unknown as BotCommandContext))
-    .command('today', (ctx) =>
-      handleToday(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
-    )
-    .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
-    )
-    .command('week', (ctx) =>
-      handleWeek(ctx as unknown as BotCommandContext, eventService, holidayService, renderService, db.groupChats),
-    )
-    .command('month', (ctx) =>
-      handleMonth(ctx as unknown as BotCommandContext, eventService, undefined, renderService, db.groupChats),
-    )
-    .command('add', (ctx) =>
-      handleAdd(ctx as unknown as BotCommandContext, eventService, scenesSetup.scenes.addEventScene, db.groupChats),
-    )
-    .command('edit', (ctx) => handleEdit(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('delete', (ctx) => handleDelete(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('search', (ctx) => handleSearch(ctx as unknown as BotCommandContext, eventService, db.groupChats))
-    .command('free', (ctx) =>
-      handleFree(ctx as unknown as BotCommandContext, eventService, holidayService, db.groupChats),
-    )
-    .command('settings', (ctx) => handleSettings(ctx as unknown as BotCommandContext, db.groupChats))
-    .command('import', (ctx) =>
-      handleImport(ctx as unknown as BotCommandContext, scenesSetup.scenes.importScene, db.groupChats),
-    )
-    .command('holidays', (ctx) => handleHolidays(ctx as unknown as BotCommandContext, holidayService, db.groupChats))
-    .command('birthdays', (ctx) =>
-      handleBirthdays(ctx as unknown as BotCommandContext, birthdayService, db.groupChats, db.groupMembers),
-    )
+    .command('ping', (ctx) => handlePing(ctx))
+    .command('help', (ctx) => handleHelp(ctx))
+    .command('today', (ctx) => handleToday(ctx, eventService, holidayService, renderService, db.groupChats))
+    .command('tomorrow', (ctx) => handleTomorrow(ctx, eventService, holidayService, renderService, db.groupChats))
+    .command('week', (ctx) => handleWeek(ctx, eventService, holidayService, renderService, db.groupChats))
+    .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
+    .command('add', (ctx) => handleAdd(ctx, eventService, scenesSetup.scenes.addEventScene, db.groupChats))
+    .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
+    .command('delete', (ctx) => handleDelete(ctx, eventService, db.groupChats))
+    .command('search', (ctx) => handleSearch(ctx, eventService, db.groupChats))
+    .command('free', (ctx) => handleFree(ctx, eventService, holidayService, db.groupChats))
+    .command('settings', (ctx) => handleSettings(ctx, db.groupChats))
+    .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
+    .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
+    .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
     // Sharing commands
     .command('invite', (ctx) =>
-      handleInvite(ctx as unknown as BotCommandContext, {
+      handleInvite(ctx, {
         invitationService,
         eventService,
         invRepo: db.invitations,
@@ -527,36 +494,31 @@ export function createBot(
             chat_id: chatId,
             text,
             parse_mode: options.parse_mode as 'HTML',
-            reply_markup: options.reply_markup as never,
+            reply_markup: options.reply_markup as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
           });
           return { message_id: sent.message_id };
         },
       }),
     )
-    .command('invitations', (ctx) =>
-      handleInvitations(ctx as unknown as BotCommandContext, db.invitations, db.events, db.users),
-    )
-    .command('share', (ctx) =>
-      handleShare(ctx as unknown as BotCommandContext, eventService, privacyService, deepLinkService, db.groupChats),
-    )
+    .command('invitations', (ctx) => handleInvitations(ctx, db.invitations, db.events, db.users))
+    .command('share', (ctx) => handleShare(ctx, eventService, privacyService, deepLinkService, db.groupChats))
     // AI agent via /cal command (works in groups and DMs)
     .command('cal', async (ctx) => {
-      const calCtx = ctx as unknown as BotCommandContext;
-      const user = calCtx.dbUser as User | undefined;
+      const user = ctx.dbUser;
       if (!user) return;
-      const text = (calCtx.args ?? '').trim();
+      const text = (ctx.args ?? '').trim();
       if (!text) {
         const lang = (user.language ?? 'en') as 'en' | 'ru';
-        await calCtx.send(
+        await ctx.send(
           lang === 'ru'
             ? 'Напиши после /cal что хочешь. Например: /cal что завтра?'
             : "Type after /cal what you want. Example: /cal what's tomorrow?",
         );
         return;
       }
-      const chat = (calCtx as unknown as { chat?: { type: string; title?: string } }).chat;
+      const chat = ctx.chat;
       const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
-      const chatId = calCtx.chatId;
+      const chatId = ctx.chatId;
       if (!chatId) return;
 
       const groupInfo = isGroup
@@ -600,23 +562,23 @@ export function createBot(
           sendMessage: async (
             chatId: number,
             text: string,
-            options: { parse_mode: string; reply_markup?: unknown },
+            options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
           ) => {
             await bot.api.sendMessage({
               chat_id: chatId,
               text,
-              parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown',
-              ...(options.reply_markup ? { reply_markup: options.reply_markup as Record<string, unknown> } : {}),
+              parse_mode: options.parse_mode,
+              ...(options.reply_markup ? { reply_markup: options.reply_markup } : {}),
             } as Parameters<typeof bot.api.sendMessage>[0]);
           },
-          editMessage: async (chatId: number, messageId: number, text: string, markup?: unknown) => {
+          editMessage: async (chatId: number, messageId: number, text: string, markup?: InlineKeyboard) => {
             await bot.api
               .editMessageText({
                 chat_id: chatId,
                 message_id: messageId,
                 text,
                 parse_mode: 'HTML',
-                ...(markup ? { reply_markup: markup as Record<string, unknown> } : {}),
+                ...(markup ? { reply_markup: markup } : {}),
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
           },
@@ -631,7 +593,9 @@ export function createBot(
         {
           feedbackRepo,
           adminReplySession,
-          sendMessage: (chatId, text) => bot.api.sendMessage({ chat_id: chatId, text }),
+          sendMessage: async (chatId: number, text: string) => {
+            await bot.api.sendMessage({ chat_id: chatId, text });
+          },
           adminId: botAdminId,
         },
         db.users,
@@ -678,13 +642,13 @@ export function createBot(
               sendMessage: async (
                 chatId: number,
                 text: string,
-                options: { parse_mode: string; reply_markup?: unknown },
+                options: { parse_mode: ParseMode; reply_markup?: InlineKeyboard },
               ) => {
                 const sent = await bot.api.sendMessage({
                   chat_id: chatId,
                   text,
-                  parse_mode: options.parse_mode as 'HTML',
-                  reply_markup: options.reply_markup as never,
+                  parse_mode: options.parse_mode,
+                  reply_markup: options.reply_markup as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
                 });
                 return { message_id: sent.message_id };
               },
@@ -710,7 +674,7 @@ export function createBot(
           sceneStorage: kvStorage,
           scenePauseService,
         },
-      )(ctx as unknown as BotCallbackContext),
+      )(ctx),
     )
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>
@@ -731,37 +695,17 @@ export function createBot(
             return null;
           }
         },
-      )(ctx as never),
+      )(ctx),
     )
     // Private chat: user blocked the bot — clear pending workflow sessions
     .on('my_chat_member', (ctx) => {
-      const update = (
-        ctx as unknown as {
-          myChatMember?: {
-            chat: { type: string };
-            from: { id: number };
-            new_chat_member: { status: string };
-          };
-        }
-      ).myChatMember;
-      if (!update) return;
-      if (update.chat.type !== 'private') return;
-      if (update.new_chat_member.status !== 'kicked') return;
-      db.workflowSessions.deleteByUser(update.from.id);
+      if (ctx.chat.type !== 'private') return;
+      if (ctx.newChatMember.status !== 'kicked') return;
+      db.workflowSessions.deleteByUser(ctx.from.id);
     })
     // Group member join/leave tracking (requires bot to be admin)
     .on('chat_member', (ctx) => {
-      const update = (
-        ctx as unknown as {
-          chatMember?: {
-            chat: { id: number; type: string };
-            new_chat_member: { status: string; user: { id: number } };
-            old_chat_member: { status: string };
-          };
-        }
-      ).chatMember;
-      if (!update) return;
-      const { chat, new_chat_member: newMember } = update;
+      const { chat, newChatMember: newMember } = ctx;
       if (chat.type !== 'group' && chat.type !== 'supergroup') return;
 
       const userId = newMember.user.id;
@@ -775,7 +719,7 @@ export function createBot(
     })
     // Users shared from picker modal → send invitations
     .on('users_shared', async (ctx) => {
-      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      const user = ctx.dbUser;
       if (!user) return;
       const eventId = ctx.requestId;
       const selected = ctx.users;
@@ -809,7 +753,7 @@ export function createBot(
 
       const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
       const resultText = `${header}\n${results.join('\n')}`;
-      await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(resultText, {
+      await ctx.send(resultText, {
         reply_markup: { remove_keyboard: true },
       });
       // Build context for AI: who was requested + what happened
@@ -823,7 +767,7 @@ export function createBot(
         .join(', ');
       const contextMsg = `[User picker result] Invitations already sent by the bot — do NOT call send_invitation. Selected: ${selectedDetails}. Results:\n${results.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
-      const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+      const chatId = ctx.chatId;
       if (chatId) {
         agent
           .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
@@ -832,12 +776,11 @@ export function createBot(
     })
     // Group chat shared from picker → send invitation to group chat
     .on('chat_shared', async (ctx) => {
-      const user = (ctx as unknown as { dbUser?: User }).dbUser;
+      const user = ctx.dbUser;
       if (!user) return;
-      const eventId = (ctx as unknown as { requestId?: number }).requestId;
-      const chat = (ctx as unknown as { chat_shared?: { chat_id: number } }).chat_shared;
-      if (!eventId || !chat) return;
-      const inviteeId = chat.chat_id;
+      const eventId = ctx.requestId;
+      const inviteeId = ctx.sharedChatId;
+      if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       if (invitationService) {
         const event = eventService.getEvent(eventId, user.telegram_id);
@@ -854,49 +797,57 @@ export function createBot(
         const resultText = inv.success
           ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
           : `❌ ${inv.error}`;
-        await (ctx as unknown as { send(text: string, opts?: Record<string, unknown>): Promise<void> }).send(
-          resultText,
-          { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } },
-        );
+        await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
       }
-    });
-
-  // AI Assistant commands (not in setMyCommands — internal use only)
-  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
-  const activateCommand = createActivateCommand(agentRegistry);
-  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
-  bot
-    .command('connect', (ctx) => connectCommand(ctx as unknown as Parameters<typeof connectCommand>[0]))
-    .command('activate', (ctx) => activateCommand(ctx as unknown as Parameters<typeof activateCommand>[0]))
-    .command('disconnect', (ctx) => disconnectCommand(ctx as unknown as Parameters<typeof disconnectCommand>[0]));
-
-  // Google Calendar commands (must be before .on('message') catch-all)
-  if (googleDeps) {
-    bot
-      .command('connect_google', (ctx) =>
-        handleConnectGoogle(ctx as unknown as BotCommandContext, {
-          oauthService: googleDeps.oauthService,
-          stateStore: googleDeps.stateStore,
-        }),
-      )
-      .command('disconnect_google', (ctx) => handleDisconnectGoogle(ctx as unknown as BotCommandContext));
-  }
-
-  // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
-  bot
-    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx as unknown as BotCommandContext))
+    })
+    // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
+    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
+    // AI Assistant commands (not in setMyCommands — internal use only)
+    .command('connect', (ctx) =>
+      connectCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
+    )
+    .command('activate', (ctx) =>
+      activateCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
+    )
+    .command('disconnect', (ctx) =>
+      disconnectCommand({
+        user: ctx.dbUser,
+        args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
+    )
+    // Google Calendar commands (registered in main chain so derived context is available)
+    .command('connect_google', (ctx) =>
+      googleDeps
+        ? handleConnectGoogle(ctx, { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore })
+        : undefined,
+    )
+    .command('disconnect_google', (ctx) => (googleDeps ? handleDisconnectGoogle(ctx) : undefined))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, err: error }, 'Bot error');
       try {
         if (context && 'send' in context) {
-          const derived = context as unknown as GramIOContextWithDerived;
-          const errLang = (derived.dbUser?.language ?? 'en') as 'en' | 'ru';
-          derived.send(t(errLang).something_wrong);
+          const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
+          const errLang = (dbUser?.language ?? 'en') as 'en' | 'ru';
+          (context as { send(text: string): Promise<unknown> }).send(t(errLang).something_wrong);
         }
       } catch {}
     });
-
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
   const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;
   let inlineBot: Bot | undefined;
@@ -904,13 +855,17 @@ export function createBot(
     inlineBot = new Bot(inlineBotToken);
     inlineBot
       .derive(createUserResolver(db))
-      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never))
+      .on('inline_query', (ctx) =>
+        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
+      )
       .onError(({ error }) => {
         botLogger.error({ err: error }, 'Inline bot error');
       });
   } else {
     // No separate inline bot — register on main bot
-    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as never));
+    bot.on('inline_query', (ctx) =>
+      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
+    );
   }
 
   return {

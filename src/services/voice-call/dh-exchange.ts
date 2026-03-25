@@ -200,6 +200,12 @@ export interface DiscardCallPayload {
   connectionId: bigint;
 }
 
+export interface GetDhConfigPayload {
+  _: 'messages.getDhConfig';
+  version: number;
+  randomLength: number;
+}
+
 interface InputPhoneCallPayload {
   _: 'inputPhoneCall';
   id: bigint;
@@ -966,12 +972,20 @@ export function handlePhoneCallUpdate(phoneCall: PhoneCallUpdate, handlers: Voic
 // Complete call orchestrator (full flow example)
 // ---------------------------------------------------------------------------
 
+/** Union of all MTProto payloads used by the call orchestrator. */
+export type MtprotoInvokePayload =
+  | GetDhConfigPayload
+  | RequestCallPayload
+  | AcceptCallPayload
+  | ConfirmCallPayload
+  | DiscardCallPayload;
+
 /**
  * Abstracts the MTProto transport layer.
  * Implement this interface to connect to an actual MTProto client.
  */
 export interface MtprotoTransport {
-  invoke<T>(method: string, params: Record<string, unknown>): Promise<T>;
+  invoke<T>(method: string, params: MtprotoInvokePayload): Promise<T>;
   onUpdate(handler: (update: { _: string; phoneCall?: PhoneCallUpdate }) => void): void;
 }
 
@@ -1023,7 +1037,7 @@ export class VoiceCallOrchestrator {
     const payload = buildRequestCallPayload(userId, userAccessHash, gAHash, video);
     const result = await this.transport.invoke<{
       phoneCall: { id: bigint; accessHash: bigint };
-    }>('phone.requestCall', payload as unknown as Record<string, unknown>);
+    }>('phone.requestCall', payload);
 
     const callId = result.phoneCall.id.toString();
     this.exchanges.set(callId, exchange);
@@ -1049,7 +1063,7 @@ export class VoiceCallOrchestrator {
     const peer: InputPhoneCall = { id: call.id, accessHash: call.accessHash };
     const payload = buildAcceptCallPayload(peer, gB);
 
-    await this.transport.invoke('phone.acceptCall', payload as unknown as Record<string, unknown>);
+    await this.transport.invoke('phone.acceptCall', payload);
 
     const callId = call.id.toString();
     this.exchanges.set(callId, exchange);
@@ -1073,7 +1087,7 @@ export class VoiceCallOrchestrator {
       // Caller: derive key and confirm
       const authParams = exchange.onCallAccepted(phoneCall.gB);
       const payload = buildConfirmCallPayload(peer, authParams.gAOrB, authParams.keyFingerprint);
-      await this.transport.invoke('phone.confirmCall', payload as unknown as Record<string, unknown>);
+      await this.transport.invoke('phone.confirmCall', payload);
 
       return authParams;
     }
@@ -1109,7 +1123,7 @@ export class VoiceCallOrchestrator {
     if (!peer) return;
 
     const payload = buildDiscardCallPayload(peer, reason);
-    await this.transport.invoke('phone.discardCall', payload as unknown as Record<string, unknown>);
+    await this.transport.invoke('phone.discardCall', payload);
 
     const exchange = this.exchanges.get(callId);
     if (exchange) exchange.discard();

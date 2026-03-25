@@ -3,10 +3,10 @@ import type { EventOccurrence } from '../../database/types.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 import { mapDailyAgendaData } from './data-mapper.ts';
-import type { RenderService } from './render-service.ts';
+import type { ImageRenderer } from './render-service.ts';
 
 export async function renderDayImage(
-  renderService: RenderService,
+  renderService: ImageRenderer,
   occurrences: EventOccurrence[],
   dateIso: string,
   timezone: string,

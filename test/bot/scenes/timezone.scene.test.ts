@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createUserResolverComposer } from '../../../src/bot/middleware/user-resolver.ts';
 import { createTimezoneScene } from '../../../src/bot/scenes/timezone.scene.ts';
 import { CB } from '../../../src/config/constants.ts';
 import type { DatabaseService } from '../../../src/database/index.ts';
@@ -8,18 +9,19 @@ function makeDb() {
     users: {
       update: () => null,
       findByTelegramId: () => null,
+      findOrCreate: () => ({ language: 'en', timezone: 'UTC' }),
     },
   } as unknown as DatabaseService;
 }
 
 describe('createTimezoneScene', () => {
   test('creates scene with name "timezone"', () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     expect(scene.name).toBe('timezone');
   });
 
   test('has one step for message/location/callback handling', () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     expect(scene.stepsCount).toBe(1);
   });
 });

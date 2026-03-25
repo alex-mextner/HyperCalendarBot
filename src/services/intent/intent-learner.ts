@@ -1,14 +1,30 @@
 // src/services/intent/intent-learner.ts
+import { z } from 'zod';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { CreateIntentData } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
+import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflowVariables } from './workflow-validator.ts';
+
+const LearnerResponseSchema = z.object({
+  skip: z.boolean().optional(),
+  canonical_name: z.string(),
+  phrases: z.array(z.string()),
+  trigger_words: z.array(z.string()).optional(),
+  pattern: z.string().optional(),
+  workflow: WorkflowSchema,
+  format: z.string().optional(),
+});
+
+const LearnerResponseCodec = jsonCodec(LearnerResponseSchema);
+const StringArrayCodec = jsonCodec(z.array(z.string()));
 
 interface ToolCallRecord {
   name: string;
-  input: Record<string, unknown>;
+  input: { [key: string]: unknown };
 }
 
 interface ToolResultRecord {
@@ -26,7 +42,7 @@ interface LearnerConfig {
   model?: string;
   dailyLimit: number;
   adminId?: number;
-  sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<unknown>;
+  sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<void>;
 }
 
 export class IntentLearner {
@@ -73,7 +89,7 @@ export class IntentLearner {
         if (existing.status === 'approved') {
           let existingPhrases: string[];
           try {
-            existingPhrases = JSON.parse(existing.phrases) as string[];
+            existingPhrases = StringArrayCodec.parse(existing.phrases);
           } catch {
             existingPhrases = [];
           }
@@ -178,16 +194,8 @@ export class IntentLearner {
         .replace(/\s*```\s*$/, '')
         .trim();
 
-      // Parse JSON response
-      const parsed = JSON.parse(json) as {
-        skip?: boolean;
-        canonical_name: string;
-        phrases: string[];
-        trigger_words?: string[];
-        pattern?: string;
-        workflow: Record<string, unknown>;
-        format: string;
-      };
+      // Parse and validate JSON response
+      const parsed = LearnerResponseCodec.parse(json);
 
       if (parsed.skip) return null;
 
@@ -196,8 +204,32 @@ export class IntentLearner {
         return null;
       }
 
+      // Validate workflow schema
+      const workflowResult = WorkflowSchema.safeParse(parsed.workflow);
+      if (!workflowResult.success) {
+        cmdLogger.warn({ attempt, errors: workflowResult.error.issues }, 'IntentLearner workflow has invalid schema');
+
+        if (attempt < MAX_RETRIES) {
+          const schemaErrors = workflowResult.error.issues.map((i) => `- ${i.path.join('.') || 'root'}: ${i.message}`);
+          const errorFeedback = [
+            'The workflow does not match the required schema. Fix it and return corrected JSON.',
+            'Schema errors:',
+            ...schemaErrors,
+          ].join('\n');
+          conversationMessages.push({ role: 'assistant', content: text });
+          conversationMessages.push({ role: 'user', content: errorFeedback });
+          continue;
+        }
+
+        cmdLogger.error(
+          { errors: workflowResult.error.issues },
+          'IntentLearner: workflow schema still invalid after retries, skipping',
+        );
+        return null;
+      }
+
       // Validate template variables in workflow
-      const varErrors = validateWorkflowVariables(parsed.workflow, parsed.pattern ?? null);
+      const varErrors = validateWorkflowVariables(workflowResult.data, parsed.pattern ?? null);
       if (varErrors.length > 0) {
         cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow has invalid variables');
 
@@ -223,7 +255,7 @@ export class IntentLearner {
         phrases: parsed.phrases,
         trigger_words: parsed.trigger_words,
         pattern: parsed.pattern,
-        workflow: parsed.workflow,
+        workflow: workflowResult.data,
         format: parsed.format || 'text',
         source_message: message,
       };

@@ -169,6 +169,23 @@ BullMQ on Redis, three queues:
 
 Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding`. Scene state is persisted in SQLite (not in-memory) so restarts don't break active flows.
 
+**Scene context typing** uses `Composer.derive()` + `scene.extend(composer)` to propagate
+`dbUser`, `lang`, `userTimezone` into step handler context without casts. Key details:
+
+- `Plugin.derive()` widens return type to `Record<string, unknown>` (Hooks.Derive constraint).
+  `Composer.derive()` uses `DeriveHandler<T, D>` with proper generic inference — use Composer.
+- **`extend()` MUST come AFTER `params()` and `state()`**. `params()` uses `Modify<Derives>`
+  which replaces `Derives.global`; `state()` uses `Derives &` (intersection, preserves).
+  If `extend()` is before `params()`, the derived props disappear from the type.
+  ```ts
+  // Correct order:
+  new Scene('name').params<P>().state<S>().extend(userComposer).step(...)
+  // Wrong — params() replaces global, losing extend:
+  new Scene('name').extend(userComposer).params<P>().step(...)
+  ```
+- Scene shared types (`AddEventState`, `OnboardingState`, `TimezoneState`, `SceneKvStorage`)
+  live in `src/bot/scenes/types.ts`.
+
 ### Database
 
 `bun:sqlite` WAL mode. All access goes through repositories in `src/database/repositories/`. Schema defined as sequential migrations in `src/database/migrations.ts`. Key tables: `users`, `events`, `reminders`, `invitations`, `intents`, `chat_history`, `calendar_secretaries`, `calendar_proposals`, `contacts`, `event_participants`.
@@ -224,12 +241,66 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
-  `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- **No `any`/`as any`/`Function`** — proper typing only.
+- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
+  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `Record<string, unknown>`** — this utility type alias is entirely banned:
+  - Known shape at compile time → specific interface or Zod-inferred type
+  - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
+  - Truly dynamic runtime accumulator → explicit index signature `{ [key: string]: unknown }`
+  - Opaque external data → `unknown`
+- **No `as SomeType` casts** — fix the types, don't paper over them. If a library produces a poor type,
+  fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
+  The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
+  where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
+- **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
+  There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
+  It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
+- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
+  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
+  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
+  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
+  of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
+  No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
+- **`ToolResult.data` is typed** — never return `unknown` from tool handlers. Use `ToolResultData`
+  union type from `src/services/ai/types.ts`. Add new variants when adding tools that return
+  structured data.
+- **Tool output schemas must be concrete** — `parseToolOutput` in intent-executor validates JSON
+  against known shapes (event lists, free slots, settings maps, etc.). When adding a new response
+  format, add its schema to `ToolOutputSchema`.
+- **Type co-location**: interfaces and type aliases must live in the same file as the code that owns
+  them. Do not create a single global `types.ts` dumping ground. One exception: types shared across
+  multiple layers without a clear owner may live in a small domain-level `types.ts`
+  (e.g. `src/services/ai/types.ts`). Avoid circular deps — a type that is imported by many files
+  should not itself import from those files.
+- **No `export type { Foo }` re-exports from repository/service files** — consumers must import
+  types directly from their canonical source (`database/types.ts`, domain `types.ts`). A re-export
+  creates two valid import paths for the same type, making the canonical location ambiguous and
+  imports harder to audit.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **No silent fallbacks for missing required values** — `ctx.message?.id ?? 0` and similar patterns
+  hide bugs: downstream code receives a meaningless sentinel and fails in an unrelated place with a
+  confusing error. When a value is required, guard and return early:
+  ```ts
+  // Bad — messageId: 0 causes editMessageText to fail later with a cryptic API error
+  const messageId = ctx.message?.id ?? 0;
+  // Good — fail immediately, log the context
+  if (!ctx.message) {
+    logger.warn({ chatId: ctx.chatId }, 'callback has no message');
+    return;
+  }
+  const messageId = ctx.message.id;
+  ```
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
+- **No silent `catch` blocks** — every `catch` must either log the error or have a comment explaining
+  WHY swallowing is safe. Acceptable patterns: JSON.parse with fallback (invalid input expected),
+  WebSocket keepalive (non-JSON packets expected), cleanup on shutdown (resource already gone).
+  Unacceptable: `catch { return; }` or `catch { return null; }` without logging or explanation.
+  When in doubt, `logger.warn({ err }, 'context')` — a warn is cheap, a hidden bug is not.
 - **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).
 - **Multi-step DB operations are atomic**: SELECT followed by UPDATE on the same rows must be wrapped in `db.transaction(...)`. Without it, concurrent writes can cause notifications to fire for rows that changed state between the two queries.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
@@ -349,6 +420,12 @@ When renaming variables, constants, config keys, or any other interface:
 - Find similar working code in the same codebase. Compare working vs broken.
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
+- **Library type limitations — clone and investigate**: when a dependency produces poor types
+  (`unknown`, missing generics, no `.derive()` on a class), don't guess or cast. Clone the library
+  source into `~/xp/` in a background agent and read the actual code. Often the library already has
+  the capability you need (e.g. `.extend()` instead of `.derive()`) or the fix is a small PR.
+  This "recon by fire" approach — start investigating as if you'll patch, but pivot if the source
+  reveals a built-in solution — avoids both blind casting and unnecessary library forks.
 
 ## Session Wrap-Up
 

@@ -1,5 +1,6 @@
 // src/index.ts
 
+import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
 import { agentRegistry } from './agent/registry.ts';
@@ -8,7 +9,9 @@ import { createBot, type GoogleBotDeps } from './bot/index.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
+import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
@@ -523,12 +526,14 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
         botLogger.warn({ username, stderr: stderr.slice(0, 200) }, 'resolve-username.py failed');
         return null;
       }
-      try {
-        return JSON.parse(stdout.trim()) as { id: number; firstName?: string; username?: string };
-      } catch {
+      const parseResult = jsonCodec(
+        z.object({ id: z.number(), firstName: z.string().optional(), username: z.string().optional() }),
+      ).safeParse(stdout.trim());
+      if (!parseResult.success) {
         botLogger.warn({ username, stdout: stdout.slice(0, 500) }, 'resolve-username.py bad JSON');
         return null;
       }
+      return parseResult.data;
     };
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
@@ -652,12 +657,9 @@ if (config.REDIS_URL) {
       if (!match) return { handled: false };
       const intent = msgDeps.intentRepo.getById(match.intentId);
       if (!intent) return { handled: false };
-      let workflow: Record<string, unknown>;
-      try {
-        workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
-      } catch {
-        return { handled: false };
-      }
+      const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
+      if (!workflowResult.success) return { handled: false };
+      const workflow: Workflow = workflowResult.data;
       const userCtx = {
         userId: agentCtx.user.telegram_id,
         language: agentCtx.user.language,
@@ -665,11 +667,8 @@ if (config.REDIS_URL) {
         username: agentCtx.user.username ?? undefined,
         firstName: agentCtx.user.first_name ?? undefined,
       };
-      const result = await intentExecutor.run(
-        workflow,
-        match.captures,
-        userCtx,
-        (toolName: string, input: Record<string, unknown>) => executeTool(agentCtx, toolName, input),
+      const result = await intentExecutor.run(workflow, match.captures, userCtx, (toolName: string, input: unknown) =>
+        executeTool(agentCtx, toolName, input),
       );
       if (result.response && agentCtx.sender) {
         await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);

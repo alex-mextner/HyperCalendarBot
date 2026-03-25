@@ -49,7 +49,12 @@ describe('ShareSessionManager', () => {
   });
 
   test('consume deletes session after resolve', async () => {
-    const sessionData = JSON.stringify({ userId: 100 });
+    const sessionData = JSON.stringify({
+      userId: 100,
+      targetType: 'user',
+      targetId: 200,
+      contentType: 'agenda',
+    });
     const redis = {
       get: mock(() => Promise.resolve(sessionData)),
       del: mock(() => Promise.resolve(1)),

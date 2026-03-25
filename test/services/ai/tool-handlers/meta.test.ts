@@ -29,6 +29,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -377,15 +378,15 @@ describe('meta tool handlers', () => {
 
   describe('handleRenderDayImage', () => {
     const GROUP_CHAT_ID = -100999;
-    let renderCalls: Record<string, unknown>[];
+    let renderCalls: ImageRenderJob[];
     let photoCalls: { chatId: number }[];
 
     beforeEach(() => {
       renderCalls = [];
       photoCalls = [];
       ctx.renderService = {
-        renderDirect(opts: Record<string, unknown>) {
-          renderCalls.push(opts);
+        renderDirect(job) {
+          renderCalls.push(job);
           return Promise.resolve(Buffer.from('png'));
         },
       };

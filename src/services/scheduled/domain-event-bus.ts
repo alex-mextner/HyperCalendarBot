@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import mitt from 'mitt';
 import type { CalendarEvent } from '../../database/types.ts';
 
 export type DomainEventMap = {
@@ -26,13 +26,13 @@ export const ALL_TOPICS = Object.freeze([
 ] as const satisfies readonly DomainEventTopic[]);
 
 export class DomainEventBus {
-  private emitter = new EventEmitter();
+  private emitter = mitt<DomainEventMap>();
 
   emit<T extends DomainEventTopic>(topic: T, payload: DomainEventMap[T]): void {
     this.emitter.emit(topic, payload);
   }
 
   on<T extends DomainEventTopic>(topic: T, handler: (payload: DomainEventMap[T]) => void): void {
-    this.emitter.on(topic, handler as (payload: unknown) => void);
+    this.emitter.on(topic, handler);
   }
 }

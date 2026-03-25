@@ -20,7 +20,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -57,7 +57,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -94,7 +94,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -129,7 +129,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: 'today',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -158,7 +158,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: undefined,
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -189,7 +189,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: 'broken',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -218,7 +218,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);

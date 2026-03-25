@@ -1,6 +1,8 @@
 import { TZDate } from '@date-fns/tz';
+import { z } from 'zod';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 
 const INTERVAL_LABELS: Record<number, string> = {
   0: 'at start',
@@ -31,6 +33,7 @@ export interface MaterializeEventData {
   user_timezone: string;
 }
 
+const NumberArrayCodec = jsonCodec(z.array(z.number()));
 const DEFAULT_ALL_DAY_TIME = '09:00';
 
 export function allDayReminderUtc(dateStr: string, localTime: string, timezone: string): Date {
@@ -54,14 +57,14 @@ export class ReminderMaterializer {
       return;
     }
 
-    const overrides = event.reminder_overrides ? (JSON.parse(event.reminder_overrides) as number[]) : null;
+    const overrides = event.reminder_overrides ? NumberArrayCodec.parse(event.reminder_overrides) : null;
 
     let intervals: number[];
     if (overrides) {
       intervals = overrides;
     } else {
       const prefs = this.prefsRepo.get(userId);
-      intervals = prefs ? (JSON.parse(prefs.default_reminder_intervals) as number[]) : [30, 0];
+      intervals = prefs ? NumberArrayCodec.parse(prefs.default_reminder_intervals) : [30, 0];
     }
 
     const eventStart = new Date(event.start_at);

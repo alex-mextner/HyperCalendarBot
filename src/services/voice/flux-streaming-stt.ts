@@ -1,3 +1,15 @@
+import { z } from 'zod';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+const FluxMessageSchema = z.object({
+  type: z.string().optional(),
+  event: z.string().optional(),
+  transcript: z.string().optional(),
+  end_of_turn_confidence: z.number().optional(),
+});
+
+const FluxMessageCodec = jsonCodec(FluxMessageSchema);
+
 export interface FluxStreamingSTTEvents {
   onStartOfTurn: () => void;
   onEndOfTurn: (confidence: number, transcript: string) => void;
@@ -33,19 +45,14 @@ export class FluxStreamingSTT {
     });
     const url = `wss://api.deepgram.com/v2/listen?${params}`;
     const createWs =
-      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } } as never));
+      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } }));
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {
       try {
         // Flux uses ListenV2TurnInfo with an `event` sub-field; connection
         // confirmation arrives as ListenV2Connected (ignored here).
-        const data = JSON.parse(event.data as string) as {
-          type?: string;
-          event?: string;
-          transcript?: string;
-          end_of_turn_confidence?: number;
-        };
+        const data = FluxMessageCodec.parse(event.data as string);
         if (data.type !== 'TurnInfo') return;
         if (data.event === 'StartOfTurn') {
           events.onStartOfTurn();
