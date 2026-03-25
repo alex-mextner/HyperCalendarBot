@@ -279,6 +279,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Tool output schemas must be concrete** — `parseToolOutput` in intent-executor validates JSON
   against known shapes (event lists, free slots, settings maps, etc.). When adding a new response
   format, add its schema to `ToolOutputSchema`.
+- **Never parse structured data from text output** — tool handlers that create or modify entities
+  (events, contacts, proposals) MUST return the entity ID in `ToolResult.data`, not only embed
+  it in the `output` string. Consumers (action log, intent executor, event mention tracker) read
+  `result.data.id` — never regex-parse `output`. If you need an ID downstream, make the handler
+  return it in `data`.
 - **Type co-location**: interfaces and type aliases must live in the same file as the code that owns
   them. Do not create a single global `types.ts` dumping ground. One exception: types shared across
   multiple layers without a clear owner may live in a small domain-level `types.ts`

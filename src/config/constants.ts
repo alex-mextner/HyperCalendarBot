@@ -228,6 +228,9 @@ export const MSG = {
       history: {
         notFound: 'No history found.',
       },
+      actionLog: {
+        notFound: 'No action log entries found.',
+      },
       meta: {
         noHolidays: 'No upcoming holidays. You may not have country subscriptions set up.',
         unknownName: 'unknown',
@@ -536,6 +539,9 @@ export const MSG = {
     aiTools: {
       history: {
         notFound: 'История не найдена.',
+      },
+      actionLog: {
+        notFound: 'Записей в логе действий не найдено.',
       },
       meta: {
         noHolidays: 'Праздников не найдено. Возможно, у тебя не настроены подписки на страны.',

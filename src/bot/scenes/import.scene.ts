@@ -1,5 +1,6 @@
 // src/bot/scenes/import.scene.ts
 import { Scene } from '@gramio/scenes';
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { ruPlural } from '../../services/event/formatters.ts';
 import { parseIcs } from '../../services/ics/parser.ts';
@@ -12,7 +13,12 @@ interface ImportParams {
   groupTimezone?: string;
 }
 
-export function createImportScene(eventService: EventService, botToken: string, userComposer: UserResolverComposer) {
+export function createImportScene(
+  eventService: EventService,
+  botToken: string,
+  userComposer: UserResolverComposer,
+  actionLogRepo?: ActionLogRepository,
+) {
   return (
     new Scene('import')
       .params<ImportParams>()
@@ -76,6 +82,16 @@ export function createImportScene(eventService: EventService, botToken: string, 
             });
             imported++;
           }
+
+          actionLogRepo?.insert({
+            user_id: user.telegram_id,
+            chat_id: Number(context.chatId ?? user.telegram_id),
+            action_type: 'scene',
+            action_name: 'import_events',
+            message_id: context.id,
+            input_summary: `${imported} events from .ics`,
+            result_summary: `imported ${imported}`,
+          });
 
           await context.send(
             lang === 'ru'

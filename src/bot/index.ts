@@ -57,6 +57,7 @@ import { handleHolidays } from './commands/holidays.ts';
 import { handleImport } from './commands/import.ts';
 import { handleInvitations } from './commands/invitations.ts';
 import { handleInvite } from './commands/invite.ts';
+import { handleLog } from './commands/log.ts';
 import { handleMonth } from './commands/month.ts';
 import { handlePing } from './commands/ping.ts';
 import { handleSearch } from './commands/search.ts';
@@ -315,6 +316,7 @@ export function createBot(
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
+    actionLogRepo: db.actionLog,
     agentRegistry,
     agentDispatcher,
     onboardingScene: scenesSetup.scenes.onboardingScene,
@@ -392,18 +394,32 @@ export function createBot(
 
       // Incoming text message (regular or command)
       const incomingText = context.update?.message?.text;
+      const incomingMsgId = context.update?.message?.message_id;
+      // Store chat_history row ID so downstream handlers can link action log entries
+      const mutableCtxAny = context as { _chatHistoryId?: number };
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
           // /cal is an AI command — save args as plain user message, not a command event
           const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
-          if (calArgs) conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId);
+          if (calArgs) {
+            mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId);
+          }
         } else if (incomingText.startsWith('/')) {
           const spaceIdx = incomingText.indexOf(' ');
           const cmdName = spaceIdx >= 0 ? incomingText.slice(0, spaceIdx) : incomingText;
           const cmdArgs = spaceIdx >= 0 ? incomingText.slice(spaceIdx + 1).trim() : undefined;
           conversationLogger.logCommand(user.telegram_id, cmdName, cmdArgs || undefined, logChatId);
+          // Log command to action log
+          db.actionLog.insert({
+            user_id: user.telegram_id,
+            chat_id: chatId ?? user.telegram_id,
+            action_type: 'command',
+            action_name: cmdName,
+            message_id: incomingMsgId,
+            input_summary: cmdArgs,
+          });
         } else {
-          conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId);
+          mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, incomingText, logChatId);
         }
       }
 
@@ -422,9 +438,19 @@ export function createBot(
 
         if (action === 'ai_btn') {
           const { answerText } = parseAiBtnPayload(payload);
-          conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId);
+          mutableCtxAny._chatHistoryId = conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId);
         } else {
           conversationLogger.logButtonPress(user.telegram_id, action, payload || undefined, logChatId);
+          // Log callback to action log
+          const cbMsgId = context.update?.callback_query?.message?.message_id;
+          db.actionLog.insert({
+            user_id: user.telegram_id,
+            chat_id: chatId ?? user.telegram_id,
+            action_type: 'callback',
+            action_name: action,
+            message_id: cbMsgId,
+            input_summary: payload || undefined,
+          });
         }
       }
 
@@ -481,6 +507,7 @@ export function createBot(
     .command('import', (ctx) => handleImport(ctx, scenesSetup.scenes.importScene, db.groupChats))
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
+    .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx, {

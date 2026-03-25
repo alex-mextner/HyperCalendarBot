@@ -10,7 +10,8 @@ export type BotTaskJobType =
   | 'cron-proposal-expiry'
   | 'cron-session-cleanup'
   | 'cron-birthday-sync'
-  | 'cron-recurring-reminders';
+  | 'cron-recurring-reminders'
+  | 'cron-action-log-cleanup';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -24,6 +25,7 @@ interface BotTasksQueueDeps {
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
   onRecurringReminders?: () => void;
+  onActionLogCleanup?: () => void;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -64,6 +66,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-recurring-reminders') {
         deps.onRecurringReminders?.();
+        return;
+      }
+      if (job.data.type === 'cron-action-log-cleanup') {
+        deps.onActionLogCleanup?.();
         return;
       }
     },
@@ -131,4 +137,14 @@ export async function setupRecurringRemindersCron(queue: Queue<BotTaskJobData>):
     { repeat: { every: 6 * 60 * 60_000 }, removeOnComplete: true, jobId: 'recurring-reminders-tick' },
   );
   botTasksLogger.info('Recurring reminders cron scheduled (every 6h)');
+}
+
+export async function setupActionLogCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  const WEEKLY_MS = 7 * 24 * 60 * 60_000;
+  await queue.add(
+    'action-log-cleanup-tick',
+    { type: 'cron-action-log-cleanup' },
+    { repeat: { every: WEEKLY_MS }, removeOnComplete: true, jobId: 'action-log-cleanup-tick' },
+  );
+  botTasksLogger.info('Action log cleanup cron scheduled (weekly, retains 90 days)');
 }

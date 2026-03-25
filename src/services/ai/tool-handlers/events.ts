@@ -311,11 +311,16 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
           success: true,
           output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
           agentHint: `⚠️ This event overlaps with: ${conflictList}. Warn the user about the overlap.`,
+          data: eventToSummary(event, ctx.user.timezone),
         };
       }
     }
 
-    return { success: true, output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')) };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
+      data: eventToSummary(event, ctx.user.timezone),
+    };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
   }
@@ -383,7 +388,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
     }
   }
 
-  return { success: true, output, agentHint: conflictHint };
+  return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {

@@ -4,8 +4,8 @@ import type { ChatHistoryRepository } from '../database/repositories/chat-histor
 export class ConversationLogger {
   constructor(private repo: ChatHistoryRepository) {}
 
-  logUserMessage(userId: number, text: string, chatId?: number): void {
-    this.repo.save(userId, 'user', text, chatId);
+  logUserMessage(userId: number, text: string, chatId?: number): number {
+    return this.repo.save(userId, 'user', text, chatId);
   }
 
   logBotResponse(userId: number, text: string, chatId?: number): void {

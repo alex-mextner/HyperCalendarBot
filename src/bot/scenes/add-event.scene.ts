@@ -3,6 +3,7 @@
 import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
 import { CB, t } from '../../config/constants.ts';
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
@@ -23,7 +24,11 @@ export function applyDefaultDuration(startAt: string, defaultMinutes: number): s
   return addMinutes(new Date(startAt), defaultMinutes).toISOString();
 }
 
-export function createAddEventScene(eventService: EventService, userComposer: UserResolverComposer) {
+export function createAddEventScene(
+  eventService: EventService,
+  userComposer: UserResolverComposer,
+  actionLogRepo?: ActionLogRepository,
+) {
   return (
     new Scene('add_event')
       .state<AddEventState>()
@@ -243,6 +248,18 @@ export function createAddEventScene(eventService: EventService, userComposer: Us
           description,
           location,
           recurrence_rule: recurrenceRule ?? undefined,
+        });
+
+        actionLogRepo?.insert({
+          user_id: user.telegram_id,
+          chat_id: Number(context.chatId ?? user.telegram_id),
+          action_type: 'scene',
+          action_name: 'create_event',
+          message_id: typeof context.id === 'number' ? context.id : undefined,
+          input_summary: title,
+          result_summary: `id: ${event.id}`,
+          target_event_id: event.id,
+          metadata: JSON.stringify({ startAt, endAt, recurrenceRule }),
         });
 
         await context.scene.exit();

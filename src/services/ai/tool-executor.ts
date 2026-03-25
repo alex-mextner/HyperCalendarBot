@@ -1,5 +1,6 @@
 import type { AgentCommand } from '../../agent/protocol.ts';
 import { logger } from '../../utils/logger.ts';
+import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import {
@@ -156,6 +157,14 @@ export interface ToolInputMap {
   };
   propose_calendar_change: ProposeInput;
   get_history: { limit?: number; search?: string; before?: string; after?: string };
+  get_action_log: {
+    event_id?: number;
+    action_type?: string;
+    action_name?: string;
+    after?: string;
+    before?: string;
+    limit?: number;
+  };
   schedule_ai_call: ScheduleAiCallInput;
   schedule_ai_calls_list: Record<never, never>;
   schedule_ai_call_cancel: TriggerIdInput;
@@ -181,6 +190,40 @@ export type ToolName = keyof ToolInputMap;
 
 const aiLogger = logger.child({ module: 'ai' });
 
+/** Tools that are read-only or meta — not worth logging as user actions. */
+const SKIP_ACTION_LOG = new Set<string>([
+  'supplement_skip',
+  'end_conversation',
+  'get_events',
+  'get_event',
+  'get_upcoming',
+  'get_free_slots',
+  'search_events',
+  'get_reminders',
+  'get_contacts',
+  'find_contact',
+  'find_user',
+  'get_history',
+  'get_holidays',
+  'get_invitation_status',
+  'get_google_calendar_status',
+  'list_google_calendars',
+  'list_calendar_access',
+  'get_timezone_info',
+  'convert_to_timezone',
+  'get_bot_info',
+  'calculate',
+  'lookup_stress',
+  'schedule_ai_calls_list',
+  'list_triggers',
+  'set_reaction',
+  'ask_user',
+  'pick_users',
+  'resume_scene',
+  'cancel_scene',
+  'get_action_log',
+]);
+
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
@@ -189,12 +232,36 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
 
     // Track which event was touched, for last_mentioned_event resolution in intents
     if (result.success) {
-      const inputObj = input as ToolInputMap[ToolName];
-      if ('event_id' in inputObj && typeof inputObj.event_id === 'number') {
-        ctx.onEventMentioned?.(inputObj.event_id);
-      } else if (toolName === 'create_event' && result.output) {
-        const m = /^id:\s*(\d+)/m.exec(result.output);
-        if (m?.[1]) ctx.onEventMentioned?.(Number.parseInt(m[1], 10));
+      const eventId = extractEventId(input as ToolInputMap[ToolName], result);
+      if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+    }
+
+    // Log mutating tool calls to user_action_log
+    if (ctx.actionLogRepo && !SKIP_ACTION_LOG.has(toolName)) {
+      try {
+        const inputObj = input as ToolInputMap[ToolName];
+        const eventId = extractEventId(inputObj, result);
+        const targetUserId = extractTargetUserId(inputObj);
+        ctx.actionLogRepo.insert({
+          user_id: ctx.user.telegram_id,
+          chat_id: ctx.chatId,
+          action_type: 'ai_tool',
+          action_name: toolName,
+          message_id: ctx.incomingMessageId,
+          chat_history_id: ctx.chatHistoryId,
+          input_summary: summarizeInput(toolName, inputObj),
+          result_summary: result.output?.slice(0, 500) ?? result.error?.slice(0, 500),
+          metadata: JSON.stringify({
+            ...inputObj,
+            ...(ctx.inputMode && { _inputMode: ctx.inputMode }),
+            ...(ctx.voiceFileId && { _voiceFileId: ctx.voiceFileId }),
+          }),
+          target_event_id: eventId,
+          target_user_id: targetUserId,
+          success: result.success,
+        });
+      } catch (logErr) {
+        aiLogger.warn({ err: logErr, tool: toolName }, 'Failed to log action');
       }
     }
 
@@ -203,6 +270,31 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
     return { success: false, error: `Tool execution failed: ${String(outerError)}` };
   }
+}
+
+function extractEventId(input: ToolInputMap[ToolName], result: ToolResult): number | undefined {
+  if ('event_id' in input && typeof input.event_id === 'number') return input.event_id;
+  // Handlers return structured EventSummary in result.data — use it instead of parsing text
+  if (result.data && typeof result.data === 'object' && 'id' in result.data && typeof result.data.id === 'number') {
+    return result.data.id;
+  }
+  return undefined;
+}
+
+function extractTargetUserId(input: ToolInputMap[ToolName]): number | undefined {
+  if ('invitee_id' in input && typeof input.invitee_id === 'number') return input.invitee_id;
+  if ('secretary_telegram_id' in input && typeof input.secretary_telegram_id === 'number')
+    return input.secretary_telegram_id;
+  if ('target_id' in input && typeof input.target_id === 'number') return input.target_id;
+  return undefined;
+}
+
+function summarizeInput(toolName: string, input: ToolInputMap[ToolName]): string {
+  if ('title' in input && typeof input.title === 'string') return input.title;
+  if ('message' in input && typeof input.message === 'string') return input.message.slice(0, 200);
+  if ('text' in input && typeof input.text === 'string') return input.text.slice(0, 200);
+  if ('expression' in input && typeof input.expression === 'string') return input.expression;
+  return toolName;
 }
 
 async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
@@ -366,6 +458,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'get_history':
         return handleGetHistory(ctx, input as ToolInputMap['get_history']);
+
+      case 'get_action_log':
+        return handleGetActionLog(ctx, input as ToolInputMap['get_action_log']);
 
       case 'schedule_ai_call':
         return handleScheduleAiCall(ctx, input as ToolInputMap['schedule_ai_call']);

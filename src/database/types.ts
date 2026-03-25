@@ -653,3 +653,39 @@ export interface UserMemoryEntry {
   content: string;
   created_at: string;
 }
+
+// --- User Action Log ---
+
+export type ActionType = 'command' | 'ai_tool' | 'callback' | 'intent_match' | 'scene';
+
+export interface UserActionLog {
+  id: number;
+  user_id: number;
+  chat_id: number;
+  action_type: ActionType;
+  action_name: string;
+  message_id: number | null;
+  chat_history_id: number | null;
+  input_summary: string | null;
+  result_summary: string | null;
+  metadata: string | null; // JSON
+  target_event_id: number | null;
+  target_user_id: number | null;
+  success: number; // 0 | 1
+  created_at: string;
+}
+
+export interface CreateUserActionLogData {
+  user_id: number;
+  chat_id: number;
+  action_type: ActionType;
+  action_name: string;
+  message_id?: number;
+  chat_history_id?: number;
+  input_summary?: string;
+  result_summary?: string;
+  metadata?: string;
+  target_event_id?: number;
+  target_user_id?: number;
+  success?: boolean;
+}
