@@ -407,6 +407,7 @@ if (config.REDIS_URL) {
     setupProposalExpiryCron,
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
+    setupChatHistoryCleanupCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
@@ -450,6 +451,10 @@ if (config.REDIS_URL) {
         await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
       }
     },
+    onChatHistoryCleanup: () => {
+      const deleted = db.chatHistory.deleteOlderThan(90);
+      botLogger.info({ deleted }, 'Cleaned up old chat history');
+    },
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
@@ -457,6 +462,7 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
+  await setupChatHistoryCleanupCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {

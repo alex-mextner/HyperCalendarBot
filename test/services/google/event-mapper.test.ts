@@ -44,6 +44,42 @@ describe('event-mapper', () => {
       expect(result.start?.dateTime).toBeUndefined();
     });
 
+    test('single-day all-day event with end_at == start_at gets end.date bumped +1 day', () => {
+      const result = localToGoogle({
+        id: 2,
+        title: 'Birthday',
+        start_at: '2026-03-15T00:00:00Z',
+        end_at: '2026-03-15T00:00:00Z',
+        all_day: 1,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.start?.date).toBe('2026-03-15');
+      expect(result.end?.date).toBe('2026-03-16');
+    });
+
+    test('single-day all-day event with null end_at gets end.date bumped +1 day', () => {
+      const result = localToGoogle({
+        id: 2,
+        title: 'Holiday',
+        start_at: '2026-03-15T00:00:00Z',
+        end_at: null,
+        all_day: 1,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.start?.date).toBe('2026-03-15');
+      expect(result.end?.date).toBe('2026-03-16');
+    });
+
     test('maps recurrence rule', () => {
       const result = localToGoogle({
         id: 3,
@@ -186,9 +222,7 @@ describe('localToGoogle — reminder_overrides resilience', () => {
   };
 
   test('invalid JSON in reminder_overrides does not throw', () => {
-    expect(() =>
-      localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' }),
-    ).not.toThrow();
+    expect(() => localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' })).not.toThrow();
   });
 
   test('invalid JSON yields no reminders field', () => {

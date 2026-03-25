@@ -82,15 +82,15 @@ describe('NotificationPreferencesRepository', () => {
 
   test('update throws on unknown field', () => {
     repo.ensureDefaults(42);
-    expect(() =>
-      repo.update(42, { injected_column: 'x' } as never),
-    ).toThrow('Unknown notification preference field: injected_column');
+    expect(() => repo.update(42, { injected_column: 'x' } as never)).toThrow(
+      'Unknown notification preference field: injected_column',
+    );
   });
 
   test('update throws on SQL injection attempt in field name', () => {
     repo.ensureDefaults(42);
-    expect(() =>
-      repo.update(42, { 'morning_agenda_time; DROP TABLE users; --': '1' } as never),
-    ).toThrow(/Unknown notification preference field/);
+    expect(() => repo.update(42, { 'morning_agenda_time; DROP TABLE users; --': '1' } as never)).toThrow(
+      /Unknown notification preference field/,
+    );
   });
 });

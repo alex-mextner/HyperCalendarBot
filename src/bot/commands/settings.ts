@@ -168,7 +168,7 @@ function buildReminderIntervalsView(intervals: number[], lang: 'en' | 'ru'): { t
   const text = [s.reminderIntervalsTitle, '', s.reminderIntervalsActive(active), `  ${s.reminderIntervalsHint}`].join(
     '\n',
   );
-  return { text, kb: reminderIntervalsKeyboard(intervals) };
+  return { text, kb: reminderIntervalsKeyboard(intervals, lang) };
 }
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
@@ -335,7 +335,7 @@ export async function handleSettingsCallback(
       const currentLang = (currentUser.language ?? 'en') as 'en' | 'ru';
       await ctx.answer();
       await ctx.editText(t(currentLang).settings.showCountries, {
-        reply_markup: countryPickerKeyboard(currentUser.country_code),
+        reply_markup: countryPickerKeyboard(currentUser.country_code, currentLang),
       });
       return;
     }

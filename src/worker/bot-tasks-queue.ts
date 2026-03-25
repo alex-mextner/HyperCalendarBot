@@ -9,7 +9,8 @@ export type BotTaskJobType =
   | 'cron-sharing-cleanup'
   | 'cron-proposal-expiry'
   | 'cron-session-cleanup'
-  | 'cron-birthday-sync';
+  | 'cron-birthday-sync'
+  | 'cron-chat-history-cleanup';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -22,6 +23,7 @@ interface BotTasksQueueDeps {
   onProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
+  onChatHistoryCleanup?: () => void;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -58,6 +60,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-birthday-sync') {
         if (deps.onBirthdaySync) await deps.onBirthdaySync();
+        return;
+      }
+      if (job.data.type === 'cron-chat-history-cleanup') {
+        deps.onChatHistoryCleanup?.();
         return;
       }
     },
@@ -116,4 +122,13 @@ export async function setupBirthdaySyncCron(queue: Queue<BotTaskJobData>): Promi
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'birthday-sync-tick' },
   );
   botTasksLogger.info('Birthday sync cron scheduled (daily)');
+}
+
+export async function setupChatHistoryCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'chat-history-cleanup-tick',
+    { type: 'cron-chat-history-cleanup' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'chat-history-cleanup-tick' },
+  );
+  botTasksLogger.info('Chat history cleanup cron scheduled (daily)');
 }

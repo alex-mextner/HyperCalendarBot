@@ -44,7 +44,7 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
     await ctx.send(
       lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:',
       {
-        reply_markup: eventPickerKeyboard(events, timezone, CB.INVITE_PICK),
+        reply_markup: eventPickerKeyboard(events, timezone, CB.INVITE_PICK, lang),
       },
     );
     return;
@@ -57,6 +57,6 @@ export async function handleInvite(ctx: BotCommandContext, deps: InviteDeps): Pr
   }
 
   await ctx.send(lang === 'ru' ? '📨 Выберите событие для приглашения:' : '📨 Select an event to invite someone to:', {
-    reply_markup: eventPickerKeyboard(events, user.timezone, CB.INVITE_PICK),
+    reply_markup: eventPickerKeyboard(events, user.timezone, CB.INVITE_PICK, lang),
   });
 }

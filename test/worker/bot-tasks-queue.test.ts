@@ -42,6 +42,7 @@ const {
   setupProposalExpiryCron,
   setupSessionCleanupCron,
   setupBirthdaySyncCron,
+  setupChatHistoryCleanupCron,
 } = await import('../../src/worker/bot-tasks-queue.ts');
 
 describe('createBotTasksQueue', () => {
@@ -109,11 +110,19 @@ describe('bot-tasks job processor', () => {
     expect(onBirthdaySync).toHaveBeenCalledTimes(1);
   });
 
+  test('calls onChatHistoryCleanup for cron-chat-history-cleanup', async () => {
+    const onChatHistoryCleanup = mock(() => {});
+    createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onChatHistoryCleanup });
+    await capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } });
+    expect(onChatHistoryCleanup).toHaveBeenCalledTimes(1);
+  });
+
   test('does not throw when optional handlers are absent', async () => {
     createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await expect(capturedProcessor({ data: { type: 'cron-secretary-expiry' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-sharing-cleanup' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-birthday-sync' } })).resolves.toBeUndefined();
+    await expect(capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } })).resolves.toBeUndefined();
   });
 
   test('failed handler logs without throwing when job is present', () => {
@@ -208,5 +217,21 @@ describe('cron setup functions', () => {
     expect(data.type).toBe('cron-birthday-sync');
     expect(opts.repeat.every).toBe(24 * 60 * 60_000);
     expect(opts.jobId).toBe('birthday-sync-tick');
+  });
+
+  test('setupChatHistoryCleanupCron adds job with daily interval', async () => {
+    mockQueueAdd.mockClear();
+    const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
+    await setupChatHistoryCleanupCron(queue);
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+      string,
+      { type: string },
+      { repeat: { every: number }; jobId: string },
+    ];
+    expect(name).toBe('chat-history-cleanup-tick');
+    expect(data.type).toBe('cron-chat-history-cleanup');
+    expect(opts.repeat.every).toBe(24 * 60 * 60_000);
+    expect(opts.jobId).toBe('chat-history-cleanup-tick');
   });
 });

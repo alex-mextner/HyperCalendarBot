@@ -75,8 +75,16 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   };
 
   if (local.all_day) {
-    event.start = { date: local.start_at.split('T')[0] };
-    event.end = { date: (local.end_at ?? local.start_at).split('T')[0] };
+    const startDate = local.start_at.split('T')[0];
+    const rawEndDate = (local.end_at ?? local.start_at).split('T')[0];
+    // Google Calendar requires end.date > start.date for all-day events (exclusive end).
+    // When end_at is absent or points to the same calendar day as start_at, advance by one day.
+    const endDate =
+      rawEndDate <= startDate
+        ? new Date(new Date(`${startDate}T00:00:00Z`).getTime() + 86_400_000).toISOString().split('T')[0]
+        : rawEndDate;
+    event.start = { date: startDate };
+    event.end = { date: endDate };
   } else {
     event.start = { dateTime: local.start_at, timeZone: local.timezone };
     event.end = local.end_at

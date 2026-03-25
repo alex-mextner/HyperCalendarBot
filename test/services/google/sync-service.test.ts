@@ -165,9 +165,24 @@ describe('SyncService.initialSync — transaction atomicity', () => {
 
     const api = createMockApi(
       [
-        { id: 'g1', summary: 'Event A', start: { dateTime: '2026-03-15T10:00:00Z' }, end: { dateTime: '2026-03-15T11:00:00Z' } },
-        { id: 'g2', summary: 'Event B', start: { dateTime: '2026-03-15T12:00:00Z' }, end: { dateTime: '2026-03-15T13:00:00Z' } },
-        { id: 'g3', summary: 'Event C', start: { dateTime: '2026-03-15T14:00:00Z' }, end: { dateTime: '2026-03-15T15:00:00Z' } },
+        {
+          id: 'g1',
+          summary: 'Event A',
+          start: { dateTime: '2026-03-15T10:00:00Z' },
+          end: { dateTime: '2026-03-15T11:00:00Z' },
+        },
+        {
+          id: 'g2',
+          summary: 'Event B',
+          start: { dateTime: '2026-03-15T12:00:00Z' },
+          end: { dateTime: '2026-03-15T13:00:00Z' },
+        },
+        {
+          id: 'g3',
+          summary: 'Event C',
+          start: { dateTime: '2026-03-15T14:00:00Z' },
+          end: { dateTime: '2026-03-15T15:00:00Z' },
+        },
       ],
       'token-x',
     );
@@ -182,8 +197,18 @@ describe('SyncService.initialSync — transaction atomicity', () => {
   test('succeeds and all events persist when no failure', async () => {
     const api = createMockApi(
       [
-        { id: 'g1', summary: 'A', start: { dateTime: '2026-03-15T10:00:00Z' }, end: { dateTime: '2026-03-15T11:00:00Z' } },
-        { id: 'g2', summary: 'B', start: { dateTime: '2026-03-15T12:00:00Z' }, end: { dateTime: '2026-03-15T13:00:00Z' } },
+        {
+          id: 'g1',
+          summary: 'A',
+          start: { dateTime: '2026-03-15T10:00:00Z' },
+          end: { dateTime: '2026-03-15T11:00:00Z' },
+        },
+        {
+          id: 'g2',
+          summary: 'B',
+          start: { dateTime: '2026-03-15T12:00:00Z' },
+          end: { dateTime: '2026-03-15T13:00:00Z' },
+        },
       ],
       'token-y',
     );

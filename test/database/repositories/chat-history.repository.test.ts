@@ -133,6 +133,28 @@ describe('ChatHistoryRepository', () => {
     expect(results[0]!.content).toBe('group message');
   });
 
+  test('deleteOlderThan removes rows older than the threshold', () => {
+    db.exec(
+      `INSERT INTO chat_history (user_id, role, content, created_at) VALUES (${USER_ID}, 'user', 'very old', '2020-01-01 00:00:00')`,
+    );
+    db.exec(
+      `INSERT INTO chat_history (user_id, role, content, created_at) VALUES (${USER_ID}, 'user', 'also old', '2020-06-15 12:00:00')`,
+    );
+    repo.save(USER_ID, 'user', 'recent message');
+    const deleted = repo.deleteOlderThan(90);
+    expect(deleted).toBe(2);
+    const remaining = repo.getRecent(USER_ID);
+    expect(remaining.length).toBe(1);
+    expect(remaining[0]!.content).toBe('recent message');
+  });
+
+  test('deleteOlderThan returns 0 when nothing is old enough', () => {
+    repo.save(USER_ID, 'user', 'Hello');
+    const deleted = repo.deleteOlderThan(90);
+    expect(deleted).toBe(0);
+    expect(repo.getRecent(USER_ID).length).toBe(1);
+  });
+
   test('clear removes all messages for user', () => {
     repo.save(USER_ID, 'user', 'Hello');
     repo.save(USER_ID, 'assistant', 'Hi');

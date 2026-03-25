@@ -681,15 +681,15 @@ describe('EventRepository.updateSyncFields column allowlist', () => {
 
   test('unknown field throws with descriptive error', () => {
     const event = createSyncedEvent();
-    expect(() =>
-      events.updateSyncFields(event.id, { injected_column: 'DROP TABLE events' } as never),
-    ).toThrow('Unknown sync field: injected_column');
+    expect(() => events.updateSyncFields(event.id, { injected_column: 'DROP TABLE events' } as never)).toThrow(
+      'Unknown sync field: injected_column',
+    );
   });
 
   test('multiple unknown fields each throw', () => {
     const event = createSyncedEvent();
-    expect(() =>
-      events.updateSyncFields(event.id, { malicious: '1; DROP TABLE events; --' } as never),
-    ).toThrow('Unknown sync field: malicious');
+    expect(() => events.updateSyncFields(event.id, { malicious: '1; DROP TABLE events; --' } as never)).toThrow(
+      'Unknown sync field: malicious',
+    );
   });
 });

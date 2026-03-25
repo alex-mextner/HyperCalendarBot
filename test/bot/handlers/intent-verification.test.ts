@@ -434,15 +434,30 @@ describe('intent callback authorization guard', () => {
 
   test('non-admin cannot trigger intent_edit session', async () => {
     const id = createIntent();
-    const adminEditSessions = new Map<number, { intentId: number; state: 'awaiting_instructions'; createdAt: number }>();
+    const adminEditSessions = new Map<
+      number,
+      { intentId: number; state: 'awaiting_instructions'; createdAt: number }
+    >();
     const handler = createCallbackHandler(
       {} as never,
       {} as never,
       {} as never,
       {} as never,
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined, undefined, undefined, undefined,
-      undefined, undefined, undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
       undefined,
       { intentRepo, adminId: ADMIN_ID, adminEditSessions },
     );
