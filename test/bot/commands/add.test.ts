@@ -28,26 +28,36 @@ function makePrivateCtx(args: string) {
 }
 
 test('handleAdd in group with no args enters scene without crash', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as never as GroupChatRepository;
+  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as unknown as GroupChatRepository;
   const ctx = makeGroupCtx('');
-  await handleAdd(ctx as never, {} as never as EventService, stubScene, groupRepo);
+  await handleAdd(
+    ctx as unknown as Parameters<typeof handleAdd>[0],
+    {} as unknown as EventService,
+    stubScene,
+    groupRepo,
+  );
   expect(ctx.scene.enter).toHaveBeenCalled();
 });
 
 test("handleAdd in group with no timezone sends prompt containing 'таймзону'", async () => {
-  const groupRepo = { getTimezone: mock(() => null) } as never as GroupChatRepository;
+  const groupRepo = { getTimezone: mock(() => null) } as unknown as GroupChatRepository;
   let sentText = '';
   const send = mock((text: string) => {
     sentText = text;
     return Promise.resolve();
   });
   const ctx = makeGroupCtx('Встреча завтра', { send });
-  await handleAdd(ctx as never, {} as never as EventService, stubScene, groupRepo);
+  await handleAdd(
+    ctx as unknown as Parameters<typeof handleAdd>[0],
+    {} as unknown as EventService,
+    stubScene,
+    groupRepo,
+  );
   expect(sentText).toContain('таймзону');
 });
 
 test('handleAdd in group with timezone creates event with group fields', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as never as GroupChatRepository;
+  const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') } as unknown as GroupChatRepository;
   let createdData: CreateEventData | null = null;
   const fakeEvent = {
     id: 1,
@@ -62,9 +72,9 @@ test('handleAdd in group with timezone creates event with group fields', async (
       createdData = data;
       return fakeEvent;
     }),
-  } as never as EventService;
+  } as unknown as EventService;
   const ctx = makeGroupCtx('Встреча завтра', {});
-  await handleAdd(ctx as never, eventService, stubScene, groupRepo);
+  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
   // Parsing "Встреча завтра" succeeds -> createEvent is called
   expect(createdData).not.toBeNull();
   expect(createdData!.owner_type).toBe('group');
@@ -73,7 +83,7 @@ test('handleAdd in group with timezone creates event with group fields', async (
 });
 
 test('handleAdd in group quick-add uses group timezone not user timezone', async () => {
-  const groupRepo = { getTimezone: mock(() => 'Asia/Tokyo') } as never as GroupChatRepository;
+  const groupRepo = { getTimezone: mock(() => 'Asia/Tokyo') } as unknown as GroupChatRepository;
   let createdData: CreateEventData | null = null;
   const fakeEvent = {
     id: 1,
@@ -88,9 +98,9 @@ test('handleAdd in group quick-add uses group timezone not user timezone', async
       createdData = data;
       return fakeEvent;
     }),
-  } as never as EventService;
+  } as unknown as EventService;
   const ctx = makeGroupCtx('Митинг завтра', {});
-  await handleAdd(ctx as never, eventService, stubScene, groupRepo);
+  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene, groupRepo);
   expect(createdData).not.toBeNull();
   expect(createdData!.timezone).toBe('Asia/Tokyo');
 });
@@ -110,9 +120,9 @@ test('handleAdd in private chat does not set group fields', async () => {
       createdData = data;
       return fakeEvent;
     }),
-  } as never as EventService;
+  } as unknown as EventService;
   const ctx = makePrivateCtx('Task завтра');
-  await handleAdd(ctx as never, eventService, stubScene);
+  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], eventService, stubScene);
   expect(createdData).not.toBeNull();
   expect(createdData!.owner_type).not.toBe('group');
   expect(createdData!.group_id).toBeUndefined();
@@ -120,6 +130,6 @@ test('handleAdd in private chat does not set group fields', async () => {
 
 test('handleAdd in private chat with no args enters scene', async () => {
   const ctx = makePrivateCtx('');
-  await handleAdd(ctx as never, {} as never as EventService, stubScene);
+  await handleAdd(ctx as unknown as Parameters<typeof handleAdd>[0], {} as unknown as EventService, stubScene);
   expect(ctx.scene.enter).toHaveBeenCalled();
 });

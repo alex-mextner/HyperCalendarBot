@@ -257,6 +257,15 @@ Optional features that depend on an env var must deactivate gracefully when the 
   There is no acceptable use case. If you think you need it, the types are wrong — fix them.
 - **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
   It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
+- **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test
+  files (`test/`), partial mocks that implement a subset of an interface are allowed to use
+  `as unknown as RealType` under these conditions:
+  1. The cast is inside a **centralized factory function** (`makeCtx`, `makeDeps`, `mockWs`),
+     never inline at the test call site
+  2. The factory parameter is typed as `Partial<RealInterface>`, not `Record<string, unknown>`
+  3. `as never` remains banned everywhere — use `as unknown as X` in test factories
+  4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
+     (bun:test types `calls` as `unknown[][]` — no way around it)
 - **`JSON.parse` must always go through Zod** — never use the raw return value. Always
   `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
   For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
@@ -334,16 +343,18 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
-- **No `as unknown as` in tests** — if you need a partial mock, use `Partial<RealType>` or build
-  a typed factory function. Double casts hide real type errors in tests, making them useless as
-  regression guards. When mock shape matches the production interface, no cast is needed.
+- **Centralize test casts in factory functions** — never write `as unknown as X` inline at the
+  test call site. Casts are allowed only inside `makeCtx`/`makeDeps`/`mockWs`-style factories
+  (see "Test-only cast exceptions" in Coding Guidelines). The factory parameter must be
+  `Partial<RealInterface>`, not `Record<string, unknown>`.
   ```ts
-  // Bad — hides type errors, test won't catch interface changes
+  // Bad — inline cast at call site, no type checking
   const ctx = { send: mock(() => {}) } as unknown as AgentContext;
-  // Good — TypeScript will error if AgentContext changes
+  // Good — cast centralized in factory, overrides are typed
   function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
-    return { ...baseCtx, ...overrides };
+    return { ...baseCtx, ...overrides } as unknown as AgentContext;
   }
+  const ctx = makeCtx({ send: mock(() => {}) }); // no cast here
   ```
 - **No `Record<string, unknown>` in mock factories** — use `Partial<ConcreteInterface>` for
   override parameters. `Record<string, unknown>` defeats the purpose of typed tests: you can pass
