@@ -1,5 +1,6 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
@@ -28,6 +29,7 @@ export function createIntentMatcherLayer(
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
   onEventMentioned?: (userId: number, eventId: number) => void,
   conversationLogger?: ConversationLogger,
+  actionLogRepo?: ActionLogRepository,
 ) {
   return async (
     ctx: BotCommandContext,
@@ -90,6 +92,18 @@ export function createIntentMatcherLayer(
       return { handled: false };
     }
     const workflow: Workflow = workflowResult.data;
+
+    // Log intent match to action log
+    if (actionLogRepo) {
+      actionLogRepo.insert({
+        user_id: userId,
+        chat_id: chatId,
+        action_type: 'intent_match',
+        action_name: intent.canonical_name,
+        message_id: ctx.id,
+        input_summary: messageText.slice(0, 200),
+      });
+    }
 
     // 4. Execute
     const eventCtx = getEventContext ? await getEventContext(user.telegram_id, user.timezone) : {};

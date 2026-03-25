@@ -400,6 +400,7 @@ if (config.REDIS_URL) {
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
     setupRecurringRemindersCron,
+    setupActionLogCleanupCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
@@ -438,6 +439,11 @@ if (config.REDIS_URL) {
       db.groupSessions.deleteExpired();
       db.eventMentions.deleteExpired();
     },
+    onActionLogCleanup: () => {
+      const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
+      const deleted = db.actionLog.deleteOlderThan(cutoff);
+      if (deleted > 0) botLogger.info({ deleted }, 'Action log cleanup: removed old entries');
+    },
     onBirthdaySync: async () => {
       const BATCH = 100;
       const users = db.birthdayMeta.getUsersNeedingSync(BIRTHDAY_SYNC_THROTTLE_MS);
@@ -456,6 +462,7 @@ if (config.REDIS_URL) {
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
+  await setupActionLogCleanupCron(botTasksQueue);
 
   botTasksQueueCleanup = {
     close: async () => {

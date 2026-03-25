@@ -2,6 +2,7 @@
 import { Scene } from '@gramio/scenes';
 import { addMinutes } from 'date-fns';
 import { t } from '../../config/constants.ts';
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { UpdateEventData } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
@@ -33,7 +34,11 @@ const EDIT_PROMPTS: Record<string, Record<string, string>> = {
   },
 };
 
-export function createEditValueScene(eventService: EventService, userComposer: UserResolverComposer) {
+export function createEditValueScene(
+  eventService: EventService,
+  userComposer: UserResolverComposer,
+  actionLogRepo?: ActionLogRepository,
+) {
   return (
     new Scene('edit_value')
       .params<EditValueParams>()
@@ -100,6 +105,20 @@ export function createEditValueScene(eventService: EventService, userComposer: U
 
         const updated = eventService.updateEvent(eventId, user.telegram_id, updateData);
         const { chatId, messageId } = context.scene.params;
+
+        actionLogRepo?.insert({
+          user_id: user.telegram_id,
+          chat_id: chatId,
+          action_type: 'scene',
+          action_name: `edit_event_${field}`,
+          message_id: context.id,
+          input_summary: text,
+          result_summary: updated ? `updated ${field}` : 'failed',
+          target_event_id: eventId,
+          metadata: JSON.stringify(updateData),
+          success: !!updated,
+        });
+
         await context.scene.exit();
 
         if (updated) {

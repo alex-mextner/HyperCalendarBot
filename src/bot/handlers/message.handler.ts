@@ -153,6 +153,8 @@ export interface MessageHandlerDeps {
   ) => Promise<void>;
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
+  chatHistoryIds?: Map<number, number>;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
@@ -370,11 +372,14 @@ async function handleVoiceMessage(
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
 
     const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
-    deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
+    const chatHistoryId = deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
 
     const agentContext: AgentContext = {
       ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
       inputMode: 'voice_message',
+      incomingMessageId: ctx.id,
+      chatHistoryId,
+      voiceFileId: voice.file_id,
     };
 
     const { responseText } = await deps.agent.run(agentContext);
@@ -514,6 +519,8 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
           })(),
       birthdayService: deps.birthdayService,
       userMemoryRepo: deps.userMemoryRepo,
+      actionLogRepo: deps.actionLogRepo,
+      chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       agentRegistry: deps.agentRegistry,
       agentDispatcher: deps.agentDispatcher,
       sceneStorage: {
@@ -1114,6 +1121,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               });
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
+              // chatHistoryId is set via buildAgentContextFactory from deps.chatHistoryIds
               // Track which events the intent touches
               agentCtx.onEventMentioned = (eventId) => {
                 Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
@@ -1131,6 +1139,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               });
             },
             deps.conversationLogger,
+            deps.actionLogRepo,
           )
         : undefined;
 

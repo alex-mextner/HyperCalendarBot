@@ -1,6 +1,7 @@
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramMessage } from 'gramio';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -46,6 +47,8 @@ export interface AgentContext {
   messageText: string;
   /** Telegram message_id of the incoming message being processed. Used for set_reaction. */
   incomingMessageId?: number;
+  /** chat_history row ID of the incoming user message. Used to link action log → conversation. */
+  chatHistoryId?: number;
   isGroup: boolean;
   groupChatId?: number;
   groupTitle?: string;
@@ -87,6 +90,8 @@ export interface AgentContext {
   deepLinkService?: DeepLinkService;
   botUsername?: string;
   inputMode?: 'text' | 'voice_message' | 'live_call';
+  /** Telegram file_id of the voice message that triggered this interaction. */
+  voiceFileId?: string;
   supplementMode?: boolean;
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;
@@ -117,6 +122,7 @@ export interface AgentContext {
   recentEventsWindow?: EventOccurrence[];
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  actionLogRepo?: ActionLogRepository;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   onAgentChunk?: (text: string) => void;

@@ -28,9 +28,9 @@ export function createScenesPlugin(
   // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
   const scopedStorage = wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
 
-  const addEventScene = createAddEventScene(eventService, userComposer);
-  const editValueScene = createEditValueScene(eventService, userComposer);
-  const importScene = createImportScene(eventService, botToken, userComposer);
+  const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog);
+  const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
+  const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer, aiModel);
   const onboardingScene = createOnboardingScene(
     db,

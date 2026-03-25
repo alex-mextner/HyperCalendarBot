@@ -980,6 +980,44 @@ During a voice call the table is still sent to chat; you MUST mention it verball
     },
   },
   {
+    name: 'get_action_log',
+    description:
+      'Query the user action log — a structured audit trail of all mutating actions performed through commands, AI tools, ' +
+      'callbacks, and intent matches. Use this to answer "why was event X deleted?", "who changed my calendar?", ' +
+      '"what did I do yesterday?". Each entry includes a Telegram message link when available.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: {
+          type: 'number',
+          description: 'Filter by target event ID — shows all actions that affected this event',
+        },
+        action_type: {
+          type: 'string',
+          enum: ['command', 'ai_tool', 'callback', 'intent_match', 'scene'],
+          description: 'Filter by action type',
+        },
+        action_name: {
+          type: 'string',
+          description: 'Filter by action name (e.g. "create_event", "/add", "delete_event")',
+        },
+        after: {
+          type: 'string',
+          description: 'Return entries after this datetime (ISO 8601)',
+        },
+        before: {
+          type: 'string',
+          description: 'Return entries before this datetime (ISO 8601)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max entries to return (default 30)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'schedule_ai_call',
     description:
       'Schedule a one-time or recurring message to be injected into the AI pipeline on your behalf at a future time. The bot will process it as if you sent it. Use run_at for one-time, cron for recurring. Always convert user local time to UTC using their timezone before calling.',

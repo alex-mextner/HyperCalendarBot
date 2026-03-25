@@ -329,6 +329,17 @@ const getHistorySchema = z
   })
   .passthrough();
 
+const getActionLogSchema = z
+  .object({
+    event_id: z.number().optional(),
+    action_type: z.string().optional(),
+    action_name: z.string().optional(),
+    after: z.string().optional(),
+    before: z.string().optional(),
+    limit: z.number().optional(),
+  })
+  .passthrough();
+
 // ── Scheduled / Trigger tools ──
 
 const scheduleAiCallSchema = z
@@ -449,6 +460,7 @@ export const toolSchemas: Partial<Record<ToolName, z.ZodType>> = {
   convert_to_timezone: convertToTimezoneSchema,
   lookup_stress: lookupStressSchema,
   get_history: getHistorySchema,
+  get_action_log: getActionLogSchema,
 
   // Scheduled / Trigger tools
   schedule_ai_call: scheduleAiCallSchema,
