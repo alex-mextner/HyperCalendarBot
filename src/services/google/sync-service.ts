@@ -179,6 +179,7 @@ export class SyncService {
 
     // Run the SELECT + writes atomically to prevent races between concurrent sync jobs
     let conflictNotification: (() => Promise<void>) | null = null;
+    // TypeScript infers the transaction return as never due to the mutable closure; cast explicitly.
     const applyUpdate = this.db.transaction(() => {
       const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
 
@@ -186,7 +187,7 @@ export class SyncService {
         if (existing.sync_status === 'pending_push') {
           const winner = this.resolveConflict(existing, gEvent.updated ?? '');
           if (winner === 'keep_local') {
-            return 'keep_local';
+            return;
           }
           this.syncRepo.logSync({
             user_id: userId,
@@ -252,7 +253,9 @@ export class SyncService {
       }
     });
     applyUpdate();
-    if (conflictNotification) await conflictNotification();
+    // TypeScript loses track of the mutable variable after the transaction closure; reassert the type.
+    const notify = conflictNotification as (() => Promise<void>) | null;
+    if (notify) await notify();
   }
 
   async setupWatchChannel(

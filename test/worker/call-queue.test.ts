@@ -58,7 +58,7 @@ describe('createCallQueue', () => {
       language: 'ru',
     });
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { userId: number; sessionId: string },
       { attempts: number; removeOnComplete: boolean; removeOnFail: boolean },
@@ -78,7 +78,7 @@ describe('createCallQueue', () => {
     for (let i = 0; i < 5; i++) {
       mockQueueAdd.mockClear();
       await enqueue({ userId: 1, callLogId: i, ttsText: 'x', language: 'en' });
-      const [, data] = mockQueueAdd.mock.calls[0] as [string, { sessionId: string }];
+      const [, data] = mockQueueAdd.mock.calls[0] as unknown as [string, { sessionId: string }];
       sessionIds.add(data.sessionId);
     }
     expect(sessionIds.size).toBe(5);

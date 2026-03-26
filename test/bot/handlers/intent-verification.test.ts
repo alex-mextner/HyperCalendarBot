@@ -73,29 +73,9 @@ describe('intent_accept callback handler', () => {
   }
 
   function makeHandler(intentRepoArg: IntentRepository, intentMatcher?: { reload: () => void }) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // chatHistoryRepo
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // userRepo
-      { intentRepo: intentRepoArg, intentMatcher },
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      intentDeps: { intentRepo: intentRepoArg, intentMatcher },
+    });
   }
 
   test('intent_accept sets status to approved', async () => {
@@ -159,29 +139,9 @@ describe('intent_accept callback handler', () => {
       format: 'text',
     });
 
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // chatHistoryRepo
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // userRepo
-      { intentRepo, adminEditSessions },
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      intentDeps: { intentRepo, adminEditSessions },
+    });
 
     const ctx = makeCtx(`intent_edit:${intentId}`);
     await handler(ctx as never);
@@ -369,29 +329,9 @@ describe('intent callback authorization guard', () => {
   });
 
   function makeHandlerWithAdmin(adminId: number) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { intentRepo, adminId },
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      intentDeps: { intentRepo, adminId },
+    });
   }
 
   function makeCtx(data: string, userId: number) {
@@ -438,29 +378,9 @@ describe('intent callback authorization guard', () => {
       number,
       { intentId: number; state: 'awaiting_instructions'; createdAt: number }
     >();
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      { intentRepo, adminId: ADMIN_ID, adminEditSessions },
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      intentDeps: { intentRepo, adminId: ADMIN_ID, adminEditSessions },
+    });
     const ctx = makeCtx(`intent_edit:${id}`, NON_ADMIN_ID);
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalledWith(expect.objectContaining({ text: expect.any(String) }));

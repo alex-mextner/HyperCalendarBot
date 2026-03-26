@@ -13,33 +13,9 @@ function makeCtx(data: string, userId = 200, lang = 'en') {
 }
 
 function makeHandler(eventService: Record<string, unknown>, forceInviteDeps?: Record<string, unknown>) {
-  return createCallbackHandler(
-    eventService as never, // eventService
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    undefined, // invitationService
-    undefined, // eventRepo
-    undefined, // chatHistoryRepo
-    undefined, // onAiButtonClick
-    undefined, // oauthDeps
-    undefined, // invitationNotifyDeps
-    undefined, // onboardingScene
-    undefined, // editProposalDeps
-    undefined, // callSettingsRepo
-    undefined, // sharingSettingsRepo
-    undefined, // feedbackDeps
-    undefined, // userRepo
-    undefined, // intentDeps
-    undefined, // secretaryDeps
-    undefined, // proposalDeps
-    undefined, // snoozeDeps
-    forceInviteDeps as never, // forceInviteDeps
-  );
+  return createCallbackHandler(eventService as never, {} as never, {} as never, {} as never, {
+    forceInviteDeps: forceInviteDeps as never,
+  });
 }
 
 describe('INVITE_CONTACT callback', () => {

@@ -73,27 +73,19 @@ export function parseAiBtnPayload(payload: string): { answerText: string; restri
   return { answerText: payload };
 }
 
-/**
- * Route all inline keyboard callbacks.
- * Callback data format: "prefix:payload" or "prefix:p1:p2"
- */
-export function createCallbackHandler(
-  eventService: EventService,
-  editValueScene: AnyScene,
-  holidayService: HolidayService,
-  prefsService: NotificationPreferencesService,
-  calendarRepo?: GoogleCalendarRepository,
-  disconnectDeps?: DisconnectDeps,
-  onCalendarsDone?: (userId: number) => Promise<void>,
-  renderService?: RenderService,
-  invitationService?: InvitationService,
-  eventRepo?: EventRepository,
-  chatHistoryRepo?: ChatHistoryRepository,
-  onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>,
+export interface CallbackHandlerOpts {
+  calendarRepo?: GoogleCalendarRepository;
+  disconnectDeps?: DisconnectDeps;
+  onCalendarsDone?: (userId: number) => Promise<void>;
+  renderService?: RenderService;
+  invitationService?: InvitationService;
+  eventRepo?: EventRepository;
+  chatHistoryRepo?: ChatHistoryRepository;
+  onAiButtonClick?: (userId: number, chatId: number, text: string) => Promise<void>;
   oauthDeps?: {
     oauthService: GoogleOAuthService;
     stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
-  },
+  };
   invitationNotifyDeps?: {
     userRepo: UserRepository;
     sendMessage: (
@@ -103,47 +95,89 @@ export function createCallbackHandler(
     ) => Promise<void>;
     editMessage?: (chatId: number, messageId: number, text: string, markup?: unknown) => Promise<void>;
     sendPhoto?: (chatId: number, photo: File) => Promise<void>;
-  },
-  onboardingScene?: AnyScene,
+  };
+  onboardingScene?: AnyScene;
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
     sendMessage: (chatId: number, text: string, options: { parse_mode: string }) => Promise<void>;
-  },
-  callSettingsRepo?: CallSettingsRepository,
-  sharingSettingsRepo?: SharingSettingsRepository,
+  };
+  callSettingsRepo?: CallSettingsRepository;
+  sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
     adminReplySession: Map<number, { threadId: number; userId: number }>;
     sendMessage: (chatId: number, text: string) => Promise<unknown>;
     adminId?: number;
-  },
-  userRepo?: UserRepository,
+  };
+  userRepo?: UserRepository;
   intentDeps?: {
     intentRepo: IntentRepository;
     intentMatcher?: { reload: () => void };
     adminEditSessions?: Map<number, AdminEditSession>;
     adminId?: number;
-  },
-  secretaryDeps?: SecretaryDeps,
-  proposalDeps?: ProposalDeps,
-  snoozeDeps?: SnoozeDeps,
-  forceInviteDeps?: ForceInviteDeps,
-  proposeTimeSessions?: Map<number, { invitationId: number }>,
-  invitationRepo?: InvitationRepository,
+  };
+  secretaryDeps?: SecretaryDeps;
+  proposalDeps?: ProposalDeps;
+  snoozeDeps?: SnoozeDeps;
+  forceInviteDeps?: ForceInviteDeps;
+  proposeTimeSessions?: Map<number, { invitationId: number }>;
+  invitationRepo?: InvitationRepository;
   voiceDeps?: {
     sileroTts?: { synthesize: (text: string) => Promise<Buffer> };
     kokoroTts?: { synthesize: (text: string) => Promise<Buffer> };
     sendVoice: (chatId: number, audio: Buffer) => Promise<void>;
     stressDictionary?: StressDictionary;
-  },
-  contactRepo?: ContactRepository,
-  timezoneScene?: AnyScene,
-  groupRepo?: GroupChatRepository,
+  };
+  contactRepo?: ContactRepository;
+  timezoneScene?: AnyScene;
+  groupRepo?: GroupChatRepository;
   scenePauseDeps?: {
     sceneStorage: { get(key: string): Promise<unknown>; delete(key: string): unknown };
     scenePauseService: ScenePauseService;
-  },
+  };
+}
+
+/**
+ * Route all inline keyboard callbacks.
+ * Callback data format: "prefix:payload" or "prefix:p1:p2"
+ */
+export function createCallbackHandler(
+  eventService: EventService,
+  editValueScene: AnyScene,
+  holidayService: HolidayService,
+  prefsService: NotificationPreferencesService,
+  opts: CallbackHandlerOpts = {},
 ) {
+  const {
+    calendarRepo,
+    disconnectDeps,
+    onCalendarsDone,
+    renderService,
+    invitationService,
+    eventRepo,
+    chatHistoryRepo,
+    onAiButtonClick,
+    oauthDeps,
+    invitationNotifyDeps,
+    onboardingScene,
+    editProposalDeps,
+    callSettingsRepo,
+    sharingSettingsRepo,
+    feedbackDeps,
+    userRepo,
+    intentDeps,
+    secretaryDeps,
+    proposalDeps,
+    snoozeDeps,
+    forceInviteDeps,
+    proposeTimeSessions,
+    invitationRepo,
+    voiceDeps,
+    contactRepo,
+    timezoneScene,
+    groupRepo,
+    scenePauseDeps,
+  } = opts;
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
     if (!data) return;

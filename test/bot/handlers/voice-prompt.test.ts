@@ -67,28 +67,9 @@ function makeCallbackCtx(data: string, userOverrides: Record<string, unknown> = 
 }
 
 function makeCallbackHandler(userRepo: { update: ReturnType<typeof mock> }) {
-  return createCallbackHandler(
-    {} as never, // eventService
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    undefined, // invitationService
-    undefined, // eventRepo
-    undefined, // chatHistoryRepo
-    undefined, // onAiButtonClick
-    undefined, // oauthDeps
-    undefined, // invitationNotifyDeps
-    undefined, // onboardingScene
-    undefined, // editProposalDeps
-    undefined, // callSettingsRepo
-    undefined, // sharingSettingsRepo
-    undefined, // feedbackDeps
-    userRepo as never,
-  );
+  return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+    userRepo: userRepo as never,
+  });
 }
 
 function makeCallbackHandlerWithVoice(deps: {
@@ -99,36 +80,11 @@ function makeCallbackHandlerWithVoice(deps: {
     sendVoice: ReturnType<typeof mock>;
   };
 }) {
-  return createCallbackHandler(
-    {} as never, // eventService
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    undefined, // invitationService
-    undefined, // eventRepo
-    deps.chatHistoryRepo as never, // chatHistoryRepo
-    undefined, // onAiButtonClick
-    undefined, // oauthDeps
-    undefined, // invitationNotifyDeps
-    undefined, // onboardingScene
-    undefined, // editProposalDeps
-    undefined, // callSettingsRepo
-    undefined, // sharingSettingsRepo
-    undefined, // feedbackDeps
-    deps.userRepo as never, // userRepo
-    undefined, // intentDeps
-    undefined, // secretaryDeps
-    undefined, // proposalDeps
-    undefined, // snoozeDeps
-    undefined, // forceInviteDeps
-    undefined, // proposeTimeSessions
-    undefined, // invitationRepo
-    deps.voiceDeps as never, // voiceDeps
-  );
+  return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+    chatHistoryRepo: deps.chatHistoryRepo as never,
+    userRepo: deps.userRepo as never,
+    voiceDeps: deps.voiceDeps as never,
+  });
 }
 
 // ── Tests: voice response prompt ──────────────────────────────────────────────

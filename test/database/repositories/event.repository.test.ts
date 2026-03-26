@@ -663,7 +663,7 @@ describe('EventRepository.updateSyncFields column allowlist', () => {
       title: 'Test',
       start_at: '2026-03-15T10:00:00Z',
       end_at: '2026-03-15T11:00:00Z',
-      all_day: 0,
+      all_day: false,
       timezone: 'UTC',
     });
   }

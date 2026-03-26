@@ -144,7 +144,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupSharingCleanupCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },
@@ -160,7 +160,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupSecretaryExpiryCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },
@@ -176,7 +176,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupProposalExpiryCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },
@@ -192,7 +192,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupSessionCleanupCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },
@@ -208,7 +208,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupBirthdaySyncCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },
@@ -224,7 +224,7 @@ describe('cron setup functions', () => {
     const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await setupChatHistoryCleanupCron(queue);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
-    const [name, data, opts] = mockQueueAdd.mock.calls[0] as [
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
       string,
       { type: string },
       { repeat: { every: number }; jobId: string },

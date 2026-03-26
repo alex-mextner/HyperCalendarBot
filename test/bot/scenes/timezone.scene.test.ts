@@ -179,7 +179,7 @@ describe('timezone scene onEnter', () => {
     const ctx = makeCtx({ timezone: 'Europe/London' });
     await enterFn(ctx, NOOP_NEXT);
     expect(ctx.editText).toHaveBeenCalledTimes(1);
-    const [text] = ctx.editText.mock.calls[0] as [string];
+    const [text] = ctx.editText.mock.calls[0] as unknown as [string];
     expect(text).toMatch(/current|текущий/i);
   });
 
@@ -212,7 +212,7 @@ describe('timezone scene step handler', () => {
   test('no user — exits scene immediately', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 0 });
     ctx.dbUser = undefined;
-    await fns[0](ctx, NOOP_NEXT);
+    await fns[0]!(ctx, NOOP_NEXT);
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
   });
 
@@ -221,7 +221,7 @@ describe('timezone scene step handler', () => {
   describe('TZ_TYPE_CITY callback', () => {
     test('sets cityInputMode=true and edits settings message', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_TYPE_CITY });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.scene.update).toHaveBeenCalled();
       const lastUpdateCall = ctx.scene.update.mock.calls.at(-1) as [Record<string, unknown>, unknown];
       expect(lastUpdateCall[0]).toMatchObject({ cityInputMode: true });
@@ -231,7 +231,7 @@ describe('timezone scene step handler', () => {
 
     test('calls answer()', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_TYPE_CITY });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
   });
@@ -241,14 +241,14 @@ describe('timezone scene step handler', () => {
   describe('TZ_GEO_PICK callback', () => {
     test('edits settings message and sends geo request prompt', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_GEO_PICK });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.editText).toHaveBeenCalledTimes(1);
       expect(ctx.send).toHaveBeenCalledTimes(1);
     });
 
     test('stores geoMsgId in scene state', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_GEO_PICK });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.scene.update).toHaveBeenCalled();
       const allCalls = ctx.scene.update.mock.calls as [Record<string, unknown>, unknown][];
       const hasGeoMsgId = allCalls.some(([patch]) => 'geoMsgId' in patch);
@@ -257,7 +257,7 @@ describe('timezone scene step handler', () => {
 
     test('calls answer()', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_GEO_PICK });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
   });
@@ -267,19 +267,19 @@ describe('timezone scene step handler', () => {
   describe('TZ_CANCEL callback', () => {
     test('exits scene', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_CANCEL });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
     });
 
     test('restores settings message via editText', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_CANCEL });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.editText).toHaveBeenCalledTimes(1);
     });
 
     test('calls answer()', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.TZ_CANCEL });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
 
@@ -290,7 +290,7 @@ describe('timezone scene step handler', () => {
         data: CB.TZ_CANCEL,
         state: { geoMsgId: 77 },
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.bot.api.deleteMessage).toHaveBeenCalledWith({ chat_id: 123, message_id: 77 });
     });
   });
@@ -300,7 +300,7 @@ describe('timezone scene step handler', () => {
   describe('ONBOARD_TZ:confirm callback', () => {
     test('no detectedTz — skips update, calls answer()', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: `${CB.ONBOARD_TZ}:confirm` });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(db.users.update).not.toHaveBeenCalled();
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
@@ -313,11 +313,11 @@ describe('timezone scene step handler', () => {
         data: `${CB.ONBOARD_TZ}:confirm`,
         state,
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(db.users.update).toHaveBeenCalledWith(1, { timezone: 'Europe/Paris' });
       expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
       expect(ctx.editText).toHaveBeenCalledTimes(1);
-      const [confirmMsg] = ctx.editText.mock.calls[0] as [string];
+      const [confirmMsg] = ctx.editText.mock.calls[0] as unknown as [string];
       expect(confirmMsg).toMatch(/✅/);
     });
 
@@ -333,7 +333,7 @@ describe('timezone scene step handler', () => {
         settingsMsgId: 555,
         settingsChatId: 999,
       });
-      await localFns[0](ctx, NOOP_NEXT);
+      await localFns[0]!(ctx, NOOP_NEXT);
       expect(ctx.bot.api.editMessageText).toHaveBeenCalledWith(
         expect.objectContaining({ chat_id: 999, message_id: 555 }),
       );
@@ -345,7 +345,7 @@ describe('timezone scene step handler', () => {
   describe('ONBOARD_TZ_RETRY callback', () => {
     test('deletes confirm message and calls answer()', async () => {
       const ctx = makeCtx({ activeType: 'callback_query', stepId: 0, data: CB.ONBOARD_TZ_RETRY });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.message?.delete).toHaveBeenCalledTimes(1);
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
@@ -362,9 +362,9 @@ describe('timezone scene step handler', () => {
         longitude: -0.1278,
         state: {},
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/✅/);
       expect(ctx.scene.update).toHaveBeenCalled();
     });
@@ -377,7 +377,7 @@ describe('timezone scene step handler', () => {
         longitude: -0.1278,
         state: { geoMsgId: 88 },
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.bot.api.deleteMessage).toHaveBeenCalledWith({ chat_id: 123, message_id: 88 });
     });
 
@@ -389,7 +389,7 @@ describe('timezone scene step handler', () => {
         longitude: -0.1278,
         state: {},
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       const allCalls = ctx.scene.update.mock.calls as [Record<string, unknown>, unknown][];
       const hasDetectedTz = allCalls.some(([patch]) => 'detectedTz' in patch);
       expect(hasDetectedTz).toBe(true);
@@ -401,22 +401,22 @@ describe('timezone scene step handler', () => {
   describe('message: city name input', () => {
     test('cityInputMode=false — ignores message silently', async () => {
       const ctx = makeCtx({ activeType: 'message', stepId: 0, text: 'London', state: { cityInputMode: false } });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).not.toHaveBeenCalled();
     });
 
     test('cityInputMode=true, no text — does nothing', async () => {
       const ctx = makeCtx({ activeType: 'message', stepId: 0, text: '', state: { cityInputMode: true } });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).not.toHaveBeenCalled();
     });
 
     test('cityInputMode=true, resolveCity returns timezone — shows confirm', async () => {
       mockResolveCity.mockResolvedValueOnce('Europe/London');
       const ctx = makeCtx({ activeType: 'message', stepId: 0, text: 'London', state: { cityInputMode: true } });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/✅/);
       expect(ctx.scene.update).toHaveBeenCalled();
     });
@@ -429,9 +429,9 @@ describe('timezone scene step handler', () => {
         text: 'xyzzy_not_a_city',
         state: { cityInputMode: true },
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/timezone|таймзону/i);
       expect(ctx.scene.update).not.toHaveBeenCalled();
     });
@@ -445,9 +445,9 @@ describe('timezone scene step handler', () => {
         state: { cityInputMode: true },
         lang: 'ru',
       });
-      await fns[0](ctx, NOOP_NEXT);
+      await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/таймзону/);
     });
   });

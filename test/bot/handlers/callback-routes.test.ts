@@ -45,12 +45,14 @@ function makeHandler(
     (overrides.editValueScene ?? {}) as never,
     (overrides.holidayService ?? {}) as never,
     (overrides.prefsService ?? {}) as never,
-    overrides.calendarRepo as never,
-    overrides.disconnectDeps as never,
-    overrides.onCalendarsDone as never,
-    overrides.renderService as never,
-    overrides.invitationService as never,
-    overrides.eventRepo as never,
+    {
+      calendarRepo: overrides.calendarRepo as never,
+      disconnectDeps: overrides.disconnectDeps as never,
+      onCalendarsDone: overrides.onCalendarsDone as never,
+      renderService: overrides.renderService as never,
+      invitationService: overrides.invitationService as never,
+      eventRepo: overrides.eventRepo as never,
+    },
   );
 }
 

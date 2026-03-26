@@ -11,17 +11,9 @@ function makeCtx(data: string, language = 'en') {
 }
 
 function makeHandler(invitationService: Record<string, unknown>) {
-  return createCallbackHandler(
-    {} as never, // eventService
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    invitationService as never, // invitationService
-  );
+  return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+    invitationService: invitationService as never,
+  });
 }
 
 describe('invitation callbacks', () => {
@@ -128,22 +120,11 @@ describe('inviter notification on response', () => {
     notifyDeps: { userRepo: Record<string, unknown>; sendMessage: ReturnType<typeof mock> },
     eventRepo?: Record<string, unknown>,
   ) {
-    return createCallbackHandler(
-      {} as never, // eventService
-      {} as never, // editValueScene
-      {} as never, // holidayService
-      {} as never, // prefsService
-      undefined, // calendarRepo
-      undefined, // disconnectDeps
-      undefined, // onCalendarsDone
-      undefined, // renderService
-      invitationService as never, // invitationService
-      eventRepo as never, // eventRepo
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
   }
 
   test('notifies inviter when invitation is accepted', async () => {
@@ -282,35 +263,13 @@ describe('propose-time callbacks', () => {
     eventRepoArg?: Record<string, unknown>,
     notifyDeps?: Record<string, unknown>,
   ) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoArg as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoArg as never,
+      invitationNotifyDeps: notifyDeps as never,
       proposeTimeSessions,
-      invitationRepo as never,
-    );
+      invitationRepo: invitationRepo as never,
+    });
   }
 
   test('propose callback sets session and sends prompt', async () => {
@@ -406,35 +365,12 @@ describe('propose-time callbacks', () => {
       editText: mock(() => Promise.resolve()),
     };
 
-    const handler = createCallbackHandler(
-      eventServiceMock as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoMock as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationRepo as never,
-    );
+    const handler = createCallbackHandler(eventServiceMock as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoMock as never,
+      invitationNotifyDeps: notifyDeps as never,
+      invitationRepo: invitationRepo as never,
+    });
     await handler(ctx as never);
 
     expect(invitationService.rescheduleFromProposal).toHaveBeenCalledWith(5, 100);
@@ -474,35 +410,12 @@ describe('propose-time callbacks', () => {
       editText: mock(() => Promise.resolve()),
     };
 
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoMock as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationRepo as never,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoMock as never,
+      invitationNotifyDeps: notifyDeps as never,
+      invitationRepo: invitationRepo as never,
+    });
     await handler(ctx as never);
 
     expect(invitationService.keepOriginalTime).toHaveBeenCalledWith(5, 100);
@@ -520,22 +433,12 @@ describe('conflict image on accept', () => {
     eventRepo: Record<string, unknown>,
     renderService: Record<string, unknown>,
   ) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      renderService as never,
-      invSvc as never,
-      eventRepo as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      renderService: renderService as never,
+      invitationService: invSvc as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
   }
 
   test('sends conflict image to inviter on accept when renderService provided', async () => {
@@ -649,22 +552,11 @@ describe('conflict image on accept', () => {
       answer: mock(() => Promise.resolve()),
       editText: mock(() => Promise.resolve()),
     };
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invSvc as never,
-      eventRepo as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invSvc as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
     await handler(ctx as never);
     await new Promise((r) => setTimeout(r, 100));
     expect(sendPhoto).not.toHaveBeenCalled();

@@ -170,7 +170,7 @@ describe('onboarding onEnter', () => {
     const ctx = makeCtx();
     await enterFn(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const [msg] = ctx.send.mock.calls[0] as [string];
+    const [msg] = ctx.send.mock.calls[0] as unknown as [string];
     expect(msg).toMatch(/language|язык/i);
   });
 });
@@ -190,23 +190,23 @@ describe('onboarding step 0: language selection', () => {
 
   test('unrelated callback data — does nothing', async () => {
     const ctx = makeCtx({ stepId: 0, data: 'something_else:en' });
-    await fns[0](ctx, NOOP_NEXT);
+    await fns[0]!(ctx, NOOP_NEXT);
     expect(db.users.update).not.toHaveBeenCalled();
   });
 
   test('no data — does nothing', async () => {
     const ctx = makeCtx({ stepId: 0 });
-    await fns[0](ctx, NOOP_NEXT);
+    await fns[0]!(ctx, NOOP_NEXT);
     expect(db.users.update).not.toHaveBeenCalled();
   });
 
   test('ONBOARD_LANG:en — saves language en and advances', async () => {
     const ctx = makeCtx({ stepId: 0, data: `${CB.ONBOARD_LANG}:en` });
-    await fns[0](ctx, NOOP_NEXT);
+    await fns[0]!(ctx, NOOP_NEXT);
     expect(db.users.update).toHaveBeenCalledWith(1, { language: 'en' });
     expect(ctx.editText).toHaveBeenCalledTimes(1);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
-    const [editMsg] = ctx.editText.mock.calls[0] as [string];
+    const [editMsg] = ctx.editText.mock.calls[0] as unknown as [string];
     expect(editMsg).toMatch(/english|EN/i);
     // state should have lang set
     expect(ctx.scene.state.lang).toBe('en');
@@ -214,9 +214,9 @@ describe('onboarding step 0: language selection', () => {
 
   test('ONBOARD_LANG:ru — saves language ru with Russian label', async () => {
     const ctx = makeCtx({ stepId: 0, data: `${CB.ONBOARD_LANG}:ru` });
-    await fns[0](ctx, NOOP_NEXT);
+    await fns[0]!(ctx, NOOP_NEXT);
     expect(db.users.update).toHaveBeenCalledWith(1, { language: 'ru' });
-    const [editMsg] = ctx.editText.mock.calls[0] as [string];
+    const [editMsg] = ctx.editText.mock.calls[0] as unknown as [string];
     expect(editMsg).toMatch(/русский/i);
     expect(ctx.scene.state.lang).toBe('ru');
   });
@@ -239,7 +239,7 @@ describe('onboarding step 1: timezone', () => {
 
   test('firstTime — sends city prompt with keyboard', async () => {
     const ctx = makeCtx({ stepId: 1, firstTime: true, state: { lang: 'en' } });
-    await fns[1](ctx, NOOP_NEXT);
+    await fns[1]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
@@ -249,9 +249,9 @@ describe('onboarding step 1: timezone', () => {
     test('resolveCity returns timezone — sends confirm', async () => {
       mockResolveCity.mockResolvedValueOnce('Europe/Berlin');
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: 'Berlin', state: { lang: 'en' } });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/✅/);
       expect(ctx.scene.update).toHaveBeenCalled();
     });
@@ -264,23 +264,23 @@ describe('onboarding step 1: timezone', () => {
         text: 'xyzzy_no_such_city',
         state: { lang: 'en' },
       });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/timezone|таймзону/i);
     });
 
     test('empty text — does nothing', async () => {
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: '', state: { lang: 'en' } });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).not.toHaveBeenCalled();
     });
 
     test('ru lang — error in Russian', async () => {
       mockResolveCity.mockResolvedValueOnce(null);
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: 'xyzzy', state: { lang: 'ru' } });
-      await fns[1](ctx, NOOP_NEXT);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      await fns[1]!(ctx, NOOP_NEXT);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/таймзону/);
     });
   });
@@ -296,9 +296,9 @@ describe('onboarding step 1: timezone', () => {
         longitude: -0.1278,
         state: { lang: 'en' },
       });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [msg] = ctx.send.mock.calls[0] as [string];
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
       expect(msg).toMatch(/got it|ваш часовой/i);
       expect(ctx.scene.update).toHaveBeenCalled();
     });
@@ -311,7 +311,7 @@ describe('onboarding step 1: timezone', () => {
         longitude: -0.1278,
         state: { lang: 'en' },
       });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       const allCalls = ctx.scene.update.mock.calls as [Record<string, unknown>, unknown][];
       const hasDetectedTz = allCalls.some(([patch]) => 'detectedTz' in patch);
       expect(hasDetectedTz).toBe(true);
@@ -327,14 +327,14 @@ describe('onboarding step 1: timezone', () => {
         data: `${CB.ONBOARD_TZ}:confirm`,
         state: { lang: 'en' },
       });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(db.users.update).not.toHaveBeenCalled();
     });
 
     test('with detectedTz — saves to DB, advances', async () => {
       const state = { lang: 'en', detectedTz: 'Europe/Berlin' };
       const ctx = makeCtx({ stepId: 1, data: `${CB.ONBOARD_TZ}:confirm`, state });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(db.users.update).toHaveBeenCalledWith(1, expect.objectContaining({ timezone: 'Europe/Berlin' }));
       expect(ctx.send).toHaveBeenCalledTimes(1);
       expect(ctx.scene.update).toHaveBeenCalled();
@@ -347,7 +347,7 @@ describe('onboarding step 1: timezone', () => {
   describe('ONBOARD_TZ_RETRY callback', () => {
     test('re-sends city prompt', async () => {
       const ctx = makeCtx({ stepId: 1, data: CB.ONBOARD_TZ_RETRY, state: { lang: 'en' } });
-      await fns[1](ctx, NOOP_NEXT);
+      await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
       expect(ctx.answer).toHaveBeenCalledTimes(1);
     });
@@ -371,20 +371,20 @@ describe('onboarding step 2: country selection', () => {
 
   test('firstTime — sends country prompt', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 2, firstTime: true, state: { lang: 'en' } });
-    await fns[2](ctx, NOOP_NEXT);
+    await fns[2]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
   test('unrelated callback data — does nothing', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 2, data: 'something:else' });
-    await fns[2](ctx, NOOP_NEXT);
+    await fns[2]!(ctx, NOOP_NEXT);
     expect(db.users.update).not.toHaveBeenCalled();
     expect(holidayService.subscribeUser).not.toHaveBeenCalled();
   });
 
   test('no data — does nothing', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 2 });
-    await fns[2](ctx, NOOP_NEXT);
+    await fns[2]!(ctx, NOOP_NEXT);
     expect(ctx.answer).not.toHaveBeenCalled();
   });
 
@@ -395,7 +395,7 @@ describe('onboarding step 2: country selection', () => {
       data: `${CB.ONBOARD_COUNTRY}:RU`,
       state: { lang: 'en' },
     });
-    await fns[2](ctx, NOOP_NEXT);
+    await fns[2]!(ctx, NOOP_NEXT);
     expect(holidayService.subscribeUser).toHaveBeenCalledWith(1, 'RU', true);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.scene.state.country).toBe('RU');
@@ -408,7 +408,7 @@ describe('onboarding step 2: country selection', () => {
       data: `${CB.ONBOARD_COUNTRY}:skip`,
       state: { lang: 'en' },
     });
-    await fns[2](ctx, NOOP_NEXT);
+    await fns[2]!(ctx, NOOP_NEXT);
     expect(holidayService.subscribeUser).not.toHaveBeenCalled();
     expect(ctx.answer).toHaveBeenCalledTimes(1);
     expect(ctx.scene.state.country).toBe('skip');
@@ -422,7 +422,7 @@ describe('onboarding step 2: country selection', () => {
       data: `${CB.ONBOARD_COUNTRY}:RU`,
       state: { lang: 'en' },
     });
-    await fnsNoHoliday[2](ctx, NOOP_NEXT);
+    await fnsNoHoliday[2]!(ctx, NOOP_NEXT);
     expect(ctx.answer).toHaveBeenCalledTimes(1);
   });
 });
@@ -444,21 +444,21 @@ describe('onboarding step 3: morning agenda + completion', () => {
 
   test('firstTime — sends morning agenda prompt with time buttons', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 3, firstTime: true, state: { lang: 'en' } });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const [msg] = ctx.send.mock.calls[0] as [string];
+    const [msg] = ctx.send.mock.calls[0] as unknown as [string];
     expect(msg).toMatch(/morning|утро|summary/i);
   });
 
   test('unrelated callback data — does nothing', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 3, data: 'unrelated:data' });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(db.users.update).not.toHaveBeenCalled();
   });
 
   test('no data — does nothing', async () => {
     const ctx = makeCtx({ activeType: 'callback_query', stepId: 3 });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(db.users.update).not.toHaveBeenCalled();
   });
 
@@ -470,7 +470,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:08:00`,
       state,
     });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(prefsService.getOrCreate).toHaveBeenCalledWith(1);
     expect(prefsService.updateMorningTime).toHaveBeenCalledWith(1, '08:00');
     expect(db.notificationPreferences.update).toHaveBeenCalledWith(1, { morning_agenda_enabled: 1 });
@@ -486,7 +486,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:no`,
       state,
     });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(prefsService.updateMorningTime).not.toHaveBeenCalled();
     expect(db.users.update).toHaveBeenCalledWith(1, { onboarding_completed: 1 });
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
@@ -500,9 +500,9 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:no`,
       state,
     });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const [msg] = ctx.send.mock.calls[0] as [string];
+    const [msg] = ctx.send.mock.calls[0] as unknown as [string];
     expect(msg).toMatch(/all set|готово/i);
   });
 
@@ -516,10 +516,10 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:no`,
       state,
     });
-    await localFns[3](ctx, NOOP_NEXT);
+    await localFns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(2);
-    const [, gcalMsg] = ctx.send.mock.calls as [string, string][];
-    expect(gcalMsg[0]).toMatch(/google/i);
+    const [, gcalMsg] = ctx.send.mock.calls as unknown as [string, string][];
+    expect(gcalMsg![0]).toMatch(/google/i);
   });
 
   test('gcalConfigured=false — no gcal prompt', async () => {
@@ -530,7 +530,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:no`,
       state,
     });
-    await fns[3](ctx, NOOP_NEXT);
+    await fns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
@@ -544,7 +544,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:no`,
       state,
     });
-    await localFns[3](ctx, NOOP_NEXT);
+    await localFns[3]!(ctx, NOOP_NEXT);
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 
@@ -557,7 +557,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
       data: `${CB.ONBOARD_AGENDA}:09:00`,
       state,
     });
-    await fnsNoPref[3](ctx, NOOP_NEXT);
+    await fnsNoPref[3]!(ctx, NOOP_NEXT);
     expect(db.users.update).toHaveBeenCalledWith(1, { onboarding_completed: 1 });
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
   });
