@@ -17,8 +17,6 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
-    "@mtcute/bun": "^0.29.0",
-    "@mtcute/tl": "^223.0.0",
     "@types/bun": "latest",
     "lefthook": "^2.1.4",
     "pino-pretty": "^13.1.3"
