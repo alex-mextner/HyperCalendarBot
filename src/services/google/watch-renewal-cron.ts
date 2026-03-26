@@ -35,7 +35,7 @@ export async function renewExpiringChannels(
 
   for (const channel of expiring) {
     try {
-      const authClient = oauthService.getAuthClient(channel.user_id);
+      const authClient = await oauthService.getAuthClient(channel.user_id);
       const api = new GoogleCalendarApi(authClient);
 
       await api.stopChannel(channel.channel_id, channel.resource_id);

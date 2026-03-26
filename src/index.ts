@@ -73,8 +73,15 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
   const Redis = (await import('ioredis')).default;
 
-  const oauthService = new GoogleOAuthService(config, db.users, db.googleSync);
   const redis = new Redis(config.REDIS_URL);
+  // Provide a lock client to GoogleOAuthService to prevent concurrent token refreshes
+  const oauthRedisLock = {
+    set: (key: string, value: string, mode: 'NX', expMode: 'EX', seconds: number) =>
+      redis.set(key, value, expMode, seconds, mode),
+    get: (key: string) => redis.get(key),
+    del: (key: string) => redis.del(key),
+  };
+  const oauthService = new GoogleOAuthService(config, db.users, db.googleSync, oauthRedisLock);
 
   const stateStore = {
     set: async (key: string, value: string, ttl: number) => {

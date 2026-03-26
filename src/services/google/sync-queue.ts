@@ -85,7 +85,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
 
       let authClient: OAuth2Client;
       try {
-        authClient = deps.oauthService.getAuthClient(userId);
+        authClient = await deps.oauthService.getAuthClient(userId);
       } catch (err) {
         if (
           (err as { name?: string }).name === 'GoogleNotConnectedError' ||
