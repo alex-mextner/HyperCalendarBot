@@ -86,3 +86,49 @@ jobs:
             docker rm hypercal-bot || true
             docker compose up -d --no-deps bot
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+      - name: Notify deploy success
+        if: success()
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+          TEXT="✅ <b>Deployed</b> <code>${COMMIT_SHA:0:7}</code>
+${FIRST_LINE}"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
+              '{chat_id: $chat_id, text: $text, parse_mode: "HTML"}')"
+
+  notify-failure:
+    name: Notify on failure
+    needs: [test, build, deploy]
+    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure' || needs.deploy.result == 'failure')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send failure alert
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.BOT_ADMIN_ID }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TEST_RESULT: ${{ needs.test.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+        run: |
+          FAILED=""
+          [[ "$TEST_RESULT" == "failure" ]] && FAILED="test "
+          [[ "$BUILD_RESULT" == "failure" ]] && FAILED+="build "
+          [[ "$DEPLOY_RESULT" == "failure" ]] && FAILED+="deploy"
+          FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
+          TEXT="🚨 <b>CI/CD failed</b> [${FAILED}]
+<code>${COMMIT_SHA:0:7}</code> — ${FIRST_LINE}
+${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
+              '{chat_id: $chat_id, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')"
