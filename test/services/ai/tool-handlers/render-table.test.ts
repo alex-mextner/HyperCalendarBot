@@ -1,5 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/meta.ts';
+import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { flushPromises } from '../../../helpers/mock-context.ts';
 
