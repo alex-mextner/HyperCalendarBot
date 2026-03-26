@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { EnvConfig } from '../../../src/config/env.ts';
+import { flushPromises } from '../../helpers/mock-context.ts';
 
 // ─── BullMQ mock setup (must come before dynamic import) ──────────────────────
 
@@ -553,8 +554,8 @@ describe('google-sync failed handler', () => {
       { id: 'j43', name: 'pull-sync', data: { type: 'pull-sync', userId: 77 }, attemptsMade: 2 },
       new Error('invalid_grant'),
     );
-    // sendMessage is fire-and-forget via .catch(() => {}), so we wait a tick
-    await new Promise((r) => setTimeout(r, 0));
+    // sendMessage is fire-and-forget via .catch(() => {}), so we flush microtasks
+    await flushPromises();
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [userId] = sendMessage.mock.calls[0] as unknown as [number, string];
     expect(userId).toBe(77);
@@ -568,7 +569,7 @@ describe('google-sync failed handler', () => {
       { id: 'j44', name: 'pull-sync', data: { type: 'pull-sync', userId: 1 }, attemptsMade: 1 },
       rateLimitErr,
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
     const [, , opts] = mockQueueAdd.mock.calls[0] as unknown as [string, unknown, { delay: number }];
     expect(opts.delay).toBeGreaterThan(0);
@@ -581,7 +582,7 @@ describe('google-sync failed handler', () => {
       { id: 'j45', name: 'pull-sync', data: { type: 'pull-sync', userId: 1 }, attemptsMade: 1 },
       new Error('Rate Limit Exceeded'),
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
   });
 
@@ -595,7 +596,7 @@ describe('google-sync failed handler', () => {
       { id: 'j46', name: 'pull-sync', data: { type: 'pull-sync', userId: 1 }, attemptsMade: 1 },
       rateLimitErr,
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
     const [, , opts] = mockQueueAdd.mock.calls[0] as unknown as [string, unknown, { delay: number }];
     expect(opts.delay).toBe(30_000);
@@ -608,7 +609,7 @@ describe('google-sync failed handler', () => {
       { id: 'j47', name: 'pull-sync', data: { type: 'pull-sync', userId: 1 }, attemptsMade: 1 },
       new Error('Rate Limit Exceeded'),
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
     const [, , opts] = mockQueueAdd.mock.calls[0] as unknown as [string, unknown, { delay: number }];
     expect(opts.delay).toBe(60_000);
@@ -623,7 +624,7 @@ describe('google-sync failed handler', () => {
       { id: 'j48', name: 'pull-sync', data: { type: 'pull-sync', userId: 1 }, attemptsMade: 1 },
       new Error('some unrelated error'),
     );
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(markRevoked).not.toHaveBeenCalled();
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
