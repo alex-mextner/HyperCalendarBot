@@ -10,7 +10,8 @@ export type BotTaskJobType =
   | 'cron-proposal-expiry'
   | 'cron-session-cleanup'
   | 'cron-birthday-sync'
-  | 'cron-chat-history-cleanup';
+  | 'cron-chat-history-cleanup'
+  | 'cron-sqlite-backup';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -24,6 +25,7 @@ interface BotTasksQueueDeps {
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
   onChatHistoryCleanup?: () => void;
+  onSqliteBackup?: () => Promise<void>;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -64,6 +66,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-chat-history-cleanup') {
         deps.onChatHistoryCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-sqlite-backup') {
+        if (deps.onSqliteBackup) await deps.onSqliteBackup();
         return;
       }
     },
@@ -131,4 +137,13 @@ export async function setupChatHistoryCleanupCron(queue: Queue<BotTaskJobData>):
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'chat-history-cleanup-tick' },
   );
   botTasksLogger.info('Chat history cleanup cron scheduled (daily)');
+}
+
+export async function setupSqliteBackupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'sqlite-backup-tick',
+    { type: 'cron-sqlite-backup' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'sqlite-backup-tick' },
+  );
+  botTasksLogger.info('SQLite backup cron scheduled (daily)');
 }
