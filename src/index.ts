@@ -60,6 +60,7 @@ let callQueue:
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
+let googleRedisClient: Bun.RedisClient | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
@@ -71,13 +72,12 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
-  const Redis = (await import('ioredis')).default;
-
-  const redis = new Redis(config.REDIS_URL);
+  const redis = new Bun.RedisClient(config.REDIS_URL);
+  googleRedisClient = redis;
   // Provide a lock client to GoogleOAuthService to prevent concurrent token refreshes
   const oauthRedisLock = {
     set: (key: string, value: string, mode: 'NX', expMode: 'EX', seconds: number) =>
-      redis.set(key, value, expMode, seconds, mode),
+      redis.set(key, value, expMode, String(seconds), mode),
     get: (key: string) => redis.get(key),
     del: (key: string) => redis.del(key),
   };
@@ -115,7 +115,6 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     close: async () => {
       await worker.close();
       await queue.close();
-      redis.disconnect();
     },
   };
 
@@ -834,6 +833,7 @@ async function shutdown(): Promise<void> {
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
+  if (googleRedisClient) googleRedisClient.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
 }
