@@ -464,7 +464,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             }
           : undefined,
       voice:
-        deps.callQueue && deps.callSettingsRepo && deps.stressDictionary
+        deps.callQueue && deps.callSettingsRepo
           ? {
               callQueue: deps.callQueue,
               callSettingsRepo: deps.callSettingsRepo,

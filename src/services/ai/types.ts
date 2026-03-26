@@ -68,7 +68,8 @@ export interface VoiceCapability {
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
   };
-  stressDictionary: StressDictionary;
+  /** May be absent if the dictionary file failed to load (non-fatal). handleLookupStress guards for this. */
+  stressDictionary?: StressDictionary;
 }
 
 export interface GoogleCapability {
