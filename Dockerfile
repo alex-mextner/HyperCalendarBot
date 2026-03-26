@@ -29,11 +29,17 @@ FROM debian:bookworm-slim AS runner
 WORKDIR /app
 ARG BUN_VERSION
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip ca-certificates && \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates python3 python3-venv && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
 RUN ln -s /usr/local/bin/bun /usr/local/bin/node
+
+# Python venv — pyrogram-only deps for birthday/username/message scripts.
+# Heavy deps (torch, ntgcalls, silero) run on host, not in container.
+COPY requirements.docker.txt ./
+RUN python3 -m venv venv && \
+    venv/bin/pip install --no-cache-dir -r requirements.docker.txt
 
 # Install only system libraries required by Chromium (not the browser itself).
 # The Chromium binary is mounted from the host via docker-compose volume.

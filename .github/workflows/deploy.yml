@@ -78,6 +78,7 @@ jobs:
           command_timeout: 10m
           envs: GH_TOKEN
           script: |
+            set -e
             cd ${{ secrets.DEPLOY_PATH }}
             echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest

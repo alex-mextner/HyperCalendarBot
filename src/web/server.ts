@@ -42,8 +42,22 @@ class IpRateLimiter {
     const windowStart = now - OAUTH_RATE_LIMIT.windowMs;
     const timestamps = (this.hits.get(ip) ?? []).filter((t) => t > windowStart);
     timestamps.push(now);
-    this.hits.set(ip, timestamps);
+    if (timestamps.length > 0) {
+      this.hits.set(ip, timestamps);
+    } else {
+      this.hits.delete(ip);
+    }
     return timestamps.length <= OAUTH_RATE_LIMIT.maxRequests;
+  }
+
+  /** Remove IPs with no activity in the last window. Call periodically to bound memory. */
+  cleanup(): void {
+    const windowStart = Date.now() - OAUTH_RATE_LIMIT.windowMs;
+    for (const [ip, timestamps] of this.hits) {
+      if (timestamps.every((t) => t <= windowStart)) {
+        this.hits.delete(ip);
+      }
+    }
   }
 }
 
@@ -176,11 +190,13 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
   // Bun.serve requires a discriminated union: either websocket is present or absent.
   // We conditionally include it via spread, so cast at the framework boundary.
   const server = Bun.serve(serveOptions as unknown as Parameters<typeof Bun.serve>[0]);
+  const cleanupTimer = setInterval(() => oauthRateLimiter.cleanup(), OAUTH_RATE_LIMIT.windowMs);
 
   webLogger.info({ port }, 'Web server started');
 
   return {
     stop: () => {
+      clearInterval(cleanupTimer);
       server.stop();
       webLogger.info('Web server stopped');
     },

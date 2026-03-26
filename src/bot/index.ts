@@ -651,6 +651,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             reload: () => intentMatcher.load(intentRepo.getApproved()),
           },
           adminEditSessions,
+          adminId: botAdminId,
         },
         secretaryDeps: {
           secretaryRepo: db.secretaries,
