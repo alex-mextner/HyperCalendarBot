@@ -3,7 +3,7 @@ import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
 // SQL fragment: group event visible to user if they are an active member
-// who joined before the event was created. For one-off events.
+// and the event starts on or after the day they joined. For one-off events.
 // Expects 1 bind param (userId).
 function groupVisibleSql(alias: string): string {
   const col = alias ? `${alias}.` : '';
@@ -11,7 +11,7 @@ function groupVisibleSql(alias: string): string {
     SELECT 1 FROM group_members gm
     WHERE gm.chat_id = ${col}group_id AND gm.user_id = ?
       AND gm.left_at IS NULL
-      AND ${col}created_at >= gm.joined_at
+      AND ${col}start_at >= gm.joined_at
   ))`;
 }
 

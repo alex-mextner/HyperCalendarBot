@@ -200,8 +200,8 @@ describe('CalendarBotAgent', () => {
     });
   });
 
-  // Test limit=30 — must use group context because buildMessages calls getRecentByChat directly for groups
-  test('buildMessages fetches 30 entries for group chats', () => {
+  // Test limit=50 — must use group context because buildMessages calls getRecentByChat directly for groups
+  test('buildMessages fetches 50 entries for group chats', () => {
     const calls: { chatId: number; limit: number }[] = [];
     const mockChatHistory = {
       ...ctx.chatHistory,
@@ -214,7 +214,7 @@ describe('CalendarBotAgent', () => {
 
     const agent = new CalendarBotAgent(config, sender);
     agent.buildMessages(groupCtx, []);
-    expect(calls[0]).toMatchObject({ chatId: 456, limit: 30 });
+    expect(calls[0]).toMatchObject({ chatId: 456, limit: 50 });
   });
 
   test('user message is saved before bot response in history', () => {

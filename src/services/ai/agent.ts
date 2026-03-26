@@ -94,7 +94,7 @@ export class CalendarBotAgent {
     const systemPrompt = buildSystemPrompt(ctx, caps);
 
     const relevantHistory =
-      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 30) : history;
+      ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 50) : history;
 
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
@@ -313,7 +313,13 @@ export class CalendarBotAgent {
 
             writer.markToolResult(result.success);
             aiLogger.info(
-              { tool: block.name, success: result.success, userId: ctx.user.telegram_id, chatId: ctx.chatId },
+              {
+                tool: block.name,
+                success: result.success,
+                ...(result.error && { error: result.error }),
+                userId: ctx.user.telegram_id,
+                chatId: ctx.chatId,
+              },
               'Tool result',
             );
             dbg?.logToolResult(block.name, result.success, result.output, result.error);
