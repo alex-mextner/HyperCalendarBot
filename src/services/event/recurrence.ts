@@ -10,7 +10,9 @@ export function expandRecurrence(
   if (!template.recurrence_rule) return [];
 
   const dtstart = new Date(template.start_at);
-  const rruleString = `DTSTART:${formatRRuleDate(dtstart)}\nRRULE:${template.recurrence_rule}`;
+  const rruleLine =
+    template.recurrence_rule.split('\n').find((line) => line.startsWith('RRULE:')) ?? template.recurrence_rule;
+  const rruleString = `DTSTART:${formatRRuleDate(dtstart)}\n${rruleLine}`;
   const rule = rrulestr(rruleString);
 
   const durationMs = template.end_at ? new Date(template.end_at).getTime() - new Date(template.start_at).getTime() : 0;

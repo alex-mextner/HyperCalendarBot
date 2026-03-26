@@ -93,7 +93,7 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.recurrence_rule) {
-    event.recurrence = [local.recurrence_rule];
+    event.recurrence = local.recurrence_rule.split('\n');
   }
 
   if (local.reminder_overrides) {
@@ -126,7 +126,7 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     all_day: isAllDay,
     timezone: gEvent.start?.timeZone ?? 'UTC',
     location: gEvent.location ?? null,
-    recurrence_rule: gEvent.recurrence?.[0] ?? null,
+    recurrence_rule: gEvent.recurrence ? gEvent.recurrence.join('\n') : null,
     google_calendar_id: googleCalendarId,
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,

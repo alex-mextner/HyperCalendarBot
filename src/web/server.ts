@@ -42,7 +42,7 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
 
   const serveOptions = {
     port,
-    ...(agentWs ? { websocket: agentWs } : {}),
+    ...(agentWs ? { websocket: { ...agentWs, idleTimeout: 30 } } : {}),
     async fetch(req: Request, server: { upgrade(req: Request, opts: { data: object }): boolean }) {
       const url = new URL(req.url);
 
@@ -96,6 +96,12 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
         if (!channel) {
           webLogger.warn({ channelId, resourceId }, 'Unknown webhook channel');
           return new Response('Unknown channel', { status: 404 });
+        }
+
+        const channelToken = req.headers.get('x-goog-channel-token');
+        if (channel.channel_token && channelToken !== channel.channel_token) {
+          webLogger.warn({ channelId, channelToken }, 'Webhook token mismatch');
+          return new Response('Forbidden', { status: 403 });
         }
 
         if ((resourceState === 'exists' || resourceState === 'sync') && deps.onWebhook) {

@@ -64,7 +64,9 @@ describe('webhook handler', () => {
   test('returns 200 and triggers onWebhook for valid channel', async () => {
     const onWebhook = mock(() => Promise.resolve());
     const deps = baseDeps({
-      calendarRepo: { findChannelByIds: mock(() => ({ id: 1 })) } as unknown as WebServerDeps['calendarRepo'],
+      calendarRepo: {
+        findChannelByIds: mock(() => ({ id: 1, channel_token: null })),
+      } as unknown as WebServerDeps['calendarRepo'],
       onWebhook,
     });
     const { stop } = startWebServer(deps);
@@ -76,6 +78,74 @@ describe('webhook handler', () => {
       expect(res.status).toBe(200);
       await Bun.sleep(10);
       expect(onWebhook).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 403 when channel token does not match', async () => {
+    const deps = baseDeps({
+      calendarRepo: {
+        findChannelByIds: mock(() => ({ id: 1, channel_token: 'secret-token' })),
+      } as unknown as WebServerDeps['calendarRepo'],
+    });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+        method: 'POST',
+        headers: {
+          'x-goog-channel-id': 'ch-1',
+          'x-goog-resource-id': 'r-1',
+          'x-goog-resource-state': 'exists',
+          'x-goog-channel-token': 'wrong-token',
+        },
+      });
+      expect(res.status).toBe(403);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when channel token matches', async () => {
+    const onWebhook = mock(() => Promise.resolve());
+    const deps = baseDeps({
+      calendarRepo: {
+        findChannelByIds: mock(() => ({ id: 1, channel_token: 'secret-token' })),
+      } as unknown as WebServerDeps['calendarRepo'],
+      onWebhook,
+    });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+        method: 'POST',
+        headers: {
+          'x-goog-channel-id': 'ch-1',
+          'x-goog-resource-id': 'r-1',
+          'x-goog-resource-state': 'exists',
+          'x-goog-channel-token': 'secret-token',
+        },
+      });
+      expect(res.status).toBe(200);
+      await Bun.sleep(10);
+      expect(onWebhook).toHaveBeenCalledTimes(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 403 when channel has token but request sends none', async () => {
+    const deps = baseDeps({
+      calendarRepo: {
+        findChannelByIds: mock(() => ({ id: 1, channel_token: 'secret-token' })),
+      } as unknown as WebServerDeps['calendarRepo'],
+    });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+        method: 'POST',
+        headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1', 'x-goog-resource-state': 'exists' },
+      });
+      expect(res.status).toBe(403);
     } finally {
       stop();
     }

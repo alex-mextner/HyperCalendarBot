@@ -61,6 +61,7 @@ export const CB = {
   TZ_TYPE_CITY: 'tzt',
   TZ_GEO_PICK: 'tzg',
   SCENE_HELP: 'scene_help',
+  ADD_CANCEL: 'add:cancel',
 } as const;
 
 // i18n messages

@@ -276,7 +276,9 @@ export class CalendarBotAgent {
               { attempt: attempt + 1, err: err, userId: ctx.user.telegram_id },
               'API call failed, retrying',
             );
-            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+            const baseDelay = RETRY_DELAY_MS * (attempt + 1);
+            const jitter = Math.random() * baseDelay;
+            await new Promise((r) => setTimeout(r, baseDelay + jitter));
           }
         }
         if (lastError) throw lastError;

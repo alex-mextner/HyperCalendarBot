@@ -97,6 +97,23 @@ describe('event-mapper', () => {
       expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY;BYDAY=MO']);
     });
 
+    test('splits multi-line recurrence_rule back into array for Google', () => {
+      const result = localToGoogle({
+        id: 4,
+        title: 'Weekly with exception',
+        start_at: '2026-04-07T09:00:00Z',
+        end_at: '2026-04-07T10:00:00Z',
+        all_day: 0,
+        timezone: 'Europe/Moscow',
+        description: null,
+        location: null,
+        recurrence_rule: 'RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000',
+        reminder_overrides: null,
+        sync_version: 1,
+      });
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY', 'EXDATE;TZID=Europe/Moscow:20260401T090000']);
+    });
+
     test('sets extended properties with local event ID', () => {
       const result = localToGoogle({
         id: 42,
@@ -203,6 +220,22 @@ describe('event-mapper', () => {
         'primary',
       );
       expect(result.is_cancelled).toBe(true);
+    });
+
+    test('preserves all recurrence components (RRULE + EXDATE) joined by newline', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-rec',
+          summary: 'Weekly',
+          start: { dateTime: '2026-04-07T09:00:00Z', timeZone: 'Europe/Moscow' },
+          end: { dateTime: '2026-04-07T10:00:00Z', timeZone: 'Europe/Moscow' },
+          status: 'confirmed',
+          recurrence: ['RRULE:FREQ=WEEKLY', 'EXDATE;TZID=Europe/Moscow:20260401T090000'],
+        },
+        42,
+        'primary',
+      );
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000');
     });
   });
 });

@@ -87,13 +87,19 @@ export class GoogleCalendarRepository {
     this.db.prepare('DELETE FROM google_calendars WHERE user_id = ?').run(userId);
   }
 
-  addWatchChannel(calendarRowId: number, channelId: string, resourceId: string, expiration: string): void {
+  addWatchChannel(
+    calendarRowId: number,
+    channelId: string,
+    resourceId: string,
+    expiration: string,
+    channelToken: string,
+  ): void {
     this.db
       .prepare(`
-        INSERT INTO google_watch_channels (google_calendar_row_id, channel_id, resource_id, expiration)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO google_watch_channels (google_calendar_row_id, channel_id, resource_id, expiration, channel_token)
+        VALUES (?, ?, ?, ?, ?)
       `)
-      .run(calendarRowId, channelId, resourceId, expiration);
+      .run(calendarRowId, channelId, resourceId, expiration, channelToken);
   }
 
   getWatchChannels(calendarRowId: number): GoogleWatchChannel[] {

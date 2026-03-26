@@ -265,11 +265,12 @@ export class SyncService {
     publicDomain: string,
   ): Promise<void> {
     const channelId = crypto.randomUUID();
+    const channelToken = crypto.randomUUID();
     const webhookUrl = `https://${publicDomain}/webhooks/google-calendar`;
     const expirationMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-    const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs);
-    this.calendarRepo.addWatchChannel(calendarRowId, channelId, result.resourceId, result.expiration);
+    const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs, channelToken);
+    this.calendarRepo.addWatchChannel(calendarRowId, channelId, result.resourceId, result.expiration, result.token);
 
     syncLogger.info({ calendarId, channelId }, 'Watch channel created');
   }

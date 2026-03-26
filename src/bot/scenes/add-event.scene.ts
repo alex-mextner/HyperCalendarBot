@@ -7,6 +7,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
 import {
+  cancelKeyboard,
   eventActionsKeyboard,
   recurrenceEndKeyboard,
   recurrenceKeyboard,
@@ -49,30 +50,61 @@ async function answerCallback(context: unknown): Promise<void> {
   await ctx.answer?.();
 }
 
+async function handleCancel(context: unknown): Promise<void> {
+  const ctx = context as {
+    send: (msg: string) => Promise<unknown>;
+    scene: { exit: () => Promise<void> };
+    answer?: (opts?: Record<string, unknown>) => Promise<unknown>;
+    dbUser?: { language?: string };
+  };
+  const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
+  await ctx.answer?.();
+  await ctx.send(lang === 'ru' ? '❌ Добавление события отменено' : '❌ Event creation cancelled');
+  await ctx.scene.exit();
+}
+
 export function createAddEventScene(eventService: EventService) {
   return (
     new Scene('add_event')
       .state<AddEventState>()
-      // Step 0: Title (text only)
-      .step('message', async (context) => {
+      // Step 0: Title
+      .step(['message', 'callback_query'], async (context) => {
         const lang = getSceneLang(context);
         if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_title_prompt);
+          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
+          return;
+        }
+        if (isCallbackQuery(context)) {
+          const data = getCallbackData(context)!;
+          if (data === CB.ADD_CANCEL) {
+            await handleCancel(context);
+            return;
+          }
+          await answerCallback(context);
           return;
         }
         const text = getMessageText(context);
         if (!text?.trim()) {
-          await context.send(t(lang).add_title_prompt);
+          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
         }
         await context.scene.update({ title: text.trim() });
       })
-      // Step 1: Date/Time (text only)
-      .step('message', async (context) => {
+      // Step 1: Date/Time
+      .step(['message', 'callback_query'], async (context) => {
         const lang = getSceneLang(context);
         const user = getSceneUser(context);
         if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_time_prompt);
+          await context.send(t(lang).add_time_prompt, { reply_markup: cancelKeyboard(lang) });
+          return;
+        }
+        if (isCallbackQuery(context)) {
+          const data = getCallbackData(context)!;
+          if (data === CB.ADD_CANCEL) {
+            await handleCancel(context);
+            return;
+          }
+          await answerCallback(context);
           return;
         }
         const text = getMessageText(context);
@@ -99,9 +131,13 @@ export function createAddEventScene(eventService: EventService) {
           return;
         }
 
-        // Handle skip callback
+        // Handle skip/cancel callback
         if (isCallbackQuery(context)) {
           const data = getCallbackData(context)!;
+          if (data === CB.ADD_CANCEL) {
+            await handleCancel(context);
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:2`) {
             await answerCallback(context);
             const sceneUser = getSceneUser(context);
@@ -151,6 +187,10 @@ export function createAddEventScene(eventService: EventService) {
         }
 
         const data = getCallbackData(context)!;
+        if (data === CB.ADD_CANCEL) {
+          await handleCancel(context);
+          return;
+        }
         const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
         await answerCallback(context);
 
@@ -180,6 +220,10 @@ export function createAddEventScene(eventService: EventService) {
         }
 
         const data = getCallbackData(context)!;
+        if (data === CB.ADD_CANCEL) {
+          await handleCancel(context);
+          return;
+        }
         const value = data.replace(`${CB.ADD_REC_END}:`, '');
         await answerCallback(context);
 
@@ -212,6 +256,10 @@ export function createAddEventScene(eventService: EventService) {
 
         if (isCallbackQuery(context)) {
           const data = getCallbackData(context)!;
+          if (data === CB.ADD_CANCEL) {
+            await handleCancel(context);
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:5`) {
             await answerCallback(context);
             await context.scene.update({});
@@ -241,6 +289,10 @@ export function createAddEventScene(eventService: EventService) {
 
         if (isCallbackQuery(context)) {
           const data = getCallbackData(context)!;
+          if (data === CB.ADD_CANCEL) {
+            await handleCancel(context);
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:6`) {
             await answerCallback(context);
             location = undefined;

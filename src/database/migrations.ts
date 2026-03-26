@@ -820,4 +820,10 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE users ADD COLUMN assistant_enabled INTEGER NOT NULL DEFAULT 0`);
     },
   },
+  {
+    name: '042_watch_channel_token',
+    up: (db) => {
+      db.exec(`ALTER TABLE google_watch_channels ADD COLUMN channel_token TEXT;`);
+    },
+  },
 ];

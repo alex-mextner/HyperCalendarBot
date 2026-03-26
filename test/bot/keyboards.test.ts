@@ -260,18 +260,21 @@ describe('recurrenceEndKeyboard', () => {
 });
 
 describe('skipKeyboard', () => {
-  test('returns Skip button with step index', () => {
+  test('returns Skip and Cancel buttons', () => {
     const kb = skipKeyboard('en', 3);
     const buttons = kbData(kb).flat();
-    expect(buttons.length).toBe(1);
+    expect(buttons.length).toBe(2);
     expect(buttons[0]?.text).toBe('Skip');
     expect(buttons[0]?.callback_data).toBe('ask:3');
+    expect(buttons[1]?.text).toBe('🚫 Cancel');
+    expect(buttons[1]?.callback_data).toBe('add:cancel');
   });
 
-  test('ru version says Пропустить', () => {
+  test('ru version says Пропустить and Отмена', () => {
     const kb = skipKeyboard('ru', 3);
     const buttons = kbData(kb).flat();
     expect(buttons[0]?.text).toBe('Пропустить');
+    expect(buttons[1]?.text).toBe('🚫 Отмена');
   });
 });
 

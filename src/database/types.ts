@@ -168,6 +168,7 @@ export interface GoogleWatchChannel {
   google_calendar_row_id: number;
   channel_id: string;
   resource_id: string;
+  channel_token: string | null;
   expiration: string;
   created_at: string;
 }

@@ -55,6 +55,19 @@ interface MockCtx {
   _activeType: string;
 }
 
+/** Create a context that represents a cancel callback press. */
+function makeCancelCtx(
+  overrides: { stepId?: number; lang?: 'en' | 'ru'; state?: Record<string, unknown> } = {},
+): MockCtx {
+  return makeCtx({
+    activeType: 'callback_query',
+    stepId: overrides.stepId ?? 0,
+    data: CB.ADD_CANCEL,
+    lang: overrides.lang,
+    state: overrides.state,
+  });
+}
+
 function makeCtx(
   overrides: {
     activeType?: string;
@@ -548,6 +561,77 @@ describe('add_event step handlers', () => {
       await fns[6]!(ctx, NOOP_NEXT);
       const [data] = createEventMock.mock.calls[0] as unknown as [{ recurrence_rule?: string }];
       expect(data.recurrence_rule).toBe('FREQ=WEEKLY');
+    });
+  });
+
+  // --- Cancel: all steps ---
+
+  describe('cancel button — all steps', () => {
+    test('step 0: cancel callback exits scene with message (en)', async () => {
+      const ctx = makeCancelCtx({ stepId: 0 });
+      await fns[0]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/cancelled/i);
+    });
+
+    test('step 0: cancel callback exits scene with message (ru)', async () => {
+      const ctx = makeCancelCtx({ stepId: 0, lang: 'ru' });
+      await fns[0]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      const [msg] = ctx.send.mock.calls[0] as unknown as [string];
+      expect(msg).toMatch(/отменено/i);
+    });
+
+    test('step 0: firstTime — shows cancel keyboard', async () => {
+      const ctx = makeCtx({ stepId: 0, firstTime: true });
+      await fns[0]!(ctx, NOOP_NEXT);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const args = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: unknown }];
+      expect(args[1]?.reply_markup).toBeDefined();
+    });
+
+    test('step 1: cancel callback exits scene', async () => {
+      const ctx = makeCancelCtx({ stepId: 1 });
+      await fns[1]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+    });
+
+    test('step 2: cancel callback exits scene without creating event', async () => {
+      const ctx = makeCancelCtx({ stepId: 2, state: { startAt: '2026-03-20T10:00:00.000Z' } });
+      await fns[2]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+    });
+
+    test('step 3: cancel callback exits scene', async () => {
+      const ctx = makeCancelCtx({ stepId: 3 });
+      await fns[3]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+    });
+
+    test('step 4: cancel callback exits scene', async () => {
+      const ctx = makeCancelCtx({ stepId: 4 });
+      await fns[4]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+    });
+
+    test('step 5: cancel callback exits scene without storing description', async () => {
+      const ctx = makeCancelCtx({ stepId: 5 });
+      await fns[5]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(ctx.scene.update).not.toHaveBeenCalled();
+    });
+
+    test('step 6: cancel callback exits scene without creating event', async () => {
+      const ctx = makeCancelCtx({ stepId: 6, state: { title: 'Standup', startAt: '2026-03-20T10:00:00.000Z' } });
+      await fns[6]!(ctx, NOOP_NEXT);
+      expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+      expect(createEventMock).not.toHaveBeenCalled();
     });
   });
 });

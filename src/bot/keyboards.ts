@@ -168,7 +168,9 @@ export function recurrenceKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Каждый месяц' : 'Monthly', `${CB.ADD_RECURRENCE}:MONTHLY`)
     .text(lang === 'ru' ? 'Каждый год' : 'Yearly', `${CB.ADD_RECURRENCE}:YEARLY`)
     .row()
-    .text(lang === 'ru' ? 'Другое...' : 'Custom...', `${CB.ADD_RECURRENCE}:custom`);
+    .text(lang === 'ru' ? 'Другое...' : 'Custom...', `${CB.ADD_RECURRENCE}:custom`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Recurrence end for add-event scene
@@ -177,12 +179,22 @@ export function recurrenceEndKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Бесконечно' : 'No end', `${CB.ADD_REC_END}:forever`)
     .row()
     .text(lang === 'ru' ? 'До даты' : 'Until date', `${CB.ADD_REC_END}:until`)
-    .text(lang === 'ru' ? 'N повторений' : 'N times', `${CB.ADD_REC_END}:count`);
+    .text(lang === 'ru' ? 'N повторений' : 'N times', `${CB.ADD_REC_END}:count`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
+}
+
+// Cancel button for add-event scene steps that show no other keyboard
+export function cancelKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard().text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Skip button for optional scene steps
 export function skipKeyboard(lang: 'en' | 'ru', stepIndex: number): InlineKeyboard {
-  return new InlineKeyboard().text(lang === 'ru' ? 'Пропустить' : 'Skip', `${CB.ADD_SKIP}:${stepIndex}`);
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? 'Пропустить' : 'Skip', `${CB.ADD_SKIP}:${stepIndex}`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Scope keyboard for recurring event edit/delete actions

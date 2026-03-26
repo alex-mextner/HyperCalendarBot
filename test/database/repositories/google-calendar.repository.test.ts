@@ -45,6 +45,7 @@ describe('GoogleCalendarRepository', () => {
       channel_id TEXT NOT NULL UNIQUE,
       resource_id TEXT NOT NULL,
       expiration TEXT NOT NULL,
+      channel_token TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (google_calendar_row_id) REFERENCES google_calendars(id) ON DELETE CASCADE
     )`);
@@ -126,17 +127,18 @@ describe('GoogleCalendarRepository', () => {
   test('addWatchChannel creates channel', () => {
     repo.upsertCalendar(42, { google_calendar_id: 'a', calendar_name: 'A', is_primary: true, access_role: 'owner' });
     const cal = repo.getCalendars(42)[0]!;
-    repo.addWatchChannel(cal.id, 'ch-uuid', 'res-123', '2026-03-20T00:00:00Z');
+    repo.addWatchChannel(cal.id, 'ch-uuid', 'res-123', '2026-03-20T00:00:00Z', 'tok-1');
     const channels = repo.getWatchChannels(cal.id);
     expect(channels.length).toBe(1);
     expect(channels[0]!.channel_id).toBe('ch-uuid');
+    expect(channels[0]!.channel_token).toBe('tok-1');
   });
 
   test('getExpiringChannels finds channels expiring before threshold', () => {
     repo.upsertCalendar(42, { google_calendar_id: 'a', calendar_name: 'A', is_primary: true, access_role: 'owner' });
     const cal = repo.getCalendars(42)[0]!;
-    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-14T00:00:00Z');
-    repo.addWatchChannel(cal.id, 'ch2', 'res2', '2026-04-01T00:00:00Z');
+    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-14T00:00:00Z', 'tok-a');
+    repo.addWatchChannel(cal.id, 'ch2', 'res2', '2026-04-01T00:00:00Z', 'tok-b');
     const expiring = repo.getExpiringChannels('2026-03-15T00:00:00Z');
     expect(expiring.length).toBe(1);
     expect(expiring[0]!.channel_id).toBe('ch1');
@@ -145,7 +147,7 @@ describe('GoogleCalendarRepository', () => {
   test('deleteWatchChannel removes channel', () => {
     repo.upsertCalendar(42, { google_calendar_id: 'a', calendar_name: 'A', is_primary: true, access_role: 'owner' });
     const cal = repo.getCalendars(42)[0]!;
-    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-20T00:00:00Z');
+    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-20T00:00:00Z', 'tok-1');
     const ch = repo.getWatchChannels(cal.id)[0]!;
     repo.deleteWatchChannel(ch.id);
     expect(repo.getWatchChannels(cal.id).length).toBe(0);
@@ -154,7 +156,7 @@ describe('GoogleCalendarRepository', () => {
   test('findChannelByIds looks up by channel_id and resource_id', () => {
     repo.upsertCalendar(42, { google_calendar_id: 'a', calendar_name: 'A', is_primary: true, access_role: 'owner' });
     const cal = repo.getCalendars(42)[0]!;
-    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-20T00:00:00Z');
+    repo.addWatchChannel(cal.id, 'ch1', 'res1', '2026-03-20T00:00:00Z', 'tok-1');
     const found = repo.findChannelByIds('ch1', 'res1');
     expect(found).not.toBeNull();
     expect(found!.channel_id).toBe('ch1');
