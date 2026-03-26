@@ -194,8 +194,16 @@ export class IntentLearner {
         .replace(/\s*```\s*$/, '')
         .trim();
 
-      // Parse and validate JSON response
-      const parsed = LearnerResponseCodec.parse(json);
+      // Parse and validate JSON response.
+      // Use safeParse first — a {"skip":true} response omits required fields and
+      // would throw a ZodError with .parse(), even though it's a valid AI decision.
+      const result = LearnerResponseCodec.safeParse(json);
+      if (!result.success) {
+        const skipCheck = jsonCodec(z.object({ skip: z.boolean().optional() }).passthrough()).safeParse(json);
+        if (skipCheck.success && skipCheck.data.skip) return null;
+        throw result.error;
+      }
+      const parsed = result.data;
 
       if (parsed.skip) return null;
 

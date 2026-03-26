@@ -60,6 +60,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           source: docker-compose.yml,Caddyfile
           target: ${{ secrets.DEPLOY_PATH }}
+          overwrite: true
       - uses: appleboy/ssh-action@v1
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

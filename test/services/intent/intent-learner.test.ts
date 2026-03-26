@@ -142,6 +142,36 @@ describe('IntentLearner', () => {
     }
   });
 
+  test('returns null silently when AI returns skip-only response {"skip":true}', async () => {
+    const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
+    globalThis.fetch = async () =>
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text: '{"skip":true}' }],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ) as Response;
+
+    const originalError = cmdLogger.error.bind(cmdLogger);
+    let errorCalled = false;
+    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
+    (cmdLogger as any).error = (...args: unknown[]) => {
+      errorCalled = true;
+      return originalError(...(args as Parameters<typeof originalError>));
+    };
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result).toBeNull();
+      expect(errorCalled).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+      // biome-ignore lint/suspicious/noExplicitAny: restore spy
+      (cmdLogger as any).error = originalError;
+    }
+  });
+
   test('retries when first response has invalid variables, succeeds on second', async () => {
     const invalidPayload = {
       canonical_name: 'show_today',
