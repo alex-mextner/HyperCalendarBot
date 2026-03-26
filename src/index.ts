@@ -223,7 +223,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     const pySessionExists = existsSync('data/voice_caller.session');
 
     if (!pySessionExists) {
-      botLogger.warn('Pyrogram session not found (data/voice_caller.session). Run: bun run auth:voice');
+      botLogger.warn(
+        'Pyrogram session not found (data/voice_caller.session). Run: venv/bin/python scripts/pyrogram-auth.py',
+      );
     }
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
