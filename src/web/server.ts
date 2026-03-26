@@ -30,6 +30,8 @@ export interface WebServerDeps {
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
   // Telegram bot webhook — set when PUBLIC_DOMAIN is configured
   telegramWebhookHandler?: (req: Request) => Response | Promise<Response>;
+  // Optional deep health check — throws if a critical dependency is unreachable
+  healthCheck?: () => Promise<void>;
 }
 
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
@@ -54,6 +56,14 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
       }
 
       if (req.method === 'GET' && url.pathname === '/health') {
+        if (deps.healthCheck) {
+          try {
+            await deps.healthCheck();
+          } catch (err) {
+            webLogger.warn({ err }, 'Health check failed');
+            return new Response('error', { status: 503 });
+          }
+        }
         return new Response('ok');
       }
 

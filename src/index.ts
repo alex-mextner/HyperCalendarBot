@@ -568,6 +568,7 @@ if (config.REDIS_URL) {
     get: (key: string) => bunRedis.get(key),
   };
   eventMentionStore = new RedisEventMentionStore(redisClient);
+  webServerDeps.healthCheck = () => bunRedis.ping().then(() => {});
   botLogger.info('Event mention store: Redis (7-day TTL)');
 } else {
   const { InMemoryEventMentionStore } = await import('./services/intent/event-mention-store.ts');
