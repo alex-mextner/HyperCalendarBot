@@ -46,6 +46,7 @@ interface GoogleSyncQueueDeps {
   onWatchRenewalTick?: () => Promise<void>;
   onCleanupTick?: () => void;
   sendMessage: (telegramId: number, text: string) => Promise<void>;
+  syncService?: SyncService;
 }
 
 export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
@@ -61,7 +62,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
     },
   });
 
-  const syncService = new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage);
+  const syncService =
+    deps.syncService ?? new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage);
 
   const worker = new Worker<GoogleSyncJobData>(
     'google-sync',

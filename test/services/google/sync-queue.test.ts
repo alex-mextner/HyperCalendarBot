@@ -54,21 +54,19 @@ mock.module('bullmq', () => ({
   },
 }));
 
-// ─── SyncService mock ──────────────────────────────────────────────────────────
+// ─── SyncService stub (injected as dependency, not via mock.module) ──────────
 
 const mockInitialSync = mock(async () => {});
 const mockIncrementalPull = mock(async () => {});
 const mockPushEvent = mock(async () => {});
 const mockSetupWatchChannel = mock(async () => {});
 
-mock.module('../../../src/services/google/sync-service.ts', () => ({
-  SyncService: class MockSyncService {
-    initialSync = mockInitialSync;
-    incrementalPull = mockIncrementalPull;
-    pushEvent = mockPushEvent;
-    setupWatchChannel = mockSetupWatchChannel;
-  },
-}));
+const fakeSyncService = {
+  initialSync: mockInitialSync,
+  incrementalPull: mockIncrementalPull,
+  pushEvent: mockPushEvent,
+  setupWatchChannel: mockSetupWatchChannel,
+};
 
 // ─── GoogleCalendarApi mock ────────────────────────────────────────────────────
 
@@ -136,6 +134,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     syncRepo: fakeSyncRepo,
     calendarRepo: fakeCalendarRepo as never,
     sendMessage: fakeSendMessage,
+    syncService: fakeSyncService as never,
     ...overrides,
   };
 }

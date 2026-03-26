@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-// Mock city resolver before importing scene (avoids real Anthropic API calls)
-const mockResolveCity = mock(async (_input: string) => null as string | null);
-mock.module('../../../src/services/timezone/city-resolver.ts', () => ({
-  resolveCity: mockResolveCity,
+// Mock Anthropic SDK before importing scene — avoids real AI calls without replacing city-resolver module
+const mockCreate = mock(async () => ({ content: [{ type: 'text', text: 'UNKNOWN' }] }));
+mock.module('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = { create: mockCreate };
+  },
 }));
 
 const { createOnboardingScene } = await import('../../../src/bot/scenes/onboarding.scene.ts');
@@ -231,8 +233,8 @@ describe('onboarding step 1: timezone', () => {
   let fns: GramioFn[];
 
   beforeEach(() => {
-    mockResolveCity.mockReset();
-    mockResolveCity.mockResolvedValue(null);
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
     db = makeDb();
     fns = getStepFns(createOnboardingScene(db));
   });
@@ -247,7 +249,7 @@ describe('onboarding step 1: timezone', () => {
 
   describe('message: city name', () => {
     test('resolveCity returns timezone — sends confirm', async () => {
-      mockResolveCity.mockResolvedValueOnce('Europe/Berlin');
+      // 'Berlin' resolves via city-timezones library without AI call
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: 'Berlin', state: { lang: 'en' } });
       await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
@@ -257,7 +259,7 @@ describe('onboarding step 1: timezone', () => {
     });
 
     test('resolveCity returns null — sends error with fallback hint', async () => {
-      mockResolveCity.mockResolvedValueOnce(null);
+      // 'xyzzy_no_such_city' — library misses, AI (mocked) returns UNKNOWN → null
       const ctx = makeCtx({
         activeType: 'message',
         stepId: 1,
@@ -277,7 +279,7 @@ describe('onboarding step 1: timezone', () => {
     });
 
     test('ru lang — error in Russian', async () => {
-      mockResolveCity.mockResolvedValueOnce(null);
+      // 'xyzzy' — library misses, AI (mocked) returns UNKNOWN → null
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: 'xyzzy', state: { lang: 'ru' } });
       await fns[1]!(ctx, NOOP_NEXT);
       const [msg] = ctx.send.mock.calls[0] as unknown as [string];

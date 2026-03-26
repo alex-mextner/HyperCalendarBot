@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-// Mock city resolver before importing scene (avoids real Anthropic API calls)
-const mockResolveCity = mock(async (_input: string) => null as string | null);
-mock.module('../../../src/services/timezone/city-resolver.ts', () => ({
-  resolveCity: mockResolveCity,
+// Mock Anthropic SDK before importing scene — avoids real AI calls without replacing city-resolver module
+const mockCreate = mock(async () => ({ content: [{ type: 'text', text: 'UNKNOWN' }] }));
+mock.module('@anthropic-ai/sdk', () => ({
+  default: class {
+    messages = { create: mockCreate };
+  },
 }));
 
 const { createTimezoneScene } = await import('../../../src/bot/scenes/timezone.scene.ts');
@@ -203,8 +205,8 @@ describe('timezone scene step handler', () => {
   let db: DatabaseService;
 
   beforeEach(() => {
-    mockResolveCity.mockReset();
-    mockResolveCity.mockResolvedValue(null);
+    mockCreate.mockReset();
+    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
     db = makeDb();
     fns = getStepFns(createTimezoneScene(db));
   });
@@ -412,7 +414,7 @@ describe('timezone scene step handler', () => {
     });
 
     test('cityInputMode=true, resolveCity returns timezone — shows confirm', async () => {
-      mockResolveCity.mockResolvedValueOnce('Europe/London');
+      // 'London' resolves via city-timezones library without AI call
       const ctx = makeCtx({ activeType: 'message', stepId: 0, text: 'London', state: { cityInputMode: true } });
       await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);
@@ -422,7 +424,7 @@ describe('timezone scene step handler', () => {
     });
 
     test('cityInputMode=true, resolveCity returns null — sends error with fallback hint', async () => {
-      mockResolveCity.mockResolvedValueOnce(null);
+      // 'xyzzy_not_a_city' — library misses, AI (mocked) returns UNKNOWN → null
       const ctx = makeCtx({
         activeType: 'message',
         stepId: 0,
@@ -437,7 +439,7 @@ describe('timezone scene step handler', () => {
     });
 
     test('cityInputMode=true, ru lang — error message in Russian', async () => {
-      mockResolveCity.mockResolvedValueOnce(null);
+      // 'xyzzy' — library misses, AI (mocked) returns UNKNOWN → null
       const ctx = makeCtx({
         activeType: 'message',
         stepId: 0,
