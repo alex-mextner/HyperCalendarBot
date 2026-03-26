@@ -32,12 +32,21 @@ test('propose: no calendarProposalRepo → error', async () => {
 test('propose: target not in chat → PROPOSAL_TARGET_NOT_IN_CHAT', async () => {
   const result = await handleProposeCalendarChange(
     makeCtx({
-      calendarProposalRepo: {
-        create: mock(() => ({ id: 1 })),
-        setDmMessageId: mock(() => {}),
-        setGroupMessageId: mock(() => {}),
-      } as never,
-      checkGroupMembership: mock(async () => false),
+      secretary: {
+        calendarProposalRepo: {
+          create: mock(() => ({ id: 1 })),
+          setDmMessageId: mock(() => {}),
+          setGroupMessageId: mock(() => {}),
+        } as never,
+        secretaryRepo: {} as never,
+        secretaryForLine: undefined,
+      },
+      group: {
+        checkGroupMembership: mock(async () => false),
+        groupChatRepo: {} as never,
+        groupMemberRepo: {} as never,
+        groupMemberService: {} as never,
+      },
     }),
     {
       target_telegram_id: 2,
@@ -54,12 +63,21 @@ test('propose: creates proposal and returns awaiting_confirmation', async () => 
   const mockCreate = mock(() => ({ id: 42, status: 'pending', target_id: 2 }));
   const result = await handleProposeCalendarChange(
     makeCtx({
-      calendarProposalRepo: {
-        create: mockCreate,
-        setDmMessageId: mock(() => {}),
-        setGroupMessageId: mock(() => {}),
-      } as never,
-      checkGroupMembership: mock(async () => true),
+      secretary: {
+        calendarProposalRepo: {
+          create: mockCreate,
+          setDmMessageId: mock(() => {}),
+          setGroupMessageId: mock(() => {}),
+        } as never,
+        secretaryRepo: {} as never,
+        secretaryForLine: undefined,
+      },
+      group: {
+        checkGroupMembership: mock(async () => true),
+        groupChatRepo: {} as never,
+        groupMemberRepo: {} as never,
+        groupMemberService: {} as never,
+      },
       sender: { sendMessage: mock(async () => ({ message_id: 5 })), sendAsUser: undefined } as never,
     }),
     {

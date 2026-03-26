@@ -9,15 +9,12 @@ interface SendFeedbackInput {
 }
 
 export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput): ToolResult {
-  if (!ctx.botAdminId) {
-    return { success: false, error: 'Feedback system is not configured (no admin ID).' };
+  if (!ctx.feedback) {
+    return { success: false, error: 'Feedback system is not configured.' };
   }
+  const { feedbackRepo, botAdminId } = ctx.feedback;
 
-  if (!ctx.feedbackRepo) {
-    return { success: false, error: 'Feedback system is not available.' };
-  }
-
-  const openCount = ctx.feedbackRepo.countOpenThreads(ctx.user.telegram_id);
+  const openCount = feedbackRepo.countOpenThreads(ctx.user.telegram_id);
   if (openCount >= 3) {
     return {
       success: false,
@@ -26,13 +23,13 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
   }
 
   const subject = input.message.slice(0, 50) + (input.message.length > 50 ? '...' : '');
-  const threadId = ctx.feedbackRepo.createThread({
+  const threadId = feedbackRepo.createThread({
     user_id: ctx.user.telegram_id,
     type: input.type,
     subject,
   });
 
-  ctx.feedbackRepo.addMessage({
+  feedbackRepo.addMessage({
     thread_id: threadId,
     sender: 'user',
     text: input.message,
@@ -46,7 +43,7 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
     const text = `${typeEmoji} Feedback #${threadId} (${input.type}) от ${username}\n\n«${input.message}»`;
 
     ctx
-      .sendMessageToChat(ctx.botAdminId, text, {
+      .sendMessageToChat(botAdminId, text, {
         reply_markup: {
           inline_keyboard: [
             [

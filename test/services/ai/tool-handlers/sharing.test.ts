@@ -65,11 +65,15 @@ describe('sharing tool handlers', () => {
       chatHistory: new ChatHistoryRepository(db),
       userRepo,
       reminderRepo,
-      sharedEventRepo,
-      invitationRepo,
-      invitationService,
-      sharingSettingsRepo,
-      sharingService,
+      sharing: {
+        sharedEventRepo,
+        invitationRepo,
+        invitationService,
+        sharingSettingsRepo,
+        sharingService,
+        privacyService,
+        editProposalRepo: undefined as never,
+      },
       conversationLogger: null as never,
       ...overrides,
     };
@@ -97,7 +101,17 @@ describe('sharing tool handlers', () => {
 
   describe('handleShareEvent', () => {
     test('returns error when sharedEventRepo is missing', () => {
-      const ctx = makeCtx({ sharedEventRepo: undefined });
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo: undefined as never,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleShareEvent(ctx, { event_id: 1, target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing is not configured.');
@@ -159,7 +173,17 @@ describe('sharing tool handlers', () => {
 
   describe('handleSendInvitation', () => {
     test('returns error when invitationService is missing', () => {
-      const ctx = makeCtx({ invitationService: undefined });
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService: undefined as never,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleSendInvitation(ctx, { event_id: 1, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invitations are not configured.');
@@ -400,7 +424,17 @@ describe('sharing tool handlers', () => {
 
   describe('handleGetInvitationStatus', () => {
     test('returns error when invitationRepo is missing', () => {
-      const ctx = makeCtx({ invitationRepo: undefined });
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo: undefined as never,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleGetInvitationStatus(ctx, { event_id: 1 });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invitations are not configured.');
@@ -497,7 +531,17 @@ describe('sharing tool handlers', () => {
 
   describe('manage_settings privacy category', () => {
     test('returns error when sharingSettingsRepo is missing', () => {
-      const ctx = makeCtx({ sharingSettingsRepo: undefined });
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo: undefined as never,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleManageSettings(ctx, {
         action: 'update',
         category: 'privacy',
@@ -584,14 +628,14 @@ describe('sharing tool handlers', () => {
 
   describe('handleShareAgenda', () => {
     test('returns error when sharingService is missing', () => {
-      const ctx = makeCtx({ sharingService: undefined });
+      const ctx = makeCtx({ sharing: undefined });
       const result = handleShareAgenda(ctx, { period: 'today', target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing is not configured.');
     });
 
     test('returns error when sharedEventRepo is missing', () => {
-      const ctx = makeCtx({ sharedEventRepo: undefined });
+      const ctx = makeCtx({ sharing: undefined });
       const result = handleShareAgenda(ctx, { period: 'today', target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing is not configured.');
@@ -715,7 +759,17 @@ describe('sharing tool handlers', () => {
 
   describe('handleSetEventVisibility', () => {
     test('returns error when sharingSettingsRepo is missing', () => {
-      const ctx = makeCtx({ sharingSettingsRepo: undefined });
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo: undefined as never,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleSetEventVisibility(ctx, { event_id: 1, visibility: 'full' });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing settings are not configured.');
@@ -816,7 +870,18 @@ describe('sharing tool handlers', () => {
 
     test('returns error when editProposalRepo is missing', () => {
       const participantRepo = new ParticipantRepository(db);
-      const ctx = makeCtx({ participantRepo, editProposalRepo: undefined });
+      const ctx = makeCtx({
+        participantRepo,
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService: privacyService,
+          editProposalRepo: undefined as never,
+        },
+      });
       const result = handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
@@ -832,7 +897,18 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
 
-      const ctx = makeCtx({ participantRepo, editProposalRepo });
+      const ctx = makeCtx({
+        participantRepo,
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
       const result = handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not an accepted participant');
@@ -849,7 +925,18 @@ describe('sharing tool handlers', () => {
       });
       participantRepo.add(event.id, USER_ID, 'accepted');
 
-      const ctx = makeCtx({ participantRepo, editProposalRepo });
+      const ctx = makeCtx({
+        participantRepo,
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
       const result = handleProposeEdit(ctx, {
         event_id: event.id,
         changes: { start_at: '2026-03-20T11:00:00Z' },
@@ -879,7 +966,15 @@ describe('sharing tool handlers', () => {
       let sentTo: number | undefined;
       const ctx = makeCtx({
         participantRepo,
-        editProposalRepo,
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
           editMessageText: async () => {},

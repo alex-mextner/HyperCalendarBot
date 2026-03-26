@@ -30,16 +30,16 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
   }
 
   if (!category || category === 'notifications') {
-    if (ctx.notificationPrefs) {
-      ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
-      result.notifications = ctx.notificationPrefs.getPrefs(ctx.user.telegram_id);
+    if (ctx.notifications?.notificationPrefs) {
+      ctx.notifications?.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
+      result.notifications = ctx.notifications?.notificationPrefs.getPrefs(ctx.user.telegram_id);
     }
   }
 
   if (!category || category === 'calls') {
-    if (ctx.callSettingsRepo) {
-      ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-      const settings = ctx.callSettingsRepo.get(ctx.user.telegram_id);
+    if (ctx.voice?.callSettingsRepo) {
+      ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+      const settings = ctx.voice?.callSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
         const { user_id: _uid, updated_at: _uat, ...rest } = settings as Record<string, unknown>;
         result.calls = rest;
@@ -48,9 +48,9 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
   }
 
   if (!category || category === 'privacy') {
-    if (ctx.sharingSettingsRepo) {
-      ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-      const settings = ctx.sharingSettingsRepo.get(ctx.user.telegram_id);
+    if (ctx.sharing?.sharingSettingsRepo) {
+      ctx.sharing?.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+      const settings = ctx.sharing?.sharingSettingsRepo.get(ctx.user.telegram_id);
       if (settings) {
         const { user_id: _uid, updated_at: _uat, ...rest } = settings as unknown as Record<string, unknown>;
         result.privacy = rest;
@@ -65,7 +65,7 @@ function handleGet(ctx: AgentContext, category?: string): ToolResult {
   }
 
   if (category === 'assistant') {
-    const connected = ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false;
+    const connected = ctx.agents?.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false;
     const enabled = Boolean(ctx.user.assistant_enabled);
     return {
       success: true,
@@ -136,8 +136,8 @@ function updateGeneral(ctx: AgentContext, updates: Record<string, unknown>): Too
 }
 
 function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
-  if (!ctx.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
-  ctx.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
+  if (!ctx.notifications?.notificationPrefs) return { success: false, error: 'Notification settings not configured.' };
+  ctx.notifications?.notificationPrefs.ensureDefaults(ctx.user.telegram_id);
 
   const patch: Record<string, unknown> = {};
   if (updates.morning_agenda_enabled !== undefined)
@@ -154,7 +154,7 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
   }
 
   if (Object.keys(patch).length === 0) return { success: false, error: 'No notification settings provided.' };
-  ctx.notificationPrefs.update(ctx.user.telegram_id, patch);
+  ctx.notifications?.notificationPrefs.update(ctx.user.telegram_id, patch);
   return {
     success: true,
     output: t(ctx.user.language).aiTools.settings.notificationsUpdated(Object.keys(patch).join(', ')),
@@ -162,16 +162,17 @@ function updateNotifications(ctx: AgentContext, updates: Record<string, unknown>
 }
 
 function updateCalls(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
-  if (!ctx.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
-  ctx.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  if (updates.enabled !== undefined) ctx.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled as boolean);
+  if (!ctx.voice?.callSettingsRepo) return { success: false, error: 'Call settings not available.' };
+  ctx.voice?.callSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  if (updates.enabled !== undefined)
+    ctx.voice?.callSettingsRepo.setEnabled(ctx.user.telegram_id, updates.enabled as boolean);
   if (updates.language !== undefined)
-    ctx.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language as string);
+    ctx.voice?.callSettingsRepo.setLanguage(ctx.user.telegram_id, updates.language as string);
   return { success: true, output: t(ctx.user.language).aiTools.settings.callsUpdated };
 }
 
 function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): ToolResult {
-  if (!ctx.sharingSettingsRepo) return { success: false, error: 'Sharing settings are not configured.' };
+  if (!ctx.sharing?.sharingSettingsRepo) return { success: false, error: 'Sharing settings are not configured.' };
 
   const patch: Record<string, string | number> = {};
   if (updates.default_visibility !== undefined) patch.default_visibility = updates.default_visibility as string;
@@ -182,8 +183,8 @@ function updatePrivacy(ctx: AgentContext, updates: Record<string, unknown>): Too
     return { success: false, error: 'No privacy settings provided.' };
   }
 
-  ctx.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
-  ctx.sharingSettingsRepo.update(ctx.user.telegram_id, patch);
+  ctx.sharing?.sharingSettingsRepo.ensureDefaults(ctx.user.telegram_id);
+  ctx.sharing?.sharingSettingsRepo.update(ctx.user.telegram_id, patch);
 
   const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
   return { success: true, output: t(ctx.user.language).aiTools.settings.privacyUpdated(lines.join(', ')) };

@@ -34,7 +34,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
     lang,
     ctx,
   } = params;
-  if (!ctx.sender?.sendInvitation || !ctx.invitationRepo) return;
+  if (!ctx.sender?.sendInvitation || !ctx.sharing?.invitationRepo) return;
 
   const eventTitle = event?.title ?? `Event #${eventId}`;
   deliveryLogger.info(
@@ -55,7 +55,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
         !!invitee?.onboarding_completed,
       )
     : t(lang).invitation_received(eventTitle, inviterName);
-  const invRepo = ctx.invitationRepo;
+  const invRepo = ctx.sharing!.invitationRepo;
   const sender = ctx.sender;
   const chatId = ctx.chatId;
   const deepLinkSvc = ctx.deepLinkService;
@@ -171,7 +171,7 @@ interface SetEventVisibilityInput {
 }
 
 export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): ToolResult {
-  if (!ctx.sharedEventRepo) {
+  if (!ctx.sharing?.sharedEventRepo) {
     return { success: false, error: 'Sharing is not configured.' };
   }
 
@@ -180,7 +180,7 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  const shared = ctx.sharedEventRepo.create({
+  const shared = ctx.sharing.sharedEventRepo.create({
     event_id: input.event_id,
     shared_by: ctx.user.telegram_id,
     shared_to_type: input.target_type,
@@ -200,11 +200,11 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
 }
 
 export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): ToolResult {
-  if (!ctx.invitationService) {
+  if (!ctx.sharing?.invitationService) {
     return { success: false, error: 'Invitations are not configured.' };
   }
 
-  const result = ctx.invitationService.sendInvitation(
+  const result = ctx.sharing.invitationService.sendInvitation(
     input.event_id,
     ctx.user.telegram_id,
     input.invitee_id,
@@ -253,10 +253,10 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
 }
 
 export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id: number }): ToolResult {
-  if (!ctx.invitationService) {
+  if (!ctx.sharing?.invitationService) {
     return { success: false, error: 'Invitations are not configured.' };
   }
-  const result = ctx.invitationService.cancelInvitation(input.invitation_id, ctx.user.telegram_id);
+  const result = ctx.sharing.invitationService.cancelInvitation(input.invitation_id, ctx.user.telegram_id);
   if (!result.success) {
     return { success: false, error: result.error };
   }
@@ -270,10 +270,10 @@ export function handleResendInvitation(
   ctx: AgentContext,
   input: { invitation_id: number; invitee_username?: string },
 ): ToolResult {
-  if (!ctx.invitationRepo || !ctx.invitationService) {
+  if (!ctx.sharing) {
     return { success: false, error: 'Invitations are not configured.' };
   }
-  const invitation = ctx.invitationRepo.findById(input.invitation_id);
+  const invitation = ctx.sharing.invitationRepo.findById(input.invitation_id);
   if (!invitation) {
     return { success: false, error: 'Invitation not found.' };
   }
@@ -310,7 +310,7 @@ export function handleResendInvitation(
 }
 
 export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitationStatusInput): ToolResult {
-  if (!ctx.invitationRepo) {
+  if (!ctx.sharing?.invitationRepo) {
     return { success: false, error: 'Invitations are not configured.' };
   }
 
@@ -319,8 +319,8 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  const pending = ctx.invitationRepo.getPendingForEvent(input.event_id);
-  const accepted = ctx.invitationRepo.getAcceptedForEvent(input.event_id);
+  const pending = ctx.sharing.invitationRepo.getPendingForEvent(input.event_id);
+  const accepted = ctx.sharing.invitationRepo.getAcceptedForEvent(input.event_id);
 
   const lines: string[] = [];
   for (const inv of accepted) {
@@ -342,7 +342,7 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
 }
 
 export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): ToolResult {
-  if (!ctx.sharingService || !ctx.sharedEventRepo) {
+  if (!ctx.sharing) {
     return { success: false, error: 'Sharing is not configured.' };
   }
 
@@ -364,7 +364,7 @@ export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): T
   }
 
   const allEvents = dates.flatMap((date) =>
-    ctx.sharingService!.getAgendaForSharing(ctx.user.telegram_id, date, ctx.user.timezone),
+    ctx.sharing!.sharingService.getAgendaForSharing(ctx.user.telegram_id, date, ctx.user.timezone),
   );
 
   if (allEvents.length === 0) {
@@ -373,7 +373,7 @@ export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): T
 
   // Record the share
   for (const ev of allEvents) {
-    ctx.sharedEventRepo.create({
+    ctx.sharing.sharedEventRepo.create({
       event_id: ev.eventId,
       shared_by: ctx.user.telegram_id,
       shared_to_type: input.target_type,
@@ -396,11 +396,16 @@ export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): T
 }
 
 export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisibilityInput): ToolResult {
-  if (!ctx.sharingSettingsRepo) {
+  if (!ctx.sharing?.sharingSettingsRepo) {
     return { success: false, error: 'Sharing settings are not configured.' };
   }
 
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
 
@@ -409,7 +414,7 @@ export function handleSetEventVisibility(ctx: AgentContext, input: SetEventVisib
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  ctx.sharingSettingsRepo.setEventVisibility(input.event_id, input.visibility);
+  ctx.sharing.sharingSettingsRepo.setEventVisibility(input.event_id, input.visibility);
 
   return {
     success: true,
@@ -427,7 +432,7 @@ export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): T
   if (!ctx.participantRepo) {
     return { success: false, error: 'Participants feature is not configured.' };
   }
-  if (!ctx.editProposalRepo) {
+  if (!ctx.sharing?.editProposalRepo) {
     return { success: false, error: 'Edit proposals are not configured.' };
   }
 
@@ -436,7 +441,7 @@ export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): T
     return { success: false, error: 'You are not an accepted participant of this event.' };
   }
 
-  const proposal = ctx.editProposalRepo.create({
+  const proposal = ctx.sharing.editProposalRepo.create({
     event_id: input.event_id,
     proposer_id: ctx.user.telegram_id,
     changes: JSON.stringify(input.changes),

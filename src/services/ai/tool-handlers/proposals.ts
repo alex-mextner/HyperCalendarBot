@@ -17,13 +17,13 @@ export interface ProposeInput {
 }
 
 export async function handleProposeCalendarChange(ctx: AgentContext, input: ProposeInput): Promise<ToolResult> {
-  const calendarProposalRepo = ctx.calendarProposalRepo;
+  const calendarProposalRepo = ctx.secretary?.calendarProposalRepo;
   if (!calendarProposalRepo) {
     return { success: false, error: 'Proposals feature not configured.' };
   }
 
-  const inChat = ctx.checkGroupMembership
-    ? await ctx.checkGroupMembership(ctx.chatId, input.target_telegram_id)
+  const inChat = ctx.group?.checkGroupMembership
+    ? await ctx.group.checkGroupMembership(ctx.chatId, input.target_telegram_id)
     : false;
   if (!inChat) {
     return { success: false, error: 'PROPOSAL_TARGET_NOT_IN_CHAT' };

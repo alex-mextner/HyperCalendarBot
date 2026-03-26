@@ -21,7 +21,7 @@ function makeCtx(db: Database, userId: number): AgentContext {
     conversationLogger: null as never,
     userRepo,
     reminderRepo: {} as AgentContext['reminderRepo'],
-    userMemoryRepo: new UserMemoryRepository(db),
+    birthday: { birthdayService: undefined as never, userMemoryRepo: new UserMemoryRepository(db) },
   };
 }
 
@@ -39,15 +39,15 @@ describe('handleRememberUserFact', () => {
     const ctx = makeCtx(db, USER_ID);
     const result = handleRememberUserFact(ctx, { type: 'append', content: 'Prefers morning workouts' });
     expect(result.success).toBe(true);
-    expect(ctx.userMemoryRepo!.getAll(USER_ID)).toHaveLength(1);
-    expect(ctx.userMemoryRepo!.getAll(USER_ID)[0]!.content).toBe('Prefers morning workouts');
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(1);
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)[0]!.content).toBe('Prefers morning workouts');
   });
 
   test('append accumulates multiple facts', () => {
     const ctx = makeCtx(db, USER_ID);
     handleRememberUserFact(ctx, { type: 'append', content: 'Fact 1' });
     handleRememberUserFact(ctx, { type: 'append', content: 'Fact 2' });
-    expect(ctx.userMemoryRepo!.getAll(USER_ID)).toHaveLength(2);
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(2);
   });
 
   test('rewrite replaces all existing facts', () => {
@@ -55,14 +55,17 @@ describe('handleRememberUserFact', () => {
     handleRememberUserFact(ctx, { type: 'append', content: 'Old fact 1' });
     handleRememberUserFact(ctx, { type: 'append', content: 'Old fact 2' });
     handleRememberUserFact(ctx, { type: 'rewrite', content: 'New consolidated fact' });
-    const facts = ctx.userMemoryRepo!.getAll(USER_ID);
+    const facts = ctx.birthday!.userMemoryRepo!.getAll(USER_ID);
     expect(facts).toHaveLength(1);
     expect(facts[0]!.content).toBe('New consolidated fact');
   });
 
   test('returns error when userMemoryRepo is not available', () => {
     const ctx = makeCtx(db, USER_ID);
-    const ctxWithout = { ...ctx, userMemoryRepo: undefined };
+    const ctxWithout = {
+      ...ctx,
+      birthday: { birthdayService: undefined as never, userMemoryRepo: undefined as never },
+    };
     const result = handleRememberUserFact(ctxWithout as AgentContext, { type: 'append', content: 'test' });
     expect(result.success).toBe(false);
   });

@@ -4,12 +4,12 @@ import { ALL_TOPICS } from '../../scheduled/domain-event-bus.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 function requireScheduledCallService(ctx: AgentContext): ToolResult | null {
-  if (!ctx.scheduledCallService) return { success: false, error: 'Scheduled calls not available.' };
+  if (!ctx.scheduled?.scheduledCallService) return { success: false, error: 'Scheduled calls not available.' };
   return null;
 }
 
 function requireTriggerRepo(ctx: AgentContext): ToolResult | null {
-  if (!ctx.triggerService?.repo) return { success: false, error: 'Trigger service not available.' };
+  if (!ctx.scheduled?.triggerService?.repo) return { success: false, error: 'Trigger service not available.' };
   return null;
 }
 
@@ -20,7 +20,7 @@ export async function handleScheduleAiCall(
   const err = requireScheduledCallService(ctx);
   if (err) return err;
   try {
-    const id = await ctx.scheduledCallService!.create({
+    const id = await ctx.scheduled!.scheduledCallService.create({
       userId: ctx.user.telegram_id,
       message: input.message,
       runAt: input.run_at ?? null,
@@ -37,7 +37,7 @@ export async function handleScheduleAiCall(
 export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
-  const schedules = ctx.scheduledCallService!.list(ctx.user.telegram_id);
+  const schedules = ctx.scheduled!.scheduledCallService.list(ctx.user.telegram_id);
   if (schedules.length === 0)
     return { success: true, output: t(ctx.user.language).aiTools.scheduled.noScheduledCalls, data: [] };
   const lines = schedules.map(
@@ -49,7 +49,7 @@ export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
 export async function handleScheduleAiCallCancel(ctx: AgentContext, input: { id: string }): Promise<ToolResult> {
   const err = requireScheduledCallService(ctx);
   if (err) return err;
-  await ctx.scheduledCallService!.cancel(input.id, ctx.user.telegram_id);
+  await ctx.scheduled!.scheduledCallService.cancel(input.id, ctx.user.telegram_id);
   return { success: true, output: t(ctx.user.language).aiTools.scheduled.scheduleCancelled(input.id) };
 }
 
@@ -72,7 +72,7 @@ export function handleAddTrigger(
     }
   }
 
-  const repo = ctx.triggerService!.repo;
+  const repo = ctx.scheduled!.triggerService.repo;
   const count = repo.countEnabled(ctx.user.telegram_id);
   if (count >= 50) return { success: false, error: 'Trigger limit (50) reached.' };
 
@@ -99,7 +99,7 @@ export function handleAddTrigger(
 export function handleListTriggers(ctx: AgentContext): ToolResult {
   const err = requireTriggerRepo(ctx);
   if (err) return err;
-  const triggers = ctx.triggerService!.repo.listByUser(ctx.user.telegram_id);
+  const triggers = ctx.scheduled!.triggerService.repo.listByUser(ctx.user.telegram_id);
   if (triggers.length === 0)
     return { success: true, output: t(ctx.user.language).aiTools.scheduled.noTriggers, data: [] };
   const lines = triggers.map(
@@ -112,6 +112,6 @@ export function handleListTriggers(ctx: AgentContext): ToolResult {
 export function handleRemoveTrigger(ctx: AgentContext, input: { id: string }): ToolResult {
   const err = requireTriggerRepo(ctx);
   if (err) return err;
-  ctx.triggerService!.repo.remove(input.id, ctx.user.telegram_id);
+  ctx.scheduled!.triggerService.repo.remove(input.id, ctx.user.telegram_id);
   return { success: true, output: t(ctx.user.language).aiTools.scheduled.triggerRemoved(input.id) };
 }

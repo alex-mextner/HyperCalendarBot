@@ -758,16 +758,17 @@ describe('buildAgentContextFactory', () => {
 
   test('passes userMemoryRepo into AgentContext', () => {
     const userMemoryRepo = { getAll: mock(() => []), append: mock(() => {}), rewrite: mock(() => {}) };
+    const birthdayService = {} as never;
     const deps = {
-      ...makeDeps({ userMemoryRepo }),
+      ...makeDeps({ userMemoryRepo, birthdayService }),
       secretaryRepo: undefined,
     };
     const ctx = buildAgentContextFactory(deps as never)(user, 1, 'hi');
-    expect(ctx.userMemoryRepo).toBe(userMemoryRepo as never);
+    expect(ctx.birthday?.userMemoryRepo).toBe(userMemoryRepo as never);
   });
 
   test('AgentContext.userMemoryRepo is undefined when not provided in deps', () => {
     const ctx = buildAgentContextFactory(makeDeps() as never)(user, 1, 'hi');
-    expect(ctx.userMemoryRepo).toBeUndefined();
+    expect(ctx.birthday?.userMemoryRepo).toBeUndefined();
   });
 });

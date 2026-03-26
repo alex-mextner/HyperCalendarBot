@@ -195,7 +195,11 @@ describe('event tool handlers', () => {
       const conflictCtx = {
         ...ctx,
         conflictChecker: new ConflictChecker(eventRepo),
-        domainEvents: { emit: mock(() => {}) },
+        scheduled: {
+          domainEvents: { emit: mock(() => {}) },
+          scheduledCallService: undefined as never,
+          triggerService: undefined as never,
+        },
       } as unknown as AgentContext;
 
       // Create existing event
@@ -225,7 +229,11 @@ describe('event tool handlers', () => {
       const conflictCtx = {
         ...ctx,
         conflictChecker: new ConflictChecker(eventRepo),
-        domainEvents: { emit: mock(() => {}) },
+        scheduled: {
+          domainEvents: { emit: mock(() => {}) },
+          scheduledCallService: undefined as never,
+          triggerService: undefined as never,
+        },
       } as unknown as AgentContext;
 
       const result = handleCreateEvent(conflictCtx, {
@@ -654,7 +662,12 @@ describe('event tool handlers', () => {
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        groupChatRepo,
+        group: {
+          groupChatRepo,
+          groupMemberRepo: undefined as never,
+          groupMemberService: undefined as never,
+          checkGroupMembership: undefined as never,
+        },
       };
       const result = handleGetEvents(gCtx, {
         start_date: '2026-03-15T00:00:00Z',
@@ -675,7 +688,12 @@ describe('event tool handlers', () => {
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
-        groupChatRepo,
+        group: {
+          groupChatRepo,
+          groupMemberRepo: undefined as never,
+          groupMemberService: undefined as never,
+          checkGroupMembership: undefined as never,
+        },
       };
       const result = handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
 
@@ -702,7 +720,17 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      const gCtx: AgentContext = { ...makeGroupCtx(), groupMemberService, sender };
+      const mockGroupChatRepo = { findByChatId: () => null } as never;
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        group: {
+          groupChatRepo: mockGroupChatRepo,
+          groupMemberRepo: undefined as never,
+          groupMemberService,
+          checkGroupMembership: undefined as never,
+        },
+        sender,
+      };
       const result = handleCreateEvent(gCtx, {
         title: 'Party',
         start_at: '2026-03-20T18:00:00Z',
@@ -736,12 +764,24 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      handleCreateEvent({ ...makeGroupCtx(), groupMemberService, sender } as AgentContext, {
-        title: 'Встреча',
-        start_at: '2026-03-20T10:00:00Z',
-        scope: 'group',
-        force: true,
-      });
+      handleCreateEvent(
+        {
+          ...makeGroupCtx(),
+          group: {
+            groupChatRepo: { findByChatId: () => null } as never,
+            groupMemberRepo: undefined as never,
+            groupMemberService,
+            checkGroupMembership: undefined as never,
+          },
+          sender,
+        } as AgentContext,
+        {
+          title: 'Встреча',
+          start_at: '2026-03-20T10:00:00Z',
+          scope: 'group',
+          force: true,
+        },
+      );
 
       await new Promise((r) => setTimeout(r, 0));
       expect(sent.length).toBe(2);
@@ -764,11 +804,23 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      const result = handleUpdateEvent({ ...makeGroupCtx(), groupMemberService, sender } as AgentContext, {
-        event_id: event.id,
-        title: 'Sprint Planning Updated',
-        scope: 'group',
-      });
+      const result = handleUpdateEvent(
+        {
+          ...makeGroupCtx(),
+          group: {
+            groupChatRepo: { findByChatId: () => null } as never,
+            groupMemberRepo: undefined as never,
+            groupMemberService,
+            checkGroupMembership: undefined as never,
+          },
+          sender,
+        } as AgentContext,
+        {
+          event_id: event.id,
+          title: 'Sprint Planning Updated',
+          scope: 'group',
+        },
+      );
 
       expect(result.success).toBe(true);
       await new Promise((r) => setTimeout(r, 0));
@@ -796,7 +848,16 @@ describe('event tool handlers', () => {
         editMessageText: mock(async () => {}),
       };
 
-      const gCtx: AgentContext = { ...makeGroupCtx(), groupMemberService, sender, groupChatRepo };
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        group: {
+          groupChatRepo,
+          groupMemberRepo: undefined as never,
+          groupMemberService,
+          checkGroupMembership: undefined as never,
+        },
+        sender,
+      };
       handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
 
       await new Promise((r) => setTimeout(r, 0));

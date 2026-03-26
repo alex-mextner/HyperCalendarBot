@@ -671,9 +671,9 @@ if (config.REDIS_URL) {
   const syntheticRunner = new SyntheticPipelineRunner({
     contextBuilder: (user, chatId, message) => {
       const ctx = agentContextBuilder(user, chatId, message);
-      ctx.scheduledCallService = scheduledCallService;
-      ctx.triggerService = { repo: triggerRepo };
-      ctx.domainEvents = domainEventBus;
+      if (ctx.scheduled) {
+        ctx.scheduled.domainEvents = domainEventBus;
+      }
       return ctx;
     },
     intentRun: async (agentCtx, message) => {

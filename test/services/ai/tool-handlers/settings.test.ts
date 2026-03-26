@@ -258,12 +258,14 @@ describe('handleManageSettings', () => {
 
     test('update notifications with prefs configured', () => {
       const prefs: Record<string, unknown> = {};
-      ctx.notificationPrefs = {
-        ensureDefaults: () => {},
-        getPrefs: () => prefs,
-        update: (...args: unknown[]) => {
-          Object.assign(prefs, args[1] as Record<string, unknown>);
-        },
+      ctx.notifications = {
+        notificationPrefs: {
+          ensureDefaults: () => {},
+          getPrefs: () => prefs,
+          update: (...args: unknown[]) => {
+            Object.assign(prefs, args[1] as Record<string, unknown>);
+          },
+        } as never,
       };
       const result = handleManageSettings(ctx, {
         action: 'update',

@@ -29,87 +29,154 @@ import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
 
+// ---------------------------------------------------------------------------
+// Capability group interfaces — each group is optional as a whole;
+// if present, all fields inside are guaranteed non-null.
+// This forces callers to guard with `if (ctx.sharing)` once, after which
+// TypeScript knows every field is defined — no per-field `?.` or `!`.
+// ---------------------------------------------------------------------------
+
+export interface SharingCapability {
+  invitationService: InvitationService;
+  invitationRepo: InvitationRepository;
+  sharingService: SharingService;
+  sharingSettingsRepo: SharingSettingsRepository;
+  sharedEventRepo: SharedEventRepository;
+  privacyService: PrivacyService;
+  editProposalRepo: EditProposalRepository;
+}
+
+export interface SecretaryCapability {
+  secretaryRepo: SecretaryRepository;
+  /** Formatted line listing all calendars this user manages as secretary. */
+  secretaryForLine: string | undefined;
+  calendarProposalRepo: CalendarProposalRepository;
+}
+
+export interface GroupCapability {
+  checkGroupMembership: (chatId: number, userId: number) => Promise<boolean>;
+  groupChatRepo: GroupChatRepository;
+  groupMemberRepo: GroupMemberRepository;
+  groupMemberService: GroupMemberService;
+}
+
+export interface VoiceCapability {
+  callQueue: { enqueue(userId: number, text: string): void };
+  callSettingsRepo: {
+    get(userId: number): Record<string, unknown> | null;
+    ensureDefaults(userId: number): void;
+    setEnabled(userId: number, enabled: boolean): void;
+    setLanguage(userId: number, lang: string): void;
+  };
+  stressDictionary: StressDictionary;
+}
+
+export interface GoogleCapability {
+  googleCalendarRepo: GoogleCalendarRepository;
+}
+
+export interface NotificationsCapability {
+  notificationPrefs: {
+    getPrefs(userId: number): Record<string, unknown>;
+    update(userId: number, patch: Record<string, unknown>): void;
+    ensureDefaults(userId: number): void;
+  };
+}
+
+export interface FeedbackCapability {
+  feedbackContext:
+    | {
+        threadId: number;
+        subject: string;
+        messages: { sender: string; text: string }[];
+      }
+    | undefined;
+  feedbackRepo: FeedbackRepository;
+  botAdminId: number;
+}
+
+export interface ScheduledCapability {
+  scheduledCallService: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
+  triggerService: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
+  domainEvents?: DomainEventBus;
+}
+
+export interface SceneCapability {
+  scenePauseState: import('../scene-pause.ts').ScenePauseState | undefined;
+  scenePauseService: import('../scene-pause.ts').ScenePauseService;
+}
+
+export interface AgentsCapability {
+  agentRegistry: AgentRegistry;
+  agentDispatcher: AgentDispatcher;
+  onAgentChunk: ((text: string) => void) | undefined;
+}
+
+export interface BirthdayCapability {
+  birthdayService: BirthdayService;
+  userMemoryRepo: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+}
+
+// ---------------------------------------------------------------------------
+// Main context
+// ---------------------------------------------------------------------------
+
 export interface AgentContext {
+  // Core — always present
   user: User;
   chatId: number;
   messageText: string;
-  /** Telegram message_id of the incoming message being processed. Used for set_reaction. */
-  incomingMessageId?: number;
   isGroup: boolean;
-  groupChatId?: number;
-  groupTitle?: string;
-  onBotResponse?: (messageId: number) => void;
   eventService: EventService;
   holidayService: HolidayService;
   chatHistory: ChatHistoryRepository;
   conversationLogger: ConversationLogger;
   userRepo: UserRepository;
   reminderRepo: ReminderRepository;
-  invitationService?: InvitationService;
-  invitationRepo?: InvitationRepository;
-  sharingService?: SharingService;
-  sharingSettingsRepo?: SharingSettingsRepository;
-  sharedEventRepo?: SharedEventRepository;
-  privacyService?: PrivacyService;
-  contactRepo?: ContactRepository;
-  participantRepo?: ParticipantRepository;
-  editProposalRepo?: EditProposalRepository;
-  secretaryRepo?: SecretaryRepository;
-  secretaryForLine?: string;
-  calendarProposalRepo?: CalendarProposalRepository;
-  checkGroupMembership?: (chatId: number, userId: number) => Promise<boolean>;
+
+  // Standalone optionals (contextual, not capability groups)
+  /** Telegram message_id of the incoming message being processed. Used for set_reaction. */
+  incomingMessageId?: number;
+  groupChatId?: number;
+  groupTitle?: string;
+  onBotResponse?: (messageId: number) => void;
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
   renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
-  notificationPrefs?: {
-    getPrefs(userId: number): Record<string, unknown>;
-    update(userId: number, patch: Record<string, unknown>): void;
-    ensureDefaults(userId: number): void;
-  };
-  callQueue?: { enqueue(userId: number, text: string): void };
-  callSettingsRepo?: {
-    get(userId: number): Record<string, unknown> | null;
-    ensureDefaults(userId: number): void;
-    setEnabled(userId: number, enabled: boolean): void;
-    setLanguage(userId: number, lang: string): void;
-  };
-  groupChatRepo?: GroupChatRepository;
-  groupMemberRepo?: GroupMemberRepository;
-  groupMemberService?: GroupMemberService;
-  googleCalendarRepo?: GoogleCalendarRepository;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
+  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
+  resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
+  conflictChecker?: ConflictChecker;
+  /** Events in a ±2-week window around now, preloaded for pattern detection. */
+  recentEventsWindow?: EventOccurrence[];
+  /** Contact directory (also used by sharing, but independently configurable). */
+  contactRepo?: ContactRepository;
+  /** Event participant registry (used independently by events and sharing). */
+  participantRepo?: ParticipantRepository;
+  /** Type of the current message being processed. */
   inputMode?: 'text' | 'voice_message' | 'live_call';
+  /** Set to true by end_call tool to hang up after TTS plays. */
+  callEndRequested?: boolean;
   supplementMode?: boolean;
   /** The exact auto-response text that was sent by the intent matcher. Passed to supplement AI explicitly. */
   supplementAutoResponse?: string;
-  /** Set to true by end_call tool to hang up after TTS plays. */
-  callEndRequested?: boolean;
-  stressDictionary?: StressDictionary;
-  feedbackContext?: {
-    threadId: number;
-    subject: string;
-    messages: { sender: string; text: string }[];
-  };
-  feedbackRepo?: FeedbackRepository;
-  botAdminId?: number;
-  sendMessageToChat?: (chatId: number, text: string, options?: Record<string, unknown>) => Promise<unknown>;
-  resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
-  domainEvents?: DomainEventBus;
-  conflictChecker?: ConflictChecker;
-  scheduledCallService?: import('../scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
-  triggerService?: { repo: import('../scheduled/trigger.repository.ts').TriggerRepository };
-  scenePauseState?: import('../scene-pause.ts').ScenePauseState;
-  scenePauseService?: import('../scene-pause.ts').ScenePauseService;
+  /** Scene key storage — used by cancel_scene to delete the GramIO scene entry. Always wired from sceneStorage dep. */
   sceneStorage?: { delete(key: string): Promise<void> };
-  /** Events in a ±2-week window around now, preloaded for pattern detection. */
-  recentEventsWindow?: EventOccurrence[];
-  birthdayService?: BirthdayService;
-  userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
-  agentRegistry?: AgentRegistry;
-  agentDispatcher?: AgentDispatcher;
-  onAgentChunk?: (text: string) => void;
+
+  // Capability groups
+  sharing?: SharingCapability;
+  secretary?: SecretaryCapability;
+  group?: GroupCapability;
+  voice?: VoiceCapability;
+  google?: GoogleCapability;
+  notifications?: NotificationsCapability;
+  feedback?: FeedbackCapability;
+  scheduled?: ScheduledCapability;
+  scene?: SceneCapability;
+  agents?: AgentsCapability;
+  birthday?: BirthdayCapability;
 }
 
 /**

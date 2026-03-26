@@ -12,7 +12,7 @@ import { IntentRepository } from '../database/repositories/intent.repository.ts'
 import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
-import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
+import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
@@ -68,7 +68,7 @@ import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
+import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -279,7 +279,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as unknown as AgentContext['callSettingsRepo'],
+    callSettingsRepo: db.callSettings as unknown as NonNullable<MessageHandlerDeps['callSettingsRepo']>,
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {

@@ -226,6 +226,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   Don't refactor surroundings "while you're at it".
 - **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
   `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- **Why we write precise types**: good types make TypeScript useful as a bug-finder, not just a syntax
+  checker. Specifically: grouping related optional fields into a single optional sub-object forces callers
+  to check `if (ctx.sharing)` once — TypeScript then guarantees all fields inside are non-null, eliminating
+  `!` assertions and `?.` on every individual field. This catches missing capability wiring at compile time
+  instead of at runtime.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise

@@ -346,12 +346,12 @@ async function dispatchTool(ctx: AgentContext, toolName: string, input: Record<s
         return handleAssistantTool(ctx, toolName as AgentCommand['type'], input);
 
       case 'resume_scene':
-        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleResumeScene(ctx, ctx.scenePauseService);
+        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleResumeScene(ctx, ctx.scene?.scenePauseService);
 
       case 'cancel_scene':
-        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleCancelScene(ctx, ctx.scenePauseService);
+        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleCancelScene(ctx, ctx.scene?.scenePauseService);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

@@ -56,8 +56,7 @@ describe('handleSendFeedback', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
-      feedbackRepo,
-      botAdminId: ADMIN_ID,
+      feedback: { feedbackContext: undefined, feedbackRepo, botAdminId: ADMIN_ID },
       sendMessageToChat: mock(() => Promise.resolve()),
       conversationLogger: null as never,
     };
@@ -81,7 +80,7 @@ describe('handleSendFeedback', () => {
   });
 
   test('rejects when botAdminId not configured', () => {
-    ctx.botAdminId = undefined;
+    ctx.feedback = undefined;
     const result = handleSendFeedback(ctx, { type: 'question', message: 'Hello' });
 
     expect(result.success).toBe(false);
@@ -89,11 +88,11 @@ describe('handleSendFeedback', () => {
   });
 
   test('rejects when feedbackRepo not available', () => {
-    ctx.feedbackRepo = undefined;
+    ctx.feedback = undefined;
     const result = handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('not available');
+    expect(result.error).toContain('not configured');
   });
 
   test('rejects when 3 open threads exist', () => {

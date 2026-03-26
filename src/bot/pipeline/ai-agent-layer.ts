@@ -34,8 +34,8 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     const agentContext = deps.agentContextBuilder(user, Number(chatId), messageText, extra?.groupContext);
 
-    if (extra?.feedbackContext) {
-      agentContext.feedbackContext = extra.feedbackContext;
+    if (extra?.feedbackContext && agentContext.feedback) {
+      agentContext.feedback.feedbackContext = extra.feedbackContext;
     }
 
     if (extra?.supplementMode) {
@@ -46,8 +46,10 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     if (deps.scenePauseService) {
       const pauseState = await deps.scenePauseService.get(user.telegram_id);
       if (pauseState) {
-        agentContext.scenePauseState = pauseState;
-        agentContext.scenePauseService = deps.scenePauseService;
+        agentContext.scene = {
+          scenePauseState: pauseState,
+          scenePauseService: deps.scenePauseService,
+        };
       }
     }
 

@@ -373,7 +373,12 @@ export function handleRenderDayImage(
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -394,7 +399,7 @@ export function handleRenderDayImage(
 
   const chatId = ctx.chatId;
   const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.groupChatRepo;
+  const groupChatRepo = ctx.group?.groupChatRepo;
 
   renderDayImage(ctx.renderService as never, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
     .then(async (buffer) => {
@@ -429,7 +434,7 @@ export function handleRenderTable(
   const sender = ctx.sender;
   const chatId = ctx.chatId;
   const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.groupChatRepo;
+  const groupChatRepo = ctx.group?.groupChatRepo;
 
   ctx.renderService
     .renderDirect({
@@ -473,7 +478,12 @@ export function handleRenderWeekImage(
   if (!ctx.renderService) {
     return { success: false, error: 'Image rendering not available.' };
   }
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   return { success: true, output: t(ctx.user.language).aiTools.meta.weekImageNotImplemented(input.week_start) };
 }
@@ -502,7 +512,7 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
       error: 'Cannot schedule a call while already on a live call. Just respond to the user directly.',
     };
   }
-  if (!ctx.callQueue) {
+  if (!ctx.voice?.callQueue) {
     metaLogger.warn({ userId: ctx.user.telegram_id }, 'make_call: callQueue not available');
     return {
       success: false,
@@ -510,7 +520,7 @@ export function handleMakeCall(ctx: AgentContext, input: { text: string }): Tool
     };
   }
   metaLogger.info({ userId: ctx.user.telegram_id, textLen: input.text.length }, 'make_call: enqueueing call');
-  ctx.callQueue.enqueue(ctx.user.telegram_id, input.text);
+  ctx.voice!.callQueue.enqueue(ctx.user.telegram_id, input.text);
   return { success: true, output: t(ctx.user.language).aiTools.meta.callQueued };
 }
 
@@ -521,11 +531,11 @@ export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
     return { success: true, output: t(lang).aiTools.meta.gcalNotConnected };
   }
 
-  if (!ctx.googleCalendarRepo) {
+  if (!ctx.google?.googleCalendarRepo) {
     return { success: true, output: t(lang).aiTools.meta.gcalConnectedNoData };
   }
 
-  const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
+  const calendars = ctx.google!.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
   const enabled = calendars.filter((c) => c.sync_enabled);
   const tr = t(lang).aiTools.meta;
   const lines = [tr.gcalConnectedHeader, tr.gcalCalendarsCount(calendars.length, enabled.length)];
@@ -542,12 +552,12 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
       error: 'Google Calendar is not connected. Suggest /connect_google command.',
     };
   }
-  if (!ctx.googleCalendarRepo) {
+  if (!ctx.google?.googleCalendarRepo) {
     return { success: false, error: 'Calendar data not available.' };
   }
 
   const lang = ctx.user.language;
-  const calendars = ctx.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
+  const calendars = ctx.google!.googleCalendarRepo.getCalendars(ctx.user.telegram_id);
   if (calendars.length === 0) {
     return { success: true, output: t(lang).aiTools.meta.gcalNoCalendars };
   }
@@ -557,11 +567,11 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
 }
 
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
-  if (!ctx.stressDictionary) {
+  if (!ctx.voice?.stressDictionary) {
     return { success: false, error: 'Stress dictionary not loaded' };
   }
 
-  const results = ctx.stressDictionary.lookupMany(input.words);
+  const results = ctx.voice!.stressDictionary.lookupMany(input.words);
   const lines: string[] = [];
 
   for (const [word, { stressed, similar }] of Object.entries(results)) {

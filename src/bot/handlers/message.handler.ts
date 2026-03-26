@@ -49,6 +49,7 @@ import { resolveCity } from '../../services/timezone/city-resolver.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
+import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
   fixLineBreaks,
@@ -99,9 +100,18 @@ export interface MessageHandlerDeps {
   sharedEventRepo?: SharedEventRepository;
   privacyService?: PrivacyService;
   renderService?: RenderService;
-  notificationPrefs?: AgentContext['notificationPrefs'];
-  callQueue?: AgentContext['callQueue'];
-  callSettingsRepo?: AgentContext['callSettingsRepo'];
+  notificationPrefs?: {
+    getPrefs(userId: number): Record<string, unknown>;
+    update(userId: number, patch: Record<string, unknown>): void;
+    ensureDefaults(userId: number): void;
+  };
+  callQueue?: { enqueue(userId: number, text: string): void };
+  callSettingsRepo?: {
+    get(userId: number): Record<string, unknown> | null;
+    ensureDefaults(userId: number): void;
+    setEnabled(userId: number, enabled: boolean): void;
+    setLanguage(userId: number, lang: string): void;
+  };
   googleCalendarRepo?: GoogleCalendarRepository;
   deepLinkService?: DeepLinkService;
   sceneStorage: SceneStorage;
@@ -114,7 +124,7 @@ export interface MessageHandlerDeps {
   transcriptionService?: TranscriptionService;
   botToken?: string;
   downloadVoiceBuffer?: (botToken: string, fileId: string) => Promise<Buffer>;
-  stressDictionary?: AgentContext['stressDictionary'];
+  stressDictionary?: StressDictionary;
   resolveUsername?: AgentContext['resolveUsername'];
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
@@ -154,6 +164,8 @@ export interface MessageHandlerDeps {
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
+  scheduledCallService?: import('../../services/scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
+  triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -403,29 +415,10 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       reminderRepo: deps.reminderRepo,
       contactRepo: deps.contactRepo,
       participantRepo: deps.participantRepo,
-      editProposalRepo: deps.editProposalRepo,
-      secretaryRepo: deps.secretaryRepo,
-      secretaryForLine,
-      calendarProposalRepo: deps.calendarProposalRepo,
-      checkGroupMembership: deps.checkGroupMembership,
-      invitationService: deps.invitationService,
-      invitationRepo: deps.invitationRepo,
-      sharingService: deps.sharingService,
-      sharingSettingsRepo: deps.sharingSettingsRepo,
-      sharedEventRepo: deps.sharedEventRepo,
-      privacyService: deps.privacyService,
       renderService: deps.renderService,
-      notificationPrefs: deps.notificationPrefs,
-      callQueue: deps.callQueue,
-      callSettingsRepo: deps.callSettingsRepo,
-      googleCalendarRepo: deps.googleCalendarRepo,
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
-      stressDictionary: deps.stressDictionary,
       resolveUsername: deps.resolveUsername,
-      groupChatRepo: deps.groupChatRepo,
-      groupMemberRepo: deps.groupMemberRepo,
-      groupMemberService: deps.groupMemberService,
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
@@ -434,15 +427,86 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
             return deps.eventService.getEventsInRange(user.telegram_id, start, end);
           })(),
-      birthdayService: deps.birthdayService,
-      userMemoryRepo: deps.userMemoryRepo,
-      agentRegistry: deps.agentRegistry,
-      agentDispatcher: deps.agentDispatcher,
       sceneStorage: {
         delete: async (key: string) => {
           await deps.sceneStorage.delete(key);
         },
       },
+      sharing:
+        deps.invitationService &&
+        deps.invitationRepo &&
+        deps.sharingService &&
+        deps.sharingSettingsRepo &&
+        deps.sharedEventRepo &&
+        deps.privacyService &&
+        deps.editProposalRepo
+          ? {
+              invitationService: deps.invitationService,
+              invitationRepo: deps.invitationRepo,
+              sharingService: deps.sharingService,
+              sharingSettingsRepo: deps.sharingSettingsRepo,
+              sharedEventRepo: deps.sharedEventRepo,
+              privacyService: deps.privacyService,
+              editProposalRepo: deps.editProposalRepo,
+            }
+          : undefined,
+      secretary:
+        deps.secretaryRepo && deps.calendarProposalRepo
+          ? {
+              secretaryRepo: deps.secretaryRepo,
+              secretaryForLine,
+              calendarProposalRepo: deps.calendarProposalRepo,
+            }
+          : undefined,
+      group:
+        deps.checkGroupMembership && deps.groupChatRepo && deps.groupMemberRepo && deps.groupMemberService
+          ? {
+              checkGroupMembership: deps.checkGroupMembership,
+              groupChatRepo: deps.groupChatRepo,
+              groupMemberRepo: deps.groupMemberRepo,
+              groupMemberService: deps.groupMemberService,
+            }
+          : undefined,
+      voice:
+        deps.callQueue && deps.callSettingsRepo && deps.stressDictionary
+          ? {
+              callQueue: deps.callQueue,
+              callSettingsRepo: deps.callSettingsRepo,
+              stressDictionary: deps.stressDictionary,
+            }
+          : undefined,
+      notifications: deps.notificationPrefs ? { notificationPrefs: deps.notificationPrefs } : undefined,
+      google: deps.googleCalendarRepo ? { googleCalendarRepo: deps.googleCalendarRepo } : undefined,
+      agents:
+        deps.agentRegistry && deps.agentDispatcher
+          ? {
+              agentRegistry: deps.agentRegistry,
+              agentDispatcher: deps.agentDispatcher,
+              onAgentChunk: undefined,
+            }
+          : undefined,
+      birthday:
+        deps.birthdayService && deps.userMemoryRepo
+          ? {
+              birthdayService: deps.birthdayService,
+              userMemoryRepo: deps.userMemoryRepo,
+            }
+          : undefined,
+      feedback:
+        deps.feedbackRepo && deps.botAdminId !== undefined
+          ? {
+              feedbackContext: undefined,
+              feedbackRepo: deps.feedbackRepo,
+              botAdminId: deps.botAdminId,
+            }
+          : undefined,
+      scheduled:
+        deps.scheduledCallService && deps.triggerService
+          ? {
+              scheduledCallService: deps.scheduledCallService,
+              triggerService: deps.triggerService,
+            }
+          : undefined,
     };
   };
 }

@@ -45,7 +45,7 @@ describe('handleResumeScene', () => {
     service = new ScenePauseService(storage);
     const state: ScenePauseState = { sceneName: 'add_event', step: 1, sceneState: {} };
     await service.save(42, state);
-    ctx = makeCtx({ scenePauseService: service });
+    ctx = makeCtx({ scene: { scenePauseState: undefined, scenePauseService: service } });
   });
 
   test('clears the pause state', async () => {
@@ -62,7 +62,7 @@ describe('handleResumeScene', () => {
   test('returns success with russian output for ru user', async () => {
     const ruCtx = makeCtx({
       user: { telegram_id: 42, language: 'ru' } as AgentContext['user'],
-      scenePauseService: service,
+      scene: { scenePauseState: undefined, scenePauseService: service },
     });
     const result = await handleResumeScene(ruCtx, service);
     expect(result.success).toBe(true);
@@ -80,7 +80,7 @@ describe('handleCancelScene', () => {
     service = new ScenePauseService(storage);
     const state: ScenePauseState = { sceneName: 'add_event', step: 1, sceneState: {} };
     await service.save(42, state);
-    ctx = makeCtx({ scenePauseService: service });
+    ctx = makeCtx({ scene: { scenePauseState: undefined, scenePauseService: service } });
   });
 
   test('clears the pause state', async () => {
@@ -96,7 +96,7 @@ describe('handleCancelScene', () => {
         sceneStore.delete(key);
       }),
     };
-    const ctxWithStorage = makeCtx({ scenePauseService: service, sceneStorage });
+    const ctxWithStorage = makeCtx({ scene: { scenePauseState: undefined, scenePauseService: service }, sceneStorage });
     await handleCancelScene(ctxWithStorage, service);
     expect(sceneStorage.delete).toHaveBeenCalledWith('@gramio/scenes:42');
   });
@@ -114,7 +114,7 @@ describe('handleCancelScene', () => {
   test('returns russian output for ru user', async () => {
     const ruCtx = makeCtx({
       user: { telegram_id: 42, language: 'ru' } as AgentContext['user'],
-      scenePauseService: service,
+      scene: { scenePauseState: undefined, scenePauseService: service },
     });
     const result = await handleCancelScene(ruCtx, service);
     expect(result.output).toContain('отменён');
