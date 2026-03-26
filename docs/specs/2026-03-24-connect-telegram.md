@@ -102,6 +102,11 @@ CREATE TABLE user_telegram_sessions (
 Это позволит боту отправлять приглашения на встречи от твоего имени
 людям, которые ещё не пользуются ботом.
 
+🔒 Безопасность:
+• Данные сессии зашифрованы AES-256-GCM (военный стандарт шифрования)
+• Бот хранит только техническую сессию — без номера телефона, паролей и сообщений
+• Ключ шифрования хранится отдельно от данных и никогда не записывается на диск
+
 Бот НЕ будет:
 • Читать твои сообщения
 • Отправлять сообщения без твоей команды
@@ -109,6 +114,8 @@ CREATE TABLE user_telegram_sessions (
 
 Бот БУДЕТ:
 • Отправлять приглашения на встречи от твоего имени
+
+Отключить можно в любой момент в /settings.
 
 [Подключить] [Отмена]
 ```
@@ -169,8 +176,8 @@ Session file → encrypt → store in DB → delete session file.
 Three subcommands:
 
 ```bash
-# Step 1: Send code
-venv/bin/python scripts/connect-session.py send_code --phone +79001234567
+# Step 1: Send code (session_path required — Pyrogram binds auth key to client session file)
+venv/bin/python scripts/connect-session.py send_code --phone +79001234567 --session_path /tmp/tgsess_42_xyz.session
 # stdout: {"phone_code_hash": "abc123"}
 # stderr: ERROR:... on failure
 
@@ -305,6 +312,24 @@ Starts the connection scene. If already connected:
 ```
 
 On confirm: set `status = 'revoked'`, call `client.log_out()` via Python script.
+
+### Settings integration
+
+`/settings` menu shows Telegram connection status and allows disconnecting:
+
+```
+⚙️ Настройки
+...
+📱 Telegram-аккаунт: подключён (+7***4567) [Отключить]
+```
+
+If not connected:
+```
+📱 Telegram-аккаунт: не подключён [Подключить]
+```
+
+Callback prefix: `settings:tg_connect` / `settings:tg_disconnect`.
+Disconnect via settings uses the same logic as `/disconnect_telegram` — confirm → revoke → log_out.
 
 ---
 
