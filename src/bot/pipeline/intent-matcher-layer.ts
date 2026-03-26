@@ -1,7 +1,7 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { User, WorkflowSessionStore } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
@@ -11,23 +11,6 @@ import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
-
-export interface WorkflowSession {
-  intentId: number;
-  stepIndex: number;
-  stepResults: Record<string, unknown>;
-  workflow: Record<string, unknown>;
-  captures: Record<string, string>;
-  createdAt: number;
-}
-
-export interface WorkflowSessionStore {
-  get(chatId: number, userId: number): WorkflowSession | null;
-  set(chatId: number, userId: number, session: WorkflowSession): void;
-  delete(chatId: number, userId: number): void;
-  /** Delete all sessions for a user across all chats (e.g. when user blocks the bot). */
-  deleteByUser(userId: number): void;
-}
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,

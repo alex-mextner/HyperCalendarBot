@@ -326,7 +326,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     intentMatcher,
     intentRepo,
     intentExecutor,
-    eventMentionStore: eventMentionStore ?? db.eventMentions,
+    eventMentionStore: eventMentionStore,
     feedbackRepo,
     workflowSessions: db.workflowSessions,
     adminEditSessions,

@@ -1,6 +1,6 @@
 // src/database/repositories/workflow-session.repository.ts
 import type { Database } from 'bun:sqlite';
-import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/intent-matcher-layer.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../types.ts';
 
 const TTL_MS = 5 * 60 * 1000;
 

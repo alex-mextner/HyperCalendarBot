@@ -450,7 +450,6 @@ if (config.REDIS_URL) {
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
-      db.eventMentions.deleteExpired();
     },
     onBirthdaySync: async () => {
       const BATCH = 100;
