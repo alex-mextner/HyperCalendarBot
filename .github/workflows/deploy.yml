@@ -77,6 +77,7 @@ jobs:
             # Generate stress dictionary if missing (one-time, ~15MB)
             if [ ! -f data/dictionaries/stress-dict.json ]; then
               mkdir -p data/dictionaries
+              rm -rf /tmp/russian-dictionary
               git clone --depth 1 https://github.com/Badestrand/russian-dictionary /tmp/russian-dictionary
               docker run --rm -v "$(pwd)":/app -v /tmp/russian-dictionary:/tmp/russian-dictionary \
                 ghcr.io/${{ env.IMAGE_NAME }}:latest bun scripts/generate-stress-dict.ts
@@ -96,8 +97,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
-          TEXT="✅ <b>Deployed</b> <code>${COMMIT_SHA:0:7}</code>
-${FIRST_LINE}"
+          TEXT=$(printf '✅ <b>Deployed</b> <code>%s</code>\n%s' "${COMMIT_SHA:0:7}" "$FIRST_LINE")
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
@@ -125,9 +125,7 @@ ${FIRST_LINE}"
           [[ "$BUILD_RESULT" == "failure" ]] && FAILED+="build "
           [[ "$DEPLOY_RESULT" == "failure" ]] && FAILED+="deploy"
           FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
-          TEXT="🚨 <b>CI/CD failed</b> [${FAILED}]
-<code>${COMMIT_SHA:0:7}</code> — ${FIRST_LINE}
-${RUN_URL}"
+          TEXT=$(printf '🚨 <b>CI/CD failed</b> [%s]\n<code>%s</code> — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")
           curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
