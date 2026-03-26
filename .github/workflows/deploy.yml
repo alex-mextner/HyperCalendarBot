@@ -79,7 +79,9 @@ jobs:
               mkdir -p data/dictionaries
               rm -rf /tmp/russian-dictionary
               git clone --depth 1 https://github.com/Badestrand/russian-dictionary /tmp/russian-dictionary
-              docker run --rm -v "$(pwd)":/app -v /tmp/russian-dictionary:/tmp/russian-dictionary \
+              docker run --rm \
+                -v "$(pwd)/data":/app/data \
+                -v /tmp/russian-dictionary:/tmp/russian-dictionary \
                 ghcr.io/${{ env.IMAGE_NAME }}:latest bun scripts/generate-stress-dict.ts
               rm -rf /tmp/russian-dictionary
             fi
