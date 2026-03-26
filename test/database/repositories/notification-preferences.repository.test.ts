@@ -93,4 +93,19 @@ describe('NotificationPreferencesRepository', () => {
       /Unknown notification preference field/,
     );
   });
+
+  test('getMany returns map of found prefs', () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (43)');
+    repo.ensureDefaults(42);
+    repo.ensureDefaults(43);
+    const result = repo.getMany([42, 43, 999]);
+    expect(result.size).toBe(2);
+    expect(result.get(42)?.morning_agenda_enabled).toBe(1);
+    expect(result.get(43)?.morning_agenda_enabled).toBe(1);
+    expect(result.has(999)).toBe(false);
+  });
+
+  test('getMany returns empty map for empty input', () => {
+    expect(repo.getMany([]).size).toBe(0);
+  });
 });

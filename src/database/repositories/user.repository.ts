@@ -13,6 +13,15 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users').all() as User[];
   }
 
+  findManyByTelegramIds(ids: number[]): Map<number, User> {
+    if (ids.length === 0) return new Map();
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.db
+      .prepare(`SELECT * FROM users WHERE telegram_id IN (${placeholders})`)
+      .all(...(ids as SQLQueryBindings[])) as User[];
+    return new Map(rows.map((u) => [u.telegram_id, u]));
+  }
+
   findByUsername(username: string): User | null {
     const normalized = username.startsWith('@') ? username.slice(1) : username;
     return this.db.prepare('SELECT * FROM users WHERE LOWER(username) = LOWER(?)').get(normalized) as User | null;

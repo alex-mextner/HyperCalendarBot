@@ -76,6 +76,15 @@ export class NotificationPreferencesRepository {
       .all() as Array<NotificationPreferencesRow & { timezone: string; language: string }>;
   }
 
+  getMany(ids: number[]): Map<number, NotificationPreferencesRow> {
+    if (ids.length === 0) return new Map();
+    const placeholders = ids.map(() => '?').join(',');
+    const rows = this.db
+      .prepare(`SELECT * FROM notification_preferences WHERE user_id IN (${placeholders})`)
+      .all(...ids) as NotificationPreferencesRow[];
+    return new Map(rows.map((r) => [r.user_id, r]));
+  }
+
   getAll(): NotificationPreferencesRow[] {
     return this.db.prepare('SELECT * FROM notification_preferences').all() as NotificationPreferencesRow[];
   }

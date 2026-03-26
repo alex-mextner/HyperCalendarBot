@@ -153,11 +153,16 @@ export class NotificationScheduler {
       }
     }
 
+    // Batch-fetch users and prefs for all reminder groups in one query each
+    const reminderUserIds = [...new Set([...byKey.values()].map((g) => g[0]!.user_id))];
+    const reminderUsersMap = this.deps.userRepo.findManyByTelegramIds(reminderUserIds);
+    const reminderPrefsMap = this.deps.prefsRepo.getMany(reminderUserIds);
+
     for (const group of byKey.values()) {
       const firstReminder = group[0]!;
-      const user = this.deps.userRepo.findByTelegramId(firstReminder.user_id);
+      const user = reminderUsersMap.get(firstReminder.user_id);
       if (!user) continue;
-      const prefs = this.deps.prefsRepo.get(firstReminder.user_id);
+      const prefs = reminderPrefsMap.get(firstReminder.user_id);
       if (prefs) {
         const quiet = isQuietHours(
           { enabled: !!prefs.quiet_hours_enabled, start: prefs.quiet_hours_start, end: prefs.quiet_hours_end },
@@ -297,10 +302,14 @@ export class NotificationScheduler {
           candidates.set(row.user_id, true);
         }
       }
+      const candidateIds = [...candidates.keys()];
+      const holidayUsersMap = this.deps.userRepo.findManyByTelegramIds(candidateIds);
+      const holidayPrefsMap = this.deps.prefsRepo.getMany(candidateIds);
+
       for (const [userId] of candidates) {
-        const user = this.deps.userRepo.findByTelegramId(userId);
+        const user = holidayUsersMap.get(userId);
         if (!user) continue;
-        const prefs = this.deps.prefsRepo.get(userId);
+        const prefs = holidayPrefsMap.get(userId);
         const targetTime = prefs?.evening_review_time ?? DEFAULT_EVE_HOLIDAY_HHMM;
         if (!isLocalTimeInWindow(nowUtc, user.timezone, targetTime, 5)) continue;
         const localTomorrowIso = new TZDate(new Date(minute.getTime() + 86_400_000), user.timezone)
@@ -379,14 +388,21 @@ export class NotificationScheduler {
 
         const lang = pref.language ?? 'ru';
 
-        // Build Mon–Sun local calendar dates for next week
+        // Build Mon–Sun local calendar dates for next week.
+        // Fetch all 7 days in one range query, then slice per day in memory.
+        const sunCalDateForRange = new Date(`${nextMonLocalIso}T12:00:00Z`);
+        sunCalDateForRange.setUTCDate(sunCalDateForRange.getUTCDate() + 6);
+        const { start: weekRangeStart } = getDayRangeUtc(new Date(`${nextMonLocalIso}T12:00:00Z`), pref.timezone);
+        const { end: weekRangeEnd } = getDayRangeUtc(sunCalDateForRange, pref.timezone);
+        const allWeekEvents = this.deps.eventRepo.getByDateRange(pref.user_id, weekRangeStart, weekRangeEnd);
+
         const days: WeeklyDigestDay[] = [];
         for (let i = 0; i < 7; i++) {
           const calDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
           calDate.setUTCDate(calDate.getUTCDate() + i);
           const dateStr = calDate.toISOString().slice(0, 10);
           const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, pref.timezone);
-          const dayEvents = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
+          const dayEvents = allWeekEvents.filter((e) => e.start_at >= dayStart && e.start_at < dayEnd);
           const dayLabel = makeDayLabel(calDate, lang);
           days.push({
             date: dateStr,
@@ -428,9 +444,9 @@ export class NotificationScheduler {
   }
 
   private isCallAllowed(userId: number, nowUtc: Date): boolean {
-    if (!this.deps.callSettingsRepo?.isEnabled(userId)) return false;
-
+    if (!this.deps.callSettingsRepo) return false;
     const callSettings = this.deps.callSettingsRepo.get(userId);
+    if (!callSettings?.enabled) return false;
 
     if (callSettings?.quiet_hours_start && callSettings?.quiet_hours_end) {
       const hours = nowUtc.getUTCHours();
