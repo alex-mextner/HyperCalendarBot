@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language = 'en') {
   return {
@@ -148,7 +149,7 @@ describe('inviter notification on response', () => {
     await handler(ctx as never);
 
     // Wait for async notification
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
@@ -177,7 +178,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
@@ -205,7 +206,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     const [, text] = sendMessage.mock.calls[0] as unknown as [number, string, unknown];
     expect(text).toContain('принял');
@@ -228,7 +229,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage });
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
@@ -250,7 +251,7 @@ describe('inviter notification on response', () => {
 
     // Should not throw
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(ctx.answer).toHaveBeenCalled();
   });
 });
@@ -330,7 +331,7 @@ describe('propose-time callbacks', () => {
 
     expect(invitationService.proposeTime).toHaveBeenCalledWith(5, 200, '2026-04-01T10:30:00Z');
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
   });
 
@@ -376,7 +377,7 @@ describe('propose-time callbacks', () => {
     expect(invitationService.rescheduleFromProposal).toHaveBeenCalledWith(5, 100);
     expect(eventServiceMock.updateEvent).toHaveBeenCalled();
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
   });
 
@@ -420,7 +421,7 @@ describe('propose-time callbacks', () => {
 
     expect(invitationService.keepOriginalTime).toHaveBeenCalledWith(5, 100);
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
     expect(notifyDeps.editMessage).toHaveBeenCalled();
   });
@@ -472,7 +473,7 @@ describe('conflict image on accept', () => {
     };
     const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
     expect(renderDirect).toHaveBeenCalledTimes(1);
     expect(sendPhoto).toHaveBeenCalledTimes(1);
     const [chatId] = sendPhoto.mock.calls[0] as unknown as [number, File];
@@ -511,7 +512,7 @@ describe('conflict image on accept', () => {
     };
     const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
 
     expect(renderDirect).toHaveBeenCalledTimes(1);
     const renderArgs = renderDirect.mock.calls[0] as unknown as [
@@ -558,7 +559,7 @@ describe('conflict image on accept', () => {
       invitationNotifyDeps: notifyDeps as never,
     });
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
     expect(sendPhoto).not.toHaveBeenCalled();
   });
 });
