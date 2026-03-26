@@ -173,6 +173,7 @@ export class NotificationScheduler {
       }
 
       if (group.length > 1) {
+        const lang = user.language ?? 'ru';
         // Batch: one combined job for all reminders in this group
         const batchItems = group.map((r) => ({
           event_id: r.event_id,
@@ -182,7 +183,15 @@ export class NotificationScheduler {
           interval_label: r.interval_label,
         }));
         const refKey = `erb:${firstReminder.user_id}:${firstReminder.remind_at_utc}`;
-        const payload = JSON.stringify({ items: batchItems });
+        const renderItems = batchItems.map((item) => ({
+          title: item.event_title,
+          startTime: format(new TZDate(item.event_start_at, user.timezone), 'HH:mm'),
+          location: item.event_location,
+          intervalLabel: item.interval_label,
+        }));
+        const rendered = renderer.renderBatchReminder(lang, renderItems);
+        const eventIds = batchItems.map((item) => item.event_id);
+        const payload = JSON.stringify({ text: rendered.text, event_ids: eventIds });
         const logId = this.deps.logRepo.insert({
           user_id: firstReminder.user_id,
           type: 'event_reminder_batch',
@@ -215,13 +224,19 @@ export class NotificationScheduler {
       // Single reminder
       const reminder = firstReminder;
       const refKey = `er:${reminder.id}`;
-      const payload = JSON.stringify({
-        event_id: reminder.event_id,
-        event_title: reminder.event_title,
-        event_start_at: reminder.event_start_at,
-        event_location: reminder.event_location,
-        interval_label: reminder.interval_label,
+      const lang = user.language ?? 'ru';
+      const startTime = format(new TZDate(reminder.event_start_at, user.timezone), 'HH:mm');
+      const endTime = reminder.event_end_at
+        ? format(new TZDate(reminder.event_end_at, user.timezone), 'HH:mm')
+        : undefined;
+      const rendered = renderer.renderEventReminder(lang, {
+        title: reminder.event_title,
+        startTime,
+        endTime,
+        location: reminder.event_location,
+        intervalLabel: reminder.interval_label,
       });
+      const payload = JSON.stringify({ text: rendered.text, event_id: reminder.event_id });
       const logId = this.deps.logRepo.insert({
         user_id: reminder.user_id,
         type: 'event_reminder',

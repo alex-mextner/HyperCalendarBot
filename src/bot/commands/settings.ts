@@ -1,5 +1,6 @@
 // src/bot/commands/settings.ts
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import { CB, t } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
@@ -8,9 +9,12 @@ import type { UserRepository } from '../../database/repositories/user.repository
 import type { User } from '../../database/types.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+
+const NumberArrayCodec = jsonCodec(z.array(z.number()));
 
 export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
 export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number; lang: 'en' | 'ru' }>(); // userId → { chatId, ts, lang }
@@ -251,7 +255,8 @@ function buildVoiceView(voiceEnabled: number | null, lang: 'en' | 'ru'): { text:
 // ─── Group settings ──────────────────────────────────────────────────────────
 
 async function handleGroupSettings(ctx: BotCommandContext, groupRepo: GroupChatRepository): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   const groupId = getGroupId(ctx);
   if (groupId === null) return;
@@ -302,7 +307,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'close') {
     await ctx.answer();
-    await (ctx as unknown as { message?: { delete: () => Promise<void> } }).message?.delete();
+    await ctx.message?.delete();
     return;
   }
 
@@ -354,7 +359,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'edit_reminders' || subAction.startsWith('toggle_reminder:')) {
     const prefs = prefsService.getOrCreate(user.telegram_id);
-    let intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+    let intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
 
     if (subAction.startsWith('toggle_reminder:')) {
       const val = Number.parseInt(subAction.split(':')[1]!, 10);
@@ -379,7 +384,7 @@ export async function handleSettingsCallback(
     subAction === 'toggle_quiet'
   ) {
     const prefs = prefsService.getOrCreate(user.telegram_id);
-    const intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+    const intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
     const { text, kb } = buildNotificationsView(
       !!prefs.morning_agenda_enabled,
       prefs.morning_agenda_time,

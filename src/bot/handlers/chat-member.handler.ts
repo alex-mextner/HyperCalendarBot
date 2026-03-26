@@ -1,14 +1,6 @@
+import type { AnyBot, ChatMemberContext } from 'gramio';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-
-interface ChatMemberContext {
-  myChatMember?: {
-    chat: { id: number; type: string; title?: string };
-    from: { id: number };
-    new_chat_member: { status: string };
-    old_chat_member: { status: string };
-  };
-}
 
 const ACTIVE_STATUSES = new Set(['member', 'administrator', 'creator']);
 const INACTIVE_STATUSES = new Set(['left', 'kicked']);
@@ -23,7 +15,7 @@ function groupWelcome(lang: 'en' | 'ru'): string {
       '• ❌ /unshare — убрать расшаренное событие\n' +
       '• 🤖 Упомяни меня или напиши /cal + текст для управления через ИИ\n\n' +
       'В личке: личные события, напоминания, /week, /month, импорт и многое другое.\n\n' +
-      '💡 Сделай меня администратором — и я смогу закреплять актуальный календарь и давать ссылку на группу в уведомлениях участникам.'
+      '💡 Сделай меня администратором — и я смогу закреплять актуальный календарь, давать ссылку на группу в уведомлениях и не показывать групповой календарь тем, кто вышел из чата.'
     );
   }
   return (
@@ -34,7 +26,7 @@ function groupWelcome(lang: 'en' | 'ru'): string {
     '• ❌ /unshare — remove your shared event\n' +
     '• 🤖 Mention me or use /cal + text to manage the calendar with AI\n\n' +
     'In DM: personal events, reminders, /week, /month, import and more.\n\n' +
-    '💡 Make me an admin — and I can pin the calendar automatically and include a group link in notifications to members.'
+    '💡 Make me an admin — and I can pin the calendar automatically, include a group link in notifications, and hide the group calendar from people who leave the chat.'
   );
 }
 
@@ -44,11 +36,11 @@ export function createChatMemberHandler(
   getUserLanguage: (userId: number) => 'en' | 'ru',
   exportInviteLink: (chatId: number) => Promise<string | null>,
 ) {
-  return async (ctx: ChatMemberContext): Promise<void> => {
-    const update = ctx.myChatMember;
-    if (!update) return;
-
-    const { chat, from, new_chat_member: newMember, old_chat_member: oldMember } = update;
+  return async (ctx: ChatMemberContext<AnyBot>): Promise<void> => {
+    const chat = ctx.chat;
+    const from = ctx.from;
+    const newMember = ctx.newChatMember;
+    const oldMember = ctx.oldChatMember;
 
     if (chat.type !== 'group' && chat.type !== 'supergroup') return;
 

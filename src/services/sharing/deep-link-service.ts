@@ -1,12 +1,17 @@
 import { randomBytes } from 'node:crypto';
+import { z } from 'zod';
 import type { DeepLinkRepository } from '../../database/repositories/deep-link.repository';
-import type { DeepLink, DeepLinkType } from '../../database/types';
+import type { DeepLink } from '../../database/types';
+import { jsonCodec } from '../../utils/json-codec.ts';
 
-interface ResolvedDeepLink {
-  type: DeepLinkType;
-  payload: Record<string, unknown>;
-  createdBy: number;
-}
+const SharedEventPayloadCodec = jsonCodec(z.object({ event_id: z.number() }));
+const InvitationPayloadCodec = jsonCodec(z.object({ invitation_id: z.number(), event_id: z.number() }));
+const GroupContextPayloadCodec = jsonCodec(z.object({ chat_id: z.number() }));
+
+type ResolvedDeepLink =
+  | { type: 'shared_event'; payload: { event_id: number }; createdBy: number }
+  | { type: 'invitation'; payload: { invitation_id: number; event_id: number }; createdBy: number }
+  | { type: 'group_context'; payload: { chat_id: number }; createdBy: number };
 
 export class DeepLinkService {
   constructor(private repo: DeepLinkRepository) {}
@@ -52,11 +57,19 @@ export class DeepLinkService {
 
     this.repo.incrementUsedCount(code);
 
-    return {
-      type: link.type,
-      payload: JSON.parse(link.payload),
-      createdBy: link.created_by,
-    };
+    const createdBy = link.created_by;
+
+    if (link.type === 'shared_event') {
+      return { type: 'shared_event', payload: SharedEventPayloadCodec.parse(link.payload), createdBy };
+    }
+    if (link.type === 'invitation') {
+      return {
+        type: 'invitation',
+        payload: InvitationPayloadCodec.parse(link.payload),
+        createdBy,
+      };
+    }
+    return { type: 'group_context', payload: GroupContextPayloadCodec.parse(link.payload), createdBy };
   }
 
   generateUrl(code: string, botUsername: string): string {

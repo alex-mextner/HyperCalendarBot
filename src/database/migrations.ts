@@ -826,4 +826,43 @@ export const migrations: Migration[] = [
       db.exec(`ALTER TABLE google_watch_channels ADD COLUMN channel_token TEXT;`);
     },
   },
+  {
+    name: '043_group_members_membership_dates',
+    up: (db) => {
+      // SQLite ALTER TABLE ADD COLUMN requires constant defaults — datetime('now') is not allowed.
+      db.exec(`ALTER TABLE group_members ADD COLUMN joined_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'`);
+      db.exec(`UPDATE group_members SET joined_at = datetime('now')`);
+      db.exec(`ALTER TABLE group_members ADD COLUMN left_at TEXT`);
+    },
+  },
+  {
+    name: '044_user_action_log',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE user_action_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          chat_id INTEGER NOT NULL,
+          action_type TEXT NOT NULL,
+          action_name TEXT NOT NULL,
+          message_id INTEGER,
+          chat_history_id INTEGER,
+          input_summary TEXT,
+          result_summary TEXT,
+          metadata TEXT,
+          target_event_id INTEGER,
+          target_user_id INTEGER,
+          success INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (chat_history_id) REFERENCES chat_history(id) ON DELETE SET NULL
+        );
+        CREATE INDEX idx_action_log_user ON user_action_log(user_id, created_at);
+        CREATE INDEX idx_action_log_chat ON user_action_log(chat_id, created_at);
+        CREATE INDEX idx_action_log_type ON user_action_log(action_type, created_at);
+        CREATE INDEX idx_action_log_event ON user_action_log(target_event_id)
+          WHERE target_event_id IS NOT NULL;
+      `);
+    },
+  },
 ];

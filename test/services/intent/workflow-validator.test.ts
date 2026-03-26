@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 import { validateWorkflowVariables } from '../../../src/services/intent/workflow-validator.ts';
 
 describe('validateWorkflowVariables', () => {
@@ -114,7 +115,7 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('"as" field with valid filter is accepted', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'дата или время?' }, as: 'choice|lower' },
         { when: 'choice == "время"', call: 'create_event', input: {} },
@@ -194,9 +195,9 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('{{ask.choice}} is valid when ask_user step with matching as field exists', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
-        { call: 'ask_user', input: { question: 'choose?', options: ['a', 'b'] }, as: 'choice' },
+        { call: 'ask_user', input: { question: 'choose?' }, as: 'choice' },
         { call: 'get_event', input: { id: '{{ask.choice}}' } },
       ],
     };
@@ -213,7 +214,7 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('{{ask.name}} with filter is valid when matching as field exists', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'date?' }, as: 'date_or_time|lower' },
         { when: 'ask.date_or_time == "дата"', call: 'create_event', input: { title: '{{ask.date_or_time}}' } },
@@ -292,7 +293,7 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('{{tool_outputs.found_user}} is valid when a step defines as: "found_user"', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
         { call: 'send_invitation', input: { invitee_id: '{{tool_outputs.found_user.telegram_id}}' } },
@@ -302,7 +303,7 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('{{tool_outputs.event_time}} is valid when calculate step defines as: "event_time"', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'calculate', input: { expression: '{{dates.now}}+{{$1}}min' }, as: 'event_time' },
         { call: 'create_event', input: { start_at: '{{tool_outputs.event_time}}' } },
@@ -321,7 +322,7 @@ describe('validateWorkflowVariables', () => {
   });
 
   test('{{tool_outputs.confirm}} is valid when ask_user defines as: "confirm"', () => {
-    const workflow = {
+    const workflow: Workflow = {
       steps: [
         { call: 'ask_user', input: { question: 'Подтверди?' }, as: 'confirm' },
         { call: 'delete_event', input: { id: '{{tool_outputs.confirm}}' } },

@@ -11,7 +11,7 @@ function createTestDb(): Database {
   return db;
 }
 
-function makeSession(overrides: Record<string, unknown> = {}) {
+function makeSession(overrides: { [key: string]: unknown } = {}) {
   return {
     intentId: 1,
     stepIndex: 0,

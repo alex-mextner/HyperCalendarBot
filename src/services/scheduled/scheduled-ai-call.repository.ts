@@ -1,25 +1,5 @@
 import type { Database } from 'bun:sqlite';
-
-export interface ScheduledAiCall {
-  id: string;
-  user_id: number;
-  message: string;
-  label: string | null;
-  run_at: string | null;
-  cron: string | null;
-  enabled: number;
-  run_count: number;
-  last_run_at: string | null;
-  created_at: string;
-}
-
-export interface CreateScheduleData {
-  userId: number;
-  message: string;
-  label: string | null;
-  runAt: string | null;
-  cron: string | null;
-}
+import type { CreateScheduleData, ScheduledAiCall } from './types.ts';
 
 export class ScheduledAiCallRepository {
   constructor(private db: Database) {}

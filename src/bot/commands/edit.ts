@@ -6,7 +6,8 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { cmdLogger } from '../../utils/logger.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
@@ -15,11 +16,12 @@ export async function handleEdit(
   eventService: EventService,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
@@ -102,8 +104,12 @@ export async function handleEditFieldCallback(
     return;
   }
 
+  if (!ctx.message) {
+    cmdLogger.warn({ chatId: ctx.chatId }, 'handleEditFieldCallback: callback has no message');
+    return;
+  }
   const chatId = ctx.chatId!;
-  const messageId = (ctx.message as unknown as { id: number } | undefined)?.id ?? 0;
+  const messageId = ctx.message.id;
   await ctx.answer();
   await ctx.scene.enter(editValueScene, { eventId, field, chatId, messageId });
 }

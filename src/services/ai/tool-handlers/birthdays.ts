@@ -15,6 +15,12 @@ export function handleCreateBirthdayEvent(ctx: AgentContext, input: CreateBirthd
 
   const lang = ctx.user.language as 'en' | 'ru';
 
+  // Validate date — day 0, month 0 would produce an invalid ISO date and crash the pipeline
+  const { day, month } = input.date;
+  if (!day || !month || day < 1 || day > 31 || month < 1 || month > 12) {
+    return { success: false, error: 'Invalid date: day must be 1-31, month must be 1-12' };
+  }
+
   // Resolve celebrant name
   let celebrantName = input.custom_name;
   if (!celebrantName) {

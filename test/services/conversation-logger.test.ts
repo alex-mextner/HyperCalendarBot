@@ -3,15 +3,17 @@ import type { ChatHistoryRepository } from '../../src/database/repositories/chat
 import { formatActivityEvent } from '../../src/services/ai/activity-event.ts';
 import { ConversationLogger } from '../../src/services/conversation-logger.ts';
 
+type SaveArgs = [number, 'user' | 'assistant' | 'tool', string, number | undefined];
+
 function makeRepo() {
-  const calls: unknown[][] = [];
+  const calls: SaveArgs[] = [];
   const repo = {
-    save: (...args: unknown[]) => {
-      calls.push(args);
+    save: (userId: number, role: 'user' | 'assistant' | 'tool', content: string, chatId?: number) => {
+      calls.push([userId, role, content, chatId]);
     },
     _calls: calls,
-  } as unknown as ChatHistoryRepository & { _calls: unknown[][] };
-  return repo;
+  };
+  return repo as unknown as ChatHistoryRepository & { _calls: SaveArgs[] };
 }
 
 describe('ConversationLogger', () => {

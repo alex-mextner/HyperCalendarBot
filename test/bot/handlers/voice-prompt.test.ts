@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler.ts';
-import { createMessageHandler } from '../../../src/bot/handlers/message.handler.ts';
+import { createMessageHandler, type MessageHandlerDeps } from '../../../src/bot/handlers/message.handler.ts';
+import type { User } from '../../../src/database/types.ts';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -14,7 +15,7 @@ function makeFetch(filePath = 'voice/file.ogg') {
   }) as unknown as typeof fetch;
 }
 
-function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+function makeVoiceDeps(overrides: Partial<MessageHandlerDeps> & { [key: string]: unknown } = {}) {
   return {
     agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ от AI', toolCalls: [], toolResults: [] })) },
     eventService: { getEventsInRange: mock(() => []) },
@@ -31,7 +32,7 @@ function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeVoiceCtx(userOverrides: Record<string, unknown> = {}, ctxOverrides: Record<string, unknown> = {}) {
+function makeVoiceCtx(userOverrides: Partial<User> = {}, ctxOverrides: { [key: string]: unknown } = {}) {
   return {
     dbUser: {
       telegram_id: 100,
@@ -48,7 +49,7 @@ function makeVoiceCtx(userOverrides: Record<string, unknown> = {}, ctxOverrides:
   };
 }
 
-function makeCallbackCtx(data: string, userOverrides: Record<string, unknown> = {}) {
+function makeCallbackCtx(data: string, userOverrides: Partial<User> = {}) {
   return {
     data,
     chatId: 100,
@@ -110,12 +111,9 @@ describe('voice response prompt', () => {
 
       // send was called for the prompt
       expect(ctx.send).toHaveBeenCalledTimes(1);
-      const [text, options] = (ctx.send as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [
-        string,
-        { reply_markup: unknown },
-      ];
-      expect(text).toContain('голосовые ответы');
-      expect(options?.reply_markup).toBeDefined();
+      const sendCall = ctx.send.mock.calls[0] as unknown[];
+      expect(sendCall[0] as string).toContain('голосовые ответы');
+      expect((sendCall[1] as { reply_markup: unknown })?.reply_markup).toBeDefined();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -155,9 +153,9 @@ describe('voice response prompt', () => {
     const synthesize = mock(() => Promise.resolve(Buffer.from('audio')));
     const sendVoice = mock(() => Promise.resolve());
     const deps = makeVoiceDeps({
-      sileroTts: { synthesize },
+      sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null },
+      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 
@@ -177,9 +175,9 @@ describe('voice response prompt', () => {
     const synthesize = mock(() => Promise.resolve(Buffer.from('audio')));
     const sendVoice = mock(() => Promise.resolve());
     const deps = makeVoiceDeps({
-      sileroTts: { synthesize },
+      sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null },
+      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 
@@ -199,9 +197,9 @@ describe('voice response prompt', () => {
     const synthesize = mock(() => Promise.resolve(Buffer.from('audio')));
     const sendVoice = mock(() => Promise.resolve());
     const deps = makeVoiceDeps({
-      sileroTts: { synthesize },
+      sileroTts: { synthesize } as unknown as MessageHandlerDeps['sileroTts'],
       sendVoice,
-      stressDictionary: { lookup: () => null },
+      stressDictionary: { lookup: () => null } as unknown as MessageHandlerDeps['stressDictionary'],
     });
     globalThis.fetch = makeFetch();
 

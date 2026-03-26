@@ -12,7 +12,7 @@ function makeCtx(data: string, language = 'ru', telegramId = 100) {
   };
 }
 
-function makeEventService(overrides: Record<string, unknown> = {}) {
+function makeEventService(overrides: { [key: string]: unknown } = {}) {
   return {
     getEvent: mock(() => null),
     getEventsForDay: mock(() => []),
@@ -26,7 +26,7 @@ function makeEventService(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeForceInviteDeps(overrides: Record<string, unknown> = {}) {
+function makeForceInviteDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     invitationService: {
       sendInvitation: mock(() => ({ success: true, invitation: { id: 99 } })),

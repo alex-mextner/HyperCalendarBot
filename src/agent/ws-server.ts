@@ -1,9 +1,12 @@
 // src/agent/ws-server.ts
 import type { ServerWebSocket } from 'bun';
+import { jsonCodec } from '../utils/json-codec.ts';
 import type { AgentDispatcher } from './dispatcher.ts';
 import { issueAgentJwt, registerPendingConnection, verifyAgentJwtFull, type WsData } from './pairing.ts';
-import type { AgentInbound, AgentTokenRefreshed } from './protocol.ts';
+import { AgentInboundSchema, type AgentTokenRefreshed } from './protocol.ts';
 import type { AgentRegistry } from './registry.ts';
+
+const AgentInboundCodec = jsonCodec(AgentInboundSchema);
 
 const REFRESH_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -44,12 +47,9 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
     },
 
     message(ws: ServerWebSocket<WsData>, raw: string) {
-      let msg: AgentInbound;
-      try {
-        msg = JSON.parse(raw) as AgentInbound;
-      } catch {
-        return;
-      }
+      const result = AgentInboundCodec.safeParse(raw);
+      if (!result.success) return;
+      const msg = result.data;
 
       if (msg.type === 'ping') {
         if (ws.data.userId) registry.updatePing(ws.data.userId);

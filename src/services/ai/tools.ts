@@ -980,6 +980,44 @@ During a voice call the table is still sent to chat; you MUST mention it verball
     },
   },
   {
+    name: 'get_action_log',
+    description:
+      'Query the user action log — a structured audit trail of all mutating actions performed through commands, AI tools, ' +
+      'callbacks, and intent matches. Use this to answer "why was event X deleted?", "who changed my calendar?", ' +
+      '"what did I do yesterday?". Each entry includes a Telegram message link when available.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: {
+          type: 'number',
+          description: 'Filter by target event ID — shows all actions that affected this event',
+        },
+        action_type: {
+          type: 'string',
+          enum: ['command', 'ai_tool', 'callback', 'intent_match', 'scene'],
+          description: 'Filter by action type',
+        },
+        action_name: {
+          type: 'string',
+          description: 'Filter by action name (e.g. "create_event", "/add", "delete_event")',
+        },
+        after: {
+          type: 'string',
+          description: 'Return entries after this datetime (ISO 8601)',
+        },
+        before: {
+          type: 'string',
+          description: 'Return entries before this datetime (ISO 8601)',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max entries to return (default 30)',
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'schedule_ai_call',
     description:
       'Schedule a one-time or recurring message to be injected into the AI pipeline on your behalf at a future time. The bot will process it as if you sent it. Use run_at for one-time, cron for recurring. Always convert user local time to UTC using their timezone before calling.',
@@ -1057,13 +1095,14 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
   {
     name: 'set_reaction',
     description:
-      'Put an emoji reaction on a Telegram message. Use in group chats to react silently without sending a text reply — e.g. when you want to acknowledge a message, log feedback, or remember a fact without cluttering the chat. The message_id is visible in the [Group: ..., msg_id:XXXX] prefix of each incoming message.',
+      'Put an emoji reaction on a Telegram message. Use in group chats to react silently. If message_id is omitted, reacts to the current incoming message.',
     input_schema: {
       type: 'object' as const,
       properties: {
         message_id: {
           type: 'number',
-          description: 'Telegram message_id to react to. Read it from the msg_id field in the message prefix.',
+          description:
+            'Telegram message_id to react to. Defaults to the current message if omitted. Only specify when reacting to a different message whose msg_id you see in the history prefix.',
         },
         emoji: {
           type: 'string',
@@ -1071,7 +1110,7 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
             'A single emoji supported by Telegram reactions, e.g. "👍", "❤️", "🔥", "👀", "😂", "🤔", "✍️", "🙏".',
         },
       },
-      required: ['message_id', 'emoji'],
+      required: ['emoji'],
     },
   },
   {

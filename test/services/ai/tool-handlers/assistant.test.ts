@@ -14,18 +14,20 @@ function makeCtx(connected: boolean): TestCtx | AgentContext {
     const ws = {
       data: { userId: 1 },
       send: (m: string) => sent.push(m),
-    } as unknown as import('bun').ServerWebSocket<{ userId: number }>;
+    } as Partial<import('bun').ServerWebSocket<{ userId: number }>> as import('bun').ServerWebSocket<{
+      userId: number;
+    }>;
     registry.register(1, ws as never);
     return {
       user: { telegram_id: 1, language: 'ru' },
       agents: { agentRegistry: registry, agentDispatcher: dispatcher, onAgentChunk: undefined },
       _sent: sent,
-    } as unknown as TestCtx;
+    } as Partial<TestCtx> as TestCtx;
   }
   return {
     user: { telegram_id: 1, language: 'ru' },
     agents: { agentRegistry: registry, agentDispatcher: dispatcher, onAgentChunk: undefined },
-  } as unknown as AgentContext;
+  } as Partial<AgentContext> as AgentContext;
 }
 
 test('returns error + /connect link when not connected', async () => {

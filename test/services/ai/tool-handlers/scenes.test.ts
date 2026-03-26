@@ -13,8 +13,9 @@ function makeStorage() {
     async set(key: string, value: unknown): Promise<void> {
       store.set(key, value);
     },
-    async delete(key: string): Promise<void> {
+    async delete(key: string): Promise<boolean | undefined> {
       store.delete(key);
+      return undefined;
     },
   };
 }

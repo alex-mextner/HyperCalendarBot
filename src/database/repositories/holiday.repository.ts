@@ -1,44 +1,11 @@
 import type { Database } from 'bun:sqlite';
-
-export interface HolidayCountryRow {
-  code: string;
-  name: string;
-  region: string;
-}
-
-export interface HolidayRow {
-  id: number;
-  country_code: string;
-  date: string;
-  name: string;
-  type: string;
-  year: number;
-}
-
-export interface HolidaySubscriptionRow {
-  id: number;
-  user_id: number;
-  country_code: string;
-  is_primary: number;
-  notify: number;
-  created_at: string;
-}
-
-export interface HolidayOverrideRow {
-  id: number;
-  user_id: number;
-  date: string;
-  is_day_off: number;
-  created_at: string;
-}
-
-export interface InsertHolidayData {
-  country_code: string;
-  date: string;
-  name: string;
-  type: string;
-  year: number;
-}
+import type {
+  HolidayCountryRow,
+  HolidayOverrideRow,
+  HolidayRow,
+  HolidaySubscriptionRow,
+  InsertHolidayData,
+} from '../types.ts';
 
 export class HolidayRepository {
   constructor(private db: Database) {}

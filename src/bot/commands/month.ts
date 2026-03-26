@@ -3,16 +3,17 @@
 import { TZDate } from '@date-fns/tz';
 import { endOfMonth, format, getDay, getDaysInMonth, startOfMonth } from 'date-fns';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
-import type { EventOccurrence, User } from '../../database/types.ts';
+import type { EventOccurrence } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { mapMonthlyCalendarData } from '../../services/image/data-mapper.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { type CtxWithChat, getGroupId, isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { monthNavKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
+import { isCallbackContext } from '../types.ts';
 
 export async function handleMonth(
   ctx: BotCommandContext | BotCallbackContext,
@@ -21,11 +22,12 @@ export async function handleMonth(
   renderService?: RenderService,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
 
-  if (isGroup(ctx as unknown as CtxWithChat)) {
-    const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  if (isGroup(ctx)) {
+    const groupId = getGroupId(ctx);
     if (groupId === null) return;
     const timezone = groupRepo?.getTimezone(groupId) ?? null;
     if (!timezone) {
@@ -96,8 +98,8 @@ export async function handleMonth(
     const ym = format(monthStart, 'yyyy-MM');
     const text = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
 
-    if (yearMonth) {
-      await (ctx as BotCallbackContext).editText(text, {
+    if (yearMonth && isCallbackContext(ctx)) {
+      await ctx.editText(text, {
         parse_mode: 'HTML',
         reply_markup: monthNavKeyboard(ym),
       });
@@ -175,8 +177,8 @@ export async function handleMonth(
   const ym = format(monthStart, 'yyyy-MM');
   const text = `📅 ${monthLabel}\n\n<code>${header}\n${grid.trimEnd()}</code>\n\n${countLines ? `Events: ${countLines}` : 'No events this month.'}`;
 
-  if (yearMonth) {
-    await (ctx as BotCallbackContext).editText(text, {
+  if (yearMonth && isCallbackContext(ctx)) {
+    await ctx.editText(text, {
       parse_mode: 'HTML',
       reply_markup: monthNavKeyboard(ym),
     });
@@ -225,7 +227,9 @@ export async function handleMonth(
             message_id: messageId,
             disable_notification: options.disable_notification,
           }),
-        sendMessage: (chatId, text) => ctx.bot.api.sendMessage({ chat_id: chatId, text }),
+        sendMessage: async (chatId, text) => {
+          await ctx.bot.api.sendMessage({ chat_id: chatId, text });
+        },
         isGroupChat: false,
         groupChatRepo: groupRepo,
       }).catch((err) => {

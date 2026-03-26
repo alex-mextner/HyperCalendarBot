@@ -11,7 +11,9 @@ export type BotTaskJobType =
   | 'cron-session-cleanup'
   | 'cron-birthday-sync'
   | 'cron-chat-history-cleanup'
-  | 'cron-sqlite-backup';
+  | 'cron-sqlite-backup'
+  | 'cron-recurring-reminders'
+  | 'cron-action-log-cleanup';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -26,6 +28,8 @@ interface BotTasksQueueDeps {
   onBirthdaySync?: () => Promise<void>;
   onChatHistoryCleanup?: () => void;
   onSqliteBackup?: () => Promise<void>;
+  onRecurringReminders?: () => void;
+  onActionLogCleanup?: () => void;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -70,6 +74,14 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-sqlite-backup') {
         if (deps.onSqliteBackup) await deps.onSqliteBackup();
+        return;
+      }
+      if (job.data.type === 'cron-recurring-reminders') {
+        deps.onRecurringReminders?.();
+        return;
+      }
+      if (job.data.type === 'cron-action-log-cleanup') {
+        deps.onActionLogCleanup?.();
         return;
       }
     },
@@ -146,4 +158,23 @@ export async function setupSqliteBackupCron(queue: Queue<BotTaskJobData>): Promi
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'sqlite-backup-tick' },
   );
   botTasksLogger.info('SQLite backup cron scheduled (daily)');
+}
+
+export async function setupRecurringRemindersCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'recurring-reminders-tick',
+    { type: 'cron-recurring-reminders' },
+    { repeat: { every: 6 * 60 * 60_000 }, removeOnComplete: true, jobId: 'recurring-reminders-tick' },
+  );
+  botTasksLogger.info('Recurring reminders cron scheduled (every 6h)');
+}
+
+export async function setupActionLogCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  const WEEKLY_MS = 7 * 24 * 60 * 60_000;
+  await queue.add(
+    'action-log-cleanup-tick',
+    { type: 'cron-action-log-cleanup' },
+    { repeat: { every: WEEKLY_MS }, removeOnComplete: true, jobId: 'action-log-cleanup-tick' },
+  );
+  botTasksLogger.info('Action log cleanup cron scheduled (weekly, retains 90 days)');
 }

@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
+import { ActionLogRepository } from './repositories/action-log.repository.ts';
 import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
 import { CallLogRepository } from './repositories/call-log.repository.ts';
@@ -62,6 +63,7 @@ export class DatabaseService {
   readonly groupSessions: GroupSessionRepository;
   readonly birthdayMeta: BirthdayMetadataRepository;
   readonly userMemory: UserMemoryRepository;
+  readonly actionLog: ActionLogRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -105,6 +107,7 @@ export class DatabaseService {
     this.groupSessions = new GroupSessionRepository(this.db);
     this.birthdayMeta = new BirthdayMetadataRepository(this.db);
     this.userMemory = new UserMemoryRepository(this.db);
+    this.actionLog = new ActionLogRepository(this.db);
   }
 
   close(): void {

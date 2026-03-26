@@ -1,8 +1,10 @@
 // src/bot/handlers/message.handler.ts
 
 import { TZDate } from '@date-fns/tz';
+import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
+import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
 import { t } from '../../config/constants.ts';
@@ -22,7 +24,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent, User, WorkflowSession, WorkflowSessionStore } from '../../database/types.ts';
+import type { CalendarEvent, NotificationPreferencesRow, User, UserCallSettings } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
@@ -40,6 +42,7 @@ import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -61,13 +64,16 @@ import {
 import type { TranscriptionService } from '../../services/voice/transcription-service.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
 import { createIntentMatcherLayer } from '../pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../pipeline/pipeline.ts';
+import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts';
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
+import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
 
 interface SceneStorage {
@@ -97,13 +103,13 @@ export interface MessageHandlerDeps {
   privacyService?: PrivacyService;
   renderService?: RenderService;
   notificationPrefs?: {
-    getPrefs(userId: number): Record<string, unknown>;
-    update(userId: number, patch: Record<string, unknown>): void;
+    getPrefs(userId: number): NotificationPreferencesRow;
+    update(userId: number, patch: Partial<NotificationPreferencesRow>): void;
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
   callSettingsRepo?: {
-    get(userId: number): Record<string, unknown> | null;
+    get(userId: number): UserCallSettings | null;
     ensureDefaults(userId: number): void;
     setEnabled(userId: number, enabled: boolean): void;
     setLanguage(userId: number, lang: string): void;
@@ -141,7 +147,7 @@ export interface MessageHandlerDeps {
   // Admin reply sessions: adminId → { threadId, userId }
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
-  sendMessageToUser?: (chatId: number, text: string) => Promise<unknown>;
+  sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
@@ -157,24 +163,27 @@ export interface MessageHandlerDeps {
   ) => Promise<void>;
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
+  chatHistoryIds?: Map<number, number>;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
   scheduledCallService?: import('../../services/scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
+  // Onboarding scene for mandatory timezone/language setup
+  onboardingScene?: AnyScene;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
 
+const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
+
 function isCallbackOnlyStep(rawScene: unknown): boolean {
-  try {
-    const parsed = JSON.parse(rawScene as string) as { name?: string; step?: number };
-    return CALLBACK_ONLY_STEPS.get(parsed.name ?? '')?.has(parsed.step ?? -1) ?? false;
-  } catch {
-    return false;
-  }
+  const result = SceneStepCodec.safeParse(rawScene as string);
+  if (!result.success) return false;
+  return CALLBACK_ONLY_STEPS.get(result.data.name ?? '')?.has(result.data.step ?? -1) ?? false;
 }
 
 // Full words/phrases for calendar-related keyword matching in groups.
@@ -217,6 +226,13 @@ const CALENDAR_KEYWORDS = [
   'завтра',
   'послезавтра',
   'сегодня',
+  'запись',
+  'записаться',
+  'записать',
+  'назначить',
+  'назначь',
+  'отложить',
+  'отложи',
   // EN — full words
   'event',
   'events',
@@ -233,7 +249,22 @@ const CALENDAR_KEYWORDS = [
   'today',
 ];
 
-const KEYWORD_PATTERN = new RegExp(`(?:^|\\s|[,.!?])(?:${CALENDAR_KEYWORDS.join('|')})(?:\\s|[,.!?]|$)`, 'i');
+// --- Fuzzy phonetic matching ---
+
+/** Russian phonetic normalization: canonicalize voiced/voiceless pairs, remove soft/hard signs. */
+function phoneticNormalize(word: string): string {
+  let s = word.toLowerCase();
+  s = s.replace(/ё/g, 'е');
+  s = s.replace(/[ъь]/g, '');
+  s = s.replace(/б/g, 'п');
+  s = s.replace(/в/g, 'ф');
+  s = s.replace(/г/g, 'к');
+  s = s.replace(/д/g, 'т');
+  s = s.replace(/ж/g, 'ш');
+  s = s.replace(/з/g, 'с');
+  s = s.replace(/(.)\1+/g, '$1');
+  return s;
+}
 
 function levenshtein(a: string, b: string): number {
   const m = a.length;
@@ -250,11 +281,59 @@ function levenshtein(a: string, b: string): number {
   return dp[m]![n]!;
 }
 
+/** Max Levenshtein distance allowed for a given normalized word length. */
+function maxEditDistance(len: number): number {
+  if (len <= 3) return 0;
+  if (len <= 5) return 1;
+  return 2;
+}
+
+/** Pre-computed normalized keyword forms for fuzzy matching. */
+const NORMALIZED_KEYWORDS = CALENDAR_KEYWORDS.map((kw) => {
+  const parts = kw.split(/\s+/);
+  return { normalized: parts.map(phoneticNormalize) };
+});
+
+/** Check if text contains any calendar keyword (fuzzy phonetic match). */
+function matchesKeywordFuzzy(text: string): boolean {
+  const inputWords = text
+    .toLowerCase()
+    .split(/[\s,.!?;:()]+/)
+    .filter((w) => w.length > 0);
+  const normalizedInput = inputWords.map(phoneticNormalize);
+
+  for (const kw of NORMALIZED_KEYWORDS) {
+    if (kw.normalized.length === 1) {
+      const kwNorm = kw.normalized[0]!;
+      for (const inputNorm of normalizedInput) {
+        const maxDist = maxEditDistance(kwNorm.length);
+        if (levenshtein(inputNorm, kwNorm) <= maxDist) return true;
+      }
+    } else {
+      // Multi-word keyword (e.g. "во сколько") — all parts must appear in sequence
+      for (let i = 0; i <= normalizedInput.length - kw.normalized.length; i++) {
+        let allMatch = true;
+        for (let j = 0; j < kw.normalized.length; j++) {
+          const inputNorm = normalizedInput[i + j]!;
+          const kwNorm = kw.normalized[j]!;
+          const maxDist = maxEditDistance(kwNorm.length);
+          if (levenshtein(inputNorm, kwNorm) > maxDist) {
+            allMatch = false;
+            break;
+          }
+        }
+        if (allMatch) return true;
+      }
+    }
+  }
+  return false;
+}
+
 const ADDRESS_TARGETS = ['календарь', 'calendar'];
 const ADDRESS_MAX_DISTANCE = 2;
 
-// Exact "календарь"/"calendar" words are already in KEYWORD_PATTERN.
-// This function handles typos only (e.g. "Каледарь,", "Calender,").
+// Exact "календарь"/"calendar" words are already in keyword list.
+// This function handles typos only in the address prefix (e.g. "Каледарь,", "Calender,").
 function startsWithCalendarAddress(text: string): boolean {
   const firstWord = (text.trim().split(/[\s,!.?:]+/)[0] ?? '').toLowerCase();
   if (firstWord.length < 5) return false;
@@ -264,7 +343,7 @@ function startsWithCalendarAddress(text: string): boolean {
 function isGroupRelevant(text: string, botUsername: string): boolean {
   if (botUsername && text.includes(`@${botUsername}`)) return true;
   if (startsWithCalendarAddress(text)) return true;
-  return KEYWORD_PATTERN.test(text);
+  return matchesKeywordFuzzy(text);
 }
 
 const TG_API = 'https://api.telegram.org';
@@ -305,11 +384,14 @@ async function handleVoiceMessage(
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
 
     const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
-    deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
+    const chatHistoryId = deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);
 
     const agentContext: AgentContext = {
       ...buildAgentContextFactory(deps)(user, Number(chatId), transcription),
       inputMode: 'voice_message',
+      incomingMessageId: ctx.id,
+      chatHistoryId,
+      voiceFileId: voice.file_id,
     };
 
     const { responseText } = await deps.agent.run(agentContext);
@@ -418,11 +500,18 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
-            const now = new Date();
-            const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
-            const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
-            return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            try {
+              const now = new Date();
+              const start = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000).toISOString();
+              const end = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000).toISOString();
+              return deps.eventService.getEventsInRange(user.telegram_id, start, end);
+            } catch (err) {
+              cmdLogger.error({ err, userId: user.telegram_id }, 'Failed to build schedule context');
+              return [];
+            }
           })(),
+      actionLogRepo: deps.actionLogRepo,
+      chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       sceneStorage: {
         delete: async (key: string) => {
           await deps.sceneStorage.delete(key);
@@ -579,11 +668,13 @@ async function handleIntentEditInstruction(
     return;
   }
 
+  const StringArrayCodec = jsonCodec(z.array(z.string()));
+  const WorkflowCodec = jsonCodec(WorkflowSchema);
   const currentJson = JSON.stringify({
-    phrases: JSON.parse(intent.phrases),
-    trigger_words: JSON.parse(intent.trigger_words),
+    phrases: StringArrayCodec.parse(intent.phrases),
+    trigger_words: StringArrayCodec.parse(intent.trigger_words),
     pattern: intent.pattern,
-    workflow: JSON.parse(intent.workflow),
+    workflow: WorkflowCodec.parse(intent.workflow),
     format: intent.format,
   });
 
@@ -592,7 +683,7 @@ async function handleIntentEditInstruction(
     phrases: string[];
     trigger_words: string[];
     pattern: string | null;
-    workflow: Record<string, unknown>;
+    workflow: Workflow;
     format: string;
   }> | null = null;
   let lastError: unknown;
@@ -632,13 +723,15 @@ async function handleIntentEditInstruction(
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
-      updated = JSON.parse(text) as Partial<{
-        phrases: string[];
-        trigger_words: string[];
-        pattern: string | null;
-        workflow: Record<string, unknown>;
-        format: string;
-      }>;
+      updated = jsonCodec(
+        z.object({
+          phrases: z.array(z.string()).optional(),
+          trigger_words: z.array(z.string()).optional(),
+          pattern: z.string().nullable().optional(),
+          workflow: WorkflowSchema.optional(),
+          format: z.string().optional(),
+        }),
+      ).parse(text);
       break;
     } catch (err) {
       lastError = err;
@@ -660,7 +753,9 @@ async function handleIntentEditInstruction(
     const fresh = intentRepo.getById(session.intentId)!;
     const preview = [
       `✏️ Intent #${fresh.id} updated: <b>${fresh.canonical_name}</b>`,
-      `Phrases: ${(JSON.parse(fresh.phrases) as string[]).map((p) => `"${p}"`).join(', ')}`,
+      `Phrases: ${StringArrayCodec.parse(fresh.phrases)
+        .map((p) => `"${p}"`)
+        .join(', ')}`,
       fresh.pattern ? `Pattern: ${fresh.pattern}` : 'Pattern: none',
       `Workflow: ${fresh.workflow}`,
       `Format: ${fresh.format}`,
@@ -876,18 +971,27 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
   };
 
   return async (ctx: BotCommandContext) => {
-    const user = ctx.dbUser as User | undefined;
+    const user = ctx.dbUser;
     if (!user) return;
 
-    // Voice message → transcribe → pass to AI agent
-    const voiceRaw = (
-      ctx as unknown as {
-        voice?: { payload?: { file_id: string; duration: number }; file_id?: string; duration?: number };
+    // Mandatory onboarding: redirect to setup if user hasn't completed it (private chats only)
+    if (!user.onboarding_completed && deps.onboardingScene) {
+      const isPrivate = ctx.chat.type === 'private';
+      if (isPrivate) {
+        // Check if a scene is already active (e.g. onboarding already in progress)
+        const sceneKey = `@gramio/scenes:${user.telegram_id}`;
+        const activeScene = await deps.sceneStorage.get(sceneKey);
+        if (!activeScene) {
+          await ctx.scene.enter(deps.onboardingScene);
+        }
+        return;
       }
-    ).voice;
-    const voicePayload = voiceRaw?.payload ?? voiceRaw;
-    if (voicePayload?.file_id && deps.transcriptionService && deps.botToken) {
-      return handleVoiceMessage(ctx, user, voicePayload as { file_id: string; duration: number }, deps);
+    }
+
+    // Voice message → transcribe → pass to AI agent
+    const voice = ctx.voice;
+    if (voice && deps.transcriptionService && deps.botToken) {
+      return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
     const text = ctx.text as string | undefined;
@@ -906,16 +1010,37 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         // Trigger 2: callback-only step — user typed instead of pressing a button → auto-pause
         if (deps.scenePauseService && isCallbackOnlyStep(activeScene)) {
           try {
-            const parsed = JSON.parse(activeScene as string) as {
-              name?: string;
-              step?: number;
-              state?: Record<string, unknown>;
-            };
-            await deps.scenePauseService.save(user.telegram_id, {
-              sceneName: parsed.name ?? 'unknown',
-              step: parsed.step ?? 0,
-              sceneState: parsed.state ?? {},
-            });
+            const parsed = jsonCodec(
+              z.object({
+                name: z.string(),
+                step: z.number(),
+                state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+              }),
+            ).parse(activeScene as string);
+            const step = parsed.step;
+            const state = parsed.state ?? {};
+            const name = parsed.name;
+            if (name === 'add_event') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'add_event',
+                step,
+                sceneState: state as AddEventState,
+              });
+            } else if (name === 'timezone') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'timezone',
+                step,
+                sceneState: state as TimezoneState,
+              });
+            } else if (name === 'onboarding') {
+              await deps.scenePauseService.save(user.telegram_id, {
+                sceneName: 'onboarding',
+                step,
+                sceneState: state as OnboardingState,
+              });
+            } else if (name === 'edit_value' || name === 'import') {
+              await deps.scenePauseService.save(user.telegram_id, { sceneName: name, step, sceneState: {} });
+            }
           } catch {
             return; // can't parse scene state — skip
           }
@@ -930,8 +1055,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     if (!chatId) return;
 
     // In groups: only respond to replies, mentions, or calendar keywords
-    const chat = (ctx as unknown as { chat?: { type: string; title?: string } }).chat;
-    const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+    const chat = ctx.chat;
+    const isGroup = chat.type === 'group' || chat.type === 'supergroup';
     let isGroupSessionMessage = false;
 
     // Propose-time session: invitee typing a new time in response to an invite (private chats only)
@@ -957,7 +1082,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         if (groupTzHandled) return;
       }
 
-      const reply = (ctx as unknown as { replyToMessage?: { from?: { id?: number } } }).replyToMessage;
+      const reply = ctx.replyMessage;
       const isReplyToBot = deps.botId !== undefined && reply?.from?.id === deps.botId;
       const botMention = deps.botUsername ? `@${deps.botUsername}` : '';
 
@@ -990,13 +1115,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     }
 
     // Build context info for group messages
-    const from = (ctx as unknown as { from?: { first_name?: string; username?: string } }).from;
-    // GramIO's MessageContext exposes .id as the Telegram message_id (confirmed via prototype inspection)
-    const incomingMsgId = (ctx as unknown as { id?: number }).id;
+    const from = ctx.from;
+    // GramIO's MessageContext exposes .id as the Telegram message_id via NodeMixinMetadata
+    const incomingMsgId = ctx.id;
     let messagePrefix = '';
     if (isGroup && from) {
-      const senderName = from.first_name ?? from.username ?? 'Unknown';
-      const groupName = chat?.title ?? 'group';
+      const senderName = from.firstName ?? from.username ?? 'Unknown';
+      const groupName = chat.title ?? 'group';
       const msgIdPart = incomingMsgId ? `, msg_id:${incomingMsgId}` : '';
       messagePrefix = `[Group: ${groupName}, From: ${senderName}${msgIdPart}] `;
     }
@@ -1060,6 +1185,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               });
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
+              // chatHistoryId is set via buildAgentContextFactory from deps.chatHistoryIds
               // Track which events the intent touches
               agentCtx.onEventMentioned = (eventId) => {
                 Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
@@ -1077,6 +1203,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               });
             },
             deps.conversationLogger,
+            deps.actionLogRepo,
           )
         : undefined;
 

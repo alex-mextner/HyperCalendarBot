@@ -4,12 +4,12 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import { createFeedbackRouterLayer } from '../../src/bot/pipeline/feedback-router-layer.ts';
 import { createIntentMatcherLayer } from '../../src/bot/pipeline/intent-matcher-layer.ts';
 import { runPipeline } from '../../src/bot/pipeline/pipeline.ts';
+import type { WorkflowSessionStore } from '../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../src/bot/types.ts';
 import { migrations } from '../../src/database/migrations.ts';
 import { FeedbackRepository } from '../../src/database/repositories/feedback.repository.ts';
 import { IntentRepository } from '../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
-import type { WorkflowSessionStore } from '../../src/database/types.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 
@@ -58,7 +58,7 @@ describe('Pipeline Integration', () => {
     matcher.load(intentRepo.getApproved());
     const executor = new IntentExecutor();
 
-    const mockToolExecutor = mock((_name: string, _input: Record<string, unknown>) => ({
+    const mockToolExecutor = mock((_name: string, _input: unknown) => ({
       success: true,
       output: JSON.stringify([{ title: 'Test Meeting', start_at: '2026-03-17T10:00:00Z' }]),
     }));
@@ -114,9 +114,9 @@ describe('Pipeline Integration', () => {
     matcher.load(intentRepo.getApproved());
     const executor = new IntentExecutor();
 
-    const capturedInputs: Record<string, unknown>[] = [];
-    const mockToolExecutor = mock((_name: string, input: Record<string, unknown>) => {
-      capturedInputs.push(input);
+    const capturedInputs: { [key: string]: unknown }[] = [];
+    const mockToolExecutor = mock((_name: string, input: unknown) => {
+      capturedInputs.push(input as { [key: string]: unknown });
       return { success: true, output: '[]' };
     });
     const ctx = makeCtx(1);

@@ -32,7 +32,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     user: { telegram_id: 1, language: 'en', timezone: 'UTC' } as User,
     scheduled: { scheduledCallService, triggerService: { repo: triggerRepo } },
     ...overrides,
-  } as unknown as AgentContext;
+  } as Partial<AgentContext> as AgentContext;
 }
 
 describe('handleAddTrigger', () => {

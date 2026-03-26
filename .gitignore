@@ -36,9 +36,10 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # git worktrees
 .worktrees
 
-# SQLite data — exclude dictionaries
+# SQLite data — only README tracked, large files generated at build time
 data/*
 !data/dictionaries/
+data/dictionaries/*.json
 data/thinking-phrases/
 *.db
 *.db-shm

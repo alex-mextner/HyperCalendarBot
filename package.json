@@ -34,13 +34,15 @@
     "date-fns": "^4.1.0",
     "date-holidays": "^3.26.9",
     "geo-tz": "^8.1.6",
-    "google-auth-library": "^10.6.1",
+    "google-auth-library": "^10.6.2",
     "googleapis": "^171.4.0",
     "gramio": "^0.7.0",
     "jose": "^6.2.2",
     "marked": "^15.0.12",
+    "mitt": "^3.0.1",
     "pino": "^10.3.1",
     "playwright": "^1.58.2",
-    "rrule": "^2.8.1"
+    "rrule": "^2.8.1",
+    "zod": "^4.3.6"
   }
 }

@@ -20,7 +20,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -57,7 +57,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -94,12 +94,17 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
     const args = ctx.answerInlineQuery.mock.calls[0] as unknown[];
-    const results = args[0] as Array<Record<string, unknown>>;
+    const results = args[0] as Array<{
+      type: string;
+      id: string;
+      title: string;
+      input_message_content: { message_text: string; parse_mode: string };
+    }>;
     const result = results[0]!;
     expect(result.type).toBe('article');
     expect(result.id).toBe('evt_1');
@@ -129,7 +134,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: 'today',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -158,7 +163,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: undefined,
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -189,7 +194,7 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: 'broken',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
@@ -218,12 +223,12 @@ describe('createInlineHandler', () => {
     const ctx = {
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     };
 
     await handler(ctx);
     const args = ctx.answerInlineQuery.mock.calls[0] as unknown[];
-    const options = args[1] as Record<string, unknown>;
+    const options = args[1] as { cache_time: number };
     expect(options.cache_time).toBe(30);
   });
 });

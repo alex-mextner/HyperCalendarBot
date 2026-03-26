@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleEdit } from '../../../src/bot/commands/edit.ts';
+import type { CalendarEvent } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -26,7 +27,7 @@ function makeCallbackCtx(overrides = {}) {
   };
 }
 
-function makeEvent(overrides: Record<string, unknown> = {}) {
+function makeEvent(overrides: Partial<CalendarEvent> = {}) {
   return {
     id: 1,
     user_id: 100,
@@ -105,11 +106,11 @@ describe('handleEdit group context', () => {
       getUpcomingForGroup: mock(() => groupOccurrences),
     };
     const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
-    let sentOpts: Record<string, unknown> = {};
+    let sentOpts: { reply_markup?: unknown } = {};
     const ctx = {
       chat: { type: 'group', id: -100 },
       dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
-      send: mock((_text: string, opts: Record<string, unknown>) => {
+      send: mock((_text: string, opts?: { reply_markup?: unknown }) => {
         sentOpts = opts ?? {};
         return Promise.resolve();
       }),
@@ -244,18 +245,14 @@ describe('handleEditFieldCallback', () => {
     });
   });
 
-  test('uses messageId 0 when message is undefined', async () => {
+  test('returns early without entering scene when message is undefined', async () => {
     const { handleEditFieldCallback } = await import('../../../src/bot/commands/edit.ts');
     const ctx = makeCallbackCtx({ message: undefined });
     const editValueScene = { name: 'edit_value' };
 
     await handleEditFieldCallback(ctx as never, user as never, 3, 'time', editValueScene as never);
 
-    expect(ctx.scene.enter).toHaveBeenCalledWith(editValueScene, {
-      eventId: 3,
-      field: 'time',
-      chatId: 42,
-      messageId: 0,
-    });
+    expect(ctx.scene.enter).not.toHaveBeenCalled();
+    expect(ctx.answer).not.toHaveBeenCalled();
   });
 });

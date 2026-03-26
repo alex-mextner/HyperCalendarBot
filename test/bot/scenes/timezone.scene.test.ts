@@ -10,6 +10,7 @@ mock.module('@anthropic-ai/sdk', () => ({
 
 const { createTimezoneScene } = await import('../../../src/bot/scenes/timezone.scene.ts');
 const { CB } = await import('../../../src/config/constants.ts');
+const { createUserResolverComposer } = await import('../../../src/bot/middleware/user-resolver.ts');
 
 import type { DatabaseService } from '../../../src/database/index.ts';
 
@@ -135,11 +136,14 @@ function makeCtx(
   return ctx;
 }
 
+/** Minimal mock of DatabaseService with only the methods used by timezone scene + user resolver.
+ *  DatabaseService has a private `db` field so structural mocking needs a boundary cast. */
 function makeDb(updateResult?: unknown): DatabaseService {
   return {
     users: {
       update: mock(() => updateResult ?? { telegram_id: 1, language: 'en', timezone: 'Europe/London' }),
       findByTelegramId: mock(() => null),
+      findOrCreate: () => ({ language: 'en', timezone: 'UTC' }),
     },
   } as unknown as DatabaseService;
 }
@@ -152,12 +156,12 @@ const NOOP_NEXT = () => Promise.resolve();
 
 describe('createTimezoneScene', () => {
   test('creates scene with name "timezone"', () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     expect(scene.name).toBe('timezone');
   });
 
   test('has 1 step', () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     expect(scene.stepsCount).toBe(1);
   });
 });
@@ -175,7 +179,7 @@ describe('CB.TZ_ constants', () => {
 
 describe('timezone scene onEnter', () => {
   test('calls editText with current timezone info', async () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     const enterFn = getEnterFn(scene);
     if (!enterFn) return;
     const ctx = makeCtx({ timezone: 'Europe/London' });
@@ -186,7 +190,7 @@ describe('timezone scene onEnter', () => {
   });
 
   test('exits early if no user', async () => {
-    const scene = createTimezoneScene(makeDb());
+    const scene = createTimezoneScene(makeDb(), createUserResolverComposer(makeDb()));
     const enterFn = getEnterFn(scene);
     if (!enterFn) return;
     const ctx = makeCtx();
@@ -208,7 +212,7 @@ describe('timezone scene step handler', () => {
     mockCreate.mockReset();
     mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
     db = makeDb();
-    fns = getStepFns(createTimezoneScene(db));
+    fns = getStepFns(createTimezoneScene(db, createUserResolverComposer(db)));
   });
 
   test('no user — exits scene immediately', async () => {
@@ -326,7 +330,7 @@ describe('timezone scene step handler', () => {
     test('with valid updatedUser + settingsMsgId — restores settings message', async () => {
       const updatedUser = { telegram_id: 1, language: 'en', timezone: 'Europe/Paris' };
       const localDb = { users: { update: mock(() => updatedUser) } } as unknown as DatabaseService;
-      const localFns = getStepFns(createTimezoneScene(localDb));
+      const localFns = getStepFns(createTimezoneScene(localDb, createUserResolverComposer(localDb)));
       const ctx = makeCtx({
         activeType: 'callback_query',
         stepId: 0,

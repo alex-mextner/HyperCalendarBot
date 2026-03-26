@@ -84,46 +84,76 @@ describe('handleSetReaction', () => {
   test('calls setReaction with groupChatId, messageId, and emoji', async () => {
     const ctx = makeCtx(db, USER_ID);
     const setReaction = mock(() => Promise.resolve());
-    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.isGroup = true;
     ctx.groupChatId = -100123;
 
-    const result = handleSetReaction(ctx, { message_id: 999, emoji: '👍' });
+    const result = await handleSetReaction(ctx, { message_id: 999, emoji: '👍' });
 
     expect(result.success).toBe(true);
-    // Allow the fire-and-forget promise to settle
-    await Promise.resolve();
     expect(setReaction).toHaveBeenCalledWith(-100123, 999, '👍');
   });
 
   test('falls back to chatId when groupChatId is absent', async () => {
     const ctx = makeCtx(db, USER_ID);
     const setReaction = mock(() => Promise.resolve());
-    ctx.sender = { setReaction } as unknown as AgentContext['sender'];
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.isGroup = false;
 
-    handleSetReaction(ctx, { message_id: 7, emoji: '😂' });
+    await handleSetReaction(ctx, { message_id: 7, emoji: '😂' });
 
-    await Promise.resolve();
     expect(setReaction).toHaveBeenCalledWith(USER_ID, 7, '😂');
   });
 
-  test('returns error when setReaction is not available on sender', () => {
+  test('returns error when setReaction is not available on sender', async () => {
     const ctx = makeCtx(db, USER_ID);
     ctx.sender = {} as AgentContext['sender'];
 
-    const result = handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('Reactions not available');
   });
 
-  test('returns error when sender is absent', () => {
+  test('returns error when sender is absent', async () => {
     const ctx = makeCtx(db, USER_ID);
     ctx.sender = undefined;
 
-    const result = handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
 
     expect(result.success).toBe(false);
+  });
+
+  test('set_reaction: awaits API and returns error on failure', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.sender = {
+      setReaction: mock(() => Promise.reject(new Error('Bad Request: message not found'))),
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    ctx.groupChatId = -100123;
+    const result = await handleSetReaction(ctx, { message_id: 999, emoji: '👍' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('message not found');
+  });
+
+  test('set_reaction: defaults to ctx.incomingMessageId when message_id omitted', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.incomingMessageId = 42;
+    ctx.groupChatId = -100123;
+    const setReaction = mock(() => Promise.resolve());
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    const result = await handleSetReaction(ctx, { emoji: '👍' });
+    expect(result.success).toBe(true);
+    expect(setReaction).toHaveBeenCalledWith(-100123, 42, '👍');
+  });
+
+  test('set_reaction: returns error when no message_id and no incomingMessageId', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.groupChatId = -100123;
+    ctx.sender = {
+      setReaction: mock(() => Promise.resolve()),
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    const result = await handleSetReaction(ctx, { emoji: '👍' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('message_id');
   });
 });

@@ -60,7 +60,7 @@ describe('intent_accept callback handler', () => {
     intentRepo = new IntentRepository(db);
   });
 
-  function makeCtx(data: string, overrides: Record<string, unknown> = {}) {
+  function makeCtx(data: string, overrides: { [key: string]: unknown } = {}) {
     return {
       data,
       dbUser: { telegram_id: 999, language: 'en', timezone: 'UTC' },

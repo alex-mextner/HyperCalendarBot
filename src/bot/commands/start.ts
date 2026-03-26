@@ -5,7 +5,6 @@ import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
@@ -21,7 +20,8 @@ export interface StartDeps {
 }
 
 export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
 
   // Handle deep links (s_ = shared event, i_ = invitation, g_ = group context)
@@ -32,7 +32,7 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
       const resolved = deps.deepLinkService.resolve(arg);
       if (resolved) {
         if (resolved.type === 'shared_event' && deps.eventService) {
-          const eventId = (resolved.payload as { event_id: number }).event_id;
+          const eventId = resolved.payload.event_id;
           const event = deps.eventService.getEvent(eventId, resolved.createdBy);
           if (event) {
             const card = formatEventDetail(event, event.timezone, lang);
@@ -43,11 +43,10 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
         }
 
         if (resolved.type === 'invitation' && deps.invitationRepo && deps.eventService) {
-          const payload = resolved.payload as { invitation_id: number; event_id: number };
-          const invitation = deps.invitationRepo.findById(payload.invitation_id);
+          const invitation = deps.invitationRepo.findById(resolved.payload.invitation_id);
 
           if (invitation && invitation.status === 'pending') {
-            const event = deps.eventService.getEvent(payload.event_id, resolved.createdBy);
+            const event = deps.eventService.getEvent(resolved.payload.event_id, resolved.createdBy);
             const inviter = deps.userRepo?.findByTelegramId(invitation.inviter_id);
             const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${invitation.inviter_id}`;
 

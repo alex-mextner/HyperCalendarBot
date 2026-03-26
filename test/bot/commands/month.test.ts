@@ -97,7 +97,7 @@ describe('handleMonth', () => {
     await handleMonth(ctx as never, svc as never, '2026-12');
 
     const callArgs = ctx.editText.mock.calls[0] as unknown[];
-    const opts = callArgs[1] as Record<string, unknown>;
+    const opts = callArgs[1] as { reply_markup?: unknown };
     expect(opts.reply_markup).toBeDefined();
   });
 
@@ -114,7 +114,7 @@ describe('handleMonth', () => {
     const svc = makeEventService();
     const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
 
-    // yearMonth undefined → triggers image render (only on initial /month command)
+    // yearMonth undefined -> triggers image render (only on initial /month command)
     await handleMonth(ctx as never, svc as never, undefined, renderService as never);
     await Promise.resolve(); // flush fire-and-forget autoPin
 
@@ -145,7 +145,7 @@ describe('handleMonth group context', () => {
     expect(eventService.getEventsInRange).not.toHaveBeenCalled();
   });
 
-  test('in group with no timezone sends Russian prompt containing таймзону', async () => {
+  test('in group with no timezone sends Russian prompt containing timezone', async () => {
     const groupRepo = { getTimezone: mock(() => null) };
     let sentText = '';
     const ctx = {

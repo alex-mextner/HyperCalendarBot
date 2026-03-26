@@ -6,7 +6,7 @@ import {
   toEventSummary,
 } from '../../../src/bot/handlers/message.handler.ts';
 
-function makeDeps(overrides: Record<string, unknown> = {}) {
+function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
     eventService: { getEventsInRange: mock(() => []) },
@@ -21,13 +21,25 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+interface MockCtxOverrides {
+  dbUser?: Partial<import('../../../src/database/types.ts').User> | undefined;
+  text?: string | undefined;
+  chatId?: number;
+  chat?: { type: string; title?: string };
+  from?: { firstName?: string; username?: string; id?: number; first_name?: string };
+  send?: ReturnType<typeof mock>;
+  voice?: { file_id: string; duration: number };
+  scene?: { enter: ReturnType<typeof mock> };
+  replyMessage?: { from: { id: number } };
+}
+
+function makeCtx(overrides: MockCtxOverrides = {}) {
   return {
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
     text: 'привет',
     chatId: 100,
     chat: { type: 'private' },
-    from: { first_name: 'Alex', username: 'alex' },
+    from: { firstName: 'Alex', username: 'alex' },
     send: mock(() => Promise.resolve()),
     ...overrides,
   };
@@ -120,6 +132,83 @@ describe('createMessageHandler', () => {
     });
   });
 
+  describe('mandatory onboarding gate', () => {
+    test('redirects to onboarding when user has not completed it', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).toHaveBeenCalledWith(onboardingScene);
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+
+    test('does not redirect when onboarding is completed', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      await handler(ctx as never);
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not redirect in group chats', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const deps = makeDeps({ onboardingScene });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        text: 'встреча завтра',
+        chat: { type: 'group', title: 'Work' },
+      });
+      await handler(ctx as never);
+      // Group messages with keywords still go through (no redirect)
+      expect(deps.agent.run).toHaveBeenCalledTimes(1);
+    });
+
+    test('does not redirect if scene already active (onboarding in progress)', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        onboardingScene,
+        sceneStorage: { get: mock(() => Promise.resolve(JSON.stringify({ name: 'onboarding', step: 1 }))) },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).not.toHaveBeenCalled();
+    });
+
+    test('redirects voice messages to onboarding too', async () => {
+      const onboardingScene = { name: 'onboarding' };
+      const sceneEnter = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        onboardingScene,
+        transcriptionService: { transcribe: mock(() => Promise.resolve('привет')) },
+        botToken: 'test-token',
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 0 },
+        text: undefined,
+        voice: { file_id: 'voice_123', duration: 5 },
+        scene: { enter: sceneEnter },
+      });
+      await handler(ctx as never);
+      expect(sceneEnter).toHaveBeenCalledWith(onboardingScene);
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+    });
+  });
+
   test('ignores messages without dbUser', async () => {
     const deps = makeDeps();
     const handler = createMessageHandler(deps as never);
@@ -171,7 +260,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'встреча в 15:00',
           chat: { type: 'supergroup', title: 'Team' },
-          from: { first_name: 'Alex' },
+          from: { firstName: 'Alex' },
         }) as never,
       );
       const call = (deps.agent.run as ReturnType<typeof mock>).mock.calls[0]![0] as { messageText: string };
@@ -247,7 +336,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'ок буду',
           chat: { type: 'group', title: 'Chat' },
-          replyToMessage: { from: { id: 500 } },
+          replyMessage: { from: { id: 500 } },
         }) as never,
       );
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
@@ -260,7 +349,7 @@ describe('createMessageHandler', () => {
         makeCtx({
           text: 'ок буду',
           chat: { type: 'group', title: 'Chat' },
-          replyToMessage: { from: { id: 999 } },
+          replyMessage: { from: { id: 999 } },
         }) as never,
       );
       expect(deps.agent.run).toHaveBeenCalledTimes(1);
@@ -368,7 +457,7 @@ describe('createMessageHandler', () => {
   });
 
   describe('voice messages', () => {
-    function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+    function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
       return makeDeps({
         transcriptionService: { transcribe: mock(() => Promise.resolve('создай встречу на завтра')) },
         botToken: 'test-token',
@@ -376,7 +465,7 @@ describe('createMessageHandler', () => {
       });
     }
 
-    function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+    function makeVoiceCtx(overrides: MockCtxOverrides = {}) {
       return makeCtx({
         text: undefined,
         voice: { file_id: 'voice_123', duration: 5 },
@@ -587,7 +676,7 @@ describe('voice reply TTS fallback', () => {
   const audioBuffer = Buffer.from('fake-audio');
   const fakeAudioDownload = mock(() => Promise.resolve(Buffer.from('fake-voice-download')));
 
-  function makeVoiceDeps(overrides: Record<string, unknown> = {}) {
+  function makeVoiceDeps(overrides: { [key: string]: unknown } = {}) {
     return makeDeps({
       agent: { run: mock(() => Promise.resolve({ responseText: 'Ответ бота' })) },
       sendVoice: mock(() => Promise.resolve()),
@@ -598,7 +687,7 @@ describe('voice reply TTS fallback', () => {
     });
   }
 
-  function makeVoiceCtx(overrides: Record<string, unknown> = {}) {
+  function makeVoiceCtx(overrides: MockCtxOverrides = {}) {
     return makeCtx({
       dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC', voice_response_enabled: 1 },
       voice: { file_id: 'test-file-id', duration: 5 },

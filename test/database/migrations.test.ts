@@ -3,6 +3,18 @@ import { expect, test } from 'bun:test';
 import { migrations } from '../../src/database/migrations.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 
+test('migration 042 adds joined_at and left_at to group_members', () => {
+  const db = new Database(':memory:');
+  runMigrations(db, migrations);
+
+  const cols = db.prepare('PRAGMA table_info(group_members)').all() as { name: string; dflt_value: string | null }[];
+  const joinedAt = cols.find((c) => c.name === 'joined_at');
+  const leftAt = cols.find((c) => c.name === 'left_at');
+  expect(joinedAt).toBeDefined();
+  expect(leftAt).toBeDefined();
+  expect(joinedAt!.dflt_value).toBe("'2026-01-01T00:00:00Z'");
+});
+
 test('birthday migrations create expected tables and columns', () => {
   const db = new Database(':memory:');
   runMigrations(db, migrations);

@@ -1,24 +1,10 @@
 import { logger } from '../../utils/logger.ts';
-import type { ScheduledAiCall, ScheduledAiCallRepository } from './scheduled-ai-call.repository.ts';
+import type { ScheduledAiCallRepository } from './scheduled-ai-call.repository.ts';
+import type { CreateScheduleInput, QueueAdapter, ScheduledAiCall } from './types.ts';
 
 const scheduleLogger = logger.child({ module: 'scheduled-ai-call' });
 
 const USER_LIMIT = 50;
-
-export interface CreateScheduleInput {
-  userId: number;
-  message: string;
-  runAt: string | null;
-  cron: string | null;
-  label: string | null;
-}
-
-export interface QueueAdapter {
-  addDelayed(data: Record<string, unknown>, delayMs: number): Promise<string>;
-  addRepeat(data: Record<string, unknown>, cron: string): Promise<void>;
-  removeDelayed(scheduleId: string): Promise<void>;
-  removeRepeat(cron: string): Promise<void>;
-}
 
 export class ScheduledAiCallService {
   constructor(

@@ -475,4 +475,123 @@ describe('executeTool', () => {
       expect(result.error).toContain('not found');
     });
   });
+
+  describe('action log integration', () => {
+    let actionCtx: AgentContext;
+    let actionLogRepo: import('../../../src/database/repositories/action-log.repository.ts').ActionLogRepository;
+    let testDb: ReturnType<typeof createTestDb>;
+
+    beforeEach(async () => {
+      const { ActionLogRepository } = await import('../../../src/database/repositories/action-log.repository.ts');
+      const db = createTestDb();
+      testDb = db;
+      const userRepo = new UserRepository(db);
+      const eventRepo = new EventRepository(db);
+      const reminderRepo = new ReminderRepository(db);
+      const chatHistoryRepo = new ChatHistoryRepository(db);
+      const holidayRepo = new HolidayRepository(db);
+      actionLogRepo = new ActionLogRepository(db);
+      userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+      const eventService = new EventService({ eventRepo, reminderRepo });
+      actionCtx = {
+        user: userRepo.findByTelegramId(USER_ID)!,
+        chatId: USER_ID,
+        messageText: '',
+        isGroup: false,
+        eventService,
+        holidayService: new HolidayService(holidayRepo),
+        chatHistory: chatHistoryRepo,
+        userRepo,
+        reminderRepo,
+        conversationLogger: null as never,
+        actionLogRepo,
+      };
+    });
+
+    test('mutating tool call creates action log entry', async () => {
+      const result = await executeTool(actionCtx, 'create_event', {
+        title: 'Test Event',
+        start_at: '2026-12-15T14:00:00Z',
+      });
+      expect(result.success).toBe(true);
+
+      const logs = actionLogRepo.query({ user_id: USER_ID, action_type: 'ai_tool' });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]!.action_name).toBe('create_event');
+      expect(logs[0]!.input_summary).toBe('Test Event');
+      expect(logs[0]!.success).toBe(1);
+      // create_event output starts with "id: N" — the event_id extractor should parse it
+      expect(logs[0]!.target_event_id).not.toBeNull();
+    });
+
+    test('read-only tool call does not create action log entry', async () => {
+      await executeTool(actionCtx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+
+      const logs = actionLogRepo.query({ user_id: USER_ID });
+      expect(logs).toHaveLength(0);
+    });
+
+    test('failed tool call logs with success=0', async () => {
+      await executeTool(actionCtx, 'delete_event', { event_id: 99999 });
+
+      const logs = actionLogRepo.query({ user_id: USER_ID, action_name: 'delete_event' });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]!.success).toBe(0);
+    });
+
+    test('action log stores metadata as JSON', async () => {
+      await executeTool(actionCtx, 'create_event', {
+        title: 'Metadata Test',
+        start_at: '2026-12-20T10:00:00Z',
+        description: 'Important meeting',
+      });
+
+      const logs = actionLogRepo.query({ user_id: USER_ID });
+      expect(logs).toHaveLength(1);
+      const meta = JSON.parse(logs[0]!.metadata!);
+      expect(meta.title).toBe('Metadata Test');
+      expect(meta.description).toBe('Important meeting');
+    });
+
+    test('tool call without actionLogRepo does not throw', async () => {
+      const ctxWithoutLog = { ...actionCtx, actionLogRepo: undefined };
+      const result = await executeTool(ctxWithoutLog, 'create_event', {
+        title: 'No Log',
+        start_at: '2026-12-15T14:00:00Z',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    test('chatHistoryId is stored in action log entry', async () => {
+      // Create a real chat_history row so FK constraint is satisfied
+      const chatHistoryRepo = new ChatHistoryRepository(testDb);
+      const historyId = chatHistoryRepo.save(USER_ID, 'user', 'create meeting tomorrow');
+      actionCtx.chatHistoryId = historyId;
+
+      await executeTool(actionCtx, 'create_event', {
+        title: 'With History Link',
+        start_at: '2026-12-15T14:00:00Z',
+      });
+
+      const logs = actionLogRepo.query({ user_id: USER_ID });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]!.chat_history_id).toBe(historyId);
+    });
+
+    test('inputMode is stored in metadata', async () => {
+      actionCtx.inputMode = 'voice_message';
+      await executeTool(actionCtx, 'create_event', {
+        title: 'Voice Event',
+        start_at: '2026-12-15T14:00:00Z',
+      });
+
+      const logs = actionLogRepo.query({ user_id: USER_ID });
+      expect(logs).toHaveLength(1);
+      const meta = JSON.parse(logs[0]!.metadata!);
+      expect(meta._inputMode).toBe('voice_message');
+    });
+  });
 });

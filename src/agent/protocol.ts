@@ -1,4 +1,5 @@
 // src/agent/protocol.ts
+import { z } from 'zod';
 
 export interface AgentPairRequest {
   type: 'pair';
@@ -13,29 +14,69 @@ export interface AgentPairError {
   reason: 'expired' | 'invalid';
 }
 
-export interface AgentCommand {
-  id: string;
-  type:
-    | 'claude_chat'
-    | 'claude_new_chat'
-    | 'claude_list_chats'
-    | 'claude_open_chat'
-    | 'claude_list_projects'
-    | 'claude_artifact'
-    | 'bash_execute'
-    | 'playwright_action'
-    | 'applescript_run';
-  payload: Record<string, unknown>;
+/** Playwright action params — each action has its own known shape. */
+interface PlaywrightNavigateParams {
+  url: string;
+}
+interface PlaywrightClickParams {
+  selector: string;
+}
+interface PlaywrightFillParams {
+  selector: string;
+  value: string;
+}
+interface PlaywrightExtractParams {
+  selector: string;
+}
+interface PlaywrightEvaluateParams {
+  expression: string;
 }
 
-export interface AgentResponse {
+type PlaywrightParams =
+  | PlaywrightNavigateParams
+  | PlaywrightClickParams
+  | PlaywrightFillParams
+  | PlaywrightExtractParams
+  | PlaywrightEvaluateParams
+  | Record<never, never>; // screenshot — no params
+
+export type AgentCommand =
+  | { id: string; type: 'claude_chat'; payload: { chat_id: string; message: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_new_chat'; payload: { message: string; project_id?: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_list_chats'; payload: { limit?: number } }
+  | { id: string; type: 'claude_open_chat'; payload: { chat_id: string } }
+  | { id: string; type: 'claude_list_projects'; payload: Record<never, never> }
+  | { id: string; type: 'claude_artifact'; payload: { artifact_id: string } }
+  | { id: string; type: 'bash_execute'; payload: { command: string; timeout_ms?: number } }
+  | {
+      id: string;
+      type: 'playwright_action';
+      payload: {
+        action: 'screenshot' | 'navigate' | 'click' | 'fill' | 'extract' | 'evaluate';
+        params: PlaywrightParams;
+        timeout_ms?: number;
+      };
+    }
+  | { id: string; type: 'applescript_run'; payload: { script: string; timeout_ms?: number } };
+
+export interface AgentChunkResponse {
   id: string;
-  type: 'chunk' | 'done' | 'error';
-  text?: string;
-  data?: unknown;
-  exitCode?: number;
-  error?: string;
+  type: 'chunk';
+  text: string;
 }
+export interface AgentDoneResponse {
+  id: string;
+  type: 'done';
+  text?: string;
+  data?: string | number | boolean | null;
+  exitCode?: number;
+}
+export interface AgentErrorResponse {
+  id: string;
+  type: 'error';
+  error: string;
+}
+export type AgentResponse = AgentChunkResponse | AgentDoneResponse | AgentErrorResponse;
 
 export interface AgentPing {
   type: 'ping';
@@ -52,7 +93,26 @@ export interface AgentTokenRefreshed {
   jwt: string;
 }
 
-export type AgentInbound = AgentPairRequest | AgentResponse | AgentPing;
+/** Zod schema for validating inbound WebSocket messages from the agent. */
+export const AgentInboundSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('pair'), code: z.string() }),
+  z.object({ type: z.literal('chunk'), id: z.string(), text: z.string() }),
+  z.object({
+    type: z.literal('done'),
+    id: z.string(),
+    text: z.string().optional(),
+    data: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
+    exitCode: z.number().optional(),
+  }),
+  z.object({
+    type: z.literal('error'),
+    id: z.string(),
+    error: z.string(),
+  }),
+  z.object({ type: z.literal('ping') }),
+]);
+
+export type AgentInbound = z.infer<typeof AgentInboundSchema>;
 export type AgentOutbound =
   | AgentPairResponse
   | AgentPairError

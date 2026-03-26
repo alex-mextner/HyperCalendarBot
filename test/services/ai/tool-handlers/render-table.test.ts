@@ -18,7 +18,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     userRepo: {} as never,
     holidayService: {} as never,
     ...overrides,
-  } as unknown as AgentContext;
+  } as Partial<AgentContext> as AgentContext;
 }
 
 describe('handleRenderTable', () => {

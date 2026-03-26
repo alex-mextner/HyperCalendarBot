@@ -34,9 +34,11 @@ export async function handleDisconnectGoogle(ctx: BotCommandContext): Promise<vo
     return;
   }
 
-  const lang = (ctx.dbUser.language ?? 'en') as Lang;
+  const dbUser = ctx.dbUser;
+  if (!dbUser) return;
+  const lang = (dbUser.language ?? 'en') as Lang;
 
-  if (!ctx.dbUser.google_refresh_token_enc) {
+  if (!dbUser.google_refresh_token_enc) {
     await ctx.send(t(lang).gcal_not_configured);
     return;
   }

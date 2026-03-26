@@ -1,8 +1,8 @@
 import { cmdLogger } from './logger.ts';
 
 interface AutoPinDeps {
-  pinChatMessage: (chatId: number, messageId: number, options: { disable_notification: boolean }) => Promise<unknown>;
-  sendMessage: (chatId: number, text: string) => Promise<unknown>;
+  pinChatMessage: (chatId: number, messageId: number, options: { disable_notification: boolean }) => Promise<true>;
+  sendMessage: (chatId: number, text: string) => Promise<void>;
   isGroupChat: boolean;
   groupChatRepo?: {
     findByChatId(chatId: number): { pin_hint_shown: number } | null;

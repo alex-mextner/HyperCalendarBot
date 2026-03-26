@@ -1,13 +1,13 @@
 // src/bot/pipeline/feedback-router-layer.ts
 
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
-import type { User } from '../../database/types.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { PipelineResult } from './types.ts';
 
 export function createFeedbackRouterLayer(feedbackRepo: FeedbackRepository) {
   return async (ctx: BotCommandContext): Promise<PipelineResult> => {
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
     const thread = feedbackRepo.getOpenThreadForUser(user.telegram_id);
 
     if (!thread) return { handled: false };

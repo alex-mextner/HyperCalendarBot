@@ -54,9 +54,11 @@ export async function handleInvitations(
   eventRepo: EventRepo,
   userRepo?: UserRepo,
 ): Promise<void> {
-  const userId = ctx.dbUser.telegram_id;
-  const lang = ctx.dbUser.language as 'en' | 'ru';
-  const timezone = ctx.dbUser.timezone;
+  const user = ctx.dbUser;
+  if (!user) return;
+  const userId = user.telegram_id;
+  const lang = user.language as 'en' | 'ru';
+  const timezone = user.timezone;
   const messages = t(lang);
 
   const received = invRepo.getByInvitee(userId);

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'bun:test';
 import { handleProposeCalendarChange } from '../../../../src/services/ai/tool-handlers/proposals.ts';
 
-function makeCtx(overrides: Record<string, unknown> = {}) {
+function makeCtx(overrides: { [key: string]: unknown } = {}) {
   return {
     user: { telegram_id: 1, username: 'alice', first_name: 'Alice', language: 'ru', timezone: 'UTC' },
     chatId: -100123,

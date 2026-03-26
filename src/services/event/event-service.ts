@@ -2,6 +2,7 @@
 
 import { DEFAULTS } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
+import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
@@ -21,6 +22,7 @@ export interface EventServiceDeps {
   reminderRepo: ReminderRepository;
   materializer?: ReminderMaterializer;
   participantRepo?: ParticipantRepository;
+  groupMemberRepo?: GroupMemberRepository;
   onParticipantsNotify?: (userIds: number[], text: string) => void;
   domainEvents?: DomainEventBus;
 }
@@ -30,6 +32,7 @@ export class EventService {
   private reminderRepo: ReminderRepository;
   private materializer?: ReminderMaterializer;
   private participantRepo?: ParticipantRepository;
+  private groupMemberRepo?: GroupMemberRepository;
   private onParticipantsNotify?: (userIds: number[], text: string) => void;
   private domainEvents?: DomainEventBus;
 
@@ -38,6 +41,7 @@ export class EventService {
     this.reminderRepo = deps.reminderRepo;
     this.materializer = deps.materializer;
     this.participantRepo = deps.participantRepo;
+    this.groupMemberRepo = deps.groupMemberRepo;
     this.onParticipantsNotify = deps.onParticipantsNotify;
     this.domainEvents = deps.domainEvents;
   }
@@ -64,6 +68,10 @@ export class EventService {
         },
         event.user_id,
       );
+      // For recurring events, also materialize reminders for upcoming occurrences
+      if (event.recurrence_rule) {
+        this.materializeRecurringOccurrences(event, overrides);
+      }
     }
     if (this.domainEvents) {
       if (event.owner_type === 'group' && event.group_id) {
@@ -94,6 +102,10 @@ export class EventService {
         },
         updated.user_id,
       );
+      // For recurring events, also rematerialize upcoming occurrences
+      if (updated.recurrence_rule) {
+        this.materializeRecurringOccurrences(updated, updated.reminder_overrides ?? null);
+      }
     }
     if (this.domainEvents && updated && existing) {
       this.domainEvents.emit('myCalendar.updatedEvent', {
@@ -174,7 +186,20 @@ export class EventService {
     const recurring: EventOccurrence[] = [];
     for (const template of templates) {
       const exceptions = this.eventRepo.getExceptions(template.id);
-      const expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+      let expanded = expandRecurrence(template, exceptions, startUtc, endUtc);
+
+      // Clip group event occurrences to membership window
+      if (template.owner_type === 'group' && template.group_id && this.groupMemberRepo) {
+        const membership = this.groupMemberRepo.getMembership(template.group_id, userId);
+        if (membership) {
+          expanded = expanded.filter(
+            (occ) =>
+              occ.occurrence_start >= membership.joined_at &&
+              (!membership.left_at || occ.occurrence_start < membership.left_at),
+          );
+        }
+      }
+
       recurring.push(...expanded);
     }
 
@@ -350,6 +375,9 @@ export class EventService {
         },
         updated.user_id,
       );
+      if (updated.recurrence_rule) {
+        this.materializeRecurringOccurrences(updated, updated.reminder_overrides ?? null);
+      }
     }
     return updated;
   }
@@ -411,5 +439,32 @@ export class EventService {
       original_start_at: originalStartAt,
       is_cancelled: true,
     });
+  }
+
+  private materializeRecurringOccurrences(event: CalendarEvent, reminderOverrides: string | null): void {
+    if (!this.materializer || !event.recurrence_rule) return;
+
+    const HORIZON_DAYS = 7;
+    const now = new Date();
+    const rangeStart = now.toISOString();
+    const rangeEnd = new Date(now.getTime() + HORIZON_DAYS * 24 * 60 * 60_000).toISOString();
+
+    const exceptions = this.eventRepo.getExceptions(event.id);
+    const occurrences = expandRecurrence(event, exceptions, rangeStart, rangeEnd);
+
+    for (const occ of occurrences) {
+      if (occ.is_exception && occ.event.is_cancelled) continue;
+      // Skip the base occurrence — already materialized by the caller
+      if (occ.occurrence_start === event.start_at) continue;
+
+      this.materializer.materializeForOccurrence(
+        event.id,
+        occ.occurrence_start,
+        event.user_id,
+        reminderOverrides,
+        event.all_day,
+        event.timezone,
+      );
+    }
   }
 }
