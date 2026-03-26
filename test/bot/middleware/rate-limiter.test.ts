@@ -2,6 +2,19 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { RateLimiter } from '../../../src/bot/middleware/rate-limiter.ts';
 
+/** Shape of the private UserBucket inside RateLimiter */
+interface UserBucket {
+  timestamps: number[];
+  silencedUntil: number;
+}
+
+/** Access RateLimiter's private `buckets` field for test assertions.
+ *  TypeScript `private` is compile-time only; at runtime the property exists normally. */
+function getBuckets(limiter: RateLimiter): Map<number, UserBucket> {
+  // Widen to index-signature type to bypass TS private check
+  return (limiter as unknown as { [key: string]: unknown }).buckets as Map<number, UserBucket>;
+}
+
 describe('RateLimiter', () => {
   let limiter: RateLimiter;
 
@@ -32,17 +45,15 @@ describe('RateLimiter', () => {
     limiter.check(999);
 
     // Access internals to age the bucket
-    const buckets = (limiter as unknown as { buckets: Map<number, { timestamps: number[]; silencedUntil: number }> })
-      .buckets;
+    const buckets = getBuckets(limiter);
     const bucket = buckets.get(999)!;
     // Set timestamps to 6 minutes ago (staleMs is 5 min)
     bucket.timestamps = [Date.now() - 6 * 60 * 1000];
     bucket.silencedUntil = 0;
 
     // Fire 100 calls from another user to trigger cleanup
-    const freshLimiter = limiter;
     for (let i = 0; i < 100; i++) {
-      freshLimiter.check(1); // Uses user 1 — different from 999
+      limiter.check(1); // Uses user 1 — different from 999
     }
 
     // After cleanup, user 999's stale bucket should be gone
@@ -55,8 +66,7 @@ describe('RateLimiter', () => {
     // Make a recent bucket
     limiter.check(777);
 
-    const buckets = (limiter as unknown as { buckets: Map<number, { timestamps: number[]; silencedUntil: number }> })
-      .buckets;
+    const buckets = getBuckets(limiter);
 
     // Fire 100 calls from another user to trigger cleanup
     for (let i = 0; i < 100; i++) {
@@ -70,8 +80,7 @@ describe('RateLimiter', () => {
   test('cleanup considers silencedUntil as activity', () => {
     limiter.check(888);
 
-    const buckets = (limiter as unknown as { buckets: Map<number, { timestamps: number[]; silencedUntil: number }> })
-      .buckets;
+    const buckets = getBuckets(limiter);
     const bucket = buckets.get(888)!;
     // Old timestamps but silencedUntil is in the future
     bucket.timestamps = [Date.now() - 6 * 60 * 1000];

@@ -169,6 +169,23 @@ BullMQ on Redis, three queues:
 
 Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding`. Scene state is persisted in SQLite (not in-memory) so restarts don't break active flows.
 
+**Scene context typing** uses `Composer.derive()` + `scene.extend(composer)` to propagate
+`dbUser`, `lang`, `userTimezone` into step handler context without casts. Key details:
+
+- `Plugin.derive()` widens return type to `Record<string, unknown>` (Hooks.Derive constraint).
+  `Composer.derive()` uses `DeriveHandler<T, D>` with proper generic inference — use Composer.
+- **`extend()` MUST come AFTER `params()` and `state()`**. `params()` uses `Modify<Derives>`
+  which replaces `Derives.global`; `state()` uses `Derives &` (intersection, preserves).
+  If `extend()` is before `params()`, the derived props disappear from the type.
+  ```ts
+  // Correct order:
+  new Scene('name').params<P>().state<S>().extend(userComposer).step(...)
+  // Wrong — params() replaces global, losing extend:
+  new Scene('name').extend(userComposer).params<P>().step(...)
+  ```
+- Scene shared types (`AddEventState`, `OnboardingState`, `TimezoneState`, `SceneKvStorage`)
+  live in `src/bot/scenes/types.ts`.
+
 ### Database
 
 `bun:sqlite` WAL mode. All access goes through repositories in `src/database/repositories/`. Schema defined as sequential migrations in `src/database/migrations.ts`. Key tables: `users`, `events`, `reminders`, `invitations`, `intents`, `chat_history`, `calendar_secretaries`, `calendar_proposals`, `contacts`, `event_participants`.
@@ -224,8 +241,58 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `any`/`as any`/`Function`** — proper typing only. Avoid `Record<string, unknown>` as a lazy escape.
-  `as unknown as ConcreteType` is acceptable only at framework boundaries (e.g. GramIO context casts).
+- **No `any`/`as any`/`Function`** — proper typing only.
+- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
+  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `Record<string, unknown>`** — this utility type alias is entirely banned:
+  - Known shape at compile time → specific interface or Zod-inferred type
+  - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
+  - Truly dynamic runtime accumulator → explicit index signature `{ [key: string]: unknown }`
+  - Opaque external data → `unknown`
+- **No `as SomeType` casts** — fix the types, don't paper over them. If a library produces a poor type,
+  fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
+  The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
+  where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
+- **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
+  There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
+  It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
+- **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test
+  files (`test/`), partial mocks that implement a subset of an interface are allowed to use
+  `as unknown as RealType` under these conditions:
+  1. The cast is inside a **centralized factory function** (`makeCtx`, `makeDeps`, `mockWs`),
+     never inline at the test call site
+  2. The factory parameter is typed as `Partial<RealInterface>`, not `Record<string, unknown>`
+  3. `as never` remains banned everywhere — use `as unknown as X` in test factories
+  4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
+     (bun:test types `calls` as `unknown[][]` — no way around it)
+- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
+  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
+  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
+  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
+  of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
+  No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
+- **`ToolResult.data` is typed** — never return `unknown` from tool handlers. Use `ToolResultData`
+  union type from `src/services/ai/types.ts`. Add new variants when adding tools that return
+  structured data.
+- **Tool output schemas must be concrete** — `parseToolOutput` in intent-executor validates JSON
+  against known shapes (event lists, free slots, settings maps, etc.). When adding a new response
+  format, add its schema to `ToolOutputSchema`.
+- **Never parse structured data from text output** — tool handlers that create or modify entities
+  (events, contacts, proposals) MUST return the entity ID in `ToolResult.data`, not only embed
+  it in the `output` string. Consumers (action log, intent executor, event mention tracker) read
+  `result.data.id` — never regex-parse `output`. If you need an ID downstream, make the handler
+  return it in `data`.
+- **Type co-location**: interfaces and type aliases must live in the same file as the code that owns
+  them. Do not create a single global `types.ts` dumping ground. One exception: types shared across
+  multiple layers without a clear owner may live in a small domain-level `types.ts`
+  (e.g. `src/services/ai/types.ts`). Avoid circular deps — a type that is imported by many files
+  should not itself import from those files.
+- **No `export type { Foo }` re-exports from repository/service files** — consumers must import
+  types directly from their canonical source (`database/types.ts`, domain `types.ts`). A re-export
+  creates two valid import paths for the same type, making the canonical location ambiguous and
+  imports harder to audit.
 - **Why we write precise types**: good types make TypeScript useful as a bug-finder, not just a syntax
   checker. Specifically: grouping related optional fields into a single optional sub-object forces callers
   to check `if (ctx.sharing)` once — TypeScript then guarantees all fields inside are non-null, eliminating
@@ -233,8 +300,26 @@ Optional features that depend on an env var must deactivate gracefully when the 
   instead of at runtime.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
+- **No silent fallbacks for missing required values** — `ctx.message?.id ?? 0` and similar patterns
+  hide bugs: downstream code receives a meaningless sentinel and fails in an unrelated place with a
+  confusing error. When a value is required, guard and return early:
+  ```ts
+  // Bad — messageId: 0 causes editMessageText to fail later with a cryptic API error
+  const messageId = ctx.message?.id ?? 0;
+  // Good — fail immediately, log the context
+  if (!ctx.message) {
+    logger.warn({ chatId: ctx.chatId }, 'callback has no message');
+    return;
+  }
+  const messageId = ctx.message.id;
+  ```
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
+- **No silent `catch` blocks** — every `catch` must either log the error or have a comment explaining
+  WHY swallowing is safe. Acceptable patterns: JSON.parse with fallback (invalid input expected),
+  WebSocket keepalive (non-JSON packets expected), cleanup on shutdown (resource already gone).
+  Unacceptable: `catch { return; }` or `catch { return null; }` without logging or explanation.
+  When in doubt, `logger.warn({ err }, 'context')` — a warn is cheap, a hidden bug is not.
 - **Security checks fail-closed**: when a guard function is injected/optional, the absent-function default is `false` (deny), never `true` (allow).
 - **Multi-step DB operations are atomic**: SELECT followed by UPDATE on the same rows must be wrapped in `db.transaction(...)`. Without it, concurrent writes can cause notifications to fire for rows that changed state between the two queries.
 - **Never throw away implementations**: never rewrite working code without explicit permission.
@@ -258,6 +343,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
   4. Run the test — confirm it passes
   5. Refactor while keeping tests green
 - **Tests must exercise production code**: never reimplement logic in tests.
+  Import helpers/utilities from `src/` — don't copy-paste them into test files.
 - **Never delete a failing test**. Investigate and fix the root cause.
 - **NEVER ignore test/system output** — logs and messages often contain CRITICAL information.
   Read test output, don't just check pass/fail. Warnings in logs point to real bugs.
@@ -267,6 +353,38 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
+- **Centralize test casts in factory functions** — never write `as unknown as X` inline at the
+  test call site. Casts are allowed only inside `makeCtx`/`makeDeps`/`mockWs`-style factories
+  (see "Test-only cast exceptions" in Coding Guidelines). The factory parameter must be
+  `Partial<RealInterface>`, not `Record<string, unknown>`.
+  ```ts
+  // Bad — inline cast at call site, no type checking
+  const ctx = { send: mock(() => {}) } as unknown as AgentContext;
+  // Good — cast centralized in factory, overrides are typed
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+    return { ...baseCtx, ...overrides } as unknown as AgentContext;
+  }
+  const ctx = makeCtx({ send: mock(() => {}) }); // no cast here
+  ```
+- **No `Record<string, unknown>` in mock factories** — use `Partial<ConcreteInterface>` for
+  override parameters. `Record<string, unknown>` defeats the purpose of typed tests: you can pass
+  any garbage and the test will happily compile. When the production interface changes, tests using
+  `Record<string, unknown>` won't break — which means they stop protecting you.
+  ```ts
+  // Bad — any shape accepted, no compile-time checks
+  function makeCtx(overrides: Record<string, unknown> = {}) { ... }
+  // Good — only valid properties accepted
+  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext { ... }
+  ```
+- **Tests must assert behavior, not mock wiring** — "mock was called with X" is a weak assertion.
+  Prefer asserting the observable outcome (return value, DB state, sent message content).
+  Mock-call assertions are acceptable only when the side effect IS the behavior (e.g., verifying
+  a Telegram message was sent with specific text).
+- **No stub tests** — `test.todo()`, `expect(true).toBe(true)`, empty test bodies, tests that
+  assert only that a function doesn't throw. Every test must assert something meaningful about
+  the code's behavior. If you can't write a meaningful assertion, the test shouldn't exist.
+- **Deleting a stub/broken test requires replacement** — when removing a low-quality test, write
+  at least 2-3 proper tests covering the same production code. Never reduce total coverage.
 - **Commit atomically and often**: after each logical unit of work (feature, bugfix, refactor), commit immediately.
   Don't accumulate 30+ changed files across multiple features.
 - **NEVER use `git add -A`** without checking `git status` first.
@@ -354,6 +472,12 @@ When renaming variables, constants, config keys, or any other interface:
 - Find similar working code in the same codebase. Compare working vs broken.
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
+- **Library type limitations — clone and investigate**: when a dependency produces poor types
+  (`unknown`, missing generics, no `.derive()` on a class), don't guess or cast. Clone the library
+  source into `~/xp/` in a background agent and read the actual code. Often the library already has
+  the capability you need (e.g. `.extend()` instead of `.derive()`) or the fix is a small PR.
+  This "recon by fire" approach — start investigating as if you'll patch, but pivot if the source
+  reveals a built-in solution — avoids both blind casting and unnecessary library forks.
 
 ## Session Wrap-Up
 
@@ -389,6 +513,12 @@ All user-facing bot messages must follow these rules:
   Add new strings to the `aiTools` namespace in `MSG.en` and `MSG.ru` in `constants.ts`.
   Inline ternaries (`lang === 'ru' ? ... : ...`) are only acceptable for strings that use `ruPlural`
   at the call site and cannot be expressed as simple catalog functions.
+- **Frame features as user benefit, not technical capability.** Never describe bot actions as surveillance
+  or tracking ("отслеживать кто вышел"). Instead explain what the user gains:
+  "автоматически обновлять групповой календарь когда участники приходят и уходят" (benefit)
+  vs "отслеживать кто присоединился или вышел" (creepy).
+  Same in English: "keep the group calendar up to date" (benefit)
+  vs "track who joins or leaves" (surveillance).
 
 ## Telegram Bot API Limits
 
@@ -518,6 +648,13 @@ Use these MCP servers proactively whenever they can help:
   `find_referencing_symbols` over reading entire files.
 - **context7** — up-to-date library documentation. Use when working with external libraries
   (GramIO, Anthropic SDK, Bun APIs, etc.) to get current docs instead of guessing from memory.
+
+## Memory
+
+- **Actively save to memory**: every significant user instruction, decision, finding, or project state change.
+- **Regularly update CLAUDE.md**: when recurring patterns, new rules, or important conventions emerge from work sessions — add them here so they persist across all conversations.
+- When the user gives an instruction that applies beyond the current session, save it to memory AND consider whether it belongs in CLAUDE.md.
+- Check memory at the start of each session for context on ongoing work.
 
 ## Documentation
 

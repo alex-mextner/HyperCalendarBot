@@ -15,7 +15,7 @@ function makeGroupMemberRepo(
 function makeUserRepo(registeredIds: number[]): UserRepository {
   return {
     findByTelegramId: mock((id: number) => (registeredIds.includes(id) ? { telegram_id: id } : null)),
-  } as unknown as UserRepository;
+  } as Partial<UserRepository> as UserRepository;
 }
 
 function mockSpawnSuccess(stdout: string) {
@@ -35,7 +35,7 @@ function mockSpawnSuccess(stdout: string) {
     exited: Promise.resolve(0),
     pid: 1,
     kill: mock(() => {}),
-  } as unknown as ReturnType<typeof Bun.spawn>;
+  } as Partial<ReturnType<typeof Bun.spawn>> as ReturnType<typeof Bun.spawn>;
 }
 
 function mockSpawnFailure(exitCode: number) {
@@ -53,7 +53,7 @@ function mockSpawnFailure(exitCode: number) {
     exited: Promise.resolve(exitCode),
     pid: 1,
     kill: mock(() => {}),
-  } as unknown as ReturnType<typeof Bun.spawn>;
+  } as Partial<ReturnType<typeof Bun.spawn>> as ReturnType<typeof Bun.spawn>;
 }
 
 describe('GroupMemberService', () => {

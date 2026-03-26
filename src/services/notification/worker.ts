@@ -1,15 +1,16 @@
+import { z } from 'zod';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 
 export function parseTelegramError(err: unknown): { code: number; retryAfter?: number } | null {
   if (typeof err !== 'object' || err === null) return null;
-  const e = err as Record<string, unknown>;
-  if (typeof e.code !== 'number') return null;
+  const obj = err as { code?: unknown; payload?: unknown };
+  if (typeof obj.code !== 'number') return null;
+  const payload = obj.payload;
   const retryAfter =
-    typeof e.payload === 'object' && e.payload !== null
-      ? ((e.payload as Record<string, unknown>).retry_after as number | undefined)
-      : undefined;
-  return { code: e.code, retryAfter };
+    typeof payload === 'object' && payload !== null ? (payload as { retry_after?: number }).retry_after : undefined;
+  return { code: obj.code, retryAfter };
 }
 
 export interface NotificationJobData {
@@ -33,23 +34,37 @@ export async function processNotification(
   if (!log || log.status === 'sent') return;
 
   try {
-    const text = log.payload ?? 'Notification';
+    const rawPayload = log.payload ?? 'Notification';
+    let text = rawPayload;
+    let eventId: number | undefined;
 
-    if (sendWithKeyboard && (data.type === 'event_reminder' || data.type === 'event_reminder_batch')) {
-      const parsed = JSON.parse(text) as { event_id?: number };
-      const eventId = parsed.event_id;
-      if (eventId !== undefined) {
-        const keyboard: ReminderKeyboard = {
-          inline_keyboard: [[{ text: '⏰ +5 мин', callback_data: `snooze:5:${eventId}` }]],
-        };
-        await sendWithKeyboard(data.telegramId, text, keyboard);
-        logRepo.markSent(data.logId);
-        notifyLogger.info({ logId: data.logId, type: data.type }, 'Notification sent');
-        return;
+    if (data.type === 'event_reminder' || data.type === 'event_reminder_batch') {
+      try {
+        const parsed = jsonCodec(
+          z.object({
+            text: z.string().optional(),
+            event_id: z.number().optional(),
+            event_ids: z.array(z.number()).optional(),
+          }),
+        ).parse(rawPayload);
+        if (parsed.text) {
+          text = parsed.text;
+        }
+        eventId = parsed.event_id ?? parsed.event_ids?.[0];
+      } catch {
+        // Non-JSON or legacy payload — send as-is
       }
     }
 
-    await sendMessage(data.telegramId, text);
+    if (sendWithKeyboard && eventId !== undefined) {
+      const keyboard: ReminderKeyboard = {
+        inline_keyboard: [[{ text: '⏰ +5 мин', callback_data: `snooze:5:${eventId}` }]],
+      };
+      await sendWithKeyboard(data.telegramId, text, keyboard);
+    } else {
+      await sendMessage(data.telegramId, text);
+    }
+
     logRepo.markSent(data.logId);
     notifyLogger.info({ logId: data.logId, type: data.type }, 'Notification sent');
   } catch (err) {

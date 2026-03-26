@@ -154,6 +154,29 @@ For periodic tasks, always use BullMQ repeating jobs — never `setInterval` or 
 
 Three queues: `image-render`, `call-reminders`, `bot-tasks`.
 
+### Patching Library Types
+
+When a dependency ships incorrect TypeScript types, the response is **not** `as unknown as ConcreteType` or `as any`. The correct workflow:
+
+1. **Identify the exact type deficiency** — wrong property names, missing union members, incorrect parameter types.
+2. **Fix at the source** — create a minimal reproduction, then open an issue + PR upstream.
+3. **Patch locally until the fix merges**:
+   - Use `patch-package` to commit the diff alongside your source:
+     ```bash
+     bunx patch-package <package-name>   # generates patches/<package-name>+<version>.patch
+     bun add --dev patch-package
+     # add "postinstall": "patch-package" to scripts in package.json
+     ```
+   - Or pin a fork/branch in `package.json` + `overrides`:
+     ```json
+     "overrides": {
+       "<package-name>": "github:your-org/fork#fix-branch"
+     }
+     ```
+4. **Do not leave `as unknown as` in the codebase** — it bypasses all type checks and hides the real problem.
+
+Once the upstream PR is merged, remove the patch/override and bump the version.
+
 ## Testing
 
 ```bash

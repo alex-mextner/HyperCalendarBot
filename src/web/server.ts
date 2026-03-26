@@ -30,6 +30,10 @@ export interface WebServerDeps {
   onWebhook?: (channelId: string, resourceId: string) => Promise<void>;
   // Telegram bot webhook — set when PUBLIC_DOMAIN is configured
   telegramWebhookHandler?: (req: Request) => Response | Promise<Response>;
+  // Optional deep health check — throws if a critical dependency is unreachable
+  healthCheck?: () => Promise<void>;
+  // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
+  botStarted?: boolean;
 }
 
 const OAUTH_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10 } as const;
@@ -94,6 +98,17 @@ async function handleRequest(
   }
 
   if (req.method === 'GET' && url.pathname === '/health') {
+    if (deps.botStarted === false) {
+      return new Response('bot not started', { status: 503 });
+    }
+    if (deps.healthCheck) {
+      try {
+        await deps.healthCheck();
+      } catch (err) {
+        webLogger.warn({ err }, 'Health check failed');
+        return new Response('error', { status: 503 });
+      }
+    }
     return new Response('ok');
   }
 

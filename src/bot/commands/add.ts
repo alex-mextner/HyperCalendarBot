@@ -7,7 +7,7 @@ import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseSimpleDate } from '../../utils/date.ts';
-import { type CtxWithChat, getGroupId } from '../group-context.ts';
+import { getGroupId } from '../group-context.ts';
 import { eventActionsKeyboard } from '../keyboards.ts';
 import type { BotCommandContext } from '../types.ts';
 
@@ -17,11 +17,12 @@ export async function handleAdd(
   addEventScene: AnyScene,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
   const args = ctx.args as string | undefined;
 
-  const groupId = getGroupId(ctx as unknown as CtxWithChat);
+  const groupId = getGroupId(ctx);
 
   if (groupId !== null) {
     const timezone = groupRepo?.getTimezone(groupId) ?? null;

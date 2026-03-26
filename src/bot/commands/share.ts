@@ -26,7 +26,8 @@ export async function handleShare(
   deepLinkService: DeepLinkService,
   groupRepo?: GroupChatRepository,
 ): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = user.language as 'en' | 'ru';
   const messages = t(lang);
   const userId = user.telegram_id;

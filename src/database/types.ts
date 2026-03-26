@@ -1,5 +1,7 @@
 // src/database/types.ts
 
+import type { Workflow } from '../services/intent/workflow-schema.ts';
+
 // ── Sync enums ──
 
 export type SyncStatus = 'local_only' | 'synced' | 'pending_push' | 'pending_pull' | 'conflict' | 'push_failed';
@@ -344,7 +346,7 @@ export interface CreateIntentData {
   phrases: string[];
   trigger_words?: string[];
   pattern?: string;
-  workflow: Record<string, unknown>;
+  workflow: Workflow;
   format: string;
   source_message?: string;
 }
@@ -527,4 +529,180 @@ export interface WorkflowSessionStore {
   set(chatId: number, userId: number, session: WorkflowSession): void;
   delete(chatId: number, userId: number): void;
   deleteByUser(userId: number): void;
+}
+
+// --- Repository row types ---
+
+export interface GroupMember {
+  chat_id: number;
+  user_id: number;
+  last_seen_at: string;
+  joined_at: string;
+  left_at: string | null;
+}
+
+export interface Contact {
+  id: number;
+  user_id: number;
+  name: string;
+  username: string | null;
+  telegram_id: number | null;
+  preferred_name: string | null;
+  created_at: string;
+}
+
+export interface EventReminderRow {
+  id: number;
+  event_id: number;
+  user_id: number;
+  remind_at_utc: string;
+  interval_minutes: number;
+  interval_label: string;
+  sent: number;
+  created_at: string;
+}
+
+export interface InsertEventReminderData {
+  event_id: number;
+  user_id: number;
+  remind_at_utc: string;
+  interval_minutes: number;
+  interval_label: string;
+}
+
+export interface DueReminderRow extends EventReminderRow {
+  event_title: string;
+  event_start_at: string;
+  event_end_at: string | null;
+  event_location: string | null;
+}
+
+// --- Holiday ---
+
+export interface HolidayCountryRow {
+  code: string;
+  name: string;
+  region: string;
+}
+
+export interface HolidayRow {
+  id: number;
+  country_code: string;
+  date: string;
+  name: string;
+  type: string;
+  year: number;
+}
+
+export interface HolidaySubscriptionRow {
+  id: number;
+  user_id: number;
+  country_code: string;
+  is_primary: number;
+  notify: number;
+  created_at: string;
+}
+
+export interface HolidayOverrideRow {
+  id: number;
+  user_id: number;
+  date: string;
+  is_day_off: number;
+  created_at: string;
+}
+
+export interface InsertHolidayData {
+  country_code: string;
+  date: string;
+  name: string;
+  type: string;
+  year: number;
+}
+
+// --- Notification Log ---
+
+export interface NotificationLogRow {
+  id: number;
+  user_id: number;
+  type: string;
+  reference_key: string;
+  status: string;
+  channel: string;
+  payload: string | null;
+  error: string | null;
+  attempts: number;
+  created_at: string;
+  sent_at: string | null;
+}
+
+export interface InsertNotificationLogData {
+  user_id: number;
+  type: string;
+  reference_key: string;
+  channel: string;
+  payload: string;
+}
+
+// --- Notification Preferences ---
+
+export interface NotificationPreferencesRow {
+  user_id: number;
+  morning_agenda_enabled: number;
+  morning_agenda_time: string;
+  morning_agenda_format: string;
+  default_reminder_intervals: string;
+  evening_review_enabled: number;
+  evening_review_time: string;
+  evening_review_format: string;
+  quiet_hours_enabled: number;
+  quiet_hours_start: string | null;
+  quiet_hours_end: string | null;
+  updated_at: string;
+}
+
+export type NotificationPreferencesUpdate = Partial<Omit<NotificationPreferencesRow, 'user_id' | 'updated_at'>>;
+
+// --- User Memory ---
+
+export interface UserMemoryEntry {
+  id: number;
+  user_id: number;
+  content: string;
+  created_at: string;
+}
+
+// --- User Action Log ---
+
+export type ActionType = 'command' | 'ai_tool' | 'callback' | 'intent_match' | 'scene';
+
+export interface UserActionLog {
+  id: number;
+  user_id: number;
+  chat_id: number;
+  action_type: ActionType;
+  action_name: string;
+  message_id: number | null;
+  chat_history_id: number | null;
+  input_summary: string | null;
+  result_summary: string | null;
+  metadata: string | null; // JSON
+  target_event_id: number | null;
+  target_user_id: number | null;
+  success: number; // 0 | 1
+  created_at: string;
+}
+
+export interface CreateUserActionLogData {
+  user_id: number;
+  chat_id: number;
+  action_type: ActionType;
+  action_name: string;
+  message_id?: number;
+  chat_history_id?: number;
+  input_summary?: string;
+  result_summary?: string;
+  metadata?: string;
+  target_event_id?: number;
+  target_user_id?: number;
+  success?: boolean;
 }

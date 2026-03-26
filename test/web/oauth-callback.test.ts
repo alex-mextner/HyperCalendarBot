@@ -2,7 +2,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleOAuthCallback } from '../../src/web/oauth-callback.ts';
 
-function createMockDeps(overrides: Record<string, unknown> = {}) {
+function createMockDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     config: { ENCRYPTION_KEY: 'a'.repeat(64) },
     oauthService: {

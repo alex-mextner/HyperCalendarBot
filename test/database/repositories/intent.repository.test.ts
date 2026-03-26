@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
 
 function createTestDb(): Database {
   const db = new Database(':memory:');
@@ -10,6 +11,11 @@ function createTestDb(): Database {
   runMigrations(db, migrations);
   return db;
 }
+
+/** Minimal valid Workflow for tests that don't care about workflow content. */
+const stubWorkflow: Workflow = {
+  tools: [{ name: 'get_events', input: { start_date: '{{today}}', end_date: '{{today}}' } }],
+};
 
 describe('IntentRepository', () => {
   let db: Database;
@@ -25,7 +31,7 @@ describe('IntentRepository', () => {
       canonical_name: 'schedule_meeting',
       phrases: ['schedule meeting', 'set up call'],
       trigger_words: ['schedule', 'meeting'],
-      workflow: { type: 'meeting_workflow' },
+      workflow: stubWorkflow,
       format: 'text',
     });
     expect(typeof id).toBe('number');
@@ -42,7 +48,7 @@ describe('IntentRepository', () => {
       canonical_name: 'test_intent',
       phrases: ['phrase1', 'phrase2'],
       trigger_words: ['word1', 'word2'],
-      workflow: { action: 'test' },
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -53,7 +59,9 @@ describe('IntentRepository', () => {
   });
 
   test('create serializes workflow as JSON', () => {
-    const workflow = { type: 'test', steps: [{ action: 'step1' }] };
+    const workflow: Workflow = {
+      steps: [{ call: 'get_events', input: { start_date: '{{today}}', end_date: '{{today}}' } }],
+    };
     const id = repo.create({
       canonical_name: 'workflow_test',
       phrases: ['test'],
@@ -73,14 +81,14 @@ describe('IntentRepository', () => {
     repo.create({
       canonical_name: 'pending_intent',
       phrases: ['test'],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
     const approvedId = repo.create({
       canonical_name: 'approved_intent',
       phrases: ['test'],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -96,7 +104,7 @@ describe('IntentRepository', () => {
     const id = repo.create({
       canonical_name: 'status_test',
       phrases: ['test'],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -113,7 +121,7 @@ describe('IntentRepository', () => {
     const id = repo.create({
       canonical_name: 'phrase_test',
       phrases: ['phrase1', 'phrase2'],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -128,7 +136,7 @@ describe('IntentRepository', () => {
     const id = repo.create({
       canonical_name: 'empty_phrases',
       phrases: [],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -143,7 +151,7 @@ describe('IntentRepository', () => {
     repo.create({
       canonical_name: 'unique_name',
       phrases: ['test'],
-      workflow: {},
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -161,7 +169,7 @@ describe('IntentRepository', () => {
       phrases: ['old1'],
       trigger_words: ['old_word'],
       pattern: 'old_pattern',
-      workflow: { type: 'old' },
+      workflow: stubWorkflow,
       format: 'text',
     });
 
@@ -180,7 +188,9 @@ describe('IntentRepository', () => {
   });
 
   test('update preserves unchanged fields', () => {
-    const originalWorkflow = { type: 'original', data: 'preserved' };
+    const originalWorkflow: Workflow = {
+      steps: [{ call: 'get_events', input: { start_date: '{{today}}', end_date: '{{today}}' } }],
+    };
     const id = repo.create({
       canonical_name: 'preserve_test',
       phrases: ['original'],

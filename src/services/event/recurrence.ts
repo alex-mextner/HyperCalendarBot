@@ -1,5 +1,8 @@
 import { rrulestr } from 'rrule';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
+import { logger } from '../../utils/logger.ts';
+
+const recurrenceLogger = logger.child({ module: 'recurrence' });
 
 export function expandRecurrence(
   template: CalendarEvent,
@@ -10,6 +13,13 @@ export function expandRecurrence(
   if (!template.recurrence_rule) return [];
 
   const dtstart = new Date(template.start_at);
+  if (Number.isNaN(dtstart.getTime())) {
+    recurrenceLogger.warn(
+      { eventId: template.id, startAt: template.start_at },
+      'Skipping event with invalid start_at date',
+    );
+    return [];
+  }
   const rruleLine =
     template.recurrence_rule.split('\n').find((line) => line.startsWith('RRULE:')) ?? template.recurrence_rule;
   const rruleString = `DTSTART:${formatRRuleDate(dtstart)}\n${rruleLine}`;

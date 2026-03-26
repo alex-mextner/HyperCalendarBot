@@ -30,9 +30,10 @@ describe('SharingService', () => {
     return { db, service, eventRepo, settingsRepo };
   }
 
-  test('getAgendaForSharing does not return group-owned events', () => {
-    const { service, eventRepo } = setup();
+  test('getAgendaForSharing returns group-owned events created by the user', () => {
+    const { db, service, eventRepo } = setup();
     const GROUP_ID = -100777;
+    db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
     eventRepo.create({
       user_id: USER_ID,
       title: 'Group Standup',
@@ -53,7 +54,28 @@ describe('SharingService', () => {
 
     const titles = result.map((e) => e.displayTitle);
     expect(titles).toContain('Personal Lunch');
-    expect(titles).not.toContain('Group Standup');
+    expect(titles).toContain('Group Standup');
+  });
+
+  test('getAgendaForSharing does not return group-owned events created by another user', () => {
+    const { db, service, eventRepo } = setup();
+    const GROUP_ID = -100777;
+    const OTHER_USER = 200;
+    new UserRepository(db).create({ telegram_id: OTHER_USER });
+    eventRepo.create({
+      user_id: USER_ID,
+      title: 'Group Standup By Other',
+      start_at: '2026-03-15T09:00:00Z',
+      timezone: TZ,
+      owner_type: 'group',
+      group_id: GROUP_ID,
+      created_by: OTHER_USER,
+    });
+
+    const result = service.getAgendaForSharing(USER_ID, new Date('2026-03-15'), TZ);
+
+    const titles = result.map((e) => e.displayTitle);
+    expect(titles).not.toContain('Group Standup By Other');
   });
 
   test('getAgendaForSharing returns empty when no events', () => {

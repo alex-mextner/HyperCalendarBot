@@ -1,5 +1,6 @@
 // src/bot/middleware/scene-command-escape.ts
 
+import type { Next } from 'gramio';
 import type { User } from '../../database/types.ts';
 
 interface SceneData {
@@ -8,14 +9,14 @@ interface SceneData {
 
 interface Storage {
   get(key: string): Promise<unknown>;
-  delete(key: string): Promise<void>;
+  delete(key: string): boolean | undefined | Promise<boolean | undefined>;
 }
 
-interface MessageContext {
+interface EscapeCtx {
   is(type: string): boolean;
   from?: { id: number };
   dbUser?: User;
-  send(text: string, opts?: Record<string, unknown>): Promise<unknown>;
+  send(text: string, opts?: { reply_markup?: { remove_keyboard?: boolean } }): Promise<void>;
   text?: string;
 }
 
@@ -35,8 +36,8 @@ const SCENE_CANCEL_MESSAGES: Record<string, Record<string, string>> = {
  * Must be registered BEFORE the scenes plugin.
  */
 export function createSceneCommandEscape(storage: Storage) {
-  return async (context: unknown, next: () => Promise<void>) => {
-    const ctx = context as MessageContext;
+  return async (context: unknown, next: Next) => {
+    const ctx = context as EscapeCtx;
     if (!ctx.is('message')) return next();
 
     const text = ctx.text;

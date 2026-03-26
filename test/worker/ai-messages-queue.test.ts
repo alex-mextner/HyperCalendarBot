@@ -184,7 +184,7 @@ describe('createAiMessagesQueue', () => {
   test('addDelayed adds job and returns job id', async () => {
     mockQueueAdd.mockClear();
     const { addDelayed } = createAiMessagesQueue({ host: 'localhost', port: 6379 });
-    const id = await addDelayed({ userId: 1, message: 'hello' }, 5000);
+    const id = await addDelayed({ userId: 1, message: 'hello', source: 'scheduled' }, 5000);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
     expect(id).toBe('job-123');
     const [name, , opts] = mockQueueAdd.mock.calls[0] as unknown as [string, unknown, { delay: number }];
@@ -195,7 +195,7 @@ describe('createAiMessagesQueue', () => {
   test('addRepeat adds job with cron pattern', async () => {
     mockQueueAdd.mockClear();
     const { addRepeat } = createAiMessagesQueue({ host: 'localhost', port: 6379 });
-    await addRepeat({ userId: 2, message: 'daily check' }, '0 9 * * *');
+    await addRepeat({ userId: 2, message: 'daily check', source: 'scheduled' }, '0 9 * * *');
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
     const [name, , opts] = mockQueueAdd.mock.calls[0] as unknown as [string, unknown, { repeat: { pattern: string } }];
     expect(name).toBe('ai-schedule');

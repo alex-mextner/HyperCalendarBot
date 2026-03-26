@@ -54,7 +54,7 @@ describe('handleHelp', () => {
 
     await handleHelp(ctx as never);
 
-    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { parse_mode?: string };
     expect(opts.parse_mode).toBe('HTML');
   });
 });

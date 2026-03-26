@@ -23,64 +23,65 @@ function makeCalendar(overrides: Partial<GoogleCalendar> = {}): GoogleCalendar {
   };
 }
 
+interface InlineButton {
+  text: string;
+  callback_data?: string;
+}
+
 describe('buildCalendarPickerKeyboard', () => {
-  test('enabled calendar shows ✅', () => {
+  test('enabled calendar shows checkmark', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ sync_enabled: 1 })], 'en');
     expect(kb).toBeInstanceOf(InlineKeyboard);
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text.startsWith('✅'))).toBe(true);
   });
 
-  test('disabled calendar shows ⬜', () => {
+  test('disabled calendar shows empty box', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ sync_enabled: 0 })], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text.startsWith('⬜'))).toBe(true);
   });
 
-  test('primary calendar shows ★', () => {
+  test('primary calendar shows star', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ is_primary: 1 })], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text.includes('★'))).toBe(true);
   });
 
   test('reader access_role shows read-only suffix', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ access_role: 'reader' })], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text.includes('(read-only)'))).toBe(true);
   });
 
   test('freeBusyReader access_role shows read-only suffix', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ access_role: 'freeBusyReader' })], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text.includes('(read-only)'))).toBe(true);
   });
 
   test('writer access_role has no read-only suffix', () => {
     const kb = buildCalendarPickerKeyboard([makeCalendar({ access_role: 'writer' })], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.every((b) => !b.text.includes('(read-only)'))).toBe(true);
   });
 
   test('each calendar row has callback data with calendar id', () => {
     const cal = makeCalendar({ id: 42 });
     const kb = buildCalendarPickerKeyboard([cal], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
-    expect(buttons.some((b) => (b as unknown as { callback_data: string }).callback_data === `${CB.GCAL}:cal:42`)).toBe(
-      true,
-    );
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
+    expect(buttons.some((b) => b.callback_data === `${CB.GCAL}:cal:42`)).toBe(true);
   });
 
   test('Done button is present with correct callback data', () => {
     const kb = buildCalendarPickerKeyboard([], 'en');
-    const buttons = kb.toJSON().inline_keyboard.flat();
-    expect(
-      buttons.some((b) => (b as unknown as { callback_data: string }).callback_data === `${CB.GCAL}:cal:done`),
-    ).toBe(true);
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
+    expect(buttons.some((b) => b.callback_data === `${CB.GCAL}:cal:done`)).toBe(true);
   });
 
   test('russian lang shows correct Done button text', () => {
     const kb = buildCalendarPickerKeyboard([], 'ru');
-    const buttons = kb.toJSON().inline_keyboard.flat();
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text === 'Готово ✓')).toBe(true);
   });
 });

@@ -182,7 +182,7 @@ test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', 
   // Allow the fire-and-forget promise to settle
   await flushPromises();
   expect(sendMessageWithKeyboard).toHaveBeenCalledTimes(1);
-  const [recipientId, , keyboard] = sendMessageWithKeyboard.mock.calls[0] as unknown as [number, string, unknown];
+  const [recipientId, , keyboard] = sendMessageWithKeyboard.mock.calls[0]! as unknown as [number, string, unknown];
   expect(recipientId).toBe(999);
   expect(keyboard).toBeDefined();
   expect(setDmMessageId).toHaveBeenCalledWith(7, 42);

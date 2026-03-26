@@ -5,10 +5,11 @@ import type { ChatHistoryMessage } from '../types.ts';
 export class ChatHistoryRepository {
   constructor(private db: Database) {}
 
-  save(userId: number, role: 'user' | 'assistant' | 'tool', content: string, chatId?: number): void {
-    this.db
+  save(userId: number, role: 'user' | 'assistant' | 'tool', content: string, chatId?: number): number {
+    const result = this.db
       .prepare('INSERT INTO chat_history (user_id, role, content, chat_id) VALUES (?, ?, ?, ?)')
       .run(userId, role, content, chatId ?? null);
+    return Number(result.lastInsertRowid);
   }
 
   getRecentByChat(chatId: number, limit = 10): ChatHistoryMessage[] {

@@ -9,7 +9,7 @@ import { GoogleSyncRepository } from '../../../src/database/repositories/google-
 import { runMigrations } from '../../../src/database/schema.ts';
 import { SyncService } from '../../../src/services/google/sync-service.ts';
 
-function createMockApi(overrides: Record<string, unknown> = {}) {
+function createMockApi(overrides: { [key: string]: unknown } = {}) {
   return {
     listEvents: mock(() => Promise.resolve({ events: [], nextSyncToken: 'token-new', nextPageToken: undefined })),
     insertEvent: mock(() => Promise.resolve({ id: 'g-new-1', etag: '"etag-new"' })),

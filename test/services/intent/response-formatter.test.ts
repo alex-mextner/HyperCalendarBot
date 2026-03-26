@@ -47,6 +47,25 @@ describe('formatResponse', () => {
     expect(result).toContain('Dentist');
   });
 
+  test('text format extracts output field from JSON object', () => {
+    const json = JSON.stringify({ output: 'Event created: Call at 10:00', event_id: 5 });
+    expect(formatResponse('text', json, 'UTC', 'en')).toBe('Event created: Call at 10:00');
+  });
+
+  test('text format extracts message field from JSON object', () => {
+    const json = JSON.stringify({ message: 'Событие удалено', id: 3 });
+    expect(formatResponse('text', json, 'UTC', 'ru')).toBe('Событие удалено');
+  });
+
+  test('text format returns non-JSON as-is', () => {
+    expect(formatResponse('text', 'Готово!', 'UTC', 'ru')).toBe('Готово!');
+  });
+
+  test('text format returns JSON array as-is (no extractable field)', () => {
+    const json = JSON.stringify([{ id: 1 }, { id: 2 }]);
+    expect(formatResponse('text', json, 'UTC', 'en')).toBe(json);
+  });
+
   test('unknown format falls back to text', () => {
     expect(formatResponse('nonexistent', 'raw data', 'UTC', 'en')).toBe('raw data');
   });

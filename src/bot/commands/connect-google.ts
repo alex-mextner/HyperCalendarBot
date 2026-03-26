@@ -27,15 +27,17 @@ export async function handleConnectGoogle(ctx: BotCommandContext, deps: ConnectG
     return;
   }
 
-  const lang = (ctx.dbUser.language ?? 'en') as Lang;
-  const userId = ctx.dbUser.telegram_id;
+  const dbUser = ctx.dbUser;
+  if (!dbUser) return;
+  const lang = (dbUser.language ?? 'en') as Lang;
+  const userId = dbUser.telegram_id;
 
   if (!deps.oauthService.isConfigured()) {
     await ctx.send(t(lang).gcal_not_configured);
     return;
   }
 
-  if (ctx.dbUser.google_refresh_token_enc) {
+  if (dbUser.google_refresh_token_enc) {
     await ctx.send(t(lang).gcal_already_connected);
     return;
   }

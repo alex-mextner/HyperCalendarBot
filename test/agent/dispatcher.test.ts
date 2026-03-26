@@ -5,9 +5,9 @@ import { AgentRegistry } from '../../src/agent/registry.ts';
 function makeSetup() {
   const registry = new AgentRegistry();
   const sent: string[] = [];
-  const ws = { data: { userId: 1 }, send: (m: string) => sent.push(m) } as unknown as Parameters<
-    typeof registry.register
-  >[1];
+  const ws = { data: { userId: 1 }, send: (m: string) => sent.push(m) } as Partial<
+    Parameters<typeof registry.register>[1]
+  > as Parameters<typeof registry.register>[1];
   registry.register(1, ws);
   const dispatcher = new AgentDispatcher(registry);
   return { registry, dispatcher, sent };
@@ -62,12 +62,12 @@ test('rejectPendingForUser does not affect other users', async () => {
   const registry = new AgentRegistry();
   const sent2: string[] = [];
   const sent3: string[] = [];
-  const ws2 = { data: { userId: 2 }, send: (m: string) => sent2.push(m) } as unknown as Parameters<
-    typeof registry.register
-  >[1];
-  const ws3 = { data: { userId: 3 }, send: (m: string) => sent3.push(m) } as unknown as Parameters<
-    typeof registry.register
-  >[1];
+  const ws2 = { data: { userId: 2 }, send: (m: string) => sent2.push(m) } as Partial<
+    Parameters<typeof registry.register>[1]
+  > as Parameters<typeof registry.register>[1];
+  const ws3 = { data: { userId: 3 }, send: (m: string) => sent3.push(m) } as Partial<
+    Parameters<typeof registry.register>[1]
+  > as Parameters<typeof registry.register>[1];
   registry.register(2, ws2);
   registry.register(3, ws3);
   const dispatcher = new AgentDispatcher(registry);

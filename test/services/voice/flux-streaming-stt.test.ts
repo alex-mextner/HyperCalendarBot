@@ -13,12 +13,18 @@ function makeWsMock() {
   };
 }
 
+type WsMock = ReturnType<typeof makeWsMock>;
+
+function asWebSocket(ws: WsMock): WebSocket {
+  return ws as Partial<WebSocket> as WebSocket;
+}
+
 test('builds Flux URL with correct params', () => {
   let capturedUrl = '';
   const stt = new FluxStreamingSTT('test-key', {
     createWs: (url) => {
       capturedUrl = url;
-      return makeWsMock() as unknown as WebSocket;
+      return asWebSocket(makeWsMock());
     },
   });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError: () => {} });
@@ -29,7 +35,7 @@ test('builds Flux URL with correct params', () => {
 
 test('emits onStartOfTurn when Flux sends StartOfTurn event', () => {
   const ws = makeWsMock();
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onStartOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn, onEndOfTurn: () => {}, onInterim: () => {}, onError: () => {} });
 
@@ -40,7 +46,7 @@ test('emits onStartOfTurn when Flux sends StartOfTurn event', () => {
 
 test('emits onEndOfTurn with confidence and final transcript', () => {
   const ws = makeWsMock();
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onEndOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn, onInterim: () => {}, onError: () => {} });
 
@@ -58,7 +64,7 @@ test('emits onEndOfTurn with confidence and final transcript', () => {
 
 test('emits onEndOfTurn with empty string when no transcript', () => {
   const ws = makeWsMock();
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onEndOfTurn = mock(() => {});
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn, onInterim: () => {}, onError: () => {} });
 
@@ -71,7 +77,7 @@ test('emits onEndOfTurn with empty string when no transcript', () => {
 
 test('emits onInterim for regular transcript', () => {
   const ws = makeWsMock();
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onInterim = mock(() => {});
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim, onError: () => {} });
 
@@ -89,33 +95,35 @@ test('emits onInterim for regular transcript', () => {
 test('onerror fires onError with message and readyState', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError });
 
-  ws.onerror?.({ type: 'error', message: 'connection refused' } as unknown as Event);
+  ws.onerror?.({ type: 'error', message: 'connection refused' } as Partial<Event> as Event);
 
   expect(onError).toHaveBeenCalledTimes(1);
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('connection refused');
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('readyState=');
+  const err = onError.mock.calls[0]![0] as Error;
+  expect(err.message).toContain('connection refused');
+  expect(err.message).toContain('readyState=');
 });
 
 test('onclose fires onError for non-1000 code', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError });
 
   ws.onclose?.({ code: 1008, reason: 'Unauthorized' } as CloseEvent);
 
   expect(onError).toHaveBeenCalledTimes(1);
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('code=1008');
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('Unauthorized');
+  const err = onError.mock.calls[0]![0] as Error;
+  expect(err.message).toContain('code=1008');
+  expect(err.message).toContain('Unauthorized');
 });
 
 test('onclose with code=1000 does not fire onError', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError });
 
   ws.onclose?.({ code: 1000, reason: '' } as CloseEvent);
@@ -126,7 +134,7 @@ test('onclose with code=1000 does not fire onError', () => {
 test('onerror and onclose together fire onError only once', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError });
 
   ws.onerror?.({ type: 'error' } as Event);
@@ -138,7 +146,7 @@ test('onerror and onclose together fire onError only once', () => {
 test('does not send audio when closed', () => {
   const ws = makeWsMock();
   ws.readyState = 3;
-  const stt = new FluxStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new FluxStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onStartOfTurn: () => {}, onEndOfTurn: () => {}, onInterim: () => {}, onError: () => {} });
   stt.sendAudio(Buffer.from([1, 2]));
   expect(ws.send).not.toHaveBeenCalled();

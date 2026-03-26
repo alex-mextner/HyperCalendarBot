@@ -31,6 +31,8 @@ import {
   timezoneMethodKeyboard,
 } from '../../src/bot/keyboards';
 
+/** InlineKeyboard stores buttons in a private `keyboard` property.
+ *  TypeScript private check bypass needed for test inspection. */
 function kbData(kb: InlineKeyboard): Array<Array<{ text: string; callback_data?: string }>> {
   return (kb as unknown as { keyboard: Array<Array<{ text: string; callback_data?: string }>> }).keyboard;
 }

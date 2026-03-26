@@ -4,7 +4,12 @@ import type { ImageRenderJob, ImageRenderResult } from '../../worker/image-rende
 
 const RENDER_TIMEOUT_MS = 15_000;
 
-export class RenderService {
+/** Structural interface for image rendering — use this in AgentContext and tests instead of RenderService class. */
+export interface ImageRenderer {
+  renderDirect(job: ImageRenderJob): Promise<Buffer>;
+}
+
+export class RenderService implements ImageRenderer {
   constructor(
     private queue: Queue<ImageRenderJob>,
     private queueEvents: QueueEvents,

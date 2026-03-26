@@ -10,11 +10,19 @@ import {
   startOfWeek,
   subDays,
 } from 'date-fns';
+import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
+import type { I18nMap } from './workflow-schema.ts';
 
-/** Event summary available as template variables in intent workflows. */
-export interface EventSummary {
+/**
+ * Event summary available as template variables in intent workflows.
+ *
+ * Defined as a type alias (not interface) so that it satisfies TypeScript's
+ * index signature assignability — required when storing EventSummary values
+ * in { [k: string]: ToolOutputValue } maps.
+ */
+export type EventSummary = {
   id: number;
   title: string;
   /** YYYY-MM-DD in user's timezone */
@@ -31,7 +39,7 @@ export interface EventSummary {
   location?: string;
   /** RFC 5545 recurrence rule — present only for recurring events */
   recurrence_rule?: string;
-}
+};
 
 export interface UserContext {
   timezone: string;
@@ -56,7 +64,7 @@ export interface UserContext {
  * Access a nested path like "results[0].id" or "results.length" in an object.
  * Returns undefined if any segment of the path doesn't exist.
  */
-function accessPath(obj: Record<string, unknown>, path: string): unknown {
+function accessPath(obj: { [key: string]: unknown }, path: string): unknown {
   // Parse path into segments: "results[0].id" → ["results", 0, "id"]
   const segments: (string | number)[] = [];
   const raw = path.replace(/\[(\d+)\]/g, '.$1');
@@ -73,14 +81,13 @@ function accessPath(obj: Record<string, unknown>, path: string): unknown {
       if (!Array.isArray(current)) return undefined;
       current = (current as unknown[])[seg];
     } else {
-      current = (current as Record<string, unknown>)[seg];
+      current = (current as { [key: string]: unknown })[seg];
     }
   }
   return current;
 }
 
 /** i18n dictionary: language code → key → template string */
-export type I18nMap = Record<string, Record<string, unknown>>;
 
 /**
  * Resolve a single variable name to its value.
@@ -90,7 +97,7 @@ function resolveVar(
   name: string,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: Record<string, unknown>,
+  stepResults?: StepResults,
   i18n?: I18nMap,
 ): unknown {
   const now = new TZDate(new Date(), userCtx.timezone);
@@ -140,7 +147,7 @@ function resolveVar(
       // t.* namespace — lazy i18n lookup
       if (name.startsWith('t.') && i18n) {
         const key = name.slice(2);
-        const langDict = i18n[userCtx.language] ?? i18n.en ?? {};
+        const langDict: { [key: string]: string } = i18n[userCtx.language] ?? i18n.en ?? {};
         const raw = langDict[key];
         if (raw === undefined) return undefined;
         // Lazy: resolve any {{}} inside the i18n string with current context
@@ -172,7 +179,7 @@ export function resolveVariables(
   template: unknown,
   captures: Record<string, string>,
   userCtx: UserContext,
-  stepResults?: Record<string, unknown>,
+  stepResults?: StepResults,
   i18n?: I18nMap,
 ): unknown {
   if (typeof template === 'string') {
@@ -217,8 +224,8 @@ export function resolveVariables(
   }
 
   if (template !== null && typeof template === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(template as Record<string, unknown>)) {
+    const result: { [key: string]: unknown } = {};
+    for (const [key, value] of Object.entries(template as { [key: string]: unknown })) {
       result[key] = resolveVariables(value, captures, userCtx, stepResults, i18n);
     }
     return result;

@@ -321,11 +321,16 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
           success: true,
           output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
           agentHint: `⚠️ This event overlaps with: ${conflictList}. Warn the user about the overlap.`,
+          data: eventToSummary(event, ctx.user.timezone),
         };
       }
     }
 
-    return { success: true, output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')) };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
+      data: eventToSummary(event, ctx.user.timezone),
+    };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
   }
@@ -398,7 +403,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
     }
   }
 
-  return { success: true, output, agentHint: conflictHint };
+  return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
@@ -421,7 +426,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
-    return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
+      data: eventToSummary(event, ctx.user.timezone),
+    };
   }
 
   const event = ctx.eventService.getEvent(input.event_id, userId);
@@ -439,7 +448,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   }
 
   ctx.eventService.deleteEvent(input.event_id, userId);
-  return { success: true, output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id) };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
+    data: eventToSummary(event, ctx.user.timezone),
+  };
 }
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {

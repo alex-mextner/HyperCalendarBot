@@ -1,10 +1,10 @@
 import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants';
-import type { User } from '../../database/types';
 import type { BotCallbackContext } from '../types';
 
 export async function handleFeatureTourCallback(ctx: BotCallbackContext, payload: string): Promise<void> {
-  const user = ctx.dbUser as User;
+  const user = ctx.dbUser;
+  if (!user) return;
   const lang = (user.language ?? 'en') as 'en' | 'ru';
   const pages = t(lang).feature_tour;
   const page = Number(payload) || 0;

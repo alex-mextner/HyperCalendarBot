@@ -1,17 +1,32 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createSceneCommandEscape } from '../../../src/bot/middleware/scene-command-escape.ts';
+import type { User } from '../../../src/database/types.ts';
 
-function createMockStorage(data: Record<string, unknown> = {}) {
-  const store = new Map(Object.entries(data));
+interface SceneData {
+  name: string;
+}
+
+function createMockStorage(data: { [key: string]: SceneData } = {}) {
+  const store = new Map<string, SceneData>(Object.entries(data));
   return {
     get: mock(async (key: string) => store.get(key) ?? null),
-    delete: mock(async (key: string) => {
+    delete: mock(async (key: string): Promise<boolean | undefined> => {
       store.delete(key);
+      return undefined;
     }),
   };
 }
 
-function createMockContext(overrides: Record<string, unknown> = {}) {
+/** Shape matching the EscapeCtx interface inside scene-command-escape.ts */
+interface FakeEscapeCtx {
+  is: (type: string) => boolean;
+  from: { id: number };
+  dbUser: Partial<User>;
+  send: (text: string, opts?: { reply_markup?: { remove_keyboard?: boolean } }) => Promise<void>;
+  text: string | undefined;
+}
+
+function createMockContext(overrides: Partial<FakeEscapeCtx> = {}): FakeEscapeCtx {
   return {
     is: mock((type: string) => type === 'message'),
     from: { id: 123 },

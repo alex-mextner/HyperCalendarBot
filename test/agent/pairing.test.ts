@@ -64,9 +64,9 @@ test('completePairing returns false for unknown code', async () => {
 test('registerPendingConnection sends pair_error after TTL expires', () => {
   jest.useFakeTimers();
   const sent: string[] = [];
-  const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as unknown as Parameters<
-    typeof registerPendingConnection
-  >[1];
+  const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as Partial<
+    Parameters<typeof registerPendingConnection>[1]
+  > as Parameters<typeof registerPendingConnection>[1];
   registerPendingConnection('expire-code-test', ws);
   expect(sent).toHaveLength(0);
   jest.advanceTimersByTime(PAIRING_TTL_MS);
@@ -78,9 +78,9 @@ test('registerPendingConnection sends pair_error after TTL expires', () => {
 test('completePairing success path: sends jwt and registers', async () => {
   const registry = new AgentRegistry();
   const sent: string[] = [];
-  const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as unknown as Parameters<
-    typeof registerPendingConnection
-  >[1];
+  const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as Partial<
+    Parameters<typeof registerPendingConnection>[1]
+  > as Parameters<typeof registerPendingConnection>[1];
   registerPendingConnection('abc-1234', ws);
   const ok = await completePairing('abc-1234', 42, registry);
   expect(ok).toBe(true);

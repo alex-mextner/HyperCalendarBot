@@ -99,4 +99,13 @@ describe('expandRecurrence', () => {
     const occurrences = expandRecurrence(template, [], '2026-03-10T00:00:00Z', '2026-03-10T23:59:59Z');
     expect(occurrences[0]!.occurrence_end).toContain('2026-03-10T09:30');
   });
+
+  test('returns empty array for invalid start_at date instead of crashing', () => {
+    const template = makeTemplate({
+      start_at: '2027-00-00T00:00:00Z',
+      recurrence_rule: 'FREQ=YEARLY',
+    });
+    const occurrences = expandRecurrence(template, [], '2026-03-01T00:00:00Z', '2027-12-31T23:59:59Z');
+    expect(occurrences).toEqual([]);
+  });
 });

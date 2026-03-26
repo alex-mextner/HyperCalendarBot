@@ -87,8 +87,8 @@ describe('evaluate', () => {
   });
 
   test('user.language in when condition — bilingual workflow branching', () => {
-    expect(evaluate('user.language == "ru"', { user: { language: 'ru' } })).toBe(true);
-    expect(evaluate('user.language != "ru"', { user: { language: 'en' } })).toBe(true);
-    expect(evaluate('user.language == "ru"', { user: { language: 'en' } })).toBe(false);
+    expect(evaluate('user.language == "ru"', { user: { id: 1, language: 'ru', timezone: 'UTC' } })).toBe(true);
+    expect(evaluate('user.language != "ru"', { user: { id: 1, language: 'en', timezone: 'UTC' } })).toBe(true);
+    expect(evaluate('user.language == "ru"', { user: { id: 1, language: 'en', timezone: 'UTC' } })).toBe(false);
   });
 });

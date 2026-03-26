@@ -3,8 +3,11 @@ import { runPipeline } from '../../../src/bot/pipeline/pipeline.ts';
 import type { FeedbackThreadContext, PipelineLayer } from '../../../src/bot/pipeline/types.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 
+/** BotCommandContext extends MessageContext; pipeline only uses send. */
 function makeCtx(): BotCommandContext {
-  return { send: mock(() => Promise.resolve()) } as unknown as BotCommandContext;
+  return {
+    send: mock(() => Promise.resolve()),
+  } as unknown as BotCommandContext;
 }
 
 describe('runPipeline', () => {

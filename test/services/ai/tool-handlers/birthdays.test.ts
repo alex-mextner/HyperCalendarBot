@@ -136,6 +136,27 @@ describe('handleCreateBirthdayEvent', () => {
     expect(result.output).toContain('99999');
   });
 
+  test('rejects invalid date with day=0 or month=0', () => {
+    const result = handleCreateBirthdayEvent(ctx, {
+      celebrant_id: CELEBRANT_ID,
+      date: { day: 0, month: 0 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid date');
+
+    const events = db.prepare("SELECT * FROM events WHERE event_type = 'birthday'").all();
+    expect(events.length).toBe(0);
+  });
+
+  test('rejects invalid date with month=13', () => {
+    const result = handleCreateBirthdayEvent(ctx, {
+      celebrant_id: CELEBRANT_ID,
+      date: { day: 15, month: 13 },
+    });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Invalid date');
+  });
+
   test('english locale produces english output', () => {
     ctx.user = { ...ctx.user, language: 'en' };
     const result = handleCreateBirthdayEvent(ctx, {

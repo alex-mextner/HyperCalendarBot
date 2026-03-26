@@ -46,13 +46,13 @@ describe('createInlineHandler location auto-update', () => {
       from: { id: 100 },
       query: '',
       location: { latitude: 44.8, longitude: 20.5 }, // Belgrade
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     });
 
     expect(updateMock).toHaveBeenCalled();
-    const call = updateMock.mock.calls[0] as unknown as [number, { timezone: string }];
+    const call = updateMock.mock.calls[0] as unknown[];
     expect(call[0]).toBe(100);
-    expect(call[1].timezone).toContain('Europe/Belgrade');
+    expect((call[1] as { timezone: string }).timezone).toContain('Europe/Belgrade');
   });
 
   test('does not update timezone when no location', async () => {
@@ -72,7 +72,7 @@ describe('createInlineHandler location auto-update', () => {
     await handler({
       from: { id: 100 },
       query: '',
-      answerInlineQuery: mock(() => Promise.resolve()),
+      answerInlineQuery: mock(() => Promise.resolve(true as const)),
     });
 
     expect(updateMock).not.toHaveBeenCalled();

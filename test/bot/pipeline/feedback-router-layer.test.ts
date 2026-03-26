@@ -1,28 +1,40 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createFeedbackRouterLayer } from '../../../src/bot/pipeline/feedback-router-layer.ts';
 import type { BotCommandContext } from '../../../src/bot/types.ts';
-import type { FeedbackRepository } from '../../../src/database/repositories/feedback.repository.ts';
+import type { FeedbackMessage, FeedbackThread, User } from '../../../src/database/types.ts';
 
+/** BotCommandContext extends MessageContext; the layer only uses dbUser. */
 function makeCtx(userId = 1): BotCommandContext {
   return {
-    dbUser: { telegram_id: userId, language: 'ru', timezone: 'UTC' },
+    dbUser: { telegram_id: userId, language: 'ru', timezone: 'UTC' } as User,
     send: mock(() => Promise.resolve()),
   } as unknown as BotCommandContext;
 }
 
+/** Mock only the methods createFeedbackRouterLayer actually uses. */
+interface MockFeedbackRepo {
+  getOpenThreadForUser: ReturnType<typeof mock<(userId: number) => Partial<FeedbackThread> | null>>;
+  getMessages: ReturnType<typeof mock<(threadId: number) => Partial<FeedbackMessage>[]>>;
+}
+
 function makeFeedbackRepo(
-  thread: Record<string, unknown> | null,
-  messages: Record<string, unknown>[] = [],
-): FeedbackRepository {
+  thread: Partial<FeedbackThread> | null,
+  messages: Partial<FeedbackMessage>[] = [],
+): MockFeedbackRepo {
   return {
     getOpenThreadForUser: mock(() => thread),
     getMessages: mock(() => messages),
-  } as unknown as FeedbackRepository;
+  };
+}
+
+/** Single boundary cast: FeedbackRepository is a class with private `db` member */
+function makeLayer(repo: MockFeedbackRepo) {
+  return createFeedbackRouterLayer(repo as unknown as Parameters<typeof createFeedbackRouterLayer>[0]);
 }
 
 describe('createFeedbackRouterLayer', () => {
   test('returns handled:false without feedbackContext when no open thread', async () => {
-    const layer = createFeedbackRouterLayer(makeFeedbackRepo(null));
+    const layer = makeLayer(makeFeedbackRepo(null));
     const result = await layer(makeCtx());
 
     expect(result.handled).toBe(false);
@@ -30,12 +42,12 @@ describe('createFeedbackRouterLayer', () => {
   });
 
   test('returns handled:false with feedbackContext when open thread exists', async () => {
-    const thread = { id: 10, user_id: 1, status: 'open', subject: 'Bug report' };
-    const messages = [
+    const thread: Partial<FeedbackThread> = { id: 10, user_id: 1, status: 'open', subject: 'Bug report' };
+    const messages: Partial<FeedbackMessage>[] = [
       { id: 1, thread_id: 10, sender: 'user', text: 'app crashes' },
       { id: 2, thread_id: 10, sender: 'admin', text: 'checking' },
     ];
-    const layer = createFeedbackRouterLayer(makeFeedbackRepo(thread, messages));
+    const layer = makeLayer(makeFeedbackRepo(thread, messages));
     const result = await layer(makeCtx());
 
     expect(result.handled).toBe(false);
@@ -52,25 +64,25 @@ describe('createFeedbackRouterLayer', () => {
   });
 
   test('trims messages to last 10 when there are many', async () => {
-    const thread = { id: 5, user_id: 2, status: 'open', subject: 'Long thread' };
-    const messages = Array.from({ length: 15 }, (_, i) => ({
+    const thread: Partial<FeedbackThread> = { id: 5, user_id: 2, status: 'open', subject: 'Long thread' };
+    const messages: Partial<FeedbackMessage>[] = Array.from({ length: 15 }, (_, i) => ({
       id: i + 1,
       thread_id: 5,
-      sender: i % 2 === 0 ? 'user' : 'admin',
+      sender: (i % 2 === 0 ? 'user' : 'admin') as 'user' | 'admin',
       text: `message ${i + 1}`,
     }));
 
-    const layer = createFeedbackRouterLayer(makeFeedbackRepo(thread, messages));
+    const layer = makeLayer(makeFeedbackRepo(thread, messages));
     const result = await layer(makeCtx(2));
 
     expect(result.handled).toBe(false);
-    const ctx = result as { handled: false; feedbackContext: { messages: unknown[] } };
+    const ctx = result as { handled: false; feedbackContext: { messages: { sender: string; text: string }[] } };
     expect(ctx.feedbackContext.messages).toHaveLength(10);
   });
 
   test('queried with correct userId from ctx.dbUser', async () => {
     const repo = makeFeedbackRepo(null);
-    const layer = createFeedbackRouterLayer(repo);
+    const layer = makeLayer(repo);
     await layer(makeCtx(99));
 
     expect(repo.getOpenThreadForUser).toHaveBeenCalledWith(99);

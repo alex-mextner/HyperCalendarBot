@@ -44,7 +44,14 @@ Output a single JSON object with these fields:
     - DATE WITH CAPTURED DAY: to build a date from a captured day number use {{dates.today|date("yyyy-MM-")}}{{$1|pad(2)}}T12:00:00{{user.utc_offset}} for current month, or {{dates.next_month_start|date("yyyy-MM-")}}{{$1|pad(2)}}T12:00:00{{user.utc_offset}} when isPastDay($1) (day already passed this month → schedule next month).
   - CRITICAL: Any other {{variable}} will fail at runtime. If the workflow needs a value not in the list above, return {"skip": true} — this intent cannot be automated without AI context.
   - Replace concrete dates/values from the actual call with template variables
-- format: string — response format type: "events_list", "free_slots", "text", "search_results", "holidays", "settings"
+- format: string — response display format. Almost all tools return human-readable text, so use "text" by default. Only use other formats when the tool output is a JSON array/object that needs special rendering:
+  - "text" — default, tool output is already human-readable (most tools use t() catalog strings)
+  - "events_list" — JSON array of {title, start_at, end_at?} objects
+  - "free_slots" — JSON array of {start, end} objects
+  - "search_results" — JSON array of {title, start_at} objects (numbered list)
+  - "holidays" — JSON array of {name, date} objects
+  - "settings" — JSON object of key-value pairs
+  When in doubt, use "text" — the formatter has a safety net for JSON objects.
 
 Rules:
 - Generalize the tool call parameters — replace today's actual date with {{dates.today}}, specific search queries with {{$1}}, etc.

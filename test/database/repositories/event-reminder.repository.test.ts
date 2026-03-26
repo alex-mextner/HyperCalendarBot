@@ -21,6 +21,7 @@ describe('EventReminderRepository', () => {
       user_id INTEGER NOT NULL,
       title TEXT NOT NULL,
       start_at TEXT NOT NULL,
+      end_at TEXT,
       location TEXT,
       timezone TEXT NOT NULL DEFAULT 'UTC',
       all_day INTEGER NOT NULL DEFAULT 0,

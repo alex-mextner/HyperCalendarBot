@@ -112,7 +112,7 @@ describe('handleStart with deep links', () => {
     expect(msg).toContain('Party');
     expect(msg).toContain('@alex');
     // Check keyboard was passed
-    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as Record<string, unknown>;
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
     expect(opts.reply_markup).toBeDefined();
   });
 

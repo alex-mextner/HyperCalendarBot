@@ -1,7 +1,9 @@
-import type {
-  NotificationPreferencesRepository,
-  NotificationPreferencesRow,
-} from '../../database/repositories/notification-preferences.repository.ts';
+import { z } from 'zod';
+import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import type { NotificationPreferencesRow } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+const NumberArrayCodec = jsonCodec(z.array(z.number()));
 
 export class NotificationPreferencesService {
   constructor(private repo: NotificationPreferencesRepository) {}
@@ -13,7 +15,7 @@ export class NotificationPreferencesService {
 
   resolveDefaultIntervals(userId: number): number[] {
     const prefs = this.getOrCreate(userId);
-    return JSON.parse(prefs.default_reminder_intervals) as number[];
+    return NumberArrayCodec.parse(prefs.default_reminder_intervals);
   }
 
   updateMorningTime(userId: number, time: string): void {

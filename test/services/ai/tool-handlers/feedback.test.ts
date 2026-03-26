@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type { TelegramMessage } from 'gramio';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -58,7 +59,7 @@ describe('handleSendFeedback', () => {
       userRepo,
       reminderRepo,
       feedback: { feedbackContext: undefined, feedbackRepo, botAdminId: ADMIN_ID },
-      sendMessageToChat: mock(() => Promise.resolve()),
+      sendMessageToChat: mock(() => Promise.resolve({} as TelegramMessage)),
       conversationLogger: null as never,
     };
   });
@@ -126,7 +127,7 @@ describe('handleSendFeedback', () => {
   });
 
   test('calls sendMessageToChat with admin notification', async () => {
-    const sendMessageToChat = mock(() => Promise.resolve());
+    const sendMessageToChat = mock(() => Promise.resolve({} as TelegramMessage));
     ctx.sendMessageToChat = sendMessageToChat;
 
     handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
@@ -135,10 +136,10 @@ describe('handleSendFeedback', () => {
     await flushPromises();
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
-    const [chatId, text, options] = sendMessageToChat.mock.calls[0] as unknown as [
+    const [chatId, text, options] = sendMessageToChat.mock.calls[0]! as unknown as [
       number,
       string,
-      Record<string, unknown>,
+      { [key: string]: unknown },
     ];
     expect(chatId).toBe(ADMIN_ID);
     expect(text).toContain('feature');

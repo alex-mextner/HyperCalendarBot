@@ -14,12 +14,18 @@ function makeWsMock() {
   return ws;
 }
 
+type WsMock = ReturnType<typeof makeWsMock>;
+
+function asWebSocket(ws: WsMock): WebSocket {
+  return ws as Partial<WebSocket> as WebSocket;
+}
+
 test('builds correct Deepgram URL with Nova-3 params', () => {
   let capturedUrl = '';
   const stt = new NovaStreamingSTT('test-api-key', {
     createWs: (url: string) => {
       capturedUrl = url;
-      return makeWsMock() as unknown as WebSocket;
+      return asWebSocket(makeWsMock());
     },
   });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError: () => {} });
@@ -32,7 +38,7 @@ test('builds correct Deepgram URL with Nova-3 params', () => {
 
 test('sends PCM buffer to WebSocket', () => {
   const ws = makeWsMock();
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError: () => {} });
 
   const pcm = Buffer.from([1, 2, 3, 4]);
@@ -43,7 +49,7 @@ test('sends PCM buffer to WebSocket', () => {
 
 test('emits interim transcript from Deepgram message', () => {
   const ws = makeWsMock();
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onInterim = mock(() => {});
   stt.connect({ onInterim, onFinal: () => {}, onError: () => {} });
 
@@ -59,7 +65,7 @@ test('emits interim transcript from Deepgram message', () => {
 
 test('emits final transcript from Deepgram message', () => {
   const ws = makeWsMock();
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   const onFinal = mock(() => {});
   stt.connect({ onInterim: () => {}, onFinal, onError: () => {} });
 
@@ -76,7 +82,7 @@ test('emits final transcript from Deepgram message', () => {
 test('does not send audio when WS is not open', () => {
   const ws = makeWsMock();
   ws.readyState = 3; // CLOSED
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError: () => {} });
 
   stt.sendAudio(Buffer.from([1, 2, 3]));
@@ -87,33 +93,35 @@ test('does not send audio when WS is not open', () => {
 test('onerror fires onError with message and readyState', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError });
 
-  ws.onerror?.({ type: 'error', message: 'connection refused' } as unknown as Event);
+  ws.onerror?.({ type: 'error', message: 'connection refused' } as Partial<Event> as Event);
 
   expect(onError).toHaveBeenCalledTimes(1);
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('connection refused');
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('readyState=');
+  const err = onError.mock.calls[0]![0] as Error;
+  expect(err.message).toContain('connection refused');
+  expect(err.message).toContain('readyState=');
 });
 
 test('onclose fires onError for non-1000 code', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError });
 
   ws.onclose?.({ code: 1008, reason: 'Unauthorized' } as CloseEvent);
 
   expect(onError).toHaveBeenCalledTimes(1);
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('code=1008');
-  expect((onError.mock.calls[0]![0] as Error).message).toContain('Unauthorized');
+  const err = onError.mock.calls[0]![0] as Error;
+  expect(err.message).toContain('code=1008');
+  expect(err.message).toContain('Unauthorized');
 });
 
 test('onclose with code=1000 does not fire onError', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError });
 
   ws.onclose?.({ code: 1000, reason: '' } as CloseEvent);
@@ -124,7 +132,7 @@ test('onclose with code=1000 does not fire onError', () => {
 test('onerror and onclose together fire onError only once', () => {
   const ws = makeWsMock();
   const onError = mock((_e: Error) => {});
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError });
 
   ws.onerror?.({ type: 'error' } as Event);
@@ -135,7 +143,7 @@ test('onerror and onclose together fire onError only once', () => {
 
 test('close sends CloseStream and nulls ws', () => {
   const ws = makeWsMock();
-  const stt = new NovaStreamingSTT('key', { createWs: () => ws as unknown as WebSocket });
+  const stt = new NovaStreamingSTT('key', { createWs: () => asWebSocket(ws) });
   stt.connect({ onInterim: () => {}, onFinal: () => {}, onError: () => {} });
   stt.close();
 

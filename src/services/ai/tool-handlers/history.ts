@@ -1,7 +1,9 @@
 // src/services/ai/tool-handlers/history.ts
 
 import { isValid, parseISO } from 'date-fns';
+import { z } from 'zod';
 import { t } from '../../../config/constants.ts';
+import { jsonCodec } from '../../../utils/json-codec.ts';
 import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
@@ -12,20 +14,20 @@ interface GetHistoryInput {
   after?: string;
 }
 
+const ContentBlocksCodec = jsonCodec(z.array(z.object({ type: z.string(), text: z.string().optional() })));
+const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
+
 function formatContent(content: string): string {
-  try {
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      return parsed
-        .filter((b: { type: string; text?: string }) => b.type === 'text' && b.text)
-        .map((b: { text: string }) => b.text)
-        .join(' ');
-    }
-    if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
-      return formatActivityEvent(parsed as ActivityEvent);
-    }
-  } catch {
-    // plain text
+  const blocksResult = ContentBlocksCodec.safeParse(content);
+  if (blocksResult.success) {
+    return blocksResult.data
+      .filter((b) => b.type === 'text' && b.text)
+      .map((b) => b.text!)
+      .join(' ');
+  }
+  const activityResult = ActivityEventCodec.safeParse(content);
+  if (activityResult.success) {
+    return formatActivityEvent(activityResult.data as ActivityEvent);
   }
   return content;
 }

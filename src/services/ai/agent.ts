@@ -1,5 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { createAnthropicClient } from './anthropic-client.ts';
@@ -47,7 +49,7 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
 
 export interface AgentToolCallRecord {
   name: string;
-  input: Record<string, unknown>;
+  input: { [key: string]: unknown };
 }
 
 export interface AgentToolResultRecord {
@@ -97,19 +99,23 @@ export class CalendarBotAgent {
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
 
+    const ContentBlocksCodec = jsonCodec(
+      z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()),
+    );
+    const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
+
     for (const msg of relevantHistory) {
       let content: string | Anthropic.ContentBlockParam[];
-      try {
-        const parsed = JSON.parse(msg.content);
-        if (Array.isArray(parsed)) {
-          content = parsed as Anthropic.ContentBlockParam[];
-        } else if (parsed !== null && typeof parsed === 'object' && typeof parsed.kind === 'string') {
-          content = withTimestamp(formatActivityEvent(parsed as ActivityEvent), msg.created_at);
+      const blocksResult = ContentBlocksCodec.safeParse(msg.content);
+      if (blocksResult.success) {
+        content = blocksResult.data as Anthropic.ContentBlockParam[];
+      } else {
+        const activityResult = ActivityEventCodec.safeParse(msg.content);
+        if (activityResult.success) {
+          content = withTimestamp(formatActivityEvent(activityResult.data as ActivityEvent), msg.created_at);
         } else {
           content = withTimestamp(msg.content, msg.created_at);
         }
-      } catch {
-        content = withTimestamp(msg.content, msg.created_at);
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
 
@@ -302,12 +308,12 @@ export class CalendarBotAgent {
               { tool: block.name, input: block.input, userId: ctx.user.telegram_id, chatId: ctx.chatId },
               'Tool call',
             );
-            dbg?.logToolCall(block.name, block.input as Record<string, unknown>);
+            dbg?.logToolCall(block.name, block.input as { [key: string]: unknown });
 
-            writer.setToolLabel(block.name, block.input as Record<string, unknown>);
+            writer.setToolLabel(block.name, block.input as { [key: string]: unknown });
             await writer.flush(true);
 
-            const result = await executeTool(ctx, block.name, block.input as Record<string, unknown>);
+            const result = await executeTool(ctx, block.name, block.input);
 
             writer.markToolResult(result.success);
             aiLogger.info(
@@ -316,7 +322,7 @@ export class CalendarBotAgent {
             );
             dbg?.logToolResult(block.name, result.success, result.output, result.error);
 
-            allToolCalls.push({ name: block.name, input: block.input as Record<string, unknown> });
+            allToolCalls.push({ name: block.name, input: block.input as { [key: string]: unknown } });
             allToolResults.push({ success: result.success, output: result.output });
 
             toolResults.push({
@@ -410,7 +416,8 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && (finalText.trim() === '[SKIP]' || finalText.includes('[SKIP]'))) {
+    const trimmed = finalText.trim();
+    if (ctx.isGroup && (trimmed === '[SKIP]' || finalText.includes('[SKIP]') || trimmed === '...' || trimmed === '…')) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

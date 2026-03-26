@@ -705,7 +705,7 @@ describe('event tool handlers', () => {
     });
 
     function makeMemberService(memberIds: number[]): GroupMemberService {
-      return { getRegisteredMembers: mock(async () => memberIds) } as unknown as GroupMemberService;
+      return { getRegisteredMembers: mock(async () => memberIds) } as Partial<GroupMemberService> as GroupMemberService;
     }
 
     test('handleCreateEvent notifies all group members including creator', async () => {
@@ -871,7 +871,8 @@ describe('event tool handlers', () => {
   describe('personal scope isolation from group events', () => {
     const GROUP_ID = -100888;
 
-    test('handleGetEvents (personal) does not return group-owned events', () => {
+    test('handleGetEvents (personal) returns group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Drinks',
@@ -895,10 +896,33 @@ describe('event tool handlers', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Personal Dinner');
-      expect(result.output).not.toContain('Group Drinks');
+      expect(result.output).toContain('Group Drinks');
     });
 
-    test('handleDeleteEvent (personal) refuses to delete group-owned events', () => {
+    test('handleGetEvents (personal) does not return group-owned events created by another user', () => {
+      const OTHER_USER = 999;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Drinks By Other',
+        start_at: '2026-03-18T18:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const result = handleGetEvents(ctx, {
+        start_date: '2026-03-18T00:00:00Z',
+        end_date: '2026-03-18T23:59:59Z',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.output).not.toContain('Group Drinks By Other');
+    });
+
+    test('handleDeleteEvent (personal) succeeds for group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -911,16 +935,30 @@ describe('event tool handlers', () => {
 
       const result = handleDeleteEvent(ctx, { event_id: event.id });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not found');
-
-      // Verify the group event still exists
-      const groupCtx = { ...ctx, isGroup: true, groupChatId: GROUP_ID };
-      const groupResult = handleDeleteEvent(groupCtx as AgentContext, { event_id: event.id, scope: 'group' });
-      expect(groupResult.success).toBe(true);
+      expect(result.success).toBe(true);
     });
 
-    test('handleSearchEvents (personal) does not return group-owned events', () => {
+    test('handleDeleteEvent (personal) refuses to delete group-owned events created by another user', () => {
+      const OTHER_USER = 998;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting By Other',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const result = handleDeleteEvent(ctx, { event_id: event.id });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not found');
+    });
+
+    test('handleSearchEvents (personal) returns group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Planning',
@@ -941,10 +979,30 @@ describe('event tool handlers', () => {
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Personal Planning');
-      expect(result.output).not.toContain('Group Planning');
+      expect(result.output).toContain('Group Planning');
     });
 
-    test('handleUpdateEvent (personal) refuses to update group-owned events', () => {
+    test('handleSearchEvents (personal) does not return group-owned events created by another user', () => {
+      const OTHER_USER = 997;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Planning By Other',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
+      });
+
+      const result = handleSearchEvents(ctx, { query: 'Planning' });
+
+      expect(result.success).toBe(true);
+      expect(result.output).not.toContain('Group Planning By Other');
+    });
+
+    test('handleUpdateEvent (personal) succeeds for group-owned events created by the user', () => {
+      db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Meeting',
@@ -953,6 +1011,25 @@ describe('event tool handlers', () => {
         owner_type: 'group',
         group_id: GROUP_ID,
         created_by: USER_ID,
+      });
+
+      const result = handleUpdateEvent(ctx, { event_id: event.id, title: 'Updated Group Meeting' });
+
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Updated Group Meeting');
+    });
+
+    test('handleUpdateEvent (personal) refuses to update group-owned events created by another user', () => {
+      const OTHER_USER = 996;
+      new UserRepository(db).create({ telegram_id: OTHER_USER });
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Meeting By Other',
+        start_at: '2026-03-18T10:00:00Z',
+        timezone: 'UTC',
+        owner_type: 'group',
+        group_id: GROUP_ID,
+        created_by: OTHER_USER,
       });
 
       const result = handleUpdateEvent(ctx, { event_id: event.id, title: 'Tampered' });

@@ -3,7 +3,7 @@ import { autoPin } from '../../src/utils/auto-pin.ts';
 
 describe('autoPin', () => {
   test('pins message silently', async () => {
-    const pinFn = mock(() => Promise.resolve());
+    const pinFn = mock(() => Promise.resolve(true as const));
     await autoPin(123, 42, {
       pinChatMessage: pinFn,
       sendMessage: mock(() => Promise.resolve()),

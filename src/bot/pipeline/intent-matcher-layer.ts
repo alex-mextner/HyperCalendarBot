@@ -1,30 +1,35 @@
 // src/bot/pipeline/intent-matcher-layer.ts
 
+import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
-import type { User, WorkflowSessionStore } from '../../database/types.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { BotCommandContext } from '../types.ts';
-import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
+import type { FeedbackThreadContext, GroupContext, PipelineResult, WorkflowSessionStore } from './types.ts';
+
+const WorkflowCodec = jsonCodec(WorkflowSchema);
 
 export function createIntentMatcherLayer(
   matcher: IntentMatcher,
   intentRepo: IntentRepository,
   executor: IntentExecutor,
-  toolExecutor: (toolName: string, input: Record<string, unknown>) => ToolResult | Promise<ToolResult>,
+  toolExecutor: (toolName: string, input: unknown) => ToolResult | Promise<ToolResult>,
   workflowSessions: WorkflowSessionStore,
-  notifyAdmin?: (text: string) => Promise<unknown>,
+  notifyAdmin?: (text: string) => Promise<void>,
   getEventContext?: (
     userId: number,
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
   onEventMentioned?: (userId: number, eventId: number) => void,
   conversationLogger?: ConversationLogger,
+  actionLogRepo?: ActionLogRepository,
 ) {
   return async (
     ctx: BotCommandContext,
@@ -35,9 +40,10 @@ export function createIntentMatcherLayer(
       supplementMode?: boolean;
     },
   ): Promise<PipelineResult> => {
-    const user = ctx.dbUser as User;
+    const user = ctx.dbUser;
+    if (!user) return { handled: false };
     const userId = user.telegram_id;
-    const chatId = Number((ctx as unknown as { chatId?: number | bigint }).chatId ?? userId);
+    const chatId = Number(ctx.chatId ?? userId);
     const groupCtx = extra?.groupContext;
 
     // 1. Check for active workflow session (resuming from ask_user).
@@ -80,12 +86,23 @@ export function createIntentMatcherLayer(
     const intent = intentRepo.getById(match.intentId);
     if (!intent) return { handled: false };
 
-    let workflow: Record<string, unknown>;
-    try {
-      workflow = JSON.parse(intent.workflow) as Record<string, unknown>;
-    } catch {
+    const workflowResult = WorkflowCodec.safeParse(intent.workflow);
+    if (!workflowResult.success) {
       cmdLogger.error({ intentId: match.intentId }, 'Intent has invalid workflow JSON, skipping');
       return { handled: false };
+    }
+    const workflow: Workflow = workflowResult.data;
+
+    // Log intent match to action log
+    if (actionLogRepo) {
+      actionLogRepo.insert({
+        user_id: userId,
+        chat_id: chatId,
+        action_type: 'intent_match',
+        action_name: intent.canonical_name,
+        message_id: ctx.id,
+        input_summary: messageText.slice(0, 200),
+      });
     }
 
     // 4. Execute
@@ -145,10 +162,7 @@ export function createIntentMatcherLayer(
 
     // 8. Format and send response
     if (result.response) {
-      const formatted =
-        intent.format !== 'text'
-          ? formatResponse(intent.format, result.response, user.timezone, user.language)
-          : result.response;
+      const formatted = formatResponse(intent.format, result.response, user.timezone, user.language);
       await ctx.send(formatted);
       conversationLogger?.logBotResponse(userId, formatted, chatId);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };

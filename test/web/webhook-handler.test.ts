@@ -15,6 +15,94 @@ function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   };
 }
 
+describe('health endpoint', () => {
+  test('returns 200 when no healthCheck configured', async () => {
+    const deps = baseDeps();
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok');
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when healthCheck resolves', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()) });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 503 when healthCheck rejects', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.reject(new Error('redis down'))) });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('error');
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 503 when botStarted is false', async () => {
+    const deps = baseDeps({ botStarted: false });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('bot not started');
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when botStarted is true', async () => {
+    const deps = baseDeps({ botStarted: true });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when botStarted is undefined (legacy — no bot-started tracking)', async () => {
+    const deps = baseDeps();
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+
+  test('health check is re-evaluated on each request', async () => {
+    let fail = true;
+    const deps = baseDeps({
+      healthCheck: mock(() => (fail ? Promise.reject(new Error('down')) : Promise.resolve())),
+    });
+    const { stop } = startWebServer(deps);
+    try {
+      const r1 = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(r1.status).toBe(503);
+      fail = false;
+      const r2 = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(r2.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+});
+
 describe('webhook handler', () => {
   test('returns 404 when calendarRepo not configured', async () => {
     const deps = baseDeps();

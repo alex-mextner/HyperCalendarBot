@@ -1,5 +1,8 @@
 // src/services/voice/call-session.ts
 import { unlink as fsUnlink } from 'node:fs/promises';
+import { z } from 'zod';
+import type { User } from '../../database/types.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import type { AgentContext } from '../ai/types.ts';
 import type { FluxStreamingSTT } from './flux-streaming-stt.ts';
 import { classifyInterrupt } from './interruption-classifier.ts';
@@ -49,12 +52,9 @@ export class CallSession {
 
   async handleMessage(data: string): Promise<void> {
     if (this.ended) return;
-    let msg: { type: string };
-    try {
-      msg = JSON.parse(data) as { type: string };
-    } catch {
-      return;
-    }
+    const result = jsonCodec(z.object({ type: z.string() })).safeParse(data);
+    if (!result.success) return;
+    const msg = result.data;
 
     switch (msg.type) {
       case 'CALL_CONNECTED':
@@ -203,10 +203,9 @@ export class CallSession {
   private async runAgent(transcript: string): Promise<void> {
     try {
       const userRepo = this.cfg.agentContextBase?.userRepo;
-      const user = (userRepo?.findByTelegramId(this.cfg.userId) ?? {
-        telegram_id: this.cfg.userId,
-        language: this.cfg.language,
-      }) as never;
+      const user =
+        userRepo?.findByTelegramId(this.cfg.userId) ??
+        ({ telegram_id: this.cfg.userId, language: this.cfg.language } as User);
       const ctx = {
         ...(this.cfg.agentContextBase ?? {}),
         user,

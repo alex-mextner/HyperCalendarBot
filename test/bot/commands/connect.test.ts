@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { registerPendingConnection } from '../../../src/agent/pairing.ts';
+import { initPairingSecret, registerPendingConnection } from '../../../src/agent/pairing.ts';
 import { AgentRegistry } from '../../../src/agent/registry.ts';
 import type { ConnectCtx } from '../../../src/bot/commands/connect.command.ts';
 import {
@@ -40,7 +40,7 @@ test('/activate with unknown code sends error', async () => {
 });
 
 test('/activate with valid code sends success and registers', async () => {
-  process.env.AGENT_JWT_SECRET = 'test-secret-at-least-32-characters!!';
+  initPairingSecret('test-secret-at-least-32-characters!!');
   const registry = new AgentRegistry();
   const activate = createActivateCommand(registry);
 

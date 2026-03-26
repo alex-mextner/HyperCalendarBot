@@ -10,6 +10,7 @@ mock.module('@anthropic-ai/sdk', () => ({
 
 const { createOnboardingScene } = await import('../../../src/bot/scenes/onboarding.scene.ts');
 const { CB } = await import('../../../src/config/constants.ts');
+const { createUserResolverComposer } = await import('../../../src/bot/middleware/user-resolver.ts');
 
 import type { DatabaseService } from '../../../src/database/index.ts';
 import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -122,12 +123,15 @@ function makeDb(
     users: {
       update: mock(() => null),
       findByTelegramId: mock(() => overrides.findByTelegramId ?? null),
+      findOrCreate: mock(() => ({ language: 'en', timezone: 'UTC' })),
     },
     notificationPreferences: {
       update: mock(() => null),
     },
   } as unknown as DatabaseService;
 }
+
+const mockComposer = createUserResolverComposer(makeDb());
 
 function makePrefsService(): NotificationPreferencesService {
   return {
@@ -150,12 +154,12 @@ const NOOP_NEXT = () => Promise.resolve();
 
 describe('createOnboardingScene', () => {
   test('creates scene with name "onboarding"', () => {
-    const scene = createOnboardingScene(makeDb());
+    const scene = createOnboardingScene(makeDb(), mockComposer);
     expect(scene.name).toBe('onboarding');
   });
 
   test('has 4 steps', () => {
-    const scene = createOnboardingScene(makeDb());
+    const scene = createOnboardingScene(makeDb(), mockComposer);
     expect(scene.stepsCount).toBe(4);
   });
 });
@@ -166,7 +170,7 @@ describe('createOnboardingScene', () => {
 
 describe('onboarding onEnter', () => {
   test('sends welcome message', async () => {
-    const scene = createOnboardingScene(makeDb());
+    const scene = createOnboardingScene(makeDb(), mockComposer);
     const enterFn = getEnterFn(scene);
     if (!enterFn) return;
     const ctx = makeCtx();
@@ -187,7 +191,7 @@ describe('onboarding step 0: language selection', () => {
 
   beforeEach(() => {
     db = makeDb();
-    fns = getStepFns(createOnboardingScene(db));
+    fns = getStepFns(createOnboardingScene(db, mockComposer));
   });
 
   test('unrelated callback data — does nothing', async () => {
@@ -236,7 +240,7 @@ describe('onboarding step 1: timezone', () => {
     mockCreate.mockReset();
     mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
     db = makeDb();
-    fns = getStepFns(createOnboardingScene(db));
+    fns = getStepFns(createOnboardingScene(db, mockComposer));
   });
 
   test('firstTime — sends city prompt with keyboard', async () => {
@@ -368,7 +372,7 @@ describe('onboarding step 2: country selection', () => {
   beforeEach(() => {
     db = makeDb();
     holidayService = makeHolidayService();
-    fns = getStepFns(createOnboardingScene(db, false, undefined, holidayService));
+    fns = getStepFns(createOnboardingScene(db, mockComposer, false, undefined, holidayService));
   });
 
   test('firstTime — sends country prompt', async () => {
@@ -417,7 +421,7 @@ describe('onboarding step 2: country selection', () => {
   });
 
   test('no holidayService — skip does not crash', async () => {
-    const fnsNoHoliday = getStepFns(createOnboardingScene(db));
+    const fnsNoHoliday = getStepFns(createOnboardingScene(db, mockComposer));
     const ctx = makeCtx({
       activeType: 'callback_query',
       stepId: 2,
@@ -441,7 +445,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
   beforeEach(() => {
     db = makeDb();
     prefsService = makePrefsService();
-    fns = getStepFns(createOnboardingScene(db, false, prefsService));
+    fns = getStepFns(createOnboardingScene(db, mockComposer, false, prefsService));
   });
 
   test('firstTime — sends morning agenda prompt with time buttons', async () => {
@@ -510,7 +514,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
 
   test('gcalConfigured=true, user without Google token — sends gcal prompt', async () => {
     const localDb = makeDb({ findByTelegramId: { telegram_id: 1, google_refresh_token_enc: null } });
-    const localFns = getStepFns(createOnboardingScene(localDb, true, prefsService));
+    const localFns = getStepFns(createOnboardingScene(localDb, mockComposer, true, prefsService));
     const state = { lang: 'en', timezone: 'Europe/Moscow' };
     const ctx = makeCtx({
       activeType: 'callback_query',
@@ -538,7 +542,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
 
   test('gcalConfigured=true, user already connected — no gcal prompt', async () => {
     const localDb = makeDb({ findByTelegramId: { telegram_id: 1, google_refresh_token_enc: 'token123' } });
-    const localFns = getStepFns(createOnboardingScene(localDb, true, prefsService));
+    const localFns = getStepFns(createOnboardingScene(localDb, mockComposer, true, prefsService));
     const state = { lang: 'en', timezone: 'Europe/Moscow' };
     const ctx = makeCtx({
       activeType: 'callback_query',
@@ -551,7 +555,7 @@ describe('onboarding step 3: morning agenda + completion', () => {
   });
 
   test('prefsService absent — morning time pick does not crash', async () => {
-    const fnsNoPref = getStepFns(createOnboardingScene(db, false));
+    const fnsNoPref = getStepFns(createOnboardingScene(db, mockComposer, false));
     const state = { lang: 'en', timezone: 'Europe/Moscow' };
     const ctx = makeCtx({
       activeType: 'callback_query',
@@ -562,5 +566,38 @@ describe('onboarding step 3: morning agenda + completion', () => {
     await fnsNoPref[3]!(ctx, NOOP_NEXT);
     expect(db.users.update).toHaveBeenCalledWith(1, { onboarding_completed: 1 });
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('onboarding CB constants', () => {
+  test('ONBOARD_LANG is defined', () => {
+    expect(CB.ONBOARD_LANG).toBeDefined();
+    expect(typeof CB.ONBOARD_LANG).toBe('string');
+  });
+
+  test('ONBOARD_TZ is defined', () => {
+    expect(CB.ONBOARD_TZ).toBeDefined();
+    expect(typeof CB.ONBOARD_TZ).toBe('string');
+  });
+
+  test('ONBOARD_TZ_RETRY is defined', () => {
+    expect(CB.ONBOARD_TZ_RETRY).toBeDefined();
+    expect(typeof CB.ONBOARD_TZ_RETRY).toBe('string');
+  });
+
+  test('ONBOARD_COUNTRY is defined', () => {
+    expect(CB.ONBOARD_COUNTRY).toBeDefined();
+    expect(typeof CB.ONBOARD_COUNTRY).toBe('string');
+  });
+
+  test('ONBOARD_AGENDA is defined', () => {
+    expect(CB.ONBOARD_AGENDA).toBeDefined();
+    expect(typeof CB.ONBOARD_AGENDA).toBe('string');
+  });
+
+  test('all onboarding CB prefixes are distinct', () => {
+    const prefixes = [CB.ONBOARD_LANG, CB.ONBOARD_TZ, CB.ONBOARD_TZ_RETRY, CB.ONBOARD_COUNTRY, CB.ONBOARD_AGENDA];
+    const unique = new Set(prefixes);
+    expect(unique.size).toBe(prefixes.length);
   });
 });

@@ -89,7 +89,7 @@ export class AiDebugRunContext {
     this.parts.push(`## ROUND ${round + 1}`);
   }
 
-  logToolCall(name: string, input: Record<string, unknown>): void {
+  logToolCall(name: string, input: { [key: string]: unknown }): void {
     this.parts.push(`TOOL CALL: ${name}`);
     this.parts.push(
       JSON.stringify(input, null, 2)

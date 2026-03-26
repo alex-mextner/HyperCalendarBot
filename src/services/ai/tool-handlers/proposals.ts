@@ -1,4 +1,4 @@
-import { InlineKeyboard } from 'gramio';
+import { InlineKeyboard, type TelegramMessage } from 'gramio';
 import type { CalendarProposalRepository } from '../../../database/repositories/calendar-proposal.repository.ts';
 import type { CreateEventData, UpdateEventData } from '../../../database/types.ts';
 import { logger } from '../../../utils/logger.ts';
@@ -59,7 +59,12 @@ function computeExpiresAt(input: ProposeInput): string {
   return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-function buildPayload(input: ProposeInput): unknown {
+type ProposalPayload =
+  | { action: 'create'; event: Omit<CreateEventData, 'user_id'> | undefined }
+  | { action: 'update'; event_id: number | undefined; changes: UpdateEventData | undefined }
+  | { action: 'delete'; event_id: number | undefined };
+
+function buildPayload(input: ProposeInput): ProposalPayload {
   if (input.action === 'create') return { action: 'create', event: input.event };
   if (input.action === 'update') return { action: 'update', event_id: input.event_id, changes: input.changes };
   return { action: 'delete', event_id: input.event_id };
@@ -119,11 +124,11 @@ async function notifyGroupChat(
   const targetName = targetUser?.first_name ?? targetUser?.username ?? `User ${targetId}`;
   const targetHandle = targetUser?.username ? ` (@${targetUser.username})` : '';
 
-  const msg = (await ctx.sendMessageToChat(
+  const msg: TelegramMessage = await ctx.sendMessageToChat(
     ctx.chatId,
     `Отправил предложение ${targetName}${targetHandle}. Она/он ответит в личных сообщениях.`,
     { reply_markup: new InlineKeyboard().url('→ Написать боту', `https://t.me/${ctx.botUsername ?? 'bot'}`) },
-  )) as { message_id: number };
+  );
 
   if (msg?.message_id) {
     repo.setGroupMessageId(proposal.id, msg.message_id);

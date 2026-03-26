@@ -11,7 +11,7 @@ function createTestDb(): Database {
   return db;
 }
 
-function makeSession(chatId = 1, overrides: Record<string, unknown> = {}) {
+function makeSession(chatId = 1, overrides: { [key: string]: unknown } = {}) {
   return {
     chatId,
     activatedBy: 42,

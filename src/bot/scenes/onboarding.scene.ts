@@ -20,18 +20,14 @@ import {
   timezoneConfirmKeyboard,
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
+import type { UserResolverComposer } from '../middleware/user-resolver.ts';
+import type { OnboardingState } from './types.ts';
 
 const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
 
-interface OnboardingState {
-  lang?: 'en' | 'ru';
-  detectedTz?: string;
-  timezone?: string;
-  country?: string;
-}
-
 export function createOnboardingScene(
   db: DatabaseService,
+  userComposer: UserResolverComposer,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
@@ -40,6 +36,7 @@ export function createOnboardingScene(
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
+      .extend(userComposer)
       // onEnter sends welcome — because scene is entered from /start (message)
       // but step 0 is "callback_query", so firstTime won't fire on entry
       .onEnter(async (context) => {
@@ -47,7 +44,7 @@ export function createOnboardingScene(
       })
       // Step 0: Language selection (callback only)
       .step('callback_query', async (context) => {
-        const data = (context as unknown as { data: string }).data;
+        const data = context.data;
         if (!data) return;
         const parts = data.split(':');
         if (parts[0] !== CB.ONBOARD_LANG) return;
@@ -55,12 +52,8 @@ export function createOnboardingScene(
         const lang = parts[1] as 'en' | 'ru';
         db.users.update(context.from.id, { language: lang });
 
-        const cbCtx = context as unknown as {
-          editText: (text: string, opts?: Record<string, unknown>) => Promise<unknown>;
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-        };
-        await cbCtx.editText(`${lang === 'ru' ? 'Язык: Русский' : 'Language: English'} \u2705`);
-        await cbCtx.answer();
+        await context.editText(`${lang === 'ru' ? 'Язык: Русский' : 'Language: English'} \u2705`);
+        await context.answer();
         await context.scene.update({ lang });
       })
 
@@ -76,7 +69,7 @@ export function createOnboardingScene(
 
         // Handle typed city name
         if (context.is('message')) {
-          const text = (context as unknown as { text?: string }).text?.trim();
+          const text = context.text?.trim();
           if (!text) return;
           const tz = await resolveCity(text, aiModel);
           if (tz) {
@@ -96,11 +89,7 @@ export function createOnboardingScene(
 
         // Handle location
         if (context.is('location')) {
-          const { latitude, longitude } = (
-            context as unknown as {
-              eventLocation: { latitude: number; longitude: number };
-            }
-          ).eventLocation;
+          const { latitude, longitude } = context.eventLocation;
           const tz = resolveTimezone(latitude, longitude);
           const display = getTimezoneDisplay(tz);
           await context.send(t(l).tz_detected(tz, display), {
@@ -113,14 +102,11 @@ export function createOnboardingScene(
 
         // Handle callback
         if (context.is('callback_query')) {
-          const data = (context as unknown as { data: string }).data;
+          const data = context.data;
           if (!data) return;
 
           const parts = data.split(':');
           const action = parts[0];
-          const cbCtx = context as unknown as {
-            answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-          };
 
           if (action === CB.ONBOARD_TZ) {
             const payload = parts.slice(1).join(':');
@@ -132,19 +118,19 @@ export function createOnboardingScene(
                 country_code: guessCountryFromTimezone(tz) ?? undefined,
               });
               await context.send(`✅ ${getTimezoneDisplay(tz)}`, removeKeyboard());
-              await cbCtx.answer();
+              await context.answer();
               await context.scene.update({ timezone: tz });
               return;
             }
           }
 
           if (action === CB.ONBOARD_TZ_RETRY) {
-            await cbCtx.answer();
+            await context.answer();
             await context.send(cityInputPrompt(l), { reply_markup: timezoneMethodKeyboard(l) });
             return;
           }
 
-          await cbCtx.answer();
+          await context.answer();
         }
       })
 
@@ -161,7 +147,7 @@ export function createOnboardingScene(
           return;
         }
 
-        const data = (context as unknown as { data: string }).data;
+        const data = context.data;
         if (!data) return;
         const parts = data.split(':');
         if (parts[0] !== CB.ONBOARD_COUNTRY) return;
@@ -171,10 +157,7 @@ export function createOnboardingScene(
           holidayService?.subscribeUser(context.from.id, payload, true);
         }
 
-        const cbCtx = context as unknown as {
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-        };
-        await cbCtx.answer();
+        await context.answer();
         await context.scene.update({ country: payload });
       })
 
@@ -196,7 +179,7 @@ export function createOnboardingScene(
           return;
         }
 
-        const data = (context as unknown as { data: string }).data;
+        const data = context.data;
         if (!data) return;
         const parts = data.split(':');
         if (parts[0] !== CB.ONBOARD_AGENDA) return;
@@ -213,10 +196,7 @@ export function createOnboardingScene(
 
         // Complete onboarding
         db.users.update(context.from.id, { onboarding_completed: 1 });
-        const cbCtx = context as unknown as {
-          answer: (opts?: Record<string, unknown>) => Promise<unknown>;
-        };
-        await cbCtx.answer();
+        await context.answer();
 
         const tourKb = new InlineKeyboard().text(t(l).feature_tour_btn, `${CB.FEATURE_TOUR}:0`);
         await context.send(t(l).onboard_done, { reply_markup: tourKb });

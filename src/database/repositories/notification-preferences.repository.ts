@@ -1,21 +1,5 @@
 import type { Database } from 'bun:sqlite';
-
-export interface NotificationPreferencesRow {
-  user_id: number;
-  morning_agenda_enabled: number;
-  morning_agenda_time: string;
-  morning_agenda_format: string;
-  default_reminder_intervals: string;
-  evening_review_enabled: number;
-  evening_review_time: string;
-  evening_review_format: string;
-  quiet_hours_enabled: number;
-  quiet_hours_start: string | null;
-  quiet_hours_end: string | null;
-  updated_at: string;
-}
-
-export type NotificationPreferencesUpdate = Partial<Omit<NotificationPreferencesRow, 'user_id' | 'updated_at'>>;
+import type { NotificationPreferencesRow, NotificationPreferencesUpdate } from '../types.ts';
 
 export class NotificationPreferencesRepository {
   constructor(private db: Database) {}

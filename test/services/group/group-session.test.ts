@@ -15,7 +15,7 @@ function makeRepo(): GroupSessionRepository {
       m.delete(chatId);
     },
     deleteExpired: () => {},
-  } as unknown as GroupSessionRepository;
+  } as Partial<GroupSessionRepository> as GroupSessionRepository;
 }
 
 let manager: GroupSessionManager;

@@ -5,7 +5,7 @@ const KEY_PREFIX = 'last_mentioned_event:';
 const TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 interface RedisClient {
-  set(key: string, value: string, opts?: { ex?: number }): Promise<unknown>;
+  set(key: string, value: string, opts?: { ex?: number }): Promise<string>;
   get(key: string): Promise<string | null>;
 }
 

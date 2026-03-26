@@ -14,7 +14,7 @@ function notConnected(lang: string): ToolResult {
 export async function handleAssistantTool(
   ctx: AgentContext,
   toolName: AgentCommand['type'],
-  payload: Record<string, unknown>,
+  payload: AgentCommand['payload'],
 ): Promise<ToolResult> {
   if (!ctx.agents?.agentRegistry.isConnected(ctx.user.telegram_id)) {
     return notConnected(ctx.user.language);
@@ -33,7 +33,6 @@ export async function handleAssistantTool(
     return {
       success: result.exitCode === undefined || result.exitCode === 0,
       output: text + exitInfo,
-      data: result.data,
     };
   } catch (err) {
     return {

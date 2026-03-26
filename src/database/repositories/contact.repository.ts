@@ -1,14 +1,5 @@
 import type { Database } from 'bun:sqlite';
-
-export interface Contact {
-  id: number;
-  user_id: number;
-  name: string;
-  username: string | null;
-  telegram_id: number | null;
-  preferred_name: string | null;
-  created_at: string;
-}
+import type { Contact } from '../types.ts';
 
 export class ContactRepository {
   constructor(private db: Database) {}

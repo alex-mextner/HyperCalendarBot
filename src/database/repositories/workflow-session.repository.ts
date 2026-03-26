@@ -1,6 +1,102 @@
 // src/database/repositories/workflow-session.repository.ts
 import type { Database } from 'bun:sqlite';
-import type { WorkflowSession, WorkflowSessionStore } from '../types.ts';
+import { z } from 'zod';
+import type { WorkflowSession, WorkflowSessionStore } from '../../bot/pipeline/types.ts';
+import type { EventSummary } from '../../services/intent/variable-resolver.ts';
+import { WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
+
+/** Recursive JSON-safe type for tool output values (objects, arrays, primitives). */
+type ToolOutputValue = string | number | boolean | null | ToolOutputValue[] | { [k: string]: ToolOutputValue };
+const ToolOutputValueSchema: z.ZodType<ToolOutputValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(ToolOutputValueSchema),
+    z.record(z.string(), ToolOutputValueSchema),
+  ]),
+);
+
+const EventSummarySchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  date: z.string(),
+  time: z.string().optional(),
+  all_day: z.boolean(),
+  end_at: z.string().optional(),
+  description: z.string().optional(),
+  location: z.string().optional(),
+  recurrence_rule: z.string().optional(),
+});
+
+/**
+ * Schema for serialized step results stored in the DB.
+ * Runtime-only fields (isPastHour, isPastDay, etc.) are NOT serialized — they are
+ * re-added by buildEventStepResults() on resume.
+ *
+ * Known keys: last_added_event, last_mentioned_event (EventSummary), group, user,
+ * tool_outputs, choices, ask, and $1/$2/... regex captures.
+ */
+const StepResultsSchema = z
+  .object({
+    last_added_event: EventSummarySchema.optional(),
+    last_mentioned_event: EventSummarySchema.optional(),
+    group: z.object({ is_group: z.boolean(), chat_id: z.number().nullable() }).optional(),
+    user: z
+      .object({
+        id: z.number().optional(),
+        language: z.string(),
+        timezone: z.string(),
+        username: z.string().optional(),
+        first_name: z.string().optional(),
+      })
+      .optional(),
+    tool_outputs: z.record(z.string(), ToolOutputValueSchema).optional(),
+    choices: z.array(z.union([z.string(), z.number()])).optional(),
+    ask: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
+  })
+  .catchall(z.union([z.string(), z.number()]));
+
+/**
+ * TypeScript type for step results.
+ *
+ * Defined manually rather than via z.infer because Zod v4's catchall with
+ * z.union([z.string(), z.number()]) produces a broken intersection where
+ * object-typed explicit fields (tool_outputs, group, etc.) collide with the
+ * string|number index signature, making them `never`.
+ *
+ * The Zod schema (StepResultsSchema) is still used for runtime validation.
+ */
+export interface StepResults {
+  last_added_event?: EventSummary;
+  last_mentioned_event?: EventSummary;
+  group?: { is_group: boolean; chat_id: number | null };
+  user?: {
+    id?: number;
+    language: string;
+    timezone: string;
+    username?: string;
+    first_name?: string;
+  };
+  tool_outputs?: { [k: string]: ToolOutputValue };
+  choices?: (string | number)[];
+  ask?: { [k: string]: string | number };
+  /** Dynamic keys: regex captures ($1, $2, ...) and other runtime values. */
+  [key: string]: unknown;
+}
+
+const WorkflowSessionSchema = z.object({
+  intentId: z.number(),
+  stepIndex: z.number(),
+  stepResults: StepResultsSchema,
+  workflow: WorkflowSchema,
+  captures: z.record(z.string(), z.string()),
+  createdAt: z.number(),
+});
+
+const WorkflowSessionCodec = jsonCodec(WorkflowSessionSchema);
 
 const TTL_MS = 5 * 60 * 1000;
 
@@ -16,11 +112,8 @@ export class WorkflowSessionRepository implements WorkflowSessionStore {
       this.delete(chatId, userId);
       return null;
     }
-    try {
-      return JSON.parse(row.data) as WorkflowSession;
-    } catch {
-      return null;
-    }
+    const result = WorkflowSessionCodec.safeParse(row.data);
+    return result.success ? result.data : null;
   }
 
   set(chatId: number, userId: number, session: WorkflowSession): void {

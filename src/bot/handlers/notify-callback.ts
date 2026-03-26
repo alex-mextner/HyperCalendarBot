@@ -1,10 +1,12 @@
 // src/bot/handlers/notify-callback.ts
 // Handles inline keyboard callbacks for notification preferences (CB.NOTIFY / 'nf:' prefix).
 
+import { z } from 'zod';
 import type { Lang } from '../../config/constants.ts';
 import { MSG } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import { jsonCodec } from '../../utils/json-codec.ts';
 import {
   notifyEveningKeyboard,
   notifyHourPickerKeyboard,
@@ -16,10 +18,12 @@ import {
 } from '../keyboards.ts';
 import type { BotCallbackContext } from '../types.ts';
 
+const NumberArrayCodec = jsonCodec(z.array(z.number()));
+
 function buildMenuText(prefsService: NotificationPreferencesService, userId: number, lang: Lang): string {
   const prefs = prefsService.getOrCreate(userId);
   const msgs = MSG[lang];
-  const intervals = JSON.parse(prefs.default_reminder_intervals) as number[];
+  const intervals = NumberArrayCodec.parse(prefs.default_reminder_intervals);
   const lines = [
     msgs.notify_menu,
     '',

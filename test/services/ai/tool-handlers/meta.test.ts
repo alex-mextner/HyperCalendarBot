@@ -33,6 +33,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -381,15 +382,15 @@ describe('meta tool handlers', () => {
 
   describe('handleRenderDayImage', () => {
     const GROUP_CHAT_ID = -100999;
-    let renderCalls: Record<string, unknown>[];
+    let renderCalls: ImageRenderJob[];
     let photoCalls: { chatId: number }[];
 
     beforeEach(() => {
       renderCalls = [];
       photoCalls = [];
       ctx.renderService = {
-        renderDirect(opts: Record<string, unknown>) {
-          renderCalls.push(opts);
+        renderDirect(job) {
+          renderCalls.push(job as unknown as ImageRenderJob);
           return Promise.resolve(Buffer.from('png'));
         },
       };
@@ -626,14 +627,20 @@ describe('handleCalculate', () => {
 
 describe('handleMakeCall', () => {
   test('blocks make_call during live_call', () => {
-    const liveCtx = { user: { telegram_id: 1, language: 'en' }, inputMode: 'live_call' } as unknown as AgentContext;
+    const liveCtx = {
+      user: { telegram_id: 1, language: 'en' },
+      inputMode: 'live_call',
+    } as Partial<AgentContext> as AgentContext;
     const result = handleMakeCall(liveCtx, { text: 'reminder' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('live call');
   });
 
   test('returns error when callQueue not available', () => {
-    const noQueueCtx = { user: { telegram_id: 1, language: 'en' }, inputMode: undefined } as unknown as AgentContext;
+    const noQueueCtx = {
+      user: { telegram_id: 1, language: 'en' },
+      inputMode: undefined,
+    } as Partial<AgentContext> as AgentContext;
     const result = handleMakeCall(noQueueCtx, { text: 'reminder' });
     expect(result.success).toBe(false);
   });

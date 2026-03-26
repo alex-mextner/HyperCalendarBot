@@ -331,7 +331,7 @@ describe('CalendarBotAgent', () => {
         ...ctx,
         isGroup: true,
         groupChatId: 456,
-        chatHistory: { getRecentByChat: () => history } as unknown as ChatHistoryRepository,
+        chatHistory: { getRecentByChat: () => history } as Partial<ChatHistoryRepository> as ChatHistoryRepository,
       };
       const agent = new CalendarBotAgent(config, sender);
       const { messages } = agent.buildMessages(groupCtx, []);
@@ -358,7 +358,7 @@ describe('CalendarBotAgent', () => {
         ...ctx,
         isGroup: true,
         groupChatId: 456,
-        chatHistory: { getRecentByChat: () => history } as unknown as ChatHistoryRepository,
+        chatHistory: { getRecentByChat: () => history } as Partial<ChatHistoryRepository> as ChatHistoryRepository,
       };
       const agent = new CalendarBotAgent(config, sender);
       const { messages } = agent.buildMessages(groupCtx, []);
