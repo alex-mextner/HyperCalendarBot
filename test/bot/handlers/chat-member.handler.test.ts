@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeGroupRepo() {
   return {
@@ -208,7 +209,7 @@ describe('createChatMemberHandler', () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(exportInviteLink).toHaveBeenCalledWith(-1001234);
     expect(groupRepo.setInviteLink).toHaveBeenCalledWith(-1001234, INVITE_LINK);
   });
@@ -228,7 +229,7 @@ describe('createChatMemberHandler', () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
     expect(exportInviteLink).not.toHaveBeenCalled();
   });
 });

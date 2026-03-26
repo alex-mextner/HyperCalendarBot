@@ -12,6 +12,7 @@ import { handleSendFeedback } from '../../../../src/services/ai/tool-handlers/fe
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -131,7 +132,7 @@ describe('handleSendFeedback', () => {
     handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
 
     // Give the fire-and-forget a tick to execute
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
     const [chatId, text, options] = sendMessageToChat.mock.calls[0] as unknown as [

@@ -29,6 +29,7 @@ import { DeepLinkService } from '../../../../src/services/sharing/deep-link-serv
 import { InvitationService } from '../../../../src/services/sharing/invitation-service.ts';
 import { PrivacyService } from '../../../../src/services/sharing/privacy-service.ts';
 import { SharingService } from '../../../../src/services/sharing/sharing-service.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -250,7 +251,7 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(true);
 
       // Wait for async delivery
-      await new Promise((r) => setTimeout(r, 50));
+      await flushPromises();
 
       expect(deliveredTo).toBe(OTHER_USER_ID);
       expect(deliveredText).toContain('Delivered Party');
@@ -286,7 +287,7 @@ describe('sharing tool handlers', () => {
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
-      await new Promise((r) => setTimeout(r, 100));
+      await flushPromises();
 
       expect(mtprotoCalledWith).toBeDefined();
       expect(mtprotoCalledWith!.userId).toBe(OTHER_USER_ID);
@@ -317,7 +318,7 @@ describe('sharing tool handlers', () => {
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
-      await new Promise((r) => setTimeout(r, 100));
+      await flushPromises();
 
       const followUp = sentMessages.find((m) => m.chatId === USER_ID && m.text.includes('t.me/TestBot'));
       expect(followUp).toBeDefined();
@@ -346,7 +347,7 @@ describe('sharing tool handlers', () => {
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
-      await new Promise((r) => setTimeout(r, 100));
+      await flushPromises();
 
       const followUp = sentMessages.find((m) => m.chatId === USER_ID && m.text.includes('t.me/TestBot'));
       expect(followUp).toBeDefined();
@@ -369,7 +370,7 @@ describe('sharing tool handlers', () => {
       const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
-      await new Promise((r) => setTimeout(r, 50));
+      await flushPromises();
 
       // Invitation created but message_id stays null
       const inv = invitationRepo.findActiveByEventAndInvitee(event.id, OTHER_USER_ID);

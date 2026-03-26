@@ -280,7 +280,7 @@ export class CalendarBotAgent {
             );
             const baseDelay = RETRY_DELAY_MS * (attempt + 1);
             const jitter = Math.random() * baseDelay;
-            await new Promise((r) => setTimeout(r, baseDelay + jitter));
+            await Bun.sleep(baseDelay + jitter);
           }
         }
         if (lastError) throw lastError;

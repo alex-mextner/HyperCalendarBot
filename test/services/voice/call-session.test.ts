@@ -1,5 +1,6 @@
 import { expect, mock, test } from 'bun:test';
 import { CallSession } from '../../../src/services/voice/call-session.ts';
+import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeWsMock() {
   return {
@@ -288,12 +289,12 @@ test('agent runs only once when VAD_END follows classify respond', async () => {
 
   // Fire an interim that classifies as 'respond' (3+ words, not all fillers)
   (interimCallback as ((t: string) => void) | null)?.('добавь встречу на завтра');
-  // Small delay to let any async work settle
-  await new Promise((r) => setTimeout(r, 0));
+  // Flush microtasks to let any async work settle
+  await flushPromises();
 
   // VAD_END arrives — should be ignored since we already responded
   await session.handleMessage(JSON.stringify({ type: 'VAD_END' }));
-  await new Promise((r) => setTimeout(r, 0));
+  await flushPromises();
 
   // Agent should have been called exactly once
   expect(agent.run).toHaveBeenCalledTimes(1);

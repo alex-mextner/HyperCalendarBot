@@ -4,6 +4,7 @@ import {
   handleManageSecretaries,
 } from '../../../../src/services/ai/tool-handlers/secretary.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -179,7 +180,7 @@ test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', 
   });
   handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
   // Allow the fire-and-forget promise to settle
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await flushPromises();
   expect(sendMessageWithKeyboard).toHaveBeenCalledTimes(1);
   const [recipientId, , keyboard] = sendMessageWithKeyboard.mock.calls[0] as unknown as [number, string, unknown];
   expect(recipientId).toBe(999);

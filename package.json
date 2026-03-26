@@ -17,34 +17,34 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
+    "@mtcute/bun": "^0.29.0",
+    "@mtcute/tl": "^223.0.0",
     "@types/bun": "latest",
     "lefthook": "^2.1.4",
-    "pino-pretty": "13.1.3"
+    "pino-pretty": "^13.1.3"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
-    "@date-fns/tz": "1.4.1",
-    "@gramio/scenes": "0.5.1",
-    "@gramio/storage-sqlite": "0.0.2",
+    "@date-fns/tz": "^1.4.1",
+    "@gramio/scenes": "^0.5.1",
+    "@gramio/storage-sqlite": "^0.0.2",
     "@huggingface/inference": "^4.13.15",
-    "@mtcute/bun": "^0.29.0",
-    "@mtcute/tl": "^223.0.0",
     "bullmq": "^5.71.0",
     "city-timezones": "^1.3.3",
-    "date-fns": "4.1.0",
+    "date-fns": "^4.1.0",
     "date-holidays": "^3.26.9",
-    "geo-tz": "8.1.6",
-    "google-auth-library": "10.6.1",
+    "geo-tz": "^8.1.6",
+    "google-auth-library": "^10.6.1",
     "googleapis": "^171.4.0",
-    "gramio": "0.7.0",
+    "gramio": "^0.7.0",
     "ioredis": "^5.10.1",
     "jose": "^6.2.2",
     "marked": "^15.0.12",
-    "pino": "10.3.1",
+    "pino": "^10.3.1",
     "playwright": "^1.58.2",
-    "rrule": "2.8.1"
+    "rrule": "^2.8.1"
   }
 }

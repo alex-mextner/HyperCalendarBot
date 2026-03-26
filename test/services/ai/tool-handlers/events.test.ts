@@ -25,6 +25,7 @@ import { ConflictChecker } from '../../../../src/services/event/conflict-checker
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -739,7 +740,7 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      await new Promise((r) => setTimeout(r, 0));
+      await flushPromises();
       expect(sent.length).toBe(2);
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
@@ -783,7 +784,7 @@ describe('event tool handlers', () => {
         },
       );
 
-      await new Promise((r) => setTimeout(r, 0));
+      await flushPromises();
       expect(sent.length).toBe(2);
       const ruNotification = sent.find((s) => s.chatId === RU_MEMBER_ID);
       expect(ruNotification?.text).toContain('Новое событие');
@@ -823,7 +824,7 @@ describe('event tool handlers', () => {
       );
 
       expect(result.success).toBe(true);
-      await new Promise((r) => setTimeout(r, 0));
+      await flushPromises();
       expect(sent.length).toBe(2);
       const chatIds = sent.map((s) => s.chatId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
@@ -860,7 +861,7 @@ describe('event tool handlers', () => {
       };
       handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
 
-      await new Promise((r) => setTimeout(r, 0));
+      await flushPromises();
       expect(sent.length).toBe(1);
       expect(sent[0]!.text).toContain(`href="${INVITE_LINK}"`);
       expect(sent[0]!.text).toContain('Test Group');

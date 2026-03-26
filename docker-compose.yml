@@ -3,7 +3,7 @@ services:
     image: redis:7-alpine
     container_name: hypercal-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes --appendfsync everysec
+    command: redis-server --appendonly yes --appendfsync everysec --maxmemory 200mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     deploy:
@@ -16,6 +16,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
   bot:
     image: ghcr.io/alex-mextner/hypercalendarbot:latest
@@ -46,6 +51,11 @@ services:
         limits:
           memory: 1g
           cpus: "0.9"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 volumes:
   redis-data:
