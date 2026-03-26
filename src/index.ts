@@ -42,6 +42,7 @@ const webServerDeps: WebServerDeps = {
   userRepo: db.users,
   agentRegistry,
   agentDispatcher,
+  botStarted: false,
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
@@ -801,6 +802,7 @@ if (config.GOOGLE_CLIENT_ID) {
 }
 
 bot.onStart(async ({ info }) => {
+  webServerDeps.botStarted = true;
   await bot.api.setMyCommands({ commands: COMMANDS_EN });
   await bot.api.setMyCommands({
     commands: COMMANDS_RU,

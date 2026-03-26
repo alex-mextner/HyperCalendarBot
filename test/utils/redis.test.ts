@@ -25,4 +25,21 @@ describe('parseRedisUrl', () => {
     expect(result.host).toBe('myhost');
     expect(result.port).toBe(6379);
   });
+
+  test('extracts password from URL with auth', () => {
+    const result = parseRedisUrl('redis://:secret123@redis:6379');
+    expect(result.host).toBe('redis');
+    expect(result.port).toBe(6379);
+    expect(result.password).toBe('secret123');
+  });
+
+  test('extracts percent-encoded password', () => {
+    const result = parseRedisUrl('redis://:p%40ssw0rd@redis:6379');
+    expect(result.password).toBe('p@ssw0rd');
+  });
+
+  test('no password field when URL has no auth', () => {
+    const result = parseRedisUrl('redis://localhost:6379');
+    expect(result.password).toBeUndefined();
+  });
 });

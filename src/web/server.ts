@@ -32,6 +32,8 @@ export interface WebServerDeps {
   telegramWebhookHandler?: (req: Request) => Response | Promise<Response>;
   // Optional deep health check — throws if a critical dependency is unreachable
   healthCheck?: () => Promise<void>;
+  // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
+  botStarted?: boolean;
 }
 
 export function startWebServer(deps: WebServerDeps): { stop: () => void } {
@@ -56,6 +58,9 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
       }
 
       if (req.method === 'GET' && url.pathname === '/health') {
+        if (deps.botStarted === false) {
+          return new Response('bot not started', { status: 503 });
+        }
         if (deps.healthCheck) {
           try {
             await deps.healthCheck();

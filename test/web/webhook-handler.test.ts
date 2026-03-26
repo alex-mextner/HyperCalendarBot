@@ -51,6 +51,40 @@ describe('health endpoint', () => {
     }
   });
 
+  test('returns 503 when botStarted is false', async () => {
+    const deps = baseDeps({ botStarted: false });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('bot not started');
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when botStarted is true', async () => {
+    const deps = baseDeps({ botStarted: true });
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 when botStarted is undefined (legacy — no bot-started tracking)', async () => {
+    const deps = baseDeps();
+    const { stop } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      expect(res.status).toBe(200);
+    } finally {
+      stop();
+    }
+  });
+
   test('health check is re-evaluated on each request', async () => {
     let fail = true;
     const deps = baseDeps({
