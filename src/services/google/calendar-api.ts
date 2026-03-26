@@ -83,7 +83,8 @@ export class GoogleCalendarApi {
     channelId: string,
     webhookUrl: string,
     expirationMs: number,
-  ): Promise<{ resourceId: string; expiration: string }> {
+    token: string,
+  ): Promise<{ resourceId: string; expiration: string; token: string }> {
     const res = await this.api.events.watch({
       calendarId,
       requestBody: {
@@ -91,11 +92,13 @@ export class GoogleCalendarApi {
         type: 'web_hook',
         address: webhookUrl,
         expiration: String(expirationMs),
+        token,
       },
     });
     return {
       resourceId: res.data.resourceId!,
       expiration: new Date(Number(res.data.expiration)).toISOString(),
+      token,
     };
   }
 

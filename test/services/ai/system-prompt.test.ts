@@ -156,7 +156,11 @@ describe('buildSystemPrompt', () => {
   });
 
   test('includes secretaryForLine in User Info when present', () => {
-    ctx.secretaryForLine = '@alice_cto (read+write)';
+    ctx.secretary = {
+      secretaryRepo: undefined as never,
+      secretaryForLine: '@alice_cto (read+write)',
+      calendarProposalRepo: undefined as never,
+    };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Calendars you can manage as secretary: @alice_cto (read+write)');
   });
@@ -167,7 +171,11 @@ describe('buildSystemPrompt', () => {
   });
 
   test('includes Secretary Access rules block when secretaryForLine present', () => {
-    ctx.secretaryForLine = '@bob_pm (read only)';
+    ctx.secretary = {
+      secretaryRepo: undefined as never,
+      secretaryForLine: '@bob_pm (read only)',
+      calendarProposalRepo: undefined as never,
+    };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('## Secretary Access');
   });
@@ -292,7 +300,10 @@ describe('buildSystemPrompt', () => {
   });
 
   test('includes scene section when scenePauseState is set', () => {
-    ctx.scenePauseState = { sceneName: 'add_event', step: 1, sceneState: { title: 'Team meeting' } };
+    ctx.scene = {
+      scenePauseState: { sceneName: 'add_event', step: 1, sceneState: { title: 'Team meeting' } },
+      scenePauseService: undefined as never,
+    };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('## Scene Paused');
     expect(prompt).toContain('add_event');
@@ -301,14 +312,20 @@ describe('buildSystemPrompt', () => {
   });
 
   test('scene section mentions resume_scene and cancel_scene tools', () => {
-    ctx.scenePauseState = { sceneName: 'edit_value', step: 0, sceneState: {} };
+    ctx.scene = {
+      scenePauseState: { sceneName: 'edit_value', step: 0, sceneState: {} },
+      scenePauseService: undefined as never,
+    };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('resume_scene');
     expect(prompt).toContain('cancel_scene');
   });
 
   test('scene section shows "(none yet)" when sceneState is empty', () => {
-    ctx.scenePauseState = { sceneName: 'add_event', step: 0, sceneState: {} };
+    ctx.scene = {
+      scenePauseState: { sceneName: 'add_event', step: 0, sceneState: {} },
+      scenePauseService: undefined as never,
+    };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('(none yet)');
   });

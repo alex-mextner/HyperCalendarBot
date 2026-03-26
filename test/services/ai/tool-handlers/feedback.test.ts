@@ -13,6 +13,7 @@ import { handleSendFeedback } from '../../../../src/services/ai/tool-handlers/fe
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -57,8 +58,7 @@ describe('handleSendFeedback', () => {
       chatHistory: chatHistoryRepo,
       userRepo,
       reminderRepo,
-      feedbackRepo,
-      botAdminId: ADMIN_ID,
+      feedback: { feedbackContext: undefined, feedbackRepo, botAdminId: ADMIN_ID },
       sendMessageToChat: mock(() => Promise.resolve({} as TelegramMessage)),
       conversationLogger: null as never,
     };
@@ -82,7 +82,7 @@ describe('handleSendFeedback', () => {
   });
 
   test('rejects when botAdminId not configured', () => {
-    ctx.botAdminId = undefined;
+    ctx.feedback = undefined;
     const result = handleSendFeedback(ctx, { type: 'question', message: 'Hello' });
 
     expect(result.success).toBe(false);
@@ -90,11 +90,11 @@ describe('handleSendFeedback', () => {
   });
 
   test('rejects when feedbackRepo not available', () => {
-    ctx.feedbackRepo = undefined;
+    ctx.feedback = undefined;
     const result = handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain('not available');
+    expect(result.error).toContain('not configured');
   });
 
   test('rejects when 3 open threads exist', () => {
@@ -133,7 +133,7 @@ describe('handleSendFeedback', () => {
     handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
 
     // Give the fire-and-forget a tick to execute
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
 
     expect(sendMessageToChat).toHaveBeenCalledTimes(1);
     const [chatId, text, options] = sendMessageToChat.mock.calls[0]! as unknown as [

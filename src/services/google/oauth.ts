@@ -26,11 +26,23 @@ const GOOGLE_CALENDAR_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
+// Minimal Redis interface required for token refresh locking
+export interface RedisLockClient {
+  set(key: string, value: string, mode: 'NX', expMode: 'EX', seconds: number): Promise<string | null>;
+  get(key: string): Promise<string | null>;
+  del(key: string): Promise<number>;
+}
+
+// Token refresh is guarded by a 5-minute window: if the stored token expires
+// within this threshold we treat it as expired and refresh proactively.
+const REFRESH_THRESHOLD_MS = 5 * 60_000;
+
 export class GoogleOAuthService {
   constructor(
     private config: EnvConfig,
     private userRepo: UserRepository,
     private syncRepo: GoogleSyncRepository,
+    private redis?: RedisLockClient,
   ) {}
 
   private assertGoogleConfigured(): void {
@@ -75,7 +87,7 @@ export class GoogleOAuthService {
     };
   }
 
-  getAuthClient(userId: number): OAuth2Client {
+  async getAuthClient(userId: number): Promise<OAuth2Client> {
     const user = this.userRepo.findByTelegramId(userId);
     if (!user?.google_refresh_token_enc) {
       throw new GoogleNotConnectedError(userId);
@@ -92,6 +104,57 @@ export class GoogleOAuthService {
 
     const refreshToken = decrypt(user.google_refresh_token_enc, this.config.ENCRYPTION_KEY);
     const client = this.createOAuth2Client();
+
+    // Determine if a proactive refresh is needed (token expired or expires within threshold)
+    const thresholdIso = new Date(Date.now() + REFRESH_THRESHOLD_MS).toISOString();
+    const needsRefresh = !syncState?.expires_at || syncState.expires_at < thresholdIso;
+
+    if (needsRefresh && this.redis) {
+      const lockKey = `gcal:refresh:${userId}`;
+      const lockVal = crypto.randomUUID();
+      const acquired = await this.redis.set(lockKey, lockVal, 'NX', 'EX', 30);
+
+      if (!acquired) {
+        // Another process holds the lock — wait for them to finish refreshing
+        let waited = 0;
+        while (waited < 10_000) {
+          await Bun.sleep(500);
+          waited += 500;
+          if (!(await this.redis.get(lockKey))) break;
+        }
+        // Re-read potentially-refreshed state from DB
+        const freshState = this.syncRepo.getSyncState(userId);
+        client.setCredentials({
+          refresh_token: refreshToken,
+          access_token: freshState?.access_token ?? undefined,
+        });
+        return client;
+      }
+
+      // We hold the lock — google-auth-library will refresh on first API call.
+      // Release the lock once the tokens event fires.
+      client.setCredentials({
+        refresh_token: refreshToken,
+        access_token: syncState?.access_token ?? undefined,
+      });
+
+      const redis = this.redis;
+      client.once('tokens', async (newTokens) => {
+        if (newTokens.access_token) {
+          this.syncRepo.updateAccessToken(
+            userId,
+            newTokens.access_token,
+            newTokens.expiry_date ? new Date(newTokens.expiry_date).toISOString() : '',
+          );
+        }
+        const current = await redis.get(lockKey);
+        if (current === lockVal) await redis.del(lockKey);
+      });
+
+      return client;
+    }
+
+    // No Redis or token still valid — set credentials and register token update handler
     client.setCredentials({
       refresh_token: refreshToken,
       access_token: syncState?.access_token ?? undefined,

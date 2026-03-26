@@ -1,110 +1,127 @@
 import { describe, expect, mock, test } from 'bun:test';
 
-mock.module('bullmq', () => {
-  const mockAdd = mock(() => Promise.resolve());
-  const mockQueue = { add: mockAdd, _mockAdd: mockAdd };
-  const mockOn = mock(() => {});
-  return {
-    Queue: class {
-      add = mockQueue.add;
-      _mockAdd = mockQueue._mockAdd;
-    },
-    Worker: class {
-      processor: ((job: { id: string; data: { userId: number } }) => Promise<void>) | null = null;
-      opts: { concurrency?: number; limiter?: { max: number; duration: number } } = {};
-      on = mockOn;
+type JobProcessor = (job: { id: string; data: Record<string, unknown> }) => Promise<void>;
+type FailedHandler = (job: { id?: string } | undefined, err: Error) => void;
 
-      constructor(
-        _name: string,
-        processor: (job: { id: string; data: { userId: number } }) => Promise<void>,
-        opts: { concurrency?: number; limiter?: { max: number; duration: number } },
-      ) {
-        this.processor = processor;
-        this.opts = opts;
-      }
-    },
-  };
+let capturedQueueName = '';
+let capturedWorkerName = '';
+let capturedProcessor: JobProcessor = async () => {};
+let capturedWorkerOpts: Record<string, unknown> = {};
+let capturedFailedHandler: FailedHandler = () => {};
+
+const mockQueueAdd = mock(async () => {});
+const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
+  capturedFailedHandler = handler;
 });
+
+mock.module('bullmq', () => ({
+  Queue: class MockQueue {
+    name: string;
+    constructor(name: string) {
+      capturedQueueName = name;
+      this.name = name;
+    }
+    add = mockQueueAdd;
+  },
+  Worker: class MockWorker {
+    constructor(name: string, processor: JobProcessor, opts: Record<string, unknown>) {
+      capturedWorkerName = name;
+      capturedProcessor = processor;
+      capturedWorkerOpts = opts;
+    }
+    on = mockWorkerOn;
+  },
+}));
 
 const { createCallQueue, createCallWorker } = await import('../../src/worker/call-queue.ts');
 
 describe('createCallQueue', () => {
-  test('returns object with queue and enqueue properties', () => {
-    const result = createCallQueue({ host: 'localhost', port: 6379 });
-    expect(result).toHaveProperty('queue');
-    expect(result).toHaveProperty('enqueue');
+  test('returns queue and enqueue function', () => {
+    const connection = { host: 'localhost', port: 6379 };
+    const result = createCallQueue(connection);
+    expect(result.queue).toBeDefined();
     expect(typeof result.enqueue).toBe('function');
   });
 
-  test('enqueue adds a job with sessionId appended to data', async () => {
-    const result = createCallQueue({ host: 'localhost', port: 6379 });
-    const addFn = result.queue.add as ReturnType<typeof mock>;
-
-    await result.enqueue({
-      userId: 42,
-      callLogId: 1,
-      ttsText: 'Reminder: meeting in 5 minutes',
-      language: 'en',
-    });
-
-    expect(addFn).toHaveBeenCalledTimes(1);
-    const [jobName, jobData, jobOpts] = addFn.mock.calls[0] as [
-      string,
-      { userId: number; callLogId: number; ttsText: string; language: string; sessionId: string },
-      { attempts: number; removeOnComplete: boolean; removeOnFail: boolean },
-    ];
-    expect(jobName).toBe('call-reminder');
-    expect(jobData.userId).toBe(42);
-    expect(jobData.callLogId).toBe(1);
-    expect(jobData.ttsText).toBe('Reminder: meeting in 5 minutes');
-    expect(jobData.language).toBe('en');
-    expect(typeof jobData.sessionId).toBe('string');
-    expect(jobData.sessionId.length).toBeGreaterThan(0);
-    expect(jobOpts.attempts).toBe(1);
-    expect(jobOpts.removeOnComplete).toBe(true);
-    expect(jobOpts.removeOnFail).toBe(true);
+  test('queue is named call-reminders', () => {
+    createCallQueue({ host: 'localhost', port: 6379 });
+    expect(capturedQueueName).toBe('call-reminders');
   });
 
-  test('enqueue generates unique sessionId for each call', async () => {
-    const result = createCallQueue({ host: 'localhost', port: 6379 });
-    const addFn = result.queue.add as ReturnType<typeof mock>;
+  test('enqueue adds job with generated sessionId', async () => {
+    mockQueueAdd.mockClear();
+    const { enqueue } = createCallQueue({ host: 'localhost', port: 6379 });
+    await enqueue({
+      userId: 42,
+      callLogId: 1,
+      ttsText: 'Hello',
+      language: 'ru',
+    });
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
+      string,
+      { userId: number; sessionId: string },
+      { attempts: number; removeOnComplete: boolean; removeOnFail: boolean },
+    ];
+    expect(name).toBe('call-reminder');
+    expect(data.userId).toBe(42);
+    expect(typeof data.sessionId).toBe('string');
+    expect(data.sessionId.length).toBeGreaterThan(0);
+    expect(opts.attempts).toBe(1);
+    expect(opts.removeOnComplete).toBe(true);
+    expect(opts.removeOnFail).toBe(true);
+  });
 
-    const baseData = { userId: 42, callLogId: 1, ttsText: 'test', language: 'en' };
-    await result.enqueue(baseData);
-    await result.enqueue(baseData);
-
-    const firstSessionId = (addFn.mock.calls[0] as [string, { sessionId: string }])[1].sessionId;
-    const secondSessionId = (addFn.mock.calls[1] as [string, { sessionId: string }])[1].sessionId;
-    expect(firstSessionId).not.toBe(secondSessionId);
+  test('enqueue generates unique sessionId per call', async () => {
+    const { enqueue } = createCallQueue({ host: 'localhost', port: 6379 });
+    const sessionIds = new Set<string>();
+    for (let i = 0; i < 5; i++) {
+      mockQueueAdd.mockClear();
+      await enqueue({ userId: 1, callLogId: i, ttsText: 'x', language: 'en' });
+      const [, data] = mockQueueAdd.mock.calls[0] as unknown as [string, { sessionId: string }];
+      sessionIds.add(data.sessionId);
+    }
+    expect(sessionIds.size).toBe(5);
   });
 });
 
 describe('createCallWorker', () => {
-  test('creates a worker with concurrency=1 and limiter settings', () => {
-    const executeCall = mock(() => Promise.resolve());
-    const callManager = { executeCall } as unknown as Parameters<typeof createCallWorker>[1];
-    const worker = createCallWorker({ host: 'localhost', port: 6379 }, callManager);
-
+  test('returns a worker instance', () => {
+    const callManager = { executeCall: mock(async () => {}) };
+    const worker = createCallWorker({ host: 'localhost', port: 6379 }, callManager as never);
     expect(worker).toBeDefined();
-    const opts = (worker as { opts: { concurrency?: number; limiter?: { max: number; duration: number } } }).opts;
-    expect(opts.concurrency).toBe(1);
-    expect(opts.limiter).toEqual({ max: 1, duration: 5000 });
   });
 
-  test('worker processor calls callManager.executeCall with job data', async () => {
-    const executeCall = mock(() => Promise.resolve());
-    const callManager = { executeCall } as unknown as Parameters<typeof createCallWorker>[1];
-    const worker = createCallWorker({ host: 'localhost', port: 6379 }, callManager);
+  test('worker is named call-reminders', () => {
+    const callManager = { executeCall: mock(async () => {}) };
+    createCallWorker({ host: 'localhost', port: 6379 }, callManager as never);
+    expect(capturedWorkerName).toBe('call-reminders');
+  });
 
-    const processor = (
-      worker as unknown as { processor: (job: { id: string; data: { userId: number } }) => Promise<void> }
-    ).processor;
-    if (processor) {
-      await processor({
-        id: 'job-1',
-        data: { userId: 42, callLogId: 1, ttsText: 'test', language: 'en', sessionId: 'abc' } as never,
-      });
-    }
+  test('worker runs with concurrency 1', () => {
+    const callManager = { executeCall: mock(async () => {}) };
+    createCallWorker({ host: 'localhost', port: 6379 }, callManager as never);
+    expect((capturedWorkerOpts as { concurrency: number }).concurrency).toBe(1);
+  });
+
+  test('worker processor calls executeCall with job data', async () => {
+    const executeCall = mock(async () => {});
+    createCallWorker({ host: 'localhost', port: 6379 }, { executeCall } as never);
+    const jobData = { userId: 7, callLogId: 2, ttsText: 'Test', language: 'en', sessionId: 'abc' };
+    await capturedProcessor({ id: 'j1', data: jobData });
     expect(executeCall).toHaveBeenCalledTimes(1);
+    expect(executeCall).toHaveBeenCalledWith(jobData);
+  });
+
+  test('failed handler does not throw when job is present', () => {
+    const callManager = { executeCall: mock(async () => {}) };
+    createCallWorker({ host: 'localhost', port: 6379 }, callManager as never);
+    expect(() => capturedFailedHandler({ id: 'j1' }, new Error('call failed'))).not.toThrow();
+  });
+
+  test('failed handler does not throw when job is undefined', () => {
+    const callManager = { executeCall: mock(async () => {}) };
+    createCallWorker({ host: 'localhost', port: 6379 }, callManager as never);
+    expect(() => capturedFailedHandler(undefined, new Error('no job'))).not.toThrow();
   });
 });

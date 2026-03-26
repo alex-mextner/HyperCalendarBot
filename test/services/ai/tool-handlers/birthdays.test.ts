@@ -59,7 +59,7 @@ describe('handleCreateBirthdayEvent', () => {
       conversationLogger: null as never,
       userRepo,
       reminderRepo,
-      birthdayService,
+      birthday: { birthdayService, userMemoryRepo: undefined as never },
     };
   });
 
@@ -118,8 +118,8 @@ describe('handleCreateBirthdayEvent', () => {
   });
 
   test('returns error when birthdayService is not available', () => {
-    const ctxNoBirthday = { ...ctx, birthdayService: undefined };
-    const result = handleCreateBirthdayEvent(ctxNoBirthday, {
+    const ctxNoBirthday = { ...ctx, birthday: undefined };
+    const result = handleCreateBirthdayEvent(ctxNoBirthday as AgentContext, {
       celebrant_id: CELEBRANT_ID,
       date: { day: 10, month: 5 },
     });

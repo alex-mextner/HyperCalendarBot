@@ -1,4 +1,5 @@
 // src/services/google/sync-service.ts
+import type { Database } from 'bun:sqlite';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
@@ -9,6 +10,7 @@ import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.t
 
 export class SyncService {
   constructor(
+    private db: Database,
     private eventRepo: EventRepository,
     private syncRepo: GoogleSyncRepository,
     private calendarRepo: GoogleCalendarRepository,
@@ -24,28 +26,31 @@ export class SyncService {
     do {
       const result = await api.listEvents(calendarId, { pageToken, timeMin });
 
-      for (const gEvent of result.events) {
-        if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
-        if (gEvent.status === 'cancelled') continue;
+      const insertBatch = this.db.transaction(() => {
+        for (const gEvent of result.events) {
+          if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
+          if (gEvent.status === 'cancelled') continue;
 
-        const local = googleToLocal(gEvent as GoogleEvent, userId, calendarId);
-        this.eventRepo.insertSyncedEvent({
-          user_id: userId,
-          title: local.title,
-          description: local.description,
-          start_at: local.start_at,
-          end_at: local.end_at,
-          all_day: local.all_day,
-          timezone: local.timezone,
-          location: local.location,
-          recurrence_rule: local.recurrence_rule,
-          google_calendar_id: calendarId,
-          google_event_id: local.google_event_id,
-          google_etag: local.google_etag,
-          is_cancelled: local.is_cancelled ?? false,
-        });
-        totalImported++;
-      }
+          const local = googleToLocal(gEvent as GoogleEvent, userId, calendarId);
+          this.eventRepo.insertSyncedEvent({
+            user_id: userId,
+            title: local.title,
+            description: local.description,
+            start_at: local.start_at,
+            end_at: local.end_at,
+            all_day: local.all_day,
+            timezone: local.timezone,
+            location: local.location,
+            recurrence_rule: local.recurrence_rule,
+            google_calendar_id: calendarId,
+            google_event_id: local.google_event_id,
+            google_etag: local.google_etag,
+            is_cancelled: local.is_cancelled ?? false,
+          });
+          totalImported++;
+        }
+      });
+      insertBatch();
 
       pageToken = result.nextPageToken ?? undefined;
       nextSyncToken = result.nextSyncToken;
@@ -171,75 +176,86 @@ export class SyncService {
 
   private async handleUpdatedOrNewEvent(userId: number, calendarId: string, gEvent: GoogleEvent): Promise<void> {
     const local = googleToLocal(gEvent, userId, calendarId);
-    const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
 
-    if (existing) {
-      if (existing.sync_status === 'pending_push') {
-        const winner = this.resolveConflict(existing, gEvent.updated ?? '');
-        if (winner === 'keep_local') {
-          return;
+    // Run the SELECT + writes atomically to prevent races between concurrent sync jobs
+    let conflictNotification: (() => Promise<void>) | null = null;
+    // TypeScript infers the transaction return as never due to the mutable closure; cast explicitly.
+    const applyUpdate = this.db.transaction(() => {
+      const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
+
+      if (existing) {
+        if (existing.sync_status === 'pending_push') {
+          const winner = this.resolveConflict(existing, gEvent.updated ?? '');
+          if (winner === 'keep_local') {
+            return;
+          }
+          this.syncRepo.logSync({
+            user_id: userId,
+            event_id: existing.id,
+            google_event_id: local.google_event_id,
+            direction: 'pull',
+            action: 'conflict_resolve',
+            details: JSON.stringify({ winner: 'google' }),
+          });
+          if (this.notifyUser) {
+            conflictNotification = () =>
+              this.notifyUser!(
+                userId,
+                `⚠️ Sync conflict on "${local.title}"\n\nGoogle Calendar version was applied (more recent).`,
+              );
+          }
         }
+
+        this.eventRepo.updateSyncFields(existing.id, {
+          google_etag: local.google_etag ?? undefined,
+          sync_status: 'synced',
+          last_synced_at: new Date().toISOString(),
+        });
+        this.eventRepo.update(existing.id, userId, {
+          title: local.title,
+          description: local.description,
+          start_at: local.start_at,
+          end_at: local.end_at,
+          all_day: local.all_day,
+          timezone: local.timezone,
+          location: local.location,
+          recurrence_rule: local.recurrence_rule,
+        });
         this.syncRepo.logSync({
           user_id: userId,
           event_id: existing.id,
           google_event_id: local.google_event_id,
           direction: 'pull',
-          action: 'conflict_resolve',
-          details: JSON.stringify({ winner: 'google' }),
+          action: 'update',
         });
-        if (this.notifyUser) {
-          await this.notifyUser(
-            userId,
-            `⚠️ Sync conflict on "${local.title}"\n\nGoogle Calendar version was applied (more recent).`,
-          );
-        }
+      } else {
+        this.eventRepo.insertSyncedEvent({
+          user_id: userId,
+          title: local.title,
+          description: local.description,
+          start_at: local.start_at,
+          end_at: local.end_at,
+          all_day: local.all_day,
+          timezone: local.timezone,
+          location: local.location,
+          recurrence_rule: local.recurrence_rule,
+          google_calendar_id: calendarId,
+          google_event_id: local.google_event_id,
+          google_etag: local.google_etag,
+          is_cancelled: local.is_cancelled ?? false,
+        });
+        this.syncRepo.logSync({
+          user_id: userId,
+          google_event_id: local.google_event_id,
+          direction: 'pull',
+          action: 'create',
+        });
       }
-
-      this.eventRepo.updateSyncFields(existing.id, {
-        google_etag: local.google_etag ?? undefined,
-        sync_status: 'synced',
-        last_synced_at: new Date().toISOString(),
-      });
-      this.eventRepo.update(existing.id, userId, {
-        title: local.title,
-        description: local.description,
-        start_at: local.start_at,
-        end_at: local.end_at,
-        all_day: local.all_day,
-        timezone: local.timezone,
-        location: local.location,
-        recurrence_rule: local.recurrence_rule,
-      });
-      this.syncRepo.logSync({
-        user_id: userId,
-        event_id: existing.id,
-        google_event_id: local.google_event_id,
-        direction: 'pull',
-        action: 'update',
-      });
-    } else {
-      this.eventRepo.insertSyncedEvent({
-        user_id: userId,
-        title: local.title,
-        description: local.description,
-        start_at: local.start_at,
-        end_at: local.end_at,
-        all_day: local.all_day,
-        timezone: local.timezone,
-        location: local.location,
-        recurrence_rule: local.recurrence_rule,
-        google_calendar_id: calendarId,
-        google_event_id: local.google_event_id,
-        google_etag: local.google_etag,
-        is_cancelled: local.is_cancelled ?? false,
-      });
-      this.syncRepo.logSync({
-        user_id: userId,
-        google_event_id: local.google_event_id,
-        direction: 'pull',
-        action: 'create',
-      });
-    }
+    });
+    applyUpdate();
+    // TypeScript loses track of the mutable variable after the transaction closure; reassert the type.
+    const notify = conflictNotification as (() => Promise<void>) | null;
+    if (notify) await notify();
   }
 
   async setupWatchChannel(
@@ -249,11 +265,12 @@ export class SyncService {
     publicDomain: string,
   ): Promise<void> {
     const channelId = crypto.randomUUID();
+    const channelToken = crypto.randomUUID();
     const webhookUrl = `https://${publicDomain}/webhooks/google-calendar`;
     const expirationMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
 
-    const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs);
-    this.calendarRepo.addWatchChannel(calendarRowId, channelId, result.resourceId, result.expiration);
+    const result = await api.watchEvents(calendarId, channelId, webhookUrl, expirationMs, channelToken);
+    this.calendarRepo.addWatchChannel(calendarRowId, channelId, result.resourceId, result.expiration, result.token);
 
     syncLogger.info({ calendarId, channelId }, 'Watch channel created');
   }

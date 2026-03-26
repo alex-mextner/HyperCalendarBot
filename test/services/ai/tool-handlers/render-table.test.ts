@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
-import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/meta.ts';
+import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -79,6 +80,6 @@ describe('handleRenderTable', () => {
     // Synchronous return is still success
     expect(result.success).toBe(true);
     // Allow the fire-and-forget promise to settle — must not throw unhandled rejection
-    await new Promise((r) => setTimeout(r, 0));
+    await flushPromises();
   });
 });

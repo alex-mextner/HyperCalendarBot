@@ -86,4 +86,18 @@ describe('UserRepository', () => {
     repo.create({ telegram_id: 123, username: 'AlexUltra' });
     expect(repo.findByUsername('alexultra')).not.toBeNull();
   });
+
+  test('findManyByTelegramIds returns map of found users', () => {
+    repo.create({ telegram_id: 1, username: 'alice' });
+    repo.create({ telegram_id: 2, username: 'bob' });
+    const result = repo.findManyByTelegramIds([1, 2, 999]);
+    expect(result.size).toBe(2);
+    expect(result.get(1)?.username).toBe('alice');
+    expect(result.get(2)?.username).toBe('bob');
+    expect(result.has(999)).toBe(false);
+  });
+
+  test('findManyByTelegramIds returns empty map for empty input', () => {
+    expect(repo.findManyByTelegramIds([]).size).toBe(0);
+  });
 });

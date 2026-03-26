@@ -1,6 +1,16 @@
 import { mock } from 'bun:test';
 import type { User } from '../../src/database/types.ts';
 
+/**
+ * Drains the microtask queue by awaiting multiple Promise.resolve() ticks.
+ * Use instead of setTimeout(r, N) when waiting for fire-and-forget async chains.
+ */
+export async function flushPromises(ticks = 10): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    await Promise.resolve();
+  }
+}
+
 interface MockCtxShape {
   args: string | null;
   dbUser: Partial<User>;

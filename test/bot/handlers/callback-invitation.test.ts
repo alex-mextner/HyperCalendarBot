@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { createCallbackHandler } from '../../../src/bot/handlers/callback.handler';
+import { flushPromises } from '../../helpers/mock-context.ts';
 
 function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
   return {
@@ -11,17 +12,9 @@ function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
 }
 
 function makeHandler(invitationService: unknown) {
-  return createCallbackHandler(
-    {} as never, // eventService
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    invitationService as never, // invitationService
-  );
+  return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+    invitationService: invitationService as never,
+  });
 }
 
 describe('invitation callbacks', () => {
@@ -128,22 +121,11 @@ describe('inviter notification on response', () => {
     notifyDeps: { userRepo: { findByTelegramId: ReturnType<typeof mock> }; sendMessage: ReturnType<typeof mock> },
     eventRepo?: { findById: ReturnType<typeof mock> },
   ) {
-    return createCallbackHandler(
-      {} as never, // eventService
-      {} as never, // editValueScene
-      {} as never, // holidayService
-      {} as never, // prefsService
-      undefined, // calendarRepo
-      undefined, // disconnectDeps
-      undefined, // onCalendarsDone
-      undefined, // renderService
-      invitationService as never, // invitationService
-      eventRepo as never, // eventRepo
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
   }
 
   test('notifies inviter when invitation is accepted', async () => {
@@ -167,7 +149,7 @@ describe('inviter notification on response', () => {
     await handler(ctx as never);
 
     // Wait for async notification
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const call0 = sendMessage.mock.calls[0] as unknown[];
@@ -196,7 +178,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const call0 = sendMessage.mock.calls[0] as unknown[];
@@ -224,7 +206,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage }, eventRepo);
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     const call0 = sendMessage.mock.calls[0] as unknown[];
     expect(call0[1] as string).toContain('принял');
@@ -247,7 +229,7 @@ describe('inviter notification on response', () => {
     const handler = makeHandlerWithNotify(invitationService, { userRepo, sendMessage });
 
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
 
     expect(sendMessage).not.toHaveBeenCalled();
   });
@@ -269,7 +251,7 @@ describe('inviter notification on response', () => {
 
     // Should not throw
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(ctx.answer).toHaveBeenCalled();
   });
 });
@@ -286,35 +268,13 @@ describe('propose-time callbacks', () => {
       editMessage?: ReturnType<typeof mock>;
     },
   ) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoArg as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoArg as never,
+      invitationNotifyDeps: notifyDeps as never,
       proposeTimeSessions,
-      invitationRepo as never,
-    );
+      invitationRepo: invitationRepo as never,
+    });
   }
 
   test('propose callback sets session and sends prompt', async () => {
@@ -375,7 +335,7 @@ describe('propose-time callbacks', () => {
 
     expect(invitationService.proposeTime).toHaveBeenCalledWith(5, 200, '2026-04-01T10:30:00Z');
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
   });
 
@@ -410,41 +370,18 @@ describe('propose-time callbacks', () => {
       editText: mock(() => Promise.resolve()),
     };
 
-    const handler = createCallbackHandler(
-      eventServiceMock as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoMock as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationRepo as never,
-    );
+    const handler = createCallbackHandler(eventServiceMock as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoMock as never,
+      invitationNotifyDeps: notifyDeps as never,
+      invitationRepo: invitationRepo as never,
+    });
     await handler(ctx as never);
 
     expect(invitationService.rescheduleFromProposal).toHaveBeenCalledWith(5, 100);
     expect(eventServiceMock.updateEvent).toHaveBeenCalled();
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
   });
 
@@ -478,40 +415,17 @@ describe('propose-time callbacks', () => {
       editText: mock(() => Promise.resolve()),
     };
 
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationService as never,
-      eventRepoMock as never,
-      undefined, // chatHistoryRepo
-      undefined, // onAiButtonClick
-      undefined, // oauthDeps
-      notifyDeps as never, // invitationNotifyDeps
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invitationRepo as never,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invitationService as never,
+      eventRepo: eventRepoMock as never,
+      invitationNotifyDeps: notifyDeps as never,
+      invitationRepo: invitationRepo as never,
+    });
     await handler(ctx as never);
 
     expect(invitationService.keepOriginalTime).toHaveBeenCalledWith(5, 100);
     expect(ctx.editText).toHaveBeenCalled();
-    await new Promise((r) => setTimeout(r, 50));
+    await flushPromises();
     expect(notifyDeps.sendMessage).toHaveBeenCalled();
     expect(notifyDeps.editMessage).toHaveBeenCalled();
   });
@@ -532,22 +446,12 @@ describe('conflict image on accept', () => {
     },
     renderService: { renderDirect: ReturnType<typeof mock> },
   ) {
-    return createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      renderService as never,
-      invSvc as never,
-      eventRepo as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
-    );
+    return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      renderService: renderService as never,
+      invitationService: invSvc as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
   }
 
   test('sends conflict image to inviter on accept when renderService provided', async () => {
@@ -581,7 +485,7 @@ describe('conflict image on accept', () => {
     };
     const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
     expect(renderDirect).toHaveBeenCalledTimes(1);
     expect(sendPhoto).toHaveBeenCalledTimes(1);
     const photoCall = sendPhoto.mock.calls[0] as unknown[];
@@ -620,7 +524,7 @@ describe('conflict image on accept', () => {
     };
     const handler = makeHandlerWithRender(invSvc, notifyDeps, eventRepo, renderService);
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
 
     expect(renderDirect).toHaveBeenCalledTimes(1);
     const renderCall = renderDirect.mock.calls[0] as unknown[];
@@ -660,24 +564,13 @@ describe('conflict image on accept', () => {
       answer: mock(() => Promise.resolve()),
       editText: mock(() => Promise.resolve()),
     };
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      invSvc as never,
-      eventRepo as never,
-      undefined,
-      undefined,
-      undefined,
-      notifyDeps as never,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      invitationService: invSvc as never,
+      eventRepo: eventRepo as never,
+      invitationNotifyDeps: notifyDeps as never,
+    });
     await handler(ctx as never);
-    await new Promise((r) => setTimeout(r, 100));
+    await flushPromises();
     expect(sendPhoto).not.toHaveBeenCalled();
   });
 });

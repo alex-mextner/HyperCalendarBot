@@ -72,32 +72,32 @@ const TOP_COUNTRIES: [string, string][] = [
   ['IN', '🇮🇳 Индия'],
 ];
 
-export function countryPickerKeyboard(currentCode?: string | null): InlineKeyboard {
+export function countryPickerKeyboard(currentCode?: string | null, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
   TOP_COUNTRIES.forEach(([code, label], i) => {
     const mark = code === currentCode ? '✅ ' : '';
     kb.text(`${mark}${label}`, `stg:set_country:${code}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb.row().text('🔙 Назад', 'stg:general');
+  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:general');
 }
 
 const REMINDER_PRESETS = [0, 5, 10, 15, 30, 60, 120] as const;
 
-function fmtReminderPreset(m: number): string {
-  if (m === 0) return 'в начале';
-  if (m >= 60) return `${m / 60}ч`;
-  return `${m}мин`;
+function fmtReminderPreset(m: number, lang: 'en' | 'ru'): string {
+  if (m === 0) return lang === 'ru' ? 'в начале' : 'at start';
+  if (m >= 60) return lang === 'ru' ? `${m / 60}ч` : `${m / 60}hr`;
+  return lang === 'ru' ? `${m}мин` : `${m}min`;
 }
 
-export function reminderIntervalsKeyboard(activeIntervals: number[]): InlineKeyboard {
+export function reminderIntervalsKeyboard(activeIntervals: number[], lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
   REMINDER_PRESETS.forEach((m, i) => {
     const active = activeIntervals.includes(m);
-    kb.text(`${active ? '✅' : '☐'} ${fmtReminderPreset(m)}`, `stg:toggle_reminder:${m}`);
+    kb.text(`${active ? '✅' : '☐'} ${fmtReminderPreset(m, lang)}`, `stg:toggle_reminder:${m}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb.row().text('🔙 Назад', 'stg:notifications');
+  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:notifications');
 }
 
 // ── Event actions ──
@@ -114,14 +114,19 @@ export function deleteConfirmKeyboard(eventId: number, lang: 'en' | 'ru'): Inlin
     .text(lang === 'ru' ? 'Отмена' : 'Cancel', `${CB.EVENT_DELETE}:cancel`);
 }
 
-export function eventPickerKeyboard(events: CalendarEvent[], timezone: string, prefix: string): InlineKeyboard {
+export function eventPickerKeyboard(
+  events: CalendarEvent[],
+  timezone: string,
+  prefix: string,
+  lang: 'en' | 'ru' = 'en',
+): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (let i = 0; i < events.length && i < 10; i++) {
     const e = events[i]!;
     const time = formatTime(e.start_at, timezone);
     kb.text(`${i + 1}. ${time} ${e.title.slice(0, 20)}`, `${prefix}:${e.id}`).row();
   }
-  kb.text('Cancel', `${prefix}:cancel`);
+  kb.text(lang === 'ru' ? 'Отмена' : 'Cancel', `${prefix}:cancel`);
   return kb;
 }
 
@@ -162,7 +167,9 @@ export function recurrenceKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Каждый месяц' : 'Monthly', `${CB.ADD_RECURRENCE}:MONTHLY`)
     .text(lang === 'ru' ? 'Каждый год' : 'Yearly', `${CB.ADD_RECURRENCE}:YEARLY`)
     .row()
-    .text(lang === 'ru' ? 'Другое...' : 'Custom...', `${CB.ADD_RECURRENCE}:custom`);
+    .text(lang === 'ru' ? 'Другое...' : 'Custom...', `${CB.ADD_RECURRENCE}:custom`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Recurrence end for add-event scene
@@ -171,12 +178,22 @@ export function recurrenceEndKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(lang === 'ru' ? 'Бесконечно' : 'No end', `${CB.ADD_REC_END}:forever`)
     .row()
     .text(lang === 'ru' ? 'До даты' : 'Until date', `${CB.ADD_REC_END}:until`)
-    .text(lang === 'ru' ? 'N повторений' : 'N times', `${CB.ADD_REC_END}:count`);
+    .text(lang === 'ru' ? 'N повторений' : 'N times', `${CB.ADD_REC_END}:count`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
+}
+
+// Cancel button for add-event scene steps that show no other keyboard
+export function cancelKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  return new InlineKeyboard().text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Skip button for optional scene steps
 export function skipKeyboard(lang: 'en' | 'ru', stepIndex: number): InlineKeyboard {
-  return new InlineKeyboard().text(lang === 'ru' ? 'Пропустить' : 'Skip', `${CB.ADD_SKIP}:${stepIndex}`);
+  return new InlineKeyboard()
+    .text(lang === 'ru' ? 'Пропустить' : 'Skip', `${CB.ADD_SKIP}:${stepIndex}`)
+    .row()
+    .text(lang === 'ru' ? '🚫 Отмена' : '🚫 Cancel', CB.ADD_CANCEL);
 }
 
 // Scope keyboard for recurring event edit/delete actions
@@ -299,16 +316,19 @@ export function notifyMenuKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .row();
 }
 
-export function notifyMorningKeyboard(enabled: boolean): InlineKeyboard {
+export function notifyMorningKeyboard(enabled: boolean, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
-  kb.text(enabled ? '❌ Disable' : '✅ Enable', `${CB.NOTIFY}:morning:toggle`);
-  kb.text('🕐 Change Time', `${CB.NOTIFY}:morning:time`);
+  kb.text(
+    enabled ? (lang === 'ru' ? '❌ Выключить' : '❌ Disable') : lang === 'ru' ? '✅ Включить' : '✅ Enable',
+    `${CB.NOTIFY}:morning:toggle`,
+  );
+  kb.text(lang === 'ru' ? '🕐 Изменить время' : '🕐 Change Time', `${CB.NOTIFY}:morning:time`);
   kb.row();
-  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:menu`);
   return kb;
 }
 
-export function notifyHourPickerKeyboard(section: string): InlineKeyboard {
+export function notifyHourPickerKeyboard(section: string, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
   for (let h = 5; h <= 12; h++) {
     kb.text(String(h).padStart(2, '0'), `${CB.NOTIFY}:${section}:hour:${String(h).padStart(2, '0')}`);
@@ -318,30 +338,26 @@ export function notifyHourPickerKeyboard(section: string): InlineKeyboard {
     kb.text(String(h).padStart(2, '0'), `${CB.NOTIFY}:${section}:hour:${String(h).padStart(2, '0')}`);
     if ((h - 12) % 4 === 0) kb.row();
   }
-  kb.text('← Back', `${CB.NOTIFY}:${section}`);
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:${section}`);
   return kb;
 }
 
-export function notifyMinutePickerKeyboard(section: string, hour: string): InlineKeyboard {
+export function notifyMinutePickerKeyboard(section: string, hour: string, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   return new InlineKeyboard()
     .text(':00', `${CB.NOTIFY}:${section}:minute:${hour}:00`)
     .text(':15', `${CB.NOTIFY}:${section}:minute:${hour}:15`)
     .text(':30', `${CB.NOTIFY}:${section}:minute:${hour}:30`)
     .text(':45', `${CB.NOTIFY}:${section}:minute:${hour}:45`)
     .row()
-    .text('← Back', `${CB.NOTIFY}:${section}:time`);
+    .text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:${section}:time`);
 }
 
-export function notifyReminderIntervalsKeyboard(activeIntervals: number[]): InlineKeyboard {
+export function notifyReminderIntervalsKeyboard(activeIntervals: number[], lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const ALL = [0, 5, 15, 30, 60, 1440];
-  const labels: Record<number, string> = {
-    0: 'at start',
-    5: '5min',
-    15: '15min',
-    30: '30min',
-    60: '1hr',
-    1440: '1day',
-  };
+  const labels: Record<number, string> =
+    lang === 'ru'
+      ? { 0: 'в начале', 5: '5мин', 15: '15мин', 30: '30мин', 60: '1ч', 1440: '1день' }
+      : { 0: 'at start', 5: '5min', 15: '15min', 30: '30min', 60: '1hr', 1440: '1day' };
   const kb = new InlineKeyboard();
   for (let i = 0; i < ALL.length; i++) {
     const m = ALL[i]!;
@@ -350,31 +366,34 @@ export function notifyReminderIntervalsKeyboard(activeIntervals: number[]): Inli
     if ((i + 1) % 3 === 0) kb.row();
   }
   kb.row();
-  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:menu`);
   return kb;
 }
 
-export function notifyEveningKeyboard(enabled: boolean): InlineKeyboard {
+export function notifyEveningKeyboard(enabled: boolean, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
-  kb.text(enabled ? '❌ Disable' : '✅ Enable', `${CB.NOTIFY}:evening:toggle`);
-  kb.text('🕐 Change Time', `${CB.NOTIFY}:evening:time`);
+  kb.text(
+    enabled ? (lang === 'ru' ? '❌ Выключить' : '❌ Disable') : lang === 'ru' ? '✅ Включить' : '✅ Enable',
+    `${CB.NOTIFY}:evening:toggle`,
+  );
+  kb.text(lang === 'ru' ? '🕐 Изменить время' : '🕐 Change Time', `${CB.NOTIFY}:evening:time`);
   kb.row();
-  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:menu`);
   return kb;
 }
 
-export function notifyQuietKeyboard(enabled: boolean): InlineKeyboard {
+export function notifyQuietKeyboard(enabled: boolean, lang: 'en' | 'ru' = 'en'): InlineKeyboard {
   const kb = new InlineKeyboard();
   if (enabled) {
-    kb.text('❌ Disable', `${CB.NOTIFY}:quiet:toggle`);
+    kb.text(lang === 'ru' ? '❌ Выключить' : '❌ Disable', `${CB.NOTIFY}:quiet:toggle`);
     kb.row();
-    kb.text('🕐 Change Start', `${CB.NOTIFY}:quiet:start`);
-    kb.text('🕐 Change End', `${CB.NOTIFY}:quiet:end`);
+    kb.text(lang === 'ru' ? '🕐 Изменить начало' : '🕐 Change Start', `${CB.NOTIFY}:quiet:start`);
+    kb.text(lang === 'ru' ? '🕐 Изменить конец' : '🕐 Change End', `${CB.NOTIFY}:quiet:end`);
   } else {
-    kb.text('✅ Enable', `${CB.NOTIFY}:quiet:toggle`);
+    kb.text(lang === 'ru' ? '✅ Включить' : '✅ Enable', `${CB.NOTIFY}:quiet:toggle`);
   }
   kb.row();
-  kb.text('← Back', `${CB.NOTIFY}:menu`);
+  kb.text(lang === 'ru' ? '← Назад' : '← Back', `${CB.NOTIFY}:menu`);
   return kb;
 }
 

@@ -8,6 +8,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { parseDuration, parseSimpleDate } from '../../utils/date.ts';
 import {
+  cancelKeyboard,
   eventActionsKeyboard,
   recurrenceEndKeyboard,
   recurrenceKeyboard,
@@ -37,12 +38,12 @@ export function createAddEventScene(
       .step('message', async (context) => {
         const { lang } = context;
         if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_title_prompt);
+          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
         }
         const text = context.text;
         if (!text?.trim()) {
-          await context.send(t(lang).add_title_prompt);
+          await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
         }
         await context.scene.update({ title: text.trim() });
@@ -51,7 +52,7 @@ export function createAddEventScene(
       .step('message', async (context) => {
         const { lang, dbUser: user } = context;
         if (context.scene.step.firstTime) {
-          await context.send(t(lang).add_time_prompt);
+          await context.send(t(lang).add_time_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
         }
         const text = context.text;

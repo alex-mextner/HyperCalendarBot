@@ -1,7 +1,7 @@
 // src/bot/commands/settings.ts
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
-import { CB } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -19,36 +19,39 @@ const NumberArrayCodec = jsonCodec(z.array(z.number()));
 export const pendingDurationInput = new Map<number, number>(); // userId → timestamp
 export const pendingGroupTzInput = new Map<number, { chatId: number; ts: number; lang: 'en' | 'ru' }>(); // userId → { chatId, ts, lang }
 
-export function settingsCategoryKeyboard(): InlineKeyboard {
+export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
+  const s = t(lang).settings;
   return new InlineKeyboard()
-    .text('🌍 Основные', 'stg:general')
-    .text('🔔 Уведомления', 'stg:notifications')
+    .text(s.categoryGeneral, 'stg:general')
+    .text(s.categoryNotifications, 'stg:notifications')
     .row()
-    .text('📞 Звонки', 'stg:calls')
-    .text('🔒 Приватность', 'stg:privacy')
+    .text(s.categoryCalls, 'stg:calls')
+    .text(s.categoryPrivacy, 'stg:privacy')
     .row()
-    .text('🎤 Голос', 'stg:voice')
+    .text(s.categoryVoice, 'stg:voice')
     .row()
-    .text('✖️ Закрыть', 'stg:close');
+    .text(s.close, 'stg:close');
 }
 
 const VISIBILITIES = ['private', 'free_busy', 'full'] as const;
 type Visibility = (typeof VISIBILITIES)[number];
 
-function visLabel(v: string): string {
-  if (v === 'free_busy') return 'Занят/свободен';
-  if (v === 'full') return 'Полный доступ';
-  return 'Приватно';
+function visLabel(v: string, lang: 'en' | 'ru'): string {
+  const s = t(lang).settings;
+  if (v === 'free_busy') return s.visibilityFreeBusy;
+  if (v === 'full') return s.visibilityFull;
+  return s.visibilityPrivate;
 }
 
-function backRow(kb: InlineKeyboard): InlineKeyboard {
-  return kb.row().text('🔙 Назад', 'stg:back');
+function backRow(kb: InlineKeyboard, lang: 'en' | 'ru'): InlineKeyboard {
+  return kb.row().text(t(lang).settings.back, 'stg:back');
 }
 
-function fmtReminderInterval(m: number): string {
-  if (m === 0) return 'в начале';
-  if (m >= 60) return `${m / 60}ч`;
-  return `${m}мин`;
+function fmtReminderInterval(m: number, lang: 'en' | 'ru'): string {
+  const s = t(lang).settings;
+  if (m === 0) return s.reminderAtStart;
+  if (m >= 60) return lang === 'ru' ? `${m / 60}ч` : `${m / 60}h`;
+  return lang === 'ru' ? `${m}мин` : `${m}min`;
 }
 
 // ─── General ─────────────────────────────────────────────────────────────────
@@ -77,7 +80,7 @@ export function buildGeneralText(
 
 export function buildGeneralView(user: User): { text: string; kb: InlineKeyboard } {
   const tzDisplay = getTimezoneDisplay(user.timezone);
-  const lang = user.language ?? 'en';
+  const lang = (user.language ?? 'en') as 'en' | 'ru';
   const country = user.country_code ?? '—';
   const duration = user.default_event_duration_minutes ?? 60;
   const ru = lang === 'ru';
@@ -128,60 +131,65 @@ function buildNotificationsView(
   quietStart: string | null,
   quietEnd: string | null,
   intervals: number[],
+  lang: 'en' | 'ru',
 ): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
   const fmtTime = (on: boolean, time: string) => (on ? `✅ ${time}` : '❌');
-  const fmtQuiet = (on: boolean, s: string | null, e: string | null) => (on && s && e ? `✅ ${s}–${e}` : '❌');
+  const fmtQuiet = (on: boolean, ss: string | null, e: string | null) => (on && ss && e ? `✅ ${ss}–${e}` : '❌');
 
   const text = [
-    '🔔 Уведомления',
+    s.notificationsTitle,
     '',
-    `Утренняя сводка: ${fmtTime(morningEnabled, morningTime)}`,
-    '  Краткая повестка дня отправляется каждое утро.',
-    `Вечерний обзор: ${fmtTime(eveningEnabled, eveningTime)}`,
-    '  Список событий на завтра — удобно проверить перед сном.',
-    `Тихие часы: ${fmtQuiet(quietEnabled, quietStart, quietEnd)}`,
-    '  Напоминания и звонки не беспокоят в это время.',
-    `Напоминания: ${intervals.map(fmtReminderInterval).join(', ')}`,
-    '  За сколько до события бот присылает напоминание.',
+    `${s.morningAgenda}: ${fmtTime(morningEnabled, morningTime)}`,
+    `  ${s.morningAgendaDesc}`,
+    `${s.eveningReview}: ${fmtTime(eveningEnabled, eveningTime)}`,
+    `  ${s.eveningReviewDesc}`,
+    `${s.quietHours}: ${fmtQuiet(quietEnabled, quietStart, quietEnd)}`,
+    `  ${s.quietHoursDesc}`,
+    `${s.reminders}: ${intervals.map((m) => fmtReminderInterval(m, lang)).join(', ')}`,
+    `  ${s.remindersDesc}`,
   ].join('\n');
 
   const kb = backRow(
     new InlineKeyboard()
-      .text(`${morningEnabled ? '✅' : '❌'} Утренняя сводка`, 'stg:toggle_morning')
+      .text(`${morningEnabled ? '✅' : '❌'} ${s.toggleMorning}`, 'stg:toggle_morning')
       .row()
-      .text(`${eveningEnabled ? '✅' : '❌'} Вечерний обзор`, 'stg:toggle_evening')
+      .text(`${eveningEnabled ? '✅' : '❌'} ${s.toggleEvening}`, 'stg:toggle_evening')
       .row()
-      .text(`${quietEnabled ? '✅' : '❌'} Тихие часы`, 'stg:toggle_quiet')
+      .text(`${quietEnabled ? '✅' : '❌'} ${s.toggleQuiet}`, 'stg:toggle_quiet')
       .row()
-      .text('⏰ Интервалы напоминаний', 'stg:edit_reminders'),
+      .text(s.editReminders, 'stg:edit_reminders'),
+    lang,
   );
 
   return { text, kb };
 }
 
-function buildReminderIntervalsView(intervals: number[]): { text: string; kb: InlineKeyboard } {
-  const text = [
-    '⏰ Интервалы напоминаний',
-    '',
-    `Активные: ${intervals.length > 0 ? intervals.map(fmtReminderInterval).join(', ') : 'не заданы'}`,
-    '  Выберите за сколько до события отправлять напоминание.',
-  ].join('\n');
-  return { text, kb: reminderIntervalsKeyboard(intervals) };
+function buildReminderIntervalsView(intervals: number[], lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
+  const active =
+    intervals.length > 0 ? intervals.map((m) => fmtReminderInterval(m, lang)).join(', ') : s.reminderIntervalsNone;
+  const text = [s.reminderIntervalsTitle, '', s.reminderIntervalsActive(active), `  ${s.reminderIntervalsHint}`].join(
+    '\n',
+  );
+  return { text, kb: reminderIntervalsKeyboard(intervals, lang) };
 }
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
 
-function buildCallsView(enabled: boolean): { text: string; kb: InlineKeyboard } {
+function buildCallsView(enabled: boolean, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
   const text = [
-    '📞 Голосовые звонки',
+    s.callsTitle,
     '',
-    `Звонки-напоминания: ${enabled ? '✅ Включены' : '❌ Отключены'}`,
-    '  Бот позвонит вам перед событием и зачитает название.',
-    '  Работает через Telegram-звонок — не нужен номер телефона.',
-    '  Тихие часы распространяются и на звонки.',
+    enabled ? s.callsEnabled : s.callsDisabled,
+    `  ${s.callsDesc1}`,
+    `  ${s.callsDesc2}`,
+    `  ${s.callsDesc3}`,
   ].join('\n');
   const kb = backRow(
-    new InlineKeyboard().text(enabled ? '❌ Отключить звонки' : '✅ Включить звонки', 'stg:toggle_calls'),
+    new InlineKeyboard().text(enabled ? s.toggleCallsDisable : s.toggleCallsEnable, 'stg:toggle_calls'),
+    lang,
   );
   return { text, kb };
 }
@@ -192,30 +200,33 @@ function buildPrivacyView(
   visibility: string,
   inlineEnabled: boolean,
   invitations: boolean,
+  lang: 'en' | 'ru',
 ): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
   const visDesc: Record<string, string> = {
-    private: 'Только вы видите свои события.',
-    free_busy: 'Другие видят что вы заняты, но не что именно.',
-    full: 'Другие видят названия и детали ваших событий.',
+    private: s.visibilityPrivateDesc,
+    free_busy: s.visibilityFreeBusyDesc,
+    full: s.visibilityFullDesc,
   };
   const text = [
-    '🔒 Приватность',
+    s.privacyTitle,
     '',
-    `Видимость событий: ${visLabel(visibility)}`,
+    `${s.visibilityLabel}: ${visLabel(visibility, lang)}`,
     `  ${visDesc[visibility] ?? ''}`,
-    `Инлайн-поиск: ${inlineEnabled ? '✅' : '❌'}`,
-    '  Позволяет @HyperCalendarBot находить вас через inline-режим.',
-    `Приглашения: ${invitations ? '✅' : '❌'}`,
-    '  Разрешить другим пользователям приглашать вас на события.',
+    `${s.inlineSearch}: ${inlineEnabled ? '✅' : '❌'}`,
+    `  ${s.inlineSearchDesc}`,
+    `${s.invitations}: ${invitations ? '✅' : '❌'}`,
+    `  ${s.invitationsDesc}`,
   ].join('\n');
 
   const kb = backRow(
     new InlineKeyboard()
-      .text(`👁 Видимость: ${visLabel(visibility)} →`, 'stg:cycle_visibility')
+      .text(s.cycleVisibility(visLabel(visibility, lang)), 'stg:cycle_visibility')
       .row()
-      .text(`${inlineEnabled ? '✅' : '❌'} Инлайн-поиск`, 'stg:toggle_inline')
+      .text(`${inlineEnabled ? '✅' : '❌'} ${s.inlineSearch}`, 'stg:toggle_inline')
       .row()
-      .text(`${invitations ? '✅' : '❌'} Приглашения`, 'stg:toggle_invitations'),
+      .text(`${invitations ? '✅' : '❌'} ${s.invitations}`, 'stg:toggle_invitations'),
+    lang,
   );
 
   return { text, kb };
@@ -223,21 +234,20 @@ function buildPrivacyView(
 
 // ─── Voice ──────────────────────────────────────────────────────────────────
 
-function buildVoiceView(voiceEnabled: number | null): { text: string; kb: InlineKeyboard } {
-  const status = voiceEnabled === null ? '❓ Не задано' : voiceEnabled === 1 ? '✅ Включены' : '❌ Отключены';
+function buildVoiceView(voiceEnabled: number | null, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
+  const status = voiceEnabled === null ? s.voiceNotSet : voiceEnabled === 1 ? s.voiceEnabled : s.voiceDisabled;
   const text = [
-    '🎤 Голосовые ответы',
+    s.voiceTitle,
     '',
-    `Голосовые ответы: ${status}`,
-    '  Когда включено — бот отвечает на сообщения голосом (TTS).',
-    '  Работает на русском и английском в зависимости от языка бота.',
-    '  Текстовый ответ отправляется всегда, голос — дополнительно.',
+    `${s.voiceStatus}: ${status}`,
+    `  ${s.voiceDesc1}`,
+    `  ${s.voiceDesc2}`,
+    `  ${s.voiceDesc3}`,
   ].join('\n');
   const kb = backRow(
-    new InlineKeyboard().text(
-      voiceEnabled === 1 ? '❌ Отключить голосовые ответы' : '✅ Включить голосовые ответы',
-      'stg:toggle_voice',
-    ),
+    new InlineKeyboard().text(voiceEnabled === 1 ? s.toggleVoiceDisable : s.toggleVoiceEnable, 'stg:toggle_voice'),
+    lang,
   );
   return { text, kb };
 }
@@ -275,8 +285,10 @@ export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupCha
     await handleGroupSettings(ctx, groupRepo);
     return;
   }
-  await ctx.send('⚙️ Настройки / Settings', {
-    reply_markup: settingsCategoryKeyboard(),
+  const user = ctx.dbUser as User;
+  const lang = (user.language ?? 'en') as 'en' | 'ru';
+  await ctx.send(t(lang).settings.title, {
+    reply_markup: settingsCategoryKeyboard(lang),
   });
 }
 
@@ -291,6 +303,8 @@ export async function handleSettingsCallback(
   sharingSettingsRepo?: SharingSettingsRepository,
   userRepo?: UserRepository,
 ): Promise<void> {
+  const lang = (user.language ?? 'en') as 'en' | 'ru';
+
   if (subAction === 'close') {
     await ctx.answer();
     await ctx.message?.delete();
@@ -299,7 +313,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'back') {
     await ctx.answer();
-    await ctx.editText('⚙️ Настройки / Settings', { reply_markup: settingsCategoryKeyboard() });
+    await ctx.editText(t(lang).settings.title, { reply_markup: settingsCategoryKeyboard(lang) });
     return;
   }
 
@@ -312,8 +326,8 @@ export async function handleSettingsCallback(
     let currentUser = user;
 
     if (subAction.startsWith('set_lang:') && userRepo) {
-      const lang = subAction.split(':')[1] as 'en' | 'ru';
-      const updated = userRepo.update(currentUser.telegram_id, { language: lang });
+      const newLang = subAction.split(':')[1] as 'en' | 'ru';
+      const updated = userRepo.update(currentUser.telegram_id, { language: newLang });
       if (updated) currentUser = updated;
     }
     if (subAction.startsWith('set_country:') && userRepo) {
@@ -323,9 +337,10 @@ export async function handleSettingsCallback(
     }
 
     if (subAction === 'show_countries') {
+      const currentLang = (currentUser.language ?? 'en') as 'en' | 'ru';
       await ctx.answer();
-      await ctx.editText('🏳️ Выберите страну:', {
-        reply_markup: countryPickerKeyboard(currentUser.country_code),
+      await ctx.editText(t(currentLang).settings.showCountries, {
+        reply_markup: countryPickerKeyboard(currentUser.country_code, currentLang),
       });
       return;
     }
@@ -356,7 +371,7 @@ export async function handleSettingsCallback(
       prefsService.updateDefaultIntervals(user.telegram_id, intervals);
     }
 
-    const { text, kb } = buildReminderIntervalsView(intervals);
+    const { text, kb } = buildReminderIntervalsView(intervals, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
@@ -379,6 +394,7 @@ export async function handleSettingsCallback(
       prefs.quiet_hours_start,
       prefs.quiet_hours_end,
       intervals,
+      lang,
     );
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
@@ -397,7 +413,7 @@ export async function handleSettingsCallback(
       }
       enabled = !!callSettingsRepo.get(user.telegram_id)?.enabled;
     }
-    const { text, kb } = buildCallsView(enabled);
+    const { text, kb } = buildCallsView(enabled, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
@@ -437,7 +453,7 @@ export async function handleSettingsCallback(
         invitations = !!settings.allow_invitations;
       }
     }
-    const { text, kb } = buildPrivacyView(visibility, inlineEnabled, invitations);
+    const { text, kb } = buildPrivacyView(visibility, inlineEnabled, invitations, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
@@ -453,7 +469,7 @@ export async function handleSettingsCallback(
   }
 
   if (subAction === 'voice' || subAction === 'toggle_voice') {
-    const { text, kb } = buildVoiceView(currentUser.voice_response_enabled);
+    const { text, kb } = buildVoiceView(currentUser.voice_response_enabled, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
@@ -461,7 +477,6 @@ export async function handleSettingsCallback(
 
   if (subAction === 'edit_duration') {
     const duration = user.default_event_duration_minutes ?? 60;
-    const lang = (user.language ?? 'en') as 'en' | 'ru';
     const { text, kb } = buildDurationView(duration, lang);
     pendingDurationInput.set(user.telegram_id, Date.now());
     await ctx.answer();
@@ -476,8 +491,8 @@ export async function handleSettingsCallback(
       pendingDurationInput.delete(user.telegram_id);
     }
     const updated = userRepo.findByTelegramId(user.telegram_id) ?? user;
-    const lang = (updated.language ?? 'en') as 'en' | 'ru';
-    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60, lang);
+    const updatedLang = (updated.language ?? 'en') as 'en' | 'ru';
+    const { text, kb } = buildDurationView(updated.default_event_duration_minutes ?? 60, updatedLang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;

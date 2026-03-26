@@ -51,7 +51,7 @@ async function sendSecretaryInvite(
   });
 
   if (result.messageId) {
-    ctx.secretaryRepo!.setDmMessageId(record.id, result.messageId);
+    ctx.secretary!.secretaryRepo.setDmMessageId(record.id, result.messageId);
   }
 }
 
@@ -77,7 +77,7 @@ async function sendSecretaryNotification(
 }
 
 export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): ToolResult {
-  if (!ctx.secretaryRepo || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
+  if (!ctx.secretary || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
 
   if (input.action === 'invite') {
     const { secretary_telegram_id, permission } = input;
@@ -87,10 +87,10 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
     const secretaryUser = ctx.userRepo.findByTelegramId(secretary_telegram_id);
     if (!secretaryUser) return { success: false, error: 'SECRETARY_NOT_FOUND' };
 
-    if (ctx.secretaryRepo.countActive(ctx.user.telegram_id) >= 10)
+    if (ctx.secretary!.secretaryRepo.countActive(ctx.user.telegram_id) >= 10)
       return { success: false, error: 'SECRETARY_LIMIT_REACHED' };
 
-    const record = ctx.secretaryRepo.upsert({
+    const record = ctx.secretary!.secretaryRepo.upsert({
       owner_id: ctx.user.telegram_id,
       secretary_id: secretary_telegram_id,
       permission,
@@ -108,11 +108,11 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
 
   if (input.action === 'revoke') {
     if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for revoke.' };
-    const record = ctx.secretaryRepo.findById(input.secretary_access_id);
+    const record = ctx.secretary!.secretaryRepo.findById(input.secretary_access_id);
     if (!record || record.owner_id !== ctx.user.telegram_id)
       return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
 
-    ctx.secretaryRepo.updateStatus(record.id, 'revoked');
+    ctx.secretary!.secretaryRepo.updateStatus(record.id, 'revoked');
 
     const secUser = ctx.userRepo!.findByTelegramId(record.secretary_id);
     if (secUser && ctx.sender) {
@@ -130,11 +130,11 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
 
   if (input.action === 'self_remove') {
     if (!input.secretary_access_id) return { success: false, error: 'secretary_access_id required for self_remove.' };
-    const record = ctx.secretaryRepo.findById(input.secretary_access_id);
+    const record = ctx.secretary!.secretaryRepo.findById(input.secretary_access_id);
     if (!record) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
     if (record.secretary_id !== ctx.user.telegram_id) return { success: false, error: 'SECRETARY_ACCESS_DENIED' };
 
-    ctx.secretaryRepo.updateStatus(record.id, 'revoked');
+    ctx.secretary!.secretaryRepo.updateStatus(record.id, 'revoked');
 
     const secName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const secHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
@@ -154,10 +154,10 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
 }
 
 export function handleListCalendarAccess(ctx: AgentContext): ToolResult {
-  if (!ctx.secretaryRepo || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
+  if (!ctx.secretary || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
 
-  const secretaryForRecords = ctx.secretaryRepo.getActiveSecretaryFor(ctx.user.telegram_id);
-  const mySecretaryRecords = ctx.secretaryRepo.getSecretariesForOwner(ctx.user.telegram_id);
+  const secretaryForRecords = ctx.secretary!.secretaryRepo.getActiveSecretaryFor(ctx.user.telegram_id);
+  const mySecretaryRecords = ctx.secretary!.secretaryRepo.getSecretariesForOwner(ctx.user.telegram_id);
 
   const enrichUser = (telegramId: number) => {
     const u = ctx.userRepo!.findByTelegramId(telegramId);

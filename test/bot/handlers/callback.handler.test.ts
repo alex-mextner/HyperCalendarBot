@@ -50,19 +50,7 @@ function makeHandler(overrides: { [key: string]: unknown } = {}) {
     getEventsForWeek: mock(() => []),
     ...overrides,
   };
-  return createCallbackHandler(
-    eventService as never,
-    {} as never, // editValueScene
-    {} as never, // holidayService
-    {} as never, // prefsService
-    undefined, // calendarRepo
-    undefined, // disconnectDeps
-    undefined, // onCalendarsDone
-    undefined, // renderService
-    undefined, // invitationService
-    undefined, // eventRepo
-    undefined, // chatHistoryRepo
-  );
+  return createCallbackHandler(eventService as never, {} as never, {} as never, {} as never);
 }
 
 describe('createCallbackHandler', () => {
@@ -99,20 +87,7 @@ describe('createCallbackHandler', () => {
 
   test('ai_btn triggers callback', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // chatHistoryRepo
-      onAiButtonClick,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
     const ctx = makeCtx('ai_btn:Да');
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
@@ -121,20 +96,7 @@ describe('createCallbackHandler', () => {
 
   test('ai_btn with userId restriction allows matching user', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
-    const handler = createCallbackHandler(
-      {} as never,
-      {} as never,
-      {} as never,
-      {} as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      undefined, // chatHistoryRepo
-      onAiButtonClick,
-    );
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
     // User 100 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
     await handler(ctx as never);

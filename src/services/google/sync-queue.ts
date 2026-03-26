@@ -1,4 +1,6 @@
 // src/services/google/sync-queue.ts
+
+import type { Database } from 'bun:sqlite';
 import { Queue, Worker } from 'bullmq';
 import type { OAuth2Client } from 'google-auth-library';
 import type { EnvConfig } from '../../config/env.ts';
@@ -32,6 +34,7 @@ export interface GoogleSyncJobData {
 }
 
 interface GoogleSyncQueueDeps {
+  db: Database;
   config: EnvConfig;
   redisUrl: string;
   oauthService: GoogleOAuthService;
@@ -43,6 +46,7 @@ interface GoogleSyncQueueDeps {
   onWatchRenewalTick?: () => Promise<void>;
   onCleanupTick?: () => void;
   sendMessage: (telegramId: number, text: string) => Promise<void>;
+  syncService?: SyncService;
 }
 
 export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
@@ -58,7 +62,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
     },
   });
 
-  const syncService = new SyncService(deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage);
+  const syncService =
+    deps.syncService ?? new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage);
 
   const worker = new Worker<GoogleSyncJobData>(
     'google-sync',
@@ -82,7 +87,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
 
       let authClient: OAuth2Client;
       try {
-        authClient = deps.oauthService.getAuthClient(userId);
+        authClient = await deps.oauthService.getAuthClient(userId);
       } catch (err) {
         if (
           (err as { name?: string }).name === 'GoogleNotConnectedError' ||
@@ -154,7 +159,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         }
       }
     },
-    { connection, concurrency: 3 },
+    { connection, concurrency: 1 },
   );
 
   worker.on('failed', (job, err) => {

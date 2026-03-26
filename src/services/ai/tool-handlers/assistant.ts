@@ -16,18 +16,18 @@ export async function handleAssistantTool(
   toolName: AgentCommand['type'],
   payload: AgentCommand['payload'],
 ): Promise<ToolResult> {
-  if (!ctx.agentRegistry?.isConnected(ctx.user.telegram_id)) {
+  if (!ctx.agents?.agentRegistry.isConnected(ctx.user.telegram_id)) {
     return notConnected(ctx.user.language);
   }
 
   const chunks: string[] = [];
   const onChunk = (text: string) => {
     chunks.push(text);
-    ctx.onAgentChunk?.(text);
+    ctx.agents?.onAgentChunk?.(text);
   };
 
   try {
-    const result = await ctx.agentDispatcher!.send(ctx.user.telegram_id, toolName, payload, onChunk);
+    const result = await ctx.agents.agentDispatcher.send(ctx.user.telegram_id, toolName, payload, onChunk);
     const text = chunks.join('') || String(result.data ?? '');
     const exitInfo = result.exitCode !== undefined ? ` (exit ${result.exitCode})` : '';
     return {

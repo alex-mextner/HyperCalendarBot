@@ -10,6 +10,8 @@ export type BotTaskJobType =
   | 'cron-proposal-expiry'
   | 'cron-session-cleanup'
   | 'cron-birthday-sync'
+  | 'cron-chat-history-cleanup'
+  | 'cron-sqlite-backup'
   | 'cron-recurring-reminders'
   | 'cron-action-log-cleanup';
 
@@ -24,6 +26,8 @@ interface BotTasksQueueDeps {
   onProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
+  onChatHistoryCleanup?: () => void;
+  onSqliteBackup?: () => Promise<void>;
   onRecurringReminders?: () => void;
   onActionLogCleanup?: () => void;
 }
@@ -62,6 +66,14 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-birthday-sync') {
         if (deps.onBirthdaySync) await deps.onBirthdaySync();
+        return;
+      }
+      if (job.data.type === 'cron-chat-history-cleanup') {
+        deps.onChatHistoryCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-sqlite-backup') {
+        if (deps.onSqliteBackup) await deps.onSqliteBackup();
         return;
       }
       if (job.data.type === 'cron-recurring-reminders') {
@@ -128,6 +140,24 @@ export async function setupBirthdaySyncCron(queue: Queue<BotTaskJobData>): Promi
     { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'birthday-sync-tick' },
   );
   botTasksLogger.info('Birthday sync cron scheduled (daily)');
+}
+
+export async function setupChatHistoryCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'chat-history-cleanup-tick',
+    { type: 'cron-chat-history-cleanup' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'chat-history-cleanup-tick' },
+  );
+  botTasksLogger.info('Chat history cleanup cron scheduled (daily)');
+}
+
+export async function setupSqliteBackupCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'sqlite-backup-tick',
+    { type: 'cron-sqlite-backup' },
+    { repeat: { every: 24 * 60 * 60_000 }, removeOnComplete: true, jobId: 'sqlite-backup-tick' },
+  );
+  botTasksLogger.info('SQLite backup cron scheduled (daily)');
 }
 
 export async function setupRecurringRemindersCron(queue: Queue<BotTaskJobData>): Promise<void> {

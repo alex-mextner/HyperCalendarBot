@@ -8,24 +8,28 @@ import { HolidayRepository } from '../../../../src/database/repositories/holiday
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { handleCalculate } from '../../../../src/services/ai/tool-handlers/calculate.ts';
 import {
-  getTimezoneSuggestions,
   handleAddContact,
-  handleAskUser,
-  handleCalculate,
-  handleConvertToTimezone,
   handleFindContact,
+  handleGetContacts,
+  handleUpdateContact,
+} from '../../../../src/services/ai/tool-handlers/contacts.ts';
+import {
+  handleAskUser,
   handleFindUser,
   handleGetBotInfo,
-  handleGetContacts,
   handleGetHolidays,
-  handleGetTimezoneInfo,
   handleMakeCall,
   handlePickUsers,
-  handleRenderDayImage,
-  handleUpdateContact,
-  validateAndGetOffset,
 } from '../../../../src/services/ai/tool-handlers/meta.ts';
+import { handleRenderDayImage } from '../../../../src/services/ai/tool-handlers/render.ts';
+import {
+  getTimezoneSuggestions,
+  handleConvertToTimezone,
+  handleGetTimezoneInfo,
+  validateAndGetOffset,
+} from '../../../../src/services/ai/tool-handlers/timezone.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
@@ -386,7 +390,7 @@ describe('meta tool handlers', () => {
       photoCalls = [];
       ctx.renderService = {
         renderDirect(job) {
-          renderCalls.push(job);
+          renderCalls.push(job as unknown as ImageRenderJob);
           return Promise.resolve(Buffer.from('png'));
         },
       };

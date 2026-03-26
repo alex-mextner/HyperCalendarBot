@@ -3,6 +3,13 @@ import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
+import { handleCalculate } from './tool-handlers/calculate.ts';
+import {
+  handleAddContact,
+  handleFindContact,
+  handleGetContacts,
+  handleUpdateContact,
+} from './tool-handlers/contacts.ts';
 import {
   handleCreateEvent,
   handleDeleteEvent,
@@ -18,31 +25,22 @@ import { handleSendFeedback } from './tool-handlers/feedback.ts';
 import { handleGetHistory } from './tool-handlers/history.ts';
 import { handleRememberUserFact, handleSetReaction } from './tool-handlers/memory.ts';
 import {
-  handleAddContact,
   handleAskUser,
-  handleCalculate,
-  handleConvertToTimezone,
   handleEndCall,
   handleEndConversation,
-  handleFindContact,
   handleFindUser,
   handleGetBotInfo,
-  handleGetContacts,
   handleGetGoogleCalendarStatus,
   handleGetHolidays,
-  handleGetTimezoneInfo,
   handleListGoogleCalendars,
   handleLookupStress,
   handleMakeCall,
   handlePickUsers,
-  handleRenderDayImage,
-  handleRenderTable,
-  handleRenderWeekImage,
-  handleUpdateContact,
 } from './tool-handlers/meta.ts';
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
+import { handleRenderDayImage, handleRenderTable, handleRenderWeekImage } from './tool-handlers/render.ts';
 import { handleCancelScene, handleResumeScene } from './tool-handlers/scenes.ts';
 import {
   handleAddTrigger,
@@ -69,6 +67,7 @@ import {
   handleShareEvent,
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
+import { handleConvertToTimezone, handleGetTimezoneInfo } from './tool-handlers/timezone.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -495,12 +494,12 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as AgentCommand['payload']);
 
       case 'resume_scene':
-        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleResumeScene(ctx, ctx.scenePauseService);
+        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleResumeScene(ctx, ctx.scene?.scenePauseService);
 
       case 'cancel_scene':
-        if (!ctx.scenePauseService) return { success: false, error: 'Scene pause not available' };
-        return handleCancelScene(ctx, ctx.scenePauseService);
+        if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };
+        return handleCancelScene(ctx, ctx.scene?.scenePauseService);
 
       default:
         return { success: false, error: `Unknown tool: ${toolName}` };

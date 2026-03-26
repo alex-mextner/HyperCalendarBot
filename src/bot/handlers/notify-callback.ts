@@ -100,7 +100,7 @@ async function handleMorningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_morning}\n\n${msgs.notify_morning_status(!!prefs.morning_agenda_enabled, prefs.morning_agenda_time)}`,
-      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled) },
+      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled, lang) },
     );
     return;
   }
@@ -111,21 +111,21 @@ async function handleMorningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_morning}\n\n${msgs.notify_morning_status(!!prefs.morning_agenda_enabled, prefs.morning_agenda_time)}`,
-      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled) },
+      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled, lang) },
     );
     return;
   }
 
   if (action === 'time') {
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('morning') });
+    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('morning', lang) });
     return;
   }
 
   if (action === 'hour') {
     const hour = parts[2]!;
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard('morning', hour) });
+    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard('morning', hour, lang) });
     return;
   }
 
@@ -138,7 +138,7 @@ async function handleMorningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_morning}\n\n${msgs.notify_morning_status(!!prefs.morning_agenda_enabled, prefs.morning_agenda_time)}`,
-      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled) },
+      { reply_markup: notifyMorningKeyboard(!!prefs.morning_agenda_enabled, lang) },
     );
     return;
   }
@@ -161,7 +161,7 @@ async function handleEveningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_evening}\n\n${msgs.notify_evening_status(!!prefs.evening_review_enabled, prefs.evening_review_time)}`,
-      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled) },
+      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled, lang) },
     );
     return;
   }
@@ -172,21 +172,21 @@ async function handleEveningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_evening}\n\n${msgs.notify_evening_status(!!prefs.evening_review_enabled, prefs.evening_review_time)}`,
-      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled) },
+      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled, lang) },
     );
     return;
   }
 
   if (action === 'time') {
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('evening') });
+    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('evening', lang) });
     return;
   }
 
   if (action === 'hour') {
     const hour = parts[2]!;
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard('evening', hour) });
+    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard('evening', hour, lang) });
     return;
   }
 
@@ -199,7 +199,7 @@ async function handleEveningSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_evening}\n\n${msgs.notify_evening_status(!!prefs.evening_review_enabled, prefs.evening_review_time)}`,
-      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled) },
+      { reply_markup: notifyEveningKeyboard(!!prefs.evening_review_enabled, lang) },
     );
     return;
   }
@@ -220,7 +220,7 @@ async function handleRemindersSection(
   const showMenu = async () => {
     const intervals = prefsService.resolveDefaultIntervals(user.telegram_id);
     await ctx.editText(`${msgs.notify_reminders}\n\n${msgs.notify_intervals_label(intervals)}`, {
-      reply_markup: notifyReminderIntervalsKeyboard(intervals),
+      reply_markup: notifyReminderIntervalsKeyboard(intervals, lang),
     });
   };
 
@@ -262,7 +262,7 @@ async function handleQuietSection(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_quiet}\n\n${msgs.notify_quiet_status(!!prefs.quiet_hours_enabled, prefs.quiet_hours_start ?? '23:00', prefs.quiet_hours_end ?? '07:00')}`,
-      { reply_markup: notifyQuietKeyboard(!!prefs.quiet_hours_enabled) },
+      { reply_markup: notifyQuietKeyboard(!!prefs.quiet_hours_enabled, lang) },
     );
   };
 
@@ -286,13 +286,13 @@ async function handleQuietSection(
 
   if (action === 'start') {
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('quiet_start') });
+    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('quiet_start', lang) });
     return;
   }
 
   if (action === 'end') {
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('quiet_end') });
+    await ctx.editText(msgs.notify_pick_hour, { reply_markup: notifyHourPickerKeyboard('quiet_end', lang) });
     return;
   }
 
@@ -313,7 +313,7 @@ async function handleQuietTimePicker(
   if (action === 'hour') {
     const hour = parts[2]!;
     await ctx.answer();
-    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard(section, hour) });
+    await ctx.editText(msgs.notify_pick_minute, { reply_markup: notifyMinutePickerKeyboard(section, hour, lang) });
     return;
   }
 
@@ -330,7 +330,7 @@ async function handleQuietTimePicker(
     const prefs = prefsService.getOrCreate(user.telegram_id);
     await ctx.editText(
       `${msgs.notify_quiet}\n\n${msgs.notify_quiet_status(!!prefs.quiet_hours_enabled, prefs.quiet_hours_start ?? '23:00', prefs.quiet_hours_end ?? '07:00')}`,
-      { reply_markup: notifyQuietKeyboard(!!prefs.quiet_hours_enabled) },
+      { reply_markup: notifyQuietKeyboard(!!prefs.quiet_hours_enabled, lang) },
     );
     return;
   }

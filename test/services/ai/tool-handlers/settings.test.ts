@@ -8,7 +8,6 @@ import { HolidayRepository } from '../../../../src/database/repositories/holiday
 import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
-import type { NotificationPreferencesUpdate } from '../../../../src/database/types.ts';
 import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -259,26 +258,15 @@ describe('handleManageSettings', () => {
     });
 
     test('update notifications with prefs configured', () => {
-      const prefs = {
-        user_id: 1,
-        morning_agenda_enabled: 0,
-        morning_agenda_time: '08:00',
-        morning_agenda_format: 'short',
-        default_reminder_intervals: '[15]',
-        evening_review_enabled: 0,
-        evening_review_time: '20:00',
-        evening_review_format: 'short',
-        quiet_hours_enabled: 0,
-        quiet_hours_start: null as string | null,
-        quiet_hours_end: null as string | null,
-        updated_at: '2024-01-01',
-      };
-      ctx.notificationPrefs = {
-        ensureDefaults: () => {},
-        getPrefs: () => prefs,
-        update: (_userId: number, patch: NotificationPreferencesUpdate) => {
-          Object.assign(prefs, patch);
-        },
+      const prefs: Record<string, unknown> = {};
+      ctx.notifications = {
+        notificationPrefs: {
+          ensureDefaults: () => {},
+          getPrefs: () => prefs,
+          update: (...args: unknown[]) => {
+            Object.assign(prefs, args[1] as Record<string, unknown>);
+          },
+        } as never,
       };
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -298,7 +286,11 @@ describe('handleManageSettings', () => {
     test('get assistant settings returns enabled/disabled status', () => {
       const aCtx = withAssistantCtx({
         user: { ...ctx.user, assistant_enabled: 0 },
-        agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => false }),
+        agents: {
+          agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => false }),
+          agentDispatcher: undefined as never,
+          onAgentChunk: undefined,
+        },
       });
       const result = handleManageSettings(aCtx, {
         action: 'get',
@@ -312,7 +304,11 @@ describe('handleManageSettings', () => {
     test('get assistant settings shows connected when agent is connected', () => {
       const aCtx = withAssistantCtx({
         user: { ...ctx.user, assistant_enabled: 1 },
-        agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => true }),
+        agents: {
+          agentRegistry: Object.assign(new AgentRegistry(), { isConnected: () => true }),
+          agentDispatcher: undefined as never,
+          onAgentChunk: undefined,
+        },
       });
       const result = handleManageSettings(aCtx, {
         action: 'get',

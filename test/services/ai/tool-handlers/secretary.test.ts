@@ -4,6 +4,7 @@ import {
   handleManageSecretaries,
 } from '../../../../src/services/ai/tool-handlers/secretary.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -41,7 +42,14 @@ test('list_calendar_access: returns own info + empty lists when no relations', (
   const mockUserRepo = {
     findByTelegramId: (id: number) => ({ telegram_id: id, username: 'alice', first_name: 'Alice' }),
   };
-  const ctx = makeCtx({ secretaryRepo: mockRepo as never, userRepo: mockUserRepo as never });
+  const ctx = makeCtx({
+    secretary: {
+      secretaryRepo: mockRepo as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
+    userRepo: mockUserRepo as never,
+  });
   const result = handleListCalendarAccess(ctx);
   expect(result.success).toBe(true);
   const out = JSON.parse(result.output!) as {
@@ -56,7 +64,11 @@ test('list_calendar_access: returns own info + empty lists when no relations', (
 
 test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing', () => {
   const ctx = makeCtx({
-    secretaryRepo: { upsert: () => ({}) } as never,
+    secretary: {
+      secretaryRepo: { upsert: () => ({}) } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => null } as never,
   });
   const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
@@ -66,7 +78,11 @@ test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing',
 
 test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', () => {
   const ctx = makeCtx({
-    secretaryRepo: { countActive: () => 10, upsert: () => ({}) } as never,
+    secretary: {
+      secretaryRepo: { countActive: () => 10, upsert: () => ({}) } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => ({ telegram_id: 999 }) } as never,
   });
   const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
@@ -75,10 +91,14 @@ test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', ()
 
 test('manage_secretaries invite: success returns awaiting_confirmation', () => {
   const ctx = makeCtx({
-    secretaryRepo: {
-      countActive: () => 0,
-      upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
-    } as never,
+    secretary: {
+      secretaryRepo: {
+        countActive: () => 0,
+        upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
     sender: { sendMessage: mock(async () => ({ message_id: 1 })) } as never,
   });
@@ -91,10 +111,14 @@ test('manage_secretaries invite: success returns awaiting_confirmation', () => {
 test('manage_secretaries revoke: updates status to revoked', () => {
   const mockUpdate = mock(() => true);
   const ctx = makeCtx({
-    secretaryRepo: {
-      findById: () => ({ id: 5, owner_id: 1, secretary_id: 99, status: 'active', permission: 'write' }),
-      updateStatus: mockUpdate,
-    } as never,
+    secretary: {
+      secretaryRepo: {
+        findById: () => ({ id: 5, owner_id: 1, secretary_id: 99, status: 'active', permission: 'write' }),
+        updateStatus: mockUpdate,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) } as never,
     sender: {} as never,
   });
@@ -105,10 +129,14 @@ test('manage_secretaries revoke: updates status to revoked', () => {
 
 test('manage_secretaries self_remove: fails if caller is not the secretary', () => {
   const ctx = makeCtx({
-    secretaryRepo: {
-      findById: () => ({ id: 5, owner_id: 10, secretary_id: 999, status: 'active' }), // secretary_id != ctx.user.telegram_id (1)
-      updateStatus: mock(() => true),
-    } as never,
+    secretary: {
+      secretaryRepo: {
+        findById: () => ({ id: 5, owner_id: 10, secretary_id: 999, status: 'active' }), // secretary_id != ctx.user.telegram_id (1)
+        updateStatus: mock(() => true),
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
   });
   const result = handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
   expect(result.success).toBe(false);
@@ -118,10 +146,14 @@ test('manage_secretaries self_remove: fails if caller is not the secretary', () 
 test('manage_secretaries self_remove: succeeds when caller matches secretary_id', () => {
   const mockUpdate = mock(() => true);
   const ctx = makeCtx({
-    secretaryRepo: {
-      findById: () => ({ id: 5, owner_id: 10, secretary_id: 1, status: 'active' }), // secretary_id == ctx.user.telegram_id (1)
-      updateStatus: mockUpdate,
-    } as never,
+    secretary: {
+      secretaryRepo: {
+        findById: () => ({ id: 5, owner_id: 10, secretary_id: 1, status: 'active' }), // secretary_id == ctx.user.telegram_id (1)
+        updateStatus: mockUpdate,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) } as never,
     sender: {} as never,
   });
@@ -134,17 +166,21 @@ test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', 
   const sendMessageWithKeyboard = mock(async () => ({ message_id: 42 }));
   const setDmMessageId = mock(() => {});
   const ctx = makeCtx({
-    secretaryRepo: {
-      countActive: () => 0,
-      upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
-      setDmMessageId,
-    } as never,
+    secretary: {
+      secretaryRepo: {
+        countActive: () => 0,
+        upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+        setDmMessageId,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
     userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
     sender: { sendMessageWithKeyboard } as never,
   });
   handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
   // Allow the fire-and-forget promise to settle
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await flushPromises();
   expect(sendMessageWithKeyboard).toHaveBeenCalledTimes(1);
   const [recipientId, , keyboard] = sendMessageWithKeyboard.mock.calls[0]! as unknown as [number, string, unknown];
   expect(recipientId).toBe(999);

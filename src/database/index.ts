@@ -2,7 +2,6 @@
 import { Database } from 'bun:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { SqliteEventMentionStore } from '../services/intent/event-mention-store.ts';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { ActionLogRepository } from './repositories/action-log.repository.ts';
@@ -62,7 +61,6 @@ export class DatabaseService {
   readonly calendarProposals: CalendarProposalRepository;
   readonly workflowSessions: WorkflowSessionRepository;
   readonly groupSessions: GroupSessionRepository;
-  readonly eventMentions: SqliteEventMentionStore;
   readonly birthdayMeta: BirthdayMetadataRepository;
   readonly userMemory: UserMemoryRepository;
   readonly actionLog: ActionLogRepository;
@@ -73,6 +71,10 @@ export class DatabaseService {
     this.db = new Database(dbPath);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA foreign_keys = ON');
+    this.db.exec('PRAGMA busy_timeout = 5000');
+    this.db.exec('PRAGMA synchronous = NORMAL');
+    this.db.exec('PRAGMA cache_size = -16000');
+    this.db.exec('PRAGMA mmap_size = 268435456');
 
     dbLogger.info({ path: dbPath }, 'Database opened');
 
@@ -103,7 +105,6 @@ export class DatabaseService {
     this.calendarProposals = new CalendarProposalRepository(this.db);
     this.workflowSessions = new WorkflowSessionRepository(this.db);
     this.groupSessions = new GroupSessionRepository(this.db);
-    this.eventMentions = new SqliteEventMentionStore(this.db);
     this.birthdayMeta = new BirthdayMetadataRepository(this.db);
     this.userMemory = new UserMemoryRepository(this.db);
     this.actionLog = new ActionLogRepository(this.db);

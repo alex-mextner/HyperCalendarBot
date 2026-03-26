@@ -23,7 +23,12 @@ function formatReminderDuration(minutesBefore: number, lang: string): string {
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -58,7 +63,12 @@ interface GetRemindersInput {
 }
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);

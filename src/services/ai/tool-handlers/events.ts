@@ -82,16 +82,16 @@ function buildGroupEventNotification(
 }
 
 function sendGroupNotifications(ctx: AgentContext, event: CalendarEvent, action: 'created' | 'updated'): void {
-  if (!ctx.groupChatId || !ctx.groupMemberService || !ctx.sender) return;
-  const groupChat = ctx.groupChatRepo?.findByChatId(ctx.groupChatId);
+  if (!ctx.groupChatId || !ctx.group?.groupMemberService || !ctx.sender) return;
+  const groupChat = ctx.group?.groupChatRepo.findByChatId(ctx.groupChatId);
   const groupLabel = ctx.groupTitle ?? groupChat?.title ?? String(ctx.groupChatId);
   const inviteLink = groupChat?.invite_link ?? null;
   const organizerLink = buildOrganizerLink(ctx.user);
   const sender = ctx.sender;
   const errorLabel =
     action === 'created' ? 'Group event notification failed' : 'Group event update notification failed';
-  ctx.groupMemberService
-    .getRegisteredMembers(ctx.groupChatId)
+  ctx
+    .group!.groupMemberService.getRegisteredMembers(ctx.groupChatId)
     .then((memberIds) => {
       for (const userId of memberIds) {
         const recipientUser = ctx.userRepo.findByTelegramId(userId);
@@ -186,7 +186,12 @@ interface SearchEventsInput {
 }
 
 export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -215,7 +220,7 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
     if (e.location) parts.push(`location: ${e.location}`);
     if (e.recurrence_rule) parts.push(`recurrence: ${e.recurrence_rule}`);
     if (e.owner_type === 'group' && e.group_id) {
-      const groupTitle = ctx.groupChatRepo?.findByChatId(e.group_id)?.title;
+      const groupTitle = ctx.group?.groupChatRepo.findByChatId(e.group_id)?.title;
       parts.push(`group: ${groupTitle ?? e.group_id}`);
     }
     if (e.created_by) {
@@ -230,7 +235,12 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
 }
 
 export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   // Block creation of events in the past — force the agent to confirm with the user first
@@ -288,10 +298,10 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 
     if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
-    if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
+    if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
       const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
       if (conflicts.length > 0) {
-        ctx.domainEvents.emit('myCalendar.conflictDetected', {
+        ctx.scheduled.domainEvents.emit('myCalendar.conflictDetected', {
           userId: ctx.user.telegram_id,
           event,
           conflictsWith: conflicts[0]!,
@@ -327,7 +337,12 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 }
 
 export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -352,10 +367,10 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
   let conflictHint: string | undefined;
-  if (ctx.domainEvents && ctx.conflictChecker && scope !== 'group') {
+  if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
     const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
     if (conflicts.length > 0) {
-      ctx.domainEvents.emit('myCalendar.conflictDetected', {
+      ctx.scheduled.domainEvents.emit('myCalendar.conflictDetected', {
         userId: ctx.user.telegram_id,
         event: updated,
         conflictsWith: conflicts[0]!,
@@ -392,7 +407,12 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -436,7 +456,12 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
 }
 
 export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -471,7 +496,12 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
 }
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const limit = input.limit ?? 5;
@@ -515,7 +545,12 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
 }
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'write');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'write',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -555,7 +590,12 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
 }
 
 export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
@@ -578,7 +618,7 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
   if (event.recurrence_rule) parts.push(`recurrence: ${event.recurrence_rule}`);
   if (event.all_day) parts.push('all_day: true');
   if (event.owner_type === 'group' && event.group_id) {
-    const groupTitle = ctx.groupChatRepo?.findByChatId(event.group_id)?.title;
+    const groupTitle = ctx.group?.groupChatRepo.findByChatId(event.group_id)?.title;
     parts.push(`group: ${groupTitle ?? event.group_id}`);
   }
   if (event.created_by) {

@@ -42,33 +42,9 @@ function makeHandler(
   eventService: ReturnType<typeof makeEventService>,
   forceInviteDeps?: ReturnType<typeof makeForceInviteDeps>,
 ) {
-  return createCallbackHandler(
-    eventService as never, // 1 eventService
-    {} as never, // 2 editValueScene
-    {} as never, // 3 holidayService
-    {} as never, // 4 prefsService
-    undefined, // 5 calendarRepo
-    undefined, // 6 disconnectDeps
-    undefined, // 7 onCalendarsDone
-    undefined, // 8 renderService
-    undefined, // 9 invitationService
-    undefined, // 10 eventRepo
-    undefined, // 11 chatHistoryRepo
-    undefined, // 12 onAiButtonClick
-    undefined, // 14 oauthDeps
-    undefined, // 15 invitationNotifyDeps
-    undefined, // 16 onboardingScene
-    undefined, // 17 editProposalDeps
-    undefined, // 18 callSettingsRepo
-    undefined, // 19 sharingSettingsRepo
-    undefined, // 20 feedbackDeps
-    undefined, // 21 userRepo
-    undefined, // 22 intentDeps
-    undefined, // 23 secretaryDeps
-    undefined, // 24 proposalDeps
-    undefined, // 25 snoozeDeps
-    forceInviteDeps as never, // 26 forceInviteDeps
-  );
+  return createCallbackHandler(eventService as never, {} as never, {} as never, {} as never, {
+    forceInviteDeps: forceInviteDeps as never,
+  });
 }
 
 describe('inv_force callback', () => {

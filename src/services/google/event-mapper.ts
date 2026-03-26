@@ -1,7 +1,4 @@
-import { z } from 'zod';
-import { jsonCodec } from '../../utils/json-codec.ts';
-
-const NumberArrayCodec = jsonCodec(z.array(z.number()));
+import { syncLogger } from '../../utils/logger.ts';
 
 interface LocalEventForGoogle {
   id: number;
@@ -78,8 +75,16 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   };
 
   if (local.all_day) {
-    event.start = { date: local.start_at.split('T')[0] };
-    event.end = { date: (local.end_at ?? local.start_at).split('T')[0] };
+    const startDate = local.start_at.split('T')[0]!;
+    const rawEndDate = (local.end_at ?? local.start_at).split('T')[0]!;
+    // Google Calendar requires end.date > start.date for all-day events (exclusive end).
+    // When end_at is absent or points to the same calendar day as start_at, advance by one day.
+    const endDate =
+      rawEndDate <= startDate
+        ? new Date(new Date(`${startDate}T00:00:00Z`).getTime() + 86_400_000).toISOString().split('T')[0]
+        : rawEndDate;
+    event.start = { date: startDate };
+    event.end = { date: endDate };
   } else {
     event.start = { dateTime: local.start_at, timeZone: local.timezone };
     event.end = local.end_at
@@ -88,15 +93,22 @@ export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
   }
 
   if (local.recurrence_rule) {
-    event.recurrence = [local.recurrence_rule];
+    event.recurrence = local.recurrence_rule.split('\n');
   }
 
   if (local.reminder_overrides) {
-    const minutes = NumberArrayCodec.parse(local.reminder_overrides);
-    event.reminders = {
-      useDefault: false,
-      overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),
-    };
+    try {
+      const minutes: number[] = JSON.parse(local.reminder_overrides);
+      event.reminders = {
+        useDefault: false,
+        overrides: minutes.map((m) => ({ method: 'popup', minutes: m })),
+      };
+    } catch (err) {
+      syncLogger.warn(
+        { err, eventId: local.id, raw: local.reminder_overrides },
+        'Failed to parse reminder_overrides, skipping',
+      );
+    }
   }
 
   return event;
@@ -114,7 +126,7 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     all_day: isAllDay,
     timezone: gEvent.start?.timeZone ?? 'UTC',
     location: gEvent.location ?? null,
-    recurrence_rule: gEvent.recurrence?.[0] ?? null,
+    recurrence_rule: gEvent.recurrence ? gEvent.recurrence.join('\n') : null,
     google_calendar_id: googleCalendarId,
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,

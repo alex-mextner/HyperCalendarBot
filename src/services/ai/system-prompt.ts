@@ -48,12 +48,12 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
     ? `\n## Schedule Context (±2 weeks, local time)\n${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}\nUse this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`
     : '';
 
-  const memoryFacts = ctx.userMemoryRepo ? ctx.userMemoryRepo.getAll(ctx.user.telegram_id) : null;
+  const memoryFacts = ctx.birthday?.userMemoryRepo ? ctx.birthday.userMemoryRepo.getAll(ctx.user.telegram_id) : null;
   const memorySection =
     memoryFacts === null
       ? ''
       : memoryFacts.length > 0
-        ? `\n## What I Know About You\n${memoryFacts.map((f) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
+        ? `\n## What I Know About You\n${memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
         : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
 
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
@@ -67,7 +67,7 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
 - Timezone: ${ctx.user.timezone} (${utcOffset})
 - ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
-${ctx.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretaryForLine}` : ''}
+${ctx.secretary?.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretary?.secretaryForLine}` : ''}
 ${memorySection}
 ## Context
 - Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as the current-time anchor. Convert to the user's local time by adding the offset (${utcOffset}).
@@ -251,7 +251,7 @@ If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].
     : ''
 }
 ${
-  ctx.secretaryForLine
+  ctx.secretary?.secretaryForLine
     ? `## Secretary Access
 
 If "Calendars you can manage as secretary" is listed above:
@@ -324,8 +324,8 @@ Guidelines:
     : ''
 }`;
 
-  if (ctx.scenePauseState) {
-    const { sceneName, step, sceneState } = ctx.scenePauseState;
+  if (ctx.scene?.scenePauseState) {
+    const { sceneName, step, sceneState } = ctx.scene!.scenePauseState!;
     const stateStr = Object.entries(sceneState)
       .filter(([, v]) => v !== undefined && v !== null)
       .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)

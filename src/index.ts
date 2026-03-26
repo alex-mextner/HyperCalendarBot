@@ -15,6 +15,16 @@ import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
+process.on('uncaughtException', (error: Error) => {
+  botLogger.fatal({ err: error }, 'Uncaught exception');
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason: unknown) => {
+  botLogger.fatal({ err: reason instanceof Error ? reason : new Error(String(reason)) }, 'Unhandled promise rejection');
+  process.exit(1);
+});
+
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
@@ -54,6 +64,7 @@ let callQueue:
 let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
+let googleRedisClient: Bun.RedisClient | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
@@ -65,10 +76,16 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
-  const Redis = (await import('ioredis')).default;
-
-  const oauthService = new GoogleOAuthService(config, db.users, db.googleSync);
-  const redis = new Redis(config.REDIS_URL);
+  const redis = new Bun.RedisClient(config.REDIS_URL);
+  googleRedisClient = redis;
+  // Provide a lock client to GoogleOAuthService to prevent concurrent token refreshes
+  const oauthRedisLock = {
+    set: (key: string, value: string, mode: 'NX', expMode: 'EX', seconds: number) =>
+      redis.set(key, value, expMode, String(seconds), mode),
+    get: (key: string) => redis.get(key),
+    del: (key: string) => redis.del(key),
+  };
+  const oauthService = new GoogleOAuthService(config, db.users, db.googleSync, oauthRedisLock);
 
   const stateStore = {
     set: async (key: string, value: string, ttl: number) => {
@@ -81,6 +98,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   const { queue, worker } = createGoogleSyncQueue({
+    db: db.db,
     config,
     redisUrl: config.REDIS_URL,
     oauthService,
@@ -101,7 +119,6 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     close: async () => {
       await worker.close();
       await queue.close();
-      redis.disconnect();
     },
   };
 
@@ -210,7 +227,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     const pySessionExists = existsSync('data/voice_caller.session');
 
     if (!pySessionExists) {
-      botLogger.warn('Pyrogram session not found (data/voice_caller.session). Run: bun run auth:voice');
+      botLogger.warn(
+        'Pyrogram session not found (data/voice_caller.session). Run: venv/bin/python scripts/pyrogram-auth.py',
+      );
     }
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
@@ -400,9 +419,12 @@ if (config.REDIS_URL) {
     setupProposalExpiryCron,
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
+    setupChatHistoryCleanupCron,
+    setupSqliteBackupCron,
     setupRecurringRemindersCron,
     setupActionLogCleanupCron,
   } = await import('./worker/bot-tasks-queue.ts');
+  const { runSqliteBackup } = await import('./database/backup.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
@@ -438,7 +460,6 @@ if (config.REDIS_URL) {
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
-      db.eventMentions.deleteExpired();
     },
     onActionLogCleanup: () => {
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60_000).toISOString().slice(0, 19).replace('T', ' ');
@@ -452,6 +473,11 @@ if (config.REDIS_URL) {
         await cronBirthdayService.runBatchSync(users.slice(i, i + BATCH));
       }
     },
+    onChatHistoryCleanup: () => {
+      const deleted = db.chatHistory.deleteOlderThan(90);
+      botLogger.info({ deleted }, 'Cleaned up old chat history');
+    },
+    onSqliteBackup: () => runSqliteBackup(db.db, config.DATABASE_PATH),
     onRecurringReminders: () => {
       cronMaterializer.materializeUpcomingRecurringReminders(db.events);
     },
@@ -462,6 +488,8 @@ if (config.REDIS_URL) {
   await setupProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
+  await setupChatHistoryCleanupCron(botTasksQueue);
+  await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
   await setupActionLogCleanupCron(botTasksQueue);
 
@@ -589,26 +617,27 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       model: config.AI_MODEL,
       debugLogger: aiDebugLogger,
     },
-    googleDeps,
-    renderService,
-    callQueue,
-    transcriptionService,
-    mtprotoSendAsUser,
-    stressDictionary,
-    sileroTts,
-    kokoroTts,
-    fallbackTts,
-    mtprotoResolveUsername,
-    eventMentionStore,
-    domainEventBus,
-    undefined, // pushAiMessage — not used at this call site
     {
-      BOT_ADMIN_ID: config.BOT_ADMIN_ID,
-      INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
-      BOT_USERNAME: config.BOT_USERNAME,
-      AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
-      INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
-      AI_FAST_MODEL: config.AI_FAST_MODEL,
+      googleDeps,
+      renderService,
+      callQueue,
+      transcriptionService,
+      mtprotoSendAsUser,
+      stressDictionary,
+      sileroTts,
+      kokoroTts,
+      fallbackTts,
+      mtprotoResolveUsername,
+      eventMentionStore,
+      domainEventBus,
+      envConfig: {
+        BOT_ADMIN_ID: config.BOT_ADMIN_ID,
+        INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
+        BOT_USERNAME: config.BOT_USERNAME,
+        AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
+        INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
+        AI_FAST_MODEL: config.AI_FAST_MODEL,
+      },
     },
   );
 
@@ -663,9 +692,9 @@ if (config.REDIS_URL) {
   const syntheticRunner = new SyntheticPipelineRunner({
     contextBuilder: (user, chatId, message) => {
       const ctx = agentContextBuilder(user, chatId, message);
-      ctx.scheduledCallService = scheduledCallService;
-      ctx.triggerService = { repo: triggerRepo };
-      ctx.domainEvents = domainEventBus;
+      if (ctx.scheduled) {
+        ctx.scheduled.domainEvents = domainEventBus;
+      }
       return ctx;
     },
     intentRun: async (agentCtx, message) => {
@@ -812,8 +841,7 @@ bot.onStart(async ({ info }) => {
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-  botLogger.info('Shutting down...');
+async function shutdown(): Promise<void> {
   await bot.stop();
   if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
   if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
@@ -822,22 +850,30 @@ process.on('SIGINT', async () => {
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
+  if (googleRedisClient) googleRedisClient.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
+}
+
+async function shutdownWithTimeout(): Promise<void> {
+  await Promise.race([
+    shutdown(),
+    new Promise<void>((_, reject) => setTimeout(() => reject(new Error('Shutdown timeout after 8s')), 8000)),
+  ]).catch((err: unknown) => {
+    botLogger.fatal({ err }, 'Shutdown timed out, forcing exit');
+    process.exit(1);
+  });
+}
+
+process.on('SIGINT', async () => {
+  botLogger.info('Shutting down...');
+  await shutdownWithTimeout();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
-  await bot.stop();
-  if (aiMessagesQueueCleanup) await aiMessagesQueueCleanup.close();
-  if (eventCheckerQueueCleanup) await eventCheckerQueueCleanup.close();
-  if (notificationQueueCleanup) await notificationQueueCleanup.close();
-  if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
-  if (syncQueueCleanup) await syncQueueCleanup.close();
-  if (imageQueueCleanup) await imageQueueCleanup.close();
-  if (callQueueCleanup) await callQueueCleanup.close();
-  if (webServerHandle) webServerHandle.stop();
-  db.close();
+  botLogger.info('Shutting down (SIGTERM)...');
+  await shutdownWithTimeout();
   process.exit(0);
 });
 

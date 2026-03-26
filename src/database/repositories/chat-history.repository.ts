@@ -91,6 +91,13 @@ export class ChatHistoryRepository {
       .all(...args, limit) as ChatHistoryMessage[];
   }
 
+  deleteOlderThan(days: number): number {
+    const result = this.db
+      .prepare(`DELETE FROM chat_history WHERE created_at < datetime('now', ? || ' days')`)
+      .run(`-${days}`);
+    return result.changes;
+  }
+
   clear(userId: number): void {
     this.db.prepare('DELETE FROM chat_history WHERE user_id = ?').run(userId);
   }

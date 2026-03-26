@@ -30,8 +30,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   const scheduledCallService = new ScheduledAiCallService(scheduleRepo, queue);
   return {
     user: { telegram_id: 1, language: 'en', timezone: 'UTC' } as User,
-    scheduledCallService,
-    triggerService: { repo: triggerRepo },
+    scheduled: { scheduledCallService, triggerService: { repo: triggerRepo } },
     ...overrides,
   } as Partial<AgentContext> as AgentContext;
 }

@@ -10,7 +10,8 @@ interface CreateBirthdayInput {
 }
 
 export function handleCreateBirthdayEvent(ctx: AgentContext, input: CreateBirthdayInput): ToolResult {
-  if (!ctx.birthdayService) return { success: false, error: 'Birthday service unavailable' };
+  if (!ctx.birthday) return { success: false, error: 'Birthday service unavailable' };
+  const { birthdayService } = ctx.birthday;
 
   const lang = ctx.user.language as 'en' | 'ru';
 
@@ -29,7 +30,7 @@ export function handleCreateBirthdayEvent(ctx: AgentContext, input: CreateBirthd
 
   // Dedup check for personal calendar
   if (!input.group_id) {
-    const existing = ctx.birthdayService.findExistingBirthday(input.celebrant_id, ctx.user.telegram_id);
+    const existing = birthdayService.findExistingBirthday(input.celebrant_id, ctx.user.telegram_id);
     if (existing) {
       const existingDate = new Date(existing.start_at);
       const existingDay = existingDate.getUTCDate();
@@ -49,7 +50,7 @@ export function handleCreateBirthdayEvent(ctx: AgentContext, input: CreateBirthd
     }
   }
 
-  ctx.birthdayService.upsertBirthdayEvent({
+  birthdayService.upsertBirthdayEvent({
     ownerId: ctx.user.telegram_id,
     celebrantId: input.celebrant_id,
     celebrantName,

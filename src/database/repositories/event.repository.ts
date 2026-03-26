@@ -336,11 +336,16 @@ export class EventRepository {
     } | null;
     if (!event?.recurrence_rule) return;
 
-    const baseRule = event.recurrence_rule
+    const lines = event.recurrence_rule.split('\n');
+    const rruleIdx = lines.findIndex((line) => line.startsWith('RRULE:'));
+    const rruleLine = rruleIdx >= 0 ? lines[rruleIdx]! : lines[0]!;
+    const otherLines = lines.filter((_, i) => i !== (rruleIdx >= 0 ? rruleIdx : 0));
+    const baseRule = rruleLine
       .split(';')
       .filter((p) => !p.startsWith('UNTIL='))
       .join(';');
-    const newRule = `${baseRule};UNTIL=${untilStr}`;
+    const newRruleLine = `${baseRule};UNTIL=${untilStr}`;
+    const newRule = [newRruleLine, ...otherLines].join('\n');
 
     this.db
       .prepare("UPDATE events SET recurrence_rule = ?, updated_at = datetime('now') WHERE id = ?")
@@ -363,10 +368,18 @@ export class EventRepository {
       last_synced_at?: string;
     },
   ): void {
+    const ALLOWED_FIELDS = new Set([
+      'google_event_id',
+      'google_calendar_id',
+      'google_etag',
+      'sync_status',
+      'last_synced_at',
+    ]);
     const fields: string[] = [];
     const values: (string | number)[] = [];
     for (const [k, v] of Object.entries(data)) {
       if (v !== undefined) {
+        if (!ALLOWED_FIELDS.has(k)) throw new Error(`Unknown sync field: ${k}`);
         fields.push(`${k} = ?`);
         values.push(v);
       }

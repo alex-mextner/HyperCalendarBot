@@ -170,6 +170,7 @@ export interface GoogleWatchChannel {
   google_calendar_row_id: number;
   channel_id: string;
   resource_id: string;
+  channel_token: string | null;
   expiration: string;
   created_at: string;
 }
@@ -512,6 +513,22 @@ export interface BirthEventMetadata {
 export interface BirthdaySyncState {
   user_id: number;
   synced_at: string;
+}
+
+export interface WorkflowSession {
+  intentId: number;
+  stepIndex: number;
+  stepResults: Record<string, unknown>;
+  workflow: Record<string, unknown>;
+  captures: Record<string, string>;
+  createdAt: number;
+}
+
+export interface WorkflowSessionStore {
+  get(chatId: number, userId: number): WorkflowSession | null;
+  set(chatId: number, userId: number, session: WorkflowSession): void;
+  delete(chatId: number, userId: number): void;
+  deleteByUser(userId: number): void;
 }
 
 // --- Repository row types ---

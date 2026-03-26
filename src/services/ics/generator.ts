@@ -1,3 +1,5 @@
+// Intentionally kept: iCalendar export generator for future /export command.
+// Not currently wired up — /export command has not been implemented yet.
 // src/services/ics/generator.ts
 import type { CalendarEvent } from '../../database/types.ts';
 

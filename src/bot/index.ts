@@ -12,7 +12,7 @@ import { IntentRepository } from '../database/repositories/intent.repository.ts'
 import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
-import type { AgentConfig, AgentContext } from '../services/ai/types.ts';
+import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
@@ -70,7 +70,7 @@ import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
+import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -78,6 +78,7 @@ import { createUserResolver, createUserResolverComposer } from './middleware/use
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
+import type { BotCallbackContext } from './types.ts';
 
 export interface GoogleBotDeps {
   oauthService: GoogleOAuthService;
@@ -87,12 +88,9 @@ export interface GoogleBotDeps {
   onCalendarsDone?: (userId: number) => Promise<void>;
 }
 
-export function createBot(
-  token: string,
-  db: DatabaseService,
-  aiConfig: AgentConfig,
-  googleDeps?: GoogleBotDeps,
-  renderService?: RenderService,
+export interface CreateBotOpts {
+  googleDeps?: GoogleBotDeps;
+  renderService?: RenderService;
   callQueue?: {
     enqueue(data: {
       userId: number;
@@ -101,17 +99,17 @@ export function createBot(
       ttsText: string;
       language: string;
     }): Promise<void>;
-  },
-  transcriptionService?: TranscriptionService,
-  mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>,
-  stressDictionary?: StressDictionary,
-  sileroTts?: SileroTtsService,
-  kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'],
-  fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'],
-  mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>,
-  eventMentionStore?: EventMentionStore,
-  domainEventBus?: DomainEventBus,
-  pushAiMessage?: (data: AiMessageJobData) => Promise<void>,
+  };
+  transcriptionService?: TranscriptionService;
+  mtprotoSendAsUser?: (userId: number, text: string) => Promise<boolean>;
+  stressDictionary?: StressDictionary;
+  sileroTts?: SileroTtsService;
+  kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
+  fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
+  mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
+  eventMentionStore?: EventMentionStore;
+  domainEventBus?: DomainEventBus;
+  pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
   envConfig?: Pick<
     EnvConfig,
     | 'BOT_ADMIN_ID'
@@ -120,8 +118,26 @@ export function createBot(
     | 'AGENT_DOWNLOAD_URL'
     | 'INLINE_BOT_TOKEN'
     | 'AI_FAST_MODEL'
-  >,
-) {
+  >;
+}
+
+export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
+  const {
+    googleDeps,
+    renderService,
+    callQueue,
+    transcriptionService,
+    mtprotoSendAsUser,
+    stressDictionary,
+    sileroTts,
+    kokoroTts,
+    fallbackTts,
+    mtprotoResolveUsername,
+    eventMentionStore,
+    domainEventBus,
+    pushAiMessage,
+    envConfig,
+  } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
     eventRepo: db.events,
@@ -256,7 +272,7 @@ export function createBot(
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as AgentContext['callSettingsRepo'],
+    callSettingsRepo: db.callSettings as unknown as NonNullable<MessageHandlerDeps['callSettingsRepo']>,
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -303,7 +319,7 @@ export function createBot(
     intentMatcher,
     intentRepo,
     intentExecutor,
-    eventMentionStore: eventMentionStore ?? db.eventMentions,
+    eventMentionStore: eventMentionStore,
     feedbackRepo,
     workflowSessions: db.workflowSessions,
     adminEditSessions,
@@ -578,25 +594,23 @@ export function createBot(
     })
     // Callback queries
     .on('callback_query', (ctx) =>
-      createCallbackHandler(
-        eventService,
-        scenesSetup.scenes.editValueScene,
-        holidayService,
-        prefsService,
-        googleDeps?.calendarRepo,
-        googleDeps?.disconnectDeps,
-        googleDeps?.onCalendarsDone,
+      createCallbackHandler(eventService, scenesSetup.scenes.editValueScene, holidayService, prefsService, {
+        calendarRepo: googleDeps?.calendarRepo,
+        disconnectDeps: googleDeps?.disconnectDeps,
+        onCalendarsDone: googleDeps?.onCalendarsDone,
         renderService,
         invitationService,
-        db.events,
-        db.chatHistory,
-        async (userId: number, chatId: number, text: string) => {
+        eventRepo: db.events,
+        chatHistoryRepo: db.chatHistory,
+        onAiButtonClick: async (userId: number, chatId: number, text: string) => {
           const user = db.users.findByTelegramId(userId);
           if (!user) return;
           await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
         },
-        googleDeps ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore } : undefined,
-        {
+        oauthDeps: googleDeps
+          ? { oauthService: googleDeps.oauthService, stateStore: googleDeps.stateStore }
+          : undefined,
+        invitationNotifyDeps: {
           userRepo: db.users,
           sendMessage: async (
             chatId: number,
@@ -625,11 +639,10 @@ export function createBot(
             await bot.api.sendPhoto({ chat_id: chatId, photo });
           },
         },
-        scenesSetup.scenes.onboardingScene,
-        undefined,
-        db.callSettings,
-        db.sharingSettings,
-        {
+        onboardingScene: scenesSetup.scenes.onboardingScene,
+        callSettingsRepo: db.callSettings,
+        sharingSettingsRepo: db.sharingSettings,
+        feedbackDeps: {
           feedbackRepo,
           adminReplySession,
           sendMessage: async (chatId: number, text: string) => {
@@ -637,15 +650,16 @@ export function createBot(
           },
           adminId: botAdminId,
         },
-        db.users,
-        {
+        userRepo: db.users,
+        intentDeps: {
           intentRepo,
           intentMatcher: {
             reload: () => intentMatcher.load(intentRepo.getApproved()),
           },
           adminEditSessions,
+          adminId: botAdminId,
         },
-        {
+        secretaryDeps: {
           secretaryRepo: db.secretaries,
           userRepo: db.users,
           sendMessage: async (chatId: number, text: string) => {
@@ -655,7 +669,7 @@ export function createBot(
             await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
           },
         },
-        {
+        proposalDeps: {
           proposalRepo: calendarProposalRepo,
           eventService: {
             createEvent: (userId: number, data: Omit<CreateEventData, 'user_id'>) =>
@@ -672,8 +686,7 @@ export function createBot(
             await bot.api.editMessageText({ chat_id: chatId, message_id: messageId, text });
           },
         },
-        undefined, // snoozeDeps
-        invitationService
+        forceInviteDeps: invitationService
           ? {
               invitationService,
               invRepo: db.invitations,
@@ -694,26 +707,27 @@ export function createBot(
             }
           : undefined,
         proposeTimeSessions,
-        db.invitations,
-        sileroTts || kokoroTts
-          ? {
-              sileroTts,
-              kokoroTts,
-              sendVoice: async (chatId: number, audio: Buffer) => {
-                const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
-                await bot.api.sendVoice({ chat_id: chatId, voice: file });
-              },
-              stressDictionary,
-            }
-          : undefined,
-        db.contacts,
-        scenesSetup.scenes.timezoneScene,
-        db.groupChats,
-        {
+        invitationRepo: db.invitations,
+        voiceDeps:
+          sileroTts || kokoroTts
+            ? {
+                sileroTts,
+                kokoroTts,
+                sendVoice: async (chatId: number, audio: Buffer) => {
+                  const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
+                  await bot.api.sendVoice({ chat_id: chatId, voice: file });
+                },
+                stressDictionary,
+              }
+            : undefined,
+        contactRepo: db.contacts,
+        timezoneScene: scenesSetup.scenes.timezoneScene,
+        groupRepo: db.groupChats,
+        scenePauseDeps: {
           sceneStorage: kvStorage,
           scenePauseService,
         },
-      )(ctx),
+      })(ctx as unknown as BotCallbackContext),
     )
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>

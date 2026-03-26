@@ -205,8 +205,12 @@ export function formatEventListItem(event: CalendarEvent, timezone: string, inde
 }
 
 export function formatRecurrenceHuman(rrule: string, lang: string): string {
+  // recurrence_rule may contain multiple lines (RRULE + EXDATE/RDATE from Google).
+  // Extract only the RRULE line for human formatting; ignore EXDATE/RDATE.
+  const ruleLine = rrule.split('\n').find((l) => l.startsWith('RRULE:')) ?? rrule;
+  const ruleBody = ruleLine.startsWith('RRULE:') ? ruleLine.slice(6) : ruleLine;
   const parts = new Map(
-    rrule.split(';').map((p) => {
+    ruleBody.split(';').map((p) => {
       const [k, v] = p.split('=');
       return [k!, v!] as [string, string];
     }),

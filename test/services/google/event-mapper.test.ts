@@ -44,6 +44,42 @@ describe('event-mapper', () => {
       expect(result.start?.dateTime).toBeUndefined();
     });
 
+    test('single-day all-day event with end_at == start_at gets end.date bumped +1 day', () => {
+      const result = localToGoogle({
+        id: 2,
+        title: 'Birthday',
+        start_at: '2026-03-15T00:00:00Z',
+        end_at: '2026-03-15T00:00:00Z',
+        all_day: 1,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.start?.date).toBe('2026-03-15');
+      expect(result.end?.date).toBe('2026-03-16');
+    });
+
+    test('single-day all-day event with null end_at gets end.date bumped +1 day', () => {
+      const result = localToGoogle({
+        id: 2,
+        title: 'Holiday',
+        start_at: '2026-03-15T00:00:00Z',
+        end_at: null,
+        all_day: 1,
+        timezone: 'UTC',
+        description: null,
+        location: null,
+        recurrence_rule: null,
+        reminder_overrides: null,
+        sync_version: 0,
+      });
+      expect(result.start?.date).toBe('2026-03-15');
+      expect(result.end?.date).toBe('2026-03-16');
+    });
+
     test('maps recurrence rule', () => {
       const result = localToGoogle({
         id: 3,
@@ -59,6 +95,23 @@ describe('event-mapper', () => {
         sync_version: 0,
       });
       expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY;BYDAY=MO']);
+    });
+
+    test('splits multi-line recurrence_rule back into array for Google', () => {
+      const result = localToGoogle({
+        id: 4,
+        title: 'Weekly with exception',
+        start_at: '2026-04-07T09:00:00Z',
+        end_at: '2026-04-07T10:00:00Z',
+        all_day: 0,
+        timezone: 'Europe/Moscow',
+        description: null,
+        location: null,
+        recurrence_rule: 'RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000',
+        reminder_overrides: null,
+        sync_version: 1,
+      });
+      expect(result.recurrence).toEqual(['RRULE:FREQ=WEEKLY', 'EXDATE;TZID=Europe/Moscow:20260401T090000']);
     });
 
     test('sets extended properties with local event ID', () => {
@@ -168,5 +221,58 @@ describe('event-mapper', () => {
       );
       expect(result.is_cancelled).toBe(true);
     });
+
+    test('preserves all recurrence components (RRULE + EXDATE) joined by newline', () => {
+      const result = googleToLocal(
+        {
+          id: 'g-rec',
+          summary: 'Weekly',
+          start: { dateTime: '2026-04-07T09:00:00Z', timeZone: 'Europe/Moscow' },
+          end: { dateTime: '2026-04-07T10:00:00Z', timeZone: 'Europe/Moscow' },
+          status: 'confirmed',
+          recurrence: ['RRULE:FREQ=WEEKLY', 'EXDATE;TZID=Europe/Moscow:20260401T090000'],
+        },
+        42,
+        'primary',
+      );
+      expect(result.recurrence_rule).toBe('RRULE:FREQ=WEEKLY\nEXDATE;TZID=Europe/Moscow:20260401T090000');
+    });
+  });
+});
+
+describe('localToGoogle — reminder_overrides resilience', () => {
+  const baseEvent = {
+    id: 1,
+    title: 'Test',
+    start_at: '2026-03-15T10:00:00Z',
+    end_at: '2026-03-15T11:00:00Z',
+    all_day: 0 as const,
+    timezone: 'UTC',
+    description: null,
+    location: null,
+    recurrence_rule: null,
+    sync_version: 0,
+  };
+
+  test('invalid JSON in reminder_overrides does not throw', () => {
+    expect(() => localToGoogle({ ...baseEvent, reminder_overrides: 'not-valid-json' })).not.toThrow();
+  });
+
+  test('invalid JSON yields no reminders field', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: '{broken' });
+    expect(result.reminders).toBeUndefined();
+  });
+
+  test('null reminder_overrides yields no reminders field', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: null });
+    expect(result.reminders).toBeUndefined();
+  });
+
+  test('valid JSON still maps correctly after guard', () => {
+    const result = localToGoogle({ ...baseEvent, reminder_overrides: '[10, 60]' });
+    expect(result.reminders?.overrides).toEqual([
+      { method: 'popup', minutes: 10 },
+      { method: 'popup', minutes: 60 },
+    ]);
   });
 });

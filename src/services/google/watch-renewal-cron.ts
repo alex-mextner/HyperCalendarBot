@@ -35,18 +35,25 @@ export async function renewExpiringChannels(
 
   for (const channel of expiring) {
     try {
-      const authClient = oauthService.getAuthClient(channel.user_id);
+      const authClient = await oauthService.getAuthClient(channel.user_id);
       const api = new GoogleCalendarApi(authClient);
 
       await api.stopChannel(channel.channel_id, channel.resource_id);
       calendarRepo.deleteWatchChannel(channel.id);
 
       const newChannelId = crypto.randomUUID();
+      const channelToken = crypto.randomUUID();
       const webhookUrl = `https://${config.PUBLIC_DOMAIN}/webhooks/google-calendar`;
       const expMs = Date.now() + 7 * 24 * 60 * 60 * 1000;
-      const result = await api.watchEvents(channel.google_calendar_id, newChannelId, webhookUrl, expMs);
+      const result = await api.watchEvents(channel.google_calendar_id, newChannelId, webhookUrl, expMs, channelToken);
 
-      calendarRepo.addWatchChannel(channel.google_calendar_row_id, newChannelId, result.resourceId, result.expiration);
+      calendarRepo.addWatchChannel(
+        channel.google_calendar_row_id,
+        newChannelId,
+        result.resourceId,
+        result.expiration,
+        result.token,
+      );
 
       syncLogger.info({ userId: channel.user_id, calendarId: channel.google_calendar_id }, 'Watch channel renewed');
     } catch (err) {

@@ -13,7 +13,12 @@ interface GetFreeSlotsInput {
 }
 
 export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput): ToolResult {
-  const access = checkSecretaryAccess(ctx.user.telegram_id, input.owner_id, ctx.secretaryRepo ?? null, 'read');
+  const access = checkSecretaryAccess(
+    ctx.user.telegram_id,
+    input.owner_id,
+    ctx.secretary?.secretaryRepo ?? null,
+    'read',
+  );
   if (!access.ok) return { success: false, error: access.error };
   const userId = access.effectiveUserId;
   const date = new Date(input.date);

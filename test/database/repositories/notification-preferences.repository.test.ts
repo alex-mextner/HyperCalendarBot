@@ -79,4 +79,33 @@ describe('NotificationPreferencesRepository', () => {
     expect(users.length).toBe(1);
     expect(users[0]!.user_id).toBe(42);
   });
+
+  test('update throws on unknown field', () => {
+    repo.ensureDefaults(42);
+    expect(() => repo.update(42, { injected_column: 'x' } as never)).toThrow(
+      'Unknown notification preference field: injected_column',
+    );
+  });
+
+  test('update throws on SQL injection attempt in field name', () => {
+    repo.ensureDefaults(42);
+    expect(() => repo.update(42, { 'morning_agenda_time; DROP TABLE users; --': '1' } as never)).toThrow(
+      /Unknown notification preference field/,
+    );
+  });
+
+  test('getMany returns map of found prefs', () => {
+    db.run('INSERT INTO users (telegram_id) VALUES (43)');
+    repo.ensureDefaults(42);
+    repo.ensureDefaults(43);
+    const result = repo.getMany([42, 43, 999]);
+    expect(result.size).toBe(2);
+    expect(result.get(42)?.morning_agenda_enabled).toBe(1);
+    expect(result.get(43)?.morning_agenda_enabled).toBe(1);
+    expect(result.has(999)).toBe(false);
+  });
+
+  test('getMany returns empty map for empty input', () => {
+    expect(repo.getMany([]).size).toBe(0);
+  });
 });

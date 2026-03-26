@@ -16,19 +16,14 @@ const HELP_EN = `📖 <b>HyperCalendar Commands</b>
   /search — find events
 
 ⚙️ <b>Settings</b>
-  /timezone — change timezone
   /settings — all preferences
 
 📤 <b>Import/Export</b>
   /import — import .ics file
-  /export — export events
 
 🌍 <b>Holidays</b>
   /holidays — manage holiday subscriptions
   /holidays list — upcoming holidays
-
-🔔 <b>Notifications</b>
-  /notify — notification settings
 
 📡 <b>Google Calendar</b>
   /connect_google — connect Google Calendar
@@ -54,19 +49,14 @@ const HELP_RU = `📖 <b>Команды HyperCalendar</b>
   /search — поиск событий
 
 ⚙️ <b>Настройки</b>
-  /timezone — часовой пояс
   /settings — все настройки
 
 📤 <b>Импорт/Экспорт</b>
   /import — импорт .ics
-  /export — экспорт событий
 
 🌍 <b>Праздники</b>
   /holidays — управление праздниками
   /holidays list — ближайшие праздники
-
-🔔 <b>Уведомления</b>
-  /notify — настройки уведомлений
 
 📡 <b>Google Calendar</b>
   /connect_google — подключить Google Calendar

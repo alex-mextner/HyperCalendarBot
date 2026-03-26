@@ -645,3 +645,51 @@ describe('EventRepository', () => {
     expect(results[0]!.title).toBe('Meeting');
   });
 });
+
+describe('EventRepository.updateSyncFields column allowlist', () => {
+  let db: Database;
+  let events: EventRepository;
+  const USER_ID = 1;
+
+  beforeEach(() => {
+    db = createTestDb();
+    events = new EventRepository(db);
+    new UserRepository(db).create({ telegram_id: USER_ID });
+  });
+
+  function createSyncedEvent() {
+    return events.create({
+      user_id: USER_ID,
+      title: 'Test',
+      start_at: '2026-03-15T10:00:00Z',
+      end_at: '2026-03-15T11:00:00Z',
+      all_day: false,
+      timezone: 'UTC',
+    });
+  }
+
+  test('allowed fields update successfully', () => {
+    const event = createSyncedEvent();
+    expect(() =>
+      events.updateSyncFields(event.id, {
+        google_event_id: 'g1',
+        sync_status: 'synced',
+        last_synced_at: new Date().toISOString(),
+      }),
+    ).not.toThrow();
+  });
+
+  test('unknown field throws with descriptive error', () => {
+    const event = createSyncedEvent();
+    expect(() => events.updateSyncFields(event.id, { injected_column: 'DROP TABLE events' } as never)).toThrow(
+      'Unknown sync field: injected_column',
+    );
+  });
+
+  test('multiple unknown fields each throw', () => {
+    const event = createSyncedEvent();
+    expect(() => events.updateSyncFields(event.id, { malicious: '1; DROP TABLE events; --' } as never)).toThrow(
+      'Unknown sync field: malicious',
+    );
+  });
+});

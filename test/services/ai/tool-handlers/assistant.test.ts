@@ -20,15 +20,13 @@ function makeCtx(connected: boolean): TestCtx | AgentContext {
     registry.register(1, ws as never);
     return {
       user: { telegram_id: 1, language: 'ru' },
-      agentRegistry: registry,
-      agentDispatcher: dispatcher,
+      agents: { agentRegistry: registry, agentDispatcher: dispatcher, onAgentChunk: undefined },
       _sent: sent,
     } as Partial<TestCtx> as TestCtx;
   }
   return {
     user: { telegram_id: 1, language: 'ru' },
-    agentRegistry: registry,
-    agentDispatcher: dispatcher,
+    agents: { agentRegistry: registry, agentDispatcher: dispatcher, onAgentChunk: undefined },
   } as Partial<AgentContext> as AgentContext;
 }
 
@@ -44,7 +42,7 @@ test('dispatches bash_execute and returns output', async () => {
   const raw = c._sent[0];
   if (!raw) throw new Error('No message sent');
   const cmd = JSON.parse(raw) as { id: string };
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'done', exitCode: 0, data: 'hi\n' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'done', exitCode: 0, data: 'hi\n' });
   const result = await promise;
   expect(result.success).toBe(true);
   expect(result.output).toContain('hi');
@@ -56,7 +54,7 @@ test('non-zero exitCode marks success=false', async () => {
   const raw = c._sent[0];
   if (!raw) throw new Error('No message sent');
   const cmd = JSON.parse(raw) as { id: string };
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'done', exitCode: 1, data: '' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'done', exitCode: 1, data: '' });
   const result = await promise;
   expect(result.success).toBe(false);
 });
@@ -67,7 +65,7 @@ test('error response returns success=false with message', async () => {
   const raw = c._sent[0];
   if (!raw) throw new Error('No message sent');
   const cmd = JSON.parse(raw) as { id: string };
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'error', error: 'Permission denied' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'error', error: 'Permission denied' });
   const result = await promise;
   expect(result.success).toBe(false);
   expect(result.output).toContain('Permission denied');
@@ -79,9 +77,9 @@ test('chunk text is concatenated into output', async () => {
   const raw = c._sent[0];
   if (!raw) throw new Error('No message sent');
   const cmd = JSON.parse(raw) as { id: string };
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'chunk', text: 'Hello' });
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'chunk', text: ' world' });
-  c.agentDispatcher!.handleResponse({ id: cmd.id, type: 'done' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'chunk', text: 'Hello' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'chunk', text: ' world' });
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'done' });
   const result = await promise;
   expect(result.output).toContain('Hello world');
 });

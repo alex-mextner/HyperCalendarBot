@@ -228,11 +228,15 @@ describe('executeTool', () => {
         chatHistory: chatHistoryRepo,
         userRepo,
         reminderRepo,
-        invitationService,
-        invitationRepo,
-        sharingService,
-        sharingSettingsRepo,
-        sharedEventRepo,
+        sharing: {
+          invitationService,
+          invitationRepo,
+          sharingService,
+          sharingSettingsRepo,
+          sharedEventRepo,
+          privacyService: undefined as never,
+          editProposalRepo: undefined as never,
+        },
         conversationLogger: null as never,
       };
     });

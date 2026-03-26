@@ -34,7 +34,7 @@ describe('SyncService — extended coverage', () => {
     eventRepo = new EventRepository(db);
     syncRepo = new GoogleSyncRepository(db);
     calendarRepo = new GoogleCalendarRepository(db);
-    service = new SyncService(eventRepo, syncRepo, calendarRepo);
+    service = new SyncService(db, eventRepo, syncRepo, calendarRepo);
 
     calendarRepo.upsertCalendar(1, {
       google_calendar_id: 'cal-1',
@@ -410,7 +410,7 @@ describe('SyncService — extended coverage', () => {
     eventRepo.updateSyncFields(existing.id, { sync_status: 'pending_push' });
 
     const notifyUser = mock(() => Promise.resolve());
-    const serviceWithNotify = new SyncService(eventRepo, syncRepo, calendarRepo, notifyUser);
+    const serviceWithNotify = new SyncService(db, eventRepo, syncRepo, calendarRepo, notifyUser);
 
     const api = createMockApi({
       listEvents: mock(() =>

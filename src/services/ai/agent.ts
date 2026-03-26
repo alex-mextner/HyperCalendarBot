@@ -160,7 +160,7 @@ export class CalendarBotAgent {
 
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
-      agentConnected: ctx.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
+      agentConnected: ctx.agents?.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
     const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
@@ -204,11 +204,13 @@ export class CalendarBotAgent {
     // Stream macOS agent chunks into the same writer so they appear live
     // and land in the collapsed blockquote after commitIntermediate().
     // tailText keeps only the last 3500 chars so Telegram never rejects the edit.
-    ctx.onAgentChunk = (text: string) => {
-      writer.appendText(text);
-      writer.tailText(3500);
-      writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
-    };
+    if (ctx.agents) {
+      ctx.agents.onAgentChunk = (text: string) => {
+        writer.appendText(text);
+        writer.tailText(3500);
+        writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
+      };
+    }
 
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
@@ -282,7 +284,9 @@ export class CalendarBotAgent {
               { attempt: attempt + 1, err: err, userId: ctx.user.telegram_id },
               'API call failed, retrying',
             );
-            await new Promise((r) => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+            const baseDelay = RETRY_DELAY_MS * (attempt + 1);
+            const jitter = Math.random() * baseDelay;
+            await Bun.sleep(baseDelay + jitter);
           }
         }
         if (lastError) throw lastError;

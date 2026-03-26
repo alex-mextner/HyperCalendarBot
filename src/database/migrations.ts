@@ -821,7 +821,13 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '042_group_members_membership_dates',
+    name: '042_watch_channel_token',
+    up: (db) => {
+      db.exec(`ALTER TABLE google_watch_channels ADD COLUMN channel_token TEXT;`);
+    },
+  },
+  {
+    name: '043_group_members_membership_dates',
     up: (db) => {
       // SQLite ALTER TABLE ADD COLUMN requires constant defaults — datetime('now') is not allowed.
       db.exec(`ALTER TABLE group_members ADD COLUMN joined_at TEXT NOT NULL DEFAULT '2026-01-01T00:00:00Z'`);
@@ -830,7 +836,7 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '043_user_action_log',
+    name: '044_user_action_log',
     up: (db) => {
       db.exec(`
         CREATE TABLE user_action_log (

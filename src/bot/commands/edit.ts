@@ -37,7 +37,7 @@ export async function handleEdit(
     }
     const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
     await ctx.send(t(lang).edit_pick, {
-      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_EDIT),
+      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_EDIT, lang),
     });
     return;
   }
@@ -50,7 +50,7 @@ export async function handleEdit(
   }
 
   await ctx.send(t(lang).edit_pick, {
-    reply_markup: eventPickerKeyboard(upcoming, user.timezone, CB.EVENT_EDIT),
+    reply_markup: eventPickerKeyboard(upcoming, user.timezone, CB.EVENT_EDIT, lang),
   });
 }
 
