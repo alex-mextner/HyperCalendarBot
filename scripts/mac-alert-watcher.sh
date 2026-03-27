@@ -16,7 +16,9 @@
 #   ALERT_POLL_INTERVAL default: 30 (seconds)
 #   ALERT_TERMINAL      "terminal" (default) or "iterm2"
 
-set -euo pipefail
+# -u: error on unset vars  -o pipefail: pipelines fail on first error
+# (intentionally no -e: curl failures in the poll loop must not exit the process)
+set -uo pipefail
 
 PLIST_LABEL="ru.invntrm.hypercal-alert-watcher"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
@@ -53,6 +55,8 @@ if [[ "${1:-}" == "--install" ]]; then
   <true/>
   <key>RunAtLoad</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
   <key>StandardOutPath</key>
   <string>/tmp/hypercal-alert-watcher.log</string>
   <key>StandardErrorPath</key>
@@ -60,6 +64,8 @@ if [[ "${1:-}" == "--install" ]]; then
 </dict>
 </plist>
 PLIST
+  # Restrict to owner-only — plist contains ADMIN_ALERT_TOKEN
+  chmod 600 "$PLIST_PATH"
   launchctl unload "$PLIST_PATH" 2>/dev/null || true
   launchctl load "$PLIST_PATH"
   echo "[watcher] installed and started — logs: /tmp/hypercal-alert-watcher.log"
@@ -72,10 +78,33 @@ TERMINAL="${ALERT_TERMINAL:-terminal}"
 
 echo "[watcher] started — polling ${ENDPOINT} every ${INTERVAL}s"
 
+open_in_terminal() {
+  local text="$1"
+  # Write a temp shell script so the alert text never touches AppleScript string interpolation.
+  # mktemp paths contain only safe chars — safe to pass as an AppleScript string literal.
+  local tmpscript
+  tmpscript=$(mktemp /tmp/hypercal-XXXX.sh)
+  # printf %q produces shell-safe escaping for the text argument
+  printf '#!/bin/sh\nexec claude --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
+    "$text" > "$tmpscript"
+  chmod +x "$tmpscript"
+
+  if [[ "$TERMINAL" == "iterm2" ]]; then
+    osascript \
+      -e 'tell application "iTerm2" to activate' \
+      -e "tell application \"iTerm2\" to tell current session of (create window with default profile) to write text \"$tmpscript\""
+  else
+    osascript \
+      -e 'tell application "Terminal" to activate' \
+      -e "tell application \"Terminal\" to do script \"$tmpscript\""
+  fi
+  # tmpscript is left for Terminal to read; /tmp is cleared on reboot
+}
+
 while true; do
   RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
-    "${ENDPOINT}" 2>/dev/null)
+    "${ENDPOINT}" 2>/dev/null) || true
 
   HTTP_CODE=$(echo "$RESPONSE" | tail -1)
   BODY=$(echo "$RESPONSE" | head -n -1)
@@ -84,31 +113,7 @@ while true; do
     TEXT=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['text'])" 2>/dev/null || echo "$BODY")
     SOURCE=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['source'])" 2>/dev/null || echo "unknown")
     echo "[watcher] alert from ${SOURCE}: ${TEXT:0:80}..."
-
-    # Escape single quotes and backslashes for AppleScript string safety
-    SAFE_TEXT="${TEXT//\\/\\\\}"
-    SAFE_TEXT="${SAFE_TEXT//\"/\\\"}"
-    SAFE_TEXT="${SAFE_TEXT//\'/\'\\\'\'}"
-    CMD="claude --dangerously-skip-permissions --permission-mode bypassPermissions '${SAFE_TEXT}'"
-
-    if [[ "$TERMINAL" == "iterm2" ]]; then
-      osascript <<APPLESCRIPT
-tell application "iTerm2"
-  activate
-  set newWindow to (create window with default profile)
-  tell current session of newWindow
-    write text "${CMD}"
-  end tell
-end tell
-APPLESCRIPT
-    else
-      osascript <<APPLESCRIPT
-tell application "Terminal"
-  activate
-  do script "${CMD}"
-end tell
-APPLESCRIPT
-    fi
+    open_in_terminal "$TEXT"
 
   elif [[ "$HTTP_CODE" != "204" ]]; then
     echo "[watcher] unexpected HTTP ${HTTP_CODE}: ${BODY:0:100}" >&2

@@ -20,14 +20,14 @@ let pushCrashAlert: ((msg: string) => void) | undefined;
 
 process.on('uncaughtException', (error: Error) => {
   botLogger.fatal({ err: error }, 'Uncaught exception');
-  pushCrashAlert?.(`Bot crashed: ${error.message}`);
+  pushCrashAlert?.(`Bot crashed: ${error.stack ?? error.message}`);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   botLogger.fatal({ err }, 'Unhandled promise rejection');
-  pushCrashAlert?.(`Bot unhandled rejection: ${err.message}`);
+  pushCrashAlert?.(`Bot unhandled rejection: ${err.stack ?? err.message}`);
   process.exit(1);
 });
 

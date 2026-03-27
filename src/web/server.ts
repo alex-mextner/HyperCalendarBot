@@ -1,5 +1,6 @@
 // src/web/server.ts
 
+import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { AgentDispatcher } from '../agent/dispatcher.ts';
 import type { AgentRegistry } from '../agent/registry.ts';
@@ -75,6 +76,13 @@ const SECURITY_HEADERS = {
   'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
 } as const;
+
+function isValidAlertToken(received: string | null, expected: string): boolean {
+  if (!received) return false;
+  const a = Buffer.from(received);
+  const b = Buffer.from(`Bearer ${expected}`);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 function withSecurityHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
@@ -179,10 +187,8 @@ async function handleRequest(
   }
 
   if (url.pathname === '/admin/alerts') {
-    if (!deps.alertRepo || !deps.adminAlertToken) {
-      return new Response('Not Found', { status: 404 });
-    }
-    if (req.headers.get('Authorization') !== `Bearer ${deps.adminAlertToken}`) {
+    if (!deps.alertRepo || !deps.adminAlertToken) return new Response('Not Found', { status: 404 });
+    if (!isValidAlertToken(req.headers.get('Authorization'), deps.adminAlertToken)) {
       return new Response('Unauthorized', { status: 401 });
     }
 
@@ -194,7 +200,9 @@ async function handleRequest(
         // invalid JSON from external caller — expected input error
         return new Response('Bad Request', { status: 400 });
       }
-      const parsed = z.object({ text: z.string().min(1), source: z.string().default('bot') }).safeParse(body);
+      const parsed = z
+        .object({ text: z.string().min(1).max(65535), source: z.string().min(1).max(64).default('bot') })
+        .safeParse(body);
       if (!parsed.success) {
         return new Response('Bad Request', { status: 400 });
       }
@@ -206,12 +214,11 @@ async function handleRequest(
   }
 
   if (req.method === 'GET' && url.pathname === '/admin/alerts/next') {
-    if (!deps.alertRepo || !deps.adminAlertToken) {
-      return new Response('Not Found', { status: 404 });
-    }
-    if (req.headers.get('Authorization') !== `Bearer ${deps.adminAlertToken}`) {
+    if (!deps.alertRepo || !deps.adminAlertToken) return new Response('Not Found', { status: 404 });
+    if (!isValidAlertToken(req.headers.get('Authorization'), deps.adminAlertToken)) {
       return new Response('Unauthorized', { status: 401 });
     }
+
     const alert = deps.alertRepo.pop();
     if (!alert) {
       return new Response(null, { status: 204 });
