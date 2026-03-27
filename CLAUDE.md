@@ -580,15 +580,22 @@ Telegram doesn't publish exact numbers — limits are dynamic. Practical rules:
 
 - **Host**: 104.248.84.190 (Digital Ocean, 1 CPU, shared with other projects)
 - **SSH**: `root@` for docker/sudo, `www-data@` for files. www-data has no passwordless sudo.
-- **Deploy path**: `/opt/hypercal` — this is the real path used by CI (`DEPLOY_PATH` secret).
-  `/var/www/hypercal.invntrm.ru` is an OLD path that still exists but is NOT used by the bot.
-  Do not confuse them — the running container mounts `/opt/hypercal/data` and reads `/opt/hypercal/.env`.
-- **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS, imports `/var/www/*/Caddyfile`)
+- **Deploy path**: `/opt/hypercal` — the only active path. CI deploys here (`DEPLOY_PATH` secret).
+  `/var/www/hypercal.invntrm.ru` was an old path — it has been deleted.
+  The running container mounts `/opt/hypercal/data` and reads `/opt/hypercal/.env`.
+- **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS)
+- **Caddy config**: `/etc/caddy/Caddyfile` imports `/var/www/*/Caddyfile` (other projects)
+  AND `import /opt/hypercal/Caddyfile` (this bot). CI deploys the repo's `Caddyfile` to
+  `/opt/hypercal/Caddyfile` and runs `caddy reload` — always update the repo's `Caddyfile`.
+- **Server scripts**: `scripts/backup-db.sh` and `scripts/healthcheck-alert.sh` are deployed
+  to `/opt/hypercal/scripts/` by CI (scp-action). Cron on the server runs them:
+  `0 3 * * *` — backup, `*/2 * * * *` — healthcheck (both log to `/opt/hypercal/logs/`).
+- **Alert queue**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN — triggers
+  mac-alert-watcher → Claude. CI `notify-failure` job does the same on CI/CD failure.
 
 ### .env на сервере
 
-Единственный актуальный `.env` — `/opt/hypercal/.env`. Именно его читает `docker compose`.
-`/var/www/hypercal.invntrm.ru/.env` — устаревший, не используется, может расходиться.
+Единственный `.env` — `/opt/hypercal/.env`. Именно его читает `docker compose`.
 
 Если добавляешь новую переменную (например, через GitHub Actions secrets):
 1. Добавь secret в репо
@@ -618,8 +625,9 @@ curl https://hypercal.invntrm.ru/health
 `AI_DEBUG_LOGS=true`. Смотри при отладке неожиданного поведения ИИ.
 
 ```bash
-# Последний лог для чата:
-ssh www-data@104.248.84.190 'ls -lt /var/www/hypercal.invntrm.ru/logs/chats/5153477378/ | head -3'
+# Последний лог для чата (AI_DEBUG_LOGS=true, логи внутри контейнера /app/logs/):
+ssh root@104.248.84.190 'docker exec hypercal-bot ls -lt /app/logs/chats/5153477378/ | head -3'
+ssh root@104.248.84.190 'docker exec hypercal-bot cat /app/logs/chats/5153477378/<timestamp>.log'
 ```
 
 ### Shared server — DO NOT touch other projects
