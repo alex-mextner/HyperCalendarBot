@@ -1,4 +1,4 @@
-import { app, Notification } from 'electron';
+import { app, clipboard, dialog, Notification } from 'electron';
 import { dispatch } from './dispatcher';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
@@ -8,22 +8,22 @@ import { WsClient } from './ws-client';
 const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://hypercal.invntrm.ru/ws/agent';
 
 async function main(): Promise<void> {
-  // Tray-only app — no dock icon
-  app.dock?.hide();
-
   await app.whenReady();
+
+  // Tray-only app — must hide dock after app is ready
+  app.dock?.hide();
 
   const jwt = await loadJwt();
   const wsClient = new WsClient(WS_URL, jwt);
 
   // Persist refreshed tokens
   wsClient.on('token_refreshed', (newJwt: string) => {
-    saveJwt(newJwt).catch(() => {});
+    saveJwt(newJwt).catch((err: unknown) => console.error('Failed to save refreshed JWT:', err));
   });
 
   // Pairing flow
   wsClient.on('paired', (newJwt: string) => {
-    saveJwt(newJwt).catch(() => {});
+    saveJwt(newJwt).catch((err: unknown) => console.error('Failed to save JWT:', err));
     new Notification({
       title: 'HyperBot Agent',
       body: 'Connected to HyperBot! AI Assistant is ready.',
@@ -58,10 +58,15 @@ async function main(): Promise<void> {
     // Wait for the socket to open before sending the pair message
     wsClient.once('connected', () => {
       wsClient.pair(code);
-      new Notification({
+      dialog.showMessageBox({
+        type: 'info',
         title: 'HyperBot Agent — Setup',
-        body: `Send to your bot in Telegram: /activate ${code}`,
-      }).show();
+        message: 'Send this command to your bot in Telegram:',
+        detail: `/activate ${code}`,
+        buttons: ['Copy & Close'],
+      }).then(() => {
+        clipboard.writeText(`/activate ${code}`);
+      });
     });
   } else {
     wsClient.connect();
