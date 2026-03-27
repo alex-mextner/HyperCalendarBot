@@ -106,6 +106,7 @@ let mtprotoResolveUsername:
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
+  const { createPushScheduler } = await import('./services/google/push-scheduler.ts');
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
@@ -168,6 +169,8 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     },
   };
 
+  const pushScheduler = createPushScheduler(db.googleSync, db.events, queue);
+
   const disconnectDeps: DisconnectDeps = {
     config,
     oauthService,
@@ -185,6 +188,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     stateStore,
     disconnectDeps,
     calendarRepo: db.googleCalendars,
+    schedulePush: pushScheduler,
     onCalendarsDone: async (userId) => {
       const calendars = db.googleCalendars.getEnabledCalendars(userId);
       for (const cal of calendars) {

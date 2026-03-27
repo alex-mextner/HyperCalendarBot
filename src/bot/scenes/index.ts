@@ -22,13 +22,14 @@ export function createScenesPlugin(
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
   aiModel?: string,
+  onEventCreated?: (userId: number, eventId: number) => Promise<void>,
 ) {
   const storage = createSceneStorage(db.db);
   // Cast satisfies GramIO's generic Storage<Data> structural contract:
   // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
   const scopedStorage = wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
 
-  const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog);
+  const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog, onEventCreated);
   const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer, aiModel);

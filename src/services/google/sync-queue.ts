@@ -31,6 +31,8 @@ export interface GoogleSyncJobData {
   eventId?: number;
   action?: 'create' | 'update' | 'delete';
   trigger?: 'cron' | 'webhook' | 'manual';
+  /** Google event ID for delete jobs where the local event is already removed from DB. */
+  googleEventId?: string;
 }
 
 interface GoogleSyncQueueDeps {
@@ -124,6 +126,12 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         }
         case 'push-event': {
           if (!eventId || !action) throw new Error('eventId and action required for push-event');
+          // Fast path: local event already deleted — delete from Google using stored ID
+          if (action === 'delete' && job.data.googleEventId) {
+            const calendarId = job.data.calendarId ?? 'primary';
+            await api.deleteEvent(calendarId, job.data.googleEventId);
+            break;
+          }
           await syncService.pushEvent(api, userId, eventId, action);
           break;
         }
