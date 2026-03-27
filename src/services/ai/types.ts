@@ -79,6 +79,12 @@ export interface VoiceCapability {
 
 export interface GoogleCapability {
   googleCalendarRepo: GoogleCalendarRepository;
+  schedulePush?: (
+    userId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+    opts?: { googleEventId?: string },
+  ) => Promise<void>;
 }
 
 export interface NotificationsCapability {

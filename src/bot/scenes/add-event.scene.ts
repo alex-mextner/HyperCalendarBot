@@ -29,6 +29,7 @@ export function createAddEventScene(
   eventService: EventService,
   userComposer: UserResolverComposer,
   actionLogRepo?: ActionLogRepository,
+  onEventCreated?: (userId: number, eventId: number) => Promise<void>,
 ) {
   return (
     new Scene('add_event')
@@ -304,6 +305,8 @@ export function createAddEventScene(
           target_event_id: event.id,
           metadata: JSON.stringify({ startAt, endAt, recurrenceRule }),
         });
+
+        onEventCreated?.(user.telegram_id, event.id).catch(() => {});
 
         await context.scene.exit();
         const detail = formatEventDetail(event, user.timezone, lang);

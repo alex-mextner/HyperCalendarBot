@@ -82,11 +82,13 @@ const mockListCalendars = mock(
   > => [],
 );
 const mockStopChannel = mock(async () => {});
+const mockDeleteEvent = mock(async () => {});
 
 mock.module('../../../src/services/google/calendar-api.ts', () => ({
   GoogleCalendarApi: class MockGoogleCalendarApi {
     listCalendars = mockListCalendars;
     stopChannel = mockStopChannel;
+    deleteEvent = mockDeleteEvent;
   },
 }));
 
@@ -403,6 +405,23 @@ describe('google-sync job processor — job types', () => {
     expect(action).toBe('create');
   });
 
+  test('push-event delete with googleEventId uses fast path (skips syncService)', async () => {
+    mockPushEvent.mockClear();
+    mockDeleteEvent.mockClear();
+    createGoogleSyncQueue(makeDeps());
+    await capturedProcessor({
+      id: 'j26d',
+      name: 'push-event',
+      data: { type: 'push-event', userId: 1, eventId: 99, action: 'delete', googleEventId: 'goog-abc' },
+      attemptsMade: 0,
+    });
+    expect(mockPushEvent).not.toHaveBeenCalled();
+    expect(mockDeleteEvent).toHaveBeenCalledTimes(1);
+    const [calendarId, googleEventId] = mockDeleteEvent.mock.calls[0] as unknown as [string, string];
+    expect(calendarId).toBe('primary');
+    expect(googleEventId).toBe('goog-abc');
+  });
+
   test('refresh-calendars calls api.listCalendars and upserts each', async () => {
     mockListCalendars.mockImplementation(async () => [
       {
@@ -427,6 +446,32 @@ describe('google-sync job processor — job types', () => {
     expect(userId).toBe(1);
     expect(calData.google_calendar_id).toBe('cal-x');
     mockListCalendars.mockImplementation(async () => []);
+  });
+
+  test('refresh-calendars calls onCalendarsRefreshed after upsert', async () => {
+    const onCalendarsRefreshed = mock(async () => {});
+    createGoogleSyncQueue(makeDeps({ onCalendarsRefreshed }));
+    await capturedProcessor({
+      id: 'j27b',
+      name: 'refresh-calendars',
+      data: { type: 'refresh-calendars', userId: 5 },
+      attemptsMade: 0,
+    });
+    expect(onCalendarsRefreshed).toHaveBeenCalledTimes(1);
+    const [userId] = onCalendarsRefreshed.mock.calls[0] as unknown as [number];
+    expect(userId).toBe(5);
+  });
+
+  test('refresh-calendars does not throw when onCalendarsRefreshed is absent', async () => {
+    createGoogleSyncQueue(makeDeps());
+    await expect(
+      capturedProcessor({
+        id: 'j27c',
+        name: 'refresh-calendars',
+        data: { type: 'refresh-calendars', userId: 5 },
+        attemptsMade: 0,
+      }),
+    ).resolves.toBeUndefined();
   });
 
   test('setup-watch returns early when calendarId is missing', async () => {

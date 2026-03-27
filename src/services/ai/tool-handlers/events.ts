@@ -298,6 +298,12 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 
     if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
+    if (scope !== 'group') {
+      ctx.google
+        ?.schedulePush?.(userId, event.id, 'create')
+        .catch((err) => logger.error({ err }, 'schedulePush failed'));
+    }
+
     if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
       const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
       if (conflicts.length > 0) {
@@ -365,6 +371,12 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.location) parts.push(`location: ${updated.location}`);
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
+
+  if (scope !== 'group') {
+    ctx.google
+      ?.schedulePush?.(userId, updated.id, 'update')
+      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+  }
 
   let conflictHint: string | undefined;
   if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
@@ -447,7 +459,15 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
+  const googleEventId = event.google_event_id ?? undefined;
   ctx.eventService.deleteEvent(input.event_id, userId);
+
+  if (ctx.google?.schedulePush && googleEventId) {
+    ctx.google
+      .schedulePush(userId, input.event_id, 'delete', { googleEventId })
+      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+  }
+
   return {
     success: true,
     output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),

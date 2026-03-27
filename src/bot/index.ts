@@ -86,6 +86,12 @@ export interface GoogleBotDeps {
   disconnectDeps: DisconnectDeps;
   calendarRepo: GoogleCalendarRepository;
   onCalendarsDone?: (userId: number) => Promise<void>;
+  schedulePush?: (
+    userId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+    opts?: { googleEventId?: string },
+  ) => Promise<void>;
 }
 
 export interface CreateBotOpts {
@@ -181,6 +187,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const sharingService = new SharingService(db.events, privacyService);
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
+  const googleSchedulePush = googleDeps?.schedulePush;
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
@@ -190,6 +197,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     prefsService,
     holidayService,
     envConfig?.AI_FAST_MODEL,
+    googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
   );
 
   const intentRepo = new IntentRepository(db.db);
@@ -294,6 +302,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       ensureDefaults: (userId: number) => db.notificationPreferences.ensureDefaults(userId),
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
+    googleSchedulePush: googleDeps?.schedulePush,
     deepLinkService,
     sceneStorage: scenesSetup.storage,
     botUsername: envConfig?.BOT_USERNAME,

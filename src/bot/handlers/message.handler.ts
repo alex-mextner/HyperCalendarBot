@@ -115,6 +115,12 @@ export interface MessageHandlerDeps {
     setLanguage(userId: number, lang: string): void;
   };
   googleCalendarRepo?: GoogleCalendarRepository;
+  googleSchedulePush?: (
+    userId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+    opts?: { googleEventId?: string },
+  ) => Promise<void>;
   deepLinkService?: DeepLinkService;
   sceneStorage: SceneStorage;
   botUsername?: string;
@@ -561,7 +567,9 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             }
           : undefined,
       notifications: deps.notificationPrefs ? { notificationPrefs: deps.notificationPrefs } : undefined,
-      google: deps.googleCalendarRepo ? { googleCalendarRepo: deps.googleCalendarRepo } : undefined,
+      google: deps.googleCalendarRepo
+        ? { googleCalendarRepo: deps.googleCalendarRepo, schedulePush: deps.googleSchedulePush }
+        : undefined,
       agents:
         deps.agentRegistry && deps.agentDispatcher
           ? {
