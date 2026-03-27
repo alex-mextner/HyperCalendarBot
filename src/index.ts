@@ -880,10 +880,12 @@ if (config.GOOGLE_CLIENT_ID) {
   COMMANDS_EN.push(
     { command: 'connect_google', description: 'Connect Google Calendar' },
     { command: 'disconnect_google', description: 'Disconnect Google Calendar' },
+    { command: 'google_status', description: 'Google Calendar sync status' },
   );
   COMMANDS_RU.push(
     { command: 'connect_google', description: 'Подключить Google Calendar' },
     { command: 'disconnect_google', description: 'Отключить Google Calendar' },
+    { command: 'google_status', description: 'Статус синхронизации Google Calendar' },
   );
 }
 
