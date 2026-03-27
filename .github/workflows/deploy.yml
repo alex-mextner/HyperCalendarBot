@@ -40,10 +40,16 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3.11"
-      # Regenerate bun.lock for linux/amd64 so Docker can use --production.
-      # The macOS lockfile from git has darwin-arm64 optional deps; bun --production
-      # treats any lockfile change as a frozen violation, so we update it first.
+      # Cache the linux/amd64 bun.lock, keyed by the macOS lockfile + package.json.
+      # On hit: cache restores the linux lockfile, Docker --production works.
+      # On miss: bun install updates bun.lock for linux, cache saves it for next run.
+      - uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4
+        id: lockfile-cache
+        with:
+          path: bun.lock
+          key: bun-lock-linux-${{ hashFiles('package.json', 'bun.lock') }}
       - run: bun install --ignore-scripts
+        if: steps.lockfile-cache.outputs.cache-hit != 'true'
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
