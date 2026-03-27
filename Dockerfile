@@ -31,7 +31,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
-RUN bun install --production --ignore-scripts
+RUN bun install --ignore-scripts
 
 # Stage 3: final image
 FROM debian:bookworm-slim AS runner
