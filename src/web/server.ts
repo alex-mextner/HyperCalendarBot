@@ -243,7 +243,7 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
 
   const serveOptions = {
     port,
-    ...(agentWs ? { websocket: { ...agentWs, idleTimeout: 30 } } : {}),
+    ...(agentWs ? { websocket: { ...agentWs, idleTimeout: 120 } } : {}),
     async fetch(
       req: Request,
       server: {
