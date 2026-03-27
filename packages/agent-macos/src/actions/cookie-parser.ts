@@ -24,13 +24,14 @@ function getMasterKey(): Buffer {
 }
 
 export function decryptCookieValue(encryptedValue: Buffer): string {
-  if (!encryptedValue || encryptedValue.length < 35) return '';
+  if (!encryptedValue || encryptedValue.length < 4) return '';
   const prefix = encryptedValue.subarray(0, 3).toString('ascii');
   if (prefix !== 'v10') return encryptedValue.toString('utf-8');
 
   // Chromium macOS v10 format: v10 (3 bytes) + IV (16 bytes) + AES-128-CBC ciphertext
   // Chromium prepends a 16-byte random nonce to the plaintext before encryption,
   // so the first 16 decrypted bytes must be skipped to get the actual cookie value.
+  if (encryptedValue.length < 35) return '';
   const iv = encryptedValue.subarray(3, 19);
   const ciphertext = encryptedValue.subarray(19);
   const key = getMasterKey();
