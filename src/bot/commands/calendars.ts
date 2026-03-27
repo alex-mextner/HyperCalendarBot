@@ -4,26 +4,8 @@ import type { Lang } from '../../config/constants.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleCalendar } from '../../database/types.ts';
+import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
-
-const GOOGLE_CALENDAR_COLORS: { [hex: string]: string } = {
-  '#d50000': '🔴', // Tomato
-  '#e67c73': '🩷', // Flamingo
-  '#f4511e': '🟠', // Tangerine
-  '#f6bf26': '🟡', // Banana
-  '#33b679': '🟢', // Sage
-  '#0f9d58': '🟩', // Basil
-  '#039be5': '🔵', // Peacock
-  '#3f51b5': '💙', // Blueberry
-  '#7986cb': '🟣', // Lavender
-  '#8e24aa': '💜', // Grape
-  '#616161': '⚫', // Graphite
-};
-
-function calendarColorDot(color: string | null): string {
-  if (!color) return '📅';
-  return GOOGLE_CALENDAR_COLORS[color.toLowerCase()] ?? '📅';
-}
 
 export function buildCalendarPickerKeyboard(calendars: GoogleCalendar[], lang: Lang): InlineKeyboard {
   const kb = new InlineKeyboard();
@@ -32,7 +14,7 @@ export function buildCalendarPickerKeyboard(calendars: GoogleCalendar[], lang: L
     const readonly =
       cal.access_role === 'reader' || cal.access_role === 'freeBusyReader' ? ` ${t(lang).gcal_calendar_readonly}` : '';
     const primary = cal.is_primary ? ' ★' : '';
-    const dot = calendarColorDot(cal.color);
+    const dot = googleCalendarColorEmoji(cal.color) || '📅';
     kb.text(`${check} ${dot} ${cal.calendar_name}${primary}${readonly}`, `${CB.GCAL}:cal:${cal.id}`).row();
   }
   kb.text(t(lang).gcal_calendar_done, `${CB.GCAL}:cal:done`);

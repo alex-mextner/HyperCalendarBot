@@ -2,9 +2,11 @@
 
 import { TZDate } from '@date-fns/tz';
 import { addDays } from 'date-fns';
+import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { formatDayAgenda } from '../../services/event/formatters.ts';
+import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
@@ -18,6 +20,7 @@ export async function handleTomorrow(
   holidayService?: HolidayService,
   renderService?: RenderService,
   groupRepo?: GroupChatRepository,
+  googleCalendarRepo?: GoogleCalendarRepository,
 ): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
@@ -56,7 +59,15 @@ export async function handleTomorrow(
   const occurrences = eventService.getEventsForDay(user.telegram_id, tomorrow, user.timezone);
   const dateIso = new TZDate(tomorrow, user.timezone).toISOString().slice(0, 10);
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
-  const text = formatDayAgenda(occurrences, tomorrow.toISOString(), user.timezone, user.language, holidays);
+  const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
+  const text = formatDayAgenda(
+    occurrences,
+    tomorrow.toISOString(),
+    user.timezone,
+    user.language,
+    holidays,
+    calendarColors,
+  );
 
   await ctx.send(text, { parse_mode: 'HTML' });
 
@@ -77,4 +88,19 @@ export async function handleTomorrow(
       imageLogger.error({ error: (err as Error).message }, 'Render failed');
     }
   }
+}
+
+function buildCalendarColorMap(
+  repo: GoogleCalendarRepository | undefined,
+  userId: number,
+): Map<string, string> | undefined {
+  if (!repo) return undefined;
+  const calendars = repo.getCalendars(userId);
+  if (calendars.length === 0) return undefined;
+  const map = new Map<string, string>();
+  for (const cal of calendars) {
+    const emoji = googleCalendarColorEmoji(cal.color);
+    if (emoji) map.set(cal.google_calendar_id, emoji);
+  }
+  return map.size > 0 ? map : undefined;
 }
