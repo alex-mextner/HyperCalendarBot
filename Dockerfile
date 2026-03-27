@@ -30,7 +30,9 @@ RUN apt-get update && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
-COPY package.json bun.lock ./
+COPY package.json ./
+# No bun.lock: bun --production modifies the lockfile format (strips devDeps),
+# so it always fails with an existing full lockfile. Generate fresh on linux.
 RUN bun install --production --ignore-scripts
 
 # Stage 3: final image
