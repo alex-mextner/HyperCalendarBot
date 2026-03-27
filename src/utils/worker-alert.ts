@@ -2,7 +2,7 @@
 // Creates a BullMQ worker 'failed' event handler that sends a Telegram alert
 // and pushes to the admin alert queue (for mac-alert-watcher → Claude).
 
-export interface WorkerAlertDeps {
+interface WorkerAlertDeps {
   botToken: string;
   adminId: number;
   /** Called synchronously — must not throw. Omit if ADMIN_ALERT_TOKEN is not set. */

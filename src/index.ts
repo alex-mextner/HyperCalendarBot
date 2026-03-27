@@ -39,15 +39,20 @@ if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
 }
 
-// Returns a BullMQ 'failed' handler that Telegrams the admin + pushes to alert queue.
-// No-op when BOT_ADMIN_ID is absent (dev/test environments without admin config).
+// Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
+// When BOT_ADMIN_ID is absent (dev/test), still logs — just skips Telegram + alert queue.
 function onWorkerFailed(name: string): (job: { id?: string } | undefined, err: Error) => void {
-  if (!config.BOT_ADMIN_ID) return () => {};
-  return makeWorkerFailureHandler(name, {
-    botToken: config.BOT_TOKEN,
-    adminId: config.BOT_ADMIN_ID,
-    pushAlert: config.ADMIN_ALERT_TOKEN ? (msg, src) => db.alerts.push(msg, src) : undefined,
-  });
+  const alertHandler = config.BOT_ADMIN_ID
+    ? makeWorkerFailureHandler(name, {
+        botToken: config.BOT_TOKEN,
+        adminId: config.BOT_ADMIN_ID,
+        pushAlert: config.ADMIN_ALERT_TOKEN ? (msg, src) => db.alerts.push(msg, src) : undefined,
+      })
+    : null;
+  return (job, err) => {
+    botLogger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
+    alertHandler?.(job, err);
+  };
 }
 
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
@@ -786,9 +791,6 @@ if (config.REDIS_URL) {
   );
 
   checkerWorker.on('failed', onWorkerFailed('event-starting-checker'));
-  checkerWorker.on('failed', (job, err) => {
-    botLogger.error({ jobId: job?.id, err }, 'EventStartingChecker job failed');
-  });
 
   aiMessagesQueueCleanup = {
     close: async () => {
