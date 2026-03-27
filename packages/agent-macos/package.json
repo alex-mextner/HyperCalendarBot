@@ -31,7 +31,6 @@
       "icon": "assets/icon.icns",
       "target": ["dmg", "pkg"]
     },
-    "files": ["dist/**/*"],
-    "npmRebuild": false
+    "files": ["dist/**/*"]
   }
 }
