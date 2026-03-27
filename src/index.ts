@@ -13,6 +13,7 @@ import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
+import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
 // Filled in after db + config are initialized — best-effort, push() is synchronous
@@ -37,6 +38,18 @@ const db = createDatabase(config.DATABASE_PATH);
 if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
 }
+
+// Returns a BullMQ 'failed' handler that Telegrams the admin + pushes to alert queue.
+// No-op when BOT_ADMIN_ID is absent (dev/test environments without admin config).
+function onWorkerFailed(name: string): (job: { id?: string } | undefined, err: Error) => void {
+  if (!config.BOT_ADMIN_ID) return () => {};
+  return makeWorkerFailureHandler(name, {
+    botToken: config.BOT_TOKEN,
+    adminId: config.BOT_ADMIN_ID,
+    pushAlert: config.ADMIN_ALERT_TOKEN ? (msg, src) => db.alerts.push(msg, src) : undefined,
+  });
+}
+
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
 
 if (config.AGENT_JWT_SECRET) {
@@ -199,6 +212,7 @@ if (config.REDIS_URL) {
   await playwrightPool.initialize();
 
   const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
+  worker.on('failed', onWorkerFailed('image-render'));
   renderService = new RenderService(
     imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
     queueEvents,
@@ -351,6 +365,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     });
 
     const worker = createCallWorker({ url: config.REDIS_URL }, callManager);
+    worker.on('failed', onWorkerFailed('call-reminders'));
     callQueueCleanup = {
       close: async () => {
         await worker.close();
@@ -504,6 +519,8 @@ if (config.REDIS_URL) {
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
   await setupActionLogCleanupCron(botTasksQueue);
+
+  botTasksWorker.on('failed', onWorkerFailed('bot-tasks'));
 
   botTasksQueueCleanup = {
     close: async () => {
@@ -743,6 +760,7 @@ if (config.REDIS_URL) {
     (userId) => db.users.findByTelegramId(userId),
     (scheduleId) => scheduleRepo.recordRun(scheduleId),
   );
+  aiWorker.on('failed', onWorkerFailed('ai-messages'));
 
   // EventStartingChecker — runs on 1-minute BullMQ cron
   const eventStartingChecker = new EventStartingChecker(db.db, domainEventBus, (withinMs) =>
@@ -767,6 +785,7 @@ if (config.REDIS_URL) {
     { connection: redisConnection },
   );
 
+  checkerWorker.on('failed', onWorkerFailed('event-starting-checker'));
   checkerWorker.on('failed', (job, err) => {
     botLogger.error({ jobId: job?.id, err }, 'EventStartingChecker job failed');
   });
