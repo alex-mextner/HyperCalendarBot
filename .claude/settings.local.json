@@ -34,7 +34,11 @@
       "Bash(BASE=/Users/ultra/xp/hypercalendarbot/.worktrees/remove-unknown-casts)",
       "Bash(awk:*)",
       "Bash(launchctl list:*)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(for f:*)",
+      "Bash(do)",
+      "Bash(launchctl unload:*)",
+      "Bash(launchctl load:*)"
     ]
   }
 }
