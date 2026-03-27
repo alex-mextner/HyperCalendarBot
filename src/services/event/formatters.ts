@@ -24,6 +24,7 @@ export function formatDayAgenda(
   timezone: string,
   lang: string,
   holidays?: HolidayEntry[],
+  calendarColors?: Map<string, string>,
 ): string {
   const header = `📅 ${formatDateHeader(dateIso, timezone, lang)}`;
 
@@ -45,7 +46,10 @@ export function formatDayAgenda(
         age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
       title = `🎁 ${title}${escapeHtml(suffix)}`;
     }
-    return `  ${time}  ${title}${isRecurring ? ' 🔁' : ''}`;
+    const colorDot =
+      calendarColors && occ.event.google_calendar_id ? (calendarColors.get(occ.event.google_calendar_id) ?? '') : '';
+    const dotPrefix = colorDot ? `${colorDot} ` : '';
+    return `  ${time}  ${dotPrefix}${title}${isRecurring ? ' 🔁' : ''}`;
   });
 
   const allLines = [...holidayLines, ...eventLines];

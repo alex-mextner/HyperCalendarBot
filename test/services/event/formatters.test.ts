@@ -75,6 +75,54 @@ describe('formatDayAgenda', () => {
     expect(result).toContain('09:00');
     expect(result).toContain('Lunch');
   });
+
+  test('shows color dot when google_calendar_id matches calendarColors map', () => {
+    const calId = 'cal-abc';
+    const events = [
+      makeOccurrence('Meeting', '2026-03-11T09:00:00Z', '2026-03-11T10:00:00Z', {
+        google_calendar_id: calId,
+      }),
+    ];
+    const calendarColors = new Map([[calId, '🔴']]);
+    const result = formatDayAgenda(events, '2026-03-11T12:00:00Z', 'UTC', 'en', [], calendarColors);
+    expect(result).toContain('🔴');
+    expect(result).toContain('Meeting');
+  });
+
+  test('no color dot when google_calendar_id not in calendarColors map', () => {
+    const events = [
+      makeOccurrence('Meeting', '2026-03-11T09:00:00Z', '2026-03-11T10:00:00Z', {
+        google_calendar_id: 'unknown-cal',
+      }),
+    ];
+    const calendarColors = new Map([['other-cal', '🔵']]);
+    const result = formatDayAgenda(events, '2026-03-11T12:00:00Z', 'UTC', 'en', [], calendarColors);
+    expect(result).not.toContain('🔵');
+    expect(result).toContain('Meeting');
+  });
+
+  test('no color dot when event has no google_calendar_id', () => {
+    const events = [
+      makeOccurrence('Meeting', '2026-03-11T09:00:00Z', '2026-03-11T10:00:00Z', {
+        google_calendar_id: null,
+      }),
+    ];
+    const calendarColors = new Map([['some-cal', '🟢']]);
+    const result = formatDayAgenda(events, '2026-03-11T12:00:00Z', 'UTC', 'en', [], calendarColors);
+    expect(result).not.toContain('🟢');
+  });
+
+  test('no color dot when calendarColors not provided', () => {
+    const events = [
+      makeOccurrence('Meeting', '2026-03-11T09:00:00Z', '2026-03-11T10:00:00Z', {
+        google_calendar_id: 'cal-abc',
+      }),
+    ];
+    const result = formatDayAgenda(events, '2026-03-11T12:00:00Z', 'UTC', 'en');
+    expect(result).toContain('Meeting');
+    // no emoji dot prefixes (only 📅 header and possible 🔁 for recurring)
+    expect(result).not.toMatch(/🔴|🔵|🟢|🟡|🟠|🟣|💙|💜|⚫|🩷|🟩/);
+  });
 });
 
 describe('formatEventDetail', () => {
