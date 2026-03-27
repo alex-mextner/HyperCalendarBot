@@ -31,7 +31,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 COPY package.json bun.lock ./
-RUN bun install --ignore-scripts
+RUN bun install --production --ignore-scripts
 
 # Stage 3: final image
 FROM debian:bookworm-slim AS runner
@@ -63,7 +63,7 @@ COPY --from=prod-deps /app/node_modules ./node_modules
 
 COPY src ./src
 COPY scripts ./scripts
-COPY tsconfig.json bunfig.toml ./
+COPY tsconfig.json bunfig.toml package.json ./
 
 RUN groupadd -r botuser && useradd -r -g botuser botuser && \
     mkdir -p logs data && \
