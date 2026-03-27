@@ -154,6 +154,11 @@ export const MSG = {
     gcal_revoked: '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Sync conflict on "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Local'} version was applied (more recent).`,
+    gcal_status_connected: 'Connected ✅',
+    gcal_status_not_connected: 'Google Calendar is not connected. Use /connect_google to start syncing.',
+    gcal_status_sync_btn: '🔄 Sync now',
+    gcal_status_calendars_btn: '⚙️ Calendars',
+    gcal_status_sync_started: '⏳ Sync started',
     invite_error: 'Failed to send invitation.',
     invite_delivered: (title: string) => `📨 Invitation to "<b>${title}</b>" sent`,
     invite_deep_link: (title: string, url: string) =>
@@ -526,6 +531,11 @@ export const MSG = {
     gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Конфликт синхронизации "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Локальная'} версия применена (более новая).`,
+    gcal_status_connected: 'Подключён ✅',
+    gcal_status_not_connected: 'Google Calendar не подключён. Используй /connect_google чтобы начать синхронизацию.',
+    gcal_status_sync_btn: '🔄 Синхронизировать',
+    gcal_status_calendars_btn: '⚙️ Календари',
+    gcal_status_sync_started: '⏳ Синхронизация запущена',
     invite_error: 'Не удалось отправить приглашение.',
     invite_delivered: (title: string) => `📨 Приглашение на "<b>${title}</b>" отправлено`,
     invite_deep_link: (title: string, url: string) =>

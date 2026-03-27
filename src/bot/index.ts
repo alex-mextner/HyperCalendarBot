@@ -8,6 +8,7 @@ import type { DatabaseService } from '../database/index.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
+import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
 import { IntentRepository } from '../database/repositories/intent.repository.ts';
 import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
@@ -52,6 +53,7 @@ import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
 import { handleEdit } from './commands/edit.ts';
 import { handleFree } from './commands/free.ts';
+import { handleGoogleStatus } from './commands/google-status.ts';
 import { handleHelp } from './commands/help.ts';
 import { handleHolidays } from './commands/holidays.ts';
 import { handleImport } from './commands/import.ts';
@@ -85,6 +87,7 @@ export interface GoogleBotDeps {
   stateStore: { set(key: string, value: string, ttl: number): Promise<void> };
   disconnectDeps: DisconnectDeps;
   calendarRepo: GoogleCalendarRepository;
+  syncRepo?: GoogleSyncRepository;
   onCalendarsDone?: (userId: number) => Promise<void>;
   schedulePush?: (
     userId: number,
@@ -92,6 +95,7 @@ export interface GoogleBotDeps {
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
   ) => Promise<void>;
+  triggerSync?: (userId: number) => Promise<void>;
 }
 
 export interface CreateBotOpts {
@@ -611,6 +615,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         calendarRepo: googleDeps?.calendarRepo,
         disconnectDeps: googleDeps?.disconnectDeps,
         onCalendarsDone: googleDeps?.onCalendarsDone,
+        triggerSync: googleDeps?.triggerSync,
         renderService,
         invitationService,
         eventRepo: db.events,
@@ -901,6 +906,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         : undefined,
     )
     .command('disconnect_google', (ctx) => (googleDeps ? handleDisconnectGoogle(ctx) : undefined))
+    .command('google_status', (ctx) =>
+      googleDeps?.syncRepo
+        ? handleGoogleStatus(ctx, { syncRepo: googleDeps.syncRepo, calendarRepo: googleDeps.calendarRepo })
+        : undefined,
+    )
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
     // so any .command() registered after it will never fire.

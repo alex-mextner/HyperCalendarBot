@@ -50,7 +50,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
-import { handleCalendarPickerCallback } from '../commands/calendars.ts';
+import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
 import { type DisconnectDeps, executeDisconnect } from '../commands/disconnect-google.ts';
 import { handleEditCallback, handleEditFieldCallback } from '../commands/edit.ts';
@@ -148,6 +148,7 @@ export interface CallbackHandlerOpts {
     sceneStorage: { get(key: string): Promise<unknown>; delete(key: string): unknown };
     scenePauseService: ScenePauseService;
   };
+  triggerSync?: (userId: number) => Promise<void>;
 }
 
 /**
@@ -190,6 +191,7 @@ export function createCallbackHandler(
     timezoneScene,
     groupRepo,
     scenePauseDeps,
+    triggerSync,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
 
@@ -363,7 +365,19 @@ export function createCallbackHandler(
     const subAction = subParts[0];
     const subPayload = subParts.slice(1).join(':');
 
+    if (subAction === 'sync') {
+      await ctx.answer({ text: t(lang).gcal_status_sync_started });
+      triggerSync?.(user.telegram_id).catch(() => {});
+      return;
+    }
     if (subAction === 'cal' && calendarRepo) {
+      if (subPayload === 'open') {
+        const calendars = calendarRepo.getCalendars(user.telegram_id);
+        const keyboard = buildCalendarPickerKeyboard(calendars, lang);
+        await ctx.answer();
+        await ctx.send(t(lang).gcal_calendar_picker, { reply_markup: keyboard });
+        return;
+      }
       await handleCalendarPickerCallback(ctx, calendarRepo, user.telegram_id, subPayload, lang, onCalendarsDone);
       return;
     }
