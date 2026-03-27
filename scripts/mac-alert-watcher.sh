@@ -23,6 +23,7 @@ set -uo pipefail
 PLIST_LABEL="ru.invntrm.hypercal-alert-watcher"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 SCRIPT_PATH="$(cd "$(dirname "$0")"; pwd -P)/$(basename "$0")"
+PROJECT_DIR="$(cd "$(dirname "$0")/.."; pwd -P)"
 
 if [[ "${1:-}" == "--uninstall" ]]; then
   launchctl unload "$PLIST_PATH" 2>/dev/null || true
@@ -85,8 +86,8 @@ open_in_terminal() {
   local tmpscript
   tmpscript=$(mktemp /tmp/hypercal-XXXX.sh)
   # printf %q produces shell-safe escaping for the text argument
-  printf '#!/bin/sh\nexec claude --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
-    "$text" > "$tmpscript"
+  printf '#!/bin/sh\ncd %q\nexec claude --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
+    "$PROJECT_DIR" "$text" > "$tmpscript"
   chmod +x "$tmpscript"
 
   if [[ "$TERMINAL" == "iterm2" ]]; then
@@ -107,7 +108,7 @@ while true; do
     "${ENDPOINT}" 2>/dev/null) || true
 
   HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | head -n -1)
+  BODY=$(echo "$RESPONSE" | sed '$d')
 
   if [[ "$HTTP_CODE" == "200" ]]; then
     TEXT=$(echo "$BODY" | python3 -c "import sys,json; print(json.load(sys.stdin)['text'])" 2>/dev/null || echo "$BODY")
