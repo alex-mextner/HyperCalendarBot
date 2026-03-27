@@ -13,7 +13,8 @@ let cachedMasterKey: Buffer | null = null;
 function getMasterKey(): Buffer {
   if (cachedMasterKey) return cachedMasterKey;
   const password = execSync(
-    'security find-generic-password -s "Chrome Safe Storage" -a "Chrome" -w 2>/dev/null || ' +
+    'security find-generic-password -s "Claude Safe Storage" -a "Claude Key" -w 2>/dev/null || ' +
+      'security find-generic-password -s "Chrome Safe Storage" -a "Chrome" -w 2>/dev/null || ' +
       'security find-generic-password -s "Chromium Safe Storage" -a "Chromium" -w 2>/dev/null || ' +
       'echo "peanuts"',
     { encoding: 'utf-8' },

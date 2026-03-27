@@ -1,9 +1,12 @@
-import { app, clipboard, dialog, Notification } from 'electron';
+import { app, clipboard, dialog, Notification, type Tray } from 'electron';
 import { dispatch } from './dispatcher';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
 import { createTray } from './tray';
 import { WsClient } from './ws-client';
+
+// Keep Tray reference at module scope — Electron destroys it if GC'd
+let tray: Tray | undefined;
 
 const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://hypercal.invntrm.ru/ws/agent';
 
@@ -48,7 +51,7 @@ async function main(): Promise<void> {
     });
   });
 
-  createTray(wsClient);
+  tray = createTray(wsClient);
 
   if (!jwt) {
     // First launch — generate pairing code and initiate pairing
