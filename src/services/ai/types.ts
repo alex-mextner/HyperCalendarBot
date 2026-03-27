@@ -25,6 +25,7 @@ import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
+import type { ImageRenderer } from '../image/render-service.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
@@ -157,7 +158,7 @@ export interface AgentContext {
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
   onEventMentioned?: (eventId: number) => void;
-  renderService?: { renderDirect(opts: Record<string, unknown>): Promise<Buffer> };
+  renderService?: ImageRenderer;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
   /** Telegram file_id of the voice message that triggered this interaction. */

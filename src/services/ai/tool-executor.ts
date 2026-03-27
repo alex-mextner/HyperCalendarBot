@@ -40,7 +40,12 @@ import {
 import type { ProposeInput } from './tool-handlers/proposals.ts';
 import { handleProposeCalendarChange } from './tool-handlers/proposals.ts';
 import { handleGetReminders, handleSetReminder } from './tool-handlers/reminders.ts';
-import { handleRenderDayImage, handleRenderTable, handleRenderWeekImage } from './tool-handlers/render.ts';
+import {
+  handleRenderDayImage,
+  handleRenderMonthImage,
+  handleRenderTable,
+  handleRenderWeekImage,
+} from './tool-handlers/render.ts';
 import { handleCancelScene, handleResumeScene } from './tool-handlers/scenes.ts';
 import {
   handleAddTrigger,
@@ -125,7 +130,8 @@ export interface ToolInputMap {
   find_contact: { name: string };
   update_contact: { search: string; name?: string; preferred_name?: string; username?: string };
   render_day_image: { date: string; scope?: 'personal' | 'group'; owner_id?: number };
-  render_week_image: { week_start: string; owner_id?: number };
+  render_week_image: { week_start: string; scope?: 'personal' | 'group'; owner_id?: number };
+  render_month_image: { month: string; scope?: 'personal' | 'group'; owner_id?: number };
   render_table: { title: string; markdown: string; caption?: string };
   end_call: Record<never, never>;
   make_call: { text: string };
@@ -220,6 +226,7 @@ const SKIP_ACTION_LOG = new Set<string>([
   'pick_users',
   'render_day_image',
   'render_week_image',
+  'render_month_image',
   'render_table',
   'resume_scene',
   'cancel_scene',
@@ -386,6 +393,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'render_week_image':
         return handleRenderWeekImage(ctx, input as ToolInputMap['render_week_image']);
+
+      case 'render_month_image':
+        return handleRenderMonthImage(ctx, input as ToolInputMap['render_month_image']);
 
       case 'render_table':
         return handleRenderTable(ctx, input as ToolInputMap['render_table']);

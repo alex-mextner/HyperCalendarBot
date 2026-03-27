@@ -311,8 +311,10 @@ export const MSG = {
         contactUpdated: (label: string) => `Contact updated: ${label}`,
         questionSent: 'Question sent. Waiting for user response.',
         dayImageRendering: (date: string) => `Image for ${date} is being rendered and will be sent as a photo.`,
-        weekImageNotImplemented: (weekStart: string) =>
-          `Week image rendering for ${weekStart} is not yet implemented via AI tools.`,
+        weekImageRendering: (weekStart: string) =>
+          `Weekly calendar starting ${weekStart} is being rendered and will be sent as a photo.`,
+        monthImageRendering: (month: string) =>
+          `Monthly calendar for ${month} is being rendered and will be sent as a photo.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
         callFailed: (text: string) => `📞 Couldn't reach you by call.\n\n${text}`,
         gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
@@ -689,8 +691,9 @@ export const MSG = {
         contactUpdated: (label: string) => `Контакт обновлён: ${label}`,
         questionSent: 'Вопрос отправлен. Ожидаю ответа.',
         dayImageRendering: (date: string) => `Изображение за ${date} формируется и будет отправлено фото.`,
-        weekImageNotImplemented: (weekStart: string) =>
-          `Недельное изображение (с ${weekStart}) через AI-инструменты пока не реализовано.`,
+        weekImageRendering: (weekStart: string) =>
+          `Недельный календарь с ${weekStart} формируется и будет отправлен фото.`,
+        monthImageRendering: (month: string) => `Месячный календарь за ${month} формируется и будет отправлен фото.`,
         callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
         callFailed: (text: string) => `📞 Не удалось дозвониться.\n\n${text}`,
         gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',

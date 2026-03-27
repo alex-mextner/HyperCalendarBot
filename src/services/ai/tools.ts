@@ -658,6 +658,31 @@ export const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'render_month_image',
+    description:
+      'Generate and send a visual monthly calendar image. Use when the user asks to see a full month overview, e.g. "show April", "calendar for next month", "monthly view".',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        month: {
+          type: 'string',
+          description: 'Month in YYYY-MM format (e.g., "2026-04")',
+        },
+        scope: {
+          type: 'string',
+          enum: ['personal', 'group'],
+          description: 'Calendar scope. In groups defaults to "group", in DMs defaults to "personal".',
+        },
+        owner_id: {
+          type: 'number',
+          description:
+            "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
+        },
+      },
+      required: ['month'],
+    },
+  },
+  {
     name: 'render_table',
     description: `Renders a Markdown table as a styled image and sends it to the chat.
 
@@ -1144,7 +1169,13 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
 ];
 
 // Tools not available during a live call (no visual output, no Telegram UI)
-const CALL_EXCLUDED_TOOLS = new Set(['make_call', 'render_day_image', 'render_week_image', 'pick_users']);
+const CALL_EXCLUDED_TOOLS = new Set([
+  'make_call',
+  'render_day_image',
+  'render_week_image',
+  'render_month_image',
+  'pick_users',
+]);
 // Tools only available during a live call
 const CALL_ONLY_TOOLS = new Set(['end_call']);
 
