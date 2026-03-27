@@ -38,6 +38,6 @@
         { "x": 371, "y": 190, "type": "link", "path": "/Applications" }
       ]
     },
-    "files": ["dist/**/*"]
+    "files": ["dist/**/*", "assets/**/*"]
   }
 }

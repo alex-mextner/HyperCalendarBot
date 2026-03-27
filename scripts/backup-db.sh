@@ -13,7 +13,7 @@ mkdir -p "${BACKUP_DIR}"
 TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
 
 # Safe WAL-mode backup via VACUUM INTO
-docker compose -f /opt/hypercal/docker-compose.yml exec -T bot \
+docker compose --project-directory /opt/hypercal -f /opt/hypercal/docker-compose.yml exec -T bot \
   bun -e "const d = new (await import(\"bun:sqlite\")).Database(\"/app/data/calendar.db\",{readonly:true}); d.exec(\"VACUUM INTO '/app/data/backups/calendar_${TIMESTAMP}.db'\"); d.close();"
 
 BACKUP_FILE="${BACKUP_DIR}/calendar_${TIMESTAMP}.db"
