@@ -53,6 +53,42 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  build-agent:
+    needs: test
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install dependencies
+        working-directory: packages/agent-macos
+        run: npm install
+      - name: Compile TypeScript
+        working-directory: packages/agent-macos
+        run: ./node_modules/.bin/tsc --project tsconfig.json
+      - name: Build DMG
+        working-directory: packages/agent-macos
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: ./node_modules/.bin/electron-builder --mac dmg
+      - name: Rename artifact
+        run: cp "$(ls packages/agent-macos/dist/*.dmg | head -1)" agent-macos.dmg
+      - name: Create downloads directory on server
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: mkdir -p ${{ secrets.DEPLOY_PATH }}/downloads
+      - name: Upload DMG
+        uses: appleboy/scp-action@917f8b81dfc1ccd331fef9e2d61bdc6c8be94634 # v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: agent-macos.dmg
+          target: ${{ secrets.DEPLOY_PATH }}/downloads/
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
@@ -97,6 +133,7 @@ jobs:
             # Ensure data dir is owned by botuser (uid=999) — docker run --rm above
             # creates files as root, causing SQLITE_READONLY on startup.
             chown -R 999:999 data/
+            grep -q '^AGENT_DOWNLOAD_URL=' .env 2>/dev/null || echo 'AGENT_DOWNLOAD_URL=https://hypercal.invntrm.ru/downloads/agent-macos.dmg' >> .env
             docker compose up -d --no-deps bot
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
       - name: Notify deploy success
@@ -117,8 +154,8 @@ jobs:
 
   notify-failure:
     name: Notify on failure
-    needs: [test, build, deploy]
-    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure' || needs.deploy.result == 'failure')
+    needs: [test, build, build-agent, deploy]
+    if: always() && (needs.test.result == 'failure' || needs.build.result == 'failure' || needs.build-agent.result == 'failure' || needs.deploy.result == 'failure')
     runs-on: ubuntu-latest
     steps:
       - name: Send failure alert
@@ -130,12 +167,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          BUILD_AGENT_RESULT: ${{ needs.build-agent.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
           ADMIN_ALERT_TOKEN: ${{ secrets.ADMIN_ALERT_TOKEN }}
         run: |
           FAILED=""
           [[ "$TEST_RESULT" == "failure" ]] && FAILED="test "
           [[ "$BUILD_RESULT" == "failure" ]] && FAILED+="build "
+          [[ "$BUILD_AGENT_RESULT" == "failure" ]] && FAILED+="build-agent "
           [[ "$DEPLOY_RESULT" == "failure" ]] && FAILED+="deploy"
           FIRST_LINE=$(echo "$COMMIT_MSG" | head -1)
           TEXT=$(printf '🚨 <b>CI/CD failed</b> [%s]\n<code>%s</code> — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")
