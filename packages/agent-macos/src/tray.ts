@@ -1,6 +1,6 @@
 import { app, Menu, nativeImage, Tray } from 'electron';
 import { join } from 'node:path';
-import type { WsClient } from './ws-client.ts';
+import type { WsClient } from './ws-client';
 
 const ICON_CONNECTED = join(__dirname, '../assets/tray-connected.png');
 const ICON_DISCONNECTED = join(__dirname, '../assets/tray-disconnected.png');

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
-import type { AgentCommand, AgentOutbound } from './protocol.ts';
-import type { AgentResponse } from './protocol.ts';
+import type { AgentCommand, AgentOutbound } from './protocol';
+import type { AgentResponse } from './protocol';
 
 const PING_INTERVAL_MS = 30_000;
 const PONG_TIMEOUT_MS = 90_000;

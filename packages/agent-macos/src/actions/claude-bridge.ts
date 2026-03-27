@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { createCookieString } from './cookie-parser.ts';
+import { createCookieString } from './cookie-parser';
 
 const COOKIES_PATH = join(
   homedir(),

@@ -78,7 +78,7 @@ fi
 
 ENDPOINT="${ALERT_ENDPOINT:-https://hypercal.invntrm.ru/admin/alerts/next}"
 INTERVAL="${ALERT_POLL_INTERVAL:-30}"
-TERMINAL="${ALERT_TERMINAL:-terminal}"
+TERMINAL="${ALERT_TERMINAL:-hyper}"
 
 echo "[watcher] started — polling ${ENDPOINT} every ${INTERVAL}s"
 
@@ -136,6 +136,13 @@ Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \
     osascript \
       -e 'tell application "iTerm2" to activate' \
       -e "tell application \"iTerm2\" to tell current session of (create window with default profile) to write text \"$tmpscript\""
+  elif [[ "$TERMINAL" == "hyper" ]]; then
+    open -a "Hyper"
+    sleep 1
+    osascript \
+      -e 'tell application "Hyper" to activate' \
+      -e "tell application \"System Events\" to keystroke \"$tmpscript\"" \
+      -e 'tell application "System Events" to key code 36'
   else
     osascript \
       -e 'tell application "Terminal" to activate' \

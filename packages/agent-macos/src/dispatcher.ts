@@ -1,8 +1,8 @@
-import { applescriptRun } from './actions/applescript.ts';
-import { bashExecute } from './actions/bash.ts';
-import { claudeChat, getArtifact, getOrgId, listChats, listProjects } from './actions/claude-bridge.ts';
-import { type PlaywrightAction, playwrightAction } from './actions/playwright.ts';
-import type { AgentCommand, AgentResponse } from './protocol.ts';
+import { applescriptRun } from './actions/applescript';
+import { bashExecute } from './actions/bash';
+import { claudeChat, getArtifact, getOrgId, listChats, listProjects } from './actions/claude-bridge';
+import { type PlaywrightAction, playwrightAction } from './actions/playwright';
+import type { AgentCommand, AgentResponse } from './protocol';
 
 type SendResponse = (resp: AgentResponse) => void;
 
@@ -114,7 +114,9 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
             ? { action, url, selector, value }
             : action === 'click' || action === 'extract'
               ? { action, url, selector }
-              : { action: action ?? 'screenshot', url };
+              : action === 'navigate'
+                ? { action, url: url ?? '' }
+                : { action: 'screenshot' as const, url };
         const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : 30_000;
         const result = await playwrightAction(params, timeoutMs);
         if (result.screenshot) {

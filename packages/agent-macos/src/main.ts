@@ -1,9 +1,9 @@
 import { app, Notification } from 'electron';
-import { dispatch } from './dispatcher.ts';
-import { loadJwt, saveJwt } from './keychain.ts';
-import { generatePairingCode } from './pairing.ts';
-import { createTray } from './tray.ts';
-import { WsClient } from './ws-client.ts';
+import { dispatch } from './dispatcher';
+import { loadJwt, saveJwt } from './keychain';
+import { generatePairingCode } from './pairing';
+import { createTray } from './tray';
+import { WsClient } from './ws-client';
 
 const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://hypercal.invntrm.ru/ws/agent';
 
@@ -68,8 +68,8 @@ async function main(): Promise<void> {
   }
 
   // Prevent the app from quitting when all windows are closed (tray-only)
-  app.on('window-all-closed', (e: Event) => {
-    e.preventDefault();
+  app.on('window-all-closed', () => {
+    // tray-only app — stay alive when all windows are closed
   });
 }
 
