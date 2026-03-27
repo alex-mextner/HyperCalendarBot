@@ -28,6 +28,7 @@
     "productName": "HyperBotAgent",
     "mac": {
       "category": "public.app-category.utilities",
+      "icon": "assets/icon.icns",
       "target": ["dmg", "pkg"]
     },
     "files": ["dist/**/*"],
