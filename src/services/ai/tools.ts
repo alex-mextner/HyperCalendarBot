@@ -1150,7 +1150,6 @@ const CALL_ONLY_TOOLS = new Set(['end_call']);
 
 export interface UserCapabilities {
   assistantEnabled: boolean;
-  agentConnected: boolean;
 }
 
 const assistantToolDefinitions: ToolDefinition[] = [
@@ -1265,7 +1264,7 @@ export function getToolDefinitions(
     tools = toolDefinitions.filter((t) => !CALL_ONLY_TOOLS.has(t.name));
   }
 
-  if (caps?.assistantEnabled === true && caps?.agentConnected === true) {
+  if (caps?.assistantEnabled === true) {
     tools = [...tools, ...assistantToolDefinitions];
   }
 

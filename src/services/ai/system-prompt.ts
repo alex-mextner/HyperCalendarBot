@@ -305,7 +305,7 @@ Rules:
 - Do not call ask_user or pick_users in supplement mode.`
     : ''
 }${
-  caps?.assistantEnabled && caps?.agentConnected
+  caps?.assistantEnabled
     ? `
 
 ## AI Assistant (Computer Access)

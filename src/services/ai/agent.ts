@@ -160,7 +160,6 @@ export class CalendarBotAgent {
 
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
-      agentConnected: ctx.agents?.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false,
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
     const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);

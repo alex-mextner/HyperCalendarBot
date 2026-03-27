@@ -100,23 +100,13 @@ const ASSISTANT_TOOLS = [
 ];
 
 describe('UserCapabilities gating', () => {
-  test('assistant tools hidden when both false', () => {
-    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: false }).map((t) => t.name);
+  test('assistant tools hidden when assistantEnabled=false', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: false }).map((t) => t.name);
     for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
   });
 
-  test('assistant tools hidden when only assistantEnabled=true', () => {
-    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: false }).map((t) => t.name);
-    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
-  });
-
-  test('assistant tools hidden when only agentConnected=true', () => {
-    const names = getToolDefinitions('text', { assistantEnabled: false, agentConnected: true }).map((t) => t.name);
-    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
-  });
-
-  test('assistant tools visible when both true', () => {
-    const names = getToolDefinitions('text', { assistantEnabled: true, agentConnected: true }).map((t) => t.name);
+  test('assistant tools visible when assistantEnabled=true', () => {
+    const names = getToolDefinitions('text', { assistantEnabled: true }).map((t) => t.name);
     for (const tool of ASSISTANT_TOOLS) expect(names).toContain(tool);
   });
 
