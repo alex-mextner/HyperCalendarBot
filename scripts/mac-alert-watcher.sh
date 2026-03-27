@@ -125,7 +125,7 @@ brief description
 Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \\~ \\\` \\> \\# \\+ \\- \\= \\| \\{ \\} \\. \\!
 " "$text" "$PROJECT_DIR")
 
-  CLAUDE_BIN="${CLAUDE_BIN:-/opt/homebrew/bin/claude}"
+  CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "${HOME}/.local/bin/claude")}"
   # printf %q produces shell-safe escaping for the prompt argument
   printf '#!/bin/sh\ncd %q\nexec %q --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
     "$PROJECT_DIR" "$CLAUDE_BIN" "$prompt" > "$tmpscript"
