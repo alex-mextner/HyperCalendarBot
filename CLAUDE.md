@@ -241,6 +241,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
+- **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
 - **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
   accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
