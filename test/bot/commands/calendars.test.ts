@@ -84,6 +84,24 @@ describe('buildCalendarPickerKeyboard', () => {
     const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
     expect(buttons.some((b) => b.text === 'Готово ✓')).toBe(true);
   });
+
+  test('known google color shows colored emoji dot', () => {
+    const kb = buildCalendarPickerKeyboard([makeCalendar({ color: '#d50000' })], 'en');
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
+    expect(buttons.some((b) => b.text.includes('🔴'))).toBe(true);
+  });
+
+  test('unknown color shows calendar emoji', () => {
+    const kb = buildCalendarPickerKeyboard([makeCalendar({ color: '#aabbcc' })], 'en');
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
+    expect(buttons.some((b) => b.text.includes('📅'))).toBe(true);
+  });
+
+  test('null color shows calendar emoji', () => {
+    const kb = buildCalendarPickerKeyboard([makeCalendar({ color: null })], 'en');
+    const buttons = kb.toJSON().inline_keyboard.flat() as InlineButton[];
+    expect(buttons.some((b) => b.text.includes('📅'))).toBe(true);
+  });
 });
 
 describe('handleCalendarPickerCallback', () => {
