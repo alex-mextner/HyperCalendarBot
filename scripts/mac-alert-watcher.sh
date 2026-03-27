@@ -20,6 +20,9 @@
 # (intentionally no -e: curl failures in the poll loop must not exit the process)
 set -uo pipefail
 
+LOG_FILE="/tmp/hypercal-alert-watcher.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
 PLIST_LABEL="ru.invntrm.hypercal-alert-watcher"
 PLIST_PATH="$HOME/Library/LaunchAgents/${PLIST_LABEL}.plist"
 SCRIPT_PATH="$(cd "$(dirname "$0")"; pwd -P)/$(basename "$0")"
