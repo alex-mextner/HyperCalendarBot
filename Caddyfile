@@ -24,6 +24,11 @@ hypercal.invntrm.ru {
 		reverse_proxy localhost:3001
 	}
 
+	# Admin alert queue
+	handle /admin/alerts* {
+		reverse_proxy localhost:3001
+	}
+
 	# Bot doesn't serve web pages
 	handle {
 		respond "HyperCalendarBot is running" 200
