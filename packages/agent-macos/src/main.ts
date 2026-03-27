@@ -5,7 +5,7 @@ import { generatePairingCode } from './pairing.ts';
 import { createTray } from './tray.ts';
 import { WsClient } from './ws-client.ts';
 
-const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://bot.hyperide.ai/ws/agent';
+const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://hypercal.invntrm.ru/ws/agent';
 
 async function main(): Promise<void> {
   // Tray-only app — no dock icon
