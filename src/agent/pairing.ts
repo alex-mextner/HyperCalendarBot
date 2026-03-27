@@ -2,8 +2,11 @@
 
 import type { ServerWebSocket } from 'bun';
 import { jwtVerify, SignJWT } from 'jose';
+import { logger } from '../utils/logger.ts';
 import type { AgentPairError, AgentPairResponse } from './protocol.ts';
 import type { AgentRegistry } from './registry.ts';
+
+const pairingLogger = logger.child({ module: 'agent-pairing' });
 
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
 
@@ -41,9 +44,13 @@ export function registerPendingConnection(code: string, ws: ServerWebSocket<WsDa
 }
 
 export async function completePairing(code: string, userId: number, registry: AgentRegistry): Promise<boolean> {
-  if (!secret()) return false;
+  if (!secret()) {
+    pairingLogger.error('completePairing: AGENT_JWT_SECRET not configured');
+    return false;
+  }
   const pending = pendingConnections.get(code);
   if (!pending || Date.now() > pending.expiresAt) {
+    pairingLogger.warn({ code, userId }, 'Pairing failed: code not found or expired');
     pendingConnections.delete(code);
     return false;
   }
@@ -53,6 +60,7 @@ export async function completePairing(code: string, userId: number, registry: Ag
   pending.ws.send(JSON.stringify(msg));
   registry.register(userId, pending.ws);
   pendingConnections.delete(code);
+  pairingLogger.info({ userId, code }, 'Agent paired successfully');
   return true;
 }
 
@@ -90,13 +98,20 @@ export async function verifyAgentJwt(token: string): Promise<number | null> {
 
 export async function verifyAgentJwtFull(token: string): Promise<{ userId: number; exp: number } | null> {
   const sec = secret();
-  if (!sec) return null;
+  if (!sec) {
+    pairingLogger.error('verifyAgentJwtFull: AGENT_JWT_SECRET not configured');
+    return null;
+  }
   try {
     const { payload } = await jwtVerify(token, sec);
     const n = Number(payload.sub);
-    if (!Number.isFinite(n) || typeof payload.exp !== 'number') return null;
+    if (!Number.isFinite(n) || typeof payload.exp !== 'number') {
+      pairingLogger.warn({ sub: payload.sub }, 'JWT payload invalid (bad sub or missing exp)');
+      return null;
+    }
     return { userId: n, exp: payload.exp };
-  } catch {
+  } catch (err) {
+    pairingLogger.warn({ err }, 'JWT verification failed');
     return null;
   }
 }
