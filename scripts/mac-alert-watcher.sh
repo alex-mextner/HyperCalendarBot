@@ -78,16 +78,14 @@ fi
 
 ENDPOINT="${ALERT_ENDPOINT:-https://hypercal.invntrm.ru/admin/alerts/next}"
 INTERVAL="${ALERT_POLL_INTERVAL:-30}"
-TERMINAL="${ALERT_TERMINAL:-hyper}"
+TERMINAL="${ALERT_TERMINAL:-terminal}"
 
 echo "[watcher] started — polling ${ENDPOINT} every ${INTERVAL}s"
 
 open_in_terminal() {
   local text="$1"
-  # Write a temp shell script so the alert text never touches AppleScript string interpolation.
-  # mktemp paths contain only safe chars — safe to pass as an AppleScript string literal.
   local tmpscript
-  tmpscript=$(mktemp /tmp/hypercal-XXXX)
+  tmpscript=$(mktemp /tmp/hypercal-XXXXXX)
 
   # Build a structured prompt: invoke the debugging skill, provide context,
   # and instruct Claude to send a Telegram report when done.
@@ -127,27 +125,22 @@ brief description
 Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \\~ \\\` \\> \\# \\+ \\- \\= \\| \\{ \\} \\. \\!
 " "$text" "$PROJECT_DIR")
 
+  CLAUDE_BIN="${CLAUDE_BIN:-/opt/homebrew/bin/claude}"
   # printf %q produces shell-safe escaping for the prompt argument
-  printf '#!/bin/sh\ncd %q\nexec claude --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
-    "$PROJECT_DIR" "$prompt" > "$tmpscript"
+  printf '#!/bin/sh\ncd %q\nexec %q --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
+    "$PROJECT_DIR" "$CLAUDE_BIN" "$prompt" > "$tmpscript"
   chmod +x "$tmpscript"
 
-  if [[ "$TERMINAL" == "iterm2" ]]; then
-    osascript \
-      -e 'tell application "iTerm2" to activate' \
-      -e "tell application \"iTerm2\" to tell current session of (create window with default profile) to write text \"$tmpscript\""
-  elif [[ "$TERMINAL" == "hyper" ]]; then
-    open -a "Hyper"
-    sleep 1
-    osascript \
-      -e 'tell application "Hyper" to activate' \
-      -e "tell application \"System Events\" to keystroke \"$tmpscript\"" \
-      -e 'tell application "System Events" to key code 36'
-  else
-    osascript \
-      -e 'tell application "Terminal" to activate' \
-      -e "tell application \"Terminal\" to do script \"$tmpscript\""
-  fi
+  # Open the script file directly — Terminal/iTerm2 execute it in a new window.
+  # No osascript or Accessibility permission required.
+  case "$TERMINAL" in
+    iterm2)
+      open -a iTerm "$tmpscript"
+      ;;
+    *)
+      open -a Terminal "$tmpscript"
+      ;;
+  esac
   # tmpscript is left for Terminal to read; /tmp is cleared on reboot
 }
 

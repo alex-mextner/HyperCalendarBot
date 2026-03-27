@@ -60,14 +60,18 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - name: Install dependencies
+      - name: Install root dependencies
+        run: npm install --ignore-scripts
+      - name: Install agent-macos dependencies
+        working-directory: packages/agent-macos
         run: npm install --ignore-scripts
       - name: Compile TypeScript
         run: node_modules/.bin/tsc --project packages/agent-macos/tsconfig.json
       - name: Build DMG
+        working-directory: packages/agent-macos
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-        run: node_modules/.bin/electron-builder --projectDir packages/agent-macos --mac dmg
+        run: ../../node_modules/.bin/electron-builder --mac dmg
       - name: Rename artifact
         run: cp "$(ls packages/agent-macos/dist/*.dmg | head -1)" agent-macos.dmg
       - name: Create downloads directory on server
