@@ -395,7 +395,7 @@ export const MSG = {
       },
       agent: {
         connectMessage: (url: string) =>
-          `🔗 *Connect AI Assistant*\n\nDownload the macOS agent:\n${url}\n\nAfter installing, the app will show an activation command.`,
+          `🔗 *Connect AI Assistant*\n\n1. Download the agent: ${url}\n2. Open the .dmg and drag the app to Applications\n3. Right\\-click the app → *Open* \\(don't double\\-click\\)\n   _If macOS says "damaged" — run in Terminal:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4. The app will show an activation command — send it here`,
         activatePrompt: 'Provide the code from the app: /activate <code>',
         activated: '✅ Agent connected!',
         activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
@@ -773,7 +773,7 @@ export const MSG = {
       },
       agent: {
         connectMessage: (url: string) =>
-          `🔗 *Подключить AI Ассистент*\n\nСкачай агент для macOS:\n${url}\n\nПосле установки приложение само покажет команду активации.`,
+          `🔗 *Подключить AI Ассистент*\n\n1\\. Скачай агент: ${url}\n2\\. Открой \\.dmg и перетащи приложение в Программы\n3\\. Открой приложение правой кнопкой → *Открыть* \\(не двойным кликом\\)\n   _Если macOS пишет «повреждён» — выполни в Терминале:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. Приложение покажет команду активации — отправь её сюда`,
         activatePrompt: 'Укажи код из приложения: /activate <код>',
         activated: '✅ Агент подключён!',
         activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
