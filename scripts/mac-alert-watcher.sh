@@ -84,7 +84,7 @@ open_in_terminal() {
   # Write a temp shell script so the alert text never touches AppleScript string interpolation.
   # mktemp paths contain only safe chars — safe to pass as an AppleScript string literal.
   local tmpscript
-  tmpscript=$(mktemp /tmp/hypercal-XXXX.sh)
+  tmpscript=$(mktemp /tmp/hypercal-XXXX)
 
   # Build a structured prompt: invoke the debugging skill, provide context,
   # and instruct Claude to send a Telegram report when done.

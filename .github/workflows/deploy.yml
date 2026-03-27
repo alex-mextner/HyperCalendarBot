@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install dependencies
         working-directory: packages/agent-macos
-        run: npm install
+        run: npm install --ignore-scripts
       - name: Compile TypeScript
         working-directory: packages/agent-macos
         run: ./node_modules/.bin/tsc --project tsconfig.json
