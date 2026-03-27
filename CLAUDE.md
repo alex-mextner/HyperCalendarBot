@@ -640,6 +640,55 @@ considers the difference a violation.
   only platform-specific optional deps.
 - **Local** (macOS): `bun install` — generates/updates lockfile normally.
 
+### bun install --production in Docker
+
+`bun install --production` with an **existing lockfile** always acts as `--frozen-lockfile` and
+fails if the lockfile format differs from what `--production` would generate (it strips devDep
+entries from the lockfile). **Never use `--production` with `COPY bun.lock`.**
+
+For a prod-deps Docker stage that installs only production deps:
+```dockerfile
+# Stage 2: production deps only
+COPY package.json ./          # ← no bun.lock
+RUN bun install --production --ignore-scripts
+```
+Without a pre-existing lockfile, bun generates a fresh production lockfile on linux without conflicts.
+The runner stage is still deterministic via the image SHA tag.
+
+### Docker prod data volume ownership
+
+The bot runs as `botuser` (uid=999) inside the container. The data volume on the host
+(`/opt/hypercal/data/`) must be owned by uid 999, otherwise SQLite throws `SQLITE_READONLY`.
+
+**If the bot fails with `attempt to write a readonly database`:**
+```bash
+# Find actual botuser UID:
+docker run --rm --entrypoint id ghcr.io/alex-mextner/hypercalendarbot:latest
+# Fix ownership (replace 999 with actual UID):
+chown -R 999:999 /opt/hypercal/data/
+```
+
+This happens when the data dir is created by root (e.g. via `docker run --rm` during deploy for
+stress dict generation). Prevention: run the stress dict step as the same user, or fix chown in
+the deploy script after the step.
+
+### Migration renumbering hazard
+
+If a migration is renumbered (e.g. `042_foo` → `043_foo`), the existing production DB has the old
+name recorded and the new code tries to apply it again, causing "duplicate column" or "table already
+exists" errors. **Never renumber existing migrations** — only append new ones at the end.
+
+If it already happened on prod, manually insert the new name into `migrations`:
+```bash
+docker run --rm -v /opt/hypercal/data:/data ghcr.io/alex-mextner/hypercalendarbot:latest \
+  bun -e "
+import { Database } from 'bun:sqlite';
+const db = new Database('/data/calendar.db');
+db.run('INSERT OR IGNORE INTO migrations (name) VALUES (?)', ['043_new_name_here']);
+db.close();
+"
+```
+
 ## MCP Tools
 
 Use these MCP servers proactively whenever they can help:
