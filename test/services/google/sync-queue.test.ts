@@ -429,6 +429,32 @@ describe('google-sync job processor — job types', () => {
     mockListCalendars.mockImplementation(async () => []);
   });
 
+  test('refresh-calendars calls onCalendarsRefreshed after upsert', async () => {
+    const onCalendarsRefreshed = mock(async () => {});
+    createGoogleSyncQueue(makeDeps({ onCalendarsRefreshed }));
+    await capturedProcessor({
+      id: 'j27b',
+      name: 'refresh-calendars',
+      data: { type: 'refresh-calendars', userId: 5 },
+      attemptsMade: 0,
+    });
+    expect(onCalendarsRefreshed).toHaveBeenCalledTimes(1);
+    const [userId] = onCalendarsRefreshed.mock.calls[0] as unknown as [number];
+    expect(userId).toBe(5);
+  });
+
+  test('refresh-calendars does not throw when onCalendarsRefreshed is absent', async () => {
+    createGoogleSyncQueue(makeDeps());
+    await expect(
+      capturedProcessor({
+        id: 'j27c',
+        name: 'refresh-calendars',
+        data: { type: 'refresh-calendars', userId: 5 },
+        attemptsMade: 0,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   test('setup-watch returns early when calendarId is missing', async () => {
     mockSetupWatchChannel.mockClear();
     createGoogleSyncQueue(makeDeps());

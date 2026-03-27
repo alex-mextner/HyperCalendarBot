@@ -4,8 +4,11 @@ import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
 import { agentRegistry } from './agent/registry.ts';
+import { buildCalendarPickerKeyboard } from './bot/commands/calendars.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
+import type { Lang } from './config/constants.ts';
+import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
@@ -138,6 +141,19 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
     onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
+    onCalendarsRefreshed: async (userId) => {
+      const user = db.users.findByTelegramId(userId);
+      const lang = (user?.language ?? 'en') as Lang;
+      const calendars = db.googleCalendars.getCalendars(userId);
+      const keyboard = buildCalendarPickerKeyboard(calendars, lang);
+      await bot.api
+        .sendMessage({
+          chat_id: userId,
+          text: t(lang).gcal_calendar_picker,
+          reply_markup: keyboard,
+        } as Parameters<typeof bot.api.sendMessage>[0])
+        .catch((err) => botLogger.error({ err, userId }, 'Failed to show calendar picker'));
+    },
     sendMessage: (telegramId, text) =>
       botRef
         .sendMessage(telegramId, text)

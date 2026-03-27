@@ -42,6 +42,7 @@ interface GoogleSyncQueueDeps {
   syncRepo: GoogleSyncRepository;
   calendarRepo: GoogleCalendarRepository;
   onSyncComplete?: (userId: number, calendarId: string) => Promise<void>;
+  onCalendarsRefreshed?: (userId: number) => Promise<void>;
   onCronSyncTick?: (queue: Queue<GoogleSyncJobData>) => Promise<void>;
   onWatchRenewalTick?: () => Promise<void>;
   onCleanupTick?: () => void;
@@ -137,6 +138,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
               access_role: cal.access_role,
             });
           }
+          await deps.onCalendarsRefreshed?.(userId);
           break;
         }
         case 'setup-watch': {
