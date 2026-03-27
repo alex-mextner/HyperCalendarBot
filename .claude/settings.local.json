@@ -32,7 +32,9 @@
       "Bash(bunx knip:*)",
       "Bash(open:*)",
       "Bash(BASE=/Users/ultra/xp/hypercalendarbot/.worktrees/remove-unknown-casts)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(launchctl list:*)",
+      "Bash(./node_modules/.bin/tsc --noEmit)"
     ]
   }
 }
