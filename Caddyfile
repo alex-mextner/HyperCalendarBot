@@ -9,6 +9,12 @@ hypercal.invntrm.ru {
 		}
 	}
 
+	# Agent download — static files from /opt/hypercal/downloads/
+	handle /downloads/* {
+		root * /opt/hypercal
+		file_server
+	}
+
 	# Non-API paths — static response (bot doesn't serve pages)
 	handle {
 		respond "HyperCalendarBot is running" 200
