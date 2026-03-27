@@ -188,7 +188,11 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     stateStore,
     disconnectDeps,
     calendarRepo: db.googleCalendars,
+    syncRepo: db.googleSync,
     schedulePush: pushScheduler,
+    triggerSync: async (userId: number) => {
+      await queue.add('pull-sync', { type: 'pull-sync', userId, trigger: 'manual' });
+    },
     onCalendarsDone: async (userId) => {
       const calendars = db.googleCalendars.getEnabledCalendars(userId);
       for (const cal of calendars) {
