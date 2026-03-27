@@ -844,14 +844,12 @@ const COMMANDS_EN = [
   { command: 'delete', description: 'Delete event' },
   { command: 'search', description: 'Search events' },
   { command: 'free', description: 'Find free slots' },
-  { command: 'timezone', description: 'Change timezone' },
   { command: 'settings', description: 'Settings' },
   { command: 'import', description: 'Import .ics' },
   { command: 'holidays', description: 'Holidays calendar' },
   { command: 'share', description: 'Share agenda or event' },
   { command: 'invite', description: 'Invite user to event' },
   { command: 'invitations', description: 'View invitations' },
-  { command: 'unshare', description: 'Remove event from group chat' },
   { command: 'help', description: 'Help' },
 ];
 
@@ -865,14 +863,12 @@ const COMMANDS_RU = [
   { command: 'delete', description: 'Удалить событие' },
   { command: 'search', description: 'Поиск событий' },
   { command: 'free', description: 'Свободные слоты' },
-  { command: 'timezone', description: 'Часовой пояс' },
   { command: 'settings', description: 'Настройки' },
   { command: 'import', description: 'Импорт .ics' },
   { command: 'holidays', description: 'Календарь праздников' },
   { command: 'share', description: 'Поделиться повесткой/событием' },
   { command: 'invite', description: 'Пригласить на событие' },
   { command: 'invitations', description: 'Просмотр приглашений' },
-  { command: 'unshare', description: 'Убрать событие из группового чата' },
   { command: 'help', description: 'Справка' },
 ];
 

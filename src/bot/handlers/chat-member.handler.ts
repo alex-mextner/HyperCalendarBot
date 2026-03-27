@@ -12,7 +12,6 @@ function groupWelcome(lang: 'en' | 'ru'): string {
       'Групповые возможности:\n' +
       '• 📅 /agenda — события, которыми участники поделились с группой\n' +
       '• 📤 /share — поделиться своим событием с группой\n' +
-      '• ❌ /unshare — убрать расшаренное событие\n' +
       '• 🤖 Упомяни меня или напиши /cal + текст для управления через ИИ\n\n' +
       'В личке: личные события, напоминания, /week, /month, импорт и многое другое.\n\n' +
       '💡 Сделай меня администратором — и я смогу закреплять актуальный календарь, давать ссылку на группу в уведомлениях и не показывать групповой календарь тем, кто вышел из чата.'
@@ -23,7 +22,6 @@ function groupWelcome(lang: 'en' | 'ru'): string {
     'Group features:\n' +
     '• 📅 /agenda — events shared with this group\n' +
     '• 📤 /share — share your event with the group\n' +
-    '• ❌ /unshare — remove your shared event\n' +
     '• 🤖 Mention me or use /cal + text to manage the calendar with AI\n\n' +
     'In DM: personal events, reminders, /week, /month, import and more.\n\n' +
     '💡 Make me an admin — and I can pin the calendar automatically, include a group link in notifications, and hide the group calendar from people who leave the chat.'
