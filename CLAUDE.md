@@ -238,6 +238,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
 ## Coding Guidelines
 
 - **Dependency versions always use `^`** (e.g. `"marked": "^15.0.12"`). Never pin exact versions — it makes routine upgrades a chore and diverges from ecosystem norms. Range `^` is mandatory; `~` and bare exact versions are not acceptable.
+  **Exception**: `electron` in `packages/agent-macos/` must be pinned to an exact version (e.g. `"34.5.8"`). `electron-builder` rejects range versions (`^`) at build time and fails CI.
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".

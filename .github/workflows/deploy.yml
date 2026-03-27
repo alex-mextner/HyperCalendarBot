@@ -64,7 +64,7 @@ jobs:
         run: npm install --ignore-scripts
       - name: Install agent-macos dependencies
         working-directory: packages/agent-macos
-        run: npm install --ignore-scripts
+        run: npm install
       - name: Compile TypeScript
         run: node_modules/.bin/tsc --project packages/agent-macos/tsconfig.json
       - name: Build DMG
