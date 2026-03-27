@@ -5,6 +5,7 @@ import type { ConnectCtx } from '../../../src/bot/commands/connect.command.ts';
 import {
   createActivateCommand,
   createConnectCommand,
+  createConnectStatusCommand,
   createDisconnectCommand,
 } from '../../../src/bot/commands/connect.command.ts';
 
@@ -93,6 +94,50 @@ test('/disconnect when agent connected: closes WS and disables assistant', async
   expect(closeCalls[0]!.code).toBe(4003);
   expect(captured[0]!.enabled).toBe(false);
   expect(ctx._sent[0]).toContain('✅');
+});
+
+test('/connect_status when not connected: shows disconnected message', async () => {
+  const registry = new AgentRegistry();
+  const status = createConnectStatusCommand(registry);
+  const ctx = mockCtx();
+  await status(ctx);
+  expect(ctx._sent[0]).toContain('🔴');
+});
+
+test('/connect_status when connected but assistant disabled: shows disabled message', async () => {
+  const registry = new AgentRegistry();
+  const ws = { data: { userId: 42, _token: null }, send: () => {}, close: () => {} } as never;
+  registry.register(42, ws);
+
+  const status = createConnectStatusCommand(registry);
+  const sent: string[] = [];
+  const ctx: ConnectCtx & { _sent: string[] } = {
+    user: { telegram_id: 42, language: 'ru', assistant_enabled: 0 },
+    send: async (text: string) => {
+      sent.push(text);
+    },
+    _sent: sent,
+  };
+  await status(ctx);
+  expect(ctx._sent[0]).toContain('⚠️');
+});
+
+test('/connect_status when connected and enabled: shows connected with timestamps', async () => {
+  const registry = new AgentRegistry();
+  const ws = { data: { userId: 42, _token: null }, send: () => {}, close: () => {} } as never;
+  registry.register(42, ws);
+
+  const status = createConnectStatusCommand(registry);
+  const sent: string[] = [];
+  const ctx: ConnectCtx & { _sent: string[] } = {
+    user: { telegram_id: 42, language: 'ru', assistant_enabled: 1 },
+    send: async (text: string) => {
+      sent.push(text);
+    },
+    _sent: sent,
+  };
+  await status(ctx);
+  expect(ctx._sent[0]).toContain('🟢');
 });
 
 test('/disconnect when agent not connected: disables assistant and sends not-connected message', async () => {

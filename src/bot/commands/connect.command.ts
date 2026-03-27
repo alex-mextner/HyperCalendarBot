@@ -5,7 +5,7 @@ import { t } from '../../config/constants.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 
 export interface ConnectCtx {
-  user?: { telegram_id?: number; language?: string };
+  user?: { telegram_id?: number; language?: string; assistant_enabled?: number };
   args?: string | null;
   send: (text: string) => Promise<void>;
 }
@@ -33,6 +33,32 @@ export function createActivateCommand(registry: AgentRegistry, userRepo: UserRep
       userRepo.updateAssistantEnabled(userId, true);
     }
     await ctx.send(ok ? t(lang).aiTools.agent.activated : t(lang).aiTools.agent.activationFailed);
+  };
+}
+
+export function createConnectStatusCommand(registry: AgentRegistry) {
+  return async function connectStatusCommand(ctx: ConnectCtx): Promise<void> {
+    const userId = ctx.user?.telegram_id ?? 0;
+    const lang = ctx.user?.language === 'ru' ? 'ru' : 'en';
+    const msgs = t(lang).aiTools.agent;
+
+    const conn = registry.get(userId);
+    if (!conn) {
+      await ctx.send(msgs.statusDisconnected);
+      return;
+    }
+
+    if (!ctx.user?.assistant_enabled) {
+      await ctx.send(msgs.statusDisabledByUser);
+      return;
+    }
+
+    const fmt = (d: Date) =>
+      d.toLocaleString(lang === 'ru' ? 'ru-RU' : 'en-US', {
+        dateStyle: 'short',
+        timeStyle: 'medium',
+      });
+    await ctx.send(msgs.statusConnected(fmt(conn.connectedAt), fmt(conn.lastPing)));
   };
 }
 

@@ -10,6 +10,12 @@ let tray: Tray | undefined;
 
 const WS_URL = process.env.HYPERBOT_WS_URL ?? 'wss://hypercal.invntrm.ru/ws/agent';
 
+function log(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString();
+  const extra = data ? ' ' + JSON.stringify(data) : '';
+  console.log(`[Agent ${ts}] ${msg}${extra}`);
+}
+
 async function main(): Promise<void> {
   await app.whenReady();
 
@@ -17,6 +23,7 @@ async function main(): Promise<void> {
   app.dock?.hide();
 
   const jwt = await loadJwt();
+  log('JWT loaded', { hasJwt: !!jwt });
   const wsClient = new WsClient(WS_URL, jwt);
 
   // Persist refreshed tokens
@@ -25,7 +32,11 @@ async function main(): Promise<void> {
   });
 
   // Pairing flow
+  wsClient.on('connected', () => log('Agent connected to server'));
+  wsClient.on('disconnected', () => log('Agent disconnected from server'));
+
   wsClient.on('paired', (newJwt: string) => {
+    log('Paired — saving JWT');
     saveJwt(newJwt).catch((err: unknown) => console.error('Failed to save JWT:', err));
     new Notification({
       title: 'HyperBot Agent',

@@ -404,6 +404,11 @@ export const MSG = {
         activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
         disconnected: '✅ Agent disconnected. AI assistant disabled.',
         notConnected: 'Agent is not connected.',
+        statusConnected: (connectedAt: string, lastPing: string) =>
+          `🟢 Agent connected\n\nConnected: ${connectedAt}\nLast ping: ${lastPing}`,
+        statusDisconnected: '🔴 Agent not connected to server.\n\nUse /connect to download and set up the app.',
+        statusDisabledByUser:
+          '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
       },
     },
     callbackErrors: {
@@ -784,6 +789,12 @@ export const MSG = {
         activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
         disconnected: '✅ Агент отключён. AI ассистент выключен.',
         notConnected: 'Агент не подключён.',
+        statusConnected: (connectedAt: string, lastPing: string) =>
+          `🟢 Агент подключён\n\nПодключён: ${connectedAt}\nПоследний пинг: ${lastPing}`,
+        statusDisconnected:
+          '🔴 Агент не подключён к серверу.\n\nИспользуй /connect чтобы скачать и настроить приложение.',
+        statusDisabledByUser:
+          '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },
     },
     callbackErrors: {

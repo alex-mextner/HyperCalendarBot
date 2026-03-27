@@ -47,7 +47,12 @@ import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
-import { createActivateCommand, createConnectCommand, createDisconnectCommand } from './commands/connect.command.ts';
+import {
+  createActivateCommand,
+  createConnectCommand,
+  createConnectStatusCommand,
+  createDisconnectCommand,
+} from './commands/connect.command.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -390,6 +395,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   // AI Assistant commands (not in setMyCommands — internal use only)
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
   const activateCommand = createActivateCommand(agentRegistry, db.users);
+  const connectStatusCommand = createConnectStatusCommand(agentRegistry);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
 
   bot
@@ -885,6 +891,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       activateCommand({
         user: ctx.dbUser,
         args: ctx.args,
+        send: async (text: string) => {
+          await ctx.send(text);
+        },
+      }),
+    )
+    .command('connect_status', (ctx) =>
+      connectStatusCommand({
+        user: ctx.dbUser,
         send: async (text: string) => {
           await ctx.send(text);
         },

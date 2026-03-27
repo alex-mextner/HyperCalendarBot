@@ -8,6 +8,12 @@ const PONG_TIMEOUT_MS = 90_000;
 const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 
+function log(msg: string, data?: Record<string, unknown>): void {
+  const ts = new Date().toISOString();
+  const extra = data ? ' ' + JSON.stringify(data) : '';
+  console.log(`[WsClient ${ts}] ${msg}${extra}`);
+}
+
 type CommandHandler = (cmd: AgentCommand) => void;
 type PairedHandler = (jwt: string) => void;
 type PairErrorHandler = (reason: string) => void;
@@ -37,10 +43,12 @@ export class WsClient extends EventEmitter {
     if (this.jwt) {
       headers['Authorization'] = `Bearer ${this.jwt}`;
     }
+    log('Connecting', { url: this.serverUrl, hasJwt: !!this.jwt, backoffMs: this.backoffMs });
     const ws = new WebSocket(this.serverUrl, { headers });
     this.ws = ws;
 
     ws.on('open', () => {
+      log('WS open — connected to server');
       this.backoffMs = BACKOFF_INITIAL_MS;
       this.emit('connected');
       this.startHeartbeat();
@@ -51,12 +59,17 @@ export class WsClient extends EventEmitter {
       try {
         msg = JSON.parse(raw.toString()) as AgentOutbound;
       } catch {
+        log('Message parse error', { raw: raw.toString().slice(0, 100) });
         return;
+      }
+      if (msg.type !== 'pong') {
+        log('Message received', { type: msg.type });
       }
       this.handleMessage(msg);
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code: number, reason: Buffer) => {
+      log('WS closed', { code, reason: reason.toString() });
       this.stopHeartbeat();
       this.emit('disconnected');
       if (!this.closed) {
@@ -64,7 +77,8 @@ export class WsClient extends EventEmitter {
       }
     });
 
-    ws.on('error', () => {
+    ws.on('error', (err: Error) => {
+      log('WS error', { message: err.message });
       // close event follows; errors are handled there
     });
   }
@@ -167,6 +181,7 @@ export class WsClient extends EventEmitter {
   }
 
   private scheduleReconnect(): void {
+    log('Scheduling reconnect', { backoffMs: this.backoffMs });
     setTimeout(() => {
       this.connect();
     }, this.backoffMs);
