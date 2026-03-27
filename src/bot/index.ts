@@ -853,8 +853,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
       }
     })
-    // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
-    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
     // AI Assistant commands (not in setMyCommands — internal use only)
     .command('connect', (ctx) =>
       connectCommand({
@@ -890,6 +888,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         : undefined,
     )
     .command('disconnect_google', (ctx) => (googleDeps ? handleDisconnectGoogle(ctx) : undefined))
+    // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
+    // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
+    // so any .command() registered after it will never fire.
+    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
     // Error handler
     .onError(({ context, kind, error }) => {
       botLogger.error({ kind, err: error }, 'Bot error');
