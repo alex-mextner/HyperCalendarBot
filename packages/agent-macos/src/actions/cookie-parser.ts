@@ -24,12 +24,13 @@ function getMasterKey(): Buffer {
 }
 
 export function decryptCookieValue(encryptedValue: Buffer): string {
-  if (!encryptedValue || encryptedValue.length < 19) return '';
+  if (!encryptedValue || encryptedValue.length < 4) return '';
   const prefix = encryptedValue.subarray(0, 3).toString('ascii');
   if (prefix !== 'v10') return encryptedValue.toString('utf-8');
 
-  const iv = encryptedValue.subarray(3, 19);
-  const ciphertext = encryptedValue.subarray(19);
+  // Chromium macOS v10: IV is always 16 space bytes (0x20), ciphertext starts at byte 3
+  const iv = Buffer.alloc(16, 0x20);
+  const ciphertext = encryptedValue.subarray(3);
   const key = getMasterKey();
 
   try {
