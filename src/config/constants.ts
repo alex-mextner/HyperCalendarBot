@@ -397,7 +397,8 @@ export const MSG = {
         connectMessage: (url: string) =>
           `🔗 *Connect AI Assistant*\n\n1. Download the agent: ${url}\n2. Open the .dmg and drag the app to Applications\n3. Right\\-click the app → *Open* \\(don't double\\-click\\)\n   _If macOS says "damaged" — run in Terminal:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4. The app will show an activation command — send it here`,
         activatePrompt: 'Provide the code from the app: /activate <code>',
-        activated: '✅ Agent connected!',
+        activated:
+          '✅ Agent connected!\n\nYou can now ask me to run tasks on your Mac:\n• Run terminal commands\n• Chat with Claude Desktop and stream responses\n• Control the browser via Playwright\n• Run AppleScript\n\nJust tell me what to do, e.g. "run ls -la" or "ask Claude what TCP is".',
         activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
         disconnected: '✅ Agent disconnected. AI assistant disabled.',
         notConnected: 'Agent is not connected.',
@@ -775,7 +776,8 @@ export const MSG = {
         connectMessage: (url: string) =>
           `🔗 *Подключить AI Ассистент*\n\n1\\. Скачай агент: ${url}\n2\\. Открой \\.dmg и перетащи приложение в Программы\n3\\. Открой приложение правой кнопкой → *Открыть* \\(не двойным кликом\\)\n   _Если macOS пишет «повреждён» — выполни в Терминале:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. Приложение покажет команду активации — отправь её сюда`,
         activatePrompt: 'Укажи код из приложения: /activate <код>',
-        activated: '✅ Агент подключён!',
+        activated:
+          '✅ Агент подключён!\n\nТеперь можешь просить меня выполнять задачи прямо на твоём Mac:\n• Запускать команды в терминале\n• Общаться с Claude Desktop и получать ответы\n• Управлять браузером через Playwright\n• Выполнять AppleScript\n\nПросто напиши что нужно, например: «запусти ls -la» или «спроси Claude что такое TCP».',
         activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
         disconnected: '✅ Агент отключён. AI ассистент выключен.',
         notConnected: 'Агент не подключён.',

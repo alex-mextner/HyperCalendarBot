@@ -33,7 +33,8 @@ test('/connect sends download link', async () => {
 
 test('/activate with unknown code sends error', async () => {
   const registry = new AgentRegistry();
-  const activate = createActivateCommand(registry);
+  const userRepo = { updateAssistantEnabled: () => {} } as never;
+  const activate = createActivateCommand(registry, userRepo);
   const ctx = mockCtx('unknown-code');
   await activate(ctx);
   expect(ctx._sent[0]).toContain('❌');
@@ -42,7 +43,11 @@ test('/activate with unknown code sends error', async () => {
 test('/activate with valid code sends success and registers', async () => {
   initPairingSecret('test-secret-at-least-32-characters!!');
   const registry = new AgentRegistry();
-  const activate = createActivateCommand(registry);
+  const captured: { id: number; enabled: boolean }[] = [];
+  const userRepo = {
+    updateAssistantEnabled: (id: number, enabled: boolean) => captured.push({ id, enabled }),
+  } as never;
+  const activate = createActivateCommand(registry, userRepo);
 
   const sent: string[] = [];
   const ws = { data: { userId: null }, send: (m: string) => sent.push(m) } as never;
@@ -53,11 +58,13 @@ test('/activate with valid code sends success and registers', async () => {
 
   expect(ctx._sent[0]).toContain('✅');
   expect(registry.isConnected(42)).toBe(true);
+  expect(captured[0]!).toEqual({ id: 42, enabled: true });
 });
 
 test('/activate with no code argument sends usage hint', async () => {
   const registry = new AgentRegistry();
-  const activate = createActivateCommand(registry);
+  const userRepo = { updateAssistantEnabled: () => {} } as never;
+  const activate = createActivateCommand(registry, userRepo);
   const ctx = mockCtx('');
   await activate(ctx);
   expect(ctx._sent[0]).toBeTruthy();

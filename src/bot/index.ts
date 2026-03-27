@@ -389,7 +389,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   // AI Assistant commands (not in setMyCommands — internal use only)
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
-  const activateCommand = createActivateCommand(agentRegistry);
+  const activateCommand = createActivateCommand(agentRegistry, db.users);
   const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
 
   bot

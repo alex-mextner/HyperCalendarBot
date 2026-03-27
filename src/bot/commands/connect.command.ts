@@ -17,7 +17,7 @@ export function createConnectCommand(downloadUrl: string) {
   };
 }
 
-export function createActivateCommand(registry: AgentRegistry) {
+export function createActivateCommand(registry: AgentRegistry, userRepo: UserRepository) {
   return async function activateCommand(ctx: ConnectCtx): Promise<void> {
     const code = ctx.args?.trim();
     const userId = ctx.user?.telegram_id ?? 0;
@@ -29,6 +29,9 @@ export function createActivateCommand(registry: AgentRegistry) {
     }
 
     const ok = await completePairing(code, userId, registry);
+    if (ok) {
+      userRepo.updateAssistantEnabled(userId, true);
+    }
     await ctx.send(ok ? t(lang).aiTools.agent.activated : t(lang).aiTools.agent.activationFailed);
   };
 }
