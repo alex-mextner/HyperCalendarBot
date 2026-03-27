@@ -14,7 +14,7 @@ const LearnerResponseSchema = z.object({
   canonical_name: z.string(),
   phrases: z.array(z.string()),
   trigger_words: z.array(z.string()).optional(),
-  pattern: z.string().optional(),
+  pattern: z.string().nullish(),
   workflow: WorkflowSchema,
   format: z.string().optional(),
 });
@@ -262,7 +262,7 @@ export class IntentLearner {
         canonical_name: parsed.canonical_name,
         phrases: parsed.phrases,
         trigger_words: parsed.trigger_words,
-        pattern: parsed.pattern,
+        pattern: parsed.pattern ?? undefined,
         workflow: workflowResult.data,
         format: parsed.format || 'text',
         source_message: message,
