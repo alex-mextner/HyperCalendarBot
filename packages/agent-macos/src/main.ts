@@ -1,5 +1,6 @@
 import { app, clipboard, dialog, Notification, type Tray } from 'electron';
 import { dispatch } from './dispatcher';
+import { getOrgId } from './actions/claude-bridge';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
 import { createTray } from './tray';
@@ -53,7 +54,15 @@ async function main(): Promise<void> {
 
   // Incoming command dispatch
   wsClient.on('command', (cmd) => {
-    dispatch(cmd, (resp) => wsClient.sendResponse(resp)).catch((err: unknown) => {
+    const isClaudeCmd = cmd.type.startsWith('claude_');
+    dispatch(cmd, (resp) => {
+      if (isClaudeCmd) {
+        if (resp.type === 'done') setClaudeStatus('ok');
+        else if (resp.type === 'error') setClaudeStatus('error');
+      }
+      wsClient.sendResponse(resp);
+    }).catch((err: unknown) => {
+      if (isClaudeCmd) setClaudeStatus('error');
       wsClient.sendResponse({
         id: cmd.id,
         type: 'error',
@@ -62,7 +71,13 @@ async function main(): Promise<void> {
     });
   });
 
-  tray = createTray(wsClient);
+  const { tray: trayInst, setClaudeStatus } = createTray(wsClient);
+  tray = trayInst;
+
+  // Probe Claude connectivity at startup
+  getOrgId()
+    .then(() => setClaudeStatus('ok'))
+    .catch(() => setClaudeStatus('error'));
 
   if (!jwt) {
     // First launch — generate pairing code and initiate pairing

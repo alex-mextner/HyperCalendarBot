@@ -406,7 +406,8 @@ export const MSG = {
         notConnected: 'Agent is not connected.',
         statusConnected: (connectedAt: string, lastPing: string) =>
           `🟢 Agent connected\n\nConnected: ${connectedAt}\nLast ping: ${lastPing}`,
-        statusDisconnected: '🔴 Agent not connected to server.\n\nUse /connect to download and set up the app.',
+        statusDisconnected:
+          '🔴 Agent not running.\n\nStart the HyperBotAgent app on your Mac. If not installed yet — /connect.',
         statusDisabledByUser:
           '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
       },
@@ -792,7 +793,7 @@ export const MSG = {
         statusConnected: (connectedAt: string, lastPing: string) =>
           `🟢 Агент подключён\n\nПодключён: ${connectedAt}\nПоследний пинг: ${lastPing}`,
         statusDisconnected:
-          '🔴 Агент не подключён к серверу.\n\nИспользуй /connect чтобы скачать и настроить приложение.',
+          '🔴 Агент не запущен.\n\nЗапусти приложение HyperBotAgent на Mac. Если не установлен — /connect.',
         statusDisabledByUser:
           '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },

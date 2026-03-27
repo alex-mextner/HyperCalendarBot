@@ -83,9 +83,14 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
 
     close(ws: ServerWebSocket<WsData>) {
       if (ws.data.userId) {
-        agentLogger.info({ userId: ws.data.userId }, 'Agent disconnected');
-        dispatcher.rejectPendingForUser(ws.data.userId, new Error('Agent disconnected'));
-        registry.unregister(ws.data.userId);
+        const current = registry.get(ws.data.userId);
+        if (current?.ws === ws) {
+          agentLogger.info({ userId: ws.data.userId }, 'Agent disconnected');
+          dispatcher.rejectPendingForUser(ws.data.userId, new Error('Agent disconnected'));
+          registry.unregister(ws.data.userId);
+        } else {
+          agentLogger.debug({ userId: ws.data.userId }, 'Agent WS closed but already replaced — skipping unregister');
+        }
       } else {
         agentLogger.debug('Agent WebSocket closed (was not authenticated)');
       }
