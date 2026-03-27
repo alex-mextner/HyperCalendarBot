@@ -580,14 +580,34 @@ Telegram doesn't publish exact numbers — limits are dynamic. Practical rules:
 
 - **Host**: 104.248.84.190 (Digital Ocean, 1 CPU, shared with other projects)
 - **SSH**: `root@` for docker/sudo, `www-data@` for files. www-data has no passwordless sudo.
-- **Deploy path**: `/var/www/hypercal.invntrm.ru`
+- **Deploy path**: `/opt/hypercal` — this is the real path used by CI (`DEPLOY_PATH` secret).
+  `/var/www/hypercal.invntrm.ru` is an OLD path that still exists but is NOT used by the bot.
+  Do not confuse them — the running container mounts `/opt/hypercal/data` and reads `/opt/hypercal/.env`.
 - **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS, imports `/var/www/*/Caddyfile`)
+
+### .env на сервере
+
+Единственный актуальный `.env` — `/opt/hypercal/.env`. Именно его читает `docker compose`.
+`/var/www/hypercal.invntrm.ru/.env` — устаревший, не используется, может расходиться.
+
+Если добавляешь новую переменную (например, через GitHub Actions secrets):
+1. Добавь secret в репо
+2. Прокинь в deploy-шаг через `envs:` и запиши в `.env` через `echo ... >> .env`, **или**
+3. Пропиши вручную в `/opt/hypercal/.env` на сервере
+
+После изменения `.env` нужно **пересоздать** контейнер (не просто restart):
+```bash
+cd /opt/hypercal
+docker stop hypercal-bot && docker rm hypercal-bot
+docker compose up -d --no-deps bot
+```
+`docker restart` не перечитывает `env_file`.
 
 ### Диагностика
 
 ```bash
 # Docker logs (pino JSON):
-ssh root@104.248.84.190 'docker compose -f /var/www/hypercal.invntrm.ru/docker-compose.yml logs -f --tail 100 bot'
+ssh root@104.248.84.190 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --tail 100 bot'
 
 # Health check:
 curl https://hypercal.invntrm.ru/health
