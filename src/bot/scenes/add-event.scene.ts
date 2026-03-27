@@ -34,9 +34,15 @@ export function createAddEventScene(
     new Scene('add_event')
       .state<AddEventState>()
       .extend(userComposer)
-      // Step 0: Title (text only)
-      .step('message', async (context) => {
+      // Step 0: Title (text + cancel button)
+      .step(['message', 'callback_query'], async (context) => {
         const { lang } = context;
+        if (context.is('callback_query')) {
+          await context.answer();
+          await context.scene.exit();
+          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+          return;
+        }
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_title_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
@@ -48,9 +54,15 @@ export function createAddEventScene(
         }
         await context.scene.update({ title: text.trim() });
       })
-      // Step 1: Date/Time (text only)
-      .step('message', async (context) => {
+      // Step 1: Date/Time (text + cancel button)
+      .step(['message', 'callback_query'], async (context) => {
         const { lang, dbUser: user } = context;
+        if (context.is('callback_query')) {
+          await context.answer();
+          await context.scene.exit();
+          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+          return;
+        }
         if (context.scene.step.firstTime) {
           await context.send(t(lang).add_time_prompt, { reply_markup: cancelKeyboard(lang) });
           return;
@@ -79,9 +91,15 @@ export function createAddEventScene(
           return;
         }
 
-        // Handle skip callback
+        // Handle cancel/skip callbacks
         if (context.is('callback_query')) {
           const data = context.data;
+          if (data === CB.ADD_CANCEL) {
+            await context.answer();
+            await context.scene.exit();
+            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:2`) {
             await context.answer();
             const defaultMins = context.dbUser?.default_event_duration_minutes ?? 60;
@@ -131,6 +149,12 @@ export function createAddEventScene(
 
         const data = context.data;
         if (!data) return;
+        if (data === CB.ADD_CANCEL) {
+          await context.answer();
+          await context.scene.exit();
+          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+          return;
+        }
         const value = data.replace(`${CB.ADD_RECURRENCE}:`, '');
         await context.answer();
 
@@ -161,6 +185,12 @@ export function createAddEventScene(
 
         const data = context.data;
         if (!data) return;
+        if (data === CB.ADD_CANCEL) {
+          await context.answer();
+          await context.scene.exit();
+          await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+          return;
+        }
         const value = data.replace(`${CB.ADD_REC_END}:`, '');
         await context.answer();
 
@@ -193,6 +223,12 @@ export function createAddEventScene(
 
         if (context.is('callback_query')) {
           const data = context.data;
+          if (data === CB.ADD_CANCEL) {
+            await context.answer();
+            await context.scene.exit();
+            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:5`) {
             await context.answer();
             await context.scene.update({});
@@ -221,6 +257,12 @@ export function createAddEventScene(
 
         if (context.is('callback_query')) {
           const data = context.data;
+          if (data === CB.ADD_CANCEL) {
+            await context.answer();
+            await context.scene.exit();
+            await context.send(lang === 'ru' ? 'Добавление отменено.' : 'Event creation cancelled.');
+            return;
+          }
           if (data === `${CB.ADD_SKIP}:6`) {
             await context.answer();
             location = undefined;

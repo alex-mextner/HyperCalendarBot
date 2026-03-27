@@ -29,7 +29,8 @@ function getStepFns(scene: ReturnType<typeof createAddEventScene>): GramioFn[] {
   const composer = inner.composer as Record<string, unknown>;
   const composerInner = composer['~'] as Record<string, unknown>;
   const middlewares = composerInner.middlewares as Array<Record<string, unknown>>;
-  return middlewares.map((m) => m.fn as GramioFn);
+  // slice(1) skips the user-resolver middleware injected by .extend(userComposer)
+  return middlewares.slice(1).map((m) => m.fn as GramioFn);
 }
 
 type SendMock = ReturnType<typeof mock<() => Promise<{ id: number }>>>;
@@ -41,6 +42,7 @@ type StepGoMock = ReturnType<typeof mock<(n: number, flag: boolean) => Promise<v
 interface MockCtx {
   send: SendMock;
   answer: AnswerMock;
+  lang: 'en' | 'ru';
   dbUser: {
     telegram_id: number;
     language: 'en' | 'ru';
@@ -92,6 +94,7 @@ function makeCtx(
     _activeType: activeType,
     send: mock(() => Promise.resolve({ id: 99 })),
     answer: mock(() => Promise.resolve()),
+    lang: overrides.lang ?? 'en',
     text: overrides.text,
     data: overrides.data,
     dbUser: {

@@ -25,7 +25,8 @@ function getStepFns(scene: ReturnType<typeof createTimezoneScene>): GramioFn[] {
   const composer = inner.composer as Record<string, unknown>;
   const composerInner = composer['~'] as Record<string, unknown>;
   const middlewares = composerInner.middlewares as Array<Record<string, unknown>>;
-  return middlewares.map((m) => m.fn as GramioFn);
+  // slice(1) skips the user-resolver middleware injected by .extend(userComposer)
+  return middlewares.slice(1).map((m) => m.fn as GramioFn);
 }
 
 function getEnterFn(scene: ReturnType<typeof createTimezoneScene>): GramioFn | undefined {
@@ -46,6 +47,7 @@ interface MockCtx {
   answer: AnswerMock;
   editText: EditTextMock;
   chatId: number;
+  lang: 'en' | 'ru';
   dbUser?: {
     telegram_id: number;
     language: 'en' | 'ru';
@@ -96,6 +98,7 @@ function makeCtx(
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
     chatId: overrides.chatId ?? 123,
+    lang: overrides.lang ?? 'en',
     dbUser: {
       telegram_id: 1,
       language: overrides.lang ?? 'en',

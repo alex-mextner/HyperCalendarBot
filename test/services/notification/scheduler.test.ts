@@ -247,7 +247,7 @@ describe('NotificationScheduler', () => {
   test('event_reminder payload is formatted text, not raw event JSON', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Moscow', 'ru')");
     db.run(
-      "INSERT INTO events (id, user_id, title, start_at, end_at) VALUES (1, 42, 'Стендап', '2026-03-15T10:00:00Z', '2026-03-15T10:30:00Z')",
+      "INSERT INTO events (id, user_id, title, start_at, end_at, timezone) VALUES (1, 42, 'Стендап', '2026-03-15T10:00:00Z', '2026-03-15T10:30:00Z', 'Europe/Moscow')",
     );
     db.run(
       "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:45:00Z', 15, '15 minutes')",
@@ -278,8 +278,12 @@ describe('NotificationScheduler', () => {
 
   test('event_reminder_batch payload is formatted text', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
-    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Standup', '2026-03-15T10:00:00Z')");
-    db.run("INSERT INTO events (id, user_id, title, start_at) VALUES (2, 42, 'Call', '2026-03-15T10:00:00Z')");
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Standup', '2026-03-15T10:00:00Z', 'UTC')",
+    );
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (2, 42, 'Call', '2026-03-15T10:00:00Z', 'UTC')",
+    );
     db.run(
       "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T09:30:00Z', 30, '30 minutes')",
     );

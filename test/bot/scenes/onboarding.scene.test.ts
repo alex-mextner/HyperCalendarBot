@@ -27,7 +27,8 @@ function getStepFns(scene: ReturnType<typeof createOnboardingScene>): GramioFn[]
   const composer = inner.composer as Record<string, unknown>;
   const composerInner = composer['~'] as Record<string, unknown>;
   const middlewares = composerInner.middlewares as Array<Record<string, unknown>>;
-  return middlewares.map((m) => m.fn as GramioFn);
+  // slice(1) skips the user-resolver middleware injected by .extend(userComposer)
+  return middlewares.slice(1).map((m) => m.fn as GramioFn);
 }
 
 function getEnterFn(scene: ReturnType<typeof createOnboardingScene>): GramioFn | undefined {
