@@ -1,9 +1,11 @@
 // src/web/server.ts
 
+import { z } from 'zod';
 import type { AgentDispatcher } from '../agent/dispatcher.ts';
 import type { AgentRegistry } from '../agent/registry.ts';
 import { createAgentWsHandler, upgradeAgentWs } from '../agent/ws-server.ts';
 import type { EnvConfig } from '../config/env.ts';
+import type { AlertRepository } from '../database/repositories/alert.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
 import type { UserRepository } from '../database/repositories/user.repository.ts';
@@ -34,6 +36,9 @@ export interface WebServerDeps {
   healthCheck?: () => Promise<void>;
   // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
   botStarted?: boolean;
+  // Admin alert queue — POST /admin/alerts to push, GET /admin/alerts/next to pop
+  alertRepo?: AlertRepository;
+  adminAlertToken?: string;
 }
 
 const OAUTH_RATE_LIMIT = { windowMs: 60_000, maxRequests: 10 } as const;
@@ -171,6 +176,50 @@ async function handleRequest(
     }
 
     return new Response('OK', { status: 200 });
+  }
+
+  if (url.pathname === '/admin/alerts') {
+    if (!deps.alertRepo || !deps.adminAlertToken) {
+      return new Response('Not Found', { status: 404 });
+    }
+    if (req.headers.get('Authorization') !== `Bearer ${deps.adminAlertToken}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+
+    if (req.method === 'POST') {
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        // invalid JSON from external caller — expected input error
+        return new Response('Bad Request', { status: 400 });
+      }
+      const parsed = z.object({ text: z.string().min(1), source: z.string().default('bot') }).safeParse(body);
+      if (!parsed.success) {
+        return new Response('Bad Request', { status: 400 });
+      }
+      deps.alertRepo.push(parsed.data.text, parsed.data.source);
+      return new Response('OK', { status: 200 });
+    }
+
+    return new Response('Method Not Allowed', { status: 405 });
+  }
+
+  if (req.method === 'GET' && url.pathname === '/admin/alerts/next') {
+    if (!deps.alertRepo || !deps.adminAlertToken) {
+      return new Response('Not Found', { status: 404 });
+    }
+    if (req.headers.get('Authorization') !== `Bearer ${deps.adminAlertToken}`) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    const alert = deps.alertRepo.pop();
+    if (!alert) {
+      return new Response(null, { status: 204 });
+    }
+    return new Response(JSON.stringify(alert), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   return new Response('Not Found', { status: 404 });

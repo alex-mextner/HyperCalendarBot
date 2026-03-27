@@ -129,6 +129,7 @@ jobs:
           TEST_RESULT: ${{ needs.test.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DEPLOY_RESULT: ${{ needs.deploy.result }}
+          ADMIN_ALERT_TOKEN: ${{ secrets.ADMIN_ALERT_TOKEN }}
         run: |
           FAILED=""
           [[ "$TEST_RESULT" == "failure" ]] && FAILED="test "
@@ -140,3 +141,10 @@ jobs:
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg chat_id "$ADMIN_ID" --arg text "$TEXT" \
               '{chat_id: $chat_id, text: $text, parse_mode: "HTML", disable_web_page_preview: true}')"
+          if [ -n "$ADMIN_ALERT_TOKEN" ]; then
+            PLAIN=$(printf 'CI/CD failed [%s]\n%s — %s\n%s' "$FAILED" "${COMMIT_SHA:0:7}" "$FIRST_LINE" "$RUN_URL")
+            curl -s -X POST "https://hypercal.invntrm.ru/admin/alerts" \
+              -H "Authorization: Bearer ${ADMIN_ALERT_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg text "$PLAIN" --arg source "ci" '{text: $text, source: $source}')"
+          fi

@@ -28,6 +28,7 @@ export interface EnvConfig {
   DEEPGRAM_API_KEY?: string;
   DISABLE_VOICE?: boolean;
   AI_DEBUG_LOGS?: boolean;
+  ADMIN_ALERT_TOKEN?: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -110,5 +111,6 @@ export function loadConfig(): EnvConfig {
     DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY || undefined,
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
     AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
+    ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
   };
 }

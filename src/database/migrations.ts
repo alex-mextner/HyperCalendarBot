@@ -865,4 +865,19 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '045_alerts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE alerts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          text TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'bot',
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          consumed INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX idx_alerts_unconsumed ON alerts(consumed, id) WHERE consumed = 0;
+      `);
+    },
+  },
 ];

@@ -15,18 +15,28 @@ import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
 
+// Filled in after db + config are initialized — best-effort, push() is synchronous
+let pushCrashAlert: ((msg: string) => void) | undefined;
+
 process.on('uncaughtException', (error: Error) => {
   botLogger.fatal({ err: error }, 'Uncaught exception');
+  pushCrashAlert?.(`Bot crashed: ${error.message}`);
   process.exit(1);
 });
 
 process.on('unhandledRejection', (reason: unknown) => {
-  botLogger.fatal({ err: reason instanceof Error ? reason : new Error(String(reason)) }, 'Unhandled promise rejection');
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  botLogger.fatal({ err }, 'Unhandled promise rejection');
+  pushCrashAlert?.(`Bot unhandled rejection: ${err.message}`);
   process.exit(1);
 });
 
 const config = loadConfig();
 const db = createDatabase(config.DATABASE_PATH);
+
+if (config.ADMIN_ALERT_TOKEN) {
+  pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
+}
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
 
 if (config.AGENT_JWT_SECRET) {
@@ -53,6 +63,8 @@ const webServerDeps: WebServerDeps = {
   agentRegistry,
   agentDispatcher,
   botStarted: false,
+  alertRepo: db.alerts,
+  adminAlertToken: config.ADMIN_ALERT_TOKEN,
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
