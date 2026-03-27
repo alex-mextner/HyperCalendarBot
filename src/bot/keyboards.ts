@@ -97,7 +97,7 @@ export function reminderIntervalsKeyboard(activeIntervals: number[], lang: 'en' 
     kb.text(`${active ? '✅' : '☐'} ${fmtReminderPreset(m, lang)}`, `stg:toggle_reminder:${m}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:notifications');
+  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', `${CB.NOTIFY}:menu`);
 }
 
 // ── Event actions ──
