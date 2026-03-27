@@ -313,7 +313,8 @@ export function notifyMenuKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .row()
     .text(msgs.notify_evening as string, `${CB.NOTIFY}:evening`)
     .text(msgs.notify_quiet as string, `${CB.NOTIFY}:quiet`)
-    .row();
+    .row()
+    .text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:back');
 }
 
 export function notifyMorningKeyboard(enabled: boolean, lang: 'en' | 'ru' = 'en'): InlineKeyboard {

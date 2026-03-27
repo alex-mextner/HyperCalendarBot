@@ -23,7 +23,7 @@ export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
   const s = t(lang).settings;
   return new InlineKeyboard()
     .text(s.categoryGeneral, 'stg:general')
-    .text(s.categoryNotifications, 'stg:notifications')
+    .text(s.categoryNotifications, `${CB.NOTIFY}:menu`)
     .row()
     .text(s.categoryCalls, 'stg:calls')
     .text(s.categoryPrivacy, 'stg:privacy')

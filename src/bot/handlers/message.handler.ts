@@ -427,7 +427,7 @@ async function handleVoiceMessage(
           }
           if (!voiceBuffer && deps.fallbackTts) {
             cmdLogger.info({ userId: user.telegram_id, lang: user.language }, 'Using fallback TTS');
-            voiceBuffer = await deps.fallbackTts.synthesize(noLineBreaks, user.language ?? 'ru');
+            voiceBuffer = await deps.fallbackTts.synthesize(noLineBreaks, user.language ?? 'en');
           }
           if (voiceBuffer) {
             await deps.sendVoice(Number(chatId), voiceBuffer);

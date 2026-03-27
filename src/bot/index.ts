@@ -283,7 +283,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
               eventId: 0,
               callLogId: callLog.id,
               ttsText: text,
-              language: user?.language ?? 'ru',
+              language: user?.language ?? 'en',
             });
           },
         }
