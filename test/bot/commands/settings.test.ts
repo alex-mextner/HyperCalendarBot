@@ -83,6 +83,14 @@ describe('settingsCategoryKeyboard', () => {
     const serialized = kb.toJSON?.() ?? kb;
     expect(serialized).toBeDefined();
   });
+
+  test('Notifications button routes to nf:menu not stg:notifications', async () => {
+    const { settingsCategoryKeyboard } = await import('../../../src/bot/commands/settings.ts');
+    const kb = settingsCategoryKeyboard('ru');
+    const json = JSON.stringify(kb.toJSON?.() ?? kb);
+    expect(json).toContain('nf:menu');
+    expect(json).not.toContain('stg:notifications');
+  });
 });
 
 describe('handleSettingsCallback', () => {

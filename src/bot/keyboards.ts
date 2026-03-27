@@ -97,7 +97,7 @@ export function reminderIntervalsKeyboard(activeIntervals: number[], lang: 'en' 
     kb.text(`${active ? '✅' : '☐'} ${fmtReminderPreset(m, lang)}`, `stg:toggle_reminder:${m}`);
     if (i % 2 === 1) kb.row();
   });
-  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:notifications');
+  return kb.row().text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', `${CB.NOTIFY}:menu`);
 }
 
 // ── Event actions ──
@@ -313,7 +313,8 @@ export function notifyMenuKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .row()
     .text(msgs.notify_evening as string, `${CB.NOTIFY}:evening`)
     .text(msgs.notify_quiet as string, `${CB.NOTIFY}:quiet`)
-    .row();
+    .row()
+    .text(lang === 'ru' ? '🔙 Назад' : '🔙 Back', 'stg:back');
 }
 
 export function notifyMorningKeyboard(enabled: boolean, lang: 'en' | 'ru' = 'en'): InlineKeyboard {

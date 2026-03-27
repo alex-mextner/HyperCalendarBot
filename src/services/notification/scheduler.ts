@@ -173,7 +173,7 @@ export class NotificationScheduler {
       }
 
       if (group.length > 1) {
-        const lang = user.language ?? 'ru';
+        const lang = user.language ?? 'en';
         // Batch: one combined job for all reminders in this group
         const batchItems = group.map((r) => ({
           event_id: r.event_id,
@@ -208,14 +208,14 @@ export class NotificationScheduler {
 
         if (this.isCallAllowed(firstReminder.user_id, nowUtc)) {
           const ttsText = renderBatchReminderForSpeech({
-            lang: user.language ?? 'ru',
+            lang: user.language ?? 'en',
             items: batchItems.map((item) => ({
               event_title: item.event_title,
               event_start_at: item.event_start_at,
               timezone: user.timezone,
             })),
           });
-          this.deps.enqueueCall?.({ userId: firstReminder.user_id, ttsText, language: user.language ?? 'ru' });
+          this.deps.enqueueCall?.({ userId: firstReminder.user_id, ttsText, language: user.language ?? 'en' });
           notifyLogger.info({ userId: firstReminder.user_id, count: group.length }, 'Batch voice call enqueued');
         }
         continue;
@@ -224,7 +224,7 @@ export class NotificationScheduler {
       // Single reminder
       const reminder = firstReminder;
       const refKey = `er:${reminder.id}`;
-      const lang = user.language ?? 'ru';
+      const lang = user.language ?? 'en';
       const startTime = format(new TZDate(reminder.event_start_at, user.timezone), 'HH:mm');
       const endTime = reminder.event_end_at
         ? format(new TZDate(reminder.event_end_at, user.timezone), 'HH:mm')
@@ -282,7 +282,7 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
       if (events.length === 0) continue;
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
-      const lang = pref.language ?? 'ru';
+      const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
@@ -363,7 +363,7 @@ export class NotificationScheduler {
       const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
       if (events.length === 0) continue;
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
-      const lang = pref.language ?? 'ru';
+      const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
@@ -401,7 +401,7 @@ export class NotificationScheduler {
         const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
         const refKey = `wd:${pref.user_id}:${weekStr}`;
 
-        const lang = pref.language ?? 'ru';
+        const lang = pref.language ?? 'en';
 
         // Build Mon–Sun local calendar dates for next week.
         // Fetch all 7 days in one range query, then slice per day in memory.
