@@ -85,9 +85,48 @@ open_in_terminal() {
   # mktemp paths contain only safe chars — safe to pass as an AppleScript string literal.
   local tmpscript
   tmpscript=$(mktemp /tmp/hypercal-XXXX.sh)
-  # printf %q produces shell-safe escaping for the text argument
+
+  # Build a structured prompt: invoke the debugging skill, provide context,
+  # and instruct Claude to send a Telegram report when done.
+  local prompt
+  prompt=$(printf '%s' "\
+Use the /systematic-debugging skill to investigate this alert.
+
+=== ALERT ===
+%s
+=============
+
+Project directory: %q
+
+After your investigation:
+1. Identify the root cause and fix it if possible (run tests, commit, push).
+2. Send a Telegram report using:
+   bash scripts/send-tg-report.sh \"\$REPORT\"
+   where REPORT is MarkdownV2-formatted text. Use this structure:
+
+*CI Alert Report*
+
+*Status:* fixed \\| not fixed \\| no action needed
+*Root cause:* one sentence
+
+*What happened:*
+\`\`\`
+brief description
+\`\`\`
+
+*Actions taken:*
+• action 1
+• action 2
+
+*Next steps* \\(if any\\):
+• step
+
+Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \\~ \\\` \\> \\# \\+ \\- \\= \\| \\{ \\} \\. \\!
+" "$text" "$PROJECT_DIR")
+
+  # printf %q produces shell-safe escaping for the prompt argument
   printf '#!/bin/sh\ncd %q\nexec claude --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
-    "$PROJECT_DIR" "$text" > "$tmpscript"
+    "$PROJECT_DIR" "$prompt" > "$tmpscript"
   chmod +x "$tmpscript"
 
   if [[ "$TERMINAL" == "iterm2" ]]; then

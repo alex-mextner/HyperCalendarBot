@@ -4,13 +4,9 @@ import type { AlertRepository } from '../../src/database/repositories/alert.repo
 import type { WebServerDeps } from '../../src/web/server.ts';
 import { startWebServer } from '../../src/web/server.ts';
 
-function makePort() {
-  return 13311 + Math.floor(Math.random() * 1000);
-}
-
 function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   return {
-    config: { OAUTH_SERVER_PORT: makePort() } as WebServerDeps['config'],
+    config: { OAUTH_SERVER_PORT: 0 } as WebServerDeps['config'],
     userRepo: {} as WebServerDeps['userRepo'],
     ...overrides,
   };
@@ -19,9 +15,9 @@ function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
 describe('health endpoint', () => {
   test('returns 200 when no healthCheck configured', async () => {
     const deps = baseDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
       expect(await res.text()).toBe('ok');
     } finally {
@@ -31,9 +27,9 @@ describe('health endpoint', () => {
 
   test('returns 200 when healthCheck resolves', async () => {
     const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()) });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
     } finally {
       stop();
@@ -42,9 +38,9 @@ describe('health endpoint', () => {
 
   test('returns 503 when healthCheck rejects', async () => {
     const deps = baseDeps({ healthCheck: mock(() => Promise.reject(new Error('redis down'))) });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(503);
       expect(await res.text()).toBe('error');
     } finally {
@@ -54,9 +50,9 @@ describe('health endpoint', () => {
 
   test('returns 503 when botStarted is false', async () => {
     const deps = baseDeps({ botStarted: false });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(503);
       expect(await res.text()).toBe('bot not started');
     } finally {
@@ -66,9 +62,9 @@ describe('health endpoint', () => {
 
   test('returns 200 when botStarted is true', async () => {
     const deps = baseDeps({ botStarted: true });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
     } finally {
       stop();
@@ -77,9 +73,9 @@ describe('health endpoint', () => {
 
   test('returns 200 when botStarted is undefined (legacy — no bot-started tracking)', async () => {
     const deps = baseDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
     } finally {
       stop();
@@ -91,12 +87,12 @@ describe('health endpoint', () => {
     const deps = baseDeps({
       healthCheck: mock(() => (fail ? Promise.reject(new Error('down')) : Promise.resolve())),
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const r1 = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const r1 = await fetch(`http://localhost:${port}/health`);
       expect(r1.status).toBe(503);
       fail = false;
-      const r2 = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/health`);
+      const r2 = await fetch(`http://localhost:${port}/health`);
       expect(r2.status).toBe(200);
     } finally {
       stop();
@@ -107,9 +103,9 @@ describe('health endpoint', () => {
 describe('webhook handler', () => {
   test('returns 404 when calendarRepo not configured', async () => {
     const deps = baseDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1' },
       });
@@ -123,9 +119,9 @@ describe('webhook handler', () => {
     const deps = baseDeps({
       calendarRepo: { findChannelByIds: mock(() => null) } as unknown as WebServerDeps['calendarRepo'],
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
       });
       expect(res.status).toBe(400);
@@ -138,9 +134,9 @@ describe('webhook handler', () => {
     const deps = baseDeps({
       calendarRepo: { findChannelByIds: mock(() => null) } as unknown as WebServerDeps['calendarRepo'],
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1', 'x-goog-resource-state': 'exists' },
       });
@@ -158,9 +154,9 @@ describe('webhook handler', () => {
       } as unknown as WebServerDeps['calendarRepo'],
       onWebhook,
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1', 'x-goog-resource-state': 'exists' },
       });
@@ -178,9 +174,9 @@ describe('webhook handler', () => {
         findChannelByIds: mock(() => ({ id: 1, channel_token: 'secret-token' })),
       } as unknown as WebServerDeps['calendarRepo'],
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: {
           'x-goog-channel-id': 'ch-1',
@@ -203,9 +199,9 @@ describe('webhook handler', () => {
       } as unknown as WebServerDeps['calendarRepo'],
       onWebhook,
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: {
           'x-goog-channel-id': 'ch-1',
@@ -228,9 +224,9 @@ describe('webhook handler', () => {
         findChannelByIds: mock(() => ({ id: 1, channel_token: 'secret-token' })),
       } as unknown as WebServerDeps['calendarRepo'],
     });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/webhooks/google-calendar`, {
+      const res = await fetch(`http://localhost:${port}/webhooks/google-calendar`, {
         method: 'POST',
         headers: { 'x-goog-channel-id': 'ch-1', 'x-goog-resource-id': 'r-1', 'x-goog-resource-state': 'exists' },
       });
@@ -267,9 +263,9 @@ describe('admin alerts endpoints', () => {
 
   test('POST /admin/alerts returns 404 when alertRepo not configured', async () => {
     const deps = baseDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'oops', source: 'ci' }),
@@ -282,9 +278,9 @@ describe('admin alerts endpoints', () => {
 
   test('POST /admin/alerts returns 401 without token', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'oops', source: 'ci' }),
@@ -297,9 +293,9 @@ describe('admin alerts endpoints', () => {
 
   test('POST /admin/alerts returns 401 with wrong token', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { Authorization: 'Bearer wrong', 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'oops', source: 'ci' }),
@@ -312,9 +308,9 @@ describe('admin alerts endpoints', () => {
 
   test('POST /admin/alerts returns 400 for invalid body', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' },
         body: 'not-json',
@@ -327,9 +323,9 @@ describe('admin alerts endpoints', () => {
 
   test('POST /admin/alerts returns 400 when text is missing', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ source: 'ci' }),
@@ -343,9 +339,9 @@ describe('admin alerts endpoints', () => {
   test('POST /admin/alerts pushes alert and returns 200', async () => {
     const repo = makeAlertRepo();
     const deps = alertDeps({ alertRepo: repo });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'CI failed', source: 'ci' }),
@@ -363,9 +359,9 @@ describe('admin alerts endpoints', () => {
   test('POST /admin/alerts uses default source "bot" when omitted', async () => {
     const repo = makeAlertRepo();
     const deps = alertDeps({ alertRepo: repo });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts`, {
+      await fetch(`http://localhost:${port}/admin/alerts`, {
         method: 'POST',
         headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: 'bot error' }),
@@ -380,9 +376,9 @@ describe('admin alerts endpoints', () => {
 
   test('GET /admin/alerts/next returns 404 when alertRepo not configured', async () => {
     const deps = baseDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts/next`);
+      const res = await fetch(`http://localhost:${port}/admin/alerts/next`);
       expect(res.status).toBe(404);
     } finally {
       stop();
@@ -391,9 +387,9 @@ describe('admin alerts endpoints', () => {
 
   test('GET /admin/alerts/next returns 401 without token', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts/next`);
+      const res = await fetch(`http://localhost:${port}/admin/alerts/next`);
       expect(res.status).toBe(401);
     } finally {
       stop();
@@ -402,9 +398,9 @@ describe('admin alerts endpoints', () => {
 
   test('GET /admin/alerts/next returns 204 when queue is empty', async () => {
     const deps = alertDeps();
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts/next`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts/next`, {
         headers: { Authorization: 'Bearer secret-token' },
       });
       expect(res.status).toBe(204);
@@ -417,9 +413,9 @@ describe('admin alerts endpoints', () => {
     const repo = makeAlertRepo();
     repo.push('CI failed on main', 'ci');
     const deps = alertDeps({ alertRepo: repo });
-    const { stop } = startWebServer(deps);
+    const { stop, port } = startWebServer(deps);
     try {
-      const res = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts/next`, {
+      const res = await fetch(`http://localhost:${port}/admin/alerts/next`, {
         headers: { Authorization: 'Bearer secret-token' },
       });
       expect(res.status).toBe(200);
@@ -427,7 +423,7 @@ describe('admin alerts endpoints', () => {
       expect(body.text).toBe('CI failed on main');
       expect(body.source).toBe('ci');
       // consumed — second request returns 204
-      const res2 = await fetch(`http://localhost:${deps.config.OAUTH_SERVER_PORT}/admin/alerts/next`, {
+      const res2 = await fetch(`http://localhost:${port}/admin/alerts/next`, {
         headers: { Authorization: 'Bearer secret-token' },
       });
       expect(res2.status).toBe(204);

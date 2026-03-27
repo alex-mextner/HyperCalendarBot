@@ -232,7 +232,7 @@ async function handleRequest(
   return new Response('Not Found', { status: 404 });
 }
 
-export function startWebServer(deps: WebServerDeps): { stop: () => void } {
+export function startWebServer(deps: WebServerDeps): { port: number; stop: () => void } {
   const port = deps.config.OAUTH_SERVER_PORT ?? 3311;
   const oauthRateLimiter = new IpRateLimiter();
 
@@ -266,6 +266,7 @@ export function startWebServer(deps: WebServerDeps): { stop: () => void } {
   webLogger.info({ port }, 'Web server started');
 
   return {
+    port: server.port ?? port,
     stop: () => {
       clearInterval(cleanupTimer);
       server.stop();
