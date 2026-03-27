@@ -877,7 +877,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         user: ctx.dbUser,
         args: ctx.args,
         send: async (text: string) => {
-          await ctx.send(text);
+          await ctx.send(text, { parse_mode: 'MarkdownV2' });
         },
       }),
     )
