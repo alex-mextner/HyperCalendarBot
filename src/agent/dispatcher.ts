@@ -22,12 +22,28 @@ export class AgentDispatcher {
     type: AgentCommand['type'],
     payload: AgentCommand['payload'],
     onChunk?: ChunkHandler,
+    timeoutMs = 120_000,
   ): Promise<{ data: AgentDoneResponse['data']; exitCode?: number }> {
     const conn = this.registry.get(userId);
     if (!conn) return Promise.reject(new Error('Agent not connected'));
     const id = randomUUID();
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { userId, resolve, reject, onChunk });
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Agent command timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+      this.pending.set(id, {
+        userId,
+        resolve: (result) => {
+          clearTimeout(timer);
+          resolve(result);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
+        onChunk,
+      });
       conn.ws.send(JSON.stringify({ id, type, payload }));
     });
   }

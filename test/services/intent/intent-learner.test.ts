@@ -235,6 +235,32 @@ describe('IntentLearner', () => {
     }
   });
 
+  test('does not crash when AI returns null for optional pattern field', async () => {
+    const intentPayload = {
+      canonical_name: 'show_today',
+      phrases: ['что сегодня', 'events today'],
+      pattern: null,
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      format: 'text',
+    };
+
+    const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }) as Response;
+
+    try {
+      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result?.canonical_name).toBe('show_today');
+      expect(result?.pattern).toBeUndefined();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('resets daily counter on new day', () => {
     for (let i = 0; i < 50; i++) {
       learner.incrementCounter();
