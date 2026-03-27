@@ -1,35 +1,15 @@
 hypercal.invntrm.ru {
-	# Telegram bot webhook
-	handle /webhook/telegram {
-		reverse_proxy localhost:3001
+	# All bot API paths — retry during container restarts so clients see a delay, not 502.
+	# Caddy holds the connection and retries every 500ms for up to 10s.
+	@bot path /webhook/* /oauth/* /webhooks/* /ws/* /health /admin/*
+	handle @bot {
+		reverse_proxy localhost:3001 {
+			lb_try_duration 10s
+			lb_try_interval 500ms
+		}
 	}
 
-	# Google OAuth callback
-	handle /oauth/google/callback {
-		reverse_proxy localhost:3001
-	}
-
-	# Google Calendar webhooks
-	handle /webhooks/google-calendar {
-		reverse_proxy localhost:3001
-	}
-
-	# macOS agent WebSocket
-	handle /ws/agent {
-		reverse_proxy localhost:3001
-	}
-
-	# Health check
-	handle /health {
-		reverse_proxy localhost:3001
-	}
-
-	# Admin alert queue
-	handle /admin/alerts* {
-		reverse_proxy localhost:3001
-	}
-
-	# Bot doesn't serve web pages
+	# Non-API paths — static response (bot doesn't serve pages)
 	handle {
 		respond "HyperCalendarBot is running" 200
 	}
