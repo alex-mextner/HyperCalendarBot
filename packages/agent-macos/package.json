@@ -11,7 +11,7 @@
     "install:app": "cp -f dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar /Applications/HyperBotAgent.app/Contents/Resources/app.asar && cp -Rf dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar.unpacked /Applications/HyperBotAgent.app/Contents/Resources/app.asar.unpacked && echo 'Installed'"
   },
   "dependencies": {
-    "better-sqlite3": "^11.0.0",
+    "better-sqlite3": "^12.0.0",
     "keytar": "^7.9.0",
     "playwright": "^1.40.0",
     "ws": "^8.0.0"
@@ -21,7 +21,7 @@
     "@types/keytar": "^4.4.2",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.0.0",
-    "electron": "34.5.8",
+    "electron": "40.8.5",
     "electron-builder": "^25.0.0",
     "typescript": "^5.0.0"
   },
