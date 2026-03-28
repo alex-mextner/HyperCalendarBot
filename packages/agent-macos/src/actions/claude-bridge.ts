@@ -1,3 +1,4 @@
+import { net } from 'electron';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -89,15 +90,26 @@ async function apiRequest(
   if (isCircuitOpen()) {
     throw new Error('Circuit breaker open — too many recent errors');
   }
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Cookie': cookieHeader,
-      'Content-Type': 'application/json',
-      'X-Agent-Version': AGENT_VERSION,
-      ...(options.headers as Record<string, string> | undefined),
-    },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  const url = `${API_BASE}${path}`;
+  console.log(`[claude-bridge] → ${options.method ?? 'GET'} ${url}`);
+  let res: Response;
+  try {
+    res = await net.fetch(url, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Cookie': cookieHeader,
+        'Content-Type': 'application/json',
+        'X-Agent-Version': AGENT_VERSION,
+        ...(options.headers as Record<string, string> | undefined),
+      },
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  console.log(`[claude-bridge] ← ${res.status} ${url}`);
   if (!res.ok) {
     recordError();
     const kind = classifyError(res.status);

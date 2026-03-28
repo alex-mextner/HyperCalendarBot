@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "electron-builder --dir && electron dist/mac-arm64/HyperBotAgent.app",
     "build": "tsc --project tsconfig.json",
-    "dist": "electron-builder --mac"
+    "dist": "electron-builder --mac",
+    "build:app": "tsc --project tsconfig.json && electron-builder --mac --dir",
+    "install:app": "cp -f dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar /Applications/HyperBotAgent.app/Contents/Resources/app.asar && cp -Rf dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar.unpacked /Applications/HyperBotAgent.app/Contents/Resources/app.asar.unpacked && echo 'Installed'"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
@@ -38,6 +40,14 @@
         { "x": 371, "y": 190, "type": "link", "path": "/Applications" }
       ]
     },
-    "files": ["dist/**/*", "assets/**/*"]
+    "files": [
+      "dist/**/*",
+      "!dist/mac-arm64",
+      "!dist/HyperBotAgent-*",
+      "!dist/*.blockmap",
+      "!dist/distribution.xml",
+      "!dist/builder-debug.yml",
+      "assets/**/*"
+    ]
   }
 }

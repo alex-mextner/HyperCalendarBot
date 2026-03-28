@@ -76,8 +76,14 @@ async function main(): Promise<void> {
 
   // Probe Claude connectivity at startup
   getOrgId()
-    .then(() => setClaudeStatus('ok'))
-    .catch(() => setClaudeStatus('error'));
+    .then((orgId) => {
+      log('Claude API OK', { orgId });
+      setClaudeStatus('ok');
+    })
+    .catch((err: unknown) => {
+      log('Claude API error', { err: err instanceof Error ? err.message : String(err) });
+      setClaudeStatus('error');
+    });
 
   if (!jwt) {
     // First launch — generate pairing code and initiate pairing

@@ -12,7 +12,9 @@
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
     "test:call": "bun run scripts/test-call.ts",
-    "postinstall": "lefthook install"
+    "postinstall": "lefthook install",
+    "agent:build": "cd packages/agent-macos && bun run build:app",
+    "agent:install": "pkill -f HyperBotAgent 2>/dev/null; sleep 1; cd packages/agent-macos && bun run install:app && open /Applications/HyperBotAgent.app"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
