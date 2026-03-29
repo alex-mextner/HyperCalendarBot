@@ -18,6 +18,7 @@ import {
   renderReminderForSpeech,
   renderWeeklyDigestForSpeech,
 } from '../voice/tts-renderer.ts';
+import { detectClockChange, formatClockChangeNotice } from './clock-change.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
 import { isLocalTimeInWindow, isQuietHours } from './timezone.ts';
@@ -286,12 +287,16 @@ export class NotificationScheduler {
       const localTodayIso = new TZDate(nowUtc, pref.timezone).toISOString().slice(0, 10);
       const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, pref.timezone);
       const occurrences = this.deps.getEventsInRange(pref.user_id, dayStart, dayEnd);
+      const clockChange = detectClockChange(pref.timezone, localTodayIso);
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
-      const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
+      let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
+      if (clockChange) {
+        payload += `\n\n${formatClockChangeNotice(lang, clockChange)}`;
+      }
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'morning_agenda',
@@ -308,6 +313,34 @@ export class NotificationScheduler {
         this.deps.enqueueCall?.({ userId: pref.user_id, ttsText, language: lang });
         notifyLogger.info({ userId: pref.user_id }, 'Morning agenda voice call enqueued');
       }
+    }
+
+    // 2b. Standalone clock-change notifications for users without morning agenda
+    // Sent at 08:00 local time on the day of the DST transition.
+    const morningUserIds = new Set(morningPrefs.map((p) => p.user_id));
+    const allUsers = this.deps.userRepo.findAll();
+    for (const user of allUsers) {
+      if (morningUserIds.has(user.telegram_id)) continue;
+      if (!isLocalTimeInWindow(nowUtc, user.timezone, '08:00', 5)) continue;
+      const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
+      const clockChange = detectClockChange(user.timezone, localTodayIso);
+      if (!clockChange) continue;
+      const lang = user.language ?? 'en';
+      const refKey = `cc:${user.telegram_id}:${localTodayIso}`;
+      const payload = formatClockChangeNotice(lang, clockChange);
+      const logId = this.deps.logRepo.insert({
+        user_id: user.telegram_id,
+        type: 'clock_change',
+        reference_key: refKey,
+        channel: 'telegram_text',
+        payload,
+      });
+      if (logId === null) continue;
+      this.deps.enqueue('clock_change', user.telegram_id, logId, payload);
+      notifyLogger.info(
+        { userId: user.telegram_id, direction: clockChange.direction, minutes: clockChange.minutes },
+        'Clock change notification enqueued',
+      );
     }
 
     // 3. Eve-holiday notifications (per-user local tomorrow date)
