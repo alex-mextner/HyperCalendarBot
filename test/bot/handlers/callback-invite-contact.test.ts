@@ -96,7 +96,14 @@ describe('INVITE_CONTACT callback', () => {
 
   test('direct contact — sends invitation when owner matches', async () => {
     const eventService = {
-      getEvent: mock(() => ({ id: 5, title: 'Party' })),
+      getEvent: mock(() => ({
+        id: 5,
+        title: 'Party',
+        start_at: '2026-04-01T18:00:00Z',
+        end_at: '2026-04-01T19:00:00Z',
+        all_day: false,
+        timezone: 'UTC',
+      })),
       getEventOwnerId: mock(() => 200), // user 200 is owner
     };
     const sendInvitation = mock(() => ({ success: true, invitation: { id: 42 } }));

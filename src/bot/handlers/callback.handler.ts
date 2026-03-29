@@ -23,7 +23,7 @@ import type { SharingSettingsRepository } from '../../database/repositories/shar
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CreateEventData, Invitation, UpdateEventData, User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { formatDayAgenda, formatEventDetail } from '../../services/event/formatters.ts';
+import { formatDayAgenda, formatEventDetail, formatInvitation } from '../../services/event/formatters.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { mapDailyAgendaData, mapWeeklyOverviewData } from '../../services/image/data-mapper.ts';
@@ -678,7 +678,18 @@ export function createCallbackHandler(
         if (invitationNotifyDeps.editMessage && invitation.message_id && invitation.chat_id) {
           const inviterUser = invitationNotifyDeps.userRepo.findByTelegramId(invitation.inviter_id);
           const inviterName = inviterUser?.first_name ?? inviterUser?.username ?? `#${invitation.inviter_id}`;
-          const originalText = t(inviteeLang).invitation_received(eventTitle, inviterName);
+          const originalText = event
+            ? formatInvitation(
+                event,
+                event.timezone,
+                inviteeLang,
+                inviterName,
+                invitation.inviter_id,
+                inviterUser?.username ?? undefined,
+                inviteeUser?.timezone ?? null,
+                !!inviteeUser?.onboarding_completed,
+              )
+            : t(inviteeLang).invitation_received(eventTitle, inviterName);
           const keyboard = new InlineKeyboard()
             .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
             .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -710,7 +721,6 @@ export function createCallbackHandler(
     }
 
     if (result.success) {
-      const statusEmoji = subAction === 'accept' ? '✅' : subAction === 'decline' ? '❌' : '🤔';
       const statusLabel =
         subAction === 'accept'
           ? t(lang).invitation_accepted
@@ -721,7 +731,7 @@ export function createCallbackHandler(
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
       const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
-      const editText = eventCard ? `${statusEmoji} ${statusLabel}\n\n${eventCard}` : statusLabel;
+      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -964,7 +974,20 @@ export function createCallbackHandler(
         return;
       }
       const invitation = result.invitation;
-      const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
+      const inviteeUser = userRepo?.findByTelegramId(inviteeId);
+      const inviteeLang = (inviteeUser?.language ?? 'en') as Lang;
+      const inviteeText = event
+        ? formatInvitation(
+            event,
+            event.timezone,
+            inviteeLang,
+            inviterName,
+            user.telegram_id,
+            user.username ?? undefined,
+            inviteeUser?.timezone ?? null,
+            !!inviteeUser?.onboarding_completed,
+          )
+        : t(inviteeLang).invitation_received(eventTitle, inviterName);
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -1020,7 +1043,20 @@ export function createCallbackHandler(
       if (!result.success || !result.invitation) continue;
 
       const invitation = result.invitation;
-      const inviteeText = t(invLang).invitation_received(eventTitle, inviterName);
+      const inviteeUser = userRepo?.findByTelegramId(inviteeId);
+      const inviteeLang = (inviteeUser?.language ?? 'en') as Lang;
+      const inviteeText = eventForInv
+        ? formatInvitation(
+            eventForInv,
+            eventForInv.timezone,
+            inviteeLang,
+            inviterName,
+            user.telegram_id,
+            user.username ?? undefined,
+            inviteeUser?.timezone ?? null,
+            !!inviteeUser?.onboarding_completed,
+          )
+        : t(inviteeLang).invitation_received(eventTitle, inviterName);
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)

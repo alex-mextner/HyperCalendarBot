@@ -18,6 +18,7 @@ import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
+import { formatInvitation } from '../services/event/formatters.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
@@ -815,7 +816,20 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           if (inv.success && inv.invitation) {
             const event = eventService.getEvent(eventId, user.telegram_id);
             const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
-            const invText = t(lang).invitation_received(event?.title ?? `Event #${eventId}`, inviterName);
+            const inviteeUser = db.users.findByTelegramId(shared.userId);
+            const inviteeLang = (inviteeUser?.language ?? lang) as 'en' | 'ru';
+            const invText = event
+              ? formatInvitation(
+                  event,
+                  event.timezone,
+                  inviteeLang,
+                  inviterName,
+                  user.telegram_id,
+                  user.username ?? undefined,
+                  inviteeUser?.timezone ?? null,
+                  !!inviteeUser?.onboarding_completed,
+                )
+              : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
             telegramSender.sendInvitation!(shared.userId, invText, inv.invitation.id)
               .then((sent) => {
                 if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, shared.userId);
@@ -864,7 +878,20 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
         const inv = invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
         if (inv.success && inv.invitation) {
-          const invText = t(lang).invitation_received(event?.title ?? `Event #${eventId}`, inviterName);
+          const inviteeUser = db.users.findByTelegramId(inviteeId);
+          const inviteeLang = (inviteeUser?.language ?? lang) as 'en' | 'ru';
+          const invText = event
+            ? formatInvitation(
+                event,
+                event.timezone,
+                inviteeLang,
+                inviterName,
+                user.telegram_id,
+                user.username ?? undefined,
+                inviteeUser?.timezone ?? null,
+                !!inviteeUser?.onboarding_completed,
+              )
+            : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
           telegramSender.sendInvitation!(inviteeId, invText, inv.invitation.id)
             .then((sent) => {
               if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);
