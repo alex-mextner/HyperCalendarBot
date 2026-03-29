@@ -568,6 +568,37 @@ describe('IntentExecutor', () => {
     expect(result.response).toBe(output);
   });
 
+  test('call: respond returns message and stops workflow', async () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'get_timezone_info', input: { timezone: '{{user.timezone}}' }, as: 'tz' },
+        { call: 'respond', input: { message: '🕐 done' } },
+      ],
+      i18n: {},
+    };
+    const calls: string[] = [];
+    const mockExecutor = (name: string) => {
+      calls.push(name);
+      return { success: true, output: '{"local_time":"2026-03-29T10:00:00"}' };
+    };
+    const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+    expect(calls).toEqual(['get_timezone_info']);
+    expect(result.success).toBe(true);
+    expect(result.response).toBe('🕐 done');
+  });
+
+  test('call: respond resolves i18n template', async () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'respond', input: { message: '{{t.msg}}' } }],
+      i18n: { ru: { msg: 'Привет' }, en: { msg: 'Hello' } },
+    };
+    const mockExecutor = () => ({ success: true, output: '' });
+    const resultRu = await executor.run(workflow, {}, { ...userCtx, language: 'ru' }, mockExecutor);
+    expect(resultRu.response).toBe('Привет');
+    const resultEn = await executor.run(workflow, {}, { ...userCtx, language: 'en' }, mockExecutor);
+    expect(resultEn.response).toBe('Hello');
+  });
+
   test('resume from suspended workflow', async () => {
     const workflow: Workflow = {
       steps: [

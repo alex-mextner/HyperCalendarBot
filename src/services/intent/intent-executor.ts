@@ -256,6 +256,16 @@ async function runLevel2(
     // No call — nothing to execute in this step
     if (step.call === undefined) continue;
 
+    // Respond with text from input.message and stop — same as respond: field but explicit call form
+    if (step.call === 'respond') {
+      if (!step.input?.message) {
+        cmdLogger.warn({ stepIndex: i }, 'Intent executor: call: respond missing input.message');
+        return { success: true, response: undefined, mentionedEventId };
+      }
+      const text = resolveVariables(step.input.message, captures, userCtx, stepResults, i18n) as string;
+      return { success: true, response: text, mentionedEventId };
+    }
+
     // Suspend for user input — resolve question text if provided
     if (step.call === 'ask_user') {
       const questionTemplate = step.input?.question;
