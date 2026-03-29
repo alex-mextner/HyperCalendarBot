@@ -410,6 +410,121 @@ describe('NotificationScheduler', () => {
     expect(eveHolidayEnqueued.some((t) => t === 'eve_holiday')).toBe(true);
   });
 
+  test('morning agenda includes clock-change notice on DST day (Europe/Berlin spring forward)', async () => {
+    // 2026-03-29 is the day Europe/Berlin springs forward (UTC+1 → UTC+2)
+    // At 06:00 UTC = 08:00 CEST (new offset already applies)
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Berlin', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Standup', '2026-03-29T10:00:00Z', 'Europe/Berlin')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedPayload = '';
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((_type: string, _userId: number, _logId: number, payload: string) => {
+        capturedPayload = payload;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-29T06:00:30Z'));
+    expect(capturedPayload).toContain('Standup');
+    expect(capturedPayload).toContain('🕐');
+    expect(capturedPayload).toContain('forward');
+  });
+
+  test('morning agenda does NOT include clock-change notice on non-DST day', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Berlin', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Standup', '2026-03-15T10:00:00Z', 'Europe/Berlin')",
+    );
+    const logRepo = new NotificationLogRepository(db);
+    let capturedPayload = '';
+    const captureScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo,
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((_type: string, _userId: number, _logId: number, payload: string) => {
+        capturedPayload = payload;
+      }),
+    });
+    await captureScheduler.tick(new Date('2026-03-15T07:00:30Z'));
+    expect(capturedPayload).toContain('Standup');
+    expect(capturedPayload).not.toContain('🕐');
+  });
+
+  test('standalone clock-change sent at 08:00 for user without morning agenda', async () => {
+    // User has no morning agenda enabled but clocks changed in their timezone
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Berlin', 'ru')");
+    // Do NOT insert into notification_preferences → no morning agenda
+    const capturedTypes: string[] = [];
+    let capturedPayload = '';
+    const standaloneScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, _logId: number, payload: string) => {
+        capturedTypes.push(type);
+        capturedPayload = payload;
+      }),
+    });
+    // 2026-03-29 06:00 UTC = 08:00 CEST (Europe/Berlin springs forward)
+    await standaloneScheduler.tick(new Date('2026-03-29T06:00:30Z'));
+    expect(capturedTypes).toContain('clock_change');
+    expect(capturedPayload).toContain('🕐');
+    expect(capturedPayload).toContain('вперёд');
+  });
+
+  test('standalone clock-change NOT sent at wrong time', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Berlin', 'en')");
+    const capturedTypes: string[] = [];
+    const noTimeScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string) => {
+        capturedTypes.push(type);
+      }),
+    });
+    // 2026-03-29 at 10:00 UTC = 12:00 CEST — not 08:00
+    await noTimeScheduler.tick(new Date('2026-03-29T10:00:30Z'));
+    expect(capturedTypes).not.toContain('clock_change');
+  });
+
+  test('clock-change sent as standalone when morning agenda user has no events on DST day', async () => {
+    // User has morning agenda enabled but no events today — should still get clock-change notice
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'Europe/Berlin', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    // No events inserted
+    let capturedType = '';
+    let capturedPayload = '';
+    const noEventsScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(db),
+      reminderRepo: new EventReminderRepository(db),
+      logRepo: new NotificationLogRepository(db),
+      userRepo: new UserRepository(db),
+      eventRepo: new EventRepository(db),
+      enqueue: mock((type: string, _userId: number, _logId: number, payload: string) => {
+        capturedType = type;
+        capturedPayload = payload;
+      }),
+    });
+    await noEventsScheduler.tick(new Date('2026-03-29T06:00:30Z'));
+    expect(capturedType).toBe('clock_change');
+    expect(capturedPayload).toContain('🕐');
+    expect(capturedPayload).toContain('forward');
+  });
+
   test('evening review includes event at 00:30 local tomorrow (22:30 UTC today) for UTC+2 user', async () => {
     // Tick: 2026-03-18T19:00:30Z = 21:00 local in Europe/Kyiv (UTC+2)
     // Event at 2026-03-18T22:30:00Z = 00:30 local on March 19 — that is "tomorrow" → should appear
