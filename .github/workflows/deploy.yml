@@ -142,6 +142,17 @@ jobs:
             # creates files as root, causing SQLITE_READONLY on startup.
             chown -R 999:999 data/
             grep -q '^AGENT_DOWNLOAD_URL=' .env 2>/dev/null || echo 'AGENT_DOWNLOAD_URL=https://hypercal.invntrm.ru/downloads/agent-macos.dmg' >> .env
+
+            echo "📜 Rotating logs before restart..."
+            STAMP=$(date +%Y-%m-%d_%H-%M-%S)
+            mkdir -p logs
+            for f in healthcheck.log backup.log; do
+              if [ -s "logs/$f" ]; then
+                mv "logs/$f" "logs/${f%.log}_${STAMP}.log"
+                gzip "logs/${f%.log}_${STAMP}.log"
+              fi
+            done
+
             docker compose up -d --no-deps bot
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
       - name: Notify deploy success
