@@ -1,7 +1,9 @@
 import { net, session } from 'electron';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { loadDecryptedCookies } from './cookie-parser';
+import { getAccessToken } from '../oauth-manager';
 
 const COOKIES_PATH = join(
   homedir(),
@@ -10,8 +12,10 @@ const COOKIES_PATH = join(
   'Claude',
   'Cookies',
 );
-const API_BASE = 'https://claude.ai';
+const CLAUDE_AI_BASE = 'https://claude.ai';
+const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const AGENT_VERSION = '0.1.0';
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 // Circuit breaker: open after 5 errors in 60s, stays open for 5 minutes.
 const CB_ERROR_THRESHOLD = 5;
@@ -45,7 +49,7 @@ function recordError(): void {
   }
 }
 
-function classifyError(status: number): string {
+function classifyClaudeAiError(status: number): string {
   if (status === 401 || status === 403) return 'AUTH_FAILED';
   if (status === 404) return 'API_CHANGED';
   if (status === 429) return 'RATE_LIMITED';
@@ -90,34 +94,23 @@ export async function initClaudeCookies(): Promise<void> {
   console.log(`[claude-bridge] Session cookies loaded: ${cookies.length} cookies for claude.ai`);
 }
 
-async function apiRequest(
-  path: string,
-  options: RequestInit = {},
-): Promise<Response> {
+// GET requests to claude.ai (listing orgs, chats, projects, artifacts).
+// These use session cookies via Electron's Chromium stack.
+async function claudeAiGet(path: string): Promise<Response> {
   if (isCircuitOpen()) {
     throw new Error('Circuit breaker open — too many recent errors');
   }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
-  const url = `${API_BASE}${path}`;
-  console.log(`[claude-bridge] → ${options.method ?? 'GET'} ${url}`);
+  const url = `${CLAUDE_AI_BASE}${path}`;
+  console.log(`[claude-bridge] → GET ${url}`);
   let res: Response;
   try {
-    // Use session.defaultSession so Chromium handles cookies natively —
-    // Cloudflare's __cf_bm is refreshed automatically on every response.
     res = await net.fetch(url, {
-      ...options,
       signal: controller.signal,
       useSessionCookies: true,
       headers: {
-        'Content-Type': 'application/json',
-        'Origin': API_BASE,
-        'Referer': `${API_BASE}/`,
-        'sec-fetch-dest': 'empty',
-        'sec-fetch-mode': 'cors',
-        'sec-fetch-site': 'same-origin',
         'X-Agent-Version': AGENT_VERSION,
-        ...(options.headers as Record<string, string> | undefined),
       },
     } as Parameters<typeof net.fetch>[1]);
   } finally {
@@ -126,21 +119,67 @@ async function apiRequest(
   console.log(`[claude-bridge] ← ${res.status} ${url}`);
   if (!res.ok) {
     recordError();
-    const kind = classifyError(res.status);
+    const kind = classifyClaudeAiError(res.status);
     throw new Error(errorMessage(kind));
   }
   return res;
 }
 
+// POST to api.anthropic.com using OAuth Bearer token.
+// Uses net.fetch for correct Chromium TLS fingerprint.
+async function anthropicPost(
+  path: string,
+  body: { [key: string]: unknown },
+): Promise<Response> {
+  if (isCircuitOpen()) {
+    throw new Error('Circuit breaker open — too many recent errors');
+  }
+  const accessToken = await getAccessToken();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90_000);
+  const url = `${ANTHROPIC_API_BASE}${path}`;
+  console.log(`[claude-bridge] → POST ${url}`);
+  let res: Response;
+  try {
+    res = await net.fetch(url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'oauth-2025-04-20',
+        'X-Anthropic-Surface': 'operon-cli',
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    } as Parameters<typeof net.fetch>[1]);
+  } finally {
+    clearTimeout(timer);
+  }
+  console.log(`[claude-bridge] ← ${res.status} ${url}`);
+  if (!res.ok) {
+    recordError();
+    const errBody = await res.text().catch(() => '');
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(errorMessage('AUTH_FAILED'));
+    }
+    if (res.status === 429) {
+      throw new Error(errorMessage('RATE_LIMITED'));
+    }
+    throw new Error(`Anthropic API error (${res.status}): ${errBody}`);
+  }
+  return res;
+}
+
 export async function getOrgId(): Promise<string> {
-  const res = await apiRequest('/api/organizations');
+  const res = await claudeAiGet('/api/organizations');
   const orgs = (await res.json()) as Array<{ uuid: string }>;
   if (!orgs.length) throw new Error('No Claude organizations found');
   return orgs[0]!.uuid;
 }
 
 export async function listChats(orgId: string): Promise<Array<{ id: string; name: string }>> {
-  const res = await apiRequest(
+  const res = await claudeAiGet(
     `/api/organizations/${orgId}/chat_conversations?limit=50`,
   );
   const chats = (await res.json()) as Array<{ uuid: string; name: string }>;
@@ -148,13 +187,13 @@ export async function listChats(orgId: string): Promise<Array<{ id: string; name
 }
 
 export async function listProjects(orgId: string): Promise<Array<{ id: string; name: string }>> {
-  const res = await apiRequest(`/api/organizations/${orgId}/projects`);
+  const res = await claudeAiGet(`/api/organizations/${orgId}/projects`);
   const projects = (await res.json()) as Array<{ uuid: string; name: string }>;
   return projects.map((p) => ({ id: p.uuid, name: p.name }));
 }
 
 export async function getArtifact(artifactId: string): Promise<{ content: string; type: string }> {
-  const res = await apiRequest(`/api/artifacts/${artifactId}`);
+  const res = await claudeAiGet(`/api/artifacts/${artifactId}`);
   const artifact = (await res.json()) as {
     content?: string;
     body?: string;
@@ -172,34 +211,21 @@ export async function claudeChat(
   conversationId?: string,
   onChunk?: (text: string) => void,
 ): Promise<{ response: string; conversationId: string }> {
-  const orgId = await getOrgId();
+  const convId = conversationId ?? randomUUID();
 
-  let convId = conversationId;
-  if (!convId) {
-    const createRes = await apiRequest(
-      `/api/organizations/${orgId}/chat_conversations`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ name: '' }),
-      },
-    );
-    const conv = (await createRes.json()) as { uuid: string };
-    convId = conv.uuid;
+  if (!message) {
+    // claude_open_chat passes empty string — nothing to send
+    return { response: '', conversationId: convId };
   }
 
-  const res = await apiRequest(
-    `/api/organizations/${orgId}/chat_conversations/${convId}/completion`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        prompt: message,
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      }),
-    },
-  );
+  const res = await anthropicPost('/v1/messages', {
+    model: CLAUDE_MODEL,
+    max_tokens: 4096,
+    stream: true,
+    messages: [{ role: 'user', content: message }],
+  });
 
   const chunks: string[] = [];
-
   const reader = res.body!.getReader();
   const decoder = new TextDecoder();
 
@@ -213,11 +239,16 @@ export async function claudeChat(
       const data = line.slice(6).trim();
       if (data === '[DONE]') break;
       try {
-        const parsed = JSON.parse(data) as { completion?: string; delta?: { text?: string } };
-        const chunk = parsed.completion ?? parsed.delta?.text ?? '';
-        if (chunk) {
-          chunks.push(chunk);
-          onChunk?.(chunk);
+        const parsed = JSON.parse(data) as {
+          type?: string;
+          delta?: { type?: string; text?: string };
+        };
+        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+          const chunk = parsed.delta.text ?? '';
+          if (chunk) {
+            chunks.push(chunk);
+            onChunk?.(chunk);
+          }
         }
       } catch {
         // skip malformed SSE lines
