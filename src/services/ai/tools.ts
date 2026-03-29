@@ -686,8 +686,8 @@ export const toolDefinitions: ToolDefinition[] = [
     name: 'render_table',
     description: `Renders a Markdown table as a styled image and sends it to the chat.
 
-Use this tool whenever presenting tabular data (comparisons, schedules, lists with multiple attributes).
-Call it IN PARALLEL with writing the same data as plain text in your response — duplicating information visually and textually is intentional and correct.
+ALWAYS call this tool when you have tabular data (comparisons, schedules, lists with multiple attributes) — never skip it.
+Call it IN PARALLEL with your text response. In the text, present the same data as a bullet list — never write raw Markdown table syntax there.
 
 During a voice call the table is still sent to chat; you MUST mention it verbally (e.g. "I've sent a table to the chat — take a look").`,
     input_schema: {
