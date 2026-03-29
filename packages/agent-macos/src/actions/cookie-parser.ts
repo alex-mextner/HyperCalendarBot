@@ -8,6 +8,16 @@ export interface CookieRow {
   encrypted_value: Buffer;
 }
 
+export interface DecryptedCookie {
+  name: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  expirationDate?: number; // Unix timestamp in seconds
+}
+
 let cachedMasterKey: Buffer | null = null;
 
 function getMasterKey(): Buffer {
@@ -55,4 +65,51 @@ export function createCookieString(rows: CookieRow[]): string {
     })
     .filter((s): s is string => s !== null)
     .join('; ');
+}
+
+export function loadDecryptedCookies(cookiesPath: string): DecryptedCookie[] {
+  // Import here to avoid top-level require at module load time
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Database = require('better-sqlite3') as typeof import('better-sqlite3');
+  const db = new Database(cookiesPath, { readonly: true });
+  try {
+    const rows = db
+      .prepare(
+        `SELECT host_key, name, value, encrypted_value, path, is_secure, is_httponly, expires_utc
+         FROM cookies WHERE host_key LIKE '%claude.ai%'`,
+      )
+      .all() as Array<{
+        host_key: string;
+        name: string;
+        value: string;
+        encrypted_value: Buffer;
+        path: string;
+        is_secure: number;
+        is_httponly: number;
+        expires_utc: number;
+      }>;
+
+    return rows
+      .map((r) => {
+        const value = r.value || (r.encrypted_value?.length ? decryptCookieValue(r.encrypted_value) : '');
+        // Chrome stores expires_utc in microseconds since Windows epoch (1601-01-01)
+        // Convert to Unix seconds: divide by 1e6, subtract Windows-to-Unix offset
+        const expirationDate =
+          r.expires_utc > 0
+            ? Math.floor(r.expires_utc / 1_000_000) - 11_644_473_600
+            : undefined;
+        return {
+          name: r.name,
+          value,
+          domain: r.host_key,
+          path: r.path || '/',
+          secure: r.is_secure === 1,
+          httpOnly: r.is_httponly === 1,
+          expirationDate,
+        };
+      })
+      .filter((c) => c.value.length > 0);
+  } finally {
+    db.close();
+  }
 }

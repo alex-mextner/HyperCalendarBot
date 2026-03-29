@@ -1,8 +1,7 @@
-import { net } from 'electron';
+import { net, session } from 'electron';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import Database from 'better-sqlite3';
-import { createCookieString } from './cookie-parser';
+import { loadDecryptedCookies } from './cookie-parser';
 
 const COOKIES_PATH = join(
   homedir(),
@@ -66,25 +65,33 @@ function errorMessage(kind: string): string {
   }
 }
 
-export function loadCookies(): string {
-  const db = new Database(COOKIES_PATH, { readonly: true });
-  try {
-    const rows = db
-      .prepare(
-        `SELECT host_key, name, value, encrypted_value
-         FROM cookies
-         WHERE host_key LIKE '%claude.ai%'`,
-      )
-      .all() as { host_key: string; name: string; value: string; encrypted_value: Buffer }[];
-    return createCookieString(rows);
-  } finally {
-    db.close();
+// Load Claude Desktop cookies into the Electron session so Chromium handles
+// them natively. This allows Cloudflare to refresh short-lived cookies (e.g.
+// __cf_bm) automatically on every response, the same way a real browser does.
+export async function initClaudeCookies(): Promise<void> {
+  const cookies = loadDecryptedCookies(COOKIES_PATH);
+  const ses = session.defaultSession;
+  for (const c of cookies) {
+    try {
+      await ses.cookies.set({
+        url: 'https://claude.ai',
+        name: c.name,
+        value: c.value,
+        domain: c.domain,
+        path: c.path,
+        secure: c.secure,
+        httpOnly: c.httpOnly,
+        expirationDate: c.expirationDate,
+      });
+    } catch {
+      // Skip cookies that fail (e.g. invalid characters in value)
+    }
   }
+  console.log(`[claude-bridge] Session cookies loaded: ${cookies.length} cookies for claude.ai`);
 }
 
 async function apiRequest(
   path: string,
-  cookieHeader: string,
   options: RequestInit = {},
 ): Promise<Response> {
   if (isCircuitOpen()) {
@@ -96,16 +103,23 @@ async function apiRequest(
   console.log(`[claude-bridge] → ${options.method ?? 'GET'} ${url}`);
   let res: Response;
   try {
+    // Use session.defaultSession so Chromium handles cookies natively —
+    // Cloudflare's __cf_bm is refreshed automatically on every response.
     res = await net.fetch(url, {
       ...options,
       signal: controller.signal,
+      useSessionCookies: true,
       headers: {
-        'Cookie': cookieHeader,
         'Content-Type': 'application/json',
+        'Origin': API_BASE,
+        'Referer': `${API_BASE}/`,
+        'sec-fetch-dest': 'empty',
+        'sec-fetch-mode': 'cors',
+        'sec-fetch-site': 'same-origin',
         'X-Agent-Version': AGENT_VERSION,
         ...(options.headers as Record<string, string> | undefined),
       },
-    });
+    } as Parameters<typeof net.fetch>[1]);
   } finally {
     clearTimeout(timer);
   }
@@ -119,33 +133,28 @@ async function apiRequest(
 }
 
 export async function getOrgId(): Promise<string> {
-  const cookies = loadCookies();
-  const res = await apiRequest('/api/organizations', cookies);
+  const res = await apiRequest('/api/organizations');
   const orgs = (await res.json()) as Array<{ uuid: string }>;
   if (!orgs.length) throw new Error('No Claude organizations found');
   return orgs[0]!.uuid;
 }
 
 export async function listChats(orgId: string): Promise<Array<{ id: string; name: string }>> {
-  const cookies = loadCookies();
   const res = await apiRequest(
     `/api/organizations/${orgId}/chat_conversations?limit=50`,
-    cookies,
   );
   const chats = (await res.json()) as Array<{ uuid: string; name: string }>;
   return chats.map((c) => ({ id: c.uuid, name: c.name }));
 }
 
 export async function listProjects(orgId: string): Promise<Array<{ id: string; name: string }>> {
-  const cookies = loadCookies();
-  const res = await apiRequest(`/api/organizations/${orgId}/projects`, cookies);
+  const res = await apiRequest(`/api/organizations/${orgId}/projects`);
   const projects = (await res.json()) as Array<{ uuid: string; name: string }>;
   return projects.map((p) => ({ id: p.uuid, name: p.name }));
 }
 
 export async function getArtifact(artifactId: string): Promise<{ content: string; type: string }> {
-  const cookies = loadCookies();
-  const res = await apiRequest(`/api/artifacts/${artifactId}`, cookies);
+  const res = await apiRequest(`/api/artifacts/${artifactId}`);
   const artifact = (await res.json()) as {
     content?: string;
     body?: string;
@@ -163,14 +172,12 @@ export async function claudeChat(
   conversationId?: string,
   onChunk?: (text: string) => void,
 ): Promise<{ response: string; conversationId: string }> {
-  const cookies = loadCookies();
   const orgId = await getOrgId();
 
   let convId = conversationId;
   if (!convId) {
     const createRes = await apiRequest(
       `/api/organizations/${orgId}/chat_conversations`,
-      cookies,
       {
         method: 'POST',
         body: JSON.stringify({ name: '' }),
@@ -182,7 +189,6 @@ export async function claudeChat(
 
   const res = await apiRequest(
     `/api/organizations/${orgId}/chat_conversations/${convId}/completion`,
-    cookies,
     {
       method: 'POST',
       body: JSON.stringify({

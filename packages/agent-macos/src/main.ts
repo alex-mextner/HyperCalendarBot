@@ -1,6 +1,6 @@
 import { app, clipboard, dialog, Notification, type Tray } from 'electron';
 import { dispatch } from './dispatcher';
-import { getOrgId } from './actions/claude-bridge';
+import { claudeChat, getOrgId, initClaudeCookies } from './actions/claude-bridge';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
 import { createTray } from './tray';
@@ -74,16 +74,30 @@ async function main(): Promise<void> {
   const { tray: trayInst, setClaudeStatus } = createTray(wsClient);
   tray = trayInst;
 
-  // Probe Claude connectivity at startup
-  getOrgId()
-    .then((orgId) => {
-      log('Claude API OK', { orgId });
+  // Load Claude Desktop cookies into the Electron session before any API calls
+  await initClaudeCookies();
+
+  // Probe Claude connectivity: GET orgs + POST a real chat round-trip
+  async function probeClaudeStatus(): Promise<void> {
+    try {
+      const orgId = await getOrgId();
+      log('Claude API GET OK', { orgId });
+      // Verify POST/streaming works too (completion endpoint)
+      const { response } = await claudeChat('Say "ok" and nothing else.', undefined, undefined);
+      log('Claude API chat OK', { responseLen: response.length });
       setClaudeStatus('ok');
-    })
-    .catch((err: unknown) => {
+    } catch (err: unknown) {
       log('Claude API error', { err: err instanceof Error ? err.message : String(err) });
       setClaudeStatus('error');
-    });
+    }
+  }
+
+  probeClaudeStatus().catch(() => {/* logged inside */});
+
+  // Re-probe every 5 minutes so tray status stays current
+  setInterval(() => {
+    probeClaudeStatus().catch(() => {/* logged inside */});
+  }, 5 * 60_000);
 
   if (!jwt) {
     // First launch — generate pairing code and initiate pairing
