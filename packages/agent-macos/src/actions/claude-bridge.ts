@@ -186,6 +186,15 @@ async function anthropicPost(
 }
 
 export async function getOrgId(): Promise<string> {
+  // Use lastActiveOrg from the session cookie — same source as OAuth.
+  // Avoids picking the wrong org when the user belongs to multiple organizations.
+  const cookies = await session.defaultSession.cookies.get({
+    name: 'lastActiveOrg',
+    url: 'https://claude.ai',
+  });
+  if (cookies.length && cookies[0].value) return cookies[0].value;
+
+  // Fallback: fetch from API if cookie is missing
   const res = await claudeAiGet('/api/organizations');
   const orgs = (await res.json()) as Array<{ uuid: string }>;
   if (!orgs.length) throw new Error('No Claude organizations found');
