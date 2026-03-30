@@ -2,7 +2,7 @@ import { net, session } from 'electron';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { loadDecryptedCookies } from './cookie-parser';
+import { loadDecryptedCookies, type DecryptedCookie } from './cookie-parser';
 import { getAccessToken } from '../oauth-manager';
 
 const COOKIES_PATH = join(
@@ -15,9 +15,10 @@ const COOKIES_PATH = join(
 const CLAUDE_AI_BASE = 'https://claude.ai';
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const AGENT_VERSION = '0.1.0';
-const CLAUDE_MODEL = 'claude-opus-4-6';
-// Beta headers: oauth always required; files-api and context-1m match Claude Desktop behavior
-const ANTHROPIC_BETA_HEADERS = 'oauth-2025-04-20,files-api-2025-04-14,context-1m-2025-08-07';
+// Desktop OAuth (client 89355bc3) only permits Haiku via the Messages API.
+// Sonnet/Opus are accessible via claude.ai session cookies (separate mechanism).
+const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+const ANTHROPIC_BETA_HEADERS = 'oauth-2025-04-20,files-api-2025-04-14';
 
 // Circuit breaker: open after 5 errors in 60s, stays open for 5 minutes.
 const CB_ERROR_THRESHOLD = 5;
@@ -185,16 +186,31 @@ async function anthropicPost(
   return res;
 }
 
+function findLastActiveOrg(cookies: DecryptedCookie[]): string | undefined {
+  return cookies.find((c) => c.name === 'lastActiveOrg')?.value;
+}
+
 export async function getOrgId(): Promise<string> {
-  // Use lastActiveOrg from the session cookie — same source as OAuth.
-  // Avoids picking the wrong org when the user belongs to multiple organizations.
-  const cookies = await session.defaultSession.cookies.get({
+  // 1. Try Electron session (set by initClaudeCookies)
+  const sessionCookies = await session.defaultSession.cookies.get({
     name: 'lastActiveOrg',
     url: 'https://claude.ai',
   });
-  if (cookies.length && cookies[0].value) return cookies[0].value;
+  if (sessionCookies.length && sessionCookies[0].value) {
+    return sessionCookies[0].value;
+  }
 
-  // Fallback: fetch from API if cookie is missing
+  // 2. Read directly from Claude Desktop Cookies DB (more reliable — avoids
+  //    Electron session.cookies.set() silently dropping the cookie)
+  const allCookies = loadDecryptedCookies(COOKIES_PATH);
+  const orgId = findLastActiveOrg(allCookies);
+  if (orgId) {
+    console.log(`[claude-bridge] orgId from cookies DB: ${orgId.substring(0, 8)}...`);
+    return orgId;
+  }
+
+  // 3. Last resort: fetch from API (may return wrong org if user has multiple)
+  console.log('[claude-bridge] lastActiveOrg not found in cookies — falling back to API');
   const res = await claudeAiGet('/api/organizations');
   const orgs = (await res.json()) as Array<{ uuid: string }>;
   if (!orgs.length) throw new Error('No Claude organizations found');
