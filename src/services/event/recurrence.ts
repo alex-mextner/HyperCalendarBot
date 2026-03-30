@@ -5,6 +5,9 @@ import { logger } from '../../utils/logger.ts';
 
 const recurrenceLogger = logger.child({ module: 'recurrence' });
 
+/** Pad range by ±3h to catch occurrences that shift across boundaries after DST adjustment */
+const DST_PAD_MS = 3 * 60 * 60_000;
+
 export function expandRecurrence(
   template: CalendarEvent,
   exceptions: CalendarEvent[],
@@ -24,26 +27,33 @@ export function expandRecurrence(
   const rruleLine =
     template.recurrence_rule.split('\n').find((line) => line.startsWith('RRULE:')) ?? template.recurrence_rule;
 
-  // Use TZID-aware DTSTART for timed events so rrule preserves local wall-clock
-  // time across DST transitions. All-day events stay in UTC (only the date matters).
-  const useTzid = !template.all_day && !!template.timezone;
-  let rruleString: string;
-  if (useTzid) {
-    const localDtstart = new TZDate(dtstart, template.timezone);
-    rruleString = `DTSTART;TZID=${template.timezone}:${formatRRuleDateLocal(localDtstart)}\n${rruleLine}`;
-  } else {
-    rruleString = `DTSTART:${formatRRuleDate(dtstart)}\n${rruleLine}`;
-  }
+  // Always expand in pure UTC — rrule's TZID output is system-timezone-dependent
+  // (local time leaked into getUTC* accessors). We expand in UTC and adjust each
+  // occurrence for DST ourselves using TZDate.
+  const rruleString = `DTSTART:${formatRRuleDate(dtstart)}\n${rruleLine}`;
   const rule = rrulestr(rruleString);
 
-  const durationMs = template.end_at ? new Date(template.end_at).getTime() - new Date(template.start_at).getTime() : 0;
+  // For timed events with a timezone, extract the template's local time
+  // so we can reconstruct the correct UTC for each occurrence's DST offset.
+  const adjustDst = !template.all_day && !!template.timezone;
+  let localH = 0;
+  let localM = 0;
+  let localS = 0;
+  if (adjustDst) {
+    const tz = new TZDate(dtstart, template.timezone);
+    localH = tz.getHours();
+    localM = tz.getMinutes();
+    localS = tz.getSeconds();
+  }
 
-  // Match exceptions by local calendar date when using TZID — handles both old
-  // exceptions (stored with pre-DST UTC) and new ones (stored with post-DST UTC).
+  const durationMs = template.end_at ? new Date(template.end_at).getTime() - dtstart.getTime() : 0;
+
+  // Match exceptions by local calendar date when adjusting for DST — handles both
+  // old exceptions (stored with pre-DST UTC) and new ones (stored with post-DST UTC).
   const exceptionMap = new Map<string, CalendarEvent>();
   for (const exc of exceptions) {
     if (exc.original_start_at) {
-      const key = useTzid
+      const key = adjustDst
         ? toLocalDateKey(exc.original_start_at, template.timezone)
         : new Date(exc.original_start_at).toISOString();
       exceptionMap.set(key, exc);
@@ -52,13 +62,21 @@ export function expandRecurrence(
 
   const rangeStart = new Date(rangeStartUtc);
   const rangeEnd = new Date(rangeEndUtc);
-  const dates = rule.between(rangeStart, rangeEnd, true);
+
+  // Pad range so occurrences that shift across the boundary after DST adjustment
+  // aren't lost. Post-filter to the original range after conversion.
+  const paddedStart = adjustDst ? new Date(rangeStart.getTime() - DST_PAD_MS) : rangeStart;
+  const paddedEnd = adjustDst ? new Date(rangeEnd.getTime() + DST_PAD_MS) : rangeEnd;
+  const dates = rule.between(paddedStart, paddedEnd, true);
 
   const occurrences: EventOccurrence[] = [];
 
   for (const date of dates) {
-    const occStart = date.toISOString();
-    const occKey = useTzid ? toLocalDateKey(occStart, template.timezone) : occStart;
+    const utcDate = adjustDst ? adjustOccurrenceForDst(date, template.timezone, localH, localM, localS) : date;
+    if (utcDate.getTime() < rangeStart.getTime() || utcDate.getTime() > rangeEnd.getTime()) continue;
+
+    const occStart = utcDate.toISOString();
+    const occKey = adjustDst ? toLocalDateKey(occStart, template.timezone) : occStart;
     const exception = exceptionMap.get(occKey);
 
     if (exception) {
@@ -75,7 +93,7 @@ export function expandRecurrence(
         is_exception: true,
       });
     } else {
-      const occEnd = durationMs ? new Date(date.getTime() + durationMs).toISOString() : null;
+      const occEnd = durationMs ? new Date(utcDate.getTime() + durationMs).toISOString() : null;
       occurrences.push({
         event: template,
         occurrence_start: occStart,
@@ -88,7 +106,7 @@ export function expandRecurrence(
   return occurrences.sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
 }
 
-/** Format a UTC Date for DTSTART without TZID (e.g. `20260301T090000Z`) */
+/** Format a UTC Date for rrule DTSTART (e.g. `20260301T090000Z`) */
 function formatRRuleDate(date: Date): string {
   return date
     .toISOString()
@@ -96,15 +114,22 @@ function formatRRuleDate(date: Date): string {
     .replace(/\.\d{3}/, '');
 }
 
-/** Format a TZDate in local time for DTSTART;TZID (e.g. `20260301T120000`, no Z suffix) */
-function formatRRuleDateLocal(date: TZDate): string {
-  const y = date.getFullYear();
-  const mo = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  const h = String(date.getHours()).padStart(2, '0');
-  const mi = String(date.getMinutes()).padStart(2, '0');
-  const s = String(date.getSeconds()).padStart(2, '0');
-  return `${y}${mo}${d}T${h}${mi}${s}`;
+/**
+ * Adjust an occurrence from template UTC time to the correct UTC time
+ * for the event's local wall-clock time on that local calendar date.
+ *
+ * Example: template at 12:30 Belgrade (11:30 UTC in CET).
+ * On a summer occurrence, 12:30 Belgrade = 10:30 UTC (CEST).
+ * This function converts 11:30 UTC → 10:30 UTC.
+ */
+function adjustOccurrenceForDst(date: Date, timezone: string, h: number, m: number, s: number): Date {
+  // Determine which local calendar date this UTC occurrence maps to
+  const occTz = new TZDate(date, timezone);
+  // Construct a TZDate at midnight UTC on that local date, then set the
+  // event's intended local time — TZDate applies DST rules for this date.
+  const local = new TZDate(new Date(Date.UTC(occTz.getFullYear(), occTz.getMonth(), occTz.getDate())), timezone);
+  local.setHours(h, m, s, 0);
+  return new Date(local.getTime());
 }
 
 /** Extract local calendar date string (YYYY-MM-DD) from a UTC ISO timestamp */
