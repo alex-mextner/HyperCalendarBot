@@ -15,7 +15,9 @@ const COOKIES_PATH = join(
 const CLAUDE_AI_BASE = 'https://claude.ai';
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const AGENT_VERSION = '0.1.0';
-const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_MODEL = 'claude-opus-4-6';
+// Beta headers: oauth always required; files-api and context-1m match Claude Desktop behavior
+const ANTHROPIC_BETA_OPUS = 'oauth-2025-04-20,files-api-2025-04-14,context-1m-2025-08-07';
 
 // Circuit breaker: open after 5 errors in 60s, stays open for 5 minutes.
 const CB_ERROR_THRESHOLD = 5;
@@ -146,7 +148,7 @@ async function anthropicPost(
       signal: controller.signal,
       headers: {
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'oauth-2025-04-20',
+        'anthropic-beta': ANTHROPIC_BETA_OPUS,
         'X-Anthropic-Surface': 'operon-desktop',
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
