@@ -15,9 +15,9 @@ const COOKIES_PATH = join(
 const CLAUDE_AI_BASE = 'https://claude.ai';
 const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const AGENT_VERSION = '0.1.0';
-// Desktop OAuth (client 89355bc3) only permits Haiku via the Messages API.
-// Sonnet/Opus are accessible via claude.ai session cookies (separate mechanism).
-const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
+// Desktop OAuth (client 89355bc3) supports all models incl. Opus/Sonnet.
+// context-1m-2025-08-07 is incompatible with this clientId — do not add it.
+const CLAUDE_MODEL = 'claude-opus-4-6';
 const ANTHROPIC_BETA_HEADERS = 'oauth-2025-04-20,files-api-2025-04-14';
 
 // Circuit breaker: open after 5 errors in 60s, stays open for 5 minutes.
