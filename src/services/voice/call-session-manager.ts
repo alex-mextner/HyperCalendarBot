@@ -95,7 +95,7 @@ export class CallSessionManager {
         return undefined;
       },
       websocket: {
-        idleTimeout: 1800,
+        idleTimeout: 960,
         open: (ws) => {
           const { sessionId } = ws.data;
           this.onWebSocketOpen(sessionId, {
