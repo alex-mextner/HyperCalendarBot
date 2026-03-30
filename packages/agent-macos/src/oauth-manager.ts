@@ -129,7 +129,6 @@ async function doAuthorizationCodeFlow(): Promise<{
       redirect_uri: REDIRECT_URI,
       state,
       code_verifier: codeVerifier,
-      expires_in: 31536000,
     }),
   });
 
