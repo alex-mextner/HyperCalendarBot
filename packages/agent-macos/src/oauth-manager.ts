@@ -2,9 +2,10 @@ import { net, session } from 'electron';
 import keytar from 'keytar';
 
 const API_HOST = 'https://api.anthropic.com';
-const CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
-const REDIRECT_URI = 'https://console.anthropic.com/oauth/code/callback';
-const SCOPE = 'user:inference user:file_upload user:profile';
+// Claude Desktop first-party client — grants Opus/Sonnet via Pro subscription
+const CLIENT_ID = '89355bc3-cbfd-4382-905b-976645cad410';
+const REDIRECT_URI = 'https://claude.ai/desktop/callback';
+const SCOPE = 'user:inference';
 
 const KEYTAR_SERVICE = 'HyperBotAgent-OAuth';
 const KEYTAR_ACCESS_TOKEN = 'access_token';
@@ -129,6 +130,7 @@ async function doAuthorizationCodeFlow(): Promise<{
       redirect_uri: REDIRECT_URI,
       state,
       code_verifier: codeVerifier,
+      expires_in: 31536000,
     }),
   });
 
