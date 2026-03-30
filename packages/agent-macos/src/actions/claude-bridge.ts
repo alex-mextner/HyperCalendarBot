@@ -96,19 +96,13 @@ export async function initClaudeCookies(): Promise<void> {
   console.log(`[claude-bridge] Session cookies loaded: ${cookies.length} cookies for claude.ai`);
 }
 
-// GET requests to claude.ai (listing orgs, chats, projects, artifacts).
-// These use session cookies via Electron's Chromium stack.
-async function claudeAiGet(path: string): Promise<Response> {
-  if (isCircuitOpen()) {
-    throw new Error('Circuit breaker open — too many recent errors');
-  }
+async function doClaudeAiGet(path: string): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   const url = `${CLAUDE_AI_BASE}${path}`;
   console.log(`[claude-bridge] → GET ${url}`);
-  let res: Response;
   try {
-    res = await net.fetch(url, {
+    return await net.fetch(url, {
       signal: controller.signal,
       useSessionCookies: true,
       headers: {
@@ -118,7 +112,25 @@ async function claudeAiGet(path: string): Promise<Response> {
   } finally {
     clearTimeout(timer);
   }
-  console.log(`[claude-bridge] ← ${res.status} ${url}`);
+}
+
+// GET requests to claude.ai (listing orgs, chats, projects, artifacts).
+// On 401/403, reloads cookies from Claude Desktop SQLite and retries once.
+async function claudeAiGet(path: string): Promise<Response> {
+  if (isCircuitOpen()) {
+    throw new Error('Circuit breaker open — too many recent errors');
+  }
+
+  let res = await doClaudeAiGet(path);
+  console.log(`[claude-bridge] ← ${res.status} ${CLAUDE_AI_BASE}${path}`);
+
+  if (res.status === 401 || res.status === 403) {
+    console.log('[claude-bridge] Session expired — reloading cookies and retrying');
+    await initClaudeCookies();
+    res = await doClaudeAiGet(path);
+    console.log(`[claude-bridge] ← ${res.status} ${CLAUDE_AI_BASE}${path} (retry)`);
+  }
+
   if (!res.ok) {
     recordError();
     const kind = classifyClaudeAiError(res.status);
