@@ -126,6 +126,9 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
         sendResponse({ id, type: 'done', data: result });
         break;
       }
+
+      default:
+        sendResponse({ id, type: 'error', error: `Unknown command type: ${type}` });
     }
   } catch (err) {
     sendResponse({
