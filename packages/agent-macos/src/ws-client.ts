@@ -155,7 +155,11 @@ export class WsClient extends EventEmitter {
     this.pingTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify({ type: 'ping' }));
+        // Clear previous pong timer before setting a new one — otherwise
+        // orphaned timers accumulate and close a healthy connection.
+        if (this.pongTimer) clearTimeout(this.pongTimer);
         this.pongTimer = setTimeout(() => {
+          log('Pong timeout — closing stale connection');
           this.ws?.close();
         }, PONG_TIMEOUT_MS);
       }
@@ -181,10 +185,13 @@ export class WsClient extends EventEmitter {
   }
 
   private scheduleReconnect(): void {
-    log('Scheduling reconnect', { backoffMs: this.backoffMs });
+    // Add ±20% jitter so a server restart doesn't get hammered by simultaneous reconnects.
+    const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1);
+    const delay = Math.round(this.backoffMs + jitter);
+    log('Scheduling reconnect', { backoffMs: delay });
     setTimeout(() => {
       this.connect();
-    }, this.backoffMs);
+    }, delay);
     this.backoffMs = Math.min(this.backoffMs * 2, BACKOFF_MAX_MS);
   }
 }
