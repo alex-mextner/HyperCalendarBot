@@ -570,7 +570,7 @@ export interface InsertEventReminderData {
   remind_at_utc: string;
   interval_minutes: number;
   interval_label: string;
-  occurrence_start?: string;
+  occurrence_start?: string | null;
   occurrence_end?: string | null;
 }
 
