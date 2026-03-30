@@ -1153,7 +1153,7 @@ export function createCallbackHandler(
   dispatch.set('fb_close', async (ctx, payload, _parts, user) => {
     if (!feedbackDeps) return;
     const lang = (user.language ?? 'en') as Lang;
-    if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+    if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1179,7 +1179,7 @@ export function createCallbackHandler(
   dispatch.set('fb_reply', async (ctx, payload, _parts, user) => {
     if (!feedbackDeps) return;
     const lang = (user.language ?? 'en') as Lang;
-    if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+    if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1272,7 +1272,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1288,7 +1288,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1303,7 +1303,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
