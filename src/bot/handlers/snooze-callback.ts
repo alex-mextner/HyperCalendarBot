@@ -10,7 +10,7 @@ export async function handleSnoozeCallback(
   userId: number,
   eventId: number,
   minutes: number,
-  reminderRepo: Pick<EventReminderRepository, 'insert'>,
+  reminderRepo: Pick<EventReminderRepository, 'insert' | 'getLastSentForEvent'>,
   eventRepo: Pick<EventRepository, 'findById'>,
   now: Date = new Date(),
 ): Promise<void> {
@@ -29,12 +29,18 @@ export async function handleSnoozeCallback(
   const remindAt = new Date(now.getTime() + minutes * 60_000);
   const label = minutes < 60 ? `${minutes} min` : `${minutes / 60}h`;
 
+  // Carry over occurrence times from the original reminder so getDue
+  // displays the correct occurrence time (not the recurring template time).
+  const lastSent = reminderRepo.getLastSentForEvent(eventId, userId);
+
   reminderRepo.insert({
     event_id: eventId,
     user_id: userId,
     remind_at_utc: remindAt.toISOString(),
     interval_minutes: minutes,
     interval_label: label,
+    occurrence_start: lastSent?.occurrence_start ?? undefined,
+    occurrence_end: lastSent?.occurrence_end ?? undefined,
   });
 
   await ctx.answer({ text: '⏰' });

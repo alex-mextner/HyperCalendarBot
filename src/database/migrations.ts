@@ -880,4 +880,20 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '046_occurrence_start_end_and_rematerialize',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE event_reminders ADD COLUMN occurrence_start TEXT;
+        ALTER TABLE event_reminders ADD COLUMN occurrence_end TEXT;
+      `);
+      // Delete unsent reminders for recurring events so the materializer
+      // recreates them with correct DST-aware UTC times and occurrence columns.
+      db.exec(`
+        DELETE FROM event_reminders
+        WHERE sent = 0
+          AND event_id IN (SELECT id FROM events WHERE recurrence_rule IS NOT NULL);
+      `);
+    },
+  },
 ];

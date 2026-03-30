@@ -464,6 +464,7 @@ export class EventService {
         reminderOverrides,
         event.all_day,
         event.timezone,
+        occ.occurrence_end,
       );
     }
   }

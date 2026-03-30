@@ -1436,7 +1436,7 @@ export function createCallbackHandler(
 }
 
 export interface SnoozeDeps {
-  reminderRepo: Pick<EventReminderRepository, 'insert'>;
+  reminderRepo: Pick<EventReminderRepository, 'insert' | 'getLastSentForEvent'>;
   eventRepo: Pick<EventRepository, 'findById'>;
 }
 

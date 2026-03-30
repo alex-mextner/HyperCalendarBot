@@ -52,6 +52,7 @@ function setupDb(): Database {
     event_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
     remind_at_utc TEXT NOT NULL, interval_minutes INTEGER NOT NULL,
     interval_label TEXT NOT NULL, sent INTEGER NOT NULL DEFAULT 0,
+    occurrence_start TEXT, occurrence_end TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE

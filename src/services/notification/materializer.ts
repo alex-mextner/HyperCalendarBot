@@ -138,6 +138,7 @@ export class ReminderMaterializer {
     reminderOverrides: string | null,
     allDay: number,
     userTimezone: string,
+    occurrenceEnd?: string | null,
   ): number {
     let inserted = 0;
     const now = Date.now();
@@ -164,6 +165,8 @@ export class ReminderMaterializer {
           remind_at_utc: remindAtIso,
           interval_minutes: -1,
           interval_label: label,
+          occurrence_start: occurrenceStart,
+          occurrence_end: occurrenceEnd ?? null,
         });
         inserted++;
       }
@@ -191,6 +194,8 @@ export class ReminderMaterializer {
         remind_at_utc: remindAtIso,
         interval_minutes: minutes,
         interval_label: formatIntervalLabel(minutes),
+        occurrence_start: occurrenceStart,
+        occurrence_end: occurrenceEnd ?? null,
       });
       inserted++;
     }
@@ -225,6 +230,7 @@ export class ReminderMaterializer {
           template.reminder_overrides,
           template.all_day,
           template.timezone,
+          occ.occurrence_end,
         );
         totalInserted += inserted;
       }
