@@ -7,16 +7,28 @@ export class EventReminderRepository {
   insert(data: InsertEventReminderData): void {
     this.db
       .prepare(
-        `INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label, occurrence_start, occurrence_end)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(data.event_id, data.user_id, data.remind_at_utc, data.interval_minutes, data.interval_label);
+      .run(
+        data.event_id,
+        data.user_id,
+        data.remind_at_utc,
+        data.interval_minutes,
+        data.interval_label,
+        data.occurrence_start ?? null,
+        data.occurrence_end ?? null,
+      );
   }
 
   getDue(windowStart: string, windowEnd: string): DueReminderRow[] {
     return this.db
       .prepare(
-        `SELECT er.*, e.title AS event_title, e.start_at AS event_start_at, e.end_at AS event_end_at, e.location AS event_location
+        `SELECT er.*,
+                e.title AS event_title,
+                COALESCE(er.occurrence_start, e.start_at) AS event_start_at,
+                COALESCE(er.occurrence_end, e.end_at) AS event_end_at,
+                e.location AS event_location
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
          WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0`,
@@ -49,5 +61,15 @@ export class EventReminderRepository {
 
   deleteUnsentForEvent(eventId: number): void {
     this.db.prepare('DELETE FROM event_reminders WHERE event_id = ? AND sent = 0').run(eventId);
+  }
+
+  getLastSentForEvent(eventId: number, userId: number): EventReminderRow | null {
+    return (
+      (this.db
+        .prepare(
+          'SELECT * FROM event_reminders WHERE event_id = ? AND user_id = ? AND sent = 1 ORDER BY id DESC LIMIT 1',
+        )
+        .get(eventId, userId) as EventReminderRow | undefined) ?? null
+    );
   }
 }

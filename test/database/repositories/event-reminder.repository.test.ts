@@ -38,6 +38,8 @@ describe('EventReminderRepository', () => {
       interval_minutes INTEGER NOT NULL,
       interval_label TEXT NOT NULL,
       sent INTEGER NOT NULL DEFAULT 0,
+      occurrence_start TEXT,
+      occurrence_end TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
       FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
@@ -108,5 +110,46 @@ describe('EventReminderRepository', () => {
     });
     repo.deleteUnsentForUser(42);
     expect(repo.getForEvent(1).length).toBe(0);
+  });
+
+  test('getDue uses occurrence_start/end when set (recurring events)', () => {
+    // Event template: start_at = 10:00, end_at = 11:00 (template times)
+    db.run("UPDATE events SET end_at = '2026-03-15T11:00:00Z' WHERE id = 1");
+
+    // Reminder with occurrence-specific times (different from template)
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-22T09:30:00Z',
+      interval_minutes: 30,
+      interval_label: '30 minutes',
+      occurrence_start: '2026-03-22T10:00:00Z',
+      occurrence_end: '2026-03-22T11:00:00Z',
+    });
+
+    const due = repo.getDue('2026-03-22T09:30:00Z', '2026-03-22T09:31:00Z');
+    expect(due.length).toBe(1);
+    // Should return occurrence times, not template times
+    expect(due[0]!.event_start_at).toBe('2026-03-22T10:00:00Z');
+    expect(due[0]!.event_end_at).toBe('2026-03-22T11:00:00Z');
+  });
+
+  test('getDue falls back to template times when occurrence_start is null', () => {
+    db.run("UPDATE events SET end_at = '2026-03-15T11:00:00Z' WHERE id = 1");
+
+    // Reminder without occurrence times (non-recurring or legacy)
+    repo.insert({
+      event_id: 1,
+      user_id: 42,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 minutes',
+    });
+
+    const due = repo.getDue('2026-03-15T09:45:00Z', '2026-03-15T09:46:00Z');
+    expect(due.length).toBe(1);
+    // Falls back to event.start_at and event.end_at
+    expect(due[0]!.event_start_at).toBe('2026-03-15T10:00:00Z');
+    expect(due[0]!.event_end_at).toBe('2026-03-15T11:00:00Z');
   });
 });

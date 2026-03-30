@@ -10,9 +10,10 @@ function makeCtx(overrides: { [key: string]: unknown } = {}) {
   };
 }
 
-function makeReminderRepo() {
+function makeReminderRepo(lastSent: { occurrence_start: string | null; occurrence_end: string | null } | null = null) {
   return {
     insert: mock(() => {}),
+    getLastSentForEvent: mock(() => lastSent),
   };
 }
 
@@ -71,5 +72,26 @@ describe('handleSnoozeCallback', () => {
 
     expect(reminderRepo.insert).not.toHaveBeenCalled();
     expect(ctx.answer).toHaveBeenCalled();
+  });
+
+  test('carries over occurrence_start/end from last sent reminder (recurring events)', async () => {
+    const ctx = makeCtx();
+    const event = { id: 7, user_id: 42, start_at: '2026-01-05T11:30:00Z', title: 'English' };
+    const reminderRepo = makeReminderRepo({
+      occurrence_start: '2026-03-30T10:30:00Z',
+      occurrence_end: '2026-03-30T11:30:00Z',
+    });
+    const eventRepo = makeEventRepo(event);
+    const now = new Date('2026-03-30T10:00:00Z');
+
+    await handleSnoozeCallback(ctx as never, 42, 7, 5, reminderRepo as never, eventRepo as never, now);
+
+    expect(reminderRepo.getLastSentForEvent).toHaveBeenCalledWith(7, 42);
+    const insertArg = (reminderRepo.insert.mock.calls[0] as unknown[])[0] as {
+      occurrence_start?: string;
+      occurrence_end?: string | null;
+    };
+    expect(insertArg.occurrence_start).toBe('2026-03-30T10:30:00Z');
+    expect(insertArg.occurrence_end).toBe('2026-03-30T11:30:00Z');
   });
 });
