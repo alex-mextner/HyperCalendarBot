@@ -17,7 +17,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { EventOccurrence, NotificationPreferencesRow, User, UserCallSettings } from '../../database/types.ts';
+import type { EventOccurrence, NotificationPreferencesRow, NotificationPreferencesUpdate, User, UserCallSettings } from '../../database/types.ts';
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
@@ -91,7 +91,7 @@ export interface GoogleCapability {
 export interface NotificationsCapability {
   notificationPrefs: {
     getPrefs(userId: number): NotificationPreferencesRow;
-    update(userId: number, patch: Partial<NotificationPreferencesRow>): void;
+    update(userId: number, patch: NotificationPreferencesUpdate): void;
     ensureDefaults(userId: number): void;
   };
 }
