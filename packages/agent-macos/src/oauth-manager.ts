@@ -12,7 +12,7 @@ const KEYTAR_ACCESS_TOKEN = 'access_token';
 const KEYTAR_REFRESH_TOKEN = 'refresh_token';
 const KEYTAR_EXPIRES_AT = 'expires_at';
 
-function log(msg: string, data?: Record<string, unknown>): void {
+function log(msg: string, data?: { [key: string]: unknown }): void {
   const ts = new Date().toISOString();
   const extra = data ? ' ' + JSON.stringify(data) : '';
   console.log(`[oauth ${ts}] ${msg}${extra}`);
@@ -74,6 +74,9 @@ async function doAuthorizationCodeFlow(): Promise<{
   const { sessionKey, orgId } = cookies;
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = await generateCodeChallenge(codeVerifier);
+  // state is sent to the server in both authorize and token exchange — matches Claude Desktop behavior.
+  // No redirect happens (we POST directly), so client-side state verification is not applicable here;
+  // the server validates it on its own side.
   const state = generateState();
 
   log('authorize', { orgId: orgId.substring(0, 8) + '...' });
@@ -240,6 +243,7 @@ export async function initOAuth(): Promise<void> {
         log('refreshed token from stored refresh_token');
       } catch (err: unknown) {
         log('stored refresh failed, doing full OAuth flow', { err: err instanceof Error ? err.message : String(err) });
+        // Null out so the full re-auth branch below runs
         cachedAccessToken = null;
       }
     } else {
@@ -272,8 +276,8 @@ export async function getAccessToken(): Promise<string> {
       cachedExpiresAt = tokens.expiresAt;
       await saveTokens(cachedAccessToken, cachedRefreshToken, cachedExpiresAt);
       return cachedAccessToken;
-    } catch {
-      // Fall through to full re-auth
+    } catch (err: unknown) {
+      log('token refresh failed, falling back to full re-auth', { err: err instanceof Error ? err.message : String(err) });
     }
   }
 

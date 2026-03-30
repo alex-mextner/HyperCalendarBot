@@ -17,7 +17,7 @@ const ANTHROPIC_API_BASE = 'https://api.anthropic.com';
 const AGENT_VERSION = '0.1.0';
 const CLAUDE_MODEL = 'claude-opus-4-6';
 // Beta headers: oauth always required; files-api and context-1m match Claude Desktop behavior
-const ANTHROPIC_BETA_OPUS = 'oauth-2025-04-20,files-api-2025-04-14,context-1m-2025-08-07';
+const ANTHROPIC_BETA_HEADERS = 'oauth-2025-04-20,files-api-2025-04-14,context-1m-2025-08-07';
 
 // Circuit breaker: open after 5 errors in 60s, stays open for 5 minutes.
 const CB_ERROR_THRESHOLD = 5;
@@ -148,7 +148,7 @@ async function anthropicPost(
       signal: controller.signal,
       headers: {
         'anthropic-version': '2023-06-01',
-        'anthropic-beta': ANTHROPIC_BETA_OPUS,
+        'anthropic-beta': ANTHROPIC_BETA_HEADERS,
         'X-Anthropic-Surface': 'operon-desktop',
         Authorization: `Bearer ${accessToken}`,
         'Content-Type': 'application/json',
@@ -227,35 +227,40 @@ export async function claudeChat(
     messages: [{ role: 'user', content: message }],
   });
 
+  if (!res.body) throw new Error('Anthropic API returned no response body');
   const chunks: string[] = [];
-  const reader = res.body!.getReader();
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    const text = decoder.decode(value, { stream: true });
-    for (const line of text.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6).trim();
-      if (data === '[DONE]') break;
-      try {
-        const parsed = JSON.parse(data) as {
-          type?: string;
-          delta?: { type?: string; text?: string };
-        };
-        if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
-          const chunk = parsed.delta.text ?? '';
-          if (chunk) {
-            chunks.push(chunk);
-            onChunk?.(chunk);
+      const text = decoder.decode(value, { stream: true });
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') break;
+        try {
+          const parsed = JSON.parse(data) as {
+            type?: string;
+            delta?: { type?: string; text?: string };
+          };
+          if (parsed.type === 'content_block_delta' && parsed.delta?.type === 'text_delta') {
+            const chunk = parsed.delta.text ?? '';
+            if (chunk) {
+              chunks.push(chunk);
+              onChunk?.(chunk);
+            }
           }
+        } catch {
+          // skip malformed SSE lines
         }
-      } catch {
-        // skip malformed SSE lines
       }
     }
+  } finally {
+    reader.releaseLock();
   }
 
   return { response: chunks.join(''), conversationId: convId };
