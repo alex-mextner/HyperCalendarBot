@@ -8,7 +8,8 @@
     "build": "tsc --project tsconfig.json",
     "dist": "electron-builder --mac",
     "build:app": "tsc --project tsconfig.json && electron-builder --mac --dir",
-    "install:app": "cp -f dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar /Applications/HyperBotAgent.app/Contents/Resources/app.asar && cp -Rf dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar.unpacked /Applications/HyperBotAgent.app/Contents/Resources/app.asar.unpacked && echo 'Installed'"
+    "install:app": "cp -f dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar /Applications/HyperBotAgent.app/Contents/Resources/app.asar && cp -Rf dist/mac-arm64/HyperBotAgent.app/Contents/Resources/app.asar.unpacked /Applications/HyperBotAgent.app/Contents/Resources/app.asar.unpacked && echo 'Installed'",
+    "install:launchagent": "ln -sf \"$(pwd)/ru.invntrm.hyperbot-agent.plist\" ~/Library/LaunchAgents/ru.invntrm.hyperbot-agent.plist && launchctl unload ~/Library/LaunchAgents/ru.invntrm.hyperbot-agent.plist 2>/dev/null; launchctl load ~/Library/LaunchAgents/ru.invntrm.hyperbot-agent.plist && echo 'LaunchAgent installed'"
   },
   "dependencies": {
     "better-sqlite3": "^12.0.0",
