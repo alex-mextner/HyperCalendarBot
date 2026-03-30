@@ -28,11 +28,14 @@ export async function handleAssistantTool(
 
   try {
     const result = await ctx.agents.agentDispatcher.send(ctx.user.telegram_id, toolName, payload, onChunk);
-    const text = chunks.join('') || String(result.data ?? '');
+    const streamed = chunks.join('');
+    const dataText =
+      streamed ||
+      (result.data == null ? '' : typeof result.data === 'string' ? result.data : JSON.stringify(result.data));
     const exitInfo = result.exitCode !== undefined ? ` (exit ${result.exitCode})` : '';
     return {
       success: result.exitCode === undefined || result.exitCode === 0,
-      output: text + exitInfo,
+      output: dataText + exitInfo,
     };
   } catch (err) {
     return {

@@ -71,6 +71,24 @@ test('error response returns success=false with message', async () => {
   expect(result.output).toContain('Permission denied');
 });
 
+test('object data is JSON-serialized (not [object Object])', async () => {
+  const c = makeCtx(true) as TestCtx;
+  const promise = handleAssistantTool(c, 'claude_list_chats', {});
+  const raw = c._sent[0];
+  if (!raw) throw new Error('No message sent');
+  const cmd = JSON.parse(raw) as { id: string };
+  const chats = [
+    { id: 'abc123', name: 'Chat 1' },
+    { id: 'def456', name: 'Chat 2' },
+  ];
+  c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'done', data: chats });
+  const result = await promise;
+  expect(result.success).toBe(true);
+  expect(result.output).not.toContain('[object Object]');
+  expect(result.output).toContain('abc123');
+  expect(result.output).toContain('Chat 1');
+});
+
 test('chunk text is concatenated into output', async () => {
   const c = makeCtx(true) as TestCtx;
   const promise = handleAssistantTool(c, 'claude_chat', { message: 'hi' });
