@@ -1,6 +1,7 @@
 import { app, clipboard, dialog, Notification, type Tray } from 'electron';
 import { dispatch } from './dispatcher';
-import { claudeChat, getOrgId, initClaudeCookies } from './actions/claude-bridge';
+import { claudeChat, initClaudeCookies } from './actions/claude-bridge';
+import { initOAuth } from './oauth-manager';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
 import { createTray } from './tray';
@@ -77,12 +78,17 @@ async function main(): Promise<void> {
   // Load Claude Desktop cookies into the Electron session before any API calls
   await initClaudeCookies();
 
-  // Probe Claude connectivity: GET orgs + POST a real chat round-trip
+  // Acquire OAuth tokens (uses sessionKey cookie loaded above)
+  try {
+    await initOAuth();
+    log('OAuth init OK');
+  } catch (err: unknown) {
+    log('OAuth init failed', { err: err instanceof Error ? err.message : String(err) });
+  }
+
+  // Probe Claude connectivity: POST a real chat round-trip via official API
   async function probeClaudeStatus(): Promise<void> {
     try {
-      const orgId = await getOrgId();
-      log('Claude API GET OK', { orgId });
-      // Verify POST/streaming works too (completion endpoint)
       const { response } = await claudeChat('Say "ok" and nothing else.', undefined, undefined);
       log('Claude API chat OK', { responseLen: response.length });
       setClaudeStatus('ok');

@@ -251,10 +251,22 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
         requestIP(req: Request): { address: string } | null;
       },
     ) {
-      const url = new URL(req.url);
-      const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
-      if (!res) return res;
-      return withSecurityHeaders(res);
+      try {
+        const url = new URL(req.url);
+        const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
+        if (!res) return res;
+        return withSecurityHeaders(res);
+      } catch (err) {
+        // Bun does not catch rejected fetch handler promises — they become unhandled rejections
+        // and crash the process. AbortError means the client disconnected; anything else is a bug.
+        const isAbort = err instanceof Error && err.name === 'AbortError';
+        if (!isAbort) {
+          webLogger.error({ err }, 'Unexpected error in fetch handler');
+        }
+        return new Response(isAbort ? 'Client disconnected' : 'Internal Server Error', {
+          status: isAbort ? 499 : 500,
+        });
+      }
     },
   };
 

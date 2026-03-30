@@ -237,6 +237,35 @@ describe('webhook handler', () => {
   });
 });
 
+describe('fetch handler error guard', () => {
+  test('returns 499 when handler throws AbortError (client disconnected)', async () => {
+    const abort = new DOMException('The connection was closed.', 'AbortError');
+    const deps = baseDeps({
+      telegramWebhookHandler: mock(() => Promise.reject(abort)),
+    });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/webhook/telegram`, { method: 'POST' });
+      expect(res.status).toBe(499);
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 500 when handler throws unexpected error', async () => {
+    const deps = baseDeps({
+      telegramWebhookHandler: mock(() => Promise.reject(new Error('unexpected crash'))),
+    });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/webhook/telegram`, { method: 'POST' });
+      expect(res.status).toBe(500);
+    } finally {
+      stop();
+    }
+  });
+});
+
 describe('admin alerts endpoints', () => {
   function makeAlertRepo() {
     const queue: { id: number; text: string; source: string; created_at: string }[] = [];

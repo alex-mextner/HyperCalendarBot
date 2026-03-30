@@ -8,7 +8,7 @@ const PONG_TIMEOUT_MS = 90_000;
 const BACKOFF_INITIAL_MS = 1_000;
 const BACKOFF_MAX_MS = 60_000;
 
-function log(msg: string, data?: Record<string, unknown>): void {
+function log(msg: string, data?: { [key: string]: unknown }): void {
   const ts = new Date().toISOString();
   const extra = data ? ' ' + JSON.stringify(data) : '';
   console.log(`[WsClient ${ts}] ${msg}${extra}`);
@@ -131,13 +131,17 @@ export class WsClient extends EventEmitter {
 
   sendResponse(resp: AgentResponse): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(resp));
+      this.ws.send(JSON.stringify(resp), (err) => {
+        if (err) log('sendResponse error', { message: err.message });
+      });
     }
   }
 
   pair(code: string): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'pair', code }));
+      this.ws.send(JSON.stringify({ type: 'pair', code }), (err) => {
+        if (err) log('pair send error', { message: err.message });
+      });
     }
   }
 
@@ -154,8 +158,14 @@ export class WsClient extends EventEmitter {
   private startHeartbeat(): void {
     this.pingTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify({ type: 'ping' }));
+        this.ws.send(JSON.stringify({ type: 'ping' }), (err) => {
+          if (err) log('ping send error', { message: err.message });
+        });
+        // Clear previous pong timer before setting a new one — otherwise
+        // orphaned timers accumulate and close a healthy connection.
+        if (this.pongTimer) clearTimeout(this.pongTimer);
         this.pongTimer = setTimeout(() => {
+          log('Pong timeout — closing stale connection');
           this.ws?.close();
         }, PONG_TIMEOUT_MS);
       }
@@ -181,10 +191,13 @@ export class WsClient extends EventEmitter {
   }
 
   private scheduleReconnect(): void {
-    log('Scheduling reconnect', { backoffMs: this.backoffMs });
+    // Add ±20% jitter so a server restart doesn't get hammered by simultaneous reconnects.
+    const jitter = this.backoffMs * 0.2 * (Math.random() * 2 - 1);
+    const delay = Math.round(this.backoffMs + jitter);
+    log('Scheduling reconnect', { backoffMs: delay });
     setTimeout(() => {
       this.connect();
-    }, this.backoffMs);
+    }, delay);
     this.backoffMs = Math.min(this.backoffMs * 2, BACKOFF_MAX_MS);
   }
 }

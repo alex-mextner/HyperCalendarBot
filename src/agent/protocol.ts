@@ -64,11 +64,25 @@ export interface AgentChunkResponse {
   type: 'chunk';
   text: string;
 }
+
+/** All concrete shapes the Mac agent returns in the `data` field of a done response. */
+export type AgentDoneData =
+  | { conversationId: string }
+  | { stdout: string; stderr: string }
+  | { output: string }
+  | Array<{ id: string; name: string }>
+  | { content: string; type: string }
+  | { screenshot?: string; text?: string; url?: string }
+  | string
+  | number
+  | boolean
+  | null;
+
 export interface AgentDoneResponse {
   id: string;
   type: 'done';
   text?: string;
-  data?: string | number | boolean | null;
+  data?: AgentDoneData;
   exitCode?: number;
 }
 export interface AgentErrorResponse {
@@ -101,7 +115,24 @@ export const AgentInboundSchema = z.discriminatedUnion('type', [
     type: z.literal('done'),
     id: z.string(),
     text: z.string().optional(),
-    data: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
+    data: z
+      .union([
+        z.object({ conversationId: z.string() }),
+        z.object({ stdout: z.string(), stderr: z.string() }),
+        z.object({ output: z.string() }),
+        z.array(z.object({ id: z.string(), name: z.string() })),
+        z.object({ content: z.string(), type: z.string() }),
+        z.object({
+          screenshot: z.string().optional(),
+          text: z.string().optional(),
+          url: z.string().optional(),
+        }),
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.null(),
+      ])
+      .optional(),
     exitCode: z.number().optional(),
   }),
   z.object({
