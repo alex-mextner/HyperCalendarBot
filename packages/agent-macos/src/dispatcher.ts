@@ -6,15 +6,27 @@ import type { AgentCommand, AgentResponse } from './protocol';
 
 type SendResponse = (resp: AgentResponse) => void;
 
+function toPlaywrightAction(
+  action: string,
+  url: string | undefined,
+  selector: string,
+  value: string,
+): PlaywrightAction {
+  if (action === 'fill') return { action: 'fill', url, selector, value };
+  if (action === 'click') return { action: 'click', url, selector };
+  if (action === 'extract') return { action: 'extract', url, selector };
+  if (action === 'navigate') return { action: 'navigate', url: url ?? '' };
+  return { action: 'screenshot', url };
+}
+
 export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): Promise<void> {
-  const { id, type, payload } = cmd;
+  const { id, type } = cmd;
 
   try {
     switch (type) {
       case 'bash_execute': {
-        const command = payload.command as string;
-        const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : 60_000;
-        const result = await bashExecute(command, timeoutMs);
+        const { command, timeout_ms } = cmd.payload;
+        const result = await bashExecute(command, timeout_ms ?? 60_000);
         sendResponse({
           id,
           type: 'done',
@@ -25,9 +37,8 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
       }
 
       case 'applescript_run': {
-        const script = payload.script as string;
-        const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : 30_000;
-        const result = await applescriptRun(script, timeoutMs);
+        const { script, timeout_ms } = cmd.payload;
+        const result = await applescriptRun(script, timeout_ms ?? 30_000);
         sendResponse({
           id,
           type: 'done',
@@ -38,23 +49,20 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
       }
 
       case 'claude_chat': {
-        const message = payload.message as string;
-        const conversationId = typeof payload.chat_id === 'string' ? payload.chat_id : undefined;
-        const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : undefined;
-
+        const { message, chat_id, timeout_ms } = cmd.payload;
         let timer: ReturnType<typeof setTimeout> | null = null;
         let timedOut = false;
 
         const result = await new Promise<{ response: string; conversationId: string }>(
           (resolve, reject) => {
-            if (timeoutMs) {
+            if (timeout_ms) {
               timer = setTimeout(() => {
                 timedOut = true;
                 reject(new Error('claude_chat timed out'));
-              }, timeoutMs);
+              }, timeout_ms);
             }
 
-            claudeChat(message, conversationId, (chunk) => {
+            claudeChat(message, chat_id, (chunk) => {
               if (!timedOut) sendResponse({ id, type: 'chunk', text: chunk });
             })
               .then(resolve)
@@ -68,7 +76,7 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
       }
 
       case 'claude_new_chat': {
-        const message = payload.message as string;
+        const { message } = cmd.payload;
         const result = await claudeChat(message, undefined, (chunk) => {
           sendResponse({ id, type: 'chunk', text: chunk });
         });
@@ -84,8 +92,8 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
       }
 
       case 'claude_open_chat': {
-        const chatId = payload.chat_id as string;
-        const result = await claudeChat('', chatId);
+        const { chat_id } = cmd.payload;
+        const result = await claudeChat('', chat_id);
         sendResponse({ id, type: 'done', data: result });
         break;
       }
@@ -98,27 +106,16 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
       }
 
       case 'claude_artifact': {
-        const artifactId = payload.artifact_id as string;
-        const artifact = await getArtifact(artifactId);
+        const { artifact_id } = cmd.payload;
+        const artifact = await getArtifact(artifact_id);
         sendResponse({ id, type: 'done', data: artifact });
         break;
       }
 
       case 'playwright_action': {
-        const action = payload.action as PlaywrightAction['action'];
-        const url = typeof payload.url === 'string' ? payload.url : undefined;
-        const selector = typeof payload.selector === 'string' ? payload.selector : '';
-        const value = typeof payload.value === 'string' ? payload.value : '';
-        const params: PlaywrightAction =
-          action === 'fill'
-            ? { action, url, selector, value }
-            : action === 'click' || action === 'extract'
-              ? { action, url, selector }
-              : action === 'navigate'
-                ? { action, url: url ?? '' }
-                : { action: 'screenshot' as const, url };
-        const timeoutMs = typeof payload.timeout_ms === 'number' ? payload.timeout_ms : 30_000;
-        const result = await playwrightAction(params, timeoutMs);
+        const { action, url, selector = '', value = '', timeout_ms } = cmd.payload;
+        const params = toPlaywrightAction(action, url, selector, value);
+        const result = await playwrightAction(params, timeout_ms ?? 30_000);
         if (result.screenshot) {
           sendResponse({
             id,
@@ -128,10 +125,6 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
         }
         sendResponse({ id, type: 'done', data: result });
         break;
-      }
-
-      default: {
-        sendResponse({ id, type: 'error', error: `Unknown command type: ${type}` });
       }
     }
   } catch (err) {

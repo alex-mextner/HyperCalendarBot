@@ -15,20 +15,26 @@ export interface AgentPairError {
   reason: 'expired' | 'invalid';
 }
 
-export interface AgentCommand {
-  id: string;
-  type:
-    | 'claude_chat'
-    | 'claude_new_chat'
-    | 'claude_list_chats'
-    | 'claude_open_chat'
-    | 'claude_list_projects'
-    | 'claude_artifact'
-    | 'bash_execute'
-    | 'playwright_action'
-    | 'applescript_run';
-  payload: Record<string, unknown>;
-}
+export type AgentCommand =
+  | { id: string; type: 'bash_execute'; payload: { command: string; timeout_ms?: number } }
+  | { id: string; type: 'applescript_run'; payload: { script: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_chat'; payload: { message: string; chat_id?: string; timeout_ms?: number } }
+  | { id: string; type: 'claude_new_chat'; payload: { message: string } }
+  | { id: string; type: 'claude_list_chats'; payload?: { [key: string]: unknown } }
+  | { id: string; type: 'claude_open_chat'; payload: { chat_id: string } }
+  | { id: string; type: 'claude_list_projects'; payload?: { [key: string]: unknown } }
+  | { id: string; type: 'claude_artifact'; payload: { artifact_id: string } }
+  | {
+      id: string;
+      type: 'playwright_action';
+      payload: {
+        action: string;
+        url?: string;
+        selector?: string;
+        value?: string;
+        timeout_ms?: number;
+      };
+    };
 
 export interface AgentResponse {
   id: string;
