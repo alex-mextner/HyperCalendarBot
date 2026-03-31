@@ -193,4 +193,121 @@ describe('handleGetReminders', () => {
       expect(result.error).toContain('not found');
     });
   });
+
+  describe('event_ids (multiple events)', () => {
+    test('returns reminders for multiple events', () => {
+      const e1 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Meeting A',
+        start_at: '2026-04-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const e2 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Meeting B',
+        start_at: '2026-04-15T14:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: e1.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-04-15T09:30:00Z',
+        interval_minutes: 30,
+        interval_label: '30 min',
+      });
+      const result = handleGetReminders(ctx, { event_ids: [e1.id, e2.id] });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Meeting A');
+      expect(result.output).toContain('30min');
+      expect(result.output).toContain('Meeting B');
+      expect(result.output).toContain('No reminders');
+    });
+
+    test('returns error when no events found', () => {
+      const result = handleGetReminders(ctx, { event_ids: [9998, 9999] });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('None');
+    });
+
+    test('skips non-existent IDs gracefully', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Real Event',
+        start_at: '2026-04-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: event.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-04-15T09:45:00Z',
+        interval_minutes: 15,
+        interval_label: '15 min',
+      });
+      const result = handleGetReminders(ctx, { event_ids: [event.id, 9999] });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Real Event');
+    });
+  });
+
+  describe('query (search by title)', () => {
+    test('finds events by title and shows reminders', () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Урок математики',
+        start_at: '2026-04-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: event.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-04-15T09:30:00Z',
+        interval_minutes: 30,
+        interval_label: '30 min',
+      });
+      const result = handleGetReminders(ctx, { query: 'Урок' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Урок математики');
+      expect(result.output).toContain('30min');
+    });
+
+    test('returns no events message when query matches nothing', () => {
+      const result = handleGetReminders(ctx, { query: 'nonexistent' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('No events found');
+    });
+
+    test('shows events without reminders too', () => {
+      const e1 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Lesson 1',
+        start_at: '2026-04-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Lesson 2',
+        start_at: '2026-04-16T10:00:00Z',
+        timezone: 'UTC',
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: e1.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-04-15T09:45:00Z',
+        interval_minutes: 15,
+        interval_label: '15 min',
+      });
+      const result = handleGetReminders(ctx, { query: 'Lesson' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Lesson 1');
+      expect(result.output).toContain('15min');
+      expect(result.output).toContain('Lesson 2');
+      expect(result.output).toContain('No reminders');
+    });
+  });
+
+  test('returns error when no input provided', () => {
+    const result = handleGetReminders(ctx, {});
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('event_id');
+  });
 });

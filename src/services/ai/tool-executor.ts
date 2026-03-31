@@ -120,7 +120,7 @@ export interface ToolInputMap {
   snooze_event: { event_id: number; minutes?: number; scope?: 'personal' | 'group' };
   get_event: { event_id: number; scope?: 'personal' | 'group' };
   notify_participants: { event_id: number; message: string };
-  get_reminders: { event_id: number; scope?: 'personal' | 'group' };
+  get_reminders: { event_id?: number; event_ids?: number[]; query?: string; scope?: 'personal' | 'group' };
   set_reminder: { event_id: number; minutes_before: number[]; scope?: 'personal' | 'group' };
   find_user: { username: string };
   ask_user: { question: string; options: string[] };

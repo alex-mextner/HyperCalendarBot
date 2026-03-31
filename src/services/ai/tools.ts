@@ -404,11 +404,21 @@ export const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'get_reminders',
-    description: 'Get the current reminder settings for an event.',
+    description:
+      'Get upcoming reminders for one or more events. Provide event_id for a single event, event_ids for multiple, or query to search by title.',
     input_schema: {
       type: 'object' as const,
       properties: {
-        event_id: { type: 'number', description: 'ID of the event' },
+        event_id: { type: 'number', description: 'ID of a single event' },
+        event_ids: {
+          type: 'array',
+          items: { type: 'number' },
+          description: 'Array of event IDs to check reminders for',
+        },
+        query: {
+          type: 'string',
+          description: 'Search events by title and show their reminders',
+        },
         scope: {
           type: 'string',
           enum: ['personal', 'group'],
@@ -420,7 +430,6 @@ export const toolDefinitions: ToolDefinition[] = [
             "Telegram ID of a user whose calendar to operate on. Only works if you have active secretary access to that user's calendar.",
         },
       },
-      required: ['event_id'],
     },
   },
   {
