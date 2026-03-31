@@ -16,7 +16,6 @@ import { SyncService } from './sync-service.ts';
 
 export type GoogleSyncJobType =
   | 'initial-sync'
-  | 'history-backfill'
   | 'pull-sync'
   | 'push-event'
   | 'refresh-calendars'
@@ -32,7 +31,7 @@ export interface GoogleSyncJobData {
   calendarId?: string;
   eventId?: number;
   action?: 'create' | 'update' | 'delete';
-  trigger?: 'cron' | 'webhook' | 'manual' | 'startup';
+  trigger?: 'cron' | 'webhook' | 'manual';
   /** Google event ID for delete jobs where the local event is already removed from DB. */
   googleEventId?: string;
 }
@@ -114,15 +113,6 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
           await syncService.initialSync(api, userId, calendarId);
           if (deps.onSyncComplete) {
             await deps.onSyncComplete(userId, calendarId);
-          }
-          break;
-        }
-        case 'history-backfill': {
-          if (!calendarId) throw new Error('calendarId required for history-backfill');
-          const imported = await syncService.initialSync(api, userId, calendarId);
-          if (imported > 0) {
-            const lang = deps.getUserLang?.(userId) ?? 'en';
-            await deps.sendMessage(userId, t(lang).gcal_history_imported(imported));
           }
           break;
         }

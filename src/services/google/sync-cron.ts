@@ -22,38 +22,6 @@ export async function setupSyncCron(queue: Queue<GoogleSyncJobData>): Promise<vo
   syncLogger.info('Sync cron scheduled (every 15min)');
 }
 
-export async function queueHistoryBackfill(
-  queue: Queue<GoogleSyncJobData>,
-  syncRepo: GoogleSyncRepository,
-  calendarRepo: GoogleCalendarRepository,
-): Promise<void> {
-  const activeUsers = syncRepo.getActiveUsers();
-  let queued = 0;
-
-  for (const userId of activeUsers) {
-    const calendars = calendarRepo.getEnabledCalendars(userId);
-    for (const cal of calendars) {
-      await queue.add(
-        'history-backfill',
-        {
-          type: 'history-backfill',
-          userId,
-          calendarId: cal.google_calendar_id,
-          trigger: 'startup',
-        },
-        {
-          jobId: `backfill-${userId}-${cal.google_calendar_id}`,
-        },
-      );
-      queued++;
-    }
-  }
-
-  if (queued > 0) {
-    syncLogger.info({ queued }, 'Queued history backfill jobs for existing users');
-  }
-}
-
 export async function executeSyncCronTick(
   queue: Queue<GoogleSyncJobData>,
   syncRepo: GoogleSyncRepository,

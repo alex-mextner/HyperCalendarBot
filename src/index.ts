@@ -107,7 +107,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
   const { createPushScheduler } = await import('./services/google/push-scheduler.ts');
-  const { executeSyncCronTick, queueHistoryBackfill, setupSyncCron } = await import('./services/google/sync-cron.ts');
+  const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
   const redis = new Bun.RedisClient(config.REDIS_URL);
@@ -230,15 +230,6 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   await setupSyncCron(queue);
   await setupWatchRenewalCron(queue);
   await setupCleanupCron(queue);
-
-  // One-time backfill: import full Google Calendar history for existing users
-  // (previous initial sync only imported 90 days). Safe to re-run — INSERT OR IGNORE skips duplicates.
-  const backfillKey = 'hypercal:history-backfill-done';
-  const backfillDone = await redis.get(backfillKey);
-  if (!backfillDone) {
-    await queueHistoryBackfill(queue, db.googleSync, db.googleCalendars);
-    await redis.set(backfillKey, '1');
-  }
 
   botLogger.info('Google Calendar sync initialized');
 }

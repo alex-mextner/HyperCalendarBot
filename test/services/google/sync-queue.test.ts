@@ -346,52 +346,6 @@ describe('google-sync job processor — job types', () => {
     expect(onSyncComplete).toHaveBeenCalledWith(1, 'cal-primary');
   });
 
-  test('history-backfill throws when calendarId is missing', async () => {
-    createGoogleSyncQueue(makeDeps());
-    await expect(
-      capturedProcessor({
-        id: 'j21b',
-        name: 'history-backfill',
-        data: { type: 'history-backfill', userId: 1 },
-        attemptsMade: 0,
-      }),
-    ).rejects.toThrow('calendarId required');
-  });
-
-  test('history-backfill calls syncService.initialSync and notifies user on imports', async () => {
-    mockInitialSync.mockClear();
-    mockInitialSync.mockImplementation(async () => 15);
-    const sendMessage = mock(async () => {});
-    createGoogleSyncQueue(makeDeps({ sendMessage }));
-    await capturedProcessor({
-      id: 'j21c',
-      name: 'history-backfill',
-      data: { type: 'history-backfill', userId: 1, calendarId: 'cal-primary' },
-      attemptsMade: 0,
-    });
-    expect(mockInitialSync).toHaveBeenCalledTimes(1);
-    const [, userId, calendarId] = mockInitialSync.mock.calls[0] as unknown as [unknown, number, string];
-    expect(userId).toBe(1);
-    expect(calendarId).toBe('cal-primary');
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    mockInitialSync.mockImplementation(async () => 0);
-  });
-
-  test('history-backfill does not notify user when 0 events imported', async () => {
-    mockInitialSync.mockClear();
-    mockInitialSync.mockImplementation(async () => 0);
-    const sendMessage = mock(async () => {});
-    createGoogleSyncQueue(makeDeps({ sendMessage }));
-    await capturedProcessor({
-      id: 'j21d',
-      name: 'history-backfill',
-      data: { type: 'history-backfill', userId: 1, calendarId: 'cal-primary' },
-      attemptsMade: 0,
-    });
-    expect(sendMessage).not.toHaveBeenCalled();
-    mockInitialSync.mockImplementation(async () => 0);
-  });
-
   test('pull-sync calls incrementalPull for specific calendarId', async () => {
     mockIncrementalPull.mockClear();
     createGoogleSyncQueue(makeDeps());
