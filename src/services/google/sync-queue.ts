@@ -32,7 +32,7 @@ export interface GoogleSyncJobData {
   calendarId?: string;
   eventId?: number;
   action?: 'create' | 'update' | 'delete';
-  trigger?: 'cron' | 'webhook' | 'manual';
+  trigger?: 'cron' | 'webhook' | 'manual' | 'startup';
   /** Google event ID for delete jobs where the local event is already removed from DB. */
   googleEventId?: string;
 }

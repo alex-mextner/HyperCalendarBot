@@ -39,7 +39,7 @@ export async function queueHistoryBackfill(
           type: 'history-backfill',
           userId,
           calendarId: cal.google_calendar_id,
-          trigger: 'manual',
+          trigger: 'startup',
         },
         {
           jobId: `backfill-${userId}-${cal.google_calendar_id}`,
