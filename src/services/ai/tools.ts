@@ -978,7 +978,7 @@ During a voice call the table is still sent to chat; you MUST mention it verball
   {
     name: 'get_history',
     description:
-      'Search conversation history — past messages, button presses, commands, and bot replies. Use when the user asks about something they said or did earlier, or when you need context from before the visible conversation window.',
+      'Search conversation history — past messages, button presses, commands, and bot replies. Use ONLY for chat message history, NOT for calendar events. For questions about past schedule or activities ("what did I do last week?"), use get_events instead. Use this tool when you need context from before the visible conversation window or to find something the user said earlier.',
     input_schema: {
       type: 'object' as const,
       properties: {

@@ -100,6 +100,7 @@ ${eventsWindowSection}
 - For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
 - Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.
 - When the user asks "what's next?" or "upcoming events", use the get_upcoming tool.
+- When the user asks "what did I do on [date]?", "what was I doing last week/month/year?", "что я делал [дата]?" — use get_events with the appropriate date range, NOT get_history. get_history searches conversation messages, not calendar events. Use get_events for any question about past schedule or activities.
 - When the user wants to postpone/snooze an event, use the snooze_event tool.
 - ACTION LOG: use \`get_action_log\` to investigate "why" questions about calendar changes — "why was event X deleted?", "who changed this?", "what happened to my meeting?". Filter by event_id to see the full history of a specific event. The log tracks all mutating actions: AI tool calls, commands, button presses, intent matches, and scene wizard completions. Each entry includes a Telegram message link when available.
 - To check or show reminders for an event, use the get_reminders tool.

@@ -1,5 +1,6 @@
 // src/services/google/sync-service.ts
 import type { Database } from 'bun:sqlite';
+import { type Lang, t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
@@ -15,16 +16,16 @@ export class SyncService {
     private syncRepo: GoogleSyncRepository,
     private calendarRepo: GoogleCalendarRepository,
     private notifyUser?: (userId: number, message: string) => Promise<void>,
+    private getUserLang?: (userId: number) => Lang,
   ) {}
 
   async initialSync(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<number> {
     let pageToken: string | undefined;
     let nextSyncToken: string | null = null;
     let totalImported = 0;
-    const timeMin = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
     do {
-      const result = await api.listEvents(calendarId, { pageToken, timeMin });
+      const result = await api.listEvents(calendarId, { pageToken });
 
       const insertBatch = this.db.transaction(() => {
         for (const gEvent of result.events) {
@@ -198,11 +199,8 @@ export class SyncService {
             details: JSON.stringify({ winner: 'google' }),
           });
           if (this.notifyUser) {
-            conflictNotification = () =>
-              this.notifyUser!(
-                userId,
-                `⚠️ Sync conflict on "${local.title}"\n\nGoogle Calendar version was applied (more recent).`,
-              );
+            const conflictLang = this.getUserLang?.(userId) ?? 'en';
+            conflictNotification = () => this.notifyUser!(userId, t(conflictLang).gcal_conflict(local.title, 'google'));
           }
         }
 

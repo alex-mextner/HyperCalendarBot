@@ -56,7 +56,7 @@ mock.module('bullmq', () => ({
 
 // ─── SyncService stub (injected as dependency, not via mock.module) ──────────
 
-const mockInitialSync = mock(async () => {});
+const mockInitialSync = mock(async () => 0);
 const mockIncrementalPull = mock(async () => {});
 const mockPushEvent = mock(async () => {});
 const mockSetupWatchChannel = mock(async () => {});
