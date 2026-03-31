@@ -422,15 +422,21 @@ if (config.REDIS_URL) {
     './services/notification/queue.ts'
   );
   const { NotificationScheduler } = await import('./services/notification/scheduler.ts');
+  const { EventService } = await import('./services/event/event-service.ts');
 
   const notifQueue = createNotificationQueue(config.REDIS_URL);
+
+  const notifEventService = new EventService({
+    eventRepo: db.events,
+    reminderRepo: db.reminders,
+  });
 
   const scheduler = new NotificationScheduler({
     prefsRepo: db.notificationPreferences,
     reminderRepo: db.eventReminders,
     logRepo: db.notificationLog,
     userRepo: db.users,
-    eventRepo: db.events,
+    getEventsInRange: (userId, startUtc, endUtc) => notifEventService.getEventsInRange(userId, startUtc, endUtc),
     enqueue: (type, userId, logId, payload) => {
       notifQueue.add(type, { logId, telegramId: userId, type, payload });
     },

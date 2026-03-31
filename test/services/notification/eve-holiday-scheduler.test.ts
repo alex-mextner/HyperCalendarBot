@@ -6,7 +6,20 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import type { EventOccurrence } from '../../../src/database/types.ts';
 import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
+
+function wrapGetEventsInRange(
+  eventRepo: EventRepository,
+): (userId: number, startUtc: string, endUtc: string) => EventOccurrence[] {
+  return (userId, startUtc, endUtc) =>
+    eventRepo.getInRange(userId, startUtc, endUtc).map((event) => ({
+      event,
+      occurrence_start: event.start_at,
+      occurrence_end: event.end_at,
+      is_exception: false,
+    }));
+}
 
 function setupDb(): Database {
   const db = new Database(':memory:');
@@ -120,12 +133,13 @@ describe('NotificationScheduler – eve_holiday', () => {
     const mockEnqueue = mock((type: string, userId: number, logId: number) => {
       enqueued.push({ type, userId, logId });
     });
+    const eventRepo = new EventRepository(db);
     scheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(db),
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: wrapGetEventsInRange(eventRepo),
       holidayRepo: new HolidayRepository(db),
       enqueue: mockEnqueue,
     });

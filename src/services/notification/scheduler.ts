@@ -3,13 +3,12 @@ import { format } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
-import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { HolidayRepository } from '../../database/repositories/holiday.repository.ts';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
 import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent } from '../../database/types.ts';
+import type { EventOccurrence } from '../../database/types.ts';
 import { getDayRangeUtc } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import {
@@ -25,11 +24,13 @@ import { isLocalTimeInWindow, isQuietHours } from './timezone.ts';
 
 const renderer = new NotificationRenderer();
 
-function toAgendaEvents(events: CalendarEvent[], timezone: string, lang: string): AgendaEvent[] {
-  return events.map((e) => {
-    const startTime = format(new TZDate(e.start_at, timezone), 'HH:mm');
-    const endTime = e.end_at ? format(new TZDate(e.end_at, timezone), 'HH:mm') : startTime;
-    const durationMs = e.end_at ? new Date(e.end_at).getTime() - new Date(e.start_at).getTime() : 0;
+function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: string): AgendaEvent[] {
+  return occurrences.map((occ) => {
+    const startAt = occ.occurrence_start;
+    const endAt = occ.occurrence_end;
+    const startTime = format(new TZDate(startAt, timezone), 'HH:mm');
+    const endTime = endAt ? format(new TZDate(endAt, timezone), 'HH:mm') : startTime;
+    const durationMs = endAt ? new Date(endAt).getTime() - new Date(startAt).getTime() : 0;
     const totalMin = Math.round(durationMs / 60000);
     const hours = Math.floor(totalMin / 60);
     const mins = totalMin % 60;
@@ -43,7 +44,7 @@ function toAgendaEvents(events: CalendarEvent[], timezone: string, lang: string)
     } else {
       duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
     }
-    return { title: e.title, startTime, endTime, location: e.location, duration };
+    return { title: occ.event.title, startTime, endTime, location: occ.event.location, duration };
   });
 }
 
@@ -111,7 +112,7 @@ export interface SchedulerDeps {
   reminderRepo: EventReminderRepository;
   logRepo: NotificationLogRepository;
   userRepo: UserRepository;
-  eventRepo: EventRepository;
+  getEventsInRange: (userId: number, startUtc: string, endUtc: string) => EventOccurrence[];
   enqueue: (type: string, userId: number, logId: number, payload: string) => void;
   holidayRepo?: HolidayRepository;
   callSettingsRepo?: CallSettingsRepository;
@@ -279,12 +280,11 @@ export class NotificationScheduler {
       if (quiet) continue;
       const localTodayIso = new TZDate(nowUtc, pref.timezone).toISOString().slice(0, 10);
       const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, pref.timezone);
-      const events = this.deps.eventRepo.getByDateRange(pref.user_id, dayStart, dayEnd);
-      if (events.length === 0) continue;
+      const occurrences = this.deps.getEventsInRange(pref.user_id, dayStart, dayEnd);
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
-      const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
+      const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
@@ -360,12 +360,11 @@ export class NotificationScheduler {
       const tomorrowUtc = new Date(nowUtc.getTime() + 86_400_000);
       const localTomorrowIso = new TZDate(tomorrowUtc, pref.timezone).toISOString().slice(0, 10);
       const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), pref.timezone);
-      const events = this.deps.eventRepo.getByDateRange(pref.user_id, tmStart, tmEnd);
-      if (events.length === 0) continue;
+      const occurrences = this.deps.getEventsInRange(pref.user_id, tmStart, tmEnd);
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
-      const agendaEvents = toAgendaEvents(events, pref.timezone, lang);
+      const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
       const logId = this.deps.logRepo.insert({
@@ -409,7 +408,7 @@ export class NotificationScheduler {
         sunCalDateForRange.setUTCDate(sunCalDateForRange.getUTCDate() + 6);
         const { start: weekRangeStart } = getDayRangeUtc(new Date(`${nextMonLocalIso}T12:00:00Z`), pref.timezone);
         const { end: weekRangeEnd } = getDayRangeUtc(sunCalDateForRange, pref.timezone);
-        const allWeekEvents = this.deps.eventRepo.getByDateRange(pref.user_id, weekRangeStart, weekRangeEnd);
+        const allWeekOccurrences = this.deps.getEventsInRange(pref.user_id, weekRangeStart, weekRangeEnd);
 
         const days: WeeklyDigestDay[] = [];
         for (let i = 0; i < 7; i++) {
@@ -417,14 +416,16 @@ export class NotificationScheduler {
           calDate.setUTCDate(calDate.getUTCDate() + i);
           const dateStr = calDate.toISOString().slice(0, 10);
           const { start: dayStart, end: dayEnd } = getDayRangeUtc(calDate, pref.timezone);
-          const dayEvents = allWeekEvents.filter((e) => e.start_at >= dayStart && e.start_at < dayEnd);
+          const dayOccs = allWeekOccurrences.filter(
+            (occ) => occ.occurrence_start >= dayStart && occ.occurrence_start < dayEnd,
+          );
           const dayLabel = makeDayLabel(calDate, lang);
           days.push({
             date: dateStr,
             dayLabel,
-            events: dayEvents.map((e) => ({
-              title: e.title,
-              startTime: format(new TZDate(e.start_at, pref.timezone), 'HH:mm'),
+            events: dayOccs.map((occ) => ({
+              title: occ.event.title,
+              startTime: format(new TZDate(occ.occurrence_start, pref.timezone), 'HH:mm'),
             })),
           });
         }

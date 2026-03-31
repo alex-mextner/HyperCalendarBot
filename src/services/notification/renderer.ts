@@ -73,7 +73,9 @@ export function localizeInterval(lang: string, label: string): string {
 const LABELS = {
   en: {
     morning: "Good morning! Here's your day:",
+    morningFree: 'Good morning!',
     evening: "Tomorrow's schedule:",
+    eveningFree: 'Good evening!',
     reminder: 'Reminder:',
     reminders: 'Reminders',
     inLabel: 'in',
@@ -84,10 +86,16 @@ const LABELS = {
     eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
     weeklyDigest: (range: string) => `📅 Week ${range}:`,
     noEvents: 'no events',
+    freeDayMorning:
+      'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
+    freeDayEvening:
+      'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
   },
   ru: {
     morning: 'Доброе утро! Ваш день:',
+    morningFree: 'Доброе утро!',
     evening: 'Расписание на завтра:',
+    eveningFree: 'Добрый вечер!',
     reminder: 'Напоминание:',
     reminders: 'Напоминания',
     inLabel: 'через',
@@ -102,6 +110,10 @@ const LABELS = {
     eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
     weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
     noEvents: 'нет событий',
+    freeDayMorning:
+      'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
+    freeDayEvening:
+      'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
   },
 };
 
@@ -109,17 +121,25 @@ export class NotificationRenderer {
   renderMorningAgenda(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
     const l = lang === 'ru' ? LABELS.ru : LABELS.en;
     const lines: string[] = [];
-    lines.push(`☀️ ${l.morning}`);
-    lines.push('');
-    lines.push(`📅 ${dateLabel}`);
-    lines.push('');
-    for (const e of events) {
-      let line = `${e.startTime} — ${e.title} (${e.duration})`;
-      if (e.location) line += `\n        📍 ${e.location}`;
-      lines.push(line);
+    if (events.length === 0) {
+      lines.push(`☀️ ${l.morningFree}`);
+      lines.push('');
+      lines.push(`📅 ${dateLabel}`);
+      lines.push('');
+      lines.push(l.freeDayMorning);
+    } else {
+      lines.push(`☀️ ${l.morning}`);
+      lines.push('');
+      lines.push(`📅 ${dateLabel}`);
+      lines.push('');
+      for (const e of events) {
+        let line = `${e.startTime} — ${e.title} (${e.duration})`;
+        if (e.location) line += `\n        📍 ${e.location}`;
+        lines.push(line);
+      }
+      lines.push('');
+      lines.push(l.haveADay);
     }
-    lines.push('');
-    lines.push(l.haveADay);
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
 
@@ -194,17 +214,25 @@ export class NotificationRenderer {
   renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
     const l = lang === 'ru' ? LABELS.ru : LABELS.en;
     const lines: string[] = [];
-    lines.push(`🌙 ${l.evening}`);
-    lines.push('');
-    lines.push(`📅 ${dateLabel}`);
-    lines.push('');
-    for (const e of events) {
-      let line = `${e.startTime} — ${e.title} (${e.duration})`;
-      if (e.location) line += `\n        📍 ${e.location}`;
-      lines.push(line);
+    if (events.length === 0) {
+      lines.push(`🌙 ${l.eveningFree}`);
+      lines.push('');
+      lines.push(`📅 ${dateLabel}`);
+      lines.push('');
+      lines.push(l.freeDayEvening);
+    } else {
+      lines.push(`🌙 ${l.evening}`);
+      lines.push('');
+      lines.push(`📅 ${dateLabel}`);
+      lines.push('');
+      for (const e of events) {
+        let line = `${e.startTime} — ${e.title} (${e.duration})`;
+        if (e.location) line += `\n        📍 ${e.location}`;
+        lines.push(line);
+      }
+      lines.push('');
+      lines.push(`${l.eventsCount(events.length)} tomorrow. ${l.goodNight}`);
     }
-    lines.push('');
-    lines.push(`${l.eventsCount(events.length)} tomorrow. ${l.goodNight}`);
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
 }
