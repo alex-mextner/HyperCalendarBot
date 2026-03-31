@@ -4,6 +4,7 @@
  * One-time backfill of full Google Calendar history for all connected users.
  * Previous initial sync only imported 90 days — this imports everything older.
  * Safe to re-run: INSERT OR IGNORE skips duplicates.
+ * Safe to run while the bot is running — does NOT touch sync tokens.
  *
  * Usage:
  *   bun run scripts/google-history-backfill.ts
@@ -16,8 +17,8 @@ import type { OAuth2Client } from 'google-auth-library';
 import type { EnvConfig } from '../src/config/env.ts';
 import { createDatabase } from '../src/database/index.ts';
 import { GoogleCalendarApi } from '../src/services/google/calendar-api.ts';
+import { type GoogleEvent, googleToLocal } from '../src/services/google/event-mapper.ts';
 import { GoogleOAuthService } from '../src/services/google/oauth.ts';
-import { SyncService } from '../src/services/google/sync-service.ts';
 
 const DATABASE_PATH = process.env.DATABASE_PATH || './data/calendar.db';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -35,7 +36,6 @@ const oauthService = new GoogleOAuthService(
   db.users,
   db.googleSync,
 );
-const syncService = new SyncService(db.db, db.events, db.googleSync, db.googleCalendars);
 
 const activeUsers = db.googleSync.getActiveUsers();
 console.log(`Found ${activeUsers.length} active user(s) with Google Calendar connected.`);
@@ -58,9 +58,43 @@ for (const userId of activeUsers) {
 
   for (const cal of calendars) {
     try {
-      const imported = await syncService.initialSync(api, userId, cal.google_calendar_id);
-      totalImported += imported;
-      console.log(`  User ${userId}, calendar "${cal.calendar_name}": +${imported} events`);
+      let pageToken: string | undefined;
+      let calImported = 0;
+
+      do {
+        const result = await api.listEvents(cal.google_calendar_id, { pageToken });
+
+        const insertBatch = db.db.transaction(() => {
+          for (const gEvent of result.events) {
+            if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
+            if (gEvent.status === 'cancelled') continue;
+
+            const local = googleToLocal(gEvent as GoogleEvent, userId, cal.google_calendar_id);
+            db.events.insertSyncedEvent({
+              user_id: userId,
+              title: local.title,
+              description: local.description,
+              start_at: local.start_at,
+              end_at: local.end_at,
+              all_day: local.all_day,
+              timezone: local.timezone,
+              location: local.location,
+              recurrence_rule: local.recurrence_rule,
+              google_calendar_id: cal.google_calendar_id,
+              google_event_id: local.google_event_id,
+              google_etag: local.google_etag,
+              is_cancelled: local.is_cancelled ?? false,
+            });
+            calImported++;
+          }
+        });
+        insertBatch();
+
+        pageToken = result.nextPageToken ?? undefined;
+      } while (pageToken);
+
+      totalImported += calImported;
+      console.log(`  User ${userId}, calendar "${cal.calendar_name}": +${calImported} events`);
     } catch (err) {
       console.error(`  User ${userId}, calendar "${cal.calendar_name}": ERROR`, err);
     }
