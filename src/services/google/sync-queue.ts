@@ -15,6 +15,7 @@ import { SyncService } from './sync-service.ts';
 
 export type GoogleSyncJobType =
   | 'initial-sync'
+  | 'history-backfill'
   | 'pull-sync'
   | 'push-event'
   | 'refresh-calendars'
@@ -110,6 +111,14 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
           await syncService.initialSync(api, userId, calendarId);
           if (deps.onSyncComplete) {
             await deps.onSyncComplete(userId, calendarId);
+          }
+          break;
+        }
+        case 'history-backfill': {
+          if (!calendarId) throw new Error('calendarId required for history-backfill');
+          const imported = await syncService.initialSync(api, userId, calendarId);
+          if (imported > 0) {
+            await deps.sendMessage(userId, `📅 Imported ${imported} historical events from Google Calendar.`);
           }
           break;
         }

@@ -21,10 +21,9 @@ export class SyncService {
     let pageToken: string | undefined;
     let nextSyncToken: string | null = null;
     let totalImported = 0;
-    const timeMin = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
 
     do {
-      const result = await api.listEvents(calendarId, { pageToken, timeMin });
+      const result = await api.listEvents(calendarId, { pageToken });
 
       const insertBatch = this.db.transaction(() => {
         for (const gEvent of result.events) {

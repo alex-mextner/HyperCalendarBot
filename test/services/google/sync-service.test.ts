@@ -83,6 +83,27 @@ describe('SyncService', () => {
     expect(imported!.title).toBe('Meeting');
   });
 
+  test('initialSync does not pass timeMin — imports full history', async () => {
+    const api = createMockApi(
+      [
+        {
+          id: 'g1',
+          summary: 'Old Event',
+          start: { dateTime: '2020-01-15T10:00:00Z' },
+          end: { dateTime: '2020-01-15T11:00:00Z' },
+          etag: '"e1"',
+        },
+      ],
+      'sync-token-full',
+    );
+
+    await service.initialSync(api as never, 1, 'cal-1');
+
+    const [calendarId, opts] = api.listEvents.mock.calls[0] as unknown as [string, { timeMin?: string }];
+    expect(calendarId).toBe('cal-1');
+    expect(opts.timeMin).toBeUndefined();
+  });
+
   test('initialSync skips events with our extended property', async () => {
     const api = createMockApi([
       {
