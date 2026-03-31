@@ -182,6 +182,7 @@ export class NotificationScheduler {
           event_start_at: r.event_start_at,
           event_location: r.event_location,
           interval_label: r.interval_label,
+          is_all_day: r.interval_minutes === -1,
         }));
         const refKey = `erb:${firstReminder.user_id}:${firstReminder.remind_at_utc}`;
         const renderItems = batchItems.map((item) => ({
@@ -189,6 +190,7 @@ export class NotificationScheduler {
           startTime: format(new TZDate(item.event_start_at, user.timezone), 'HH:mm'),
           location: item.event_location,
           intervalLabel: item.interval_label,
+          isAllDay: item.is_all_day,
         }));
         const rendered = renderer.renderBatchReminder(lang, renderItems);
         const eventIds = batchItems.map((item) => item.event_id);
@@ -230,12 +232,14 @@ export class NotificationScheduler {
       const endTime = reminder.event_end_at
         ? format(new TZDate(reminder.event_end_at, user.timezone), 'HH:mm')
         : undefined;
+      const isAllDay = reminder.interval_minutes === -1;
       const rendered = renderer.renderEventReminder(lang, {
         title: reminder.event_title,
         startTime,
         endTime,
         location: reminder.event_location,
         intervalLabel: reminder.interval_label,
+        isAllDay,
       });
       const payload = JSON.stringify({ text: rendered.text, event_id: reminder.event_id });
       const logId = this.deps.logRepo.insert({

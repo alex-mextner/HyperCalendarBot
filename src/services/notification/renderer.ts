@@ -27,6 +27,7 @@ export interface ReminderData {
   endTime?: string;
   location: string | null;
   intervalLabel: string;
+  isAllDay?: boolean;
 }
 
 export interface BatchReminderItem {
@@ -34,6 +35,7 @@ export interface BatchReminderItem {
   startTime: string;
   location: string | null;
   intervalLabel: string;
+  isAllDay?: boolean;
 }
 
 export interface WeeklyDigestEvent {
@@ -57,6 +59,7 @@ const INTERVAL_RU: Record<string, string> = {
   '2 hours': '2 часа',
   '1 day': '1 день',
   '7 days before': '7 дней',
+  'day before': 'завтра',
   'day of': 'сегодня',
 };
 
@@ -86,6 +89,7 @@ const LABELS = {
     eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
     weeklyDigest: (range: string) => `📅 Week ${range}:`,
     noEvents: 'no events',
+    allDay: 'All day',
     freeDayMorning:
       'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
     freeDayEvening:
@@ -110,6 +114,7 @@ const LABELS = {
     eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
     weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
     noEvents: 'нет событий',
+    allDay: 'Весь день',
     freeDayMorning:
       'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
     freeDayEvening:
@@ -149,11 +154,15 @@ export class NotificationRenderer {
     const lines: string[] = [];
     if (data.intervalLabel === 'at start') {
       lines.push(`⏰ ${data.title} — ${l.startingNow}`);
+    } else if (data.isAllDay) {
+      lines.push(`⏰ ${l.reminder} ${data.title} — ${localized}`);
     } else {
       lines.push(`⏰ ${l.reminder} ${data.title} ${l.inLabel} ${localized}`);
     }
     lines.push('');
-    if (data.endTime && data.endTime !== data.startTime) {
+    if (data.isAllDay) {
+      lines.push(`📅 ${l.allDay}`);
+    } else if (data.endTime && data.endTime !== data.startTime) {
       lines.push(`🕐 ${data.startTime} — ${data.endTime}`);
     } else {
       lines.push(`🕐 ${data.startTime}`);
@@ -171,8 +180,16 @@ export class NotificationRenderer {
     lines.push('');
     for (const item of items) {
       const localized = localizeInterval(lang, item.intervalLabel);
-      const intervalText = item.intervalLabel === 'at start' ? l.startingNow : `${l.inLabel} ${localized}`;
-      let line = `• ${item.title} — ${item.startTime} (${intervalText})`;
+      let intervalText: string;
+      if (item.intervalLabel === 'at start') {
+        intervalText = l.startingNow;
+      } else if (item.isAllDay) {
+        intervalText = localized;
+      } else {
+        intervalText = `${l.inLabel} ${localized}`;
+      }
+      const timeInfo = item.isAllDay ? l.allDay : item.startTime;
+      let line = `• ${item.title} — ${timeInfo} (${intervalText})`;
       if (item.location) line += `\n  📍 ${item.location}`;
       lines.push(line);
     }

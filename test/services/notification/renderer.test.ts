@@ -98,6 +98,62 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('🕐 10:00');
       expect(result.text).not.toContain('10:00 —');
     });
+
+    test('renders all-day "day before" reminder in Russian without time', () => {
+      const result = renderer.renderEventReminder('ru', {
+        title: 'Зарплата как CTO',
+        startTime: '03:00',
+        location: null,
+        intervalLabel: 'day before',
+        isAllDay: true,
+      });
+      expect(result.text).toContain('Напоминание: Зарплата как CTO — завтра');
+      expect(result.text).toContain('📅 Весь день');
+      expect(result.text).not.toContain('🕐');
+      expect(result.text).not.toContain('через');
+      expect(result.text).not.toContain('03:00');
+    });
+
+    test('renders all-day "day of" reminder in Russian without time', () => {
+      const result = renderer.renderEventReminder('ru', {
+        title: 'Праздник',
+        startTime: '03:00',
+        location: null,
+        intervalLabel: 'day of',
+        isAllDay: true,
+      });
+      expect(result.text).toContain('Напоминание: Праздник — сегодня');
+      expect(result.text).toContain('📅 Весь день');
+      expect(result.text).not.toContain('🕐');
+      expect(result.text).not.toContain('через');
+    });
+
+    test('renders all-day "day before" reminder in English without time', () => {
+      const result = renderer.renderEventReminder('en', {
+        title: 'Salary',
+        startTime: '00:00',
+        location: null,
+        intervalLabel: 'day before',
+        isAllDay: true,
+      });
+      expect(result.text).toContain('Reminder: Salary — day before');
+      expect(result.text).toContain('📅 All day');
+      expect(result.text).not.toContain('🕐');
+      expect(result.text).not.toContain(' in ');
+    });
+
+    test('renders all-day reminder with location', () => {
+      const result = renderer.renderEventReminder('ru', {
+        title: 'Конференция',
+        startTime: '03:00',
+        location: 'Офис',
+        intervalLabel: 'day before',
+        isAllDay: true,
+      });
+      expect(result.text).toContain('📅 Весь день');
+      expect(result.text).toContain('📍 Офис');
+      expect(result.text).not.toContain('🕐');
+    });
   });
 
   describe('renderBatchReminder', () => {
@@ -121,6 +177,16 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('через 30 минут');
       expect(result.text).toContain('начинается!');
     });
+
+    test('renders batch with all-day item in Russian', () => {
+      const result = renderer.renderBatchReminder('ru', [
+        { title: 'Стендап', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Праздник', startTime: '03:00', location: null, intervalLabel: 'day of', isAllDay: true },
+      ]);
+      expect(result.text).toContain('• Стендап — 10:00 (через 30 минут)');
+      expect(result.text).toContain('• Праздник — Весь день (сегодня)');
+      expect(result.text).not.toContain('03:00');
+    });
   });
 
   describe('localizeInterval', () => {
@@ -135,6 +201,8 @@ describe('NotificationRenderer', () => {
       expect(localizeInterval('ru', '1 hour')).toBe('1 час');
       expect(localizeInterval('ru', '2 hours')).toBe('2 часа');
       expect(localizeInterval('ru', '1 day')).toBe('1 день');
+      expect(localizeInterval('ru', 'day before')).toBe('завтра');
+      expect(localizeInterval('ru', 'day of')).toBe('сегодня');
     });
 
     test('handles snooze labels (N min)', () => {
