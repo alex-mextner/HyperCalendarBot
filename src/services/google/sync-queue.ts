@@ -50,6 +50,7 @@ interface GoogleSyncQueueDeps {
   onCleanupTick?: () => void;
   sendMessage: (telegramId: number, text: string) => Promise<void>;
   syncService?: SyncService;
+  createCalendarApi?: (authClient: OAuth2Client) => GoogleCalendarApi;
 }
 
 export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
@@ -102,7 +103,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         throw err;
       }
 
-      const api = new GoogleCalendarApi(authClient);
+      const api = deps.createCalendarApi ? deps.createCalendarApi(authClient) : new GoogleCalendarApi(authClient);
 
       switch (type) {
         case 'initial-sync': {
