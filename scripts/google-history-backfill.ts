@@ -59,7 +59,11 @@ for (const userId of activeUsers) {
   for (const cal of calendars) {
     try {
       let pageToken: string | undefined;
-      let calImported = 0;
+      const countBefore = (
+        db.db
+          .prepare('SELECT COUNT(*) as cnt FROM events WHERE user_id = ? AND google_calendar_id = ?')
+          .get(userId, cal.google_calendar_id) as { cnt: number }
+      ).cnt;
 
       do {
         const result = await api.listEvents(cal.google_calendar_id, { pageToken });
@@ -85,7 +89,6 @@ for (const userId of activeUsers) {
               google_etag: local.google_etag,
               is_cancelled: local.is_cancelled ?? false,
             });
-            calImported++;
           }
         });
         insertBatch();
@@ -93,6 +96,12 @@ for (const userId of activeUsers) {
         pageToken = result.nextPageToken ?? undefined;
       } while (pageToken);
 
+      const countAfter = (
+        db.db
+          .prepare('SELECT COUNT(*) as cnt FROM events WHERE user_id = ? AND google_calendar_id = ?')
+          .get(userId, cal.google_calendar_id) as { cnt: number }
+      ).cnt;
+      const calImported = countAfter - countBefore;
       totalImported += calImported;
       console.log(`  User ${userId}, calendar "${cal.calendar_name}": +${calImported} events`);
     } catch (err) {
