@@ -3,6 +3,7 @@
 import type { Database } from 'bun:sqlite';
 import { Queue, Worker } from 'bullmq';
 import type { OAuth2Client } from 'google-auth-library';
+import { type Lang, t } from '../../config/constants.ts';
 import type { EnvConfig } from '../../config/env.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
@@ -50,6 +51,7 @@ interface GoogleSyncQueueDeps {
   onWatchRenewalTick?: () => Promise<void>;
   onCleanupTick?: () => void;
   sendMessage: (telegramId: number, text: string) => Promise<void>;
+  getUserLang?: (userId: number) => Lang;
   syncService?: SyncService;
 }
 
@@ -67,7 +69,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
   });
 
   const syncService =
-    deps.syncService ?? new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage);
+    deps.syncService ??
+    new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage, deps.getUserLang);
 
   const worker = new Worker<GoogleSyncJobData>(
     'google-sync',
@@ -118,7 +121,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
           if (!calendarId) throw new Error('calendarId required for history-backfill');
           const imported = await syncService.initialSync(api, userId, calendarId);
           if (imported > 0) {
-            await deps.sendMessage(userId, `📅 Imported ${imported} historical events from Google Calendar.`);
+            const lang = deps.getUserLang?.(userId) ?? 'en';
+            await deps.sendMessage(userId, t(lang).gcal_history_imported(imported));
           }
           break;
         }
@@ -197,9 +201,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
     const errorStr = String(err);
     if (errorStr.includes('invalid_grant') || errorStr.includes('Token has been expired or revoked')) {
       deps.syncRepo.markRevoked(job.data.userId);
-      deps
-        .sendMessage(job.data.userId, '⚠️ Google Calendar connection lost. Use /connect_google to reconnect.')
-        .catch(() => {});
+      const revokedLang = deps.getUserLang?.(job.data.userId) ?? 'en';
+      deps.sendMessage(job.data.userId, t(revokedLang).gcal_revoked).catch(() => {});
     }
 
     if (errorStr.includes('Rate Limit Exceeded') || (err as { code?: number }).code === 429) {

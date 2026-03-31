@@ -139,6 +139,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     eventRepo: db.events,
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
+    getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
     onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
