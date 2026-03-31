@@ -79,7 +79,8 @@ export const MSG = {
     agenda_prompt: "I can send you a morning summary of your day's events.\n\nChoose a time for the daily agenda:",
     onboard_done:
       "✅ All set! Here's what you can do:\n\n/add — create an event\n/today — today's schedule\n\nJust send me a text or voice message — I understand natural language and can create, edit, search events for you.",
-    no_events_today: (date: string) => `📅 ${date}\n\nNo events today. Use /add to create one.`,
+    no_events_today: (date: string) =>
+      `📅 ${date}\n\nNo events today. Want to plan something? Just describe it in a message, or use /add.`,
     no_events: 'No events in this range.',
     event_created: (title: string) => `✅ Created: "${title}"`,
     event_deleted: (title: string) => `🗑 Deleted: "${title}"`,
@@ -465,7 +466,8 @@ export const MSG = {
     agenda_prompt: 'Могу отправлять утреннюю сводку событий на день.\n\nВыберите время для утренней сводки:',
     onboard_done:
       '✅ Всё готово!\n\n/add — создать событие\n/today — расписание на сегодня\n\nПросто напишите или отправьте голосовое — я понимаю естественный язык и могу создавать, редактировать, искать события за вас.',
-    no_events_today: (date: string) => `📅 ${date}\n\nНет событий. Используйте /add для создания.`,
+    no_events_today: (date: string) =>
+      `📅 ${date}\n\nНет событий. Хочешь что-то запланировать? Просто напиши сообщение, или используй /add.`,
     no_events: 'Нет событий за этот период.',
     event_created: (title: string) => `✅ Создано: "${title}"`,
     event_deleted: (title: string) => `🗑 Удалено: "${title}"`,

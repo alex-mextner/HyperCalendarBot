@@ -446,15 +446,21 @@ describe('NotificationScheduler', () => {
     expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
   });
 
-  test('morning agenda skips day with only recurring events on other days', async () => {
+  test('morning agenda sends free-day message when no events', async () => {
     db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
     db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
-    // Weekly event on Mondays only
-    db.run(
-      "INSERT INTO events (id, user_id, title, start_at, end_at, timezone, recurrence_rule) VALUES (1, 42, 'Monday meeting', '2026-03-09T10:00:00Z', '2026-03-09T10:30:00Z', 'UTC', 'FREQ=WEEKLY;BYDAY=MO')",
-    );
-    // Tick on Sunday March 15 — Monday event should NOT appear
+    // No events at all
     await scheduler.tick(new Date('2026-03-15T08:00:30Z'));
-    expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(false);
+    expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
+  });
+
+  test('evening review sends free-day message when no events tomorrow', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run(
+      "INSERT INTO notification_preferences (user_id, evening_review_enabled, evening_review_time) VALUES (42, 1, '21:00')",
+    );
+    // No events at all
+    await scheduler.tick(new Date('2026-03-15T21:00:30Z'));
+    expect(enqueued.some((e) => e.type === 'evening_review')).toBe(true);
   });
 });

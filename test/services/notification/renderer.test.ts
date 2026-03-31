@@ -151,6 +151,23 @@ describe('NotificationRenderer', () => {
     });
   });
 
+  describe('renderMorningAgenda – free day', () => {
+    test('renders free-day message in English', () => {
+      const result = renderer.renderMorningAgenda('en', 'Sunday, March 15', []);
+      expect(result.text).toContain('No events today');
+      expect(result.text).toContain('Just describe it in a message');
+      expect(result.text).toContain('/add');
+      expect(result.text).not.toContain('Have a productive day');
+    });
+
+    test('renders free-day message in Russian', () => {
+      const result = renderer.renderMorningAgenda('ru', 'воскресенье, 15 марта', []);
+      expect(result.text).toContain('Сегодня нет событий');
+      expect(result.text).toContain('Просто напиши сообщение');
+      expect(result.text).toContain('/add');
+    });
+  });
+
   describe('renderEveningReview', () => {
     test('renders tomorrow schedule', () => {
       const result = renderer.renderEveningReview('en', 'Wednesday, March 16', [
@@ -159,6 +176,20 @@ describe('NotificationRenderer', () => {
       expect(result.channel).toBe('telegram_text');
       expect(result.text).toContain('Review');
       expect(result.text).toContain('Wednesday');
+    });
+
+    test('renders free-day message when no events tomorrow', () => {
+      const result = renderer.renderEveningReview('en', 'Thursday, March 17', []);
+      expect(result.text).toContain('No events tomorrow');
+      expect(result.text).toContain('Just describe it in a message');
+      expect(result.text).toContain('/add');
+      expect(result.text).not.toContain('Good night');
+    });
+
+    test('renders free-day message in Russian', () => {
+      const result = renderer.renderEveningReview('ru', 'четверг, 17 марта', []);
+      expect(result.text).toContain('Завтра нет событий');
+      expect(result.text).toContain('Просто напиши сообщение');
     });
   });
 });

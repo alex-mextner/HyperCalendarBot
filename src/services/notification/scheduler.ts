@@ -281,7 +281,6 @@ export class NotificationScheduler {
       const localTodayIso = new TZDate(nowUtc, pref.timezone).toISOString().slice(0, 10);
       const { start: dayStart, end: dayEnd } = getDayRangeUtc(nowUtc, pref.timezone);
       const occurrences = this.deps.getEventsInRange(pref.user_id, dayStart, dayEnd);
-      if (occurrences.length === 0) continue;
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
@@ -362,7 +361,6 @@ export class NotificationScheduler {
       const localTomorrowIso = new TZDate(tomorrowUtc, pref.timezone).toISOString().slice(0, 10);
       const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), pref.timezone);
       const occurrences = this.deps.getEventsInRange(pref.user_id, tmStart, tmEnd);
-      if (occurrences.length === 0) continue;
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
