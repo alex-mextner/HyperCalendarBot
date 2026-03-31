@@ -73,11 +73,5 @@ RUN groupadd -r botuser && useradd -r -g botuser botuser && \
 
 USER botuser
 
-RUN groupadd -r botuser && useradd -r -g botuser botuser && \
-    mkdir -p logs data && \
-    chown -R botuser:botuser /app
-
-USER botuser
-
 EXPOSE 3311
 CMD ["bun", "run", "start"]
