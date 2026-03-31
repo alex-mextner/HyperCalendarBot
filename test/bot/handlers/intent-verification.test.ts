@@ -74,7 +74,8 @@ describe('intent_accept callback handler', () => {
 
   function makeHandler(intentRepoArg: IntentRepository, intentMatcher?: { reload: () => void }) {
     return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      intentDeps: { intentRepo: intentRepoArg, intentMatcher },
+      // adminId must match makeCtx's dbUser.telegram_id (999) — guard is now fail-closed
+      intentDeps: { intentRepo: intentRepoArg, intentMatcher, adminId: 999 },
     });
   }
 
@@ -140,7 +141,8 @@ describe('intent_accept callback handler', () => {
     });
 
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
-      intentDeps: { intentRepo, adminEditSessions },
+      // adminId 999 matches makeCtx's dbUser.telegram_id — guard is fail-closed
+      intentDeps: { intentRepo, adminEditSessions, adminId: 999 },
     });
 
     const ctx = makeCtx(`intent_edit:${intentId}`);

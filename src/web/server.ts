@@ -52,11 +52,7 @@ class IpRateLimiter {
     const windowStart = now - OAUTH_RATE_LIMIT.windowMs;
     const timestamps = (this.hits.get(ip) ?? []).filter((t) => t > windowStart);
     timestamps.push(now);
-    if (timestamps.length > 0) {
-      this.hits.set(ip, timestamps);
-    } else {
-      this.hits.delete(ip);
-    }
+    this.hits.set(ip, timestamps);
     return timestamps.length <= OAUTH_RATE_LIMIT.maxRequests;
   }
 

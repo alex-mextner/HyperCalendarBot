@@ -456,6 +456,7 @@ export function createCallbackHandler(
       const file = new File([buffer], 'agenda.png', { type: 'image/png' });
       if (ctx.message) {
         const sent = await ctx.message.sendPhoto(file);
+        if (!sent) return;
         const chatId = Number(ctx.chatId ?? user.telegram_id);
         autoPin(chatId, sent.id, {
           pinChatMessage: (cid, messageId, options) =>
@@ -531,6 +532,7 @@ export function createCallbackHandler(
       const file = new File([buffer], 'week.png', { type: 'image/png' });
       if (ctx.message) {
         const sent = await ctx.message.sendPhoto(file);
+        if (!sent) return;
         const chatId = Number(ctx.chatId ?? user.telegram_id);
         autoPin(chatId, sent.id, {
           pinChatMessage: (cid, messageId, options) =>
@@ -1153,7 +1155,7 @@ export function createCallbackHandler(
   dispatch.set('fb_close', async (ctx, payload, _parts, user) => {
     if (!feedbackDeps) return;
     const lang = (user.language ?? 'en') as Lang;
-    if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+    if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1179,7 +1181,7 @@ export function createCallbackHandler(
   dispatch.set('fb_reply', async (ctx, payload, _parts, user) => {
     if (!feedbackDeps) return;
     const lang = (user.language ?? 'en') as Lang;
-    if (feedbackDeps.adminId && user.telegram_id !== feedbackDeps.adminId) {
+    if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1272,7 +1274,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1288,7 +1290,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }
@@ -1303,7 +1305,7 @@ export function createCallbackHandler(
     if (!intentDeps) return;
     const intentId = Number(payload);
     const lang = (user.language ?? 'en') as Lang;
-    if (intentDeps.adminId && user.telegram_id !== intentDeps.adminId) {
+    if (!intentDeps.adminId || user.telegram_id !== intentDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
       return;
     }

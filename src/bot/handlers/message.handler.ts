@@ -24,7 +24,7 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent, NotificationPreferencesRow, User, UserCallSettings } from '../../database/types.ts';
+import type { CalendarEvent, NotificationPreferencesRow, NotificationPreferencesUpdate, User, UserCallSettings } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
@@ -104,7 +104,7 @@ export interface MessageHandlerDeps {
   renderService?: RenderService;
   notificationPrefs?: {
     getPrefs(userId: number): NotificationPreferencesRow;
-    update(userId: number, patch: Partial<NotificationPreferencesRow>): void;
+    update(userId: number, patch: NotificationPreferencesUpdate): void;
     ensureDefaults(userId: number): void;
   };
   callQueue?: { enqueue(userId: number, text: string): void };
@@ -372,14 +372,14 @@ async function handleVoiceMessage(
   deps: MessageHandlerDeps,
 ): Promise<void> {
   const chatId = ctx.chatId;
-  if (!chatId) return;
+  if (!chatId || !deps.botToken) return;
 
   cmdLogger.info({ userId: user.telegram_id, duration: voice.duration }, 'Voice message received');
 
   const lang = user.language as 'en' | 'ru';
 
   try {
-    const audioBuffer = await (deps.downloadVoiceBuffer ?? downloadTelegramFile)(deps.botToken!, voice.file_id);
+    const audioBuffer = await (deps.downloadVoiceBuffer ?? downloadTelegramFile)(deps.botToken, voice.file_id);
     const transcription = await deps.transcriptionService!.transcribe(audioBuffer);
 
     if (!transcription) {
@@ -408,7 +408,7 @@ async function handleVoiceMessage(
       const hasPrimaryTts = isRu ? !!(deps.sileroTts && deps.stressDictionary) : !!deps.kokoroTts;
       if (hasPrimaryTts || deps.fallbackTts) {
         try {
-          await fetch(`${TG_API}/bot${deps.botToken!}/sendChatAction`, {
+          await fetch(`${TG_API}/bot${deps.botToken}/sendChatAction`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ chat_id: Number(chatId), action: 'record_voice' }),
