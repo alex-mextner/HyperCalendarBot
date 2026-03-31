@@ -216,7 +216,10 @@ describe('executeTool', () => {
       const holidayService = new HolidayService(holidayRepo);
       const invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo);
       const privacyService = new PrivacyService(sharingSettingsRepo);
-      const sharingService = new SharingService(eventRepo, privacyService);
+      const sharingService = new SharingService(
+        (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc),
+        privacyService,
+      );
 
       sharingCtx = {
         user: userRepo.findByTelegramId(USER_ID)!,

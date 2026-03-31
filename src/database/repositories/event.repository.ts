@@ -85,17 +85,6 @@ export class EventRepository {
     return row?.user_id ?? null;
   }
 
-  getByDateRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
-    return this.db
-      .prepare(
-        `SELECT * FROM events WHERE start_at >= ? AND start_at <= ? AND is_cancelled = 0
-         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR ${groupVisibleSql('')})
-         ORDER BY start_at`,
-      )
-      .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
-  }
-
   getInRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(`

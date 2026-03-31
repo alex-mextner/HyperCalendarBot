@@ -5,7 +5,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
-import type { NotificationLogRow } from '../../../src/database/types.ts';
+import type { EventOccurrence, NotificationLogRow } from '../../../src/database/types.ts';
 import { NotificationRenderer } from '../../../src/services/notification/renderer.ts';
 import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
 
@@ -81,6 +81,18 @@ function setupDb(): Database {
   return db;
 }
 
+function wrapGetEventsInRange(
+  eventRepo: EventRepository,
+): (userId: number, startUtc: string, endUtc: string) => EventOccurrence[] {
+  return (userId, startUtc, endUtc) =>
+    eventRepo.getInRange(userId, startUtc, endUtc).map((event) => ({
+      event,
+      occurrence_start: event.start_at,
+      occurrence_end: event.end_at,
+      is_exception: false,
+    }));
+}
+
 // 2026-03-22 is a Sunday, 21:00 UTC
 const SUNDAY_21H = new Date('2026-03-22T21:00:30Z');
 // Next week: Mon 2026-03-23 through Sun 2026-03-29
@@ -97,12 +109,13 @@ describe('NotificationScheduler – weekly_digest', () => {
     const mockEnqueue = mock((type: string, userId: number, logId: number) => {
       enqueued.push({ type, userId, logId });
     });
+    const eventRepo = new EventRepository(db);
     scheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(db),
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: wrapGetEventsInRange(eventRepo),
       enqueue: mockEnqueue,
     });
   });
@@ -165,12 +178,13 @@ describe('NotificationScheduler – weekly_digest', () => {
     );
 
     const logRepo = new NotificationLogRepository(db);
+    const testEventRepo = new EventRepository(db);
     const testScheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(db),
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: wrapGetEventsInRange(testEventRepo),
       enqueue: mock(() => {}),
     });
 
@@ -189,12 +203,13 @@ describe('NotificationScheduler – weekly_digest', () => {
     db.run(`INSERT INTO events (id, user_id, title, start_at) VALUES (1, 42, 'Стендап', '${MON}T10:00:00Z')`);
 
     const logRepo = new NotificationLogRepository(db);
+    const testEventRepo = new EventRepository(db);
     const testScheduler = new NotificationScheduler({
       prefsRepo: new NotificationPreferencesRepository(db),
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: wrapGetEventsInRange(testEventRepo),
       enqueue: mock(() => {}),
     });
 

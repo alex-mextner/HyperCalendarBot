@@ -194,7 +194,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     conflictChecker,
     domainEventBus,
   );
-  const sharingService = new SharingService(db.events, privacyService);
+  const sharingService = new SharingService(
+    (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc),
+    privacyService,
+  );
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
   const googleSchedulePush = googleDeps?.schedulePush;

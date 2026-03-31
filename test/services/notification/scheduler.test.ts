@@ -5,9 +5,11 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
+import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import type { NotificationLogRow } from '../../../src/database/types.ts';
+import type { EventOccurrence, NotificationLogRow } from '../../../src/database/types.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
 import { NotificationScheduler } from '../../../src/services/notification/scheduler.ts';
 
 function setupDb(): Database {
@@ -15,6 +17,14 @@ function setupDb(): Database {
   db.run('PRAGMA foreign_keys = ON');
   runMigrations(db, migrations);
   return db;
+}
+
+function makeGetEventsInRange(db: Database): (userId: number, startUtc: string, endUtc: string) => EventOccurrence[] {
+  const eventService = new EventService({
+    eventRepo: new EventRepository(db),
+    reminderRepo: new ReminderRepository(db),
+  });
+  return (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc);
 }
 
 describe('NotificationScheduler', () => {
@@ -33,7 +43,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mockEnqueue,
     });
   });
@@ -89,7 +99,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock(() => {}),
       callSettingsRepo: {
         isEnabled: mock(() => true),
@@ -171,7 +181,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock(() => {}),
     });
     // Sunday 2026-03-15 at 03:00 UTC
@@ -193,7 +203,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock(() => {}),
     });
     // Monday 2026-03-16 at 03:00 UTC (day=1 not Sunday=0)
@@ -216,7 +226,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock(() => {}),
       callSettingsRepo: {
         isEnabled: mock(() => true),
@@ -259,7 +269,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock((type: string, _userId: number, logId: number) => {
         if (type === 'event_reminder') capturedLogId = logId;
       }),
@@ -297,7 +307,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock((type: string, _userId: number, logId: number) => {
         if (type === 'event_reminder_batch') capturedLogId = logId;
       }),
@@ -326,7 +336,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock((type: string, _userId: number, logId: number) => {
         if (type === 'morning_agenda') capturedLogId = logId;
       }),
@@ -353,7 +363,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo,
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: mock((type: string, _userId: number, logId: number) => {
         if (type === 'evening_review') capturedLogId = logId;
       }),
@@ -402,7 +412,7 @@ describe('NotificationScheduler', () => {
       reminderRepo: new EventReminderRepository(db),
       logRepo: new NotificationLogRepository(db),
       userRepo: new UserRepository(db),
-      eventRepo: new EventRepository(db),
+      getEventsInRange: makeGetEventsInRange(db),
       enqueue: (type: string) => eveHolidayEnqueued.push(type),
       holidayRepo: mockHolidayRepo as never,
     });
@@ -422,5 +432,29 @@ describe('NotificationScheduler', () => {
     );
     await scheduler.tick(new Date('2026-03-18T19:00:30Z'));
     expect(enqueued.some((e) => e.type === 'evening_review')).toBe(true);
+  });
+
+  test('morning agenda includes recurring events', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    // A weekly recurring event on Sundays at 10:00 — template start is March 8 (Sunday)
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at, timezone, recurrence_rule) VALUES (1, 42, 'Weekly standup', '2026-03-08T10:00:00Z', '2026-03-08T10:30:00Z', 'UTC', 'FREQ=WEEKLY;BYDAY=SU')",
+    );
+    // Tick on Sunday March 15 at 08:00 — recurring event should expand to this date
+    await scheduler.tick(new Date('2026-03-15T08:00:30Z'));
+    expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(true);
+  });
+
+  test('morning agenda skips day with only recurring events on other days', async () => {
+    db.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    db.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    // Weekly event on Mondays only
+    db.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at, timezone, recurrence_rule) VALUES (1, 42, 'Monday meeting', '2026-03-09T10:00:00Z', '2026-03-09T10:30:00Z', 'UTC', 'FREQ=WEEKLY;BYDAY=MO')",
+    );
+    // Tick on Sunday March 15 — Monday event should NOT appear
+    await scheduler.tick(new Date('2026-03-15T08:00:30Z'));
+    expect(enqueued.some((e) => e.type === 'morning_agenda')).toBe(false);
   });
 });

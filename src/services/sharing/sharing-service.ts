@@ -1,5 +1,4 @@
-import type { EventRepository } from '../../database/repositories/event.repository';
-import type { Visibility } from '../../database/types';
+import type { EventOccurrence, Visibility } from '../../database/types';
 import { getDayRangeUtc } from '../../utils/date';
 import type { PrivacyService } from './privacy-service';
 
@@ -13,24 +12,24 @@ export interface ShareableEvent {
 
 export class SharingService {
   constructor(
-    private eventRepo: EventRepository,
+    private getEventsInRange: (userId: number, startUtc: string, endUtc: string) => EventOccurrence[],
     private privacyService: PrivacyService,
   ) {}
 
   getAgendaForSharing(userId: number, date: Date, timezone: string): ShareableEvent[] {
     const { start, end } = getDayRangeUtc(date, timezone);
-    const events = this.eventRepo.getByDateRange(userId, start, end);
+    const occurrences = this.getEventsInRange(userId, start, end);
 
     const result: ShareableEvent[] = [];
-    for (const event of events) {
-      const visibility = this.privacyService.resolveVisibility(userId, event.id);
+    for (const occ of occurrences) {
+      const visibility = this.privacyService.resolveVisibility(userId, occ.event.id);
       if (visibility === 'private') continue;
 
       result.push({
-        eventId: event.id,
-        displayTitle: event.title,
-        startAt: event.start_at,
-        timezone: event.timezone,
+        eventId: occ.event.id,
+        displayTitle: occ.event.title,
+        startAt: occ.occurrence_start,
+        timezone: occ.event.timezone,
         visibility,
       });
     }
