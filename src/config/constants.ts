@@ -1,5 +1,7 @@
 // src/config/constants.ts
 
+import { ruPlural } from '../services/event/formatters.ts';
+
 // Rate limits
 export const RATE_LIMIT = {
   MESSAGES_PER_MINUTE: 30,
@@ -540,19 +542,8 @@ export const MSG = {
     gcal_calendar_readonly: '(только чтение)',
     gcal_calendars_saved: '✅ Выбор сохранён. Начинается синхронизация...',
     gcal_sync_complete: '✅ Синхронизация завершена. Ваши события из Google теперь в боте.',
-    gcal_history_imported: (count: number) => {
-      const mod10 = count % 10;
-      const mod100 = count % 100;
-      const form =
-        mod100 >= 11 && mod100 <= 19
-          ? 'событий'
-          : mod10 === 1
-            ? 'событие'
-            : mod10 >= 2 && mod10 <= 4
-              ? 'события'
-              : 'событий';
-      return `📅 Импортировано ${count} ${form} из Google Calendar.`;
-    },
+    gcal_history_imported: (count: number) =>
+      `📅 Импортировано ${count} ${ruPlural(count, 'событие', 'события', 'событий')} из Google Calendar.`,
     gcal_revoked: '⚠️ Связь с Google Calendar потеряна. Используйте /connect_google чтобы переподключить.',
     gcal_conflict: (title: string, winner: string) =>
       `⚠️ Конфликт синхронизации "${title}"\n\n${winner === 'google' ? 'Google Calendar' : 'Локальная'} версия применена (более новая).`,
