@@ -7,7 +7,6 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -29,10 +28,9 @@ describe('EventService', () => {
   beforeEach(() => {
     db = createTestDb();
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
     const groupMemberRepo = new GroupMemberRepository(db);
     new UserRepository(db).create({ telegram_id: USER_ID });
-    service = new EventService({ eventRepo, reminderRepo, groupMemberRepo });
+    service = new EventService({ eventRepo, groupMemberRepo });
   });
 
   test('createEvent inserts event_reminders rows when materializer is provided', () => {
@@ -42,7 +40,6 @@ describe('EventService', () => {
     const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
     const svc = new EventService({
       eventRepo: new EventRepository(db),
-      reminderRepo: new ReminderRepository(db),
       materializer: mat,
     });
     const event = svc.createEvent({
@@ -68,7 +65,6 @@ describe('EventService', () => {
     const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
     const svc = new EventService({
       eventRepo: new EventRepository(db),
-      reminderRepo: new ReminderRepository(db),
       materializer: mat,
     });
     const event = svc.createEvent({
@@ -94,16 +90,26 @@ describe('EventService', () => {
     expect(event.title).toBe('Test');
   });
 
-  test('createEvent creates reminders from reminder_minutes', () => {
-    const event = service.createEvent({
+  test('createEvent materializes event_reminders from reminder_minutes', () => {
+    const eventReminderRepo = new EventReminderRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
+    prefsRepo.ensureDefaults(USER_ID);
+    const mat = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const svc = new EventService({
+      eventRepo: new EventRepository(db),
+      materializer: mat,
+    });
+    const event = svc.createEvent({
       user_id: USER_ID,
       title: 'Test',
-      start_at: '2026-03-12T12:00:00Z',
+      start_at: new Date(Date.now() + 86_400_000).toISOString(),
       timezone: TZ,
       reminder_minutes: [5, 15],
     });
-    const reminders = db.prepare('SELECT * FROM reminders WHERE event_id = ?').all(event.id);
+    const reminders = eventReminderRepo.getForEvent(event.id);
     expect(reminders.length).toBe(2);
+    const intervals = reminders.map((r) => r.interval_minutes).sort((a, b) => a - b);
+    expect(intervals).toEqual([5, 15]);
   });
 
   test('getEventsForDay returns events and recurring occurrences', () => {

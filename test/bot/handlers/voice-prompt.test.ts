@@ -23,7 +23,7 @@ function makeVoiceDeps(overrides: Partial<MessageHandlerDeps> & { [key: string]:
     chatHistory: {},
     conversationLogger: { logUserMessage: mock(() => {}) },
     userRepo: { update: mock(() => {}) },
-    reminderRepo: {},
+    eventReminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },
     botUsername: 'TestBot',
     transcriptionService: { transcribe: mock(() => Promise.resolve('создай встречу на завтра')) },

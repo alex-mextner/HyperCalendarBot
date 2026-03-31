@@ -171,6 +171,7 @@ export class EventRepository {
       'location',
       'recurrence_rule',
       'recurrence_end_at',
+      'reminder_overrides',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];

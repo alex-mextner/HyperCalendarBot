@@ -357,6 +357,7 @@ export const MSG = {
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
         remindersSet: (title: string, descriptions: string) => `Reminders set for "${title}": ${descriptions}`,
+        remindersDisabled: (title: string) => `All reminders disabled for "${title}".`,
         remindersFor: (title: string, lines: string) => `Reminders for "${title}": ${lines}`,
       },
       sharing: {
@@ -744,6 +745,7 @@ export const MSG = {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
         remindersSet: (title: string, descriptions: string) =>
           `Напоминания для «${title}» установлены: ${descriptions}`,
+        remindersDisabled: (title: string) => `Все напоминания для «${title}» отключены.`,
         remindersFor: (title: string, lines: string) => `Напоминания для «${title}»: ${lines}`,
       },
       sharing: {

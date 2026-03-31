@@ -20,7 +20,7 @@ function makeCtx(db: Database, userId: number): AgentContext {
     chatHistory: {} as AgentContext['chatHistory'],
     conversationLogger: null as never,
     userRepo,
-    reminderRepo: {} as AgentContext['reminderRepo'],
+    eventReminderRepo: {} as AgentContext['eventReminderRepo'],
     birthday: { birthdayService: undefined as never, userMemoryRepo: new UserMemoryRepository(db) },
   };
 }

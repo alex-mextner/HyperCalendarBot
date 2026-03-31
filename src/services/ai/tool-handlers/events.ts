@@ -647,9 +647,10 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     parts.push(`created_by: ${creatorLabel}`);
   }
 
-  const reminders = ctx.reminderRepo.getByEventId(input.event_id);
+  const reminders = ctx.eventReminderRepo.getForEvent(input.event_id).filter((r) => r.sent === 0);
   if (reminders.length > 0) {
-    parts.push(`reminders: ${reminders.map((r) => `${r.minutes_before}min`).join(', ')}`);
+    const unique = [...new Set(reminders.map((r) => `${r.interval_minutes}min`))];
+    parts.push(`reminders: ${unique.join(', ')}`);
   }
 
   return { success: true, output: parts.join(', '), data: eventToSummary(event, ctx.user.timezone) };

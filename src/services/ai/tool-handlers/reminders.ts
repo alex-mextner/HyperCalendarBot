@@ -35,11 +35,17 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
-  const event =
+
+  const overridesJson = JSON.stringify(input.minutes_before);
+  const updated =
     scope === 'group'
-      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
-      : ctx.eventService.getEvent(input.event_id, userId);
-  if (!event) {
+      ? ctx.eventService.updateEventForGroup(input.event_id, ctx.groupChatId!, {
+          reminder_overrides: overridesJson,
+        })
+      : ctx.eventService.updateEvent(input.event_id, userId, {
+          reminder_overrides: overridesJson,
+        });
+  if (!updated) {
     return {
       success: false,
       error: `Event ${input.event_id} not found or not owned by you.`,
@@ -47,12 +53,17 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
   }
 
   const lang = ctx.user.language;
-  const reminders = ctx.reminderRepo.setForEvent(input.event_id, input.minutes_before);
-  const descriptions = reminders.map((r) => formatReminderDuration(r.minutes_before, lang));
+  if (input.minutes_before.length === 0) {
+    return {
+      success: true,
+      output: t(lang).aiTools.reminders.remindersDisabled(updated.title),
+    };
+  }
 
+  const descriptions = input.minutes_before.map((m) => formatReminderDuration(m, lang));
   return {
     success: true,
-    output: t(lang).aiTools.reminders.remindersSet(event.title, descriptions.join(', ')),
+    output: t(lang).aiTools.reminders.remindersSet(updated.title, descriptions.join(', ')),
   };
 }
 
@@ -83,16 +94,17 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  const reminders = ctx.reminderRepo.getByEventId(input.event_id);
+  const reminders = ctx.eventReminderRepo.getForEvent(input.event_id).filter((r) => r.sent === 0);
   const lang = ctx.user.language;
   if (reminders.length === 0) {
     return { success: true, output: t(lang).aiTools.reminders.noReminders(event.title) };
   }
 
   const lines = reminders.map((r) => {
-    const dur = formatReminderDuration(r.minutes_before, lang);
+    const dur = formatReminderDuration(r.interval_minutes, lang);
     return lang === 'ru' ? `за ${dur}` : `${dur} before`;
   });
+  const unique = [...new Set(lines)];
 
-  return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, lines.join(', ')) };
+  return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, unique.join(', ')) };
 }

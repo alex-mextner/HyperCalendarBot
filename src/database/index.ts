@@ -26,7 +26,6 @@ import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from './repositories/participant.repository.ts';
-import { ReminderRepository } from './repositories/reminder.repository.ts';
 import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
@@ -41,7 +40,6 @@ export class DatabaseService {
   readonly callLog: CallLogRepository;
   readonly users: UserRepository;
   readonly events: EventRepository;
-  readonly reminders: ReminderRepository;
   readonly holidays: HolidayRepository;
   readonly chatHistory: ChatHistoryRepository;
   readonly notificationPreferences: NotificationPreferencesRepository;
@@ -86,7 +84,6 @@ export class DatabaseService {
     this.callLog = new CallLogRepository(this.db);
     this.users = new UserRepository(this.db);
     this.events = new EventRepository(this.db);
-    this.reminders = new ReminderRepository(this.db);
     this.holidays = new HolidayRepository(this.db);
     this.chatHistory = new ChatHistoryRepository(this.db);
     this.notificationPreferences = new NotificationPreferencesRepository(this.db);

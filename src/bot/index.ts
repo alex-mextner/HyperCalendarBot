@@ -157,7 +157,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
     eventRepo: db.events,
-    reminderRepo: db.reminders,
     materializer,
     participantRepo: db.participants,
     groupMemberRepo: db.groupMembers,
@@ -279,7 +278,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     chatHistory: db.chatHistory,
     conversationLogger,
     userRepo: db.users,
-    reminderRepo: db.reminders,
+    eventReminderRepo: db.eventReminders,
     contactRepo: db.contacts,
     participantRepo: db.participants,
     editProposalRepo: db.editProposals,

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { ConflictChecker } from '../../../src/services/event/conflict-checker.ts';
@@ -31,8 +30,7 @@ describe('ConflictChecker', () => {
     const userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
-    const reminderRepo = new ReminderRepository(db);
-    eventService = new EventService({ eventRepo, reminderRepo });
+    eventService = new EventService({ eventRepo });
     checker = new ConflictChecker(eventRepo);
     userRepo.create({ telegram_id: USER, timezone: 'UTC' });
     userRepo.create({ telegram_id: OTHER, timezone: 'UTC' });

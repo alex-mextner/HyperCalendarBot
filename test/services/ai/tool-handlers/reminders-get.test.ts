@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
-import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import { handleGetReminders } from '../../../../src/services/ai/tool-handlers/reminders.ts';
@@ -27,11 +27,11 @@ describe('handleGetReminders', () => {
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -42,7 +42,7 @@ describe('handleGetReminders', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });
@@ -53,7 +53,20 @@ describe('handleGetReminders', () => {
       title: 'Meeting',
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
-      reminder_minutes: [15, 60],
+    });
+    ctx.eventReminderRepo.insert({
+      event_id: event.id,
+      user_id: USER_ID,
+      remind_at_utc: '2026-03-15T09:45:00Z',
+      interval_minutes: 15,
+      interval_label: '15 min',
+    });
+    ctx.eventReminderRepo.insert({
+      event_id: event.id,
+      user_id: USER_ID,
+      remind_at_utc: '2026-03-15T09:00:00Z',
+      interval_minutes: 60,
+      interval_label: '1 hour',
     });
     const result = handleGetReminders(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
@@ -76,7 +89,7 @@ describe('handleGetReminders', () => {
       timezone: 'UTC',
     });
     // Remove default reminders
-    ctx.reminderRepo.removeByEventId(event.id);
+    ctx.eventReminderRepo.deleteForEvent(event.id);
 
     const result = handleGetReminders(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
@@ -91,8 +104,16 @@ describe('handleGetReminders', () => {
       start_at: '2026-03-15T10:00:00Z',
       timezone: 'UTC',
     });
-    ctx.reminderRepo.removeByEventId(event.id);
-    ctx.reminderRepo.setForEvent(event.id, [90, 120]);
+    ctx.eventReminderRepo.deleteForEvent(event.id);
+    for (const minutes of [90, 120]) {
+      ctx.eventReminderRepo.insert({
+        event_id: event.id,
+        user_id: USER_ID,
+        remind_at_utc: new Date(new Date('2026-03-15T10:00:00Z').getTime() - minutes * 60_000).toISOString(),
+        interval_minutes: minutes,
+        interval_label: `${minutes} min`,
+      });
+    }
 
     const result = handleGetReminders(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
@@ -118,10 +139,16 @@ describe('handleGetReminders', () => {
         title: 'Group Standup',
         start_at: '2026-03-15T10:00:00Z',
         timezone: 'UTC',
-        reminder_minutes: [15, 60],
         owner_type: 'group',
         group_id: GROUP_CHAT_ID,
         created_by: USER_ID,
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: event.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-03-15T09:45:00Z',
+        interval_minutes: 15,
+        interval_label: '15 min',
       });
       const gCtx = makeGroupCtx();
       const result = handleGetReminders(gCtx, { event_id: event.id, scope: 'group' });
@@ -136,10 +163,16 @@ describe('handleGetReminders', () => {
         title: 'Group Default',
         start_at: '2026-03-15T10:00:00Z',
         timezone: 'UTC',
-        reminder_minutes: [30],
         owner_type: 'group',
         group_id: GROUP_CHAT_ID,
         created_by: USER_ID,
+      });
+      ctx.eventReminderRepo.insert({
+        event_id: event.id,
+        user_id: USER_ID,
+        remind_at_utc: '2026-03-15T09:30:00Z',
+        interval_minutes: 30,
+        interval_label: '30 min',
       });
       const gCtx = makeGroupCtx();
       const result = handleGetReminders(gCtx, { event_id: event.id });

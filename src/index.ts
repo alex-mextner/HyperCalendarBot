@@ -320,7 +320,6 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
     const voiceEventService = new EventService({
       eventRepo: db.events,
-      reminderRepo: db.reminders,
       materializer: voiceMaterializer,
     });
     const voiceHolidayService = new HolidayService(db.holidays);
@@ -373,7 +372,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
             eventService: voiceEventService,
             chatHistory: db.chatHistory,
             userRepo: db.users,
-            reminderRepo: db.reminders,
+            eventReminderRepo: db.eventReminders,
             holidayService: voiceHolidayService,
           },
         }),
@@ -429,7 +428,6 @@ if (config.REDIS_URL) {
 
   const notifEventService = new EventService({
     eventRepo: db.events,
-    reminderRepo: db.reminders,
   });
 
   const scheduler = new NotificationScheduler({

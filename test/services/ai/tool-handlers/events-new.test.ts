@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
-import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
+import { NotificationPreferencesRepository } from '../../../../src/database/repositories/notification-preferences.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import {
@@ -15,6 +16,7 @@ import {
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
+import { ReminderMaterializer } from '../../../../src/services/notification/materializer.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -31,11 +33,11 @@ describe('handleGetUpcoming', () => {
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -46,7 +48,7 @@ describe('handleGetUpcoming', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });
@@ -126,11 +128,11 @@ describe('handleSnoozeEvent', () => {
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -141,7 +143,7 @@ describe('handleSnoozeEvent', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });
@@ -202,11 +204,14 @@ describe('handleGetEvent', () => {
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
+    const prefsRepo = new NotificationPreferencesRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    prefsRepo.ensureDefaults(USER_ID);
+    const materializer = new ReminderMaterializer(eventReminderRepo, prefsRepo);
+    const eventService = new EventService({ eventRepo, materializer });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -217,7 +222,7 @@ describe('handleGetEvent', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });
@@ -246,10 +251,11 @@ describe('handleGetEvent', () => {
   });
 
   test('includes reminders when present', () => {
+    const futureStart = new Date(Date.now() + 86_400_000).toISOString();
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Reminder Test',
-      start_at: '2026-03-15T09:00:00Z',
+      start_at: futureStart,
       timezone: 'UTC',
       reminder_minutes: [15, 60],
     });

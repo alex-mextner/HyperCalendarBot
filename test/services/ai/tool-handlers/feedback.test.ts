@@ -4,9 +4,9 @@ import type { TelegramMessage } from 'gramio';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { FeedbackRepository } from '../../../../src/database/repositories/feedback.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
-import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import { handleSendFeedback } from '../../../../src/services/ai/tool-handlers/feedback.ts';
@@ -33,7 +33,7 @@ describe('handleSendFeedback', () => {
     db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     feedbackRepo = new FeedbackRepository(db);
@@ -45,7 +45,7 @@ describe('handleSendFeedback', () => {
       username: 'testuser',
     });
 
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
 
     ctx = {
@@ -57,7 +57,7 @@ describe('handleSendFeedback', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       feedback: { feedbackContext: undefined, feedbackRepo, botAdminId: ADMIN_ID },
       sendMessageToChat: mock(() => Promise.resolve({} as TelegramMessage)),
       conversationLogger: null as never,

@@ -1,10 +1,8 @@
 // src/services/event/event-service.ts
 
-import { DEFAULTS } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
-import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
 import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
 import type { ReminderMaterializer } from '../notification/materializer.ts';
@@ -19,7 +17,6 @@ export interface FreeSlot {
 
 export interface EventServiceDeps {
   eventRepo: EventRepository;
-  reminderRepo: ReminderRepository;
   materializer?: ReminderMaterializer;
   participantRepo?: ParticipantRepository;
   groupMemberRepo?: GroupMemberRepository;
@@ -29,7 +26,6 @@ export interface EventServiceDeps {
 
 export class EventService {
   private eventRepo: EventRepository;
-  private reminderRepo: ReminderRepository;
   private materializer?: ReminderMaterializer;
   private participantRepo?: ParticipantRepository;
   private groupMemberRepo?: GroupMemberRepository;
@@ -38,7 +34,6 @@ export class EventService {
 
   constructor(deps: EventServiceDeps) {
     this.eventRepo = deps.eventRepo;
-    this.reminderRepo = deps.reminderRepo;
     this.materializer = deps.materializer;
     this.participantRepo = deps.participantRepo;
     this.groupMemberRepo = deps.groupMemberRepo;
@@ -48,10 +43,6 @@ export class EventService {
 
   createEvent(data: CreateEventData): CalendarEvent {
     const event = this.eventRepo.create(data);
-    const reminderMinutes = data.reminder_minutes ?? [DEFAULTS.REMINDER_MINUTES];
-    for (const mins of reminderMinutes) {
-      this.reminderRepo.create(event.id, mins);
-    }
     if (this.materializer) {
       // Prefer explicit reminder_minutes from CreateEventData over event.reminder_overrides
       // (reminder_minutes is not persisted to events.reminder_overrides in the DB)
