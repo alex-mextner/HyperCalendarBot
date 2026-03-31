@@ -10,7 +10,6 @@ import { migrations } from '../../src/database/migrations.ts';
 import { FeedbackRepository } from '../../src/database/repositories/feedback.repository.ts';
 import { IntentRepository } from '../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
-import type { WorkflowSessionStore } from '../../src/database/types.ts';
 import { IntentExecutor } from '../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../src/services/intent/intent-matcher.ts';
 

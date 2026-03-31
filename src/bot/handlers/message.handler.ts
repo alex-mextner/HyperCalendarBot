@@ -24,7 +24,13 @@ import type { SecretaryRepository } from '../../database/repositories/secretary.
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { CalendarEvent, NotificationPreferencesRow, NotificationPreferencesUpdate, User, UserCallSettings } from '../../database/types.ts';
+import type {
+  CalendarEvent,
+  NotificationPreferencesRow,
+  NotificationPreferencesUpdate,
+  User,
+  UserCallSettings,
+} from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
