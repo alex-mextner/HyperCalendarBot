@@ -38,6 +38,7 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
 export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
+  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd HH:mm');
 
   const tzUpdatedAt = ctx.user.timezone_updated_at;
   const tzFreshness = tzUpdatedAt
@@ -65,12 +66,13 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
 - Language: ${ctx.user.language}
 - Timezone: ${ctx.user.timezone} (${utcOffset})
+- Current local time: ${nowLocal}
 - ${tzFreshness}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 ${ctx.secretary?.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretary?.secretaryForLine}` : ''}
 ${memorySection}
 ## Context
-- Each message includes a UTC timestamp in brackets, e.g. [2026-03-18 10:30]. Use it as the current-time anchor. Convert to the user's local time by adding the offset (${utcOffset}).
+- "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min"). "next week" → calculate("2026-03-18 + 7days"). "in 2 weeks" → calculate("2026-03-18 + 2weeks"). "next month" → calculate("2026-03-18 + 1month"). "next year" → calculate("2026-03-18 + 1year"). "how long is this meeting" → calculate("2026-03-18T18:00:00Z - 2026-03-18T17:00:00Z"). If calculate returns an error, report it to the user — do not compute manually.
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.

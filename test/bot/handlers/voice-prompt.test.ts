@@ -109,11 +109,16 @@ describe('voice response prompt', () => {
       // AI was called
       expect(deps.agent.run).toHaveBeenCalledTimes(1);
 
-      // send was called for the prompt
-      expect(ctx.send).toHaveBeenCalledTimes(1);
-      const sendCall = ctx.send.mock.calls[0] as unknown[];
-      expect(sendCall[0] as string).toContain('голосовые ответы');
-      expect((sendCall[1] as { reply_markup: unknown })?.reply_markup).toBeDefined();
+      // send called twice: transcription blockquote + voice prompt
+      expect(ctx.send).toHaveBeenCalledTimes(2);
+      // First call: transcription as collapsed blockquote
+      const transcriptionCall = ctx.send.mock.calls[0] as unknown[];
+      expect(transcriptionCall[0] as string).toContain('blockquote expandable');
+      expect(transcriptionCall[0] as string).toContain('создай встречу на завтра');
+      // Second call: voice prompt
+      const promptCall = ctx.send.mock.calls[1] as unknown[];
+      expect(promptCall[0] as string).toContain('голосовые ответы');
+      expect((promptCall[1] as { reply_markup: unknown })?.reply_markup).toBeDefined();
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -128,7 +133,10 @@ describe('voice response prompt', () => {
       const ctx = makeVoiceCtx({ voice_response_enabled: 0 });
       await handler(ctx as never);
 
-      expect(ctx.send).not.toHaveBeenCalled();
+      // Only the transcription blockquote, no prompt
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const call = ctx.send.mock.calls[0] as unknown[];
+      expect(call[0] as string).toContain('blockquote expandable');
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -143,7 +151,10 @@ describe('voice response prompt', () => {
       const ctx = makeVoiceCtx({ voice_response_enabled: 1 });
       await handler(ctx as never);
 
-      expect(ctx.send).not.toHaveBeenCalled();
+      // Only the transcription blockquote, no prompt
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const call = ctx.send.mock.calls[0] as unknown[];
+      expect(call[0] as string).toContain('blockquote expandable');
     } finally {
       globalThis.fetch = originalFetch;
     }

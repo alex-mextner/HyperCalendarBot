@@ -100,10 +100,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toMatch(/UTC\+\d/);
   });
 
-  test('does not include current date/time (injected per-message instead)', () => {
+  test('includes current local time for accurate time comparisons', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).not.toContain('Current local time');
-    expect(prompt).not.toContain('Current UTC time');
+    expect(prompt).toContain('Current local time:');
+    expect(prompt).toContain('authoritative clock');
   });
 
   test('instructs to create events immediately without confirmation', () => {

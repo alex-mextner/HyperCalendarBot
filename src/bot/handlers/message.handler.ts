@@ -73,6 +73,7 @@ import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { escapeHtml } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -395,6 +396,11 @@ async function handleVoiceMessage(
     }
 
     cmdLogger.info({ userId: user.telegram_id, transcription: transcription.slice(0, 100) }, 'Voice transcribed');
+
+    // Show transcription to user as collapsed blockquote before AI response
+    await ctx.send(`<blockquote expandable>🎤 <i>${escapeHtml(transcription)}</i></blockquote>`, {
+      parse_mode: 'HTML',
+    });
 
     const logChatId = Number(chatId) !== user.telegram_id ? Number(chatId) : undefined;
     const chatHistoryId = deps.conversationLogger.logUserMessage(user.telegram_id, transcription, logChatId);

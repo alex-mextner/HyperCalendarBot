@@ -1,4 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
@@ -24,9 +26,9 @@ interface MessageParam {
   content: string | Anthropic.ContentBlockParam[];
 }
 
-function withTimestamp(text: string, createdAt: string): string {
-  const ts = createdAt.slice(0, 19);
-  return `[${ts}] ${text}`;
+function withTimestamp(text: string, createdAt: string, timezone: string): string {
+  const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm');
+  return `[${local}] ${text}`;
 }
 
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
@@ -112,9 +114,13 @@ export class CalendarBotAgent {
       } else {
         const activityResult = ActivityEventCodec.safeParse(msg.content);
         if (activityResult.success) {
-          content = withTimestamp(formatActivityEvent(activityResult.data as ActivityEvent), msg.created_at);
+          content = withTimestamp(
+            formatActivityEvent(activityResult.data as ActivityEvent),
+            msg.created_at,
+            ctx.user.timezone,
+          );
         } else {
-          content = withTimestamp(msg.content, msg.created_at);
+          content = withTimestamp(msg.content, msg.created_at, ctx.user.timezone);
         }
       }
       const role = msg.role === 'tool' ? 'user' : msg.role;
