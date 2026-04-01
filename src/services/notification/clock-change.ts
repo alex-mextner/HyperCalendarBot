@@ -1,7 +1,5 @@
 import { TZDate } from '@date-fns/tz';
-import type { Lang } from '../../config/constants.ts';
-import { t } from '../../config/constants.ts';
-import { ruPlural } from '../event/formatters.ts';
+import { type Lang, t } from '../../config/constants.ts';
 
 export interface ClockChangeInfo {
   direction: 'forward' | 'back';
@@ -33,17 +31,18 @@ export function detectClockChange(timezone: string, localDateIso: string): Clock
   };
 }
 
-function formatDuration(lang: string, minutes: number): string {
+function formatDuration(lang: Lang, minutes: number): string {
+  const msgs = t(lang).notifications;
   const hours = minutes / 60;
   if (Number.isInteger(hours)) {
-    return lang === 'ru' ? `${hours} ${ruPlural(hours, 'час', 'часа', 'часов')}` : `${hours}h`;
+    return msgs.durationHours(hours);
   }
-  return lang === 'ru' ? `${minutes} ${ruPlural(minutes, 'минуту', 'минуты', 'минут')}` : `${minutes} min`;
+  return msgs.durationMinutes(minutes);
 }
 
-export function formatClockChangeNotice(lang: string, info: ClockChangeInfo): string {
+export function formatClockChangeNotice(lang: Lang, info: ClockChangeInfo): string {
   const duration = formatDuration(lang, info.minutes);
-  const msgs = t(lang as Lang).notifications;
+  const msgs = t(lang).notifications;
 
   if (info.direction === 'forward') {
     return msgs.clockChangeForward(duration);

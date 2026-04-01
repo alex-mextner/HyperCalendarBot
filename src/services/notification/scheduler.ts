@@ -1,6 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
+import { toLang } from '../../config/constants.ts';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -289,7 +290,7 @@ export class NotificationScheduler {
       const occurrences = this.deps.getEventsInRange(pref.user_id, dayStart, dayEnd);
       const clockChange = detectClockChange(pref.timezone, localTodayIso);
       const refKey = `ma:${pref.user_id}:${localTodayIso}`;
-      const lang = pref.language ?? 'en';
+      const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
@@ -325,7 +326,7 @@ export class NotificationScheduler {
         const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
         const clockChange = detectClockChange(user.timezone, localTodayIso);
         if (!clockChange) continue;
-        const lang = user.language ?? 'en';
+        const lang = toLang(user.language);
         const refKey = `cc:${user.telegram_id}:${localTodayIso}`;
         const payload = formatClockChangeNotice(lang, clockChange);
         const logId = this.deps.logRepo.insert({

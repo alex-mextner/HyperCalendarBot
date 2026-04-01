@@ -482,6 +482,8 @@ export const MSG = {
         'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
       freeDayEvening:
         'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
+      durationHours: (h: number) => `${h}h`,
+      durationMinutes: (m: number) => `${m} min`,
       clockChangeForward: (duration: string) =>
         `🕐 Clocks moved ${duration} forward last night. Double-check your alarms and meetings!`,
       clockChangeBack: (duration: string) =>
@@ -919,6 +921,8 @@ export const MSG = {
         'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
       freeDayEvening:
         'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
+      durationHours: (h: number) => `${h} ${ruPlural(h, 'час', 'часа', 'часов')}`,
+      durationMinutes: (m: number) => `${m} ${ruPlural(m, 'минуту', 'минуты', 'минут')}`,
       clockChangeForward: (duration: string) =>
         `🕐 Сегодня ночью часы перевели на ${duration} вперёд. Проверь, что будильник и встречи правильно настроены!`,
       clockChangeBack: (duration: string) =>
@@ -944,6 +948,12 @@ export const MSG = {
 
 export type Lang = keyof typeof MSG;
 export type Messages = (typeof MSG)[Lang];
+
+/** Validate a string to Lang, defaulting to 'en' for unknown values. */
+export function toLang(value: string | null | undefined): Lang {
+  if (value === 'ru' || value === 'en') return value;
+  return 'en';
+}
 
 export function t(lang: Lang): Messages {
   return MSG[lang] || MSG.en;

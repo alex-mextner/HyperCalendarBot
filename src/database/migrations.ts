@@ -908,4 +908,10 @@ export const migrations: Migration[] = [
       db.exec('CREATE INDEX IF NOT EXISTS idx_users_timezone ON users(timezone)');
     },
   },
+  {
+    name: '049_drop_unused_idx_users_timezone',
+    up: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_users_timezone');
+    },
+  },
 ];
