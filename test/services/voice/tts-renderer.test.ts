@@ -100,6 +100,24 @@ describe('renderMorningAgendaForSpeech', () => {
     expect(text).not.toContain('__');
     expect(text).not.toContain('#');
   });
+
+  test('renders all-day event without time in Russian', () => {
+    const allDayEvents = [
+      { title: 'Зарплата', startTime: '02:00', duration: '24ч', isAllDay: true },
+      { title: 'English', startTime: '13:30', duration: '1ч' },
+    ];
+    const text = renderMorningAgendaForSpeech({ lang: 'ru', dateLabel: 'среда, 1 апреля', events: allDayEvents });
+    expect(text).toContain('Зарплата, весь день.');
+    expect(text).not.toContain('02:00');
+    expect(text).toContain('13:30 — English, 1ч.');
+  });
+
+  test('renders all-day event without time in English', () => {
+    const allDayEvents = [{ title: 'Payday', startTime: '00:00', duration: '24h', isAllDay: true }];
+    const text = renderMorningAgendaForSpeech({ lang: 'en', dateLabel: 'Wednesday, April 1', events: allDayEvents });
+    expect(text).toContain('Payday, all day.');
+    expect(text).not.toContain('00:00');
+  });
 });
 
 describe('renderEveningReviewForSpeech', () => {
@@ -127,6 +145,17 @@ describe('renderEveningReviewForSpeech', () => {
     const text = renderEveningReviewForSpeech({ lang: 'en', dateLabel: 'Friday, March 20', events });
     expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
     expect(text).not.toContain('**');
+  });
+
+  test('renders all-day event without time in English', () => {
+    const allDayEvents = [
+      { title: 'Holiday', startTime: '00:00', duration: '24h', isAllDay: true },
+      { title: 'Meeting', startTime: '14:00', duration: '1h' },
+    ];
+    const text = renderEveningReviewForSpeech({ lang: 'en', dateLabel: 'Friday, March 20', events: allDayEvents });
+    expect(text).toContain('Holiday, all day.');
+    expect(text).not.toContain('00:00');
+    expect(text).toContain('14:00 — Meeting, 1h.');
   });
 });
 
@@ -162,6 +191,24 @@ describe('renderWeeklyDigestForSpeech', () => {
     const text = renderWeeklyDigestForSpeech({ lang: 'en', weekRange: 'Mar 20-26', days });
     expect(text).not.toMatch(/[\u{1F300}-\u{1FFFF}]/u);
     expect(text).not.toContain('**');
+  });
+
+  test('renders all-day event without time in weekly digest', () => {
+    const daysWithAllDay = [
+      { dayLabel: 'Mon', events: [{ title: 'Holiday', startTime: '00:00', isAllDay: true }] },
+      { dayLabel: 'Tue', events: [{ title: 'Standup', startTime: '09:00' }] },
+    ];
+    const text = renderWeeklyDigestForSpeech({ lang: 'en', weekRange: 'Mar 20-26', days: daysWithAllDay });
+    expect(text).toContain('Holiday, all day');
+    expect(text).not.toContain('at 00:00');
+    expect(text).toContain('Standup at 09:00');
+  });
+
+  test('renders all-day event without time in Russian weekly digest', () => {
+    const daysWithAllDay = [{ dayLabel: 'Пн', events: [{ title: 'Праздник', startTime: '00:00', isAllDay: true }] }];
+    const text = renderWeeklyDigestForSpeech({ lang: 'ru', weekRange: '20-26 мар', days: daysWithAllDay });
+    expect(text).toContain('Праздник, весь день');
+    expect(text).not.toContain('в 00:00');
   });
 });
 

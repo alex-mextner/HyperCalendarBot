@@ -219,6 +219,82 @@ describe('NotificationRenderer', () => {
     });
   });
 
+  describe('renderMorningAgenda – all-day events', () => {
+    test('renders all-day event without time in Russian', () => {
+      const result = renderer.renderMorningAgenda('ru', 'среда, апреля 1', [
+        {
+          title: 'Зарплата как CTO',
+          startTime: '02:00',
+          endTime: '02:00',
+          location: null,
+          duration: '24ч',
+          isAllDay: true,
+        },
+        { title: 'English', startTime: '13:30', endTime: '14:30', location: null, duration: '1ч' },
+      ]);
+      expect(result.text).toContain('📅 Зарплата как CTO (Весь день)');
+      expect(result.text).not.toContain('02:00');
+      expect(result.text).toContain('13:30 — English (1ч)');
+    });
+
+    test('renders all-day event without time in English', () => {
+      const result = renderer.renderMorningAgenda('en', 'Wednesday, April 1', [
+        { title: 'Payday', startTime: '00:00', endTime: '00:00', location: null, duration: '24h', isAllDay: true },
+      ]);
+      expect(result.text).toContain('📅 Payday (All day)');
+      expect(result.text).not.toContain('00:00');
+    });
+
+    test('renders all-day event with location', () => {
+      const result = renderer.renderMorningAgenda('ru', 'среда, апреля 1', [
+        {
+          title: 'Конференция',
+          startTime: '00:00',
+          endTime: '00:00',
+          location: 'Офис',
+          duration: '24ч',
+          isAllDay: true,
+        },
+      ]);
+      expect(result.text).toContain('📅 Конференция (Весь день)');
+      expect(result.text).toContain('📍 Офис');
+    });
+  });
+
+  describe('renderEveningReview – all-day events', () => {
+    test('renders all-day event without time in Russian', () => {
+      const result = renderer.renderEveningReview('ru', 'четверг, 2 апреля', [
+        { title: 'Праздник', startTime: '00:00', endTime: '00:00', location: null, duration: '24ч', isAllDay: true },
+      ]);
+      expect(result.text).toContain('📅 Праздник (Весь день)');
+      expect(result.text).not.toContain('00:00');
+    });
+
+    test('renders all-day event without time in English', () => {
+      const result = renderer.renderEveningReview('en', 'Thursday, April 2', [
+        { title: 'Holiday', startTime: '00:00', endTime: '00:00', location: null, duration: '24h', isAllDay: true },
+        { title: 'Meeting', startTime: '14:00', endTime: '15:00', location: null, duration: '1h' },
+      ]);
+      expect(result.text).toContain('📅 Holiday (All day)');
+      expect(result.text).toContain('14:00 — Meeting (1h)');
+    });
+
+    test('footer uses localized "tomorrow" in Russian', () => {
+      const result = renderer.renderEveningReview('ru', 'четверг, 2 апреля', [
+        { title: 'Встреча', startTime: '14:00', endTime: '15:00', location: null, duration: '1ч' },
+      ]);
+      expect(result.text).toContain('1 событие завтра.');
+      expect(result.text).not.toContain('tomorrow');
+    });
+
+    test('footer uses "tomorrow" in English', () => {
+      const result = renderer.renderEveningReview('en', 'Thursday, April 2', [
+        { title: 'Meeting', startTime: '14:00', endTime: '15:00', location: null, duration: '1h' },
+      ]);
+      expect(result.text).toContain('1 event tomorrow.');
+    });
+  });
+
   describe('renderMorningAgenda – free day', () => {
     test('renders free-day message in English', () => {
       const result = renderer.renderMorningAgenda('en', 'Sunday, March 15', []);

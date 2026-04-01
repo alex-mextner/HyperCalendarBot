@@ -1,5 +1,7 @@
 // src/config/constants.ts
 
+import { ruPlural } from '../services/event/formatters.ts';
+
 // Rate limits
 export const RATE_LIMIT = {
   MESSAGES_PER_MINUTE: 30,
@@ -452,6 +454,42 @@ export const MSG = {
       proposalRejectedNotification: '❌ Your edit proposal was rejected.',
       feedbackThreadResolved: 'Your feedback thread has been resolved.',
     },
+    notifications: {
+      morning: "Good morning! Here's your day:",
+      morningFree: 'Good morning!',
+      evening: "Tomorrow's schedule:",
+      eveningFree: 'Good evening!',
+      reminder: 'Reminder:',
+      reminders: 'Reminders',
+      inLabel: 'in',
+      startingNow: 'starting now!',
+      eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
+      goodNight: 'Good night!',
+      tomorrow: 'tomorrow',
+      haveADay: 'Have a productive day!',
+      eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
+      weeklyDigest: (range: string) => `📅 Week ${range}:`,
+      noEvents: 'no events',
+      allDay: 'All day',
+      freeDayMorning:
+        'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
+      freeDayEvening:
+        'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
+    },
+    speech: {
+      allDay: 'all day',
+      noEvents: 'no events',
+      at: 'at',
+      morningIntro: (dateLabel: string) => `Good morning. Today, ${dateLabel}.`,
+      morningOutro: 'Have a productive day!',
+      eveningIntro: (dateLabel: string) => `Good evening. Tomorrow, ${dateLabel}.`,
+      eveningOutro: 'Good night!',
+      weeklyDigestIntro: (weekRange: string) => `Weekly digest for the week of ${weekRange}.`,
+      reminderIntro: (cleanTitle: string, timeStr: string) => `Calendar reminder. ${cleanTitle} at ${timeStr}.`,
+      location: (loc: string) => `Location: ${loc}.`,
+      batchIntro: (count: number) => `Calendar reminder. ${count} ${count === 1 ? 'event' : 'events'} starting soon:`,
+      eventAt: (title: string, timeStr: string) => `${title} at ${timeStr}.`,
+    },
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -841,6 +879,43 @@ export const MSG = {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
         return `Уже ${map[status] ?? status}`;
       },
+    },
+    notifications: {
+      morning: 'Доброе утро! Ваш день:',
+      morningFree: 'Доброе утро!',
+      evening: 'Расписание на завтра:',
+      eveningFree: 'Добрый вечер!',
+      reminder: 'Напоминание:',
+      reminders: 'Напоминания',
+      inLabel: 'через',
+      startingNow: 'начинается!',
+      eventsCount: (n: number) => `${n} ${ruPlural(n, 'событие', 'события', 'событий')}`,
+      goodNight: 'Спокойной ночи!',
+      tomorrow: 'завтра',
+      haveADay: 'Продуктивного дня!',
+      eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
+      weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
+      noEvents: 'нет событий',
+      allDay: 'Весь день',
+      freeDayMorning:
+        'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
+      freeDayEvening:
+        'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
+    },
+    speech: {
+      allDay: 'весь день',
+      noEvents: 'нет событий',
+      at: 'в',
+      morningIntro: (dateLabel: string) => `Доброе утро. Сегодня, ${dateLabel}.`,
+      morningOutro: 'Продуктивного дня!',
+      eveningIntro: (dateLabel: string) => `Добрый вечер. Завтра, ${dateLabel}.`,
+      eveningOutro: 'Спокойной ночи!',
+      weeklyDigestIntro: (weekRange: string) => `Еженедельный дайджест на неделю ${weekRange}.`,
+      reminderIntro: (cleanTitle: string, timeStr: string) => `Календарное напоминание. ${cleanTitle} в ${timeStr}.`,
+      location: (loc: string) => `Место: ${loc}.`,
+      batchIntro: (count: number) =>
+        `Календарное напоминание. ${count} ${ruPlural(count, 'событие', 'события', 'событий')} начинаются скоро:`,
+      eventAt: (title: string, timeStr: string) => `${title} в ${timeStr}.`,
     },
   },
 } as const;

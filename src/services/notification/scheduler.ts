@@ -44,7 +44,8 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
     } else {
       duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
     }
-    return { title: occ.event.title, startTime, endTime, location: occ.event.location, duration };
+    const isAllDay = occ.event.all_day === 1;
+    return { title: occ.event.title, startTime, endTime, location: occ.event.location, duration, isAllDay };
   });
 }
 
@@ -430,6 +431,7 @@ export class NotificationScheduler {
             events: dayOccs.map((occ) => ({
               title: occ.event.title,
               startTime: format(new TZDate(occ.occurrence_start, pref.timezone), 'HH:mm'),
+              isAllDay: occ.event.all_day === 1,
             })),
           });
         }
