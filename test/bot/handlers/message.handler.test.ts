@@ -14,7 +14,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
     chatHistory: {},
     conversationLogger: { logUserMessage: mock(() => {}), logBotResponse: mock(() => {}) },
     userRepo: {},
-    reminderRepo: {},
+    eventReminderRepo: {},
     sceneStorage: { get: mock(() => Promise.resolve(null)) },
     botUsername: 'TestBot',
     ...overrides,

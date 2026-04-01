@@ -7,7 +7,6 @@ import { EventRepository } from '../../../../src/database/repositories/event.rep
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { NotificationPreferencesRepository } from '../../../../src/database/repositories/notification-preferences.repository.ts';
-import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
 import { handleCreateBirthdayEvent } from '../../../../src/services/ai/tool-handlers/birthdays.ts';
@@ -34,7 +33,6 @@ describe('handleCreateBirthdayEvent', () => {
     db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     const metaRepo = new BirthdayMetadataRepository(db);
@@ -45,7 +43,7 @@ describe('handleCreateBirthdayEvent', () => {
     userRepo.create({ telegram_id: CELEBRANT_ID, first_name: 'Ivan', username: 'ivan_t', timezone: 'UTC' });
 
     birthdayService = new BirthdayService(eventRepo, metaRepo, eventReminderRepo, prefsRepo);
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
 
     ctx = {
@@ -58,7 +56,7 @@ describe('handleCreateBirthdayEvent', () => {
       chatHistory: chatHistoryRepo,
       conversationLogger: null as never,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       birthday: { birthdayService, userMemoryRepo: undefined as never },
     };
   });

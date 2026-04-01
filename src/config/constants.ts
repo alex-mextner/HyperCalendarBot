@@ -359,7 +359,14 @@ export const MSG = {
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
         remindersSet: (title: string, descriptions: string) => `Reminders set for "${title}": ${descriptions}`,
+        remindersDisabled: (title: string) => `All reminders disabled for "${title}".`,
         remindersFor: (title: string, lines: string) => `Reminders for "${title}": ${lines}`,
+        durationMin: (n: number) => `${n}min`,
+        durationHourMin: (h: number, m: number) => (m > 0 ? `${h}h ${m}m` : `${h}h`),
+        beforeDuration: (dur: string) => `${dur} before`,
+        noEventsForQuery: (query: string) => `No events found for "${query}".`,
+        noRemindersLabel: 'No reminders',
+        noRemindersFound: 'No reminders found.',
       },
       sharing: {
         eventShared: (title: string, id: number, targetType: string, targetId: number) =>
@@ -782,7 +789,14 @@ export const MSG = {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
         remindersSet: (title: string, descriptions: string) =>
           `Напоминания для «${title}» установлены: ${descriptions}`,
+        remindersDisabled: (title: string) => `Все напоминания для «${title}» отключены.`,
         remindersFor: (title: string, lines: string) => `Напоминания для «${title}»: ${lines}`,
+        durationMin: (n: number) => `${n}мин`,
+        durationHourMin: (h: number, m: number) => (m > 0 ? `${h}ч ${m}мин` : `${h}ч`),
+        beforeDuration: (dur: string) => `за ${dur}`,
+        noEventsForQuery: (query: string) => `По запросу «${query}» событий не найдено.`,
+        noRemindersLabel: 'Без напоминаний',
+        noRemindersFound: 'Напоминаний не найдено.',
       },
       sharing: {
         eventShared: (title: string, id: number, targetType: string, targetId: number) =>

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
@@ -28,7 +28,7 @@ describe('buildSystemPrompt', () => {
     db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     const user = userRepo.create({
@@ -38,7 +38,7 @@ describe('buildSystemPrompt', () => {
       timezone: 'Europe/Kyiv',
       language: 'en',
     });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user,
@@ -49,7 +49,7 @@ describe('buildSystemPrompt', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });

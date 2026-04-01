@@ -12,7 +12,7 @@ function makeCtx(overrides: { [key: string]: unknown } = {}) {
     holidayService: {} as never,
     chatHistory: {} as never,
     userRepo: { findByTelegramId: () => null } as never,
-    reminderRepo: {} as never,
+    eventReminderRepo: {} as never,
     sendMessageToChat: mock(async () => ({ message_id: 1 })),
     botUsername: 'mybot',
     ...overrides,

@@ -31,7 +31,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     chatHistory: {} as never,
     conversationLogger: {} as never,
     userRepo: {} as never,
-    reminderRepo: {} as never,
+    eventReminderRepo: {} as never,
     ...overrides,
   };
 }

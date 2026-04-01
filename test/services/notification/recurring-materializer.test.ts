@@ -4,7 +4,6 @@ import { migrations } from '../../../src/database/migrations.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -245,10 +244,8 @@ describe('Recurring reminder materialization', () => {
 
   describe('EventService integration with recurring materializer', () => {
     test('createEvent materializes reminders for upcoming recurring occurrences', () => {
-      const reminderRepo = new ReminderRepository(db);
       const svc = new EventService({
         eventRepo,
-        reminderRepo,
         materializer,
       });
 
@@ -273,10 +270,8 @@ describe('Recurring reminder materialization', () => {
     });
 
     test('updateEvent re-materializes recurring occurrences', () => {
-      const reminderRepo = new ReminderRepository(db);
       const svc = new EventService({
         eventRepo,
-        reminderRepo,
         materializer,
       });
 

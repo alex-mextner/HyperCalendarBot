@@ -2,7 +2,6 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations';
 import { EventRepository } from '../../../src/database/repositories/event.repository';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository';
 import { UserRepository } from '../../../src/database/repositories/user.repository';
 import { runMigrations } from '../../../src/database/schema';
@@ -26,8 +25,7 @@ describe('SharingService', () => {
     const userRepo = new UserRepository(db);
     userRepo.create({ telegram_id: USER_ID });
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const settingsRepo = new SharingSettingsRepository(db);
     const privacyService = new PrivacyService(settingsRepo);
     const service = new SharingService(

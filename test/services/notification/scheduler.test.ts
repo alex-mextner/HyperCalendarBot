@@ -5,7 +5,6 @@ import { EventRepository } from '../../../src/database/repositories/event.reposi
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from '../../../src/database/repositories/notification-preferences.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence, NotificationLogRow } from '../../../src/database/types.ts';
@@ -22,7 +21,6 @@ function setupDb(): Database {
 function makeGetEventsInRange(db: Database): (userId: number, startUtc: string, endUtc: string) => EventOccurrence[] {
   const eventService = new EventService({
     eventRepo: new EventRepository(db),
-    reminderRepo: new ReminderRepository(db),
   });
   return (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc);
 }

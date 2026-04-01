@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
@@ -175,7 +175,7 @@ describe('acceptInvitation — adds participant', () => {
     participantRepo = new ParticipantRepository(db);
     invitationRepo = new InvitationRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
-    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
+    eventService = new EventService({ eventRepo });
     invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettings, participantRepo);
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
@@ -311,7 +311,7 @@ describe('acceptInvitation — conflict warnings', () => {
     invitationRepo = new InvitationRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
     const conflictChecker = new ConflictChecker(eventRepo);
-    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
+    eventService = new EventService({ eventRepo });
     invitationService = new InvitationService(
       invitationRepo,
       eventRepo,
@@ -425,7 +425,7 @@ describe('calendar views show participated events', () => {
     const userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
-    eventService = new EventService({ eventRepo, reminderRepo: new ReminderRepository(db) });
+    eventService = new EventService({ eventRepo });
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
@@ -520,7 +520,7 @@ describe('invitee deletes shared event = decline', () => {
   let eventRepo: EventRepository;
   let participantRepo: ParticipantRepository;
   let eventService: EventService;
-  let reminderRepo: ReminderRepository;
+  let eventReminderRepo: EventReminderRepository;
   let chatHistory: ChatHistoryRepository;
   let userRepo: UserRepository;
   let inviteeUser: User;
@@ -535,7 +535,7 @@ describe('invitee deletes shared event = decline', () => {
       holidayService: {} as HolidayService,
       chatHistory,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       participantRepo,
       conversationLogger: null as never,
     };
@@ -546,9 +546,9 @@ describe('invitee deletes shared event = decline', () => {
     userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
-    reminderRepo = new ReminderRepository(db);
+    eventReminderRepo = new EventReminderRepository(db);
     chatHistory = new ChatHistoryRepository(db);
-    eventService = new EventService({ eventRepo, reminderRepo });
+    eventService = new EventService({ eventRepo });
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
     inviteeUser = userRepo.findByTelegramId(INVITEE)!;
@@ -635,7 +635,6 @@ describe('creator delete notifies participants', () => {
   let eventRepo: EventRepository;
   let participantRepo: ParticipantRepository;
   let eventService: EventService;
-  let reminderRepo: ReminderRepository;
   let userRepo: UserRepository;
 
   beforeEach(() => {
@@ -643,7 +642,6 @@ describe('creator delete notifies participants', () => {
     userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
-    reminderRepo = new ReminderRepository(db);
     userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
@@ -652,7 +650,6 @@ describe('creator delete notifies participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
-      reminderRepo,
       participantRepo,
       onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
@@ -678,7 +675,6 @@ describe('creator delete notifies participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
-      reminderRepo,
       participantRepo,
       onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
@@ -701,7 +697,6 @@ describe('creator delete notifies participants', () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
-      reminderRepo,
       participantRepo,
       onParticipantsNotify: (userIds, text) => {
         notified.push({ userIds, text });
@@ -730,7 +725,7 @@ describe('full shared event lifecycle', () => {
   let eventService: EventService;
   let invitationService: InvitationService;
   let userRepo: UserRepository;
-  let reminderRepo: ReminderRepository;
+  let eventReminderRepo: EventReminderRepository;
   let chatHistory: ChatHistoryRepository;
 
   const ALICE = 100; // creator
@@ -742,11 +737,11 @@ describe('full shared event lifecycle', () => {
     eventRepo = new EventRepository(db);
     participantRepo = new ParticipantRepository(db);
     invitationRepo = new InvitationRepository(db);
-    reminderRepo = new ReminderRepository(db);
+    eventReminderRepo = new EventReminderRepository(db);
     chatHistory = new ChatHistoryRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
     const conflictChecker = new ConflictChecker(eventRepo);
-    eventService = new EventService({ eventRepo, reminderRepo });
+    eventService = new EventService({ eventRepo });
     invitationService = new InvitationService(
       invitationRepo,
       eventRepo,
@@ -809,7 +804,7 @@ describe('full shared event lifecycle', () => {
       holidayService: {} as HolidayService,
       chatHistory,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       participantRepo,
       conversationLogger: null as never,
     };

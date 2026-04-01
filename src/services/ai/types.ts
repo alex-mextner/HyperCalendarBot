@@ -6,13 +6,13 @@ import type { CalendarProposalRepository } from '../../database/repositories/cal
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
+import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { GroupMemberRepository } from '../../database/repositories/group-member.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
-import type { ReminderRepository } from '../../database/repositories/reminder.repository.ts';
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
@@ -153,7 +153,7 @@ export interface AgentContext {
   chatHistory: ChatHistoryRepository;
   conversationLogger: ConversationLogger;
   userRepo: UserRepository;
-  reminderRepo: ReminderRepository;
+  eventReminderRepo: EventReminderRepository;
 
   // Standalone optionals (contextual, not capability groups)
   /** Telegram message_id of the incoming message being processed. Used for set_reaction. */

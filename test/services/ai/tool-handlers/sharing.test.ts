@@ -5,10 +5,10 @@ import { ChatHistoryRepository } from '../../../../src/database/repositories/cha
 import { DeepLinkRepository } from '../../../../src/database/repositories/deep-link.repository.ts';
 import { EditProposalRepository } from '../../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
-import { ReminderRepository } from '../../../../src/database/repositories/reminder.repository.ts';
 import { SharedEventRepository } from '../../../../src/database/repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
@@ -45,7 +45,7 @@ describe('sharing tool handlers', () => {
   let db: Database;
   let userRepo: UserRepository;
   let eventRepo: EventRepository;
-  let reminderRepo: ReminderRepository;
+  let eventReminderRepo: EventReminderRepository;
   let eventService: EventService;
   let sharedEventRepo: SharedEventRepository;
   let invitationRepo: InvitationRepository;
@@ -65,7 +65,7 @@ describe('sharing tool handlers', () => {
       holidayService: new HolidayService(new HolidayRepository(db)),
       chatHistory: new ChatHistoryRepository(db),
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       sharing: {
         sharedEventRepo,
         invitationRepo,
@@ -84,13 +84,13 @@ describe('sharing tool handlers', () => {
     db = createTestDb();
     userRepo = new UserRepository(db);
     eventRepo = new EventRepository(db);
-    reminderRepo = new ReminderRepository(db);
+    eventReminderRepo = new EventReminderRepository(db);
     sharedEventRepo = new SharedEventRepository(db);
     invitationRepo = new InvitationRepository(db);
     sharingSettingsRepo = new SharingSettingsRepository(db);
     invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo);
     privacyService = new PrivacyService(sharingSettingsRepo);
-    eventService = new EventService({ eventRepo, reminderRepo });
+    eventService = new EventService({ eventRepo });
     sharingService = new SharingService(
       (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc),
       privacyService,

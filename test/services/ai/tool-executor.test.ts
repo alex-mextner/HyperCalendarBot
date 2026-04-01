@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
-import { ReminderRepository } from '../../../src/database/repositories/reminder.repository.ts';
 import { SharedEventRepository } from '../../../src/database/repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
@@ -33,11 +33,11 @@ describe('executeTool', () => {
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
-    const reminderRepo = new ReminderRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
     const chatHistoryRepo = new ChatHistoryRepository(db);
     const holidayRepo = new HolidayRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo, reminderRepo });
+    const eventService = new EventService({ eventRepo });
     const holidayService = new HolidayService(holidayRepo);
     ctx = {
       user: userRepo.findByTelegramId(USER_ID)!,
@@ -48,7 +48,7 @@ describe('executeTool', () => {
       holidayService,
       chatHistory: chatHistoryRepo,
       userRepo,
-      reminderRepo,
+      eventReminderRepo,
       conversationLogger: null as never,
     };
   });
@@ -204,7 +204,7 @@ describe('executeTool', () => {
       const db = createTestDb();
       const userRepo = new UserRepository(db);
       eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
+      const eventReminderRepo = new EventReminderRepository(db);
       const chatHistoryRepo = new ChatHistoryRepository(db);
       const holidayRepo = new HolidayRepository(db);
       invitationRepo = new InvitationRepository(db);
@@ -212,7 +212,7 @@ describe('executeTool', () => {
       sharedEventRepo = new SharedEventRepository(db);
 
       userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-      const eventService = new EventService({ eventRepo, reminderRepo });
+      const eventService = new EventService({ eventRepo });
       const holidayService = new HolidayService(holidayRepo);
       const invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettingsRepo);
       const privacyService = new PrivacyService(sharingSettingsRepo);
@@ -230,7 +230,7 @@ describe('executeTool', () => {
         holidayService,
         chatHistory: chatHistoryRepo,
         userRepo,
-        reminderRepo,
+        eventReminderRepo,
         sharing: {
           invitationService,
           invitationRepo,
@@ -490,12 +490,12 @@ describe('executeTool', () => {
       testDb = db;
       const userRepo = new UserRepository(db);
       const eventRepo = new EventRepository(db);
-      const reminderRepo = new ReminderRepository(db);
+      const eventReminderRepo = new EventReminderRepository(db);
       const chatHistoryRepo = new ChatHistoryRepository(db);
       const holidayRepo = new HolidayRepository(db);
       actionLogRepo = new ActionLogRepository(db);
       userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-      const eventService = new EventService({ eventRepo, reminderRepo });
+      const eventService = new EventService({ eventRepo });
       actionCtx = {
         user: userRepo.findByTelegramId(USER_ID)!,
         chatId: USER_ID,
@@ -505,7 +505,7 @@ describe('executeTool', () => {
         holidayService: new HolidayService(holidayRepo),
         chatHistory: chatHistoryRepo,
         userRepo,
-        reminderRepo,
+        eventReminderRepo,
         conversationLogger: null as never,
         actionLogRepo,
       };

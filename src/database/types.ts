@@ -61,13 +61,6 @@ export interface CalendarEvent {
   updated_at: string;
 }
 
-export interface Reminder {
-  id: number;
-  event_id: number;
-  minutes_before: number;
-  created_at: string;
-}
-
 // ── Input types ──
 
 export interface CreateUserData {

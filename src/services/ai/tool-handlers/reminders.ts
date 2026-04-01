@@ -1,4 +1,5 @@
-import { t } from '../../../config/constants.ts';
+import { type Lang, t } from '../../../config/constants.ts';
+import type { CalendarEvent } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
@@ -12,14 +13,14 @@ interface SetReminderInput {
   owner_id?: number;
 }
 
-function formatReminderDuration(minutesBefore: number, lang: string): string {
+export function formatReminderDuration(minutesBefore: number, lang: Lang): string {
+  const msgs = t(lang).aiTools.reminders;
   if (minutesBefore >= 60) {
     const hours = Math.floor(minutesBefore / 60);
     const mins = minutesBefore % 60;
-    if (lang === 'ru') return mins > 0 ? `${hours}ч ${mins}мин` : `${hours}ч`;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    return msgs.durationHourMin(hours, mins);
   }
-  return lang === 'ru' ? `${minutesBefore}мин` : `${minutesBefore}min`;
+  return msgs.durationMin(minutesBefore);
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
@@ -35,11 +36,17 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
-  const event =
+
+  const overridesJson = JSON.stringify(input.minutes_before);
+  const updated =
     scope === 'group'
-      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
-      : ctx.eventService.getEvent(input.event_id, userId);
-  if (!event) {
+      ? ctx.eventService.updateEventForGroup(input.event_id, ctx.groupChatId!, {
+          reminder_overrides: overridesJson,
+        })
+      : ctx.eventService.updateEvent(input.event_id, userId, {
+          reminder_overrides: overridesJson,
+        });
+  if (!updated) {
     return {
       success: false,
       error: `Event ${input.event_id} not found or not owned by you.`,
@@ -47,19 +54,33 @@ export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): T
   }
 
   const lang = ctx.user.language;
-  const reminders = ctx.reminderRepo.setForEvent(input.event_id, input.minutes_before);
-  const descriptions = reminders.map((r) => formatReminderDuration(r.minutes_before, lang));
+  if (input.minutes_before.length === 0) {
+    return {
+      success: true,
+      output: t(lang).aiTools.reminders.remindersDisabled(updated.title),
+    };
+  }
 
+  const descriptions = input.minutes_before.map((m) => formatReminderDuration(m, lang));
   return {
     success: true,
-    output: t(lang).aiTools.reminders.remindersSet(event.title, descriptions.join(', ')),
+    output: t(lang).aiTools.reminders.remindersSet(updated.title, descriptions.join(', ')),
   };
 }
 
 interface GetRemindersInput {
-  event_id: number;
+  event_id?: number;
+  event_ids?: number[];
+  query?: string;
   scope?: Scope;
   owner_id?: number;
+}
+
+function formatEventReminders(event: CalendarEvent, ctx: AgentContext, lang: Lang): string | null {
+  const reminders = ctx.eventReminderRepo.getForEvent(event.id).filter((r) => r.sent === 0);
+  if (reminders.length === 0) return null;
+  const durations = [...new Set(reminders.map((r) => formatReminderDuration(r.interval_minutes, lang)))];
+  return `"${event.title}" (id:${event.id}): ${durations.join(', ')}`;
 }
 
 export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput): ToolResult {
@@ -75,24 +96,90 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
   if (scope === 'group' && ctx.groupChatId === undefined) {
     return { success: false, error: 'Group context required for group scope' };
   }
-  const event =
-    scope === 'group'
-      ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
-      : ctx.eventService.getEvent(input.event_id, userId);
-  if (!event) {
-    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
-  }
-
-  const reminders = ctx.reminderRepo.getByEventId(input.event_id);
   const lang = ctx.user.language;
-  if (reminders.length === 0) {
-    return { success: true, output: t(lang).aiTools.reminders.noReminders(event.title) };
+
+  // Single event by ID
+  if (input.event_id !== undefined && input.event_ids === undefined && input.query === undefined) {
+    const event =
+      scope === 'group'
+        ? ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId!)
+        : ctx.eventService.getEvent(input.event_id, userId);
+    if (!event) {
+      return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+    }
+
+    const reminders = ctx.eventReminderRepo.getForEvent(input.event_id).filter((r) => r.sent === 0);
+    if (reminders.length === 0) {
+      return { success: true, output: t(lang).aiTools.reminders.noReminders(event.title) };
+    }
+    const lines = reminders.map((r) => {
+      const dur = formatReminderDuration(r.interval_minutes, lang);
+      return t(lang).aiTools.reminders.beforeDuration(dur);
+    });
+    const unique = [...new Set(lines)];
+    return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, unique.join(', ')) };
   }
 
-  const lines = reminders.map((r) => {
-    const dur = formatReminderDuration(r.minutes_before, lang);
-    return lang === 'ru' ? `за ${dur}` : `${dur} before`;
-  });
+  // Multiple events by IDs
+  if (input.event_ids !== undefined) {
+    const events: CalendarEvent[] = [];
+    for (const id of input.event_ids) {
+      const event =
+        scope === 'group'
+          ? ctx.eventService.getEventForGroup(id, ctx.groupChatId!)
+          : ctx.eventService.getEvent(id, userId);
+      if (event) events.push(event);
+    }
+    if (events.length === 0) {
+      return { success: false, error: 'None of the specified events were found.' };
+    }
+    return buildMultiEventResult(events, ctx, lang);
+  }
 
-  return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, lines.join(', ')) };
+  // Search by query
+  if (input.query !== undefined) {
+    const events =
+      scope === 'group'
+        ? ctx.eventService.searchEventsForGroup(ctx.groupChatId!, input.query)
+        : ctx.eventService.searchEvents(userId, input.query);
+    if (events.length === 0) {
+      return {
+        success: true,
+        output: t(lang).aiTools.reminders.noEventsForQuery(input.query),
+      };
+    }
+    return buildMultiEventResult(events, ctx, lang);
+  }
+
+  return { success: false, error: 'Provide event_id, event_ids, or query.' };
+}
+
+function buildMultiEventResult(events: CalendarEvent[], ctx: AgentContext, lang: Lang): ToolResult {
+  const withReminders: string[] = [];
+  const withoutReminders: string[] = [];
+
+  for (const event of events) {
+    const line = formatEventReminders(event, ctx, lang);
+    if (line) {
+      withReminders.push(line);
+    } else {
+      withoutReminders.push(`"${event.title}" (id:${event.id})`);
+    }
+  }
+
+  const parts: string[] = [];
+  if (withReminders.length > 0) {
+    parts.push(withReminders.join('\n'));
+  }
+  if (withoutReminders.length > 0) {
+    const label = t(lang).aiTools.reminders.noRemindersLabel;
+    parts.push(`${label}: ${withoutReminders.join(', ')}`);
+  }
+  if (parts.length === 0) {
+    return {
+      success: true,
+      output: t(lang).aiTools.reminders.noRemindersFound,
+    };
+  }
+  return { success: true, output: parts.join('\n') };
 }

@@ -896,4 +896,10 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '047_drop_legacy_reminders_table',
+    up: (db) => {
+      db.exec('DROP TABLE IF EXISTS reminders');
+    },
+  },
 ];
