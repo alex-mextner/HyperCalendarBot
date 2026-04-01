@@ -100,4 +100,32 @@ describe('UserRepository', () => {
   test('findManyByTelegramIds returns empty map for empty input', () => {
     expect(repo.findManyByTelegramIds([]).size).toBe(0);
   });
+
+  test('findTimezoneInfo returns only telegram_id, timezone, language', () => {
+    repo.create({ telegram_id: 1, username: 'alice' });
+    repo.create({ telegram_id: 2, username: 'bob', timezone: 'Europe/Berlin' });
+    const rows = repo.findTimezoneInfo(new Set());
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toHaveProperty('telegram_id');
+    expect(rows[0]).toHaveProperty('timezone');
+    expect(rows[0]).toHaveProperty('language');
+    // Should NOT have heavy columns like google_refresh_token_enc
+    expect(rows[0]).not.toHaveProperty('google_refresh_token_enc');
+    expect(rows[0]).not.toHaveProperty('username');
+  });
+
+  test('findTimezoneInfo excludes given IDs', () => {
+    repo.create({ telegram_id: 1 });
+    repo.create({ telegram_id: 2 });
+    repo.create({ telegram_id: 3 });
+    const rows = repo.findTimezoneInfo(new Set([1, 3]));
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.telegram_id).toBe(2);
+  });
+
+  test('findTimezoneInfo returns empty array when all excluded', () => {
+    repo.create({ telegram_id: 1 });
+    const rows = repo.findTimezoneInfo(new Set([1]));
+    expect(rows.length).toBe(0);
+  });
 });

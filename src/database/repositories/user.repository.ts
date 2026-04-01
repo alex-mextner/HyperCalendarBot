@@ -13,6 +13,16 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users').all() as User[];
   }
 
+  /** Lightweight query: only telegram_id, timezone, language. Excludes given IDs. */
+  findTimezoneInfo(excludeIds: Set<number>): Pick<User, 'telegram_id' | 'timezone' | 'language'>[] {
+    const rows = this.db.prepare('SELECT telegram_id, timezone, language FROM users').all() as Pick<
+      User,
+      'telegram_id' | 'timezone' | 'language'
+    >[];
+    if (excludeIds.size === 0) return rows;
+    return rows.filter((r) => !excludeIds.has(r.telegram_id));
+  }
+
   findManyByTelegramIds(ids: number[]): Map<number, User> {
     if (ids.length === 0) return new Map();
     const placeholders = ids.map(() => '?').join(',');

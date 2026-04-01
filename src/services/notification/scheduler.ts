@@ -318,9 +318,8 @@ export class NotificationScheduler {
     // 2b. Standalone clock-change notifications for users without morning agenda
     // Sent at 08:00 local time on the day of the DST transition.
     const morningUserIds = new Set(morningPrefs.map((p) => p.user_id));
-    const allUsers = this.deps.userRepo.findAll();
-    for (const user of allUsers) {
-      if (morningUserIds.has(user.telegram_id)) continue;
+    const clockCandidates = this.deps.userRepo.findTimezoneInfo(morningUserIds);
+    for (const user of clockCandidates) {
       if (!isLocalTimeInWindow(nowUtc, user.timezone, '08:00', 5)) continue;
       const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
       const clockChange = detectClockChange(user.timezone, localTodayIso);
