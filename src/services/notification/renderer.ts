@@ -1,3 +1,5 @@
+import type { Lang } from '../../config/constants.ts';
+import { t } from '../../config/constants.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
 
 export interface VoiceRenderInput {
@@ -75,69 +77,19 @@ export function localizeInterval(lang: string, label: string): string {
   return label;
 }
 
-const LABELS = {
-  en: {
-    morning: "Good morning! Here's your day:",
-    morningFree: 'Good morning!',
-    evening: "Tomorrow's schedule:",
-    eveningFree: 'Good evening!',
-    reminder: 'Reminder:',
-    reminders: 'Reminders',
-    inLabel: 'in',
-    startingNow: 'starting now!',
-    eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
-    goodNight: 'Good night!',
-    tomorrow: 'tomorrow',
-    haveADay: 'Have a productive day!',
-    eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
-    weeklyDigest: (range: string) => `📅 Week ${range}:`,
-    noEvents: 'no events',
-    allDay: 'All day',
-    freeDayMorning:
-      'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
-    freeDayEvening:
-      'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
-  },
-  ru: {
-    morning: 'Доброе утро! Ваш день:',
-    morningFree: 'Доброе утро!',
-    evening: 'Расписание на завтра:',
-    eveningFree: 'Добрый вечер!',
-    reminder: 'Напоминание:',
-    reminders: 'Напоминания',
-    inLabel: 'через',
-    startingNow: 'начинается!',
-    eventsCount: (n: number) => {
-      if (n === 1) return '1 событие';
-      if (n >= 2 && n <= 4) return `${n} события`;
-      return `${n} событий`;
-    },
-    goodNight: 'Спокойной ночи!',
-    tomorrow: 'завтра',
-    haveADay: 'Продуктивного дня!',
-    eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
-    weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
-    noEvents: 'нет событий',
-    allDay: 'Весь день',
-    freeDayMorning:
-      'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
-    freeDayEvening:
-      'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
-  },
-};
+type NotificationLabels = ReturnType<typeof t>['notifications'];
 
-function formatAgendaEventLine(e: AgendaEvent, l: (typeof LABELS)['en']): string {
+function formatAgendaEventLine(e: AgendaEvent, l: NotificationLabels): string {
   const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
   return e.location ? `${line}\n        📍 ${e.location}` : line;
 }
 
 function renderAgenda(
-  lang: string,
+  l: NotificationLabels,
   dateLabel: string,
   events: AgendaEvent[],
   config: { emoji: string; greeting: string; greetingFree: string; freeDay: string; footer: string },
 ): RenderedNotification {
-  const l = lang === 'ru' ? LABELS.ru : LABELS.en;
   const lines: string[] = [];
   if (events.length === 0) {
     lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`, '', config.freeDay);
@@ -153,8 +105,8 @@ function renderAgenda(
 
 export class NotificationRenderer {
   renderMorningAgenda(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
-    return renderAgenda(lang, dateLabel, events, {
+    const l = t(lang as Lang).notifications;
+    return renderAgenda(l, dateLabel, events, {
       emoji: '☀️',
       greeting: l.morning,
       greetingFree: l.morningFree,
@@ -164,7 +116,7 @@ export class NotificationRenderer {
   }
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const l = t(lang as Lang).notifications;
     const localized = localizeInterval(lang, data.intervalLabel);
     const lines: string[] = [];
     if (data.intervalLabel === 'at start') {
@@ -189,7 +141,7 @@ export class NotificationRenderer {
   }
 
   renderBatchReminder(lang: string, items: BatchReminderItem[]): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const l = t(lang as Lang).notifications;
     const lines: string[] = [];
     lines.push(`⏰ ${l.reminders}:`);
     lines.push('');
@@ -223,7 +175,7 @@ export class NotificationRenderer {
   }
 
   renderWeeklyDigest(lang: string, weekRange: string, days: WeeklyDigestDay[]): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const l = t(lang as Lang).notifications;
     const lines: string[] = [];
     lines.push(l.weeklyDigest(weekRange));
     lines.push('');
@@ -241,13 +193,13 @@ export class NotificationRenderer {
   }
 
   renderEveHoliday(lang: string, holidayName: string): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+    const l = t(lang as Lang).notifications;
     return { channel: 'telegram_text', text: l.eveHoliday(holidayName) };
   }
 
   renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = lang === 'ru' ? LABELS.ru : LABELS.en;
-    return renderAgenda(lang, dateLabel, events, {
+    const l = t(lang as Lang).notifications;
+    return renderAgenda(l, dateLabel, events, {
       emoji: '🌙',
       greeting: l.evening,
       greetingFree: l.eveningFree,

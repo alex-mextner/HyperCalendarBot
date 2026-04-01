@@ -504,17 +504,21 @@ All user-facing bot messages must follow these rules:
 - `ToolResult.output` strings have **two consumers**: the AI agent (which reformulates them) AND the
   intent engine (`IntentMatcherLayer`), which sends `output` **directly to the user** via `ctx.send()`
   when bypassing the AI. Write them as if they will be shown verbatim.
-- Make `output` strings **bilingual**. Use the `t(lang).aiTools.*` catalog from `src/config/constants.ts`:
+- **All user-facing strings must go through `t(lang)`** from `src/config/constants.ts`. Never use
+  inline `lang === 'ru' ? ... : ...` ternaries or `if (lang === 'ru')` branches for string selection.
+  Namespaces: `t(lang).aiTools.*` for tool outputs, `t(lang).notifications.*` for notification
+  renderers, `t(lang).speech.*` for TTS renderers. Add new strings to `MSG.en` and `MSG.ru`.
   ```ts
   import { t } from '../../../config/constants.ts';
   // static string:
   output: t(ctx.user.language).aiTools.history.notFound
   // dynamic string (function):
   output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id)
+  // notifications:
+  const l = t(lang as Lang).notifications;
+  // speech (TTS):
+  const s = t(lang as Lang).speech;
   ```
-  Add new strings to the `aiTools` namespace in `MSG.en` and `MSG.ru` in `constants.ts`.
-  Inline ternaries (`lang === 'ru' ? ... : ...`) are only acceptable for strings that use `ruPlural`
-  at the call site and cannot be expressed as simple catalog functions.
 - **Frame features as user benefit, not technical capability.** Never describe bot actions as surveillance
   or tracking ("отслеживать кто вышел"). Instead explain what the user gains:
   "автоматически обновлять групповой календарь когда участники приходят и уходят" (benefit)
