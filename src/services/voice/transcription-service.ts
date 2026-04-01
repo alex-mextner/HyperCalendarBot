@@ -1,8 +1,8 @@
 // src/services/voice/transcription-service.ts
 import { voiceLogger } from './types';
 
-const WHISPER_MODEL = 'openai/whisper-large-v3-turbo';
-const HF_INFERENCE_URL = `https://router.huggingface.co/hf-inference/models/${WHISPER_MODEL}`;
+const GROQ_WHISPER_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
+const WHISPER_MODEL = 'whisper-large-v3';
 
 export class TranscriptionService {
   private token: string;
@@ -14,18 +14,22 @@ export class TranscriptionService {
   async transcribe(audioBuffer: Buffer): Promise<string> {
     const startMs = Date.now();
 
-    const response = await fetch(HF_INFERENCE_URL, {
+    const form = new FormData();
+    form.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
+    form.append('model', WHISPER_MODEL);
+    form.append('response_format', 'json');
+
+    const response = await fetch(GROQ_WHISPER_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.token}`,
-        'Content-Type': 'audio/ogg',
       },
-      body: audioBuffer,
+      body: form,
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      voiceLogger.error({ status: response.status, body: body.slice(0, 200) }, 'Whisper API error');
+      voiceLogger.error({ status: response.status, body: body.slice(0, 200) }, 'Groq Whisper API error');
       throw new Error(`Whisper transcription failed: HTTP ${response.status}`);
     }
 
@@ -33,7 +37,7 @@ export class TranscriptionService {
     const text = result.text?.trim() ?? '';
     const elapsed = Date.now() - startMs;
 
-    voiceLogger.info({ elapsed, textLen: text.length }, 'Voice transcribed');
+    voiceLogger.info({ elapsed, textLen: text.length }, 'Voice transcribed (Groq)');
     return text;
   }
 }

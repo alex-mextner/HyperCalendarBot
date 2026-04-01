@@ -10,9 +10,9 @@ if (!filePath) {
   process.exit(1);
 }
 
-const token = process.env.HF_TOKEN;
+const token = process.env.GROQ_API_KEY;
 if (!token) {
-  console.log('HF_TOKEN not set in environment');
+  console.log('GROQ_API_KEY not set in environment');
   process.exit(1);
 }
 

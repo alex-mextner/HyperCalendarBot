@@ -567,10 +567,10 @@ if (config.REDIS_URL) {
 }
 
 let transcriptionService: import('./services/voice/transcription-service.ts').TranscriptionService | undefined;
-if (config.HF_TOKEN) {
+if (config.GROQ_API_KEY) {
   const { TranscriptionService } = await import('./services/voice/transcription-service.ts');
-  transcriptionService = new TranscriptionService(config.HF_TOKEN);
-  botLogger.info('Voice transcription initialized (Whisper via HF)');
+  transcriptionService = new TranscriptionService(config.GROQ_API_KEY);
+  botLogger.info('Voice transcription initialized (Whisper via Groq)');
 }
 
 let stressDictionary: import('./services/voice/stress-dictionary.ts').StressDictionary | undefined;

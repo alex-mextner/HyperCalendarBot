@@ -553,18 +553,22 @@ describe('createMessageHandler', () => {
       }
     });
 
-    test('notifies admin with details when voice processing fails', async () => {
-      const sendMessageToUser = mock(() => Promise.resolve());
+    test('saves error log and sends document to admin when voice processing fails', async () => {
       const deps = makeVoiceDeps({
         transcriptionService: { transcribe: mock(() => Promise.reject(new Error('Whisper API 503'))) },
         botAdminId: 999,
-        sendMessageToUser,
+        botToken: 'test-bot-token',
       });
       const originalFetch = globalThis.fetch;
-      globalThis.fetch = mock(async (url: string | URL | Request) => {
+      const fetchCalls: { url: string; body: FormData }[] = [];
+      globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
         const urlStr = typeof url === 'string' ? url : url.toString();
         if (urlStr.includes('/getFile')) {
           return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        if (urlStr.includes('/sendDocument')) {
+          fetchCalls.push({ url: urlStr, body: init?.body as FormData });
+          return new Response(JSON.stringify({ ok: true }));
         }
         return new Response(Buffer.from('fake-audio'));
       }) as unknown as typeof fetch;
@@ -573,16 +577,29 @@ describe('createMessageHandler', () => {
         const ctx = makeVoiceCtx();
         const handler = createMessageHandler(deps as never);
         await handler(ctx as never);
-        // Wait for fire-and-forget admin notification
-        await Bun.sleep(10);
-        expect(sendMessageToUser).toHaveBeenCalledTimes(1);
-        const [chatId, text] = sendMessageToUser.mock.calls[0] as unknown as [number, string];
-        expect(chatId).toBe(999);
-        expect(text).toContain('Voice message error');
+        // Wait for fire-and-forget admin notification (mkdir + file write + fetch)
+        await Bun.sleep(50);
+
+        expect(fetchCalls).toHaveLength(1);
+        const { url, body } = fetchCalls[0]!;
+        expect(url).toContain('test-bot-token/sendDocument');
+        expect(body.get('chat_id')).toBe('999');
+
+        const doc = body.get('document') as File;
+        expect(doc.name).toContain('voice-error-');
+        const text = await doc.text();
         expect(text).toContain('Whisper API 503');
         expect(text).toContain('Duration: 5s');
+
+        // Verify log file was written
+        const { readdir } = await import('node:fs/promises');
+        const files = await readdir('logs/voice-errors');
+        expect(files.some((f) => f.startsWith('voice-error-100-'))).toBe(true);
       } finally {
         globalThis.fetch = originalFetch;
+        // Cleanup log files
+        const { rm } = await import('node:fs/promises');
+        await rm('logs/voice-errors', { recursive: true, force: true });
       }
     });
 
