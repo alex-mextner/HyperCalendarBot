@@ -480,6 +480,8 @@ describe('executeTool', () => {
   });
 
   describe('action log integration', () => {
+    const futureDate = `${new Date(Date.now() + 30 * 86400_000).toISOString().slice(0, 11)}14:00:00Z`;
+    const futureDate2 = `${new Date(Date.now() + 35 * 86400_000).toISOString().slice(0, 11)}10:00:00Z`;
     let actionCtx: AgentContext;
     let actionLogRepo: import('../../../src/database/repositories/action-log.repository.ts').ActionLogRepository;
     let testDb: ReturnType<typeof createTestDb>;
@@ -514,7 +516,7 @@ describe('executeTool', () => {
     test('mutating tool call creates action log entry', async () => {
       const result = await executeTool(actionCtx, 'create_event', {
         title: 'Test Event',
-        start_at: '2026-12-15T14:00:00Z',
+        start_at: futureDate,
       });
       expect(result.success).toBe(true);
 
@@ -548,7 +550,7 @@ describe('executeTool', () => {
     test('action log stores metadata as JSON', async () => {
       await executeTool(actionCtx, 'create_event', {
         title: 'Metadata Test',
-        start_at: '2026-12-20T10:00:00Z',
+        start_at: futureDate2,
         description: 'Important meeting',
       });
 
@@ -563,7 +565,7 @@ describe('executeTool', () => {
       const ctxWithoutLog = { ...actionCtx, actionLogRepo: undefined };
       const result = await executeTool(ctxWithoutLog, 'create_event', {
         title: 'No Log',
-        start_at: '2026-12-15T14:00:00Z',
+        start_at: futureDate,
       });
       expect(result.success).toBe(true);
     });
@@ -576,7 +578,7 @@ describe('executeTool', () => {
 
       await executeTool(actionCtx, 'create_event', {
         title: 'With History Link',
-        start_at: '2026-12-15T14:00:00Z',
+        start_at: futureDate,
       });
 
       const logs = actionLogRepo.query({ user_id: USER_ID });
@@ -588,7 +590,7 @@ describe('executeTool', () => {
       actionCtx.inputMode = 'voice_message';
       await executeTool(actionCtx, 'create_event', {
         title: 'Voice Event',
-        start_at: '2026-12-15T14:00:00Z',
+        start_at: futureDate,
       });
 
       const logs = actionLogRepo.query({ user_id: USER_ID });
