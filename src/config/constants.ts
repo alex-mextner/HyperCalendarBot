@@ -889,11 +889,7 @@ export const MSG = {
       reminders: 'Напоминания',
       inLabel: 'через',
       startingNow: 'начинается!',
-      eventsCount: (n: number) => {
-        if (n === 1) return '1 событие';
-        if (n >= 2 && n <= 4) return `${n} события`;
-        return `${n} событий`;
-      },
+      eventsCount: (n: number) => `${n} ${ruPlural(n, 'событие', 'события', 'событий')}`,
       goodNight: 'Спокойной ночи!',
       tomorrow: 'завтра',
       haveADay: 'Продуктивного дня!',

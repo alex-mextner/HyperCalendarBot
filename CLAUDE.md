@@ -222,6 +222,7 @@ import { ruPlural } from '../../services/event/formatters.ts';
 ```
 
 Never hardcode a single word form next to a variable number.
+Never inline pluralization logic (`if (n === 1) … if (n >= 2 && n <= 4) …`) — always use `ruPlural`.
 
 ## Environment Variables
 
@@ -506,18 +507,13 @@ All user-facing bot messages must follow these rules:
   when bypassing the AI. Write them as if they will be shown verbatim.
 - **All user-facing strings must go through `t(lang)`** from `src/config/constants.ts`. Never use
   inline `lang === 'ru' ? ... : ...` ternaries or `if (lang === 'ru')` branches for string selection.
-  Namespaces: `t(lang).aiTools.*` for tool outputs, `t(lang).notifications.*` for notification
-  renderers, `t(lang).speech.*` for TTS renderers. Add new strings to `MSG.en` and `MSG.ru`.
+  Add new strings to `MSG.en` and `MSG.ru` in the appropriate namespace.
   ```ts
   import { t } from '../../../config/constants.ts';
   // static string:
   output: t(ctx.user.language).aiTools.history.notFound
   // dynamic string (function):
   output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id)
-  // notifications:
-  const l = t(lang as Lang).notifications;
-  // speech (TTS):
-  const s = t(lang as Lang).speech;
   ```
 - **Frame features as user benefit, not technical capability.** Never describe bot actions as surveillance
   or tracking ("отслеживать кто вышел"). Instead explain what the user gains:
