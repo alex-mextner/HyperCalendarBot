@@ -84,9 +84,10 @@ describe('handleRemoveTrigger', () => {
 describe('handleScheduleAiCall', () => {
   test('creates a one-time scheduled call', async () => {
     const ctx = makeCtx();
+    const futureDate = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const result = await handleScheduleAiCall(ctx, {
       message: 'Check your calendar',
-      run_at: '2026-04-01T10:00:00Z',
+      run_at: futureDate,
     });
     expect(result.success).toBe(true);
     expect(result.output).toContain('Check your calendar');
