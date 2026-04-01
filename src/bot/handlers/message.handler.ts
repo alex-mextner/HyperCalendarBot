@@ -1,5 +1,6 @@
 // src/bot/handlers/message.handler.ts
 
+import { mkdir } from 'node:fs/promises';
 import { TZDate } from '@date-fns/tz';
 import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
@@ -458,8 +459,41 @@ async function handleVoiceMessage(
       await ctx.send(t(lang).voice_prompt, { reply_markup: keyboard });
     }
   } catch (error) {
-    cmdLogger.error({ err: error, userId: user.telegram_id }, 'Voice transcription error');
+    cmdLogger.error({ err: error, userId: user.telegram_id }, 'Voice message processing error');
     await ctx.send(t(lang).voice_error);
+    if (deps.botAdminId && deps.botToken) {
+      const errMsg = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `voice-error-${user.telegram_id}-${timestamp}.txt`;
+      const report = [
+        'Voice message processing error',
+        `Date: ${new Date().toISOString()}`,
+        `User: ${user.telegram_id} (@${user.username ?? '—'})`,
+        `Duration: ${voice.duration ?? '?'}s`,
+        '',
+        errMsg,
+      ].join('\n');
+
+      const logDir = 'logs/voice-errors';
+      void (async () => {
+        await mkdir(logDir, { recursive: true });
+        await Bun.write(`${logDir}/${filename}`, report);
+        const form = new FormData();
+        form.append('chat_id', String(deps.botAdminId));
+        form.append('document', new Blob([report], { type: 'text/plain' }), filename);
+        form.append('caption', `🔴 Voice error: ${user.telegram_id} (@${user.username ?? '—'})`);
+        const resp = await fetch(`https://api.telegram.org/bot${deps.botToken}/sendDocument`, {
+          method: 'POST',
+          body: form,
+        });
+        if (!resp.ok) {
+          const body = await resp.text().catch(() => '');
+          cmdLogger.error({ status: resp.status, body }, 'Failed to send voice error document to admin');
+        }
+      })().catch((e: unknown) => {
+        cmdLogger.error({ err: e }, 'Failed to notify admin about voice error');
+      });
+    }
   }
 }
 

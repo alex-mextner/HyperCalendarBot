@@ -7,26 +7,32 @@ describe('TranscriptionService', () => {
   let service: TranscriptionService;
 
   beforeEach(() => {
-    service = new TranscriptionService('hf_test_token');
+    service = new TranscriptionService('gsk_test_token');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
   });
 
-  test('sends audio buffer to HF Inference API and returns text', async () => {
+  test('sends audio to Groq Whisper API via multipart form and returns text', async () => {
     const audioBuffer = Buffer.from('fake-ogg-data');
 
     globalThis.fetch = mock(async (url: string | URL | Request, init?: RequestInit) => {
       const urlStr = typeof url === 'string' ? url : url.toString();
-      expect(urlStr).toContain('whisper-large-v3-turbo');
+      expect(urlStr).toBe('https://api.groq.com/openai/v1/audio/transcriptions');
       expect(init?.method).toBe('POST');
-      expect(init?.headers).toEqual(
-        expect.objectContaining({
-          Authorization: 'Bearer hf_test_token',
-          'Content-Type': 'audio/ogg',
-        }),
-      );
+
+      const headers = init?.headers as { [key: string]: string };
+      expect(headers.Authorization).toBe('Bearer gsk_test_token');
+
+      const body = init?.body as FormData;
+      expect(body.get('model')).toBe('whisper-large-v3');
+      expect(body.get('response_format')).toBe('json');
+
+      const file = body.get('file') as Blob;
+      expect(file).toBeInstanceOf(Blob);
+      expect(file.type).toBe('audio/ogg');
+
       return new Response(JSON.stringify({ text: ' Привет, создай встречу на завтра ' }));
     }) as unknown as typeof fetch;
 

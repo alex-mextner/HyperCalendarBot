@@ -18,6 +18,7 @@ export interface EnvConfig {
   MTPROTO_API_ID?: number;
   MTPROTO_API_HASH?: string;
   HF_TOKEN?: string;
+  GROQ_API_KEY?: string;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
@@ -101,6 +102,7 @@ export function loadConfig(): EnvConfig {
     MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
     MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
     HF_TOKEN: process.env.HF_TOKEN || undefined,
+    GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
