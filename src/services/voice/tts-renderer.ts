@@ -31,76 +31,59 @@ export function renderReminderForSpeech(input: ReminderSpeechInput): string {
   return parts.join(' ');
 }
 
+type SpeechEvent = { title: string; startTime: string; duration: string; isAllDay?: boolean };
+
+function formatEventsSpeech(events: SpeechEvent[], lang: string): string {
+  const allDay = lang === 'ru' ? 'весь день' : 'all day';
+  return events
+    .map((e) => (e.isAllDay ? `${e.title}, ${allDay}.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
+    .join(' ');
+}
+
 export function renderMorningAgendaForSpeech(input: {
   lang: string;
   dateLabel: string;
-  events: Array<{ title: string; startTime: string; duration: string; isAllDay?: boolean }>;
+  events: SpeechEvent[];
 }): string {
   const { lang, dateLabel, events } = input;
-
-  if (lang === 'ru') {
-    const intro = `Доброе утро. Сегодня, ${dateLabel}.`;
-    const items = events
-      .map((e) => (e.isAllDay ? `${e.title}, весь день.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
-      .join(' ');
-    return `${intro} ${items} Продуктивного дня!`;
-  }
-
-  const intro = `Good morning. Today, ${dateLabel}.`;
-  const items = events
-    .map((e) => (e.isAllDay ? `${e.title}, all day.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
-    .join(' ');
-  return `${intro} ${items} Have a productive day!`;
+  const items = formatEventsSpeech(events, lang);
+  if (lang === 'ru') return `Доброе утро. Сегодня, ${dateLabel}. ${items} Продуктивного дня!`;
+  return `Good morning. Today, ${dateLabel}. ${items} Have a productive day!`;
 }
 
 export function renderEveningReviewForSpeech(input: {
   lang: string;
   dateLabel: string;
-  events: Array<{ title: string; startTime: string; duration: string; isAllDay?: boolean }>;
+  events: SpeechEvent[];
 }): string {
   const { lang, dateLabel, events } = input;
+  const items = formatEventsSpeech(events, lang);
+  if (lang === 'ru') return `Добрый вечер. Завтра, ${dateLabel}. ${items} Спокойной ночи!`;
+  return `Good evening. Tomorrow, ${dateLabel}. ${items} Good night!`;
+}
 
-  if (lang === 'ru') {
-    const intro = `Добрый вечер. Завтра, ${dateLabel}.`;
-    const items = events
-      .map((e) => (e.isAllDay ? `${e.title}, весь день.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
-      .join(' ');
-    return `${intro} ${items} Спокойной ночи!`;
-  }
+type DigestEvent = { title: string; startTime: string; isAllDay?: boolean };
 
-  const intro = `Good evening. Tomorrow, ${dateLabel}.`;
+function formatDigestDay(dayLabel: string, events: DigestEvent[], lang: string): string {
+  const allDay = lang === 'ru' ? 'весь день' : 'all day';
+  const noEvents = lang === 'ru' ? 'нет событий' : 'no events';
+  const at = lang === 'ru' ? 'в' : 'at';
+  if (events.length === 0) return `${dayLabel}: ${noEvents}.`;
   const items = events
-    .map((e) => (e.isAllDay ? `${e.title}, all day.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
-    .join(' ');
-  return `${intro} ${items} Good night!`;
+    .map((e) => (e.isAllDay ? `${e.title}, ${allDay}` : `${e.title} ${at} ${e.startTime}`))
+    .join(', ');
+  return `${dayLabel}: ${items}.`;
 }
 
 export function renderWeeklyDigestForSpeech(input: {
   lang: string;
   weekRange: string;
-  days: Array<{ dayLabel: string; events: Array<{ title: string; startTime: string; isAllDay?: boolean }> }>;
+  days: Array<{ dayLabel: string; events: DigestEvent[] }>;
 }): string {
   const { lang, weekRange, days } = input;
-
-  if (lang === 'ru') {
-    const intro = `Еженедельный дайджест на неделю ${weekRange}.`;
-    const dayParts = days.map((d) => {
-      if (d.events.length === 0) return `${d.dayLabel}: нет событий.`;
-      const items = d.events
-        .map((e) => (e.isAllDay ? `${e.title}, весь день` : `${e.title} в ${e.startTime}`))
-        .join(', ');
-      return `${d.dayLabel}: ${items}.`;
-    });
-    return `${intro} ${dayParts.join(' ')}`;
-  }
-
-  const intro = `Weekly digest for the week of ${weekRange}.`;
-  const dayParts = days.map((d) => {
-    if (d.events.length === 0) return `${d.dayLabel}: no events.`;
-    const items = d.events.map((e) => (e.isAllDay ? `${e.title}, all day` : `${e.title} at ${e.startTime}`)).join(', ');
-    return `${d.dayLabel}: ${items}.`;
-  });
-  return `${intro} ${dayParts.join(' ')}`;
+  const dayParts = days.map((d) => formatDigestDay(d.dayLabel, d.events, lang));
+  if (lang === 'ru') return `Еженедельный дайджест на неделю ${weekRange}. ${dayParts.join(' ')}`;
+  return `Weekly digest for the week of ${weekRange}. ${dayParts.join(' ')}`;
 }
 
 export function renderBatchReminderForSpeech(input: {

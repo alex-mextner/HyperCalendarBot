@@ -126,30 +126,41 @@ const LABELS = {
   },
 };
 
+function formatAgendaEventLine(e: AgendaEvent, l: (typeof LABELS)['en']): string {
+  const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
+  return e.location ? `${line}\n        📍 ${e.location}` : line;
+}
+
+function renderAgenda(
+  lang: string,
+  dateLabel: string,
+  events: AgendaEvent[],
+  config: { emoji: string; greeting: string; greetingFree: string; freeDay: string; footer: string },
+): RenderedNotification {
+  const l = lang === 'ru' ? LABELS.ru : LABELS.en;
+  const lines: string[] = [];
+  if (events.length === 0) {
+    lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`, '', config.freeDay);
+  } else {
+    lines.push(`${config.emoji} ${config.greeting}`, '', `📅 ${dateLabel}`, '');
+    for (const e of events) {
+      lines.push(formatAgendaEventLine(e, l));
+    }
+    lines.push('', config.footer);
+  }
+  return { channel: 'telegram_text', text: lines.join('\n') };
+}
+
 export class NotificationRenderer {
   renderMorningAgenda(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
     const l = lang === 'ru' ? LABELS.ru : LABELS.en;
-    const lines: string[] = [];
-    if (events.length === 0) {
-      lines.push(`☀️ ${l.morningFree}`);
-      lines.push('');
-      lines.push(`📅 ${dateLabel}`);
-      lines.push('');
-      lines.push(l.freeDayMorning);
-    } else {
-      lines.push(`☀️ ${l.morning}`);
-      lines.push('');
-      lines.push(`📅 ${dateLabel}`);
-      lines.push('');
-      for (const e of events) {
-        const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
-        if (e.location) lines.push(`${line}\n        📍 ${e.location}`);
-        else lines.push(line);
-      }
-      lines.push('');
-      lines.push(l.haveADay);
-    }
-    return { channel: 'telegram_text', text: lines.join('\n') };
+    return renderAgenda(lang, dateLabel, events, {
+      emoji: '☀️',
+      greeting: l.morning,
+      greetingFree: l.morningFree,
+      freeDay: l.freeDayMorning,
+      footer: l.haveADay,
+    });
   }
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
@@ -236,26 +247,12 @@ export class NotificationRenderer {
 
   renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
     const l = lang === 'ru' ? LABELS.ru : LABELS.en;
-    const lines: string[] = [];
-    if (events.length === 0) {
-      lines.push(`🌙 ${l.eveningFree}`);
-      lines.push('');
-      lines.push(`📅 ${dateLabel}`);
-      lines.push('');
-      lines.push(l.freeDayEvening);
-    } else {
-      lines.push(`🌙 ${l.evening}`);
-      lines.push('');
-      lines.push(`📅 ${dateLabel}`);
-      lines.push('');
-      for (const e of events) {
-        const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
-        if (e.location) lines.push(`${line}\n        📍 ${e.location}`);
-        else lines.push(line);
-      }
-      lines.push('');
-      lines.push(`${l.eventsCount(events.length)} ${l.tomorrow}. ${l.goodNight}`);
-    }
-    return { channel: 'telegram_text', text: lines.join('\n') };
+    return renderAgenda(lang, dateLabel, events, {
+      emoji: '🌙',
+      greeting: l.evening,
+      greetingFree: l.eveningFree,
+      freeDay: l.freeDayEvening,
+      footer: `${l.eventsCount(events.length)} ${l.tomorrow}. ${l.goodNight}`,
+    });
   }
 }
