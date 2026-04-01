@@ -192,6 +192,14 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
 
 **When removing or repurposing DB columns**: never leave dead columns in the schema without a migration. Always ask whether to run a destructive migration (DROP COLUMN — data lost, safe when no real users yet) or a preserving migration (rename, backfill, keep for rollback). Then write the appropriate migration. No silent schema drift.
 
+**No unbounded queries in hot paths** (scheduler tick, webhook handler, middleware):
+- Never `SELECT * FROM table` — select only the columns you need. `SELECT *` fetches tokens, blobs,
+  and other heavy columns the caller ignores. Use `Pick<Entity, 'col1' | 'col2'>` as the return type.
+- Never load an entire table into memory in one query. Use cursor-based batching
+  (`WHERE id > ? ORDER BY id LIMIT ?`) via a generator that yields batches. This keeps peak memory
+  bounded regardless of table size.
+- `findAll()` is acceptable only in admin/debug endpoints and tests, never in per-tick loops.
+
 ### MTProto Bridge
 
 For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.

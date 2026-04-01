@@ -902,4 +902,10 @@ export const migrations: Migration[] = [
       db.exec('DROP TABLE IF EXISTS reminders');
     },
   },
+  {
+    name: '048_idx_users_timezone',
+    up: (db) => {
+      db.exec('CREATE INDEX IF NOT EXISTS idx_users_timezone ON users(timezone)');
+    },
+  },
 ];

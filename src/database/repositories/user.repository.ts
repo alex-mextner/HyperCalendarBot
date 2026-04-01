@@ -9,8 +9,26 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId) as User | null;
   }
 
-  findAll(): User[] {
-    return this.db.prepare('SELECT * FROM users').all() as User[];
+  /** Cursor-based batch iterator: yields batches of (telegram_id, timezone, language). */
+  *iterateTimezoneInfo(
+    excludeIds: Set<number>,
+    batchSize = 100,
+  ): Generator<Pick<User, 'telegram_id' | 'timezone' | 'language'>[]> {
+    const stmt = this.db.prepare(
+      'SELECT telegram_id, timezone, language FROM users WHERE telegram_id > ? ORDER BY telegram_id LIMIT ?',
+    );
+    let cursor = 0;
+    for (;;) {
+      const rows = stmt.all(cursor, batchSize) as Pick<User, 'telegram_id' | 'timezone' | 'language'>[];
+      if (rows.length === 0) break;
+      cursor = rows[rows.length - 1]!.telegram_id;
+      if (excludeIds.size > 0) {
+        const filtered = rows.filter((r) => !excludeIds.has(r.telegram_id));
+        if (filtered.length > 0) yield filtered;
+      } else {
+        yield rows;
+      }
+    }
   }
 
   findManyByTelegramIds(ids: number[]): Map<number, User> {
