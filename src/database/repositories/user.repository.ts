@@ -9,10 +9,6 @@ export class UserRepository {
     return this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId) as User | null;
   }
 
-  findAll(): User[] {
-    return this.db.prepare('SELECT * FROM users').all() as User[];
-  }
-
   /** Cursor-based batch iterator: yields batches of (telegram_id, timezone, language). */
   *iterateTimezoneInfo(
     excludeIds: Set<number>,
