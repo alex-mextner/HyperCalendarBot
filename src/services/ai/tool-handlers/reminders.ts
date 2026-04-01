@@ -1,4 +1,4 @@
-import { t } from '../../../config/constants.ts';
+import { type Lang, t } from '../../../config/constants.ts';
 import type { CalendarEvent } from '../../../database/types.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -13,14 +13,14 @@ interface SetReminderInput {
   owner_id?: number;
 }
 
-function formatReminderDuration(minutesBefore: number, lang: string): string {
+function formatReminderDuration(minutesBefore: number, lang: Lang): string {
+  const msgs = t(lang).aiTools.reminders;
   if (minutesBefore >= 60) {
     const hours = Math.floor(minutesBefore / 60);
     const mins = minutesBefore % 60;
-    if (lang === 'ru') return mins > 0 ? `${hours}ч ${mins}мин` : `${hours}ч`;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+    return msgs.durationHourMin(hours, mins);
   }
-  return lang === 'ru' ? `${minutesBefore}мин` : `${minutesBefore}min`;
+  return msgs.durationMin(minutesBefore);
 }
 
 export function handleSetReminder(ctx: AgentContext, input: SetReminderInput): ToolResult {
@@ -76,7 +76,7 @@ interface GetRemindersInput {
   owner_id?: number;
 }
 
-function formatEventReminders(event: CalendarEvent, ctx: AgentContext, lang: string): string | null {
+function formatEventReminders(event: CalendarEvent, ctx: AgentContext, lang: Lang): string | null {
   const reminders = ctx.eventReminderRepo.getForEvent(event.id).filter((r) => r.sent === 0);
   if (reminders.length === 0) return null;
   const durations = [...new Set(reminders.map((r) => formatReminderDuration(r.interval_minutes, lang)))];
@@ -114,7 +114,7 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
     }
     const lines = reminders.map((r) => {
       const dur = formatReminderDuration(r.interval_minutes, lang);
-      return lang === 'ru' ? `за ${dur}` : `${dur} before`;
+      return t(lang).aiTools.reminders.beforeDuration(dur);
     });
     const unique = [...new Set(lines)];
     return { success: true, output: t(lang).aiTools.reminders.remindersFor(event.title, unique.join(', ')) };
@@ -145,8 +145,7 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
     if (events.length === 0) {
       return {
         success: true,
-        output:
-          lang === 'ru' ? `По запросу «${input.query}» событий не найдено.` : `No events found for "${input.query}".`,
+        output: t(lang).aiTools.reminders.noEventsForQuery(input.query),
       };
     }
     return buildMultiEventResult(events, ctx, lang);
@@ -155,7 +154,7 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
   return { success: false, error: 'Provide event_id, event_ids, or query.' };
 }
 
-function buildMultiEventResult(events: CalendarEvent[], ctx: AgentContext, lang: string): ToolResult {
+function buildMultiEventResult(events: CalendarEvent[], ctx: AgentContext, lang: Lang): ToolResult {
   const withReminders: string[] = [];
   const withoutReminders: string[] = [];
 
@@ -173,13 +172,13 @@ function buildMultiEventResult(events: CalendarEvent[], ctx: AgentContext, lang:
     parts.push(withReminders.join('\n'));
   }
   if (withoutReminders.length > 0) {
-    const label = lang === 'ru' ? 'Без напоминаний' : 'No reminders';
+    const label = t(lang).aiTools.reminders.noRemindersLabel;
     parts.push(`${label}: ${withoutReminders.join(', ')}`);
   }
   if (parts.length === 0) {
     return {
       success: true,
-      output: lang === 'ru' ? 'Напоминаний не найдено.' : 'No reminders found.',
+      output: t(lang).aiTools.reminders.noRemindersFound,
     };
   }
   return { success: true, output: parts.join('\n') };
