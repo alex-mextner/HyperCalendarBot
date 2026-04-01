@@ -147,6 +147,31 @@ describe('detectClockChange', () => {
     const result = detectClockChange('Asia/Kolkata', '2026-03-29');
     expect(result).toBeNull();
   });
+
+  test('Palestine (Asia/Gaza): spring forward with late-announced dates', () => {
+    // Palestinian Authority sometimes announces DST dates with only days of notice
+    // 2026 spring forward: March 28
+    const result = detectClockChange('Asia/Gaza', '2026-03-28');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('Egypt (Africa/Cairo): reinstated DST after years of chaos', () => {
+    // Egypt abolished DST in 2011, briefly reinstated in 2014, cancelled again,
+    // then restored in 2023. Tests that IANA tzdata is current.
+    // 2026 spring forward: April 24
+    const result = detectClockChange('Africa/Cairo', '2026-04-24');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('extreme timezone: Pacific/Kiritimati (UTC+14, no DST)', () => {
+    // World's furthest-ahead timezone, no DST
+    const result = detectClockChange('Pacific/Kiritimati', '2026-03-29');
+    expect(result).toBeNull();
+  });
 });
 
 describe('formatClockChangeNotice', () => {
