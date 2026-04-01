@@ -34,43 +34,51 @@ export function renderReminderForSpeech(input: ReminderSpeechInput): string {
 export function renderMorningAgendaForSpeech(input: {
   lang: string;
   dateLabel: string;
-  events: Array<{ title: string; startTime: string; duration: string }>;
+  events: Array<{ title: string; startTime: string; duration: string; isAllDay?: boolean }>;
 }): string {
   const { lang, dateLabel, events } = input;
 
   if (lang === 'ru') {
     const intro = `Доброе утро. Сегодня, ${dateLabel}.`;
-    const items = events.map((e) => `${e.startTime} — ${e.title}, ${e.duration}.`).join(' ');
+    const items = events
+      .map((e) => (e.isAllDay ? `${e.title}, весь день.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
+      .join(' ');
     return `${intro} ${items} Продуктивного дня!`;
   }
 
   const intro = `Good morning. Today, ${dateLabel}.`;
-  const items = events.map((e) => `${e.startTime} — ${e.title}, ${e.duration}.`).join(' ');
+  const items = events
+    .map((e) => (e.isAllDay ? `${e.title}, all day.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
+    .join(' ');
   return `${intro} ${items} Have a productive day!`;
 }
 
 export function renderEveningReviewForSpeech(input: {
   lang: string;
   dateLabel: string;
-  events: Array<{ title: string; startTime: string; duration: string }>;
+  events: Array<{ title: string; startTime: string; duration: string; isAllDay?: boolean }>;
 }): string {
   const { lang, dateLabel, events } = input;
 
   if (lang === 'ru') {
     const intro = `Добрый вечер. Завтра, ${dateLabel}.`;
-    const items = events.map((e) => `${e.startTime} — ${e.title}, ${e.duration}.`).join(' ');
+    const items = events
+      .map((e) => (e.isAllDay ? `${e.title}, весь день.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
+      .join(' ');
     return `${intro} ${items} Спокойной ночи!`;
   }
 
   const intro = `Good evening. Tomorrow, ${dateLabel}.`;
-  const items = events.map((e) => `${e.startTime} — ${e.title}, ${e.duration}.`).join(' ');
+  const items = events
+    .map((e) => (e.isAllDay ? `${e.title}, all day.` : `${e.startTime} — ${e.title}, ${e.duration}.`))
+    .join(' ');
   return `${intro} ${items} Good night!`;
 }
 
 export function renderWeeklyDigestForSpeech(input: {
   lang: string;
   weekRange: string;
-  days: Array<{ dayLabel: string; events: Array<{ title: string; startTime: string }> }>;
+  days: Array<{ dayLabel: string; events: Array<{ title: string; startTime: string; isAllDay?: boolean }> }>;
 }): string {
   const { lang, weekRange, days } = input;
 
@@ -78,7 +86,9 @@ export function renderWeeklyDigestForSpeech(input: {
     const intro = `Еженедельный дайджест на неделю ${weekRange}.`;
     const dayParts = days.map((d) => {
       if (d.events.length === 0) return `${d.dayLabel}: нет событий.`;
-      const items = d.events.map((e) => `${e.title} в ${e.startTime}`).join(', ');
+      const items = d.events
+        .map((e) => (e.isAllDay ? `${e.title}, весь день` : `${e.title} в ${e.startTime}`))
+        .join(', ');
       return `${d.dayLabel}: ${items}.`;
     });
     return `${intro} ${dayParts.join(' ')}`;
@@ -87,7 +97,7 @@ export function renderWeeklyDigestForSpeech(input: {
   const intro = `Weekly digest for the week of ${weekRange}.`;
   const dayParts = days.map((d) => {
     if (d.events.length === 0) return `${d.dayLabel}: no events.`;
-    const items = d.events.map((e) => `${e.title} at ${e.startTime}`).join(', ');
+    const items = d.events.map((e) => (e.isAllDay ? `${e.title}, all day` : `${e.title} at ${e.startTime}`)).join(', ');
     return `${d.dayLabel}: ${items}.`;
   });
   return `${intro} ${dayParts.join(' ')}`;

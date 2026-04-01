@@ -19,6 +19,7 @@ export interface AgendaEvent {
   endTime: string;
   location: string | null;
   duration: string;
+  isAllDay?: boolean;
 }
 
 export interface ReminderData {
@@ -41,6 +42,7 @@ export interface BatchReminderItem {
 export interface WeeklyDigestEvent {
   title: string;
   startTime: string;
+  isAllDay?: boolean;
 }
 
 export interface WeeklyDigestDay {
@@ -138,9 +140,9 @@ export class NotificationRenderer {
       lines.push(`📅 ${dateLabel}`);
       lines.push('');
       for (const e of events) {
-        let line = `${e.startTime} — ${e.title} (${e.duration})`;
-        if (e.location) line += `\n        📍 ${e.location}`;
-        lines.push(line);
+        const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
+        if (e.location) lines.push(`${line}\n        📍 ${e.location}`);
+        else lines.push(line);
       }
       lines.push('');
       lines.push(l.haveADay);
@@ -216,7 +218,9 @@ export class NotificationRenderer {
       if (day.events.length === 0) {
         lines.push(`${day.dayLabel}: (${l.noEvents})`);
       } else {
-        const eventList = day.events.map((e) => `${e.startTime} ${e.title}`).join(', ');
+        const eventList = day.events
+          .map((e) => (e.isAllDay ? `${l.allDay}: ${e.title}` : `${e.startTime} ${e.title}`))
+          .join(', ');
         lines.push(`${day.dayLabel}: ${eventList}`);
       }
     }
@@ -243,9 +247,9 @@ export class NotificationRenderer {
       lines.push(`📅 ${dateLabel}`);
       lines.push('');
       for (const e of events) {
-        let line = `${e.startTime} — ${e.title} (${e.duration})`;
-        if (e.location) line += `\n        📍 ${e.location}`;
-        lines.push(line);
+        const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
+        if (e.location) lines.push(`${line}\n        📍 ${e.location}`);
+        else lines.push(line);
       }
       lines.push('');
       lines.push(`${l.eventsCount(events.length)} tomorrow. ${l.goodNight}`);
