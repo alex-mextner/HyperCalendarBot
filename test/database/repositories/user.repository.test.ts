@@ -101,31 +101,44 @@ describe('UserRepository', () => {
     expect(repo.findManyByTelegramIds([]).size).toBe(0);
   });
 
-  test('findTimezoneInfo returns only telegram_id, timezone, language', () => {
+  test('iterateTimezoneInfo returns only telegram_id, timezone, language', () => {
     repo.create({ telegram_id: 1, username: 'alice' });
     repo.create({ telegram_id: 2, username: 'bob', timezone: 'Europe/Berlin' });
-    const rows = repo.findTimezoneInfo(new Set());
-    expect(rows.length).toBe(2);
-    expect(rows[0]).toHaveProperty('telegram_id');
-    expect(rows[0]).toHaveProperty('timezone');
-    expect(rows[0]).toHaveProperty('language');
+    const allRows = [...repo.iterateTimezoneInfo(new Set())].flat();
+    expect(allRows.length).toBe(2);
+    expect(allRows[0]).toHaveProperty('telegram_id');
+    expect(allRows[0]).toHaveProperty('timezone');
+    expect(allRows[0]).toHaveProperty('language');
     // Should NOT have heavy columns like google_refresh_token_enc
-    expect(rows[0]).not.toHaveProperty('google_refresh_token_enc');
-    expect(rows[0]).not.toHaveProperty('username');
+    expect(allRows[0]).not.toHaveProperty('google_refresh_token_enc');
+    expect(allRows[0]).not.toHaveProperty('username');
   });
 
-  test('findTimezoneInfo excludes given IDs', () => {
+  test('iterateTimezoneInfo excludes given IDs', () => {
     repo.create({ telegram_id: 1 });
     repo.create({ telegram_id: 2 });
     repo.create({ telegram_id: 3 });
-    const rows = repo.findTimezoneInfo(new Set([1, 3]));
-    expect(rows.length).toBe(1);
-    expect(rows[0]!.telegram_id).toBe(2);
+    const allRows = [...repo.iterateTimezoneInfo(new Set([1, 3]))].flat();
+    expect(allRows.length).toBe(1);
+    expect(allRows[0]!.telegram_id).toBe(2);
   });
 
-  test('findTimezoneInfo returns empty array when all excluded', () => {
+  test('iterateTimezoneInfo yields empty when all excluded', () => {
     repo.create({ telegram_id: 1 });
-    const rows = repo.findTimezoneInfo(new Set([1]));
-    expect(rows.length).toBe(0);
+    const batches = [...repo.iterateTimezoneInfo(new Set([1]))];
+    expect(batches.length).toBe(0);
+  });
+
+  test('iterateTimezoneInfo yields multiple batches for large datasets', () => {
+    for (let i = 1; i <= 250; i++) {
+      repo.create({ telegram_id: i });
+    }
+    const batches = [...repo.iterateTimezoneInfo(new Set(), 100)];
+    expect(batches.length).toBe(3); // 100 + 100 + 50
+    expect(batches[0]!.length).toBe(100);
+    expect(batches[1]!.length).toBe(100);
+    expect(batches[2]!.length).toBe(50);
+    const allRows = batches.flat();
+    expect(allRows.length).toBe(250);
   });
 });

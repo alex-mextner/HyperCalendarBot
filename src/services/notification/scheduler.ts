@@ -317,29 +317,31 @@ export class NotificationScheduler {
 
     // 2b. Standalone clock-change notifications for users without morning agenda
     // Sent at 08:00 local time on the day of the DST transition.
+    // Cursor-based batching: reads 100 users at a time, never loads full table.
     const morningUserIds = new Set(morningPrefs.map((p) => p.user_id));
-    const clockCandidates = this.deps.userRepo.findTimezoneInfo(morningUserIds);
-    for (const user of clockCandidates) {
-      if (!isLocalTimeInWindow(nowUtc, user.timezone, '08:00', 5)) continue;
-      const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
-      const clockChange = detectClockChange(user.timezone, localTodayIso);
-      if (!clockChange) continue;
-      const lang = user.language ?? 'en';
-      const refKey = `cc:${user.telegram_id}:${localTodayIso}`;
-      const payload = formatClockChangeNotice(lang, clockChange);
-      const logId = this.deps.logRepo.insert({
-        user_id: user.telegram_id,
-        type: 'clock_change',
-        reference_key: refKey,
-        channel: 'telegram_text',
-        payload,
-      });
-      if (logId === null) continue;
-      this.deps.enqueue('clock_change', user.telegram_id, logId, payload);
-      notifyLogger.info(
-        { userId: user.telegram_id, direction: clockChange.direction, minutes: clockChange.minutes },
-        'Clock change notification enqueued',
-      );
+    for (const batch of this.deps.userRepo.iterateTimezoneInfo(morningUserIds)) {
+      for (const user of batch) {
+        if (!isLocalTimeInWindow(nowUtc, user.timezone, '08:00', 5)) continue;
+        const localTodayIso = new TZDate(nowUtc, user.timezone).toISOString().slice(0, 10);
+        const clockChange = detectClockChange(user.timezone, localTodayIso);
+        if (!clockChange) continue;
+        const lang = user.language ?? 'en';
+        const refKey = `cc:${user.telegram_id}:${localTodayIso}`;
+        const payload = formatClockChangeNotice(lang, clockChange);
+        const logId = this.deps.logRepo.insert({
+          user_id: user.telegram_id,
+          type: 'clock_change',
+          reference_key: refKey,
+          channel: 'telegram_text',
+          payload,
+        });
+        if (logId === null) continue;
+        this.deps.enqueue('clock_change', user.telegram_id, logId, payload);
+        notifyLogger.info(
+          { userId: user.telegram_id, direction: clockChange.direction, minutes: clockChange.minutes },
+          'Clock change notification enqueued',
+        );
+      }
     }
 
     // 3. Eve-holiday notifications (per-user local tomorrow date)
