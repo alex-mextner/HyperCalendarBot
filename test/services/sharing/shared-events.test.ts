@@ -484,11 +484,13 @@ describe('calendar views show participated events', () => {
   });
 
   test('getUpcoming includes participated events', () => {
+    const futureStart = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const futureEnd = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Future Shared',
-      start_at: '2026-12-20T10:00:00Z',
-      end_at: '2026-12-20T11:00:00Z',
+      start_at: futureStart,
+      end_at: futureEnd,
       timezone: 'UTC',
     });
     participantRepo.add(shared.id, INVITEE, 'accepted');

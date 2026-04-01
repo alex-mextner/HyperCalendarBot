@@ -740,7 +740,8 @@ describe('EventService', () => {
 
       test('getUpcoming does not include group events after user left', () => {
         addMember(USER_ID, MEMBER_GROUP_ID, '2026-03-01T00:00:00Z', '2026-04-01T00:00:00Z');
-        createGroupEvent('Future Group Event', '2026-05-01T10:00:00Z');
+        const futureStart = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+        createGroupEvent('Future Group Event', futureStart);
 
         const upcoming = service.getUpcoming(USER_ID, 10);
         expect(upcoming.some((e) => e.title === 'Future Group Event')).toBe(false);
