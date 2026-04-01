@@ -553,6 +553,39 @@ describe('createMessageHandler', () => {
       }
     });
 
+    test('notifies admin with details when voice processing fails', async () => {
+      const sendMessageToUser = mock(() => Promise.resolve());
+      const deps = makeVoiceDeps({
+        transcriptionService: { transcribe: mock(() => Promise.reject(new Error('Whisper API 503'))) },
+        botAdminId: 999,
+        sendMessageToUser,
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mock(async (url: string | URL | Request) => {
+        const urlStr = typeof url === 'string' ? url : url.toString();
+        if (urlStr.includes('/getFile')) {
+          return new Response(JSON.stringify({ ok: true, result: { file_path: 'voice/file.ogg' } }));
+        }
+        return new Response(Buffer.from('fake-audio'));
+      }) as unknown as typeof fetch;
+
+      try {
+        const ctx = makeVoiceCtx();
+        const handler = createMessageHandler(deps as never);
+        await handler(ctx as never);
+        // Wait for fire-and-forget admin notification
+        await Bun.sleep(10);
+        expect(sendMessageToUser).toHaveBeenCalledTimes(1);
+        const [chatId, text] = sendMessageToUser.mock.calls[0] as unknown as [number, string];
+        expect(chatId).toBe(999);
+        expect(text).toContain('Voice message error');
+        expect(text).toContain('Whisper API 503');
+        expect(text).toContain('Duration: 5s');
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
     test('sends empty speech message when transcription returns empty', async () => {
       const deps = makeVoiceDeps({
         transcriptionService: { transcribe: mock(() => Promise.resolve('')) },

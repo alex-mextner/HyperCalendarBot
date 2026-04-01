@@ -458,8 +458,19 @@ async function handleVoiceMessage(
       await ctx.send(t(lang).voice_prompt, { reply_markup: keyboard });
     }
   } catch (error) {
-    cmdLogger.error({ err: error, userId: user.telegram_id }, 'Voice transcription error');
+    cmdLogger.error({ err: error, userId: user.telegram_id }, 'Voice message processing error');
     await ctx.send(t(lang).voice_error);
+    if (deps.botAdminId && deps.sendMessageToUser) {
+      const errMsg = error instanceof Error ? `${error.message}\n${error.stack ?? ''}` : String(error);
+      deps
+        .sendMessageToUser(
+          deps.botAdminId,
+          `🔴 Voice message error\nUser: ${user.telegram_id} (@${user.username ?? '—'})\nDuration: ${voice.duration}s\n\n${errMsg.slice(0, 3000)}`,
+        )
+        .catch((e: unknown) => {
+          cmdLogger.error({ err: e }, 'Failed to notify admin about voice error');
+        });
+    }
   }
 }
 
