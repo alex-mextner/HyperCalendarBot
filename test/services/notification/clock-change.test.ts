@@ -64,6 +64,89 @@ describe('detectClockChange', () => {
     const result = detectClockChange('Europe/Berlin', '2026-03-30');
     expect(result).toBeNull();
   });
+
+  // --- Edge cases: "Falsehoods programmers believe about time" ---
+
+  test('Lord Howe Island: 30-minute DST shift (not 60)', () => {
+    // Australia/Lord_Howe springs forward 30 minutes on Oct 4, 2026
+    // UTC+10:30 → UTC+11:00 (only 30 min, not 60!)
+    const result = detectClockChange('Australia/Lord_Howe', '2026-10-04');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(30);
+  });
+
+  test('Lord Howe Island: 30-minute fall back', () => {
+    // Australia/Lord_Howe falls back 30 minutes on Apr 5, 2026
+    // UTC+11:00 → UTC+10:30
+    const result = detectClockChange('Australia/Lord_Howe', '2026-04-05');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('back');
+    expect(result!.minutes).toBe(30);
+  });
+
+  test('Chatham Islands (UTC+12:45): 60-minute DST despite fractional base offset', () => {
+    // Pacific/Chatham springs forward on Sep 27, 2026
+    // UTC+12:45 → UTC+13:45 (still a 60-min shift, but from a 45-min base)
+    const result = detectClockChange('Pacific/Chatham', '2026-09-27');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('Chatham Islands fall back', () => {
+    // Pacific/Chatham falls back on Apr 5, 2026
+    // UTC+13:45 → UTC+12:45
+    const result = detectClockChange('Pacific/Chatham', '2026-04-05');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('back');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('southern hemisphere: Australia/Sydney DST ends in April (fall back)', () => {
+    // Sydney falls back on Apr 5, 2026 (southern hemisphere — opposite of Europe/US)
+    const result = detectClockChange('Australia/Sydney', '2026-04-05');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('back');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('southern hemisphere: Australia/Sydney DST starts in October (spring forward)', () => {
+    // Sydney springs forward on Oct 4, 2026
+    const result = detectClockChange('Australia/Sydney', '2026-10-04');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('Morocco: Ramadan fall-back (mid-year, not autumn)', () => {
+    // Africa/Casablanca reverts UTC+1 → UTC+0 around Feb 15, 2026 for Ramadan
+    // This is NOT a normal DST transition — it's a religious/political offset change
+    const result = detectClockChange('Africa/Casablanca', '2026-02-15');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('back');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('Morocco: spring-forward back from Ramadan time', () => {
+    // Africa/Casablanca goes UTC+0 → UTC+1 around Mar 22, 2026 after Ramadan
+    const result = detectClockChange('Africa/Casablanca', '2026-03-22');
+    expect(result).not.toBeNull();
+    expect(result!.direction).toBe('forward');
+    expect(result!.minutes).toBe(60);
+  });
+
+  test('no DST timezone with fractional offset: Asia/Kathmandu (UTC+5:45)', () => {
+    // Nepal uses UTC+5:45 year-round, never has DST
+    const result = detectClockChange('Asia/Kathmandu', '2026-03-29');
+    expect(result).toBeNull();
+  });
+
+  test('no DST timezone with half-hour offset: Asia/Kolkata (UTC+5:30)', () => {
+    // India uses UTC+5:30 year-round, no DST
+    const result = detectClockChange('Asia/Kolkata', '2026-03-29');
+    expect(result).toBeNull();
+  });
 });
 
 describe('formatClockChangeNotice', () => {
@@ -91,5 +174,18 @@ describe('formatClockChangeNotice', () => {
     const text = formatClockChangeNotice('en', { direction: 'back', minutes: 60 });
     expect(text).toContain('🕐');
     expect(text).toContain('back');
+  });
+
+  test('formats 30-minute shift as "30 min" not "0.5h" (Lord Howe Island case)', () => {
+    // 30 min should display as "30 min" / "30 минут", not "0.5h" / "0.5 часов"
+    const textEn = formatClockChangeNotice('en', { direction: 'forward', minutes: 30 });
+    expect(textEn).toContain('30');
+    expect(textEn).toContain('min');
+    expect(textEn).not.toContain('0.5');
+
+    const textRu = formatClockChangeNotice('ru', { direction: 'forward', minutes: 30 });
+    expect(textRu).toContain('30');
+    expect(textRu).toContain('минут');
+    expect(textRu).not.toContain('0.5');
   });
 });

@@ -482,10 +482,10 @@ export const MSG = {
         'No events today — your day is free!\nWant to plan something? Just describe it in a message, or use /add.',
       freeDayEvening:
         'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
-      clockChangeForward: (hours: string) =>
-        `🕐 Clocks moved ${hours}h forward last night. Double-check your alarms and meetings!`,
-      clockChangeBack: (hours: string) =>
-        `🕐 Clocks moved ${hours}h back last night. Double-check your alarms and meetings!`,
+      clockChangeForward: (duration: string) =>
+        `🕐 Clocks moved ${duration} forward last night. Double-check your alarms and meetings!`,
+      clockChangeBack: (duration: string) =>
+        `🕐 Clocks moved ${duration} back last night. Double-check your alarms and meetings!`,
     },
     speech: {
       allDay: 'all day',
@@ -919,10 +919,10 @@ export const MSG = {
         'Сегодня нет событий — день свободен!\nХочешь что-то запланировать? Просто напиши сообщение, или используй /add.',
       freeDayEvening:
         'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
-      clockChangeForward: (hours: string) =>
-        `🕐 Сегодня ночью часы перевели на ${hours} ${ruPlural(Number(hours), 'час', 'часа', 'часов')} вперёд. Проверь, что будильник и встречи правильно настроены!`,
-      clockChangeBack: (hours: string) =>
-        `🕐 Сегодня ночью часы перевели на ${hours} ${ruPlural(Number(hours), 'час', 'часа', 'часов')} назад. Проверь, что будильник и встречи правильно настроены!`,
+      clockChangeForward: (duration: string) =>
+        `🕐 Сегодня ночью часы перевели на ${duration} вперёд. Проверь, что будильник и встречи правильно настроены!`,
+      clockChangeBack: (duration: string) =>
+        `🕐 Сегодня ночью часы перевели на ${duration} назад. Проверь, что будильник и встречи правильно настроены!`,
     },
     speech: {
       allDay: 'весь день',
