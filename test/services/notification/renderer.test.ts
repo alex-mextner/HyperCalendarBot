@@ -278,6 +278,21 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('📅 Holiday (All day)');
       expect(result.text).toContain('14:00 — Meeting (1h)');
     });
+
+    test('footer uses localized "tomorrow" in Russian', () => {
+      const result = renderer.renderEveningReview('ru', 'четверг, 2 апреля', [
+        { title: 'Встреча', startTime: '14:00', endTime: '15:00', location: null, duration: '1ч' },
+      ]);
+      expect(result.text).toContain('1 событие завтра.');
+      expect(result.text).not.toContain('tomorrow');
+    });
+
+    test('footer uses "tomorrow" in English', () => {
+      const result = renderer.renderEveningReview('en', 'Thursday, April 2', [
+        { title: 'Meeting', startTime: '14:00', endTime: '15:00', location: null, duration: '1h' },
+      ]);
+      expect(result.text).toContain('1 event tomorrow.');
+    });
   });
 
   describe('renderMorningAgenda – free day', () => {

@@ -87,6 +87,7 @@ const LABELS = {
     startingNow: 'starting now!',
     eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
     goodNight: 'Good night!',
+    tomorrow: 'tomorrow',
     haveADay: 'Have a productive day!',
     eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
     weeklyDigest: (range: string) => `📅 Week ${range}:`,
@@ -112,6 +113,7 @@ const LABELS = {
       return `${n} событий`;
     },
     goodNight: 'Спокойной ночи!',
+    tomorrow: 'завтра',
     haveADay: 'Продуктивного дня!',
     eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
     weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
@@ -252,7 +254,7 @@ export class NotificationRenderer {
         else lines.push(line);
       }
       lines.push('');
-      lines.push(`${l.eventsCount(events.length)} tomorrow. ${l.goodNight}`);
+      lines.push(`${l.eventsCount(events.length)} ${l.tomorrow}. ${l.goodNight}`);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
