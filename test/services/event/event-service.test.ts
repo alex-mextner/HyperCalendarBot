@@ -603,10 +603,11 @@ describe('EventService', () => {
 
     test('getUpcoming() includes group-owned recurring events created by the user', () => {
       ensureMembership();
+      const futureStart = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
       service.createEvent({
         user_id: USER_ID,
         title: 'Group Standup',
-        start_at: '2026-04-01T09:00:00Z',
+        start_at: futureStart,
         timezone: 'UTC',
         recurrence_rule: 'FREQ=DAILY',
         owner_type: 'group',
@@ -616,7 +617,7 @@ describe('EventService', () => {
       service.createEvent({
         user_id: USER_ID,
         title: 'Personal Yoga',
-        start_at: '2026-04-01T07:00:00Z',
+        start_at: futureStart,
         timezone: 'UTC',
       });
 
