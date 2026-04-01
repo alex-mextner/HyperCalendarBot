@@ -88,22 +88,22 @@ describe('CalendarBotAgent', () => {
     expect(messages[2]!.content as string).toContain(ctx.messageText);
   });
 
-  test('buildMessages prefixes user text messages with UTC timestamp', () => {
+  test('buildMessages prefixes user text messages with local timestamp', () => {
     ctx.chatHistory.save(USER_ID, 'user', 'Hello');
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
     expect(typeof messages[0]!.content).toBe('string');
-    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
     expect(messages[0]!.content as string).toContain('Hello');
   });
 
-  test('buildMessages prefixes user messages with UTC timestamp', () => {
+  test('buildMessages prefixes user messages with local timestamp', () => {
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves it
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
     const { messages } = agent.buildMessages(ctx, history);
-    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
     expect(messages[0]!.content as string).toContain(ctx.messageText);
   });
 
