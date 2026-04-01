@@ -1,6 +1,8 @@
 import { TZDate } from '@date-fns/tz';
+import type { Lang } from '../../config/constants.ts';
+import { t } from '../../config/constants.ts';
 
-interface ClockChangeInfo {
+export interface ClockChangeInfo {
   direction: 'forward' | 'back';
   minutes: number;
 }
@@ -32,17 +34,11 @@ export function detectClockChange(timezone: string, localDateIso: string): Clock
 
 export function formatClockChangeNotice(lang: string, info: ClockChangeInfo): string {
   const hours = info.minutes / 60;
-  const hoursLabel = Number.isInteger(hours) ? String(hours) : String(hours);
-
-  if (lang === 'ru') {
-    if (info.direction === 'forward') {
-      return `🕐 Сегодня ночью часы перевели на ${hoursLabel} ч вперёд. Проверь, что будильник и встречи правильно настроены!`;
-    }
-    return `🕐 Сегодня ночью часы перевели на ${hoursLabel} ч назад. Проверь, что будильник и встречи правильно настроены!`;
-  }
+  const hoursLabel = String(hours);
+  const msgs = t(lang as Lang).notifications;
 
   if (info.direction === 'forward') {
-    return `🕐 Clocks moved ${hoursLabel}h forward last night. Double-check your alarms and meetings!`;
+    return msgs.clockChangeForward(hoursLabel);
   }
-  return `🕐 Clocks moved ${hoursLabel}h back last night. Double-check your alarms and meetings!`;
+  return msgs.clockChangeBack(hoursLabel);
 }
