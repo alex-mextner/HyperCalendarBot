@@ -8,6 +8,7 @@ import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
+import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
@@ -649,7 +650,8 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
 
   const reminders = ctx.eventReminderRepo.getForEvent(input.event_id).filter((r) => r.sent === 0);
   if (reminders.length > 0) {
-    const unique = [...new Set(reminders.map((r) => `${r.interval_minutes}min`))];
+    const lang = ctx.user.language;
+    const unique = [...new Set(reminders.map((r) => formatReminderDuration(r.interval_minutes, lang)))];
     parts.push(`reminders: ${unique.join(', ')}`);
   }
 

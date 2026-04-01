@@ -13,7 +13,7 @@ interface SetReminderInput {
   owner_id?: number;
 }
 
-function formatReminderDuration(minutesBefore: number, lang: Lang): string {
+export function formatReminderDuration(minutesBefore: number, lang: Lang): string {
   const msgs = t(lang).aiTools.reminders;
   if (minutesBefore >= 60) {
     const hours = Math.floor(minutesBefore / 60);

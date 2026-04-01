@@ -19,32 +19,38 @@ function createTestDb() {
   return db;
 }
 
+const USER_ID = 123;
+
+function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
+  const db = createTestDb();
+  const userRepo = new UserRepository(db);
+  const eventRepo = new EventRepository(db);
+  const eventReminderRepo = new EventReminderRepository(db);
+  const chatHistoryRepo = new ChatHistoryRepository(db);
+  const holidayRepo = new HolidayRepository(db);
+  userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
+  const eventService = new EventService({ eventRepo });
+  const holidayService = new HolidayService(holidayRepo);
+  return {
+    user: userRepo.findByTelegramId(USER_ID)!,
+    chatId: USER_ID,
+    messageText: '',
+    isGroup: false,
+    eventService,
+    holidayService,
+    chatHistory: chatHistoryRepo,
+    userRepo,
+    eventReminderRepo,
+    conversationLogger: null as never,
+    ...overrides,
+  } as unknown as AgentContext;
+}
+
 describe('handleGetReminders', () => {
   let ctx: AgentContext;
-  const USER_ID = 123;
 
   beforeEach(() => {
-    const db = createTestDb();
-    const userRepo = new UserRepository(db);
-    const eventRepo = new EventRepository(db);
-    const eventReminderRepo = new EventReminderRepository(db);
-    const chatHistoryRepo = new ChatHistoryRepository(db);
-    const holidayRepo = new HolidayRepository(db);
-    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC' });
-    const eventService = new EventService({ eventRepo });
-    const holidayService = new HolidayService(holidayRepo);
-    ctx = {
-      user: userRepo.findByTelegramId(USER_ID)!,
-      chatId: USER_ID,
-      messageText: '',
-      isGroup: false,
-      eventService,
-      holidayService,
-      chatHistory: chatHistoryRepo,
-      userRepo,
-      eventReminderRepo,
-      conversationLogger: null as never,
-    };
+    ctx = makeCtx();
   });
 
   test('returns reminders for event', () => {

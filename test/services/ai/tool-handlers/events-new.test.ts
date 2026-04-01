@@ -263,7 +263,7 @@ describe('handleGetEvent', () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain('reminders');
     expect(result.output).toContain('15min');
-    expect(result.output).toContain('60min');
+    expect(result.output).toContain('1h');
   });
 
   test('includes recurrence rule when present', () => {
