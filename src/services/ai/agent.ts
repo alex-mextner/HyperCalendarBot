@@ -27,7 +27,7 @@ interface MessageParam {
 }
 
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
-  const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm');
+  const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
   return `[${local}] ${text}`;
 }
 

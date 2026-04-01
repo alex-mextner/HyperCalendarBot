@@ -94,7 +94,7 @@ describe('CalendarBotAgent', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
     expect(typeof messages[0]!.content).toBe('string');
-    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
     expect(messages[0]!.content as string).toContain('Hello');
   });
 
@@ -103,7 +103,7 @@ describe('CalendarBotAgent', () => {
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
     const { messages } = agent.buildMessages(ctx, history);
-    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}\]/);
+    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
     expect(messages[0]!.content as string).toContain(ctx.messageText);
   });
 
