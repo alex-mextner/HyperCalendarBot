@@ -87,6 +87,25 @@ const CITY_ALIASES: { [key: string]: string } = {
   пекине: 'Asia/Shanghai',
   шанхай: 'Asia/Shanghai',
   шанхае: 'Asia/Shanghai',
+  // Novosibirsk
+  новосибирск: 'Asia/Novosibirsk',
+  новосибирске: 'Asia/Novosibirsk',
+  // Yekaterinburg
+  екатеринбург: 'Asia/Yekaterinburg',
+  екатеринбурге: 'Asia/Yekaterinburg',
+  екб: 'Asia/Yekaterinburg',
+  // Kazan
+  казань: 'Europe/Moscow',
+  казани: 'Europe/Moscow',
+  // Samara
+  самара: 'Europe/Samara',
+  самаре: 'Europe/Samara',
+  // Vladivostok
+  владивосток: 'Asia/Vladivostok',
+  владивостоке: 'Asia/Vladivostok',
+  // Krasnoyarsk
+  красноярск: 'Asia/Krasnoyarsk',
+  красноярске: 'Asia/Krasnoyarsk',
   // Tbilisi
   тбилиси: 'Asia/Tbilisi',
   // Yerevan
@@ -170,6 +189,9 @@ export async function resolveCity(input: string, model?: string): Promise<string
   const cacheKey = trimmed.toLowerCase();
   const cached = resolveCache.get(cacheKey);
   if (cached) {
+    // Move to end for LRU behavior
+    resolveCache.delete(cacheKey);
+    resolveCache.set(cacheKey, cached);
     cmdLogger.debug(
       { city: trimmed, resolved: cached, source: 'cache', ms: performance.now() - startMs },
       'City resolved',
