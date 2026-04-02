@@ -11,13 +11,12 @@ mock.module('@anthropic-ai/sdk', () => ({
   },
 }));
 
-const { resolveCity, clearResolveCache } = await import('../../../src/services/timezone/city-resolver.ts');
+const { resolveCity, initCityResolverCache } = await import('../../../src/services/timezone/city-resolver.ts');
 
 describe('resolveCity', () => {
   beforeEach(() => {
     mockCreate.mockReset();
     mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'Europe/Belgrade' }] });
-    clearResolveCache();
   });
 
   test('returns IANA key when user types it directly', async () => {
@@ -29,50 +28,59 @@ describe('resolveCity', () => {
     expect(result).toBe('Europe/Belgrade');
   });
 
-  test('resolves partial/fuzzy city name', async () => {
+  test('resolves partial/fuzzy city name via library', async () => {
     const result = await resolveCity('New Yor');
     expect(result).toBeTruthy();
     expect(result).toContain('America/');
   });
 
-  test('falls back to AI for Cyrillic input not in dictionary', async () => {
-    // Cyrillic 'Воронеж' not in dictionary or library → goes to AI
+  test('resolves Russian nominative via matcher without AI', async () => {
+    expect(await resolveCity('москва')).toBe('Europe/Moscow');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('resolves Russian case forms via matcher without AI', async () => {
+    expect(await resolveCity('москве')).toBe('Europe/Moscow');
+    expect(await resolveCity('нижнем новгороде')).toBe('Europe/Moscow');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('resolves abbreviations without AI', async () => {
+    expect(await resolveCity('мск')).toBe('Europe/Moscow');
+    expect(await resolveCity('екб')).toBe('Asia/Yekaterinburg');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('resolves case-insensitive', async () => {
+    expect(await resolveCity('Москве')).toBe('Europe/Moscow');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('falls back to AI for unknown input', async () => {
     mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Europe/Moscow' }] });
-    const result = await resolveCity('Воронеж');
+    const result = await resolveCity('глубокобыстрицк');
     expect(result).toBe('Europe/Moscow');
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
-  test('resolves when AI returns a city name instead of IANA key (libFallback path)', async () => {
-    // Cyrillic input → dictionary misses → library misses → AI returns 'Belgrade' (city name)
-    // validateTimezone('Belgrade') is false → lookupLibrary('Belgrade') → 'Europe/Belgrade'
+  test('resolves when AI returns a city name instead of IANA key', async () => {
     mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Belgrade' }] });
-    const result = await resolveCity('Воронеж');
+    const result = await resolveCity('глубокобыстрицк');
     expect(result).toBe('Europe/Belgrade');
     expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   test('returns null when AI response has empty content', async () => {
     mockCreate.mockResolvedValueOnce({ content: [] });
-    const result = await resolveCity('Воронеж');
+    const result = await resolveCity('глубокобыстрицк');
     expect(result).toBeNull();
   });
 
-  test('retries AI when it returns invalid IANA key', async () => {
-    // Use Cyrillic so library won't resolve it
-    mockCreate
-      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Europe/Novi_Sad' }] }) // invalid
-      .mockResolvedValueOnce({ content: [{ type: 'text', text: 'Europe/Belgrade' }] }); // valid
-    const result = await resolveCity('Нови Сад');
-    expect(result).toBe('Europe/Belgrade');
-    expect(mockCreate).toHaveBeenCalledTimes(2);
-  });
-
-  test('returns null after 3 exhausted AI attempts', async () => {
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'Fake/Zone' }] });
-    const result = await resolveCity('xyzxyzxyz');
+  test('AI makes only 1 attempt to avoid long delays', async () => {
+    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Fake/Zone' }] });
+    const result = await resolveCity('глубокобыстрицк');
     expect(result).toBeNull();
-    expect(mockCreate).toHaveBeenCalledTimes(3);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
   });
 
   test('returns null when AI returns UNKNOWN', async () => {
@@ -81,41 +89,61 @@ describe('resolveCity', () => {
     expect(result).toBeNull();
   });
 
-  test('resolves Russian case forms from dictionary without AI', async () => {
-    // "москве" (prepositional case) should resolve instantly via dictionary
+  test('resolves relocant destination cities', async () => {
+    expect(await resolveCity('батуми')).toBe('Asia/Tbilisi');
+    expect(await resolveCity('будве')).toBe('Europe/Podgorica');
+    expect(await resolveCity('лимасоле')).toBe('Asia/Nicosia');
+    expect(await resolveCity('анталье')).toBe('Europe/Istanbul');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  test('resolves воронеж without AI (now in matcher)', async () => {
+    expect(await resolveCity('воронеже')).toBe('Europe/Moscow');
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('Redis cache integration', () => {
+  test('cache hit returns cached value without calling matcher or AI', async () => {
+    const mockGet = mock(async () => 'Asia/Tokyo');
+    const mockSet = mock(async () => 'OK');
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
+    const result = await resolveCity('какой-то город');
+    expect(result).toBe('Asia/Tokyo');
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(mockCreate).not.toHaveBeenCalled();
+
+    // Reset to no-cache for other tests
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
+  });
+
+  test('cache miss falls through to matcher', async () => {
+    const mockGet = mock(async () => null);
+    const mockSet = mock(async () => 'OK');
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
     const result = await resolveCity('москве');
     expect(result).toBe('Europe/Moscow');
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    // cacheSet should be called after successful matcher resolution
+    expect(mockSet).toHaveBeenCalledTimes(1);
+
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
   });
 
-  test('resolves nominative Russian city from dictionary without AI', async () => {
-    const result = await resolveCity('москва');
+  test('Redis error degrades gracefully — falls through to matcher', async () => {
+    const mockGet = mock(async () => {
+      throw new Error('Redis connection refused');
+    });
+    const mockSet = mock(async () => {
+      throw new Error('Redis connection refused');
+    });
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
+    const result = await resolveCity('москве');
     expect(result).toBe('Europe/Moscow');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
 
-  test('resolves abbreviation from dictionary without AI', async () => {
-    const result = await resolveCity('мск');
-    expect(result).toBe('Europe/Moscow');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  test('resolves case-insensitive dictionary lookup', async () => {
-    const result = await resolveCity('Москве');
-    expect(result).toBe('Europe/Moscow');
-    expect(mockCreate).not.toHaveBeenCalled();
-  });
-
-  test('caches AI resolution and reuses on second call', async () => {
-    // Use a city not in dictionary to force AI path
-    mockCreate.mockResolvedValueOnce({ content: [{ type: 'text', text: 'Europe/Moscow' }] });
-    const first = await resolveCity('Краснодар');
-    expect(first).toBe('Europe/Moscow');
-    expect(mockCreate).toHaveBeenCalledTimes(1);
-
-    mockCreate.mockReset();
-    const second = await resolveCity('Краснодар');
-    expect(second).toBe('Europe/Moscow');
-    expect(mockCreate).not.toHaveBeenCalled();
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
   });
 });
