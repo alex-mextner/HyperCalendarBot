@@ -261,6 +261,58 @@ describe('IntentLearner', () => {
     }
   });
 
+  test('accepts empty phrases when pattern is present', async () => {
+    const intentPayload = {
+      canonical_name: 'get_time_in_timezone',
+      phrases: [],
+      trigger_words: ['час', 'время'],
+      pattern: '^(?:который час|время)\\s+(?:в|in)\\s+(.+)$',
+      workflow: { steps: [{ call: 'get_timezone_info', input: { timezone: '{{$1}}', at: '{{dates.now}}' } }] },
+      format: 'text',
+    };
+
+    const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }) as Response;
+
+    try {
+      const result = await learner.analyze('который час в москве', [{ name: 'get_timezone_info', input: {} }], [{ success: true }]);
+      expect(result?.canonical_name).toBe('get_time_in_timezone');
+      expect(result?.phrases).toEqual([]);
+      expect(result?.pattern).toBe('^(?:который час|время)\\s+(?:в|in)\\s+(.+)$');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('rejects empty phrases when no pattern', async () => {
+    const intentPayload = {
+      canonical_name: 'broken_intent',
+      phrases: [],
+      workflow: { steps: [{ call: 'get_events', input: { start_date: '{{dates.today}}' } }] },
+      format: 'text',
+    };
+
+    const originalFetch = globalThis.fetch;
+    // @ts-expect-error: mock fetch missing preconnect
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }) as Response;
+
+    try {
+      const result = await learner.analyze('что-то', [{ name: 'get_events', input: {} }], [{ success: true }]);
+      expect(result).toBeNull();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('resets daily counter on new day', () => {
     for (let i = 0; i < 50; i++) {
       learner.incrementCounter();
