@@ -72,7 +72,7 @@ import {
   handleShareEvent,
 } from './tool-handlers/sharing.ts';
 import { handleGetFreeSlots } from './tool-handlers/slots.ts';
-import { handleConvertToTimezone, handleGetTimezoneInfo } from './tool-handlers/timezone.ts';
+import { handleConvertToTimezone, handleGetTimezoneInfoWithCityFallback } from './tool-handlers/timezone.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import type { AgentContext, ToolResult } from './types.ts';
 
@@ -461,7 +461,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleCalculate(input as ToolInputMap['calculate']);
 
       case 'get_timezone_info':
-        return handleGetTimezoneInfo(input as ToolInputMap['get_timezone_info']);
+        return handleGetTimezoneInfoWithCityFallback(input as ToolInputMap['get_timezone_info'], ctx.fastModel);
 
       case 'convert_to_timezone':
         return handleConvertToTimezone(input as ToolInputMap['convert_to_timezone']);

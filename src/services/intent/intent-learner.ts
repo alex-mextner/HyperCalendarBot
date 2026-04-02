@@ -12,7 +12,7 @@ import { validateWorkflowVariables } from './workflow-validator.ts';
 const LearnerResponseSchema = z.object({
   skip: z.boolean().optional(),
   canonical_name: z.string(),
-  phrases: z.array(z.string()),
+  phrases: z.array(z.string()).default([]),
   trigger_words: z.array(z.string()).optional(),
   pattern: z.string().nullish(),
   workflow: WorkflowSchema,
@@ -207,8 +207,11 @@ export class IntentLearner {
 
       if (parsed.skip) return null;
 
-      // Validate required fields
-      if (!parsed.canonical_name || !parsed.phrases?.length || !parsed.workflow) {
+      // Validate required fields — phrases can be empty for parameterized intents
+      if (!parsed.canonical_name || !parsed.workflow) {
+        return null;
+      }
+      if (!parsed.phrases.length && !parsed.pattern) {
         return null;
       }
 
@@ -276,14 +279,17 @@ export class IntentLearner {
     if (!this.config.adminId || !this.config.sendToAdmin) return;
 
     const workflowStr = JSON.stringify(data.workflow, null, 2);
-    const text = [
-      `💡 New intent: ${data.canonical_name}`,
-      `Phrases: ${data.phrases.map((p) => `"${p}"`).join(', ')}`,
+    const lines = [`💡 New intent: ${data.canonical_name}`];
+    if (data.phrases.length > 0) {
+      lines.push(`Phrases: ${data.phrases.map((p) => `"${p}"`).join(', ')}`);
+    }
+    lines.push(
       data.pattern ? `Pattern: ${data.pattern}` : 'Pattern: none (exact match only)',
       `Workflow: ${workflowStr}`,
       `Format: ${data.format}`,
       `Source: "${data.source_message}"`,
-    ].join('\n');
+    );
+    const text = lines.join('\n');
 
     const replyMarkup = {
       inline_keyboard: [

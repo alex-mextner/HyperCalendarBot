@@ -1,4 +1,5 @@
 import cityTimezones from 'city-timezones';
+import { resolveCity } from '../../timezone/city-resolver.ts';
 import type { ToolResult } from '../types.ts';
 
 function getOffsetMinutes(timezone: string, dt: Date): number {
@@ -140,6 +141,28 @@ export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?:
   }
 
   return { success: true, output: JSON.stringify(result) };
+}
+
+/**
+ * Wraps handleGetTimezoneInfo with city name resolution fallback.
+ * When a timezone string is not a valid IANA ID, tries:
+ * 1. city-timezones library lookup
+ * 2. AI fast model resolution with retries
+ */
+export async function handleGetTimezoneInfoWithCityFallback(
+  input: { timezone: string | string[]; at?: string },
+  fastModel?: string,
+): Promise<ToolResult> {
+  const syncResult = handleGetTimezoneInfo(input);
+  if (syncResult.success) return syncResult;
+
+  // Only attempt city resolution for single timezone string
+  if (typeof input.timezone !== 'string') return syncResult;
+
+  const resolved = await resolveCity(input.timezone, fastModel);
+  if (!resolved) return syncResult;
+
+  return handleGetTimezoneInfo({ timezone: resolved, at: input.at });
 }
 
 export function handleConvertToTimezone(input: { datetime: string; timezone: string }): ToolResult {
