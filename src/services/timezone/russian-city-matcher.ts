@@ -379,8 +379,6 @@ for (const [name, timezone] of CITIES) {
   }
 }
 
-// Also index abbreviations by their first character (they're already in CITIES)
-
 /**
  * Match a Russian city name (any grammatical case) against the dictionary.
  * Uses stemming + Levenshtein fuzzy matching.
@@ -428,7 +426,7 @@ export function matchCity(input: string): string | null {
 
   if (bestMatch) return bestMatch.timezone;
 
-  // 4. Multi-word: try matching individual words (e.g., "новгороде" → "новгород")
+  // 4. Single-word fallback: search ALL buckets (not just first-letter) for partial matches
   const words = stemmed.split(/\s+/);
   if (words.length === 1 && words[0]!.length >= 4) {
     // Single word — search ALL entries for fuzzy match (not just first-letter)

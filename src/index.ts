@@ -669,7 +669,7 @@ if (config.REDIS_URL) {
   eventMentionStore = new RedisEventMentionStore(redisClient);
   // City resolver cache — persistent timezone lookups
   const { initCityResolverCache } = await import('./services/timezone/city-resolver.ts');
-  initCityResolverCache({ get: (k) => bunRedis.get(k), set: (k, v) => bunRedis.set(k, v) });
+  initCityResolverCache({ get: (k) => bunRedis.get(k), set: (k, v) => bunRedis.set(k, v, 'EX', 2592000) });
   botLogger.info('City resolver cache: Redis');
   webServerDeps.healthCheck = () => bunRedis.ping().then(() => {});
   botLogger.info('Event mention store: Redis (7-day TTL)');

@@ -11,7 +11,7 @@ mock.module('@anthropic-ai/sdk', () => ({
   },
 }));
 
-const { resolveCity } = await import('../../../src/services/timezone/city-resolver.ts');
+const { resolveCity, initCityResolverCache } = await import('../../../src/services/timezone/city-resolver.ts');
 
 describe('resolveCity', () => {
   beforeEach(() => {
@@ -100,5 +100,50 @@ describe('resolveCity', () => {
   test('resolves воронеж without AI (now in matcher)', async () => {
     expect(await resolveCity('воронеже')).toBe('Europe/Moscow');
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe('Redis cache integration', () => {
+  test('cache hit returns cached value without calling matcher or AI', async () => {
+    const mockGet = mock(async () => 'Asia/Tokyo');
+    const mockSet = mock(async () => 'OK');
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
+    const result = await resolveCity('какой-то город');
+    expect(result).toBe('Asia/Tokyo');
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    expect(mockCreate).not.toHaveBeenCalled();
+
+    // Reset to no-cache for other tests
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
+  });
+
+  test('cache miss falls through to matcher', async () => {
+    const mockGet = mock(async () => null);
+    const mockSet = mock(async () => 'OK');
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
+    const result = await resolveCity('москве');
+    expect(result).toBe('Europe/Moscow');
+    expect(mockGet).toHaveBeenCalledTimes(1);
+    // cacheSet should be called after successful matcher resolution
+    expect(mockSet).toHaveBeenCalledTimes(1);
+
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
+  });
+
+  test('Redis error degrades gracefully — falls through to matcher', async () => {
+    const mockGet = mock(async () => {
+      throw new Error('Redis connection refused');
+    });
+    const mockSet = mock(async () => {
+      throw new Error('Redis connection refused');
+    });
+    initCityResolverCache({ get: mockGet, set: mockSet });
+
+    const result = await resolveCity('москве');
+    expect(result).toBe('Europe/Moscow');
+
+    initCityResolverCache({ get: async () => null, set: async () => 'OK' });
   });
 });
