@@ -192,6 +192,8 @@ export interface AgentContext {
   /** Scene key storage — used by cancel_scene to delete the GramIO scene entry. Always wired from sceneStorage dep. */
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
+  /** Fast model ID for lightweight AI tasks (city→timezone resolution). */
+  fastModel?: string;
 
   // Capability groups
   sharing?: SharingCapability;

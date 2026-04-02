@@ -562,6 +562,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               return [];
             }
           })(),
+      fastModel: deps.aiCityModel,
       actionLogRepo: deps.actionLogRepo,
       chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       sceneStorage: {

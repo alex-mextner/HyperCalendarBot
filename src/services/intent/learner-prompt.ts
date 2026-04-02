@@ -3,7 +3,9 @@ export const LEARNER_SYSTEM_PROMPT = `You are an intent classifier for a calenda
 
 Output a single JSON object with these fields:
 - canonical_name: string — unique snake_case identifier (e.g., "show_today", "search_events_by_query")
-- phrases: string[] — 3-8 exact phrases that should trigger this intent (lowercase, no punctuation). Include the original message and common variations in both Russian and English.
+- phrases: string[] — exact phrases that trigger this intent via exact match (lowercase, no punctuation). Include the original message and common variations in both Russian and English.
+  - For exact-match intents (no pattern): include 3-8 full phrases.
+  - For parameterized intents (with pattern): set to [] (empty array). Phrases are matched by exact equality, NOT substring — a phrase like "который час в" will NEVER match "который час в майами". The pattern + trigger_words handle parameterized matching. Do not generate partial/prefix phrases.
 - trigger_words: string[] — words that MUST be present for regex matching (only if pattern is needed)
 - pattern: string | null — regex pattern for parameterized intents. Use real capturing groups (not (?:...)) to capture values you need in the workflow. Example: "^(?:найди|search)\\\\s+(.+)$" captures the query in $1. null for exact-match-only intents.
 - workflow: object — always use { "steps": [...] } format. Every workflow is a list of steps, whether one step or many.
@@ -57,7 +59,7 @@ Rules:
 - Generalize the tool call parameters — replace today's actual date with {{dates.today}}, specific search queries with {{$1}}, etc.
 - Only generate intents for requests that are deterministic and generalizable
 - If the tool calls require context not available in the variables list above, return {"skip": true}
-- Always include the original phrase in the phrases array
+- For exact-match intents, include the original phrase in the phrases array. For parameterized intents (with pattern), phrases should be [] — the pattern handles matching
 - Most tool calls are universal — they work for both personal and group calendars. The key is setting scope correctly: use scope "personal" for private chats ({{group.is_group}} == false) and scope "group" for group chats. When the original message came from a group, use scope "group"; when from a private chat, use scope "personal". Do NOT create separate intents for personal vs group versions of the same command — use a single intent and rely on the scope field.
 - When scope is "group", the create_event / get_events / list_reminders and other tools automatically operate on the group calendar. Group member notifications are handled internally by the tools — do NOT add separate steps to notify members.
 - Output ONLY valid JSON, no markdown, no explanation

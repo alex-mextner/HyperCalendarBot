@@ -88,6 +88,35 @@ describe('IntentMatcher', () => {
     expect(result).toEqual({ intentId: 4, captures: { $1: 'завтра' } });
   });
 
+  test('loads intent with invalid phrases JSON but valid pattern', () => {
+    matcher.load([
+      makeIntent({
+        id: 5,
+        canonical_name: 'timezone',
+        phrases: 'NOT VALID JSON',
+        trigger_words: '["час", "время"]',
+        pattern: '^(?:который час|время)\\s+(?:в|in)\\s+(.+)$',
+      }),
+    ]);
+    // Pattern matching still works despite corrupt phrases
+    const result = matcher.match('который час в москве');
+    expect(result).toEqual({ intentId: 5, captures: { $1: 'москве' } });
+  });
+
+  test('loads intent with empty phrases and pattern', () => {
+    matcher.load([
+      makeIntent({
+        id: 6,
+        canonical_name: 'timezone2',
+        phrases: '[]',
+        trigger_words: '["час"]',
+        pattern: '^который час\\s+в\\s+(.+)$',
+      }),
+    ]);
+    const result = matcher.match('который час в дубае');
+    expect(result).toEqual({ intentId: 6, captures: { $1: 'дубае' } });
+  });
+
   test('load clears previous data', () => {
     matcher.load([makeIntent({ id: 1, canonical_name: 'a', phrases: '["hello"]' })]);
     expect(matcher.match('hello')).toBeDefined();

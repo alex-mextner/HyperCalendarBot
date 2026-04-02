@@ -28,12 +28,11 @@ export class IntentMatcher {
     this.triggerIndex = new Map();
 
     for (const intent of intents) {
-      let phrases: string[];
+      let phrases: string[] = [];
       try {
         phrases = StringArrayCodec.parse(intent.phrases);
       } catch {
-        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON, skipping');
-        continue;
+        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON');
       }
       for (const phrase of phrases) {
         this.phraseMap.set(normalize(phrase), intent.id);
