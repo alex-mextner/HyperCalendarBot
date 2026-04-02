@@ -68,7 +68,9 @@ export interface AgentRunResult {
 
 export class CalendarBotAgent {
   private client: Anthropic;
+  private fallbackClient: Anthropic | null;
   private model: string;
+  private fallbackModel: string | null;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
 
@@ -77,6 +79,13 @@ export class CalendarBotAgent {
     this.model = config.model;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
+    this.fallbackClient = config.fallback
+      ? createAnthropicClient({
+          apiKey: config.fallback.apiKey ?? config.apiKey,
+          baseURL: config.fallback.baseUrl ?? config.baseUrl,
+        })
+      : null;
+    this.fallbackModel = config.fallback?.model ?? null;
   }
 
   getSender(): TelegramSender {
@@ -237,9 +246,9 @@ export class CalendarBotAgent {
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
         const contentBlocks: Anthropic.ContentBlockParam[] = [];
 
-        const streamRequest = () =>
-          this.client.messages.stream({
-            model: this.model,
+        const makeStreamRequest = (client: Anthropic, model: string) =>
+          client.messages.stream({
+            model,
             max_tokens: 4096,
             system: [
               {
@@ -252,49 +261,92 @@ export class CalendarBotAgent {
             tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
           });
 
-        let stream: ReturnType<typeof streamRequest>;
+        type StreamType = ReturnType<typeof makeStreamRequest>;
+        let stream: StreamType;
         let lastError: unknown;
-        for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
-          try {
-            stream = streamRequest();
-            for await (const event of stream) {
-              if (event.type === 'content_block_delta') {
-                if (event.delta.type === 'text_delta') {
-                  writer.appendText(event.delta.text);
-                  await writer.flush(false);
-                }
-              }
+        let usedFallback = false;
 
-              if (event.type === 'content_block_start') {
-                if (event.content_block.type === 'tool_use') {
-                  hasToolUse = true;
-                  writer.setToolLabel(event.content_block.name);
-                  await writer.flush(true);
-                }
-              }
+        const consumeStream = async (s: StreamType) => {
+          // Register listeners to prevent Anthropic SDK's intentional Promise.reject()
+          // for unhandled abort/error events (MessageStream._emit lines 282, 299)
+          s.on('abort', (err) => aiLogger.warn({ err }, 'Anthropic stream aborted'));
+          s.on('error', (err) => aiLogger.warn({ err }, 'Anthropic stream error'));
 
-              if (event.type === 'message_delta') {
-                if (event.delta.stop_reason === 'tool_use') {
-                  hasToolUse = true;
-                }
+          for await (const event of s) {
+            if (event.type === 'content_block_delta') {
+              if (event.delta.type === 'text_delta') {
+                writer.appendText(event.delta.text);
+                await writer.flush(false);
               }
             }
+
+            if (event.type === 'content_block_start') {
+              if (event.content_block.type === 'tool_use') {
+                hasToolUse = true;
+                writer.setToolLabel(event.content_block.name);
+                await writer.flush(true);
+              }
+            }
+
+            if (event.type === 'message_delta') {
+              if (event.delta.stop_reason === 'tool_use') {
+                hasToolUse = true;
+              }
+            }
+          }
+        };
+
+        const isRetryableError = (err: unknown): boolean => {
+          const s = String(err);
+          return (
+            s.includes('Network') ||
+            s.includes('overloaded') ||
+            s.includes('AbortError') ||
+            s.includes('connection was closed') ||
+            s.includes('529') ||
+            s.includes('rate') ||
+            s.includes('ECONNRESET')
+          );
+        };
+
+        // Primary model retry loop
+        for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
+          try {
+            stream = makeStreamRequest(this.client, this.model);
+            await consumeStream(stream);
             lastError = undefined;
             break;
           } catch (err) {
             lastError = err;
-            const isRetryable = String(err).includes('Network') || String(err).includes('overloaded');
-            if (!isRetryable || attempt >= MAX_API_RETRIES) break;
-            aiLogger.warn(
-              { attempt: attempt + 1, err: err, userId: ctx.user.telegram_id },
-              'API call failed, retrying',
-            );
+            if (!isRetryableError(err) || attempt >= MAX_API_RETRIES) break;
+            aiLogger.warn({ attempt: attempt + 1, err, userId: ctx.user.telegram_id }, 'API call failed, retrying');
             const baseDelay = RETRY_DELAY_MS * (attempt + 1);
             const jitter = Math.random() * baseDelay;
             await Bun.sleep(baseDelay + jitter);
           }
         }
+
+        // Fallback model: try once if primary exhausted retries
+        if (lastError && this.fallbackClient && this.fallbackModel) {
+          aiLogger.warn(
+            { err: lastError, fallbackModel: this.fallbackModel, userId: ctx.user.telegram_id },
+            'Primary model failed, trying fallback',
+          );
+          try {
+            stream = makeStreamRequest(this.fallbackClient, this.fallbackModel);
+            await consumeStream(stream);
+            lastError = undefined;
+            usedFallback = true;
+          } catch (fallbackErr) {
+            aiLogger.error({ err: fallbackErr, userId: ctx.user.telegram_id }, 'Fallback model also failed');
+            // Keep the original lastError — it's more informative
+          }
+        }
+
         if (lastError) throw lastError;
+        if (usedFallback) {
+          aiLogger.info({ userId: ctx.user.telegram_id, model: this.fallbackModel }, 'Used fallback model');
+        }
 
         const finalMessage = await stream!.finalMessage();
 

@@ -57,6 +57,9 @@ function createMockAnthropicClient(streamEvents: MockStreamEvent[], finalMessage
               },
             };
           },
+          on() {
+            return this;
+          },
           finalMessage: mock(() => Promise.resolve(finalMessage)),
         };
       }),
@@ -181,6 +184,9 @@ describe('CalendarBotAgent.run()', () => {
                   return Promise.resolve({ value: undefined, done: true });
                 },
               };
+            },
+            on() {
+              return this;
             },
             finalMessage: mock(() => Promise.resolve(final)),
           };
@@ -636,6 +642,9 @@ describe('CalendarBotAgent.run()', () => {
                     : Promise.resolve({ value: undefined, done: true });
                 },
               };
+            },
+            on() {
+              return this;
             },
             finalMessage: mock(() => Promise.resolve(final)),
           };

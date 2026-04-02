@@ -30,6 +30,9 @@ export interface EnvConfig {
   DISABLE_VOICE?: boolean;
   AI_DEBUG_LOGS?: boolean;
   ADMIN_ALERT_TOKEN?: string;
+  AI_MODEL_FALLBACK?: string;
+  AI_BASE_URL_FALLBACK?: string;
+  AI_API_KEY_FALLBACK?: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -114,5 +117,8 @@ export function loadConfig(): EnvConfig {
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
     AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
     ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
+    AI_MODEL_FALLBACK: process.env.AI_MODEL_FALLBACK || undefined,
+    AI_BASE_URL_FALLBACK: process.env.AI_BASE_URL_FALLBACK || undefined,
+    AI_API_KEY_FALLBACK: process.env.AI_API_KEY_FALLBACK || undefined,
   };
 }

@@ -252,6 +252,11 @@ export interface AgentConfig {
   baseUrl: string;
   model: string;
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
+  fallback?: {
+    model: string;
+    baseUrl?: string;
+    apiKey?: string;
+  };
 }
 
 export interface TelegramSender {

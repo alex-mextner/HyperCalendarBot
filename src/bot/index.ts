@@ -965,7 +965,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         if (context && 'send' in context) {
           const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
           const errLang = (dbUser?.language ?? 'en') as 'en' | 'ru';
-          (context as { send(text: string): Promise<unknown> }).send(t(errLang).something_wrong);
+          (context as { send(text: string): Promise<unknown> })
+            .send(t(errLang).something_wrong)
+            .catch((sendErr: unknown) => botLogger.warn({ err: sendErr }, 'Failed to send error message to user'));
         }
       } catch {}
     });

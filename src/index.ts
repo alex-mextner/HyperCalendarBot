@@ -30,6 +30,13 @@ process.on('uncaughtException', (error: Error) => {
 
 process.on('unhandledRejection', (reason: unknown) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
+  // AbortError ("The connection was closed") is a transient network issue — log and continue.
+  // Bun's DOMException has no stack trace; crashing gives zero diagnostic value.
+  const isAbort = err.name === 'AbortError' || err.message?.includes('The connection was closed');
+  if (isAbort) {
+    botLogger.warn({ err, name: err.name, message: err.message }, 'Transient AbortError (not crashing)');
+    return;
+  }
   botLogger.fatal({ err }, 'Unhandled promise rejection');
   pushCrashAlert?.(`Bot unhandled rejection: ${err.stack ?? err.message}`);
   process.exit(1);
@@ -679,6 +686,13 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       baseUrl: config.AI_BASE_URL,
       model: config.AI_MODEL,
       debugLogger: aiDebugLogger,
+      ...(config.AI_MODEL_FALLBACK && {
+        fallback: {
+          model: config.AI_MODEL_FALLBACK,
+          baseUrl: config.AI_BASE_URL_FALLBACK,
+          apiKey: config.AI_API_KEY_FALLBACK,
+        },
+      }),
     },
     {
       googleDeps,
