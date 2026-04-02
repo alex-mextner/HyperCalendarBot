@@ -280,7 +280,11 @@ describe('IntentLearner', () => {
       }) as Response;
 
     try {
-      const result = await learner.analyze('который час в москве', [{ name: 'get_timezone_info', input: {} }], [{ success: true }]);
+      const result = await learner.analyze(
+        'который час в москве',
+        [{ name: 'get_timezone_info', input: {} }],
+        [{ success: true }],
+      );
       expect(result?.canonical_name).toBe('get_time_in_timezone');
       expect(result?.phrases).toEqual([]);
       expect(result?.pattern).toBe('^(?:который час|время)\\s+(?:в|in)\\s+(.+)$');

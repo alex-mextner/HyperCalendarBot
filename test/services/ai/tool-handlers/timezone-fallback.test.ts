@@ -7,9 +7,7 @@ mock.module('../../../../src/services/timezone/city-resolver.ts', () => ({
   resolveCity: resolveCityMock,
 }));
 
-const { handleGetTimezoneInfoWithCityFallback } = await import(
-  '../../../../src/services/ai/tool-handlers/timezone.ts'
-);
+const { handleGetTimezoneInfoWithCityFallback } = await import('../../../../src/services/ai/tool-handlers/timezone.ts');
 
 describe('handleGetTimezoneInfoWithCityFallback', () => {
   test('valid IANA timezone returns synchronously without resolveCity', async () => {
