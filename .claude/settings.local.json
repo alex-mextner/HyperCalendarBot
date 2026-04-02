@@ -39,9 +39,7 @@
       "Bash(do)",
       "Bash(launchctl unload:*)",
       "Bash(launchctl load:*)",
-      "Bash(npm view:*)",
-      "Bash(npm info:*)",
-      "Bash(npm search:*)"
+      "Bash(npm view:*)"
     ]
   }
 }
