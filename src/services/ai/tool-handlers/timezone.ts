@@ -153,14 +153,18 @@ export async function handleGetTimezoneInfoWithCityFallback(
   input: { timezone: string | string[]; at?: string },
   fastModel?: string,
 ): Promise<ToolResult> {
-  const syncResult = handleGetTimezoneInfo(input);
-  if (syncResult.success) return syncResult;
-
   // Only attempt city resolution for single timezone string
-  if (typeof input.timezone !== 'string') return syncResult;
+  if (typeof input.timezone !== 'string') return handleGetTimezoneInfo(input);
+
+  // Skip sync IANA check when input is clearly not an IANA ID (no "/")
+  // — go straight to city resolution which has dictionary + cache
+  if (input.timezone.includes('/')) {
+    const syncResult = handleGetTimezoneInfo(input);
+    if (syncResult.success) return syncResult;
+  }
 
   const resolved = await resolveCity(input.timezone, fastModel);
-  if (!resolved) return syncResult;
+  if (!resolved) return invalidTimezoneError(input.timezone);
 
   return handleGetTimezoneInfo({ timezone: resolved, at: input.at });
 }
