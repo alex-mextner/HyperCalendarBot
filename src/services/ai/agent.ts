@@ -16,6 +16,20 @@ import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
 
+/** Text patterns that mean "stay silent" — works in both groups and DMs. */
+function isSkipText(text: string): boolean {
+  const trimmed = text.trim();
+  const upper = trimmed.toUpperCase();
+  return (
+    upper.includes('[SKIP]') ||
+    upper.includes('[ПРОПУСК]') ||
+    upper.includes('[SKIP') ||
+    upper.includes('ПРОПУСК]') ||
+    trimmed === '...' ||
+    trimmed === '…'
+  );
+}
+
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
 const MAX_API_RETRIES = 2;
@@ -441,6 +455,17 @@ export class CalendarBotAgent {
           break;
         }
 
+        // [SKIP] in a round with tool calls — discard immediately so it doesn't
+        // leak into intermediateChunks and appear in the finalized message.
+        // Intentionally skips saveToolResults: silent tools (set_reaction etc.)
+        // don't need history persistence — the side effect already happened.
+        if (isSkipText(writer.getText())) {
+          await writer.discard();
+          dbg?.logFinal('[SKIP] (mid-loop discard)', allToolCalls.length);
+          dbg?.flush();
+          return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+        }
+
         writer.commitIntermediate();
         this.saveToolResults(ctx, toolResults);
 
@@ -479,16 +504,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    const trimmed = finalText.trim();
-    const upper = trimmed.toUpperCase();
-    if (
-      upper.includes('[SKIP]') ||
-      upper.includes('[ПРОПУСК]') ||
-      upper.includes('[SKIP') ||
-      upper.includes('ПРОПУСК]') ||
-      trimmed === '...' ||
-      trimmed === '…'
-    ) {
+    if (isSkipText(finalText)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

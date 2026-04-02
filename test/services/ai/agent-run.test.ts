@@ -554,6 +554,50 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
+  test('[SKIP] with tool calls in same round is discarded (mid-loop exit)', async () => {
+    // Round 1: model calls set_reaction AND outputs [SKIP] text in the same response
+    const toolCallEvents: MockStreamEvent[] = [
+      { type: 'content_block_start', content_block: { type: 'tool_use', name: 'set_reaction' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } },
+      { type: 'message_delta', delta: { type: 'message_delta', stop_reason: 'tool_use' } },
+    ];
+    const toolCallFinal = {
+      content: [
+        {
+          type: 'tool_use',
+          id: 'call-1',
+          name: 'set_reaction',
+          input: { emoji: '👍' },
+        },
+        { type: 'text', text: '[SKIP]' },
+      ],
+      stop_reason: 'tool_use',
+    };
+
+    const mockClient = createMockAnthropicClient(toolCallEvents, toolCallFinal);
+    const agent = new CalendarBotAgent(config, sender);
+    setPrivateField(agent, 'client', mockClient);
+
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+    (sender as TelegramSender).setReaction = mock(() => Promise.resolve());
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    ctx.incomingMessageId = 123;
+    ctx.sender = sender;
+
+    const result = await agent.run(ctx);
+
+    // [SKIP] should be detected mid-loop — response is empty, no second API round
+    expect(result.responseText).toBe('');
+    expect(result.toolCalls.length).toBe(1);
+    expect(result.toolCalls[0]!.name).toBe('set_reaction');
+    // Only one API call — loop exits before round 2
+    expect(mockClient.messages.stream).toHaveBeenCalledTimes(1);
+  });
+
   test('logAiTurn via ConversationLogger saves content blocks with chatId in group context', () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.isGroup = true;
