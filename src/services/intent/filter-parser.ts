@@ -179,7 +179,22 @@ export function applyFilters(value: unknown, filters: FilterCall[]): string {
           current = '';
         } else {
           try {
-            current = dateFnsFormat(parseISO(String(current)), fmt);
+            const isoStr = String(current);
+            const parsed = parseISO(isoStr);
+            // When the ISO string has an explicit timezone offset (e.g. +03:00),
+            // parseISO normalizes to UTC and format() uses system timezone.
+            // Adjust so formatting shows the original local wall-clock time.
+            const offsetMatch = isoStr.match(/([+-])(\d{2}):(\d{2})$/);
+            const isUtcSuffix = !offsetMatch && isoStr.endsWith('Z');
+            if (offsetMatch || isUtcSuffix) {
+              const targetOffsetMinutes = offsetMatch
+                ? (offsetMatch[1] === '+' ? 1 : -1) * (Number(offsetMatch[2]) * 60 + Number(offsetMatch[3]))
+                : 0;
+              const adjusted = new Date(parsed.getTime() + (targetOffsetMinutes + parsed.getTimezoneOffset()) * 60000);
+              current = dateFnsFormat(adjusted, fmt);
+            } else {
+              current = dateFnsFormat(parsed, fmt);
+            }
           } catch {
             current = String(current);
           }

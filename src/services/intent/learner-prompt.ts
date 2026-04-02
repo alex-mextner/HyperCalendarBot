@@ -55,6 +55,23 @@ Output a single JSON object with these fields:
   - "settings" — JSON object of key-value pairs
   When in doubt, use "text" — the formatter has a safety net for JSON objects.
 
+FORMATTING RULE — the executor takes the LAST step's output as the response, then applies the "format" formatter:
+- Tools that return human-readable text (most tools): the last step's output IS the response. Use format "text".
+- Tools that return JSON objects (get_timezone_info, manage_settings, etc.): the "text" formatter cannot extract readable text from arbitrary JSON keys. You MUST save the output with "as" and add a "respond" step with "{{t.msg}}" that formats the fields you need.
+- Image rendering tools (render_day_image, render_week_image, render_month_image) are FIRE-AND-FORGET side effects — they send an image asynchronously and return a status message like "Rendering...". NEVER put them as the last step if you need data from a preceding step. Put render steps BEFORE data steps, or after data steps with a "respond" that uses the saved data.
+- "events_list" format expects JSON array [{title, start_at, end_at?}] — only use when the LAST step returns exactly this shape.
+
+EXAMPLES — complete intent JSON for common patterns:
+
+1. Parameterized intent with JSON tool output — format with respond + i18n:
+{"canonical_name":"get_time_in_timezone","phrases":[],"trigger_words":["час","время","time"],"pattern":"^(?:который час|сколько времени|время|what time)\\\\s+(?:в|in)\\\\s+(.+)$","workflow":{"steps":[{"call":"get_timezone_info","input":{"timezone":"{{$1}}","at":"{{dates.now}}"},"as":"tz_info"},{"respond":"{{t.msg}}"}],"i18n":{"ru":{"msg":"🕐 {{tool_outputs.tz_info.local_time|date(\\"HH:mm\\")}} ({{tool_outputs.tz_info.timezone}}, UTC{{tool_outputs.tz_info.utc_offset}})"},"en":{"msg":"🕐 {{tool_outputs.tz_info.local_time|date(\\"h:mm a\\")}} ({{tool_outputs.tz_info.timezone}}, UTC{{tool_outputs.tz_info.utc_offset}})"}}},"format":"text"}
+
+2. Exact-match intent with render side effect — render first, data last:
+{"canonical_name":"show_today","phrases":["что сегодня","план на сегодня","today","show today","my schedule","мое расписание"],"trigger_words":[],"pattern":null,"workflow":{"steps":[{"call":"render_day_image","input":{"date":"{{dates.today}}","scope":"{{env.scope}}"}},{"call":"get_events","input":{"start_date":"{{dates.today}}","end_date":"{{dates.today}}","scope":"{{env.scope}}"}}]},"format":"text"}
+
+3. Parameterized search intent — single tool, text output:
+{"canonical_name":"search_events","phrases":[],"trigger_words":["найди","поиск","search","find"],"pattern":"^(?:найди|поиск|search|find)\\\\s+(.+)$","workflow":{"steps":[{"call":"search_events","input":{"query":"{{$1}}","scope":"{{env.scope}}"}}]},"format":"text"}
+
 Rules:
 - Generalize the tool call parameters — replace today's actual date with {{dates.today}}, specific search queries with {{$1}}, etc.
 - Only generate intents for requests that are deterministic and generalizable
@@ -68,4 +85,6 @@ SELF-CHECK — verify ALL of these before emitting JSON:
 1. Does the pattern capture a number $N in range 1-12 (could be an hour)? → MUST add an isAmPmAmbiguous($N) check with an ask_user step for AM/PM. No exceptions.
 2. Is the event scheduled relative to today without an explicit day anchor (e.g. "в 15" with no "tomorrow"/"next week")? → MUST add isPastHour($N) check — if past, schedule for tomorrow instead.
 3. Is the event anchored to a day-of-month (e.g. "22-го")? → MUST add isPastDay($N) check — if past, schedule next month instead.
-4. CRITICAL — do NOT replicate what the AI agent did. The AI had conversation context and may have silently guessed AM/PM or assumed a future time. Your job is to build a correct workflow using the rules above, independent of the AI's choices. When in doubt, ask_user.`;
+4. CRITICAL — do NOT replicate what the AI agent did. The AI had conversation context and may have silently guessed AM/PM or assumed a future time. Your job is to build a correct workflow using the rules above, independent of the AI's choices. When in doubt, ask_user.
+5. Does the workflow end with a render/image step while format is "events_list" or another structured format? → The render step returns a status string, NOT structured data. Either reorder steps so the data step is last, or add a "respond" step.
+6. Does the last step's tool return a JSON object (not text)? → Save with "as" and add a "respond" step to format the output for the user. Raw JSON must NEVER be shown to the user.`;

@@ -169,4 +169,38 @@ describe('applyFilters', () => {
   test('eq is chainable', () => {
     expect(applyFilters('ru', parseFilterChain('eq("ru","en","ru")|upper'))).toBe('EN');
   });
+
+  test('date("HH:mm") formats ISO string with timezone offset correctly', () => {
+    // Must show 16:29 (Moscow local), not 13:29 (UTC) regardless of system timezone
+    expect(applyFilters('2026-04-02T16:29:00+03:00', parseFilterChain('date("HH:mm")'))).toBe('16:29');
+  });
+
+  test('date("h:mm a") formats ISO string with timezone offset (12h)', () => {
+    expect(applyFilters('2026-04-02T16:29:00+03:00', parseFilterChain('date("h:mm a")'))).toBe('4:29 PM');
+  });
+
+  test('date("yyyy-MM-dd") formats ISO date-only string', () => {
+    expect(applyFilters('2026-04-02', parseFilterChain('date("yyyy-MM-dd")'))).toBe('2026-04-02');
+  });
+
+  test('date("dd.MM") formats date part', () => {
+    expect(applyFilters('2026-04-02T16:29:00+03:00', parseFilterChain('date("dd.MM")'))).toBe('02.04');
+  });
+
+  test('date with negative offset', () => {
+    expect(applyFilters('2026-04-02T08:30:00-05:00', parseFilterChain('date("HH:mm")'))).toBe('08:30');
+  });
+
+  test('date with UTC (Z suffix) treats as UTC', () => {
+    expect(applyFilters('2026-04-02T13:29:00Z', parseFilterChain('date("HH:mm")'))).toBe('13:29');
+  });
+
+  test('date returns empty string for null/undefined', () => {
+    expect(applyFilters(null, parseFilterChain('date("HH:mm")'))).toBe('');
+    expect(applyFilters(undefined, parseFilterChain('date("HH:mm")'))).toBe('');
+  });
+
+  test('date falls back to string on invalid input', () => {
+    expect(applyFilters('not-a-date', parseFilterChain('date("HH:mm")'))).toBe('not-a-date');
+  });
 });
