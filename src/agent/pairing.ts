@@ -37,7 +37,11 @@ export function registerPendingConnection(code: string, ws: ServerWebSocket<WsDa
     const pending = pendingConnections.get(code);
     if (pending) {
       const msg: AgentPairError = { type: 'pair_error', reason: 'expired' };
-      pending.ws.send(JSON.stringify(msg));
+      try {
+        pending.ws.send(JSON.stringify(msg));
+      } catch {
+        /* WS already closed */
+      }
       pendingConnections.delete(code);
     }
   }, PAIRING_TTL_MS);
@@ -57,7 +61,13 @@ export async function completePairing(code: string, userId: number, registry: Ag
   const jwt = await issueAgentJwt(userId);
   pending.ws.data.userId = userId;
   const msg: AgentPairResponse = { type: 'paired', jwt };
-  pending.ws.send(JSON.stringify(msg));
+  try {
+    pending.ws.send(JSON.stringify(msg));
+  } catch {
+    pairingLogger.warn({ userId, code }, 'Pairing send failed (WS closed)');
+    pendingConnections.delete(code);
+    return false;
+  }
   registry.register(userId, pending.ws);
   pendingConnections.delete(code);
   pairingLogger.info({ userId, code }, 'Agent paired successfully');

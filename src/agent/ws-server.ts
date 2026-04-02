@@ -40,8 +40,12 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
         if (result.exp * 1000 - Date.now() < REFRESH_THRESHOLD_MS) {
           const newJwt = await issueAgentJwt(result.userId);
           const msg: AgentTokenRefreshed = { type: 'token_refreshed', jwt: newJwt };
-          ws.send(JSON.stringify(msg));
-          agentLogger.info({ userId: result.userId }, 'Agent JWT refreshed proactively');
+          try {
+            ws.send(JSON.stringify(msg));
+            agentLogger.info({ userId: result.userId }, 'Agent JWT refreshed proactively');
+          } catch {
+            agentLogger.warn({ userId: result.userId }, 'JWT refresh send failed (WS closed)');
+          }
         }
       } else {
         agentLogger.info('Agent WebSocket: no JWT, pairing window open (30s)');
@@ -65,7 +69,11 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
 
       if (msg.type === 'ping') {
         if (ws.data.userId) registry.updatePing(ws.data.userId);
-        ws.send(JSON.stringify({ type: 'pong' }));
+        try {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        } catch {
+          /* WS closed between message and pong */
+        }
         return;
       }
 

@@ -52,7 +52,13 @@ export class AgentDispatcher {
         },
         onChunk,
       });
-      conn.ws.send(JSON.stringify({ id, type, payload }));
+      try {
+        conn.ws.send(JSON.stringify({ id, type, payload }));
+      } catch (sendErr) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(sendErr instanceof Error ? sendErr : new Error(String(sendErr)));
+      }
     });
   }
 

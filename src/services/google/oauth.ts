@@ -140,15 +140,19 @@ export class GoogleOAuthService {
 
       const redis = this.redis;
       client.once('tokens', async (newTokens) => {
-        if (newTokens.access_token) {
-          this.syncRepo.updateAccessToken(
-            userId,
-            newTokens.access_token,
-            newTokens.expiry_date ? new Date(newTokens.expiry_date).toISOString() : '',
-          );
+        try {
+          if (newTokens.access_token) {
+            this.syncRepo.updateAccessToken(
+              userId,
+              newTokens.access_token,
+              newTokens.expiry_date ? new Date(newTokens.expiry_date).toISOString() : '',
+            );
+          }
+          const current = await redis.get(lockKey);
+          if (current === lockVal) await redis.del(lockKey);
+        } catch (err) {
+          syncLogger.warn({ err, userId }, 'Failed to release Redis lock after token refresh');
         }
-        const current = await redis.get(lockKey);
-        if (current === lockVal) await redis.del(lockKey);
       });
 
       return client;
