@@ -489,6 +489,22 @@ export const MSG = {
       clockChangeBack: (duration: string) =>
         `🕐 Clocks moved ${duration} back last night. Double-check your alarms and meetings!`,
     },
+    weather: {
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      wind: (ms: number) => `${ms} m/s`,
+      weekForecast: '🌤 Weather this week:',
+    },
+    botTips: [
+      '💡 Tip: send a voice message to quickly create an event!',
+      '💡 Tip: use /add to create a new event step by step.',
+      '💡 Tip: share your calendar with someone — say "share my calendar with @username".',
+      '💡 Tip: you can set custom reminders — try "remind me 2 hours before the meeting".',
+      '💡 Tip: ask me "what\'s my week look like?" to get a quick overview.',
+      '💡 Tip: you can import .ics files — just send the file to this chat.',
+      '💡 Tip: say "set up morning agenda at 7:30" to get daily summaries.',
+      '💡 Tip: I can create recurring events — try "every Monday at 10am standup".',
+    ],
     speech: {
       allDay: 'all day',
       noEvents: 'no events',
@@ -928,6 +944,22 @@ export const MSG = {
       clockChangeBack: (duration: string) =>
         `🕐 Сегодня ночью часы перевели на ${duration} назад. Проверь, что будильник и встречи правильно настроены!`,
     },
+    weather: {
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      wind: (ms: number) => `${ms} м/с`,
+      weekForecast: '🌤 Погода на неделю:',
+    },
+    botTips: [
+      '💡 Совет: отправь голосовое сообщение, чтобы быстро создать событие!',
+      '💡 Совет: используй /add для создания события по шагам.',
+      '💡 Совет: поделись календарём — скажи «поделись моим календарём с @username».',
+      '💡 Совет: можно настроить напоминания — попробуй «напомни за 2 часа до встречи».',
+      '💡 Совет: спроси «что у меня на этой неделе?» для быстрого обзора.',
+      '💡 Совет: можно импортировать .ics файлы — просто отправь файл в этот чат.',
+      '💡 Совет: скажи «настрой утреннюю сводку на 7:30» для ежедневных уведомлений.',
+      '💡 Совет: я могу создавать повторяющиеся события — попробуй «каждый понедельник в 10:00 стендап».',
+    ],
     speech: {
       allDay: 'весь день',
       noEvents: 'нет событий',

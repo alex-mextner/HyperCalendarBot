@@ -1,6 +1,9 @@
 import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+import { formatDayWeatherLine } from '../weather/format.ts';
+import type { DayWeather } from '../weather/types.ts';
+import { weatherEmoji } from '../weather/weather-service.ts';
 
 export interface VoiceRenderInput {
   title: string;
@@ -84,17 +87,39 @@ function formatAgendaEventLine(e: AgendaEvent, l: NotificationLabels): string {
   return e.location ? `${line}\n        📍 ${e.location}` : line;
 }
 
+interface AgendaConfig {
+  emoji: string;
+  greeting: string;
+  greetingFree: string;
+  freeDay: string;
+  footer: string;
+  lang: Lang;
+  weather?: DayWeather | null;
+  botTip?: string | null;
+}
+
 function renderAgenda(
   l: NotificationLabels,
   dateLabel: string,
   events: AgendaEvent[],
-  config: { emoji: string; greeting: string; greetingFree: string; freeDay: string; footer: string },
+  config: AgendaConfig,
 ): RenderedNotification {
   const lines: string[] = [];
   if (events.length === 0) {
-    lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`, '', config.freeDay);
+    lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`);
+    if (config.weather) {
+      lines.push(formatDayWeatherLine(config.lang, config.weather));
+    }
+    lines.push('', config.freeDay);
+    if (config.botTip) {
+      lines.push('', config.botTip);
+    }
   } else {
-    lines.push(`${config.emoji} ${config.greeting}`, '', `📅 ${dateLabel}`, '');
+    lines.push(`${config.emoji} ${config.greeting}`, '', `📅 ${dateLabel}`);
+    if (config.weather) {
+      lines.push(formatDayWeatherLine(config.lang, config.weather));
+    }
+    lines.push('');
     for (const e of events) {
       lines.push(formatAgendaEventLine(e, l));
     }
@@ -103,15 +128,29 @@ function renderAgenda(
   return { channel: 'telegram_text', text: lines.join('\n') };
 }
 
+export interface AgendaWeatherOpts {
+  weather?: DayWeather | null;
+  botTip?: string | null;
+}
+
 export class NotificationRenderer {
-  renderMorningAgenda(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderMorningAgenda(
+    lang: string,
+    dateLabel: string,
+    events: AgendaEvent[],
+    opts?: AgendaWeatherOpts,
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     return renderAgenda(l, dateLabel, events, {
       emoji: '☀️',
       greeting: l.morning,
       greetingFree: l.morningFree,
       freeDay: l.freeDayMorning,
       footer: l.haveADay,
+      lang: langKey,
+      weather: opts?.weather,
+      botTip: opts?.botTip,
     });
   }
 
@@ -174,19 +213,28 @@ export class NotificationRenderer {
     return { channel: 'telegram_voice_call', text };
   }
 
-  renderWeeklyDigest(lang: string, weekRange: string, days: WeeklyDigestDay[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderWeeklyDigest(
+    lang: string,
+    weekRange: string,
+    days: WeeklyDigestDay[],
+    opts?: { weatherByDate?: { [date: string]: DayWeather } },
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
+    const weatherMap = opts?.weatherByDate;
     const lines: string[] = [];
     lines.push(l.weeklyDigest(weekRange));
     lines.push('');
     for (const day of days) {
+      const dayW = weatherMap?.[day.date];
+      const weatherSuffix = dayW ? ` ${weatherEmoji(dayW.conditionCode)} ${dayW.tempMin}..${dayW.tempMax}°` : '';
       if (day.events.length === 0) {
-        lines.push(`${day.dayLabel}: (${l.noEvents})`);
+        lines.push(`${day.dayLabel}: (${l.noEvents})${weatherSuffix}`);
       } else {
         const eventList = day.events
           .map((e) => (e.isAllDay ? `${l.allDay}: ${e.title}` : `${e.startTime} ${e.title}`))
           .join(', ');
-        lines.push(`${day.dayLabel}: ${eventList}`);
+        lines.push(`${day.dayLabel}: ${eventList}${weatherSuffix}`);
       }
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
@@ -197,14 +245,23 @@ export class NotificationRenderer {
     return { channel: 'telegram_text', text: l.eveHoliday(holidayName) };
   }
 
-  renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderEveningReview(
+    lang: string,
+    dateLabel: string,
+    events: AgendaEvent[],
+    opts?: AgendaWeatherOpts,
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     return renderAgenda(l, dateLabel, events, {
       emoji: '🌙',
       greeting: l.evening,
       greetingFree: l.eveningFree,
       freeDay: l.freeDayEvening,
       footer: `${l.eventsCount(events.length)} ${l.tomorrow}. ${l.goodNight}`,
+      lang: langKey,
+      weather: opts?.weather,
+      botTip: opts?.botTip,
     });
   }
 }

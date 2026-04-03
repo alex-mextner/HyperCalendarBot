@@ -1,7 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
-import { toLang } from '../../config/constants.ts';
+import { t, toLang } from '../../config/constants.ts';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -19,6 +19,8 @@ import {
   renderReminderForSpeech,
   renderWeeklyDigestForSpeech,
 } from '../voice/tts-renderer.ts';
+import type { DayWeather } from '../weather/types.ts';
+import type { WeatherService } from '../weather/weather-service.ts';
 import { detectClockChange, formatClockChangeNotice } from './clock-change.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
@@ -97,6 +99,27 @@ function makeDayLabel(date: Date, lang: string): string {
 
 const DEFAULT_EVE_HOLIDAY_HHMM = '21:00';
 
+/** Pick a random bot tip for free days (shown ~50% of the time to avoid spam) */
+function pickBotTip(lang: string): string | null {
+  if (Math.random() > 0.5) return null;
+  const tips = t(toLang(lang)).botTips;
+  return tips[Math.floor(Math.random() * tips.length)]!;
+}
+
+/** Fetch day weather with graceful failure */
+async function fetchDayWeather(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+): Promise<DayWeather | null> {
+  if (!weatherService) return null;
+  try {
+    return await weatherService.getDayWeather(timezone);
+  } catch (err) {
+    notifyLogger.warn({ err, timezone }, 'Weather fetch failed for agenda');
+    return null;
+  }
+}
+
 function truncateToMinute(d: Date): Date {
   const r = new Date(d);
   r.setSeconds(0, 0);
@@ -121,6 +144,7 @@ export interface SchedulerDeps {
   callSettingsRepo?: CallSettingsRepository;
   callLogRepo?: CallLogRepository;
   enqueueCall?: (data: EnqueueCallData) => void;
+  weatherService?: WeatherService;
 }
 
 export class NotificationScheduler {
@@ -293,8 +317,10 @@ export class NotificationScheduler {
       const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
+      const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone);
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
-      let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
+      let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents, { weather, botTip }).text;
       if (clockChange) {
         payload += `\n\n${formatClockChangeNotice(lang, clockChange)}`;
       }
@@ -405,8 +431,23 @@ export class NotificationScheduler {
       const lang = pref.language ?? 'en';
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
+      // For evening review, fetch tomorrow's weather via week forecast (day index 1)
+      let tomorrowWeather: DayWeather | null = null;
+      if (this.deps.weatherService) {
+        try {
+          const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone);
+          const dayW = weekW?.days.find((d) => d.date === localTomorrowIso);
+          if (dayW) tomorrowWeather = dayW;
+        } catch (err) {
+          notifyLogger.warn({ err, timezone: pref.timezone }, 'Weather fetch failed for evening review');
+        }
+      }
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
-      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
+      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents, {
+        weather: tomorrowWeather,
+        botTip,
+      }).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'evening_review',
@@ -474,7 +515,24 @@ export class NotificationScheduler {
         const sunCalDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
         sunCalDate.setUTCDate(sunCalDate.getUTCDate() + 6);
         const weekRange = makeWeekRangeLabel(new Date(`${nextMonLocalIso}T12:00:00Z`), sunCalDate, lang);
-        const payload = renderer.renderWeeklyDigest(lang, weekRange, days).text;
+
+        // Fetch week weather for digest
+        let weatherByDate: { [date: string]: DayWeather } | undefined;
+        if (this.deps.weatherService) {
+          try {
+            const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone);
+            if (weekW) {
+              weatherByDate = {};
+              for (const d of weekW.days) {
+                weatherByDate[d.date] = d;
+              }
+            }
+          } catch (err) {
+            notifyLogger.warn({ err, timezone: pref.timezone }, 'Weather fetch failed for weekly digest');
+          }
+        }
+
+        const payload = renderer.renderWeeklyDigest(lang, weekRange, days, { weatherByDate }).text;
 
         const logId = this.deps.logRepo.insert({
           user_id: pref.user_id,
