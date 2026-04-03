@@ -1252,6 +1252,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                 isGroup,
                 groupChatId: isGroup ? Number(chatId) : undefined,
                 groupTitle: chat?.title ?? undefined,
+                incomingMessageId: incomingMsgId,
               });
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
