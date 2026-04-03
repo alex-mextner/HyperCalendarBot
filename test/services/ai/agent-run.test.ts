@@ -416,7 +416,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] response in DM is NOT discarded', async () => {
+  test('[SKIP] response in DM is also discarded', async () => {
     const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
     const finalMsg = {
       content: [{ type: 'text', text: '[SKIP]' }],
@@ -427,12 +427,15 @@ describe('CalendarBotAgent.run()', () => {
     const agent = new CalendarBotAgent(config, sender);
     setPrivateField(agent, 'client', mockClient);
 
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
     ctx.isGroup = false;
 
-    await agent.run(ctx);
+    const result = await agent.run(ctx);
 
-    // In DM, [SKIP] should be finalized normally (editMessageText called)
-    expect(sender.editMessageText).toHaveBeenCalled();
+    // [SKIP] is discarded in DMs too — silent actions (reactions etc.) need no text
+    expect(result.responseText).toBe('');
   });
 
   test('[SKIP] with trailing whitespace is still discarded in group', async () => {

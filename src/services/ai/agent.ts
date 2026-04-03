@@ -482,13 +482,12 @@ export class CalendarBotAgent {
     const trimmed = finalText.trim();
     const upper = trimmed.toUpperCase();
     if (
-      ctx.isGroup &&
-      (upper.includes('[SKIP]') ||
-        upper.includes('[ПРОПУСК]') ||
-        upper.includes('[SKIP') ||
-        upper.includes('ПРОПУСК]') ||
-        trimmed === '...' ||
-        trimmed === '…')
+      upper.includes('[SKIP]') ||
+      upper.includes('[ПРОПУСК]') ||
+      upper.includes('[SKIP') ||
+      upper.includes('ПРОПУСК]') ||
+      trimmed === '...' ||
+      trimmed === '…'
     ) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
