@@ -131,11 +131,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('group calendar');
   });
 
-  test('does NOT include group context block in DM', () => {
+  test('does NOT include group context block in DM but includes [SKIP] for set_reaction', () => {
     ctx.isGroup = false;
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).not.toContain('## Group Context');
-    expect(prompt).not.toContain('[SKIP]');
+    expect(prompt).toContain('[SKIP]');
   });
 
   test('includes language instruction for ru user', () => {
