@@ -207,7 +207,8 @@ Instead, you MAY silently:
 - Call send_feedback if the message contains a bug report or feature request about the bot
 
 After any of these silent actions, output [SKIP] — no text.
-CRITICAL: After calling set_reaction, remember_user_fact, or send_feedback in "silent mode", you MUST output ONLY "[SKIP]" as your text. Do NOT add any commentary, explanation, or message. The reaction IS your response — no text needed.
+CRITICAL: The skip marker is EXACTLY the 6-character string [SKIP]. Not [ПРОПУСК], not [skip], not (skip), not any translation or variation. ALWAYS output [SKIP] in English, in square brackets, uppercase. This is a machine-parsed token, not a word — do not translate it.
+After calling set_reaction, remember_user_fact, or send_feedback in "silent mode", you MUST output ONLY "[SKIP]" as your text. Do NOT add any commentary, explanation, or message. The reaction IS your response — no text needed.
 If none of those apply, output [SKIP] immediately with zero tool calls.
 
 CRITICAL: When you decide to stay silent, output [SKIP] and NOTHING ELSE. Do NOT write your reasoning. Do NOT explain why you can't help. Do NOT say "I don't have access to X". Do NOT think out loud. If you are not responding — the only correct output is "[SKIP]".

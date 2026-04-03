@@ -146,6 +146,18 @@ describe('handleSetReaction', () => {
     expect(setReaction).toHaveBeenCalledWith(-100123, 42, '👍');
   });
 
+  test('set_reaction: returns non-empty error when API throws with empty message', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.groupChatId = -100123;
+    const emptyError = new Error('');
+    ctx.sender = {
+      setReaction: mock(() => Promise.reject(emptyError)),
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '👍' });
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
   test('set_reaction: returns error when no message_id and no incomingMessageId', async () => {
     const ctx = makeCtx(db, USER_ID);
     ctx.groupChatId = -100123;

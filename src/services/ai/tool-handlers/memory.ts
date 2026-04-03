@@ -25,6 +25,7 @@ export async function handleSetReaction(
   input: { message_id?: number; emoji: string },
 ): Promise<ToolResult> {
   if (!ctx.sender?.setReaction) {
+    cmdLogger.warn({ chatId: ctx.chatId, hasSender: !!ctx.sender }, 'set_reaction: sender.setReaction unavailable');
     return { success: false, error: 'Reactions not available' };
   }
   const messageId = input.message_id ?? ctx.incomingMessageId;
@@ -36,8 +37,8 @@ export async function handleSetReaction(
     await ctx.sender.setReaction(chatId, messageId, input.emoji);
     return { success: true, output: '' };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    cmdLogger.error({ err, chatId, messageId }, 'set_reaction failed');
-    return { success: false, error: msg };
+    const msg = err instanceof Error ? err.message || err.constructor.name : String(err);
+    cmdLogger.error({ err, chatId, messageId, emoji: input.emoji }, 'set_reaction failed');
+    return { success: false, error: msg || 'Unknown reaction error' };
   }
 }

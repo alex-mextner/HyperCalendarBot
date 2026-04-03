@@ -147,10 +147,11 @@ describe('handleSendFeedback', () => {
     expect(options).toBeDefined();
   });
 
-  test('does not call sendMessageToChat when not provided', async () => {
+  test('returns agentHint warning when sendMessageToChat not provided', async () => {
     ctx.sendMessageToChat = undefined;
     const result = handleSendFeedback(ctx, { type: 'bug', message: 'Crash' });
 
     expect(result.success).toBe(true);
+    expect(result.agentHint).toContain('WARNING');
   });
 });
