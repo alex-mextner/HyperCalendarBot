@@ -15,6 +15,6 @@ export type AgentContextBuilder = (
     groupChatId?: number;
     groupTitle?: string;
     onBotResponse?: (messageId: number) => void;
-    incomingMessageId?: number;
   },
+  incomingMessageId?: number,
 ) => AgentContext;

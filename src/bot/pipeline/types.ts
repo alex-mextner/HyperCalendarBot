@@ -37,7 +37,6 @@ export interface GroupContext {
   isGroup: boolean;
   groupChatId?: number;
   groupTitle?: string;
-  incomingMessageId?: number;
   onBotResponse?: (messageId: number) => void;
 }
 
@@ -47,6 +46,7 @@ export type PipelineLayer = (
   extra?: {
     feedbackContext?: FeedbackThreadContext;
     groupContext?: GroupContext;
+    incomingMessageId?: number;
     supplementMode?: boolean;
     supplementAutoResponse?: string;
   },

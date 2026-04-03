@@ -9,6 +9,7 @@ export async function runPipeline(
   messageText: string,
   layers: PipelineLayer[],
   groupContext?: GroupContext,
+  incomingMessageId?: number,
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
   let supplementMode = false;
@@ -19,6 +20,7 @@ export async function runPipeline(
       const result = await layer(ctx, messageText, {
         feedbackContext,
         groupContext,
+        incomingMessageId,
         supplementMode,
         supplementAutoResponse,
       });

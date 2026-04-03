@@ -519,6 +519,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       onBotResponse?: (messageId: number) => void;
       incomingMessageId?: number;
     },
+    incomingMessageId?: number,
   ): AgentContext => {
     const activeFor = deps.secretaryRepo?.getActiveSecretaryFor(user.telegram_id) ?? [];
     const secretaryForLine =
@@ -536,7 +537,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       user,
       chatId,
       messageText,
-      incomingMessageId: groupInfo?.incomingMessageId,
+      incomingMessageId,
       isGroup: groupInfo?.isGroup ?? false,
       groupChatId: groupInfo?.groupChatId,
       groupTitle: groupInfo?.groupTitle,
@@ -999,8 +1000,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
   const aiAgentLayer = createAiAgentLayer({
     agent: deps.agent,
-    agentContextBuilder: (user, chatId, messageText, groupInfo) => {
-      const ctx = agentContextBuilder(user, chatId, messageText, groupInfo);
+    agentContextBuilder: (user, chatId, messageText, groupInfo, incomingMessageId) => {
+      const ctx = agentContextBuilder(user, chatId, messageText, groupInfo, incomingMessageId);
       ctx.onEventMentioned = (eventId) => {
         Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
           cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
@@ -1248,12 +1249,17 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             deps.intentRepo,
             deps.intentExecutor,
             (toolName, input) => {
-              const agentCtx = agentContextBuilder(user, Number(ctx.chatId!), messageText, {
-                isGroup,
-                groupChatId: isGroup ? Number(chatId) : undefined,
-                groupTitle: chat?.title ?? undefined,
-                incomingMessageId: incomingMsgId,
-              });
+              const agentCtx = agentContextBuilder(
+                user,
+                Number(ctx.chatId!),
+                messageText,
+                {
+                  isGroup,
+                  groupChatId: isGroup ? Number(chatId) : undefined,
+                  groupTitle: chat?.title ?? undefined,
+                },
+                incomingMsgId,
+              );
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
               // chatHistoryId is set via buildAgentContextFactory from deps.chatHistoryIds
@@ -1285,7 +1291,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           isGroup: true as const,
           groupChatId: Number(chatId),
           groupTitle: chat?.title ?? undefined,
-          incomingMessageId: incomingMsgId,
           onBotResponse: deps.groupSessions
             ? (messageId: number) => {
                 if (deps.groupSessions!.hasActiveSession(Number(chatId))) {
@@ -1318,12 +1323,12 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sendTyping();
       const typingInterval = setInterval(sendTyping, 6000);
       try {
-        await runPipeline(ctx, messageText, layers, groupContext);
+        await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
       } finally {
         clearInterval(typingInterval);
       }
     } else {
-      await runPipeline(ctx, messageText, layers, groupContext);
+      await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
     }
   };
 }

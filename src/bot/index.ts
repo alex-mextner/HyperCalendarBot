@@ -621,7 +621,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             isGroup: true as const,
             groupChatId: Number(chatId),
             groupTitle: chat?.title ?? undefined,
-            incomingMessageId: ctx.id,
             onBotResponse: (messageId: number) => {
               if (groupSessions.hasActiveSession(Number(chatId))) {
                 groupSessions.refresh(Number(chatId), messageId);
@@ -631,9 +630,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             },
           }
         : undefined;
-      const agentCtx = buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo);
-      agentCtx.incomingMessageId ??= ctx.id;
-      await agent.run(agentCtx);
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo, ctx.id));
     })
     // Callback queries
     .on('callback_query', (ctx) =>
