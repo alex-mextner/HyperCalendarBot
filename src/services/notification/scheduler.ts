@@ -5,11 +5,15 @@ import { t, toLang } from '../../config/constants.ts';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
+import type { FeatureUsageRepository } from '../../database/repositories/feature-usage.repository.ts';
 import type { HolidayRepository } from '../../database/repositories/holiday.repository.ts';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
-import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import type {
+  NotificationPreferencesRepository,
+  UserContextFlags,
+} from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { EventOccurrence } from '../../database/types.ts';
+import type { EventOccurrence, FeatureUsageRow, NotificationPreferencesRow } from '../../database/types.ts';
 import { getDayRangeUtc } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import {
@@ -25,6 +29,7 @@ import { detectClockChange, formatClockChangeNotice } from './clock-change.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
 import { isLocalTimeInWindow, isQuietHours } from './timezone.ts';
+import { BOT_TIP_FEATURE_MAP } from './tip-tags.ts';
 
 const renderer = new NotificationRenderer();
 
@@ -99,13 +104,122 @@ function makeDayLabel(date: Date, lang: string): string {
 
 const DEFAULT_EVE_HOLIDAY_HHMM = '21:00';
 
-/** Pick a random bot tip or GTD quote for free days (shown ~50% of the time to avoid spam) */
-function pickBotTip(lang: string): string | null {
+/** User context for contextual tip selection */
+export interface TipContext {
+  hasMorningAgenda: boolean;
+  hasEveningReview: boolean;
+  hasQuietHours: boolean;
+  hasGoogle: boolean;
+  hasCountry: boolean;
+  hasVoiceCalls: boolean;
+  /** Feature usage data for filtering tips */
+  featureUsage?: FeatureUsageRow[];
+}
+
+/** Build TipContext from a pref row with user context flags */
+function buildTipContext(
+  pref: NotificationPreferencesRow & UserContextFlags,
+  featureUsage?: FeatureUsageRow[],
+): TipContext {
+  return {
+    hasMorningAgenda: !!pref.morning_agenda_enabled,
+    hasEveningReview: !!pref.evening_review_enabled,
+    hasQuietHours: !!pref.quiet_hours_enabled,
+    hasGoogle: !!pref.has_google,
+    hasCountry: !!pref.has_country,
+    hasVoiceCalls: !!pref.has_voice_calls,
+    featureUsage,
+  };
+}
+
+/** Days threshold: features used more recently than this are "fresh" — don't tip about them */
+const RECENT_USAGE_DAYS = 7;
+/** Days threshold: features used before this are "stale" — re-engagement tips welcome */
+const STALE_USAGE_DAYS = 30;
+/** Minimum use count to consider a feature "well known" (skip discovery tips) */
+const WELL_KNOWN_COUNT = 5;
+
+/**
+ * Filter bot tips based on feature usage.
+ * - Remove tips about features used recently (< 7 days) and frequently (>= 5 uses)
+ * - Prioritize tips about features used a lot but stale (> 30 days) for re-engagement
+ */
+function filterTipsByUsage(
+  tips: readonly string[],
+  featureUsage: FeatureUsageRow[],
+): { normal: number[]; reEngage: number[] } {
+  const now = Date.now();
+  const usageMap = new Map(featureUsage.map((u) => [u.feature_key, u]));
+
+  const normal: number[] = [];
+  const reEngage: number[] = [];
+
+  for (let i = 0; i < tips.length && i < BOT_TIP_FEATURE_MAP.length; i++) {
+    const featureKey = BOT_TIP_FEATURE_MAP[i]!;
+    const usage = usageMap.get(featureKey);
+    if (!usage) {
+      // Never used — discovery tip
+      normal.push(i);
+      continue;
+    }
+
+    const lastUsedMs = new Date(usage.last_used_at).getTime();
+    const daysSinceUse = (now - lastUsedMs) / 86_400_000;
+
+    if (daysSinceUse < RECENT_USAGE_DAYS && usage.use_count >= WELL_KNOWN_COUNT) {
+      // Used recently and frequently — skip this tip
+      continue;
+    }
+
+    if (daysSinceUse > STALE_USAGE_DAYS && usage.use_count >= WELL_KNOWN_COUNT) {
+      // Used a lot before but not recently — re-engagement candidate
+      reEngage.push(i);
+    } else {
+      normal.push(i);
+    }
+  }
+
+  return { normal, reEngage };
+}
+
+/** Pick a random bot tip, contextual tip, or book quote for free days (shown ~50% of the time) */
+export function pickBotTip(lang: string, ctx?: TipContext): string | null {
   if (Math.random() > 0.5) return null;
   const l = t(toLang(lang));
-  // 60% bot tips, 40% GTD quotes
-  const pool = Math.random() < 0.6 ? l.botTips : l.gtdQuotes;
-  return pool[Math.floor(Math.random() * pool.length)]!;
+
+  // 30% chance: try a contextual tip based on user's missing features
+  if (ctx && Math.random() < 0.3) {
+    const candidates: string[] = [];
+    if (!ctx.hasEveningReview) candidates.push(l.contextualTips.noEveningReview);
+    if (!ctx.hasMorningAgenda) candidates.push(l.contextualTips.noMorningAgenda);
+    if (!ctx.hasQuietHours) candidates.push(l.contextualTips.noQuietHours);
+    if (!ctx.hasGoogle) candidates.push(l.contextualTips.noGoogleCalendar);
+    if (!ctx.hasCountry) candidates.push(l.contextualTips.noCountry);
+    if (!ctx.hasVoiceCalls) candidates.push(l.contextualTips.noVoiceCalls);
+    if (candidates.length > 0) {
+      return candidates[Math.floor(Math.random() * candidates.length)]!;
+    }
+  }
+
+  // 50% bot tips, 50% book quotes
+  if (Math.random() < 0.5) {
+    // Filter tips by feature usage if available
+    if (ctx?.featureUsage && ctx.featureUsage.length > 0) {
+      const { normal, reEngage } = filterTipsByUsage(l.botTips, ctx.featureUsage);
+      // 40% chance to pick a re-engagement tip if available
+      if (reEngage.length > 0 && Math.random() < 0.4) {
+        const idx = reEngage[Math.floor(Math.random() * reEngage.length)]!;
+        return l.botTips[idx]!;
+      }
+      if (normal.length > 0) {
+        const idx = normal[Math.floor(Math.random() * normal.length)]!;
+        return l.botTips[idx]!;
+      }
+    }
+    return l.botTips[Math.floor(Math.random() * l.botTips.length)]!;
+  }
+  const allQuotes = [...l.gtdQuotes, ...l.atomicHabitsQuotes, ...l.deepWorkQuotes, ...l.sevenHabitsQuotes];
+  return allQuotes[Math.floor(Math.random() * allQuotes.length)]!;
 }
 
 /** Fetch day weather with graceful failure */
@@ -147,6 +261,7 @@ export interface SchedulerDeps {
   callLogRepo?: CallLogRepository;
   enqueueCall?: (data: EnqueueCallData) => void;
   weatherService?: WeatherService;
+  featureUsageRepo?: FeatureUsageRepository;
 }
 
 export class NotificationScheduler {
@@ -320,7 +435,9 @@ export class NotificationScheduler {
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone);
-      const botTip = agendaEvents.length === 0 ? pickBotTip(lang) : null;
+      const featureUsage = this.deps.featureUsageRepo?.getForUser(pref.user_id);
+      const tipCtx = buildTipContext(pref, featureUsage);
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang, tipCtx) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents, { weather, botTip }).text;
       if (clockChange) {
@@ -444,7 +561,9 @@ export class NotificationScheduler {
           notifyLogger.warn({ err, timezone: pref.timezone }, 'Weather fetch failed for evening review');
         }
       }
-      const botTip = agendaEvents.length === 0 ? pickBotTip(lang) : null;
+      const featureUsage = this.deps.featureUsageRepo?.getForUser(pref.user_id);
+      const tipCtx = buildTipContext(pref, featureUsage);
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang, tipCtx) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
       const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents, {
         weather: tomorrowWeather,

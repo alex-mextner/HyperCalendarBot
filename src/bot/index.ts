@@ -372,6 +372,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     birthdayService,
     userMemoryRepo: db.userMemory,
     actionLogRepo: db.actionLog,
+    featureUsageRepo: db.featureUsage,
     chatHistoryIds,
     agentRegistry,
     agentDispatcher,

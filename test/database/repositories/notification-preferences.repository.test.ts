@@ -16,6 +16,8 @@ describe('NotificationPreferencesRepository', () => {
       language TEXT NOT NULL DEFAULT 'en',
       timezone TEXT NOT NULL DEFAULT 'UTC',
       country_code TEXT,
+      google_refresh_token_enc TEXT,
+      voice_response_enabled INTEGER DEFAULT NULL,
       onboarding_completed INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))

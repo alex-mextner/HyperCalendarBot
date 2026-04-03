@@ -463,6 +463,7 @@ if (config.REDIS_URL) {
         }
       : undefined,
     weatherService,
+    featureUsageRepo: db.featureUsage,
   });
 
   const notifWorker = createNotificationWorker(

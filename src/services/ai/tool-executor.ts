@@ -239,6 +239,50 @@ const SKIP_ACTION_LOG = new Set<string>([
   'get_action_log',
 ]);
 
+/** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
+const TOOL_FEATURE_MAP: { [tool: string]: string } = {
+  create_event: 'events_create',
+  create_birthday_event: 'events_create',
+  update_event: 'events_edit',
+  delete_event: 'events_edit',
+  snooze_event: 'events_edit',
+  get_event: 'events_create',
+  get_events: 'events_create',
+  get_upcoming: 'events_create',
+  search_events: 'events_create',
+  set_reminder: 'reminders',
+  get_reminders: 'reminders',
+  get_free_slots: 'free_slots',
+  share_event: 'sharing',
+  send_invitation: 'sharing',
+  share_agenda: 'sharing',
+  set_event_visibility: 'sharing',
+  cancel_invitation: 'sharing',
+  resend_invitation: 'sharing',
+  propose_edit: 'sharing',
+  get_invitation_status: 'sharing',
+  notify_participants: 'sharing',
+  get_contacts: 'contacts',
+  add_contact: 'contacts',
+  find_contact: 'contacts',
+  update_contact: 'contacts',
+  get_holidays: 'holidays',
+  get_google_calendar_status: 'google_calendar',
+  list_google_calendars: 'google_calendar',
+  make_call: 'voice_calls',
+  end_call: 'voice_calls',
+  schedule_ai_call: 'voice_calls',
+  schedule_ai_call_cancel: 'voice_calls',
+  manage_settings: 'settings',
+  get_history: 'history',
+  get_action_log: 'history',
+  manage_secretaries: 'secretary',
+  list_calendar_access: 'secretary',
+  render_month_image: 'month_view',
+  render_day_image: 'month_view',
+  render_week_image: 'month_view',
+};
+
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
@@ -249,6 +293,18 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
     if (result.success) {
       const eventId = extractEventId(input as ToolInputMap[ToolName], result);
       if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+    }
+
+    // Track feature usage for tip personalization
+    if (result.success && ctx.featureUsageRepo) {
+      const featureKey = TOOL_FEATURE_MAP[toolName];
+      if (featureKey) {
+        try {
+          ctx.featureUsageRepo.record(ctx.user.telegram_id, featureKey);
+        } catch (fuErr) {
+          aiLogger.warn({ err: fuErr, tool: toolName }, 'Failed to record feature usage');
+        }
+      }
     }
 
     // Log mutating tool calls to user_action_log

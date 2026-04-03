@@ -27,7 +27,9 @@ function setupDb(): Database {
   db.run(`CREATE TABLE users (
     telegram_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT,
     language TEXT NOT NULL DEFAULT 'en', timezone TEXT NOT NULL DEFAULT 'UTC',
-    country_code TEXT, onboarding_completed INTEGER NOT NULL DEFAULT 0,
+    country_code TEXT, google_refresh_token_enc TEXT,
+    voice_response_enabled INTEGER DEFAULT NULL,
+    onboarding_completed INTEGER NOT NULL DEFAULT 0,
     timezone_updated_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))

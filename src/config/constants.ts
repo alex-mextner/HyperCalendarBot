@@ -585,6 +585,58 @@ export const MSG = {
       '📖 "The Weekly Review is the time to gather and process all your stuff, review your system, update your lists, and get clean, clear, current, and complete." — David Allen, GTD, ch. 8',
       '📖 "A great hammer doesn\'t make a great carpenter; but a great carpenter will always want to have a great hammer." — David Allen, GTD, ch. 5',
     ],
+    atomicHabitsQuotes: [
+      // James Clear, "Atomic Habits" (2018)
+      '📖 "You do not rise to the level of your goals. You fall to the level of your systems." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Every action you take is a vote for the type of person you wish to become." — James Clear, Atomic Habits, ch. 2',
+      '📖 "Habits are the compound interest of self-improvement." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The most effective way to change your habits is to focus not on what you want to achieve, but on who you wish to become." — James Clear, Atomic Habits, ch. 2',
+      '📖 "Be the designer of your world and not merely the consumer of it." — James Clear, Atomic Habits, ch. 6',
+      '📖 "When you fall in love with the process rather than the product, you don\'t have to wait to give yourself permission to be happy." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The task of breaking a bad habit is like uprooting a powerful oak within us." — James Clear, Atomic Habits, ch. 7',
+      '📖 "Success is the product of daily habits — not once-in-a-lifetime transformations." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Time magnifies the margin between success and failure. It will multiply whatever you feed it." — James Clear, Atomic Habits, ch. 1',
+      '📖 "You should be far more concerned with your current trajectory than with your current results." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The purpose of setting goals is to win the game. The purpose of building systems is to continue playing the game." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Missing once is an accident. Missing twice is the start of a new habit." — James Clear, Atomic Habits, ch. 16',
+    ],
+    deepWorkQuotes: [
+      // Cal Newport, "Deep Work: Rules for Focused Success in a Distracted World" (2016)
+      '📖 "If you don\'t produce, you won\'t thrive — no matter how skilled or talented you are." — Cal Newport, Deep Work, ch. 1',
+      '📖 "Clarity about what matters provides clarity about what does not." — Cal Newport, Deep Work, ch. 4',
+      '📖 "The ability to perform deep work is becoming increasingly rare at exactly the same time it is becoming increasingly valuable." — Cal Newport, Deep Work, intro',
+      '📖 "Two core abilities for thriving in the new economy: the ability to quickly master hard things, and the ability to produce at an elite level." — Cal Newport, Deep Work, ch. 1',
+      '📖 "Who you are, what you think, feel, and do, what you love — is the sum of what you focus on." — Cal Newport, Deep Work, ch. 3',
+      '📖 "A deep life is a good life, any way you look at it." — Cal Newport, Deep Work, conclusion',
+      '📖 "Efforts to deepen your focus will struggle if you don\'t simultaneously wean your mind from a dependence on distraction." — Cal Newport, Deep Work, rule 2',
+      '📖 "The key to developing a deep work habit is to move beyond good intentions and add routines and rituals to your working life." — Cal Newport, Deep Work, rule 1',
+      '📖 "Treat your time with respect. Schedule every minute of your day." — Cal Newport, Deep Work, rule 4',
+      '📖 "Don\'t take breaks from distraction. Instead take breaks from focus." — Cal Newport, Deep Work, rule 2',
+    ],
+    sevenHabitsQuotes: [
+      // Stephen R. Covey, "The 7 Habits of Highly Effective People" (1989)
+      '📖 "The key is not to prioritize what\'s on your schedule, but to schedule your priorities." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Begin with the end in mind." — Stephen Covey, 7 Habits, habit 2',
+      '📖 "Put first things first." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Most of us spend too much time on what is urgent and not enough time on what is important." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "The main thing is to keep the main thing the main thing." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Sow a thought, reap an action; sow an action, reap a habit; sow a habit, reap a character; sow a character, reap a destiny." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Between stimulus and response there is a space. In that space is our freedom and power to choose our response." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Be proactive. Highly effective people don\'t just react to circumstances — they create them." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Seek first to understand, then to be understood." — Stephen Covey, 7 Habits, habit 5',
+      '📖 "Live out of your imagination, not your history." — Stephen Covey, 7 Habits, habit 2',
+    ],
+    contextualTips: {
+      noEveningReview:
+        '💡 Your mornings are set — how about evenings? Enable the evening review to prepare for tomorrow: "turn on evening review at 9pm".',
+      noMorningAgenda:
+        '💡 Want to start each day with a plan? Enable the morning agenda: "set morning agenda to 7:30".',
+      noQuietHours: "💡 Protect your sleep — set up quiet hours so I don't disturb you at night. Check /settings.",
+      noGoogleCalendar: '💡 Connect Google Calendar to see all your events in one place — /connect_google.',
+      noCountry: '💡 Set your country to get public holidays in your calendar — /holidays.',
+      noVoiceCalls:
+        '💡 I can call you before important events so you never miss them. Enable voice calls in /settings.',
+    },
     speech: {
       allDay: 'all day',
       noEvents: 'no events',
@@ -1120,6 +1172,58 @@ export const MSG = {
       '📖 «Еженедельный обзор — это время собрать и обработать все «входящие», обновить списки и привести систему в чистое, ясное, актуальное состояние.» — Дэвид Аллен, GTD, гл. 8',
       '📖 «Отличный молоток не сделает из тебя отличного плотника, но отличный плотник всегда захочет иметь отличный молоток.» — Дэвид Аллен, GTD, гл. 5',
     ],
+    atomicHabitsQuotes: [
+      // Джеймс Клир, «Атомные привычки» (2018)
+      '📖 «Ты не поднимаешься до уровня своих целей. Ты падаешь до уровня своих систем.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Каждое твоё действие — это голос за тот тип человека, которым ты хочешь стать.» — Джеймс Клир, Атомные привычки, гл. 2',
+      '📖 «Привычки — это сложный процент самосовершенствования.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Самый эффективный способ изменить привычки — сосредоточиться не на том, чего ты хочешь достичь, а на том, кем ты хочешь стать.» — Джеймс Клир, Атомные привычки, гл. 2',
+      '📖 «Будь дизайнером своего мира, а не просто его потребителем.» — Джеймс Клир, Атомные привычки, гл. 6',
+      '📖 «Когда ты влюбляешься в процесс, а не в результат, тебе не нужно ждать разрешения быть счастливым.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Избавиться от плохой привычки — как выкорчевать мощный дуб внутри себя.» — Джеймс Клир, Атомные привычки, гл. 7',
+      '📖 «Успех — это продукт ежедневных привычек, а не единичных трансформаций.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Время усиливает разрыв между успехом и провалом. Оно умножает то, чем ты его кормишь.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Тебя должна волновать текущая траектория, а не текущие результаты.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Цель постановки целей — выиграть игру. Цель построения систем — продолжать играть.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Пропустить один раз — случайность. Пропустить дважды — начало новой привычки.» — Джеймс Клир, Атомные привычки, гл. 16',
+    ],
+    deepWorkQuotes: [
+      // Кэл Ньюпорт, «Глубокая работа» (2016)
+      '📖 «Если ты не производишь результат — ты не преуспеешь, независимо от таланта и навыков.» — Кэл Ньюпорт, Глубокая работа, гл. 1',
+      '📖 «Ясность в том, что важно, даёт ясность в том, что не важно.» — Кэл Ньюпорт, Глубокая работа, гл. 4',
+      '📖 «Способность к глубокой работе становится всё более редкой именно тогда, когда становится всё более ценной.» — Кэл Ньюпорт, Глубокая работа, введение',
+      '📖 «Два ключевых навыка для успеха в новой экономике: быстро осваивать сложные вещи и производить результат на элитном уровне.» — Кэл Ньюпорт, Глубокая работа, гл. 1',
+      '📖 «Кто ты, что ты думаешь, чувствуешь и делаешь, что любишь — это сумма того, на чём ты фокусируешься.» — Кэл Ньюпорт, Глубокая работа, гл. 3',
+      '📖 «Глубокая жизнь — это хорошая жизнь, как ни посмотри.» — Кэл Ньюпорт, Глубокая работа, заключение',
+      '📖 «Попытки углубить фокус обречены, если ты одновременно не отучишь свой мозг от зависимости к отвлечениям.» — Кэл Ньюпорт, Глубокая работа, правило 2',
+      '📖 «Ключ к глубокой работе — выйти за рамки добрых намерений и добавить рутины и ритуалы в рабочую жизнь.» — Кэл Ньюпорт, Глубокая работа, правило 1',
+      '📖 «Относись к своему времени с уважением. Планируй каждую минуту дня.» — Кэл Ньюпорт, Глубокая работа, правило 4',
+      '📖 «Не бери перерывы от отвлечений. Бери перерывы от фокуса.» — Кэл Ньюпорт, Глубокая работа, правило 2',
+    ],
+    sevenHabitsQuotes: [
+      // Стивен Кови, «7 навыков высокоэффективных людей» (1989)
+      '📖 «Главное — не расставлять приоритеты в расписании, а планировать приоритеты.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Начинай, представляя конечную цель.» — Стивен Кови, 7 навыков, навык 2',
+      '📖 «Сначала делай то, что нужно делать сначала.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Большинство из нас тратит слишком много времени на срочное и слишком мало на важное.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Главное — сохранять главное главным.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Посей мысль — пожнёшь действие; посей действие — пожнёшь привычку; посей привычку — пожнёшь характер; посей характер — пожнёшь судьбу.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Между стимулом и реакцией есть пространство. В этом пространстве — наша свобода и сила выбирать свой ответ.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Будь проактивным. Эффективные люди не просто реагируют на обстоятельства — они их создают.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Сначала стремись понять, потом — быть понятым.» — Стивен Кови, 7 навыков, навык 5',
+      '📖 «Живи воображением, а не историей.» — Стивен Кови, 7 навыков, навык 2',
+    ],
+    contextualTips: {
+      noEveningReview:
+        '💡 Утро настроено — а вечер? Включи вечерний обзор, чтобы готовиться к завтрашнему дню: «включи вечерний обзор в 21:00».',
+      noMorningAgenda:
+        '💡 Хочешь начинать каждый день с плана? Включи утреннюю сводку: «настрой утреннюю сводку на 7:30».',
+      noQuietHours: '💡 Защити свой сон — настрой тихие часы, чтобы я не беспокоил ночью. Смотри /settings.',
+      noGoogleCalendar: '💡 Подключи Google Calendar, чтобы видеть все события в одном месте — /connect_google.',
+      noCountry: '💡 Укажи свою страну, чтобы праздники появились в календаре — /holidays.',
+      noVoiceCalls:
+        '💡 Я могу звонить перед важными событиями, чтобы ты ничего не пропустил. Включи звонки в /settings.',
+    },
     speech: {
       allDay: 'весь день',
       noEvents: 'нет событий',

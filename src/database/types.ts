@@ -659,6 +659,15 @@ export interface NotificationPreferencesRow {
 
 export type NotificationPreferencesUpdate = Partial<Omit<NotificationPreferencesRow, 'user_id' | 'updated_at'>>;
 
+// --- Feature Usage ---
+
+export interface FeatureUsageRow {
+  user_id: number;
+  feature_key: string;
+  use_count: number;
+  last_used_at: string;
+}
+
 // --- User Memory ---
 
 export interface UserMemoryEntry {

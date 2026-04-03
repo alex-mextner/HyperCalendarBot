@@ -7,6 +7,7 @@ import type { ChatHistoryRepository } from '../../database/repositories/chat-his
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
+import type { FeatureUsageRepository } from '../../database/repositories/feature-usage.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
@@ -192,6 +193,7 @@ export interface AgentContext {
   /** Scene key storage — used by cancel_scene to delete the GramIO scene entry. Always wired from sceneStorage dep. */
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
+  featureUsageRepo?: FeatureUsageRepository;
   /** Fast model ID for lightweight AI tasks (city→timezone resolution). */
   fastModel?: string;
 

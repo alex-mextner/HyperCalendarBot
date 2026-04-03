@@ -914,4 +914,18 @@ export const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_users_timezone');
     },
   },
+  {
+    name: '050_feature_usage',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS feature_usage (
+          user_id INTEGER NOT NULL,
+          feature_key TEXT NOT NULL,
+          use_count INTEGER NOT NULL DEFAULT 1,
+          last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, feature_key)
+        );
+      `);
+    },
+  },
 ];

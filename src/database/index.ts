@@ -16,6 +16,7 @@ import { DeepLinkRepository } from './repositories/deep-link.repository.ts';
 import { EditProposalRepository } from './repositories/edit-proposal.repository.ts';
 import { EventRepository } from './repositories/event.repository.ts';
 import { EventReminderRepository } from './repositories/event-reminder.repository.ts';
+import { FeatureUsageRepository } from './repositories/feature-usage.repository.ts';
 import { GoogleCalendarRepository } from './repositories/google-calendar.repository.ts';
 import { GoogleSyncRepository } from './repositories/google-sync.repository.ts';
 import { GroupChatRepository } from './repositories/group-chat.repository.ts';
@@ -64,6 +65,7 @@ export class DatabaseService {
   readonly userMemory: UserMemoryRepository;
   readonly actionLog: ActionLogRepository;
   readonly alerts: AlertRepository;
+  readonly featureUsage: FeatureUsageRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -108,6 +110,7 @@ export class DatabaseService {
     this.userMemory = new UserMemoryRepository(this.db);
     this.actionLog = new ActionLogRepository(this.db);
     this.alerts = new AlertRepository(this.db);
+    this.featureUsage = new FeatureUsageRepository(this.db);
   }
 
   close(): void {

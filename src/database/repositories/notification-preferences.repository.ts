@@ -1,6 +1,18 @@
 import type { Database } from 'bun:sqlite';
 import type { NotificationPreferencesRow, NotificationPreferencesUpdate } from '../types.ts';
 
+/** Extra user-level flags returned by morning/evening queries for contextual tips */
+export interface UserContextFlags {
+  timezone: string;
+  language: string;
+  /** 1 if user has Google Calendar connected, 0 otherwise */
+  has_google: number;
+  /** 1 if user has country_code set, 0 otherwise */
+  has_country: number;
+  /** 1 if user has voice calls enabled, 0 otherwise */
+  has_voice_calls: number;
+}
+
 export class NotificationPreferencesRepository {
   constructor(private db: Database) {}
 
@@ -38,26 +50,32 @@ export class NotificationPreferencesRepository {
       .run(...values, userId);
   }
 
-  getAllMorningEnabled(): Array<NotificationPreferencesRow & { timezone: string; language: string }> {
+  getAllMorningEnabled(): Array<NotificationPreferencesRow & UserContextFlags> {
     return this.db
       .prepare(
-        `SELECT np.*, u.timezone, u.language
+        `SELECT np.*, u.timezone, u.language,
+                (u.google_refresh_token_enc IS NOT NULL) AS has_google,
+                (u.country_code IS NOT NULL) AS has_country,
+                COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
          FROM notification_preferences np
          JOIN users u ON np.user_id = u.telegram_id
          WHERE np.morning_agenda_enabled = 1`,
       )
-      .all() as Array<NotificationPreferencesRow & { timezone: string; language: string }>;
+      .all() as Array<NotificationPreferencesRow & UserContextFlags>;
   }
 
-  getAllEveningEnabled(): Array<NotificationPreferencesRow & { timezone: string; language: string }> {
+  getAllEveningEnabled(): Array<NotificationPreferencesRow & UserContextFlags> {
     return this.db
       .prepare(
-        `SELECT np.*, u.timezone, u.language
+        `SELECT np.*, u.timezone, u.language,
+                (u.google_refresh_token_enc IS NOT NULL) AS has_google,
+                (u.country_code IS NOT NULL) AS has_country,
+                COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
          FROM notification_preferences np
          JOIN users u ON np.user_id = u.telegram_id
          WHERE np.evening_review_enabled = 1`,
       )
-      .all() as Array<NotificationPreferencesRow & { timezone: string; language: string }>;
+      .all() as Array<NotificationPreferencesRow & UserContextFlags>;
   }
 
   getMany(ids: number[]): Map<number, NotificationPreferencesRow> {
