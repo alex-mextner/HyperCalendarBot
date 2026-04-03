@@ -320,7 +320,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
     if (!result.success) {
       return {
         success: false,
-        output: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
+        error: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
       };
     }
     input = result.data as ToolInputMap[ToolName];

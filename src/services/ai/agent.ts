@@ -377,7 +377,7 @@ export class CalendarBotAgent {
               {
                 tool: block.name,
                 success: result.success,
-                ...(result.error !== undefined && { error: result.error }),
+                ...(!result.success && { error: result.error ?? result.output ?? 'Unknown error' }),
                 userId: ctx.user.telegram_id,
                 chatId: ctx.chatId,
               },
@@ -393,7 +393,7 @@ export class CalendarBotAgent {
               tool_use_id: block.id,
               content: result.success
                 ? `${result.output ?? 'OK'}${result.agentHint ? `\n[AGENT: ${result.agentHint}]` : ''}`
-                : `Error: ${result.error}`,
+                : `Error: ${result.error ?? result.output ?? 'Unknown error'}`,
               is_error: !result.success,
             });
 

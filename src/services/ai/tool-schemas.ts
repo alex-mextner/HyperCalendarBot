@@ -367,7 +367,7 @@ const addTriggerSchema = z
 
 const setReactionSchema = z
   .object({
-    message_id: z.number(),
+    message_id: z.number().optional(),
     emoji: z.string(),
   })
   .passthrough();

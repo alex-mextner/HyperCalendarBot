@@ -33,7 +33,7 @@ function makeCtx(connected: boolean): TestCtx | AgentContext {
 test('returns error + /connect link when not connected', async () => {
   const result = await handleAssistantTool(makeCtx(false) as AgentContext, 'bash_execute', { command: 'ls' });
   expect(result.success).toBe(false);
-  expect(result.output).toContain('/connect');
+  expect(result.error).toContain('/connect');
 });
 
 test('dispatches bash_execute and returns output', async () => {
@@ -68,7 +68,7 @@ test('error response returns success=false with message', async () => {
   c.agents!.agentDispatcher.handleResponse({ id: cmd.id, type: 'error', error: 'Permission denied' });
   const result = await promise;
   expect(result.success).toBe(false);
-  expect(result.output).toContain('Permission denied');
+  expect(result.error).toContain('Permission denied');
 });
 
 test('object data is JSON-serialized (not [object Object])', async () => {

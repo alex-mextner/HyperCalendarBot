@@ -1141,7 +1141,9 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
         emoji: {
           type: 'string',
           description:
-            'A single emoji supported by Telegram reactions, e.g. "👍", "❤️", "🔥", "👀", "😂", "🤔", "✍️", "🙏".',
+            'ONLY one of these Telegram reaction emojis (no others will work): ' +
+            '👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 🖕 😈 😴 😭 🤓 👻 👨‍💻 👀 🎃 🙈 😇 😨 🤝 ✍ 🤗 🫡 🎅 🎄 ☃ 💅 🤪 🗿 🆒 💘 🙉 🦄 😘 💊 🙊 😎 👾 🤷‍♂ 🤷 🤷‍♀ 😡. ' +
+            'Pick the closest match from this list.',
         },
       },
       required: ['emoji'],
