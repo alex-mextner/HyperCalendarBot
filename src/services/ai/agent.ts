@@ -377,7 +377,7 @@ export class CalendarBotAgent {
               {
                 tool: block.name,
                 success: result.success,
-                ...(result.error && { error: result.error }),
+                ...(result.error !== undefined && { error: result.error }),
                 userId: ctx.user.telegram_id,
                 chatId: ctx.chatId,
               },
@@ -480,7 +480,16 @@ export class CalendarBotAgent {
     );
 
     const trimmed = finalText.trim();
-    if (ctx.isGroup && (trimmed === '[SKIP]' || finalText.includes('[SKIP]') || trimmed === '...' || trimmed === '…')) {
+    const upper = trimmed.toUpperCase();
+    if (
+      ctx.isGroup &&
+      (upper.includes('[SKIP]') ||
+        upper.includes('[ПРОПУСК]') ||
+        upper.includes('[SKIP') ||
+        upper.includes('ПРОПУСК]') ||
+        trimmed === '...' ||
+        trimmed === '…')
+    ) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

@@ -126,6 +126,7 @@ export interface CreateBotOpts {
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
+  nliClassifier?: import('../services/nli/nli-classifier.ts').NliClassifier;
   envConfig?: Pick<
     EnvConfig,
     | 'BOT_ADMIN_ID'
@@ -346,6 +347,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminEditSessions,
     adminReplySession,
     intentLearner,
+    nliClassifier: opts.nliClassifier,
     aiCityModel: envConfig?.AI_FAST_MODEL,
     botAdminId,
     aiBaseUrl: aiConfig.baseUrl,
@@ -353,6 +355,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     aiModel: aiConfig.model,
     sendMessageToUser: async (chatId: number, text: string) => {
       await bot.api.sendMessage({ chat_id: chatId, text });
+    },
+    sendMessageToChat: async (
+      chatId: number,
+      text: string,
+      options?: { reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup },
+    ) => {
+      const result = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
+      });
+      return result as import('gramio').TelegramMessage;
     },
     proposeTimeSessions,
     birthdayService,
@@ -960,7 +974,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
     // Error handler
     .onError(({ context, kind, error }) => {
-      botLogger.error({ kind, err: error }, 'Bot error');
+      const userId = context && 'from' in context ? (context as { from?: { id?: number } }).from?.id : undefined;
+      const chatId = context && 'chatId' in context ? (context as { chatId?: number }).chatId : undefined;
+      botLogger.error({ kind, err: error, userId, chatId }, 'Bot error');
       try {
         if (context && 'send' in context) {
           const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
@@ -969,7 +985,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             .send(t(errLang).something_wrong)
             .catch((sendErr: unknown) => botLogger.warn({ err: sendErr }, 'Failed to send error message to user'));
         }
-      } catch {}
+      } catch (sendErr) {
+        botLogger.warn({ err: sendErr }, 'Failed to build error response for user');
+      }
     });
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
   const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;

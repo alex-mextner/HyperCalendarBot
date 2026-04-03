@@ -50,6 +50,7 @@ import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import type { NliClassifier } from '../../services/nli/nli-classifier.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
@@ -156,12 +157,15 @@ export interface MessageHandlerDeps {
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
   aiCityModel?: string;
+  // NLI semantic filter for group messages
+  nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
   // Admin reply sessions: adminId → { threadId, userId }
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
+  sendMessageToChat?: AgentContext['sendMessageToChat'];
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
   aiBaseUrl?: string;
@@ -549,6 +553,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
       resolveUsername: deps.resolveUsername,
+      sendMessageToChat: deps.sendMessageToChat,
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
@@ -1166,6 +1171,16 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         // Session active but no keyword — tick and keep typing indicator running
         deps.groupSessions!.tick(Number(chatId));
         isGroupSessionMessage = true;
+      }
+
+      // Stage 2: NLI semantic filter — verify keyword-matched messages are actually calendar-related.
+      // Only runs when: keyword matched (not reply/session), NLI is configured, text is long enough.
+      if (!isGroupSessionMessage && !isReplyToBot && deps.nliClassifier && text.length >= 10) {
+        const isCalendar = await deps.nliClassifier.isCalendarRelated(text);
+        if (!isCalendar) {
+          cmdLogger.debug({ chatId: Number(chatId), text: text.slice(0, 80) }, 'NLI rejected keyword-matched message');
+          return;
+        }
       }
     }
 

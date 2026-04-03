@@ -324,6 +324,15 @@ Optional features that depend on an env var must deactivate gracefully when the 
   }
   const messageId = ctx.message.id;
   ```
+- **No silent optional-dependency guards** — `if (ctx.something) { doWork() }` that silently skips
+  when the dependency is missing is a bug factory. When a tool handler or service depends on an
+  injected capability (`sendMessageToChat`, `sender`, etc.):
+  1. If the feature CANNOT work without it → return `{ success: false, error: '...' }` with a clear message
+  2. If the feature CAN partially work → log a warning (`logger.warn`) and include an `agentHint` in
+     the result so the AI knows something is degraded
+  3. NEVER silently skip and return success — the caller (AI agent, admin, user) must know the action
+     was not fully performed
+  The same applies to `deps.*` in handlers: if a dep is required for a code path, log when absent.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
 - **No silent `catch` blocks** — every `catch` must either log the error or have a comment explaining

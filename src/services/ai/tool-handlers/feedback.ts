@@ -35,28 +35,36 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
     text: input.message,
   });
 
-  if (ctx.sendMessageToChat) {
-    const username = ctx.user.username
-      ? `@${ctx.user.username}`
-      : (ctx.user.first_name ?? `ID:${ctx.user.telegram_id}`);
-    const typeEmoji = { bug: '🐛', feature: '💡', question: '❓', other: '💬' }[input.type] ?? '💬';
-    const text = `${typeEmoji} Feedback #${threadId} (${input.type}) от ${username}\n\n«${input.message}»`;
-
-    ctx
-      .sendMessageToChat(botAdminId, text, {
-        reply_markup: {
-          inline_keyboard: [
-            [
-              { text: '↩️ Reply', callback_data: `fb_reply:${threadId}` },
-              { text: '✅ Close', callback_data: `fb_close:${threadId}` },
-            ],
-          ],
-        },
-      })
-      .catch((err: unknown) => {
-        cmdLogger.error({ err: err }, 'Failed to send feedback notification to admin');
-      });
+  if (!ctx.sendMessageToChat) {
+    cmdLogger.error(
+      { userId: ctx.user.telegram_id, threadId, botAdminId },
+      'sendMessageToChat not injected — admin will NOT receive feedback notification',
+    );
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.feedback.feedbackSent,
+      agentHint: 'WARNING: admin notification could not be sent (sendMessageToChat unavailable)',
+    };
   }
+
+  const username = ctx.user.username ? `@${ctx.user.username}` : (ctx.user.first_name ?? `ID:${ctx.user.telegram_id}`);
+  const typeEmoji = { bug: '🐛', feature: '💡', question: '❓', other: '💬' }[input.type] ?? '💬';
+  const text = `${typeEmoji} Feedback #${threadId} (${input.type}) от ${username}\n\n«${input.message}»`;
+
+  ctx
+    .sendMessageToChat(botAdminId, text, {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '↩️ Reply', callback_data: `fb_reply:${threadId}` },
+            { text: '✅ Close', callback_data: `fb_close:${threadId}` },
+          ],
+        ],
+      },
+    })
+    .catch((err: unknown) => {
+      cmdLogger.error({ err: err }, 'Failed to send feedback notification to admin');
+    });
 
   return { success: true, output: t(ctx.user.language).aiTools.feedback.feedbackSent };
 }

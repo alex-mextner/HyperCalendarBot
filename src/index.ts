@@ -598,6 +598,13 @@ if (config.HF_TOKEN) {
   botLogger.info('Kokoro TTS initialized');
 }
 
+let nliClassifier: import('./services/nli/nli-classifier.ts').NliClassifier | undefined;
+if (config.HF_TOKEN) {
+  const { NliClassifier } = await import('./services/nli/nli-classifier.ts');
+  nliClassifier = new NliClassifier(config.HF_TOKEN);
+  botLogger.info('NLI classifier initialized (group message semantic filter)');
+}
+
 let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService | undefined;
 if (config.SILERO_PYTHON_PATH && stressDictionary) {
   const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
@@ -711,6 +718,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       mtprotoResolveUsername,
       eventMentionStore,
       domainEventBus,
+      nliClassifier,
       envConfig: {
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
