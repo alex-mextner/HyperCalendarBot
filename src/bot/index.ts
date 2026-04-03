@@ -366,7 +366,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         text,
         ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
       });
-      return result as import('gramio').TelegramMessage;
+      return result;
     },
     proposeTimeSessions,
     birthdayService,
@@ -973,10 +973,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // so any .command() registered after it will never fire.
     .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
     // Error handler
+    // GramIO's onError context is a wide union of all context types — property access
+    // requires runtime 'in' checks because static narrowing is not possible here.
     .onError(({ context, kind, error }) => {
-      const userId = context && 'from' in context ? (context as { from?: { id?: number } }).from?.id : undefined;
-      const chatId = context && 'chatId' in context ? (context as { chatId?: number }).chatId : undefined;
-      botLogger.error({ kind, err: error, userId, chatId }, 'Bot error');
+      const ctx = context as { from?: { id?: number }; chatId?: number } | undefined;
+      botLogger.error({ kind, err: error, userId: ctx?.from?.id, chatId: ctx?.chatId }, 'Bot error');
       try {
         if (context && 'send' in context) {
           const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;

@@ -41,6 +41,18 @@ describe('NliClassifier', () => {
     expect(await classifier.isCalendarRelated('Как дожить до 12 апреля')).toBe(false);
   });
 
+  test('returns true at exact threshold 0.4', async () => {
+    mockFetch(0.4, 0.6);
+    const classifier = new NliClassifier('test-token');
+    expect(await classifier.isCalendarRelated('boundary test')).toBe(true);
+  });
+
+  test('returns false just below threshold 0.39', async () => {
+    mockFetch(0.39, 0.61);
+    const classifier = new NliClassifier('test-token');
+    expect(await classifier.isCalendarRelated('boundary test')).toBe(false);
+  });
+
   test('returns true on API error (fail open)', async () => {
     globalThis.fetch = mock(() =>
       Promise.resolve(new Response('error', { status: 500 })),

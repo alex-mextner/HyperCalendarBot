@@ -1,16 +1,19 @@
 // src/services/nli/nli-classifier.ts
+import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
 
 const HF_API_URL = 'https://api-inference.huggingface.co/models/joeddav/xlm-roberta-large-xnli';
 const REQUEST_TIMEOUT_MS = 3000;
+const CALENDAR_CONFIDENCE_THRESHOLD = 0.4;
 
-const CANDIDATE_LABELS = ['calendar scheduling reminder event meeting', 'general conversation chat smalltalk'];
+const CALENDAR_LABEL = 'calendar scheduling reminder event meeting';
+const CANDIDATE_LABELS = [CALENDAR_LABEL, 'general conversation chat smalltalk'];
 
-interface HfClassificationResult {
-  sequence: string;
-  labels: string[];
-  scores: number[];
-}
+const HfClassificationSchema = z.object({
+  sequence: z.string(),
+  labels: z.array(z.string()).min(2),
+  scores: z.array(z.number()).min(2),
+});
 
 export class NliClassifier {
   private token: string;
@@ -48,19 +51,19 @@ export class NliClassifier {
         return true; // fail open
       }
 
-      const result = (await response.json()) as HfClassificationResult;
-
-      if (!result.labels || !result.scores || result.labels.length < 2) {
-        cmdLogger.warn({ result, text: text.slice(0, 80) }, 'NLI API unexpected response shape');
+      const parsed = HfClassificationSchema.safeParse(await response.json());
+      if (!parsed.success) {
+        cmdLogger.warn({ err: parsed.error, text: text.slice(0, 80) }, 'NLI API unexpected response shape');
         return true; // fail open
       }
 
-      const calendarIdx = result.labels.indexOf(CANDIDATE_LABELS[0]!);
+      const result = parsed.data;
+      const calendarIdx = result.labels.indexOf(CALENDAR_LABEL);
       const calendarScore = calendarIdx >= 0 ? result.scores[calendarIdx]! : 0;
 
       cmdLogger.debug({ text: text.slice(0, 80), calendarScore }, 'NLI classification result');
 
-      return calendarScore >= 0.4;
+      return calendarScore >= CALENDAR_CONFIDENCE_THRESHOLD;
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         cmdLogger.debug({ text: text.slice(0, 80) }, 'NLI classification timed out — fail open');
