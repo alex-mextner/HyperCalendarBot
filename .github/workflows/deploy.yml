@@ -30,16 +30,16 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository_owner }}/hypercalendarbot-ci:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: oven-sh/setup-bun@735343b667d3e6a283f1e0cafc2da923d4e2b925 # v2
+        with:
+          bun-version: 1.3.11
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: bun install
       # Validate lockfile integrity (same platform — linux/linux)
       - run: bun install --frozen-lockfile --ignore-scripts
+      - run: bunx playwright install --with-deps chromium
       - run: bun test
       - run: bun run lint
       - run: ./node_modules/.bin/tsc --noEmit
