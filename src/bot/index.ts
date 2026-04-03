@@ -631,7 +631,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             },
           }
         : undefined;
-      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo));
+      const agentCtx = buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo);
+      agentCtx.incomingMessageId ??= ctx.id;
+      await agent.run(agentCtx);
     })
     // Callback queries
     .on('callback_query', (ctx) =>

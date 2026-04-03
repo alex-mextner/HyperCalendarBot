@@ -33,6 +33,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     if (!chatId) return { handled: false };
 
     const agentContext = deps.agentContextBuilder(user, Number(chatId), messageText, extra?.groupContext);
+    agentContext.incomingMessageId ??= ctx.id;
 
     if (extra?.feedbackContext && agentContext.feedback) {
       agentContext.feedback.feedbackContext = extra.feedbackContext;
