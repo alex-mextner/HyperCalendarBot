@@ -99,11 +99,13 @@ function makeDayLabel(date: Date, lang: string): string {
 
 const DEFAULT_EVE_HOLIDAY_HHMM = '21:00';
 
-/** Pick a random bot tip for free days (shown ~50% of the time to avoid spam) */
+/** Pick a random bot tip or GTD quote for free days (shown ~50% of the time to avoid spam) */
 function pickBotTip(lang: string): string | null {
   if (Math.random() > 0.5) return null;
-  const tips = t(toLang(lang)).botTips;
-  return tips[Math.floor(Math.random() * tips.length)]!;
+  const l = t(toLang(lang));
+  // 60% bot tips, 40% GTD quotes
+  const pool = Math.random() < 0.6 ? l.botTips : l.gtdQuotes;
+  return pool[Math.floor(Math.random() * pool.length)]!;
 }
 
 /** Fetch day weather with graceful failure */
