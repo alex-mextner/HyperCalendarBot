@@ -29,7 +29,7 @@ export class FeatureUsageRepository {
   constructor(private db: Database) {}
 
   /** Record that a user used a feature (upsert: increment count, update timestamp) */
-  record(userId: number, featureKey: string): void {
+  record(userId: number, featureKey: FeatureKey): void {
     this.db
       .prepare(
         `INSERT INTO feature_usage (user_id, feature_key, use_count, last_used_at)

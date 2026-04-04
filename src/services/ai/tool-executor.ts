@@ -1,4 +1,5 @@
 import type { AgentCommand } from '../../agent/protocol.ts';
+import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleAssistantTool } from './tool-handlers/assistant.ts';
@@ -240,7 +241,7 @@ const SKIP_ACTION_LOG = new Set<string>([
 ]);
 
 /** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
-const TOOL_FEATURE_MAP: { [tool: string]: string } = {
+const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   create_event: 'events_create',
   create_birthday_event: 'events_create',
   update_event: 'events_edit',

@@ -1,5 +1,6 @@
 // src/services/weather/weather-service.ts
 import cityTimezones from 'city-timezones';
+import { z } from 'zod';
 import { notifyLogger } from '../../utils/logger.ts';
 import type { DayWeather, WeekWeather } from './types.ts';
 import { owmCurrentSchema, owmDailyForecastSchema } from './types.ts';
@@ -33,13 +34,22 @@ interface Coordinates {
   lon: number;
 }
 
+const cityEntrySchema = z.object({
+  timezone: z.string().optional(),
+  lat: z.number(),
+  lng: z.number(),
+  pop: z.number().optional(),
+});
+
 /** Resolve timezone string to approximate lat/lon via city-timezones library */
 export function timezoneToCoords(timezone: string): Coordinates | null {
-  const cities = cityTimezones.cityMapping.filter((c: { timezone?: string }) => c.timezone === timezone);
-  if (cities.length === 0) return null;
+  const matching = cityTimezones.cityMapping.filter((c: z.infer<typeof cityEntrySchema>) => c.timezone === timezone);
+  if (matching.length === 0) return null;
   // Pick the most populated city in that timezone
-  cities.sort((a: { pop?: number }, b: { pop?: number }) => (b.pop ?? 0) - (a.pop ?? 0));
-  const best = cities[0] as { lat: number; lng: number };
+  matching.sort(
+    (a: z.infer<typeof cityEntrySchema>, b: z.infer<typeof cityEntrySchema>) => (b.pop ?? 0) - (a.pop ?? 0),
+  );
+  const best = matching[0]!;
   return { lat: best.lat, lon: best.lng };
 }
 
@@ -51,11 +61,16 @@ interface WeatherServiceDeps {
   fetchFn?: FetchFn;
 }
 
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+
 export class WeatherService {
   private apiKey: string;
   private fetchFn: FetchFn;
-  /** In-memory cache: key = "lat,lon:type" → { data, expiresAt } */
-  private cache = new Map<string, { data: DayWeather | WeekWeather; expiresAt: number }>();
+  private dayCache = new Map<string, CacheEntry<DayWeather>>();
+  private weekCache = new Map<string, CacheEntry<WeekWeather>>();
 
   constructor(deps: WeatherServiceDeps) {
     this.apiKey = deps.apiKey;
@@ -83,10 +98,10 @@ export class WeatherService {
   }
 
   private async fetchCurrentWeather(coords: Coordinates): Promise<DayWeather | null> {
-    const cacheKey = `${coords.lat},${coords.lon}:current`;
-    const cached = this.cache.get(cacheKey);
+    const cacheKey = `${coords.lat},${coords.lon}`;
+    const cached = this.dayCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return cached.data as DayWeather;
+      return cached.data;
     }
 
     try {
@@ -108,7 +123,7 @@ export class WeatherService {
         windSpeed: data.wind.speed,
       };
       // Cache for 30 minutes
-      this.cache.set(cacheKey, { data: result, expiresAt: Date.now() + 30 * 60_000 });
+      this.dayCache.set(cacheKey, { data: result, expiresAt: Date.now() + 30 * 60_000 });
       return result;
     } catch (err) {
       notifyLogger.error({ err, coords }, 'Failed to fetch current weather');
@@ -117,10 +132,10 @@ export class WeatherService {
   }
 
   private async fetchWeekForecast(coords: Coordinates): Promise<WeekWeather | null> {
-    const cacheKey = `${coords.lat},${coords.lon}:week`;
-    const cached = this.cache.get(cacheKey);
+    const cacheKey = `${coords.lat},${coords.lon}`;
+    const cached = this.weekCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
-      return cached.data as WeekWeather;
+      return cached.data;
     }
 
     try {
@@ -148,7 +163,7 @@ export class WeatherService {
         }),
       };
       // Cache for 2 hours
-      this.cache.set(cacheKey, { data: result, expiresAt: Date.now() + 120 * 60_000 });
+      this.weekCache.set(cacheKey, { data: result, expiresAt: Date.now() + 120 * 60_000 });
       return result;
     } catch (err) {
       notifyLogger.error({ err, coords }, 'Failed to fetch week forecast');

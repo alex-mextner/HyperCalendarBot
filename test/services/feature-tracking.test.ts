@@ -96,6 +96,36 @@ describe('trackFeatureUsage', () => {
     }
   });
 
+  test('all SCENE_FEATURE_MAP entries produce valid calls', () => {
+    const scenes = ['add-event', 'edit-value', 'import', 'timezone'];
+    for (const scene of scenes) {
+      const repo = makeRepo();
+      trackFeatureUsage(repo, 42, 'scene', scene);
+      expect(repo.record).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test('all ACTION_FEATURE_MAP entries produce valid calls', () => {
+    const actions = ['voice_message', 'ics_file', 'geolocation'];
+    for (const action of actions) {
+      const repo = makeRepo();
+      trackFeatureUsage(repo, 42, 'action', action);
+      expect(repo.record).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  test('ignores unknown scene', () => {
+    const repo = makeRepo();
+    trackFeatureUsage(repo, 42, 'scene', 'nonexistent');
+    expect(repo.record).not.toHaveBeenCalled();
+  });
+
+  test('ignores unknown action', () => {
+    const repo = makeRepo();
+    trackFeatureUsage(repo, 42, 'action', 'nonexistent');
+    expect(repo.record).not.toHaveBeenCalled();
+  });
+
   test('all CALLBACK_FEATURE_MAP entries produce valid calls', () => {
     const prefixes = [
       'ev',

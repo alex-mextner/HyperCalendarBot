@@ -1,8 +1,8 @@
-import type { FeatureUsageRepository } from '../database/repositories/feature-usage.repository.ts';
+import type { FeatureKey, FeatureUsageRepository } from '../database/repositories/feature-usage.repository.ts';
 import { notifyLogger } from '../utils/logger.ts';
 
 /** Maps slash commands to feature keys */
-const COMMAND_FEATURE_MAP: { [cmd: string]: string } = {
+const COMMAND_FEATURE_MAP: { [cmd: string]: FeatureKey } = {
   today: 'events_create',
   tomorrow: 'events_create',
   week: 'events_create',
@@ -27,7 +27,7 @@ const COMMAND_FEATURE_MAP: { [cmd: string]: string } = {
 };
 
 /** Maps callback data prefixes to feature keys */
-const CALLBACK_FEATURE_MAP: { [prefix: string]: string } = {
+const CALLBACK_FEATURE_MAP: { [prefix: string]: FeatureKey } = {
   ev: 'events_create', // view event
   ee: 'events_edit', // edit event
   ef: 'events_edit', // edit field
@@ -48,7 +48,7 @@ const CALLBACK_FEATURE_MAP: { [prefix: string]: string } = {
 };
 
 /** Maps scene names to feature keys */
-const SCENE_FEATURE_MAP: { [scene: string]: string } = {
+const SCENE_FEATURE_MAP: { [scene: string]: FeatureKey } = {
   'add-event': 'events_create',
   'edit-value': 'events_edit',
   import: 'import',
@@ -56,7 +56,7 @@ const SCENE_FEATURE_MAP: { [scene: string]: string } = {
 };
 
 /** Maps abstract actions to feature keys */
-const ACTION_FEATURE_MAP: { [action: string]: string } = {
+const ACTION_FEATURE_MAP: { [action: string]: FeatureKey } = {
   voice_message: 'events_create', // voice messages are usually to create/query events
   ics_file: 'import', // sending .ics files
   geolocation: 'settings', // sharing location for timezone
