@@ -79,6 +79,62 @@ describe('FeatureUsageRepository', () => {
     expect(stale).toHaveLength(0); // count=1, below minCount=5
   });
 
+  test('getStaleFeatures includes feature past the threshold day', () => {
+    repo.record(42, 'events_create');
+    db.run(
+      "UPDATE feature_usage SET use_count = 5, last_used_at = datetime('now', '-31 days') WHERE feature_key = 'events_create'",
+    );
+
+    const stale = repo.getStaleFeatures(42, 5, 30);
+    expect(stale).toHaveLength(1);
+    expect(stale[0]!.feature_key).toBe('events_create');
+  });
+
+  test('getStaleFeatures excludes feature within threshold window', () => {
+    repo.record(42, 'events_create');
+    db.run(
+      "UPDATE feature_usage SET use_count = 10, last_used_at = datetime('now', '-29 days') WHERE feature_key = 'events_create'",
+    );
+
+    const stale = repo.getStaleFeatures(42, 5, 30);
+    expect(stale).toHaveLength(0);
+  });
+
+  test('getStaleFeatures includes feature at exactly minCount threshold', () => {
+    repo.record(42, 'sharing');
+    db.run(
+      "UPDATE feature_usage SET use_count = 5, last_used_at = datetime('now', '-60 days') WHERE feature_key = 'sharing'",
+    );
+
+    const stale = repo.getStaleFeatures(42, 5, 30);
+    expect(stale).toHaveLength(1);
+  });
+
+  test('getStaleFeatures excludes feature one below minCount', () => {
+    repo.record(42, 'sharing');
+    db.run(
+      "UPDATE feature_usage SET use_count = 4, last_used_at = datetime('now', '-60 days') WHERE feature_key = 'sharing'",
+    );
+
+    const stale = repo.getStaleFeatures(42, 5, 30);
+    expect(stale).toHaveLength(0);
+  });
+
+  test('getStaleFeatures with minCount=0 returns any old feature', () => {
+    repo.record(42, 'reminders');
+    db.run(
+      "UPDATE feature_usage SET use_count = 1, last_used_at = datetime('now', '-60 days') WHERE feature_key = 'reminders'",
+    );
+
+    const stale = repo.getStaleFeatures(42, 0, 30);
+    expect(stale).toHaveLength(1);
+  });
+
+  test('getStaleFeatures returns empty for user with no usage', () => {
+    const stale = repo.getStaleFeatures(999, 5, 30);
+    expect(stale).toEqual([]);
+  });
+
   test('different users have separate data', () => {
     repo.record(42, 'events_create');
     repo.record(99, 'events_create');

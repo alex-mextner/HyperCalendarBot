@@ -51,20 +51,16 @@ export class NotificationPreferencesRepository {
   }
 
   getAllMorningEnabled(): Array<NotificationPreferencesRow & UserContextFlags> {
-    return this.db
-      .prepare(
-        `SELECT np.*, u.timezone, u.language,
-                (u.google_refresh_token_enc IS NOT NULL) AS has_google,
-                (u.country_code IS NOT NULL) AS has_country,
-                COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
-         FROM notification_preferences np
-         JOIN users u ON np.user_id = u.telegram_id
-         WHERE np.morning_agenda_enabled = 1`,
-      )
-      .all() as Array<NotificationPreferencesRow & UserContextFlags>;
+    return this.getAllEnabledByColumn('morning_agenda_enabled');
   }
 
   getAllEveningEnabled(): Array<NotificationPreferencesRow & UserContextFlags> {
+    return this.getAllEnabledByColumn('evening_review_enabled');
+  }
+
+  private getAllEnabledByColumn(
+    column: 'morning_agenda_enabled' | 'evening_review_enabled',
+  ): Array<NotificationPreferencesRow & UserContextFlags> {
     return this.db
       .prepare(
         `SELECT np.*, u.timezone, u.language,
@@ -73,7 +69,7 @@ export class NotificationPreferencesRepository {
                 COALESCE(u.voice_response_enabled, 0) AS has_voice_calls
          FROM notification_preferences np
          JOIN users u ON np.user_id = u.telegram_id
-         WHERE np.evening_review_enabled = 1`,
+         WHERE np.${column} = 1`,
       )
       .all() as Array<NotificationPreferencesRow & UserContextFlags>;
   }

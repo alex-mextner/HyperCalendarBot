@@ -6,6 +6,10 @@ const K = FEATURE_KEYS;
 /**
  * Maps each bot tip index to a feature key.
  * Order must match the `botTips` array in constants.ts (EN and RU have the same structure).
+ *
+ * WARNING: Adding, removing, or reordering tips in constants.ts requires updating this array.
+ * The test in tip-tags.test.ts catches length mismatches but NOT reorder bugs.
+ * When modifying botTips, always update this mapping in the same commit.
  */
 export const BOT_TIP_FEATURE_MAP: FeatureKey[] = [
   // ── Creating events (0-5) ──

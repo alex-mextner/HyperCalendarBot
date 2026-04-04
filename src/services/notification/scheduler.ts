@@ -547,7 +547,7 @@ export class NotificationScheduler {
       const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), pref.timezone);
       const occurrences = this.deps.getEventsInRange(pref.user_id, tmStart, tmEnd);
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
-      const lang = pref.language ?? 'en';
+      const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
       // For evening review, fetch tomorrow's weather via week forecast (day index 1)
@@ -602,7 +602,7 @@ export class NotificationScheduler {
         const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
         const refKey = `wd:${pref.user_id}:${weekStr}`;
 
-        const lang = pref.language ?? 'en';
+        const lang = toLang(pref.language);
 
         // Build Mon–Sun local calendar dates for next week.
         // Fetch all 7 days in one range query, then slice per day in memory.

@@ -18,9 +18,15 @@ export interface DayWeather {
   pop?: number;
 }
 
+/** A day in the weekly forecast — DayWeather with a date attached */
+export interface WeekWeatherDay extends DayWeather {
+  /** ISO date string (YYYY-MM-DD) */
+  date: string;
+}
+
 /** Weather forecast for a week (7 days) */
 export interface WeekWeather {
-  days: Array<DayWeather & { date: string }>;
+  days: WeekWeatherDay[];
 }
 
 // Zod schemas for OpenWeatherMap API responses
