@@ -19,6 +19,7 @@ import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { formatInvitation } from '../services/event/formatters.ts';
+import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
@@ -547,6 +548,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       return next();
     })
     .extend(scenesSetup.plugin)
+    // Feature usage tracking for commands
+    .on('message', (ctx, next) => {
+      const text = ctx.text;
+      const userId = ctx.dbUser?.telegram_id;
+      if (text && userId && text.startsWith('/')) {
+        const cmd = text.slice(1).split(/[\s@]/)[0]!;
+        trackFeatureUsage(db.featureUsage, userId, 'command', cmd);
+      }
+      return next();
+    })
     // Commands
     .command('start', (ctx) =>
       handleStart(ctx, {
@@ -634,8 +645,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo, ctx.id));
     })
     // Callback queries
-    .on('callback_query', (ctx) =>
-      createCallbackHandler(eventService, scenesSetup.scenes.editValueScene, holidayService, prefsService, {
+    .on('callback_query', (ctx) => {
+      const data = ctx.data;
+      const userId = ctx.dbUser?.telegram_id;
+      if (data && userId) {
+        trackFeatureUsage(db.featureUsage, userId, 'callback', callbackPrefix(data));
+      }
+      return createCallbackHandler(eventService, scenesSetup.scenes.editValueScene, holidayService, prefsService, {
         calendarRepo: googleDeps?.calendarRepo,
         disconnectDeps: googleDeps?.disconnectDeps,
         onCalendarsDone: googleDeps?.onCalendarsDone,
@@ -769,8 +785,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           sceneStorage: kvStorage,
           scenePauseService,
         },
-      })(ctx as unknown as BotCallbackContext),
-    )
+      })(ctx as unknown as BotCallbackContext);
+    })
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>
       createChatMemberHandler(
@@ -972,7 +988,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
     // so any .command() registered after it will never fire.
-    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
+    .on('message', (ctx) => {
+      const userId = ctx.dbUser?.telegram_id;
+      if (userId) {
+        if (ctx.voice) trackFeatureUsage(db.featureUsage, userId, 'action', 'voice_message');
+        if (ctx.document?.fileName?.endsWith('.ics')) trackFeatureUsage(db.featureUsage, userId, 'action', 'ics_file');
+        if (ctx.location) trackFeatureUsage(db.featureUsage, userId, 'action', 'geolocation');
+      }
+      return createMessageHandler(msgDeps)(ctx);
+    })
     // Error handler
     // GramIO's onError context is a wide union of all context types — property access
     // requires runtime 'in' checks because static narrowing is not possible here.
