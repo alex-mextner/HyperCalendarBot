@@ -641,6 +641,73 @@ describe('createMessageHandler', () => {
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('пошло не так');
   });
+
+  describe('location message → timezone update', () => {
+    test('updates timezone when location resolves to a different timezone', async () => {
+      const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
+      const deps = makeDeps({ userRepo: { update } });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(update).toHaveBeenCalledTimes(1);
+      const [id, data] = update.mock.calls[0] as unknown as [number, { timezone: string; country_code?: string }];
+      expect(id).toBe(100);
+      expect(data.timezone).toBe('Europe/Moscow');
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Europe/Moscow');
+      expect(msg).toContain('обновлён');
+    });
+
+    test('sends same-timezone message when location matches current timezone', async () => {
+      const update = mock(() => null);
+      const deps = makeDeps({ userRepo: { update } });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'Europe/Moscow', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(update).not.toHaveBeenCalled();
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Europe/Moscow');
+      expect(msg).toContain('уже');
+    });
+
+    test('does not route to AI agent after handling location', async () => {
+      const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
+      const deps = makeDeps({ userRepo: { update } });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
+      await handler(ctx as never);
+
+      expect(deps.agent.run).toHaveBeenCalledTimes(0);
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('updated');
+    });
+  });
 });
 
 describe('toEventSummary', () => {

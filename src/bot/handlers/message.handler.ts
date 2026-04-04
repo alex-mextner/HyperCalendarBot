@@ -57,7 +57,11 @@ import type { InvitationService } from '../../services/sharing/invitation-servic
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
-import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import {
+  getTimezoneDisplay,
+  guessCountryFromTimezone,
+  resolveTimezone,
+} from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -1053,6 +1057,27 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const voice = ctx.voice;
     if (voice && deps.transcriptionService && deps.botToken) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
+    }
+
+    // Location message → update timezone from geolocation
+    const location = ctx.location;
+    if (location) {
+      const { latitude, longitude } = location;
+      const tz = resolveTimezone(latitude, longitude);
+      const display = getTimezoneDisplay(tz);
+      const offset = display.match(/\((.+)\)/)?.[1] ?? '';
+      const lang = user.language;
+      if (tz !== user.timezone) {
+        const countryCode = guessCountryFromTimezone(tz);
+        deps.userRepo.update(user.telegram_id, {
+          timezone: tz,
+          ...(countryCode ? { country_code: countryCode } : {}),
+        });
+        await ctx.send(t(lang).tz_updated_from_location(tz, offset));
+      } else {
+        await ctx.send(t(lang).tz_same_from_location(tz, offset));
+      }
+      return;
     }
 
     const text = ctx.text as string | undefined;
