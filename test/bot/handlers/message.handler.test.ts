@@ -642,10 +642,9 @@ describe('createMessageHandler', () => {
     expect(msg).toContain('пошло не так');
   });
 
-  describe('location message → timezone update', () => {
-    test('updates timezone when location resolves to a different timezone', async () => {
-      const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
-      const deps = makeDeps({ userRepo: { update } });
+  describe('location message → timezone confirmation', () => {
+    test('sends confirmation prompt with buttons when timezone differs', async () => {
+      const deps = makeDeps();
       const handler = createMessageHandler(deps as never);
       const ctx = makeCtx({
         text: undefined,
@@ -657,19 +656,18 @@ describe('createMessageHandler', () => {
       };
       await handler(ctx as never);
 
-      expect(update).toHaveBeenCalledTimes(1);
-      const [id, data] = update.mock.calls[0] as unknown as [number, { timezone: string; country_code?: string }];
-      expect(id).toBe(100);
-      expect(data.timezone).toBe('Europe/Moscow');
       expect(ctx.send).toHaveBeenCalledTimes(1);
       const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
       expect(msg).toContain('Europe/Moscow');
-      expect(msg).toContain('обновлён');
+      expect(msg).toContain('UTC');
+      expect(msg).toContain('Обновить часовой пояс?');
+      const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { parse_mode: string; reply_markup: unknown };
+      expect(opts.parse_mode).toBe('HTML');
+      expect(opts.reply_markup).toBeDefined();
     });
 
     test('sends same-timezone message when location matches current timezone', async () => {
-      const update = mock(() => null);
-      const deps = makeDeps({ userRepo: { update } });
+      const deps = makeDeps();
       const handler = createMessageHandler(deps as never);
       const ctx = makeCtx({
         text: undefined,
@@ -681,7 +679,6 @@ describe('createMessageHandler', () => {
       };
       await handler(ctx as never);
 
-      expect(update).not.toHaveBeenCalled();
       expect(ctx.send).toHaveBeenCalledTimes(1);
       const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
       expect(msg).toContain('Europe/Moscow');
@@ -689,8 +686,7 @@ describe('createMessageHandler', () => {
     });
 
     test('does not route to AI agent after handling location', async () => {
-      const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
-      const deps = makeDeps({ userRepo: { update } });
+      const deps = makeDeps();
       const handler = createMessageHandler(deps as never);
       const ctx = makeCtx({
         text: undefined,
@@ -705,7 +701,7 @@ describe('createMessageHandler', () => {
       expect(deps.agent.run).toHaveBeenCalledTimes(0);
       expect(ctx.send).toHaveBeenCalledTimes(1);
       const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
-      expect(msg).toContain('updated');
+      expect(msg).toContain('Update timezone?');
     });
   });
 });

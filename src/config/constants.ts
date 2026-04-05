@@ -62,6 +62,8 @@ export const CB = {
   TZ_CANCEL: 'tzc',
   TZ_TYPE_CITY: 'tzt',
   TZ_GEO_PICK: 'tzg',
+  GEO_TZ_CONFIRM: 'gtzc',
+  GEO_TZ_DISMISS: 'gtzd',
   SCENE_HELP: 'scene_help',
   ADD_CANCEL: 'add:cancel',
 } as const;
@@ -74,8 +76,14 @@ export const MSG = {
     tz_detected: (tz: string, offset: string) => `Got it! Your timezone is ${tz} (${offset}).\nIs this correct?`,
     tz_confirm_yes: 'Yes ✓',
     tz_confirm_no: 'No, choose manually',
-    tz_updated_from_location: (tz: string, offset: string) => `📍 Timezone updated: ${tz} (${offset})`,
-    tz_same_from_location: (tz: string, offset: string) => `📍 Your timezone is already ${tz} (${offset})`,
+    geo_tz_confirm_prompt: (currentTz: string, newTz: string, offset: string) =>
+      `📍 Your current timezone is <b>${currentTz}</b>.\nBased on your location, it looks like you're in <b>${newTz}</b> (${offset}).\n\nUpdating the timezone ensures reminders, agenda, and event times are shown correctly.\n\nUpdate timezone?`,
+    geo_tz_confirm_btn: 'Yes, update ✓',
+    geo_tz_dismiss_btn: 'No, keep current',
+    geo_tz_updated: (tz: string, offset: string) => `✅ Timezone updated to ${tz} (${offset}).`,
+    geo_tz_dismissed: 'OK, timezone left unchanged.',
+    tz_same_from_location: (tz: string, offset: string) =>
+      `📍 Your timezone is already ${tz} (${offset}) — no changes needed.`,
     share_location: '📍 Share Location',
     choose_manually: '⌨️ Choose Manually',
     country_prompt: 'Want to see public holidays in your calendar?',
@@ -512,8 +520,14 @@ export const MSG = {
     tz_detected: (tz: string, offset: string) => `Ваш часовой пояс: ${tz} (${offset}).\nВсё верно?`,
     tz_confirm_yes: 'Да ✓',
     tz_confirm_no: 'Нет, выбрать вручную',
-    tz_updated_from_location: (tz: string, offset: string) => `📍 Часовой пояс обновлён: ${tz} (${offset})`,
-    tz_same_from_location: (tz: string, offset: string) => `📍 Твой часовой пояс уже ${tz} (${offset})`,
+    geo_tz_confirm_prompt: (currentTz: string, newTz: string, offset: string) =>
+      `📍 Твой текущий часовой пояс — <b>${currentTz}</b>.\nПо геолокации похоже, что ты в <b>${newTz}</b> (${offset}).\n\nОбновление часового пояса нужно, чтобы напоминания, сводка дня и время событий отображались правильно.\n\nОбновить часовой пояс?`,
+    geo_tz_confirm_btn: 'Да, обновить ✓',
+    geo_tz_dismiss_btn: 'Нет, оставить',
+    geo_tz_updated: (tz: string, offset: string) => `✅ Часовой пояс обновлён: ${tz} (${offset}).`,
+    geo_tz_dismissed: 'ОК, часовой пояс не изменён.',
+    tz_same_from_location: (tz: string, offset: string) =>
+      `📍 Твой часовой пояс уже ${tz} (${offset}) — менять ничего не нужно.`,
     share_location: '📍 Отправить геолокацию',
     choose_manually: '⌨️ Выбрать вручную',
     country_prompt: 'Показывать государственные праздники в календаре?',

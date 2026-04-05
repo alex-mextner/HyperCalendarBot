@@ -34,6 +34,7 @@ import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import { getTimezoneDisplay, guessCountryFromTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
@@ -1127,6 +1128,30 @@ export function createCallbackHandler(
       return;
     }
     return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);
+  });
+
+  // Geo-location timezone: confirm update
+  dispatch.set(CB.GEO_TZ_CONFIRM, async (ctx, payload, _parts, user) => {
+    const tz = payload; // IANA timezone string, e.g. "Europe/Moscow"
+    const lang = (user.language ?? 'en') as Lang;
+    if (userRepo) {
+      const countryCode = guessCountryFromTimezone(tz);
+      userRepo.update(user.telegram_id, {
+        timezone: tz,
+        ...(countryCode ? { country_code: countryCode } : {}),
+      });
+    }
+    const display = getTimezoneDisplay(tz);
+    const offset = display.match(/\((.+)\)/)?.[1] ?? '';
+    await ctx.answer();
+    await ctx.editText(t(lang).geo_tz_updated(tz, offset), { reply_markup: undefined });
+  });
+
+  // Geo-location timezone: dismiss (keep current)
+  dispatch.set(CB.GEO_TZ_DISMISS, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    await ctx.answer();
+    await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
   });
 
   // Group settings: timezone picker

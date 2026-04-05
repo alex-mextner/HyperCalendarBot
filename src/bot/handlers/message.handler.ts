@@ -8,7 +8,7 @@ import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
-import { t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -57,11 +57,7 @@ import type { InvitationService } from '../../services/sharing/invitation-servic
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
-import {
-  getTimezoneDisplay,
-  guessCountryFromTimezone,
-  resolveTimezone,
-} from '../../services/timezone/timezone-service.ts';
+import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -1059,7 +1055,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
-    // Location message → update timezone from geolocation
+    // Location message → ask to update timezone from geolocation
     const location = ctx.location;
     if (location) {
       const { latitude, longitude } = location;
@@ -1067,15 +1063,17 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       const display = getTimezoneDisplay(tz);
       const offset = display.match(/\((.+)\)/)?.[1] ?? '';
       const lang = user.language;
+      const msgs = t(lang);
       if (tz !== user.timezone) {
-        const countryCode = guessCountryFromTimezone(tz);
-        deps.userRepo.update(user.telegram_id, {
-          timezone: tz,
-          ...(countryCode ? { country_code: countryCode } : {}),
+        const kb = new InlineKeyboard()
+          .text(msgs.geo_tz_confirm_btn, `${CB.GEO_TZ_CONFIRM}:${tz}`)
+          .text(msgs.geo_tz_dismiss_btn, CB.GEO_TZ_DISMISS);
+        await ctx.send(msgs.geo_tz_confirm_prompt(user.timezone, tz, offset), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
         });
-        await ctx.send(t(lang).tz_updated_from_location(tz, offset));
       } else {
-        await ctx.send(t(lang).tz_same_from_location(tz, offset));
+        await ctx.send(msgs.tz_same_from_location(tz, offset));
       }
       return;
     }

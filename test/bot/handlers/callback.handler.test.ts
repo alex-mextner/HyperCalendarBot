@@ -335,3 +335,35 @@ describe('parseAiBtnPayload', () => {
     expect(parseAiBtnPayload('yes:please')).toEqual({ answerText: 'yes:please' });
   });
 });
+
+describe('geo timezone confirm/dismiss callbacks', () => {
+  test('GEO_TZ_CONFIRM updates user timezone and edits message', async () => {
+    const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      userRepo: { update, findByTelegramId: mock(() => null) } as never,
+    });
+    const ctx = makeCtx('gtzc:Europe/Moscow');
+    await handler(ctx as never);
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const [id, data] = update.mock.calls[0] as unknown as [number, { timezone: string; country_code?: string }];
+    expect(id).toBe(100);
+    expect(data.timezone).toBe('Europe/Moscow');
+    expect(data.country_code).toBe('RU');
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).toHaveBeenCalledTimes(1);
+    const editedText = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(editedText).toContain('Europe/Moscow');
+  });
+
+  test('GEO_TZ_DISMISS keeps timezone and edits message', async () => {
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
+    const ctx = makeCtx('gtzd');
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).toHaveBeenCalledTimes(1);
+    const editedText = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(editedText).toContain('не изменён');
+  });
+});
