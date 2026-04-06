@@ -111,8 +111,7 @@ export class WeatherService {
         notifyLogger.warn({ status: res.status, coords }, 'OpenWeatherMap current weather request failed');
         return null;
       }
-      const raw: unknown = await res.json();
-      const data = owmCurrentSchema.parse(raw);
+      const data = owmCurrentSchema.parse(await res.json());
       const weather = data.weather[0]!;
       const result: DayWeather = {
         tempMin: Math.round(data.main.temp_min),
@@ -145,8 +144,7 @@ export class WeatherService {
         notifyLogger.warn({ status: res.status, coords }, 'OpenWeatherMap forecast request failed');
         return null;
       }
-      const raw: unknown = await res.json();
-      const data = owmDailyForecastSchema.parse(raw);
+      const data = owmDailyForecastSchema.parse(await res.json());
       const result: WeekWeather = {
         days: data.daily.slice(0, 8).map((d) => {
           const weather = d.weather[0]!;
