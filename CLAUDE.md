@@ -166,7 +166,7 @@ feature tracking map so tip filtering and re-engagement work correctly:
 - `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
 - `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
 - `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)
-- `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip index → `FeatureKey` (54 entries, must stay in sync with `botTips` array in constants.ts)
+- `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip key → `FeatureKey` (54 entries, keys must match `botTips` keys in constants.ts)
 
 If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/repositories/feature-usage.repository.ts`.
 

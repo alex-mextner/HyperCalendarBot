@@ -145,21 +145,25 @@ const WELL_KNOWN_COUNT = 5;
  * - Prioritize tips about features used a lot but stale (> 30 days) for re-engagement
  */
 function filterTipsByUsage(
-  tips: readonly string[],
+  tipKeys: string[],
   featureUsage: FeatureUsageRow[],
-): { normal: number[]; reEngage: number[] } {
+): { normal: string[]; reEngage: string[] } {
   const now = Date.now();
   const usageMap = new Map(featureUsage.map((u) => [u.feature_key, u]));
 
-  const normal: number[] = [];
-  const reEngage: number[] = [];
+  const normal: string[] = [];
+  const reEngage: string[] = [];
 
-  for (let i = 0; i < tips.length && i < BOT_TIP_FEATURE_MAP.length; i++) {
-    const featureKey = BOT_TIP_FEATURE_MAP[i]!;
+  for (const tipKey of tipKeys) {
+    const featureKey = BOT_TIP_FEATURE_MAP[tipKey];
+    if (!featureKey) {
+      normal.push(tipKey);
+      continue;
+    }
     const usage = usageMap.get(featureKey);
     if (!usage) {
       // Never used — discovery tip
-      normal.push(i);
+      normal.push(tipKey);
       continue;
     }
 
@@ -173,9 +177,9 @@ function filterTipsByUsage(
 
     if (daysSinceUse > STALE_USAGE_DAYS && usage.use_count >= WELL_KNOWN_COUNT) {
       // Used a lot before but not recently — re-engagement candidate
-      reEngage.push(i);
+      reEngage.push(tipKey);
     } else {
-      normal.push(i);
+      normal.push(tipKey);
     }
   }
 
@@ -203,20 +207,24 @@ export function pickBotTip(lang: string, ctx?: TipContext): string | null {
 
   // 50% bot tips, 50% book quotes
   if (Math.random() < 0.5) {
+    const tipEntries = Object.entries(l.botTips);
+    const tipKeys = tipEntries.map(([k]) => k);
     // Filter tips by feature usage if available
     if (ctx?.featureUsage && ctx.featureUsage.length > 0) {
-      const { normal, reEngage } = filterTipsByUsage(l.botTips, ctx.featureUsage);
+      const tipMap = new Map(tipEntries);
+      const { normal, reEngage } = filterTipsByUsage(tipKeys, ctx.featureUsage);
       // 40% chance to pick a re-engagement tip if available
       if (reEngage.length > 0 && Math.random() < 0.4) {
-        const idx = reEngage[Math.floor(Math.random() * reEngage.length)]!;
-        return l.botTips[idx]!;
+        const key = reEngage[Math.floor(Math.random() * reEngage.length)]!;
+        return tipMap.get(key)!;
       }
       if (normal.length > 0) {
-        const idx = normal[Math.floor(Math.random() * normal.length)]!;
-        return l.botTips[idx]!;
+        const key = normal[Math.floor(Math.random() * normal.length)]!;
+        return tipMap.get(key)!;
       }
     }
-    return l.botTips[Math.floor(Math.random() * l.botTips.length)]!;
+    const randomEntry = tipEntries[Math.floor(Math.random() * tipEntries.length)]!;
+    return randomEntry[1];
   }
   const allQuotes = [...l.gtdQuotes, ...l.atomicHabitsQuotes, ...l.deepWorkQuotes, ...l.sevenHabitsQuotes];
   return allQuotes[Math.floor(Math.random() * allQuotes.length)]!;
