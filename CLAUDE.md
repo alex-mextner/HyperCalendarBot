@@ -291,10 +291,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. `as never` remains banned everywhere — use `as unknown as X` in test factories
   4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
      (bun:test types `calls` as `unknown[][]` — no way around it)
-- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
-  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
-  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
-  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`JSON.parse` and `Response.json()` must always go through Zod** — never use the raw return
+  value, never cast with `as`. Always `z.schema().parse(JSON.parse(...))` or
+  `z.schema().parse(await res.json())`. No `(await res.json()) as SomeType` — define a Zod schema
+  and `.parse()` it. For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the
+  matching Zod array schema. For complex DB types, validate the structural shape with Zod.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
   No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.

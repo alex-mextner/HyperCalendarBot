@@ -175,10 +175,11 @@ export class IntentLearner {
         throw new Error(`Learner API error: ${response.status}`);
       }
 
-      const data = (await response.json()) as {
-        content: { type: string; text: string }[];
-        stop_reason?: string;
-      };
+      const anthropicResponseSchema = z.object({
+        content: z.array(z.object({ type: z.string(), text: z.string() })),
+        stop_reason: z.string().optional(),
+      });
+      const data = anthropicResponseSchema.parse(await response.json());
 
       if (data.stop_reason === 'max_tokens') {
         cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
