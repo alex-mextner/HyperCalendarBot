@@ -156,6 +156,20 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 
 After every AI interaction (no `ask_user` calls, no contextual pronouns), `IntentLearner.analyze()` calls a secondary Haiku model to generate a candidate intent. Candidates are sent to the admin (`BOT_ADMIN_ID`) as inline-keyboard messages (Accept / Edit / Reject). Approved intents are stored in the `intents` table and matched by `IntentMatcher` in future requests, bypassing the AI entirely.
 
+### Feature Usage Tracking (`src/services/feature-tracking.ts`)
+
+When adding a new command, callback, scene, AI tool, or abstract user action — update the corresponding
+feature tracking map so tip filtering and re-engagement work correctly:
+
+- `COMMAND_FEATURE_MAP` — `/command` → `FeatureKey` (21 entries)
+- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (17 entries)
+- `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
+- `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
+- `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)
+- `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip index → `FeatureKey` (54 entries, must stay in sync with `botTips` array in constants.ts)
+
+If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/repositories/feature-usage.repository.ts`.
+
 ### Workers (`src/worker/`)
 
 For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
