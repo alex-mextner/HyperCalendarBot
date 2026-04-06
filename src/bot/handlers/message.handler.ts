@@ -8,7 +8,7 @@ import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
-import { t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -57,7 +57,7 @@ import type { InvitationService } from '../../services/sharing/invitation-servic
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
-import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -74,7 +74,7 @@ import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { escapeHtml } from '../../utils/telegram.ts';
+import { escapeHtml, formatUtcOffset } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -1053,6 +1053,28 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const voice = ctx.voice;
     if (voice && deps.transcriptionService && deps.botToken) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
+    }
+
+    // Location message in private chat → ask to update timezone from geolocation
+    const location = ctx.location;
+    if (location && ctx.chat.type === 'private') {
+      const { latitude, longitude } = location;
+      const tz = resolveTimezone(latitude, longitude);
+      const offset = formatUtcOffset(tz);
+      const lang = user.language;
+      const msgs = t(lang);
+      if (tz !== user.timezone) {
+        const kb = new InlineKeyboard()
+          .text(msgs.geo_tz_confirm_btn, `${CB.GEO_TZ_CONFIRM}:${tz}`)
+          .text(msgs.geo_tz_dismiss_btn, CB.GEO_TZ_DISMISS);
+        await ctx.send(msgs.geo_tz_confirm_prompt(user.timezone, tz, offset), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+      } else {
+        await ctx.send(msgs.tz_same_from_location(tz, offset));
+      }
+      return;
     }
 
     const text = ctx.text as string | undefined;
