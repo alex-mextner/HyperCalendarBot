@@ -437,6 +437,14 @@ if (config.REDIS_URL) {
     eventRepo: db.events,
   });
 
+  // Weather service — optional, requires OPENWEATHER_API_KEY
+  let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
+  if (config.OPENWEATHER_API_KEY) {
+    const { WeatherService } = await import('./services/weather/weather-service.ts');
+    weatherService = new WeatherService({ apiKey: config.OPENWEATHER_API_KEY });
+    botLogger.info('Weather service initialized');
+  }
+
   const scheduler = new NotificationScheduler({
     prefsRepo: db.notificationPreferences,
     reminderRepo: db.eventReminders,
@@ -454,6 +462,8 @@ if (config.REDIS_URL) {
           callQueue!.enqueue({ ...data, callLogId: log.id });
         }
       : undefined,
+    weatherService,
+    featureUsageRepo: db.featureUsage,
   });
 
   const notifWorker = createNotificationWorker(

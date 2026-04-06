@@ -156,6 +156,20 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 
 After every AI interaction (no `ask_user` calls, no contextual pronouns), `IntentLearner.analyze()` calls a secondary Haiku model to generate a candidate intent. Candidates are sent to the admin (`BOT_ADMIN_ID`) as inline-keyboard messages (Accept / Edit / Reject). Approved intents are stored in the `intents` table and matched by `IntentMatcher` in future requests, bypassing the AI entirely.
 
+### Feature Usage Tracking (`src/services/feature-tracking.ts`)
+
+When adding a new command, callback, scene, AI tool, or abstract user action — update the corresponding
+feature tracking map so tip filtering and re-engagement work correctly:
+
+- `COMMAND_FEATURE_MAP` — `/command` → `FeatureKey` (21 entries)
+- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (17 entries)
+- `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
+- `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
+- `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)
+- `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip key → `FeatureKey` (54 entries, keys must match `botTips` keys in constants.ts)
+
+If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/repositories/feature-usage.repository.ts`.
+
 ### Workers (`src/worker/`)
 
 For periodic/scheduled tasks always use BullMQ repeating jobs — never `setInterval` or `setTimeout`. Repeating jobs survive restarts and are observable in the queue.
@@ -277,10 +291,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. `as never` remains banned everywhere — use `as unknown as X` in test factories
   4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
      (bun:test types `calls` as `unknown[][]` — no way around it)
-- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
-  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
-  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
-  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`JSON.parse` and `Response.json()` must always go through Zod** — never use the raw return
+  value, never cast with `as`. Always `z.schema().parse(JSON.parse(...))` or
+  `z.schema().parse(await res.json())`. No `(await res.json()) as SomeType` — define a Zod schema
+  and `.parse()` it. For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the
+  matching Zod array schema. For complex DB types, validate the structural shape with Zod.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
   No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.

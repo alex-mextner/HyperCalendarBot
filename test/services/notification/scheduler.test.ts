@@ -576,4 +576,65 @@ describe('NotificationScheduler', () => {
     await scheduler.tick(new Date('2026-03-15T21:00:30Z'));
     expect(enqueued.some((e) => e.type === 'evening_review')).toBe(true);
   });
+
+  test('morning agenda includes weather when weatherService is provided', async () => {
+    const weatherDb = setupDb();
+    weatherDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    weatherDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+    weatherDb.run(
+      "INSERT INTO events (id, user_id, title, start_at, timezone) VALUES (1, 42, 'Meeting', '2026-03-15T10:00:00Z', 'UTC')",
+    );
+
+    const logRepo = new NotificationLogRepository(weatherDb);
+    let capturedPayload = '';
+    const weatherScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(weatherDb),
+      reminderRepo: new EventReminderRepository(weatherDb),
+      logRepo,
+      userRepo: new UserRepository(weatherDb),
+      getEventsInRange: makeGetEventsInRange(weatherDb),
+      enqueue: mock((_type: string, _userId: number, _logId: number, payload: string) => {
+        capturedPayload = payload;
+      }),
+      weatherService: {
+        getDayWeather: mock(() =>
+          Promise.resolve({
+            tempMin: 5,
+            tempMax: 15,
+            tempCurrent: 10,
+            conditionCode: 800,
+            description: 'clear sky',
+            windSpeed: 3,
+          }),
+        ),
+        getWeekWeather: mock(() => Promise.resolve(null)),
+      } as never,
+    });
+
+    await weatherScheduler.tick(new Date('2026-03-15T08:00:30Z'));
+    expect(capturedPayload).toContain('clear sky');
+    expect(capturedPayload).toContain('10°C');
+  });
+
+  test('morning agenda works gracefully when weather fetch fails', async () => {
+    const weatherDb = setupDb();
+    weatherDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    weatherDb.run("INSERT INTO notification_preferences (user_id, morning_agenda_time) VALUES (42, '08:00')");
+
+    const weatherScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(weatherDb),
+      reminderRepo: new EventReminderRepository(weatherDb),
+      logRepo: new NotificationLogRepository(weatherDb),
+      userRepo: new UserRepository(weatherDb),
+      getEventsInRange: makeGetEventsInRange(weatherDb),
+      enqueue: mock(() => {}),
+      weatherService: {
+        getDayWeather: mock(() => Promise.reject(new Error('API down'))),
+        getWeekWeather: mock(() => Promise.reject(new Error('API down'))),
+      } as never,
+    });
+
+    // Should not throw, just skip weather
+    await weatherScheduler.tick(new Date('2026-03-15T08:00:30Z'));
+  });
 });

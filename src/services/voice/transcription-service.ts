@@ -1,4 +1,5 @@
 // src/services/voice/transcription-service.ts
+import { z } from 'zod';
 import { voiceLogger } from './types';
 
 const GROQ_WHISPER_URL = 'https://api.groq.com/openai/v1/audio/transcriptions';
@@ -33,7 +34,8 @@ export class TranscriptionService {
       throw new Error(`Whisper transcription failed: HTTP ${response.status}`);
     }
 
-    const result = (await response.json()) as { text?: string };
+    const whisperSchema = z.object({ text: z.string().optional() });
+    const result = whisperSchema.parse(await response.json());
     const text = result.text?.trim() ?? '';
     const elapsed = Date.now() - startMs;
 

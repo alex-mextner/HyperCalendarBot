@@ -368,7 +368,11 @@ const TG_API = 'https://api.telegram.org';
 
 async function downloadTelegramFile(botToken: string, fileId: string): Promise<Buffer> {
   const metaRes = await fetch(`${TG_API}/bot${botToken}/getFile?file_id=${fileId}`);
-  const meta = (await metaRes.json()) as { ok: boolean; result?: { file_path: string } };
+  const tgFileSchema = z.object({
+    ok: z.boolean(),
+    result: z.object({ file_path: z.string() }).optional(),
+  });
+  const meta = tgFileSchema.parse(await metaRes.json());
   if (!meta.ok || !meta.result?.file_path) {
     throw new Error(`Failed to get file path from Telegram: ${JSON.stringify(meta)}`);
   }
@@ -779,7 +783,10 @@ async function handleIntentEditInstruction(
         throw new Error(`AI API error: ${response.status}`);
       }
 
-      const data = (await response.json()) as { content: { type: string; text: string }[] };
+      const anthropicResponseSchema = z.object({
+        content: z.array(z.object({ type: z.string(), text: z.string() })),
+      });
+      const data = anthropicResponseSchema.parse(await response.json());
       rawText = data.content.find((c) => c.type === 'text')?.text;
       if (!rawText) throw new Error('Empty AI response');
 
