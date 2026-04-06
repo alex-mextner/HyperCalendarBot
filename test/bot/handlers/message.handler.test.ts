@@ -703,6 +703,24 @@ describe('createMessageHandler', () => {
       const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
       expect(msg).toContain('Update timezone?');
     });
+
+    test('ignores location messages in group chats', async () => {
+      const deps = makeDeps();
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC', onboarding_completed: 1 },
+        chat: { type: 'supergroup' },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).not.toHaveBeenCalled();
+      expect(deps.agent.run).not.toHaveBeenCalled();
+    });
   });
 });
 

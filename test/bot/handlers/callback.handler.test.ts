@@ -366,4 +366,28 @@ describe('geo timezone confirm/dismiss callbacks', () => {
     const editedText = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
     expect(editedText).toContain('не изменён');
   });
+
+  test('GEO_TZ_CONFIRM shows error when userRepo is absent', async () => {
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
+    const ctx = makeCtx('gtzc:Europe/Moscow');
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    const answerArg = ctx.answer.mock.calls[0] as unknown[];
+    expect(answerArg[0]).toEqual({ text: 'Ошибка' });
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('GEO_TZ_CONFIRM rejects invalid timezone payload', async () => {
+    const update = mock(() => null);
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      userRepo: { update, findByTelegramId: mock(() => null) } as never,
+    });
+    const ctx = makeCtx('gtzc:Invalid/Timezone_Zone');
+    await handler(ctx as never);
+
+    expect(update).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
 });

@@ -74,7 +74,7 @@ import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { escapeHtml } from '../../utils/telegram.ts';
+import { escapeHtml, formatUtcOffset } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -1055,13 +1055,12 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
-    // Location message → ask to update timezone from geolocation
+    // Location message in private chat → ask to update timezone from geolocation
     const location = ctx.location;
-    if (location) {
+    if (location && ctx.chat.type === 'private') {
       const { latitude, longitude } = location;
       const tz = resolveTimezone(latitude, longitude);
-      const display = getTimezoneDisplay(tz);
-      const offset = display.match(/\((.+)\)/)?.[1] ?? '';
+      const offset = formatUtcOffset(tz);
       const lang = user.language;
       const msgs = t(lang);
       if (tz !== user.timezone) {

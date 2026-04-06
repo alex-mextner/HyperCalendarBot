@@ -34,7 +34,7 @@ import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
-import { getTimezoneDisplay, guessCountryFromTimezone } from '../../services/timezone/timezone-service.ts';
+import { guessCountryFromTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
@@ -49,7 +49,7 @@ import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
-import type { ParseMode } from '../../utils/telegram.ts';
+import { formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -1134,15 +1134,24 @@ export function createCallbackHandler(
   dispatch.set(CB.GEO_TZ_CONFIRM, async (ctx, payload, _parts, user) => {
     const tz = payload; // IANA timezone string, e.g. "Europe/Moscow"
     const lang = (user.language ?? 'en') as Lang;
-    if (userRepo) {
-      const countryCode = guessCountryFromTimezone(tz);
-      userRepo.update(user.telegram_id, {
-        timezone: tz,
-        ...(countryCode ? { country_code: countryCode } : {}),
-      });
+    // Validate that the timezone is a real IANA zone
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: tz });
+    } catch {
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
     }
-    const display = getTimezoneDisplay(tz);
-    const offset = display.match(/\((.+)\)/)?.[1] ?? '';
+    if (!userRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'GEO_TZ_CONFIRM: userRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    const countryCode = guessCountryFromTimezone(tz);
+    userRepo.update(user.telegram_id, {
+      timezone: tz,
+      ...(countryCode ? { country_code: countryCode } : {}),
+    });
+    const offset = formatUtcOffset(tz);
     await ctx.answer();
     await ctx.editText(t(lang).geo_tz_updated(tz, offset), { reply_markup: undefined });
   });
