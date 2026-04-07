@@ -191,6 +191,7 @@ export interface MessageHandlerDeps {
   // Onboarding scene for mandatory timezone/language setup
   onboardingScene?: AnyScene;
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  addressCache?: import('../../services/location/address-cache.ts').AddressCache;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -661,6 +662,8 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               triggerService: deps.triggerService,
             }
           : undefined,
+      locationVerification: deps.locationVerification,
+      addressCache: deps.addressCache,
     };
   };
 }

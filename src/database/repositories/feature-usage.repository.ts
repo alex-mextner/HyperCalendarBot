@@ -21,6 +21,7 @@ export const FEATURE_KEYS = {
   HISTORY: 'history',
   SETTINGS: 'settings',
   RECURRENCE: 'recurrence',
+  GEOLOCATION: 'geolocation',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

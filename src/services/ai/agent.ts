@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
+import { buildAddressContext } from '../location/address-context.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { createAnthropicClient } from './anthropic-client.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
@@ -186,6 +187,15 @@ export class CalendarBotAgent {
       },
       'Agent run started',
     );
+
+    // Preload address context (async) before building messages (sync)
+    if (ctx.addressCache && !ctx.preloadedAddressContext) {
+      try {
+        ctx.preloadedAddressContext = await buildAddressContext(ctx.addressCache, ctx.user.telegram_id);
+      } catch (err) {
+        aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to preload address context');
+      }
+    }
 
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),

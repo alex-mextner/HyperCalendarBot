@@ -1240,6 +1240,37 @@ export function createCallbackHandler(
       const { pendingGeoLocations } = await import('./message.handler.ts');
       pendingGeoLocations.delete(user.telegram_id);
       await ctx.editText(msgs.aiTools.location.geoExplain, { reply_markup: undefined });
+    } else {
+      // Numeric eventId — user picked a location candidate from askUserToChoose
+      // Format: loc_pick:{eventId}:{index}
+      const eventId = Number.parseInt(parts[1] ?? '', 10);
+      const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
+      if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
+
+      const candidates = await locationVerification.getStoredCandidates(eventId);
+      if (!candidates) {
+        cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+        return;
+      }
+
+      const success = await locationVerification.handleLocationChoice(
+        eventId,
+        user.telegram_id,
+        choiceIndex,
+        candidates,
+      );
+
+      if (success) {
+        const event = eventRepo?.findByIdUnfiltered(eventId);
+        const address = event?.resolved_address ?? '';
+        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+          parse_mode: 'HTML',
+          reply_markup: undefined,
+        });
+      } else {
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      }
     }
   });
 

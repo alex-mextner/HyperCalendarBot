@@ -71,6 +71,15 @@ if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
 }
 
+// Mutable send function for location verification — patched after bot creation to support reply_markup
+let locationSendMessage: (
+  userId: number,
+  text: string,
+  options?: { parse_mode?: string; reply_markup?: unknown },
+) => Promise<void> = async (userId, text, options) => {
+  await botRef.sendMessage(userId, text, options?.parse_mode);
+};
+
 // Mutable ref — patched after bot creation
 const botRef: {
   sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
@@ -702,6 +711,57 @@ if (config.REDIS_URL) {
 
 const domainEventBus = new DomainEventBus();
 
+// Location verification — requires GOOGLE_MAPS_API_KEY + Redis for address cache
+let locationVerification:
+  | import('./services/location/location-verification-service.ts').LocationVerificationService
+  | undefined;
+let addressCache: import('./services/location/address-cache.ts').AddressCache | undefined;
+
+if (config.GOOGLE_MAPS_API_KEY && config.REDIS_URL) {
+  const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
+  const { AddressCache } = await import('./services/location/address-cache.ts');
+  const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
+  const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
+
+  const locationRedis = new Bun.RedisClient(config.REDIS_URL);
+  const geocodingService = createGeocodingService(config.GOOGLE_MAPS_API_KEY);
+  addressCache = new AddressCache({
+    get: (key: string) => locationRedis.get(key),
+    set: (key: string, value: string) => locationRedis.set(key, value),
+  });
+  const candidateStore = new RedisLocationCandidateStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
+  });
+
+  // sendMessage / editMessage closures resolve botRef at call time (patched after createBot)
+  locationVerification = new LocationVerificationService({
+    geocodingService,
+    addressCache,
+    eventRepo: db.events,
+    userRepo: db.users,
+    invitationRepo: db.invitations,
+    db: db.db,
+    candidateStore,
+    sendMessage: async (userId, text) => {
+      await botRef.sendMessage(userId, text).catch((err: unknown) => {
+        botLogger.error({ err, userId }, 'Location verification: failed to send message');
+      });
+    },
+    editMessage: async (chatId, messageId, text, parseMode) => {
+      await botRef.editMessage(chatId, messageId, text, parseMode).catch((err: unknown) => {
+        botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
+      });
+    },
+  });
+
+  botLogger.info('Location verification initialized (Google Maps + Redis)');
+} else if (config.GOOGLE_MAPS_API_KEY) {
+  botLogger.info('Location verification disabled: REDIS_URL not set (address cache requires Redis)');
+}
+
 const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
   createBot(
     config.BOT_TOKEN,
@@ -733,6 +793,8 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       eventMentionStore,
       domainEventBus,
       nliClassifier,
+      locationVerification,
+      addressCache,
       envConfig: {
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
@@ -764,6 +826,16 @@ botRef.editMessage = async (chatId, messageId, text, parseMode) => {
 botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
+};
+
+// Patch location send to use full bot API (supports reply_markup for candidate selection)
+locationSendMessage = async (userId, text, options) => {
+  await bot.api.sendMessage({
+    chat_id: userId,
+    text,
+    ...(options?.parse_mode ? { parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
+  } as Parameters<typeof bot.api.sendMessage>[0]);
 };
 
 // Scheduled AI calls + trigger system — requires Redis for BullMQ

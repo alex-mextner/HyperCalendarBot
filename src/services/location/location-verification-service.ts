@@ -7,6 +7,7 @@ import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
+import type { LocationCandidateStore } from './location-candidate-store.ts';
 
 const logger = botLogger.child({ module: 'location-verification' });
 
@@ -17,6 +18,8 @@ export interface LocationVerificationDeps {
   userRepo: UserRepository;
   invitationRepo: InvitationRepository;
   db: Database;
+  /** Temporary store for location candidates (Redis-backed with TTL) */
+  candidateStore: LocationCandidateStore;
   /** Callback to send a message to a user (for confirmation/clarification) */
   sendMessage: (
     userId: number,
@@ -160,7 +163,18 @@ export class LocationVerificationService {
 
     await this.applyResolvedLocation(event, chosen);
     await this.cacheAndUpdateCity(user, event.location ?? '', chosen);
+
+    // Clean up stored candidates after successful choice
+    await this.deps.candidateStore.del(eventId).catch((err) => {
+      logger.warn({ err, eventId }, 'Failed to delete location candidates from store');
+    });
+
     return true;
+  }
+
+  /** Retrieve stored candidates for a given event (from Redis) */
+  async getStoredCandidates(eventId: number): Promise<GeocodedLocation[] | null> {
+    return this.deps.candidateStore.get(eventId);
   }
 
   /** Resolve location from coordinates (when user sends 📍 for an event) */
@@ -203,12 +217,16 @@ export class LocationVerificationService {
     const header =
       lang === 'ru' ? `📍 Уточни адрес для «${event.title}»:` : `📍 Clarify the address for "${event.title}":`;
 
-    const options = candidates.slice(0, 5).map((c, i) => `${i + 1}. ${c.formattedAddress}`);
+    const limited = candidates.slice(0, 5);
+    const options = limited.map((c, i) => `${i + 1}. ${c.formattedAddress}`);
     const text = `${header}\n\n${options.join('\n')}`;
 
-    // Store candidates in a temporary way for callback handling
-    // We encode eventId and candidates in the callback_data
-    const buttons = candidates.slice(0, 5).map((_c, i) => ({
+    // Persist candidates in Redis so the callback handler can retrieve them
+    await this.deps.candidateStore.set(event.id, limited).catch((err) => {
+      logger.error({ err, eventId: event.id }, 'Failed to store location candidates');
+    });
+
+    const buttons = limited.map((_c, i) => ({
       text: `${i + 1}`,
       callback_data: `loc_pick:${event.id}:${i}`,
     }));

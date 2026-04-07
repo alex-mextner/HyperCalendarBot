@@ -59,7 +59,7 @@ const SCENE_FEATURE_MAP: { [scene: string]: FeatureKey } = {
 const ACTION_FEATURE_MAP: { [action: string]: FeatureKey } = {
   voice_message: 'events_create', // voice messages are usually to create/query events
   ics_file: 'import', // sending .ics files
-  geolocation: 'settings', // sharing location for timezone
+  geolocation: 'geolocation', // sharing location pin
 };
 
 /**
