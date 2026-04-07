@@ -132,15 +132,16 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
     lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
   }
 
+  const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${lang === 'ru' ? 'Весь день' : 'All day'}`);
+    lines.push(`📅 ${dateStr}, ${lang === 'ru' ? 'весь день' : 'all day'}`);
   } else {
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
       const duration = formatDuration(event.start_at, event.end_at, lang);
-      lines.push(`🕐 ${time} (${duration})`);
+      lines.push(`🕐 ${dateStr}, ${time} (${duration})`);
     } else {
-      lines.push(`🕐 ${time}`);
+      lines.push(`🕐 ${dateStr}, ${time}`);
     }
   }
 

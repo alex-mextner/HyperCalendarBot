@@ -137,6 +137,7 @@ export interface CreateBotOpts {
     | 'INLINE_BOT_TOKEN'
     | 'AI_FAST_MODEL'
   >;
+  weatherService?: import('../services/weather/weather-service.ts').WeatherService;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -155,6 +156,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     domainEventBus,
     pushAiMessage,
     envConfig,
+    weatherService,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -785,6 +787,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           sceneStorage: kvStorage,
           scenePauseService,
         },
+        weatherService,
       })(ctx as unknown as BotCallbackContext);
     })
     // Chat member updates (bot added/removed from groups)

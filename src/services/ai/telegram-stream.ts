@@ -88,6 +88,14 @@ export class TelegramStreamWriter {
     this.messageId = result.message_id;
   }
 
+  /** Clear accumulated text for retry after validation rejection */
+  reset(): void {
+    this.text = '';
+    this.plainResponseText = '';
+    this.intermediateChunks = [];
+    this.lastFlushedLength = 0;
+  }
+
   appendText(chunk: string): void {
     this.text += chunk;
   }

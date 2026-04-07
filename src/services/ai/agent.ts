@@ -8,6 +8,7 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import { createAnthropicClient } from './anthropic-client.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
+import { validateResponse } from './response-validator.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -85,12 +86,14 @@ export class CalendarBotAgent {
   private fallbackClient: Anthropic | null;
   private model: string;
   private fallbackModel: string | null;
+  private validationModel: string | null;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
 
   constructor(config: AgentConfig, sender: TelegramSender) {
     this.client = createAnthropicClient({ apiKey: config.apiKey, baseURL: config.baseUrl });
     this.model = config.model;
+    this.validationModel = config.validationModel ?? null;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.fallbackClient = config.fallback
@@ -486,6 +489,54 @@ export class CalendarBotAgent {
       writer.appendText(errorMsg);
     }
 
+    // Response validation: when no tools were called, verify the response isn't hallucinated
+    if (this.validationModel && allToolCalls.length === 0 && !ctx.supplementMode) {
+      const responseText = writer.getText().trim();
+      if (responseText && !isSkipText(responseText)) {
+        const validation = await validateResponse(this.client, this.validationModel, {
+          userMessage: ctx.messageText,
+          toolCalls: allToolCalls.map((tc) => tc.name),
+          response: responseText,
+        });
+
+        if (!validation.approved) {
+          aiLogger.info(
+            { userId: ctx.user.telegram_id, reason: validation.reason },
+            'Response validation REJECTED — retrying with tools',
+          );
+
+          writer.reset();
+          allToolCalls.length = 0;
+          allToolResults.length = 0;
+
+          const retryMessages: MessageParam[] = [
+            ...messages,
+            { role: 'assistant', content: responseText },
+            {
+              role: 'user',
+              content: `[SYSTEM] Your previous response was rejected by the quality validator. Reason: ${validation.reason}. You MUST call the appropriate tools and re-answer the question properly. Do NOT repeat the same mistake.`,
+            },
+          ];
+
+          try {
+            const retryResult = await this.runRetryLoop(
+              ctx,
+              retryMessages,
+              systemPrompt,
+              writer,
+              dbg,
+              caps,
+              allToolCalls,
+              allToolResults,
+            );
+            if (retryResult) return retryResult;
+          } catch (retryErr) {
+            aiLogger.error({ err: retryErr, userId: ctx.user.telegram_id }, 'Retry after validation failed');
+          }
+        }
+      }
+    }
+
     const finalText = writer.getText().trim();
     dbg?.logFinal(finalText, allToolCalls.length);
     dbg?.flush();
@@ -522,5 +573,85 @@ export class CalendarBotAgent {
       toolResults: allToolResults,
       endCall: ctx.callEndRequested === true,
     };
+  }
+
+  /**
+   * Single retry round after validation rejection.
+   * Runs one full agent loop iteration with the rejection feedback in context.
+   */
+  private async runRetryLoop(
+    ctx: AgentContext,
+    retryMessages: MessageParam[],
+    systemPrompt: string,
+    writer: TelegramStreamWriter,
+    dbg: AiDebugRunContext | null,
+    caps: UserCapabilities,
+    allToolCalls: AgentToolCallRecord[],
+    allToolResults: AgentToolResultRecord[],
+  ): Promise<AgentRunResult | null> {
+    dbg?.logRound(-1); // special "retry" round marker
+
+    const stream = this.client.messages.stream({
+      model: this.model,
+      max_tokens: 4096,
+      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+      messages: retryMessages,
+      tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+    });
+
+    stream.on('abort', (err) => aiLogger.warn({ err }, 'Retry stream aborted'));
+    stream.on('error', (err) => aiLogger.warn({ err }, 'Retry stream error'));
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+        writer.appendText(event.delta.text);
+        await writer.flush(false);
+      }
+      if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
+        writer.setToolLabel(event.content_block.name);
+        await writer.flush(true);
+      }
+    }
+
+    const finalMessage = await stream.finalMessage();
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+    for (const block of finalMessage.content) {
+      if (block.type === 'tool_use') {
+        writer.setToolLabel(block.name, block.input as { [key: string]: unknown });
+        await writer.flush(true);
+
+        const result = await executeTool(ctx, block.name, block.input);
+        writer.markToolResult(result.success);
+
+        allToolCalls.push({ name: block.name, input: block.input as { [key: string]: unknown } });
+        allToolResults.push({ success: result.success, output: result.output });
+
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: result.success
+            ? `${result.output ?? 'OK'}${result.agentHint ? `\n[AGENT: ${result.agentHint}]` : ''}`
+            : `Error: ${result.error ?? result.output ?? 'Unknown error'}`,
+          is_error: !result.success,
+        });
+
+        if (result.stopLoop) {
+          writer.clearToolLabel();
+          writer.commitIntermediate();
+          await writer.finalize();
+          return {
+            responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
+            toolCalls: allToolCalls,
+            toolResults: allToolResults,
+            endCall: ctx.callEndRequested === true,
+          };
+        }
+      }
+    }
+
+    writer.clearToolLabel();
+    // Return null to let the normal finalization path handle it
+    return null;
   }
 }

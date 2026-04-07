@@ -503,7 +503,11 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   );
 
   if (events.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsMatching, data };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.noEventsMatchingScope(scope),
+      data,
+    };
   }
 
   const lines = events.map((e) => {
@@ -513,7 +517,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     return parts.join(', ');
   });
 
-  return { success: true, output: lines.join('\n'), data };
+  return { success: true, output: `[scope: ${scope}]\n${lines.join('\n')}`, data };
 }
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
