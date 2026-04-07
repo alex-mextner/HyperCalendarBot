@@ -91,10 +91,7 @@ function withSecurityHeaders(res: Response): Response {
 async function handleRequest(
   req: Request,
   url: URL,
-  server: {
-    upgrade(req: Request, opts: { data: object }): boolean;
-    requestIP(req: Request): { address: string } | null;
-  },
+  server: Bun.Server<object>,
   deps: WebServerDeps,
   agentWs: ReturnType<typeof createAgentWsHandler> | undefined,
   oauthRateLimiter: IpRateLimiter,
@@ -237,38 +234,46 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
       ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher)
       : undefined;
 
-  const serveOptions = {
-    port,
-    ...(agentWs ? { websocket: { ...agentWs, idleTimeout: 120 } } : {}),
-    async fetch(
-      req: Request,
-      server: {
-        upgrade(req: Request, opts: { data: object }): boolean;
-        requestIP(req: Request): { address: string } | null;
-      },
-    ) {
-      try {
-        const url = new URL(req.url);
-        const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
-        if (!res) return res;
-        return withSecurityHeaders(res);
-      } catch (err) {
-        // Bun does not catch rejected fetch handler promises — they become unhandled rejections
-        // and crash the process. AbortError means the client disconnected; anything else is a bug.
-        const isAbort = err instanceof Error && err.name === 'AbortError';
-        if (!isAbort) {
-          webLogger.error({ err }, 'Unexpected error in fetch handler');
-        }
-        return new Response(isAbort ? 'Client disconnected' : 'Internal Server Error', {
-          status: isAbort ? 499 : 500,
-        });
+  async function fetchWithWs(
+    this: Bun.Server<object>,
+    req: Request,
+    server: Bun.Server<object>,
+  ): Promise<Response | undefined> {
+    try {
+      const url = new URL(req.url);
+      const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
+      if (!res) return undefined;
+      return withSecurityHeaders(res);
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      if (!isAbort) {
+        webLogger.error({ err }, 'Unexpected error in fetch handler');
       }
-    },
-  };
+      return new Response(isAbort ? 'Client disconnected' : 'Internal Server Error', {
+        status: isAbort ? 499 : 500,
+      });
+    }
+  }
 
-  // Bun.serve requires a discriminated union: either websocket is present or absent.
-  // We conditionally include it via spread, so cast at the framework boundary.
-  const server = Bun.serve(serveOptions as unknown as Parameters<typeof Bun.serve>[0]);
+  async function fetchPlain(this: Bun.Server<object>, req: Request, server: Bun.Server<object>) {
+    try {
+      const url = new URL(req.url);
+      const res = await handleRequest(req, url, server, deps, agentWs, oauthRateLimiter);
+      return res ? withSecurityHeaders(res) : new Response(null, { status: 204 });
+    } catch (err) {
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      if (!isAbort) {
+        webLogger.error({ err }, 'Unexpected error in fetch handler');
+      }
+      return new Response(isAbort ? 'Client disconnected' : 'Internal Server Error', {
+        status: isAbort ? 499 : 500,
+      });
+    }
+  }
+
+  const server = agentWs
+    ? Bun.serve({ port, fetch: fetchWithWs, websocket: { ...agentWs, idleTimeout: 120 } })
+    : Bun.serve({ port, fetch: fetchPlain });
   const cleanupTimer = setInterval(() => oauthRateLimiter.cleanup(), OAUTH_RATE_LIMIT.windowMs);
 
   webLogger.info({ port }, 'Web server started');
