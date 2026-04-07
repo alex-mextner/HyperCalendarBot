@@ -3,14 +3,7 @@ hypercal.invntrm.ru {
 	# Caddy holds the connection and retries every 500ms for up to 10s.
 	@bot path /webhook/* /oauth/* /webhooks/* /ws/* /health /admin/*
 	handle @bot {
-		# Both ports always present: lb_policy first prefers 3001.
-		# When 3001 is down, Caddy auto-routes to 3002 (green container during deploy).
-		# No sed/caddy-reload needed in deploy scripts.
-		reverse_proxy localhost:3001 localhost:3002 {
-			lb_policy       first
-			health_uri      /health
-			health_interval 2s
-			health_timeout  3s
+		reverse_proxy localhost:3001 {
 			lb_try_duration 10s
 			lb_try_interval 500ms
 		}
