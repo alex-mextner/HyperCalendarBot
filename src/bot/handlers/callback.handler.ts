@@ -1140,10 +1140,13 @@ export function createCallbackHandler(
         await ctx.answer(t(lang).callbackErrors.unavailable);
         return;
       }
-      const settingsMsgId = ctx.message?.id ?? 0;
-      const settingsChatId = ctx.chatId ?? 0;
+      if (!ctx.message || !ctx.chatId) {
+        cmdLogger.warn({ userId: user.telegram_id }, 'settings change_tz: missing message or chatId');
+        await ctx.answer();
+        return;
+      }
       await ctx.answer();
-      await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
+      await ctx.scene.enter(timezoneScene, { settingsMsgId: ctx.message.id, settingsChatId: ctx.chatId });
       return;
     }
     return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);

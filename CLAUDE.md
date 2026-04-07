@@ -181,8 +181,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
   Don't refactor surroundings "while you're at it".
 - **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
-- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
-  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `object` type** — neither as a standalone type nor as a generic parameter (e.g. `Bun.Server<object>`).
+  Use a specific interface, `{ [key: string]: unknown }`, or the correct generic argument.
+  `object` accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
 - **No `Record<string, unknown>`** — this utility type alias is entirely banned:
   - Known shape at compile time → specific interface or Zod-inferred type
   - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
