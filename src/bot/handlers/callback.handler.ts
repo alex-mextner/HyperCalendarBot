@@ -847,7 +847,7 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
 
     // In groups, only the user who triggered the question can answer
-    const clickerId = ctx.from?.id ?? user.telegram_id;
+    const clickerId = ctx.from.id;
     if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
       await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
       return;
@@ -1188,7 +1188,7 @@ export function createCallbackHandler(
   // Group settings: timezone picker
   dispatch.set(CB.GROUP_SETTINGS_TZ, async (ctx, payload, _parts, user) => {
     if (!groupRepo) return;
-    const chatId = ctx.chatId ? Number(ctx.chatId) : null;
+    const chatId = ctx.chatId ?? null;
     if (!chatId) {
       await ctx.answer();
       return;
