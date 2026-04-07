@@ -246,25 +246,29 @@ if (config.REDIS_URL) {
   const { RenderService } = await import('./services/image/render-service.ts');
   const { playwrightPool } = await import('./worker/playwright-pool.ts');
 
-  await playwrightPool.initialize();
+  try {
+    await playwrightPool.initialize();
 
-  const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
-  worker.on('failed', onWorkerFailed('image-render'));
-  renderService = new RenderService(
-    imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
-    queueEvents,
-  );
+    const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
+    worker.on('failed', onWorkerFailed('image-render'));
+    renderService = new RenderService(
+      imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
+      queueEvents,
+    );
 
-  imageQueueCleanup = {
-    close: async () => {
-      await worker.close();
-      await imageQueue.close();
-      await queueEvents.close();
-      await playwrightPool.shutdown();
-    },
-  };
+    imageQueueCleanup = {
+      close: async () => {
+        await worker.close();
+        await imageQueue.close();
+        await queueEvents.close();
+        await playwrightPool.shutdown();
+      },
+    };
 
-  botLogger.info('Image render queue initialized');
+    botLogger.info('Image render queue initialized');
+  } catch (err) {
+    botLogger.error({ err }, 'Playwright initialization failed — image rendering disabled');
+  }
 }
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
