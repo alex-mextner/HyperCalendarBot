@@ -1,27 +1,6 @@
 ARG BUN_VERSION=1.3.11
 
-# Stage 1: install all deps (dev + prod) — needed for playwright install-deps
-FROM debian:bookworm-slim AS deps
-WORKDIR /app
-ARG BUN_VERSION
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-      curl unzip ca-certificates python3 python3-venv && \
-    curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
-    rm -rf /var/lib/apt/lists/*
-
-# Python venv — pyrogram-only deps for birthday/username/message scripts.
-# Heavy deps (torch, ntgcalls, silero) run on host, not in container.
-COPY requirements.docker.txt ./
-RUN python3 -m venv venv && \
-    venv/bin/pip install --no-cache-dir -r requirements.docker.txt
-
-# bun install respects lockfile version pins; --frozen-lockfile is validated
-# in CI (same platform). Docker adjusts only platform-specific optional deps.
-COPY package.json bun.lock ./
-RUN bun install --ignore-scripts
-
-# Stage 2: production deps only (no devDependencies)
+# Stage 1: production deps only (no devDependencies)
 FROM debian:bookworm-slim AS prod-deps
 WORKDIR /app
 ARG BUN_VERSION
@@ -35,7 +14,7 @@ COPY package.json ./
 # so it always fails with an existing full lockfile. Generate fresh on linux.
 RUN bun install --production --ignore-scripts
 
-# Stage 3: final image
+# Stage 2: final image
 FROM debian:bookworm-slim AS runner
 WORKDIR /app
 ARG BUN_VERSION
@@ -53,14 +32,13 @@ COPY requirements.docker.txt ./
 RUN python3 -m venv venv && \
     uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python
 
-# Chromium browser binary lives inside the image — no host volume mount needed.
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-COPY --from=deps /app/node_modules ./node_modules
-RUN ./node_modules/.bin/playwright install --with-deps chromium
-
-# Replace with production node_modules (no devDependencies)
-RUN rm -rf ./node_modules
+# Production node_modules (no devDependencies)
 COPY --from=prod-deps /app/node_modules ./node_modules
+
+# Chromium browser binary — install using the PRODUCTION playwright version
+# to ensure browser revision matches the runtime package.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN ./node_modules/.bin/playwright install --with-deps chromium
 
 COPY src ./src
 COPY scripts ./scripts
