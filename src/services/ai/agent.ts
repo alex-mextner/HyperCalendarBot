@@ -478,47 +478,35 @@ export class CalendarBotAgent {
           { role: 'user' as const, content: toolResults },
         ];
       }
-    } catch (error) {
-      aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
+      // Response validation: when no tools were called, verify the response isn't hallucinated
+      if (this.validationModel && allToolCalls.length === 0 && !ctx.supplementMode) {
+        const responseText = writer.getText().trim();
+        if (responseText && !isSkipText(responseText)) {
+          const validation = await validateResponse(this.client, this.validationModel, {
+            userMessage: ctx.messageText,
+            toolCalls: allToolCalls.map((tc) => tc.name),
+            response: responseText,
+          });
 
-      const lang = ctx.user.language;
-      const errorMsg =
-        lang === 'ru'
-          ? '\n\n⚠️ Произошла ошибка при обработке запроса.'
-          : '\n\n⚠️ An error occurred while processing your request.';
-      writer.appendText(errorMsg);
-    }
+          if (!validation.approved) {
+            aiLogger.info(
+              { userId: ctx.user.telegram_id, reason: validation.reason },
+              'Response validation REJECTED — retrying with tools',
+            );
 
-    // Response validation: when no tools were called, verify the response isn't hallucinated
-    if (this.validationModel && allToolCalls.length === 0 && !ctx.supplementMode) {
-      const responseText = writer.getText().trim();
-      if (responseText && !isSkipText(responseText)) {
-        const validation = await validateResponse(this.client, this.validationModel, {
-          userMessage: ctx.messageText,
-          toolCalls: allToolCalls.map((tc) => tc.name),
-          response: responseText,
-        });
+            writer.reset();
+            allToolCalls.length = 0;
+            allToolResults.length = 0;
 
-        if (!validation.approved) {
-          aiLogger.info(
-            { userId: ctx.user.telegram_id, reason: validation.reason },
-            'Response validation REJECTED — retrying with tools',
-          );
+            const retryMessages: MessageParam[] = [
+              ...messages,
+              { role: 'assistant', content: responseText },
+              {
+                role: 'user',
+                content: `[SYSTEM] Your previous response was rejected by the quality validator. Reason: ${validation.reason}. You MUST call the appropriate tools and re-answer the question properly. Do NOT repeat the same mistake.`,
+              },
+            ];
 
-          writer.reset();
-          allToolCalls.length = 0;
-          allToolResults.length = 0;
-
-          const retryMessages: MessageParam[] = [
-            ...messages,
-            { role: 'assistant', content: responseText },
-            {
-              role: 'user',
-              content: `[SYSTEM] Your previous response was rejected by the quality validator. Reason: ${validation.reason}. You MUST call the appropriate tools and re-answer the question properly. Do NOT repeat the same mistake.`,
-            },
-          ];
-
-          try {
             const retryResult = await this.runRetryLoop(
               ctx,
               retryMessages,
@@ -530,11 +518,18 @@ export class CalendarBotAgent {
               allToolResults,
             );
             if (retryResult) return retryResult;
-          } catch (retryErr) {
-            aiLogger.error({ err: retryErr, userId: ctx.user.telegram_id }, 'Retry after validation failed');
           }
         }
       }
+    } catch (error) {
+      aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
+
+      const lang = ctx.user.language;
+      const errorMsg =
+        lang === 'ru'
+          ? '\n\n⚠️ Произошла ошибка при обработке запроса.'
+          : '\n\n⚠️ An error occurred while processing your request.';
+      writer.appendText(errorMsg);
     }
 
     const finalText = writer.getText().trim();
@@ -651,6 +646,45 @@ export class CalendarBotAgent {
     }
 
     writer.clearToolLabel();
+
+    // If tools were called, feed results back to the model for a text response
+    if (toolResults.length > 0) {
+      const contentBlocks: Anthropic.ContentBlockParam[] = [];
+      for (const block of finalMessage.content) {
+        if (block.type === 'text') {
+          contentBlocks.push({ type: 'text', text: block.text });
+        } else if (block.type === 'tool_use') {
+          contentBlocks.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
+        }
+      }
+
+      writer.commitIntermediate();
+
+      const followUpMessages: MessageParam[] = [
+        ...retryMessages,
+        { role: 'assistant' as const, content: contentBlocks },
+        { role: 'user' as const, content: toolResults },
+      ];
+
+      const followUp = this.client.messages.stream({
+        model: this.model,
+        max_tokens: 4096,
+        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+        messages: followUpMessages,
+        tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+      });
+
+      followUp.on('abort', (err) => aiLogger.warn({ err }, 'Retry follow-up stream aborted'));
+      followUp.on('error', (err) => aiLogger.warn({ err }, 'Retry follow-up stream error'));
+
+      for await (const event of followUp) {
+        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
+          writer.appendText(event.delta.text);
+          await writer.flush(false);
+        }
+      }
+    }
+
     // Return null to let the normal finalization path handle it
     return null;
   }

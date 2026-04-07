@@ -517,7 +517,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     return parts.join(', ');
   });
 
-  return { success: true, output: `[scope: ${scope}]\n${lines.join('\n')}`, data };
+  return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };
 }
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
