@@ -190,10 +190,16 @@ Optional features that depend on an env var must deactivate gracefully when the 
   - Opaque external data → `unknown`
 - **No `as SomeType` casts** — fix the types, don't paper over them. If a library produces a poor type,
   fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
-  The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
-  where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
+  Acceptable casts (only these two patterns):
+  1. `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site where the runtime accepts
+     objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
+  2. `as unknown as DerivedContext` in `src/bot/index.ts` GramIO event wiring — GramIO's `.on()`
+     provides a base context that doesn't include `.derive()` extensions; casting to the derived
+     type (e.g. `BotCallbackContext`) is unavoidable at the wiring boundary.
 - **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
-  There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+  Not acceptable in feature code. If you think you need it, the types are wrong — fix them.
+  The only exceptions are the GramIO wiring casts in `src/bot/index.ts` (see above) and
+  `Bun.serve()` call in `src/web/server.ts` (Bun types lag behind runtime capabilities).
 - **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
   It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
 - **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test

@@ -18,11 +18,12 @@ interface MockCallbackCtxOverrides {
 function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
   return {
     data,
+    chatId: 100,
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
-    message: { chat: { id: 100 }, send: mock(() => Promise.resolve()) },
-    chat: { id: 100 },
+    message: { id: 1, text: '', chat: { id: 100, type: 'private' }, send: mock(() => Promise.resolve()) },
+    from: { id: 100 },
     ...overrides,
   };
 }

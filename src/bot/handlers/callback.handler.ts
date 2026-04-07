@@ -61,7 +61,6 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import type { CtxWithChat } from '../group-context.ts';
 import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
@@ -471,7 +470,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -547,7 +546,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -848,7 +847,7 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
 
     // In groups, only the user who triggered the question can answer
-    const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+    const clickerId = ctx.from?.id ?? user.telegram_id;
     if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
       await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
       return;
@@ -856,9 +855,7 @@ export function createCallbackHandler(
 
     await ctx.answer();
     await ctx.editText(`✅ ${answerText}`);
-    const cbChatId =
-      (ctx as unknown as { chat?: { id: number } }).chat?.id ??
-      (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
+    const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
       onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
         cmdLogger.error({ err: e }, 'AI button continuation failed');
@@ -1143,8 +1140,8 @@ export function createCallbackHandler(
         await ctx.answer(t(lang).callbackErrors.unavailable);
         return;
       }
-      const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
-      const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
+      const settingsMsgId = ctx.message?.id ?? 0;
+      const settingsChatId = ctx.chatId ?? 0;
       await ctx.answer();
       await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
       return;
@@ -1337,7 +1334,7 @@ export function createCallbackHandler(
     intentDeps.intentRepo.updateStatus(intentId, 'approved');
     intentDeps.intentMatcher?.reload();
     await ctx.answer(t(lang).callbackErrors.intentApproved);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
   });
 
@@ -1352,7 +1349,7 @@ export function createCallbackHandler(
     }
     intentDeps.intentRepo.updateStatus(intentId, 'rejected');
     await ctx.answer(t(lang).callbackErrors.intentRejected);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
   });
 
