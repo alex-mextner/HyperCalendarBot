@@ -35,10 +35,10 @@ RUN python3 -m venv venv && \
 # Production node_modules (no devDependencies)
 COPY --from=prod-deps /app/node_modules ./node_modules
 
-# Chromium browser binary — install using the PRODUCTION playwright version
-# to ensure browser revision matches the runtime package.
+# Chromium headless shell — only the headless binary, not the full browser.
+# Playwright 1.58+ uses chromium-headless-shell for headless mode by default.
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-RUN ./node_modules/.bin/playwright install --with-deps chromium
+RUN ./node_modules/.bin/playwright install --with-deps chromium-headless-shell
 
 COPY src ./src
 COPY scripts ./scripts

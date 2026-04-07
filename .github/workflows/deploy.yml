@@ -49,9 +49,9 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('package.json') }}
-      - run: bunx playwright install --with-deps chromium
+      - run: bunx playwright install --with-deps chromium-headless-shell
         if: steps.playwright-cache.outputs.cache-hit != 'true'
-      - run: bunx playwright install-deps chromium
+      - run: bunx playwright install-deps chromium-headless-shell
         if: steps.playwright-cache.outputs.cache-hit == 'true'
       - run: bun test
       - run: bun run lint
@@ -158,12 +158,6 @@ jobs:
             # Clean up old images to prevent "no space left on device"
             docker image prune -f
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
-            # Ensure Playwright browsers on host match the image version
-            docker run --rm \
-              -v /root/.cache/ms-playwright:/ms-playwright \
-              -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-              ghcr.io/${{ env.IMAGE_NAME }}:latest \
-              ./node_modules/.bin/playwright install chromium
             # Generate stress dictionary if missing (one-time, ~15MB)
             if [ ! -f data/dictionaries/stress-dict.json ]; then
               mkdir -p data/dictionaries
