@@ -78,34 +78,34 @@ export class WeatherService {
   }
 
   /** Get current day weather for a timezone */
-  async getDayWeather(timezone: string): Promise<DayWeather | null> {
+  async getDayWeather(timezone: string, lang = 'en'): Promise<DayWeather | null> {
     const coords = timezoneToCoords(timezone);
     if (!coords) {
       notifyLogger.warn({ timezone }, 'Cannot resolve timezone to coordinates for weather');
       return null;
     }
-    return this.fetchCurrentWeather(coords);
+    return this.fetchCurrentWeather(coords, lang);
   }
 
   /** Get 7-day forecast for a timezone */
-  async getWeekWeather(timezone: string): Promise<WeekWeather | null> {
+  async getWeekWeather(timezone: string, lang = 'en'): Promise<WeekWeather | null> {
     const coords = timezoneToCoords(timezone);
     if (!coords) {
       notifyLogger.warn({ timezone }, 'Cannot resolve timezone to coordinates for weather');
       return null;
     }
-    return this.fetchWeekForecast(coords);
+    return this.fetchWeekForecast(coords, lang);
   }
 
-  private async fetchCurrentWeather(coords: Coordinates): Promise<DayWeather | null> {
-    const cacheKey = `${coords.lat},${coords.lon}`;
+  private async fetchCurrentWeather(coords: Coordinates, lang: string): Promise<DayWeather | null> {
+    const cacheKey = `${coords.lat},${coords.lon},${lang}`;
     const cached = this.dayCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data;
     }
 
     try {
-      const url = `https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lon}&units=metric&appid=${this.apiKey}`;
+      const url = `https://api.openweathermap.org/data/2.5/weather?lat=${coords.lat}&lon=${coords.lon}&units=metric&lang=${lang}&appid=${this.apiKey}`;
       const res = await this.fetchFn(url);
       if (!res.ok) {
         notifyLogger.warn({ status: res.status, coords }, 'OpenWeatherMap current weather request failed');
@@ -130,15 +130,15 @@ export class WeatherService {
     }
   }
 
-  private async fetchWeekForecast(coords: Coordinates): Promise<WeekWeather | null> {
-    const cacheKey = `${coords.lat},${coords.lon}`;
+  private async fetchWeekForecast(coords: Coordinates, lang: string): Promise<WeekWeather | null> {
+    const cacheKey = `${coords.lat},${coords.lon},${lang}`;
     const cached = this.weekCache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) {
       return cached.data;
     }
 
     try {
-      const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${coords.lat}&lon=${coords.lon}&units=metric&exclude=minutely,hourly,alerts&appid=${this.apiKey}`;
+      const url = `https://api.openweathermap.org/data/3.0/onecall?lat=${coords.lat}&lon=${coords.lon}&units=metric&lang=${lang}&exclude=minutely,hourly,alerts&appid=${this.apiKey}`;
       const res = await this.fetchFn(url);
       if (!res.ok) {
         notifyLogger.warn({ status: res.status, coords }, 'OpenWeatherMap forecast request failed');

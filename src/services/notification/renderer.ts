@@ -105,20 +105,19 @@ function renderAgenda(
   config: AgendaConfig,
 ): RenderedNotification {
   const lines: string[] = [];
+  const countLabel = events.length === 0 ? l.noEvents : l.eventsCount(events.length);
+  lines.push(`📅 ${dateLabel} (${countLabel})`);
+  if (config.weather) {
+    lines.push(formatDayWeatherLine(config.lang, config.weather));
+  }
   if (events.length === 0) {
-    lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`);
-    if (config.weather) {
-      lines.push(formatDayWeatherLine(config.lang, config.weather));
-    }
+    lines.push(`${config.emoji} ${config.greetingFree}`);
     lines.push('', config.freeDay);
     if (config.botTip) {
       lines.push('', config.botTip);
     }
   } else {
-    lines.push(`${config.emoji} ${config.greeting}`, '', `📅 ${dateLabel}`);
-    if (config.weather) {
-      lines.push(formatDayWeatherLine(config.lang, config.weather));
-    }
+    lines.push(`${config.emoji} ${config.greeting}`);
     lines.push('');
     for (const e of events) {
       lines.push(formatAgendaEventLine(e, l));

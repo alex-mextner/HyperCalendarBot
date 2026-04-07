@@ -86,6 +86,24 @@ describe('WeatherService', () => {
     const url = (fetchFn.mock.calls[0] as unknown as [string])[0];
     expect(url).toContain('appid=test-key');
     expect(url).toContain('units=metric');
+    expect(url).toContain('lang=en');
+  });
+
+  test('getDayWeather passes lang parameter to API', async () => {
+    const mockResponse = {
+      main: { temp: 15, temp_min: 12, temp_max: 18 },
+      weather: [{ id: 800, description: 'ясно' }],
+      wind: { speed: 3 },
+    };
+    const fetchFn = makeMockFetch(mockResponse);
+    const service = new WeatherService({ apiKey: 'test-key', fetchFn });
+
+    const result = await service.getDayWeather('Europe/Moscow', 'ru');
+
+    expect(result).not.toBeNull();
+    expect(result!.description).toBe('ясно');
+    const url = (fetchFn.mock.calls[0] as unknown as [string])[0];
+    expect(url).toContain('lang=ru');
   });
 
   test('getDayWeather returns null for unknown timezone', async () => {
