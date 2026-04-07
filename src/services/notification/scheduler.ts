@@ -61,7 +61,8 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
 function makeDateLabel(dateStr: string, timezone: string, lang: string): string {
   const d = new TZDate(`${dateStr}T12:00:00Z`, timezone);
   const locale = lang === 'ru' ? ru : enUS;
-  return format(d, 'EEEE, MMMM d', { locale });
+  const pattern = lang === 'ru' ? 'EEEE, d MMMM' : 'EEEE, MMMM d';
+  return format(d, pattern, { locale });
 }
 
 function isoWeekNumber(date: Date): number {
@@ -234,10 +235,11 @@ export function pickBotTip(lang: string, ctx?: TipContext): string | null {
 async function fetchDayWeather(
   weatherService: WeatherService | undefined,
   timezone: string,
+  lang = 'en',
 ): Promise<DayWeather | null> {
   if (!weatherService) return null;
   try {
-    return await weatherService.getDayWeather(timezone);
+    return await weatherService.getDayWeather(timezone, lang);
   } catch (err) {
     notifyLogger.warn({ err, timezone }, 'Weather fetch failed for agenda');
     return null;
@@ -442,7 +444,7 @@ export class NotificationScheduler {
       const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
-      const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone);
+      const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone, lang);
       const featureUsage = this.deps.featureUsageRepo?.getForUser(pref.user_id);
       const tipCtx = buildTipContext(pref, featureUsage);
       const botTip = agendaEvents.length === 0 ? pickBotTip(lang, tipCtx) : null;
@@ -562,7 +564,7 @@ export class NotificationScheduler {
       let tomorrowWeather: DayWeather | null = null;
       if (this.deps.weatherService) {
         try {
-          const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone);
+          const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone, lang);
           const dayW = weekW?.days.find((d) => d.date === localTomorrowIso);
           if (dayW) tomorrowWeather = dayW;
         } catch (err) {
@@ -649,7 +651,7 @@ export class NotificationScheduler {
         let weatherByDate: { [date: string]: DayWeather } | undefined;
         if (this.deps.weatherService) {
           try {
-            const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone);
+            const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone, lang);
             if (weekW) {
               weatherByDate = {};
               for (const d of weekW.days) {

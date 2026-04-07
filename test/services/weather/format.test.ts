@@ -18,8 +18,9 @@ describe('formatDayWeatherLine', () => {
   });
 
   test('formats current weather in Russian', () => {
-    const result = formatDayWeatherLine('ru', baseWeather);
-    expect(result).toBe('☀️ 10°C (5..15°C), clear sky');
+    const ruWeather: DayWeather = { ...baseWeather, description: 'ясно' };
+    const result = formatDayWeatherLine('ru', ruWeather);
+    expect(result).toBe('☀️ 10°C (5..15°C), ясно');
   });
 
   test('shows wind when >= 10 m/s', () => {
