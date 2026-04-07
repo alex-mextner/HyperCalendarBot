@@ -155,6 +155,8 @@ jobs:
             cd ${{ secrets.DEPLOY_PATH }}
             chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh
             echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
+            # Clean up old images to prevent "no space left on device"
+            docker image prune -f
             docker pull ghcr.io/${{ env.IMAGE_NAME }}:latest
             # Generate stress dictionary if missing (one-time, ~15MB)
             if [ ! -f data/dictionaries/stress-dict.json ]; then
