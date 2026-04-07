@@ -35,7 +35,6 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - NODE_ENV=production
-      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     ports:
       - "3001:3311"
     volumes:
