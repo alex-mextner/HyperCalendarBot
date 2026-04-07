@@ -1,6 +1,6 @@
 ARG BUN_VERSION=1.3.11
 
-# Stage 1: production deps only (no devDependencies)
+# Stage 1: install deps with locked versions
 FROM debian:bookworm-slim AS prod-deps
 WORKDIR /app
 ARG BUN_VERSION
@@ -9,10 +9,11 @@ RUN apt-get update && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     rm -rf /var/lib/apt/lists/*
 
-COPY package.json ./
-# No bun.lock: bun --production modifies the lockfile format (strips devDeps),
-# so it always fails with an existing full lockfile. Generate fresh on linux.
-RUN bun install --production --ignore-scripts
+COPY package.json bun.lock ./
+# bun.lock pins exact versions (playwright revision must match installed browser).
+# --production is omitted: bun rewrites lockfile format with --production, breaking
+# --frozen-lockfile. DevDeps are tiny (biome, types, lefthook, pino-pretty).
+RUN bun install --ignore-scripts
 
 # Stage 2: final image
 FROM debian:bookworm-slim AS runner
@@ -32,7 +33,7 @@ COPY requirements.docker.txt ./
 RUN python3 -m venv venv && \
     uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python
 
-# Production node_modules (no devDependencies)
+# Locked node_modules from prod-deps stage
 COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Chromium headless shell — only the headless binary, not the full browser.
