@@ -53,11 +53,10 @@ COPY requirements.docker.txt ./
 RUN python3 -m venv venv && \
     uv pip install --no-cache-dir -r requirements.docker.txt --python venv/bin/python
 
-# Install only system libraries required by Chromium (not the browser itself).
-# The Chromium binary is mounted from the host via docker-compose volume.
-# Playwright CLI is needed only for install-deps — use full node_modules from deps stage.
+# Chromium browser binary lives inside the image — no host volume mount needed.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 COPY --from=deps /app/node_modules ./node_modules
-RUN ./node_modules/.bin/playwright install-deps chromium
+RUN ./node_modules/.bin/playwright install --with-deps chromium
 
 # Replace with production node_modules (no devDependencies)
 RUN rm -rf ./node_modules
