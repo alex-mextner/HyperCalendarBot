@@ -142,7 +142,7 @@ export class NotificationRenderer {
     const langKey = lang as Lang;
     const l = t(langKey).notifications;
     return renderAgenda(l, dateLabel, events, {
-      emoji: '☀️',
+      emoji: '👋',
       greeting: l.morning,
       greetingFree: l.morningFree,
       freeDay: l.freeDayMorning,
