@@ -71,22 +71,19 @@ if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
 }
 
-// Mutable send function for location verification — patched after bot creation to support reply_markup
-let locationSendMessage: (
-  userId: number,
-  text: string,
-  options?: { parse_mode?: string; reply_markup?: unknown },
-) => Promise<void> = async (userId, text, options) => {
-  await botRef.sendMessage(userId, text, options?.parse_mode);
-};
-
 // Mutable ref — patched after bot creation
 const botRef: {
   sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
+  sendMessageFull: (
+    userId: number,
+    text: string,
+    options?: { parse_mode?: string; reply_markup?: unknown },
+  ) => Promise<void>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
   editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
+  sendMessageFull: async () => {},
   sendVoice: async () => {},
   editMessage: async () => {},
 };
@@ -745,8 +742,8 @@ if (config.GOOGLE_MAPS_API_KEY && config.REDIS_URL) {
     invitationRepo: db.invitations,
     db: db.db,
     candidateStore,
-    sendMessage: async (userId, text) => {
-      await botRef.sendMessage(userId, text).catch((err: unknown) => {
+    sendMessage: async (userId, text, options) => {
+      await botRef.sendMessageFull(userId, text, options).catch((err: unknown) => {
         botLogger.error({ err, userId }, 'Location verification: failed to send message');
       });
     },
@@ -829,7 +826,7 @@ botRef.sendVoice = async (telegramId, audio) => {
 };
 
 // Patch location send to use full bot API (supports reply_markup for candidate selection)
-locationSendMessage = async (userId, text, options) => {
+botRef.sendMessageFull = async (userId, text, options) => {
   await bot.api.sendMessage({
     chat_id: userId,
     text,
