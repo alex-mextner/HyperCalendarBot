@@ -34,6 +34,8 @@ import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
+import type { AddressCache } from '../location/address-cache.ts';
+import type { LocationVerificationService } from '../location/location-verification-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
@@ -209,6 +211,10 @@ export interface AgentContext {
   scene?: SceneCapability;
   agents?: AgentsCapability;
   birthday?: BirthdayCapability;
+  locationVerification?: LocationVerificationService;
+  addressCache?: AddressCache;
+  /** Preloaded address context for system prompt (loaded async before agent runs) */
+  preloadedAddressContext?: string;
 }
 
 /** Structured data from tool handlers for intent executor consumption. */

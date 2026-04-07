@@ -12,6 +12,7 @@ import {
 } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
+import { formatLocationHtml } from '../location/format-location.ts';
 
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
@@ -148,7 +149,8 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
     lines.push(`📝 ${escapeHtml(event.description)}`);
   }
   if (event.location) {
-    lines.push(`📍 ${escapeHtml(event.location)}`);
+    const locationLink = formatLocationHtml(event);
+    lines.push(`📍 ${locationLink}`);
   }
   if (event.category) {
     lines.push(`🏷 ${escapeHtml(event.category)}`);

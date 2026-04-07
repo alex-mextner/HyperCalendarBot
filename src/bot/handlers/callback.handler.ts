@@ -34,7 +34,7 @@ import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
-import { guessCountryFromTimezone } from '../../services/timezone/timezone-service.ts';
+import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
@@ -150,6 +150,7 @@ export interface CallbackHandlerOpts {
     scenePauseService: ScenePauseService;
   };
   triggerSync?: (userId: number) => Promise<void>;
+  locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
 }
 
 /**
@@ -193,6 +194,7 @@ export function createCallbackHandler(
     groupRepo,
     scenePauseDeps,
     triggerSync,
+    locationVerification,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
 
@@ -1161,6 +1163,84 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
     await ctx.answer();
     await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
+  });
+
+  // Location pick: user chose what to do with a geolocation pin
+  dispatch.set(CB.LOCATION_PICK, async (ctx, _payload, parts, user) => {
+    await ctx.answer();
+    const lang = (user.language ?? 'en') as Lang;
+    const msgs = t(lang);
+
+    if (!locationVerification || !userRepo) return;
+
+    const action = parts[1]; // 'geo', 'city', 'other'
+
+    if (action === 'geo') {
+      // Use geolocation for the specified event
+      const eventId = Number.parseInt(parts[2] ?? '', 10);
+      if (Number.isNaN(eventId)) return;
+
+      const { pendingGeoLocations } = await import('./message.handler.ts');
+      const geo = pendingGeoLocations.get(user.telegram_id);
+      if (!geo) {
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+        return;
+      }
+
+      const success = await locationVerification.resolveFromCoordinates(
+        eventId,
+        geo.latitude,
+        geo.longitude,
+        user.telegram_id,
+      );
+      pendingGeoLocations.delete(user.telegram_id);
+
+      if (success) {
+        const event = eventRepo?.findByIdUnfiltered(eventId);
+        const address = event?.resolved_address ?? '';
+        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+          parse_mode: 'HTML',
+          reply_markup: undefined,
+        });
+      } else {
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      }
+    } else if (action === 'city') {
+      // Update user city from coordinates
+      const lat = Number.parseFloat(parts[2] ?? '');
+      const lng = Number.parseFloat(parts[3] ?? '');
+      if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+      const { pendingGeoLocations } = await import('./message.handler.ts');
+      pendingGeoLocations.delete(user.telegram_id);
+
+      // Also handle timezone update
+      const tz = resolveTimezone(lat, lng);
+      const offset = formatUtcOffset(tz);
+      if (tz !== user.timezone) {
+        userRepo.update(user.telegram_id, { timezone: tz });
+      }
+
+      // Reverse geocode to get city
+      const { createGeocodingService } = await import('../../services/location/geocoding-service.ts');
+      const config = (await import('../../config/env.ts')).loadConfig();
+      if (config.GOOGLE_MAPS_API_KEY) {
+        const geocoding = createGeocodingService(config.GOOGLE_MAPS_API_KEY);
+        const result = await geocoding.reverseGeocode(lat, lng);
+        if (result?.city) {
+          userRepo.update(user.telegram_id, { city: result.city });
+        }
+      }
+
+      await ctx.editText(
+        tz !== user.timezone ? msgs.geo_tz_updated(tz, offset) : msgs.tz_same_from_location(tz, offset),
+        { reply_markup: undefined },
+      );
+    } else if (action === 'other') {
+      const { pendingGeoLocations } = await import('./message.handler.ts');
+      pendingGeoLocations.delete(user.telegram_id);
+      await ctx.editText(msgs.aiTools.location.geoExplain, { reply_markup: undefined });
+    }
   });
 
   // Group settings: timezone picker

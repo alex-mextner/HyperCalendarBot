@@ -305,6 +305,13 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
         .catch((err) => logger.error({ err }, 'schedulePush failed'));
     }
 
+    // Trigger background location verification if event has a location
+    if (event.location && ctx.locationVerification) {
+      ctx.locationVerification
+        .verifyEventLocation(event, ctx.user)
+        .catch((err) => logger.error({ err, eventId: event.id }, 'Background location verification failed'));
+    }
+
     if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
       const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
       if (conflicts.length > 0) {
@@ -414,6 +421,13 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
           ? `. У этого события ${accepted.length} ${ruPlural(accepted.length, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
           : `. This event has ${accepted.length} participant${accepted.length > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
     }
+  }
+
+  // Trigger background location verification if location was updated
+  if (input.location && ctx.locationVerification) {
+    ctx.locationVerification
+      .verifyEventLocation(updated, ctx.user)
+      .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));
   }
 
   return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };

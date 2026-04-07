@@ -24,6 +24,7 @@ export interface User {
   voice_response_enabled: number | null;
   default_event_duration_minutes: number;
   assistant_enabled: number; // 0 | 1
+  city: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +57,11 @@ export interface CalendarEvent {
   event_type?: 'birthday' | null;
   birth_year?: number | null;
   celebrant_id?: number | null;
+  resolved_address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  google_maps_url: string | null;
+  location_verified: number; // 0 | 1
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -81,6 +87,7 @@ export interface UpdateUserData {
   onboarding_completed?: number;
   voice_response_enabled?: number | null;
   default_event_duration_minutes?: number;
+  city?: string | null;
 }
 
 export interface CreateEventData {
@@ -120,6 +127,11 @@ export interface UpdateEventData {
   sync_status?: SyncStatus;
   sync_version?: number;
   last_synced_at?: string | null;
+  resolved_address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  google_maps_url?: string | null;
+  location_verified?: number;
 }
 
 export interface ChatHistoryMessage {

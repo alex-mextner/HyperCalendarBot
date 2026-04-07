@@ -34,6 +34,7 @@ export interface EnvConfig {
   AI_BASE_URL_FALLBACK?: string;
   AI_API_KEY_FALLBACK?: string;
   OPENWEATHER_API_KEY?: string;
+  GOOGLE_MAPS_API_KEY?: string;
 }
 
 export function loadConfig(): EnvConfig {
@@ -122,5 +123,6 @@ export function loadConfig(): EnvConfig {
     AI_BASE_URL_FALLBACK: process.env.AI_BASE_URL_FALLBACK || undefined,
     AI_API_KEY_FALLBACK: process.env.AI_API_KEY_FALLBACK || undefined,
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
+    GOOGLE_MAPS_API_KEY: process.env.GOOGLE_MAPS_API_KEY || undefined,
   };
 }

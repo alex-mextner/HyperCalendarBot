@@ -9,7 +9,7 @@ import {
 function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
-    eventService: { getEventsInRange: mock(() => []) },
+    eventService: { getEventsInRange: mock(() => []), getLatestCreated: mock(() => null) },
     holidayService: {},
     chatHistory: {},
     conversationLogger: { logUserMessage: mock(() => {}), logBotResponse: mock(() => {}) },
@@ -750,6 +750,11 @@ describe('toEventSummary', () => {
     owner_type: 'user' as const,
     group_id: null,
     created_by: null,
+    resolved_address: null,
+    latitude: null,
+    longitude: null,
+    google_maps_url: null,
+    location_verified: 0,
     last_synced_at: null,
     created_at: '2026-03-19T10:00:00Z',
     updated_at: '2026-03-19T10:00:00Z',

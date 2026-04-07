@@ -928,4 +928,18 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '051_location_verification',
+    up: (db) => {
+      // Add city to users for location biasing
+      db.exec('ALTER TABLE users ADD COLUMN city TEXT DEFAULT NULL');
+
+      // Add resolved location fields to events
+      db.exec('ALTER TABLE events ADD COLUMN resolved_address TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN latitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN longitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN google_maps_url TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN location_verified INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];

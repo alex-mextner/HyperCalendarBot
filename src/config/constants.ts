@@ -66,6 +66,7 @@ export const CB = {
   GEO_TZ_DISMISS: 'gtzd',
   SCENE_HELP: 'scene_help',
   ADD_CANCEL: 'add:cancel',
+  LOCATION_PICK: 'loc_pick',
 } as const;
 
 // i18n messages
@@ -414,6 +415,18 @@ export const MSG = {
         triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
           `Trigger created (id: ${id}): when ${topic}${condition ? ` and (${condition})` : ''} → "${action}"`,
         triggerRemoved: (id: string) => `Trigger ${id} removed.`,
+      },
+      location: {
+        clarifyAddress: (title: string) => `📍 Clarify the address for "${title}":`,
+        locationResolved: (title: string, address: string) => `📍 Location for "${title}" resolved: ${address}`,
+        locationNotFound: (title: string) =>
+          `📍 Could not resolve location for "${title}". You can send a 📍 location pin or type the full address.`,
+        geoForEvent: (title: string) => `📍 Got your location! Is this for the event "${title}"?`,
+        geoForEventConfirm: 'Yes, use for this event',
+        geoNewLocation: 'No, this is my current location',
+        geoExplain: 'Something else',
+        geoPurposeQuestion:
+          '📍 Got your location! What is it for?\n1. Update your current city\n2. Set as location for your latest event\n3. Something else (please explain)',
       },
       agent: {
         connectMessage: (url: string) =>
@@ -1010,6 +1023,18 @@ export const MSG = {
         triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
           `Триггер создан (id: ${id}): когда ${topic}${condition ? ` и (${condition})` : ''} → «${action}»`,
         triggerRemoved: (id: string) => `Триггер ${id} удалён.`,
+      },
+      location: {
+        clarifyAddress: (title: string) => `📍 Уточни адрес для «${title}»:`,
+        locationResolved: (title: string, address: string) => `📍 Адрес для «${title}» определён: ${address}`,
+        locationNotFound: (title: string) =>
+          `📍 Не удалось определить адрес для «${title}». Можешь отправить 📍 геолокацию или написать полный адрес.`,
+        geoForEvent: (title: string) => `📍 Получена геолокация! Это для события «${title}»?`,
+        geoForEventConfirm: 'Да, использовать для этого события',
+        geoNewLocation: 'Нет, это моё текущее местоположение',
+        geoExplain: 'Другое',
+        geoPurposeQuestion:
+          '📍 Получена геолокация! Для чего она?\n1. Обновить город\n2. Задать локацию для последнего события\n3. Другое (напиши пояснение)',
       },
       agent: {
         connectMessage: (url: string) =>

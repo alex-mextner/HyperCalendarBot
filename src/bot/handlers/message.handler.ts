@@ -190,11 +190,15 @@ export interface MessageHandlerDeps {
   triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
   // Onboarding scene for mandatory timezone/language setup
   onboardingScene?: AnyScene;
+  locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
+
+/** Temporary store for geo coordinates when asking user about location purpose */
+export const pendingGeoLocations = new Map<number, { latitude: number; longitude: number; timestamp: number }>();
 
 const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
 
@@ -1062,14 +1066,40 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
-    // Location message in private chat → ask to update timezone from geolocation
+    // Location message in private chat → context-aware handling
     const location = ctx.location;
     if (location && ctx.chat.type === 'private') {
       const { latitude, longitude } = location;
-      const tz = resolveTimezone(latitude, longitude);
-      const offset = formatUtcOffset(tz);
       const lang = user.language;
       const msgs = t(lang);
+
+      // Check if user has a recent event that could use this location
+      const latestEvent = deps.eventService.getLatestCreated(user.telegram_id);
+      const hasRecentUnverifiedEvent =
+        latestEvent?.location &&
+        !latestEvent.location_verified &&
+        Date.now() - new Date(latestEvent.created_at).getTime() < 30 * 60 * 1000; // within 30 min
+
+      if (hasRecentUnverifiedEvent && deps.locationVerification) {
+        // Ask if this location is for the recent event
+        const kb = new InlineKeyboard()
+          .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_PICK}:geo:${latestEvent.id}`)
+          .row()
+          .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_PICK}:city:${latitude}:${longitude}`)
+          .row()
+          .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_PICK}:other:${latitude}:${longitude}`);
+        await ctx.send(msgs.aiTools.location.geoForEvent(latestEvent.title), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        // Store coordinates temporarily for callback handler
+        pendingGeoLocations.set(user.telegram_id, { latitude, longitude, timestamp: Date.now() });
+        return;
+      }
+
+      // Default behavior: timezone update
+      const tz = resolveTimezone(latitude, longitude);
+      const offset = formatUtcOffset(tz);
       if (tz !== user.timezone) {
         const kb = new InlineKeyboard()
           .text(msgs.geo_tz_confirm_btn, `${CB.GEO_TZ_CONFIRM}:${tz}`)
