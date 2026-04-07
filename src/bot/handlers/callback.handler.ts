@@ -1224,8 +1224,8 @@ export function createCallbackHandler(
       // Reverse geocode to get city
       const { createGeocodingService } = await import('../../services/location/geocoding-service.ts');
       const config = (await import('../../config/env.ts')).loadConfig();
-      if (config.GOOGLE_MAPS_API_KEY) {
-        const geocoding = createGeocodingService(config.GOOGLE_MAPS_API_KEY);
+      if (config.GOOGLE_API_KEY) {
+        const geocoding = createGeocodingService(config.GOOGLE_API_KEY);
         const result = await geocoding.reverseGeocode(lat, lng);
         if (result?.city) {
           userRepo.update(user.telegram_id, { city: result.city });

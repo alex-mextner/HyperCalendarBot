@@ -708,20 +708,20 @@ if (config.REDIS_URL) {
 
 const domainEventBus = new DomainEventBus();
 
-// Location verification — requires GOOGLE_MAPS_API_KEY + Redis for address cache
+// Location verification — requires GOOGLE_API_KEY + Redis for address cache
 let locationVerification:
   | import('./services/location/location-verification-service.ts').LocationVerificationService
   | undefined;
 let addressCache: import('./services/location/address-cache.ts').AddressCache | undefined;
 
-if (config.GOOGLE_MAPS_API_KEY && config.REDIS_URL) {
+if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
   const { AddressCache } = await import('./services/location/address-cache.ts');
   const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
   const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
 
   const locationRedis = new Bun.RedisClient(config.REDIS_URL);
-  const geocodingService = createGeocodingService(config.GOOGLE_MAPS_API_KEY);
+  const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
   addressCache = new AddressCache({
     get: (key: string) => locationRedis.get(key),
     set: (key: string, value: string) => locationRedis.set(key, value),
@@ -755,7 +755,7 @@ if (config.GOOGLE_MAPS_API_KEY && config.REDIS_URL) {
   });
 
   botLogger.info('Location verification initialized (Google Maps + Redis)');
-} else if (config.GOOGLE_MAPS_API_KEY) {
+} else if (config.GOOGLE_API_KEY) {
   botLogger.info('Location verification disabled: REDIS_URL not set (address cache requires Redis)');
 }
 
