@@ -5,6 +5,7 @@ interface PoolOptions {
   maxPages?: number;
   maxUseCount?: number;
   maxAgeMs?: number;
+  maxReinitAttempts?: number;
 }
 
 export class PlaywrightPool {
@@ -14,31 +15,60 @@ export class PlaywrightPool {
   private pageUseCount: Map<Page, number> = new Map();
   private pageCreatedAt: Map<Page, number> = new Map();
   private reinitPromise: Promise<void> | null = null;
+  private reinitAttempts = 0;
+  private dead = false;
 
   private readonly maxPages: number;
   private readonly maxUseCount: number;
   private readonly maxAgeMs: number;
+  private readonly maxReinitAttempts: number;
 
   constructor(options: PoolOptions = {}) {
     this.maxPages = options.maxPages ?? 4;
     this.maxUseCount = options.maxUseCount ?? 50;
     this.maxAgeMs = options.maxAgeMs ?? 300_000;
+    this.maxReinitAttempts = options.maxReinitAttempts ?? 3;
   }
 
   async initialize(): Promise<void> {
     this.browser = await chromium.launch({
       args: ['--no-sandbox', '--disable-gpu'],
     });
+    this.reinitAttempts = 0;
+    this.dead = false;
     this.browser.on('disconnected', () => {
       this.freePages = [];
       this.busyPages.clear();
       this.pageUseCount.clear();
       this.pageCreatedAt.clear();
       this.browser = null;
+
+      if (this.reinitAttempts >= this.maxReinitAttempts) {
+        this.dead = true;
+        imageLogger.error(
+          { attempts: this.reinitAttempts },
+          'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+        );
+        return;
+      }
+
+      this.reinitAttempts++;
       this.reinitPromise = this.initialize()
+        .then(() => {
+          imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
+        })
         .catch((err) => {
-          imageLogger.error({ err }, 'PlaywrightPool reinit failed after browser disconnect');
-          throw err;
+          imageLogger.error(
+            { err, attempt: this.reinitAttempts },
+            'PlaywrightPool reinit failed after browser disconnect',
+          );
+          if (this.reinitAttempts >= this.maxReinitAttempts) {
+            this.dead = true;
+            imageLogger.error(
+              { attempts: this.reinitAttempts },
+              'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+            );
+          }
         })
         .finally(() => {
           this.reinitPromise = null;
@@ -47,11 +77,19 @@ export class PlaywrightPool {
   }
 
   async acquire(timeoutMs = 10_000): Promise<Page> {
+    if (this.dead) {
+      throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
+    }
+
     const deadline = Date.now() + timeoutMs;
 
     while (true) {
       if (this.reinitPromise) {
         await this.reinitPromise;
+      }
+
+      if (this.dead) {
+        throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
       }
 
       // Return a free page if available

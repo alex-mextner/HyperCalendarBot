@@ -37,6 +37,8 @@ services:
       - NODE_ENV=production
     ports:
       - "3001:3311"
+    # Chromium (Playwright) needs more than Docker's default 64MB /dev/shm
+    shm_size: '256m'
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
