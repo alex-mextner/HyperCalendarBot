@@ -80,6 +80,41 @@ ENDPOINT="${ALERT_ENDPOINT:-https://hypercal.invntrm.ru/admin/alerts/next}"
 INTERVAL="${ALERT_POLL_INTERVAL:-30}"
 TERMINAL="${ALERT_TERMINAL:-terminal}"
 
+# --- Session lock: prevents spawning multiple Claude sessions concurrently ---
+LOCK_FILE="/tmp/hypercal-claude-session.lock"
+MAX_SESSION_SECONDS="${MAX_SESSION_SECONDS:-900}"  # 15 min — stale lock threshold
+COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-300}"         # 5 min — wait after session ends before starting a new one
+COOLDOWN_FILE="/tmp/hypercal-claude-session.done"
+
+is_session_active() {
+  if [[ ! -f "$LOCK_FILE" ]]; then
+    return 1  # no lock — not active
+  fi
+  local lock_age
+  lock_age=$(( $(date +%s) - $(stat -f %m "$LOCK_FILE") ))
+  if (( lock_age > MAX_SESSION_SECONDS )); then
+    echo "[watcher] stale lock (${lock_age}s old) — removing"
+    rm -f "$LOCK_FILE"
+    return 1  # stale lock — not active
+  fi
+  echo "[watcher] session active (${lock_age}/${MAX_SESSION_SECONDS}s) — skipping poll"
+  return 0  # lock exists and is fresh — session active
+}
+
+is_in_cooldown() {
+  if [[ ! -f "$COOLDOWN_FILE" ]]; then
+    return 1
+  fi
+  local cooldown_age
+  cooldown_age=$(( $(date +%s) - $(stat -f %m "$COOLDOWN_FILE") ))
+  if (( cooldown_age > COOLDOWN_SECONDS )); then
+    rm -f "$COOLDOWN_FILE"
+    return 1  # cooldown expired
+  fi
+  echo "[watcher] in cooldown (${cooldown_age}/${COOLDOWN_SECONDS}s) — skipping"
+  return 0
+}
+
 echo "[watcher] started — polling ${ENDPOINT} every ${INTERVAL}s"
 
 open_in_terminal() {
@@ -126,9 +161,14 @@ Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \
 " "$text" "$PROJECT_DIR")
 
   CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "${HOME}/.local/bin/claude")}"
+  # Create the lock BEFORE launching — prevents races during Terminal startup
+  date +%s > "$LOCK_FILE"
+  echo "[watcher] lock acquired: $LOCK_FILE"
+
   # printf %q produces shell-safe escaping for the prompt argument
-  printf '#!/bin/sh\ncd %q\nexec %q --dangerously-skip-permissions --permission-mode bypassPermissions %q\n' \
-    "$PROJECT_DIR" "$CLAUDE_BIN" "$prompt" > "$tmpscript"
+  # No exec — shell must survive to clean up the lockfile after Claude exits.
+  printf '#!/bin/sh\ncd %q\n%q --dangerously-skip-permissions --permission-mode bypassPermissions %q\nrm -f %q\ndate +%%s > %q\necho "[claude-session] done — lock released, cooldown started"\n' \
+    "$PROJECT_DIR" "$CLAUDE_BIN" "$prompt" "$LOCK_FILE" "$COOLDOWN_FILE" > "$tmpscript"
   chmod +x "$tmpscript"
 
   # Open the script file directly — Terminal/iTerm2 execute it in a new window.
@@ -145,6 +185,17 @@ Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \
 }
 
 while true; do
+  # Skip polling entirely if a Claude session is already running or in cooldown.
+  # This prevents consuming alerts from the queue that would be wasted.
+  if is_session_active; then
+    sleep "$INTERVAL"
+    continue
+  fi
+  if is_in_cooldown; then
+    sleep "$INTERVAL"
+    continue
+  fi
+
   RESPONSE=$(curl -s -w "\n%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
     "${ENDPOINT}" 2>/dev/null) || true
