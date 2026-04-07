@@ -43,7 +43,8 @@
     "marked": "^15.0.12",
     "mitt": "^3.0.1",
     "pino": "^10.3.1",
-    "playwright": "^1.58.2",
+    "playwright": "^1.59.1",
+    "playwright-core": "^1.59.1",
     "rrule": "^2.8.1",
     "zod": "^4.3.6"
   }
