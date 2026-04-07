@@ -391,3 +391,46 @@ describe('geo timezone confirm/dismiss callbacks', () => {
     expect(ctx.editText).not.toHaveBeenCalled();
   });
 });
+
+describe('group settings timezone callback', () => {
+  test('gst:select stores pending input and sends city prompt', async () => {
+    const { pendingGroupTzInput } = await import('../../../src/bot/commands/settings.ts');
+    const groupRepo = { findByChatId: mock(() => null) };
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      groupRepo: groupRepo as never,
+    });
+    const send = mock(() => Promise.resolve());
+    const ctx = {
+      ...makeCtx('gst:select'),
+      chatId: -200,
+      send,
+    };
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const prompt = send.mock.calls[0] as unknown as [string];
+    expect(prompt[0]).toContain('Введите название города');
+    const pending = pendingGroupTzInput.get(100);
+    expect(pending).toBeDefined();
+    expect(pending?.chatId).toBe(-200);
+    pendingGroupTzInput.delete(100);
+  });
+
+  test('gst:select returns early when chatId is missing', async () => {
+    const groupRepo = { findByChatId: mock(() => null) };
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      groupRepo: groupRepo as never,
+    });
+    const send = mock(() => Promise.resolve());
+    const ctx = {
+      ...makeCtx('gst:select'),
+      chatId: undefined,
+      send,
+    };
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+  });
+});

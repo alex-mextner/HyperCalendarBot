@@ -1188,7 +1188,7 @@ export function createCallbackHandler(
   // Group settings: timezone picker
   dispatch.set(CB.GROUP_SETTINGS_TZ, async (ctx, payload, _parts, user) => {
     if (!groupRepo) return;
-    const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+    const chatId = ctx.chatId ? Number(ctx.chatId) : null;
     if (!chatId) {
       await ctx.answer();
       return;
