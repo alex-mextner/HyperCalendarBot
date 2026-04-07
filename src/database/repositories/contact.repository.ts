@@ -7,9 +7,25 @@ export class ContactRepository {
   findByName(userId: number, name: string): Contact | null {
     const lower = name.toLowerCase();
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
-    return (
-      contacts.find((c) => c.name.toLowerCase() === lower || (c.preferred_name?.toLowerCase() ?? '') === lower) ?? null
+
+    // 1. Exact match on name or preferred_name
+    const exact = contacts.find(
+      (c) => c.name.toLowerCase() === lower || (c.preferred_name?.toLowerCase() ?? '') === lower,
     );
+    if (exact) return exact;
+
+    // 2. Substring match: query is part of name/preferred_name or vice versa
+    // Handles "Лена" matching "Елена", "Алена" and short-form lookups
+    const substring = contacts.find((c) => {
+      const cName = c.name.toLowerCase();
+      const cPref = c.preferred_name?.toLowerCase();
+      return (
+        cName.includes(lower) ||
+        lower.includes(cName) ||
+        (cPref ? cPref.includes(lower) || lower.includes(cPref) : false)
+      );
+    });
+    return substring ?? null;
   }
 
   findByTelegramId(userId: number, contactTelegramId: number): Contact | null {

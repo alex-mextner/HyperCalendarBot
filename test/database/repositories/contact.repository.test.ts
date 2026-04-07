@@ -145,6 +145,59 @@ describe('ContactRepository', () => {
     expect(contact!.preferred_name).toBe('Вова');
   });
 
+  describe('findByName substring matching', () => {
+    test('short form query finds full name (Лена → Елена)', () => {
+      repo.add(USER_ID, 'Елена', 'elena_user', 111);
+      const found = repo.findByName(USER_ID, 'Лена');
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe('Елена');
+    });
+
+    test('full name query finds contact with short preferred_name (Елена → preferred Лена)', () => {
+      repo.add(USER_ID, 'SomeTgName', 'lena_user', 222, 'Лена');
+      const found = repo.findByName(USER_ID, 'Елена');
+      expect(found).not.toBeNull();
+      expect(found!.preferred_name).toBe('Лена');
+    });
+
+    test('exact match takes priority over substring match', () => {
+      const exactContact = repo.add(USER_ID, 'Лена', 'lena_exact', 333);
+      repo.add(USER_ID, 'Елена', 'elena_full', 444);
+      const found = repo.findByName(USER_ID, 'Лена');
+      expect(found).not.toBeNull();
+      expect(found!.id).toBe(exactContact.id);
+    });
+
+    test('short prefix query finds full name (Ал → Алексей)', () => {
+      repo.add(USER_ID, 'Алексей', 'alex_user', 555);
+      const found = repo.findByName(USER_ID, 'Ал');
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe('Алексей');
+    });
+
+    test('substring match returns null when no contact matches', () => {
+      repo.add(USER_ID, 'Вова', 'vova_user', 666);
+      repo.add(USER_ID, 'Аня', 'anya_user', 777);
+      expect(repo.findByName(USER_ID, 'Максим')).toBeNull();
+    });
+
+    test('substring match is case-insensitive', () => {
+      repo.add(USER_ID, 'Елена');
+      const found = repo.findByName(USER_ID, 'лена');
+      expect(found).not.toBeNull();
+      expect(found!.name).toBe('Елена');
+    });
+
+    test('preferred_name exact match takes priority over name substring', () => {
+      repo.add(USER_ID, 'Елена', 'elena_user', 888);
+      const preferred = repo.add(USER_ID, 'FancyName', 'fancy_user', 999, 'Лена');
+      const found = repo.findByName(USER_ID, 'Лена');
+      expect(found).not.toBeNull();
+      // Exact match on preferred_name wins over substring of "Елена"
+      expect(found!.id).toBe(preferred.id);
+    });
+  });
+
   test('contacts are isolated per user', () => {
     new UserRepository(db).create({ telegram_id: 200 });
     repo.add(USER_ID, 'Лена');

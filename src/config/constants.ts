@@ -356,6 +356,8 @@ export const MSG = {
       events: {
         noEventsInRange: 'No events found in this range.',
         noEventsMatching: 'No events found matching the query.',
+        noEventsMatchingScope: (scope: string) =>
+          `No events found matching the query in ${scope} calendar. Try searching the other scope.`,
         noUpcomingEvents: 'No upcoming events.',
         upcomingEvents: (count: number, lines: string) => `Next ${count} events:\n${lines}`,
         eventCreated: (parts: string) => `Event created: ${parts}`,
@@ -952,6 +954,8 @@ export const MSG = {
       events: {
         noEventsInRange: 'Событий в этом диапазоне не найдено.',
         noEventsMatching: 'Событий по запросу не найдено.',
+        noEventsMatchingScope: (scope: string) =>
+          `Событий по запросу не найдено в ${scope === 'personal' ? 'личном' : 'групповом'} календаре. Попробуй поискать в ${scope === 'personal' ? 'групповом' : 'личном'}.`,
         noUpcomingEvents: 'Предстоящих событий нет.',
         upcomingEvents: (count: number, lines: string) => `Следующие ${count}:\n${lines}`,
         eventCreated: (parts: string) => `Событие создано: ${parts}`,
