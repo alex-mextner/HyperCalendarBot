@@ -1165,8 +1165,8 @@ export function createCallbackHandler(
     await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
   });
 
-  // Location pick: user chose what to do with a geolocation pin
-  dispatch.set(CB.LOCATION_PICK, async (ctx, _payload, parts, user) => {
+  // Location geo: user chose what to do with a geolocation pin (geo/city/other)
+  dispatch.set(CB.LOCATION_GEO, async (ctx, _payload, parts, user) => {
     await ctx.answer();
     const lang = (user.language ?? 'en') as Lang;
     const msgs = t(lang);
@@ -1176,7 +1176,6 @@ export function createCallbackHandler(
     const action = parts[1]; // 'geo', 'city', 'other'
 
     if (action === 'geo') {
-      // Use geolocation for the specified event
       const eventId = Number.parseInt(parts[2] ?? '', 10);
       if (Number.isNaN(eventId)) return;
 
@@ -1196,7 +1195,7 @@ export function createCallbackHandler(
       pendingGeoLocations.delete(user.telegram_id);
 
       if (success) {
-        const event = eventRepo?.findByIdUnfiltered(eventId);
+        const event = eventRepo?.findById(eventId, user.telegram_id);
         const address = event?.resolved_address ?? '';
         await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
           parse_mode: 'HTML',
@@ -1206,7 +1205,6 @@ export function createCallbackHandler(
         await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
       }
     } else if (action === 'city') {
-      // Update user city from coordinates
       const lat = Number.parseFloat(parts[2] ?? '');
       const lng = Number.parseFloat(parts[3] ?? '');
       if (Number.isNaN(lat) || Number.isNaN(lng)) return;
@@ -1214,22 +1212,15 @@ export function createCallbackHandler(
       const { pendingGeoLocations } = await import('./message.handler.ts');
       pendingGeoLocations.delete(user.telegram_id);
 
-      // Also handle timezone update
       const tz = resolveTimezone(lat, lng);
       const offset = formatUtcOffset(tz);
       if (tz !== user.timezone) {
         userRepo.update(user.telegram_id, { timezone: tz });
       }
 
-      // Reverse geocode to get city
-      const { createGeocodingService } = await import('../../services/location/geocoding-service.ts');
-      const config = (await import('../../config/env.ts')).loadConfig();
-      if (config.GOOGLE_API_KEY) {
-        const geocoding = createGeocodingService(config.GOOGLE_API_KEY);
-        const result = await geocoding.reverseGeocode(lat, lng);
-        if (result?.city) {
-          userRepo.update(user.telegram_id, { city: result.city });
-        }
+      const reverseResult = await locationVerification.reverseGeocodeForCity(lat, lng);
+      if (reverseResult?.city) {
+        userRepo.update(user.telegram_id, { city: reverseResult.city });
       }
 
       await ctx.editText(
@@ -1240,37 +1231,39 @@ export function createCallbackHandler(
       const { pendingGeoLocations } = await import('./message.handler.ts');
       pendingGeoLocations.delete(user.telegram_id);
       await ctx.editText(msgs.aiTools.location.geoExplain, { reply_markup: undefined });
+    }
+  });
+
+  // Location candidate: user picked a resolved address from multiple candidates
+  dispatch.set(CB.LOCATION_CANDIDATE, async (ctx, _payload, parts, user) => {
+    await ctx.answer();
+    const lang = (user.language ?? 'en') as Lang;
+    const msgs = t(lang);
+
+    if (!locationVerification) return;
+
+    const eventId = Number.parseInt(parts[1] ?? '', 10);
+    const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
+    if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
+
+    const candidates = await locationVerification.getStoredCandidates(eventId);
+    if (!candidates) {
+      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
+      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      return;
+    }
+
+    const success = await locationVerification.handleLocationChoice(eventId, user.telegram_id, choiceIndex, candidates);
+
+    if (success) {
+      const event = eventRepo?.findById(eventId, user.telegram_id);
+      const address = event?.resolved_address ?? '';
+      await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+        parse_mode: 'HTML',
+        reply_markup: undefined,
+      });
     } else {
-      // Numeric eventId — user picked a location candidate from askUserToChoose
-      // Format: loc_pick:{eventId}:{index}
-      const eventId = Number.parseInt(parts[1] ?? '', 10);
-      const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
-      if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
-
-      const candidates = await locationVerification.getStoredCandidates(eventId);
-      if (!candidates) {
-        cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
-        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
-        return;
-      }
-
-      const success = await locationVerification.handleLocationChoice(
-        eventId,
-        user.telegram_id,
-        choiceIndex,
-        candidates,
-      );
-
-      if (success) {
-        const event = eventRepo?.findByIdUnfiltered(eventId);
-        const address = event?.resolved_address ?? '';
-        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
-          parse_mode: 'HTML',
-          reply_markup: undefined,
-        });
-      } else {
-        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
-      }
+      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
     }
   });
 

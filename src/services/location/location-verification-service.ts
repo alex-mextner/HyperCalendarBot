@@ -5,6 +5,7 @@ import type { InvitationRepository } from '../../database/repositories/invitatio
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { CalendarEvent, User } from '../../database/types.ts';
 import { botLogger } from '../../utils/logger.ts';
+import { formatInvitation } from '../event/formatters.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore } from './location-candidate-store.ts';
@@ -177,6 +178,13 @@ export class LocationVerificationService {
     return this.deps.candidateStore.get(eventId);
   }
 
+  /** Reverse geocode coordinates to extract city. Used by callback handler to avoid ad-hoc service creation. */
+  async reverseGeocodeForCity(lat: number, lng: number): Promise<{ city: string } | null> {
+    const result = await this.deps.geocodingService.reverseGeocode(lat, lng);
+    if (!result?.city) return null;
+    return { city: result.city };
+  }
+
   /** Resolve location from coordinates (when user sends 📍 for an event) */
   async resolveFromCoordinates(eventId: number, lat: number, lng: number, userId: number): Promise<boolean> {
     const geo = await this.deps.geocodingService.reverseGeocode(lat, lng);
@@ -228,7 +236,7 @@ export class LocationVerificationService {
 
     const buttons = limited.map((_c, i) => ({
       text: `${i + 1}`,
-      callback_data: `loc_pick:${event.id}:${i}`,
+      callback_data: `loc_cand:${event.id}:${i}`,
     }));
 
     const inlineKeyboard = [buttons];
@@ -259,7 +267,6 @@ export class LocationVerificationService {
       if (!inv.message_id || !inv.chat_id) continue;
 
       try {
-        const { formatInvitation } = await import('../event/formatters.ts');
         const inviter = this.deps.userRepo.findByTelegramId(inv.inviter_id);
         const invitee = this.deps.userRepo.findByTelegramId(inv.invitee_id);
 

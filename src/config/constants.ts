@@ -66,7 +66,8 @@ export const CB = {
   GEO_TZ_DISMISS: 'gtzd',
   SCENE_HELP: 'scene_help',
   ADD_CANCEL: 'add:cancel',
-  LOCATION_PICK: 'loc_pick',
+  LOCATION_GEO: 'loc_geo',
+  LOCATION_CANDIDATE: 'loc_cand',
 } as const;
 
 // i18n messages

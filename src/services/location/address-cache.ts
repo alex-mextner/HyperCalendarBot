@@ -1,4 +1,5 @@
 // src/services/location/address-cache.ts
+import { z } from 'zod';
 import { botLogger } from '../../utils/logger.ts';
 
 const logger = botLogger.child({ module: 'address-cache' });
@@ -27,11 +28,6 @@ export interface AddressFrequency {
   lastUsed: number;
 }
 
-export interface AddressCacheEntry {
-  mappings: AddressMapping[];
-  frequent: AddressFrequency[];
-}
-
 interface RedisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<unknown>;
@@ -40,21 +36,25 @@ interface RedisLike {
 const MAPPINGS_KEY = (userId: number) => `addr:${userId}:mappings`;
 const FREQ_KEY = (userId: number) => `addr:${userId}:freq`;
 
-const MappingArraySchema = {
-  parse(raw: string): AddressMapping[] {
-    const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-    return arr as AddressMapping[];
-  },
-};
+const AddressMappingSchema = z.object({
+  input: z.string(),
+  resolvedAddress: z.string(),
+  googleMapsUrl: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  placeId: z.string().nullable(),
+  timestamp: z.number(),
+});
 
-const FreqMapSchema = {
-  parse(raw: string): { [resolved: string]: { url: string; count: number; lastUsed: number } } {
-    const obj = JSON.parse(raw);
-    if (typeof obj !== 'object' || obj === null) return {};
-    return obj as { [resolved: string]: { url: string; count: number; lastUsed: number } };
-  },
-};
+const MappingArraySchema = z.array(AddressMappingSchema);
+
+const FreqEntrySchema = z.object({
+  url: z.string(),
+  count: z.number(),
+  lastUsed: z.number(),
+});
+
+const FreqMapSchema = z.record(z.string(), FreqEntrySchema);
 
 export class AddressCache {
   constructor(private redis: RedisLike) {}
@@ -77,7 +77,7 @@ export class AddressCache {
     try {
       const key = MAPPINGS_KEY(userId);
       const raw = await this.redis.get(key);
-      const mappings = raw ? MappingArraySchema.parse(raw) : [];
+      const mappings = raw ? MappingArraySchema.parse(JSON.parse(raw)) : [];
 
       const normalized = this.normalize(input);
       const existing = mappings.findIndex((m) => this.normalize(m.input) === normalized);
@@ -115,7 +115,7 @@ export class AddressCache {
   private async incrementFrequency(userId: number, resolvedAddress: string, googleMapsUrl: string): Promise<void> {
     const key = FREQ_KEY(userId);
     const raw = await this.redis.get(key);
-    const freq = raw ? FreqMapSchema.parse(raw) : {};
+    const freq = raw ? FreqMapSchema.parse(JSON.parse(raw)) : {};
 
     const entry = freq[resolvedAddress] ?? { url: googleMapsUrl, count: 0, lastUsed: 0 };
     entry.count += 1;
@@ -133,7 +133,7 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return null;
 
-      const mappings = MappingArraySchema.parse(raw);
+      const mappings = MappingArraySchema.parse(JSON.parse(raw));
       const normalized = this.normalize(input);
 
       // Exact normalized match
@@ -174,7 +174,7 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return [];
 
-      const mappings = MappingArraySchema.parse(raw);
+      const mappings = MappingArraySchema.parse(JSON.parse(raw));
       return mappings.sort((a, b) => b.timestamp - a.timestamp).slice(0, limit);
     } catch (err) {
       logger.warn({ err, userId }, 'Failed to get recent mappings');
@@ -189,7 +189,7 @@ export class AddressCache {
       const raw = await this.redis.get(key);
       if (!raw) return [];
 
-      const freq = FreqMapSchema.parse(raw);
+      const freq = FreqMapSchema.parse(JSON.parse(raw));
       return Object.entries(freq)
         .map(([address, data]) => ({
           resolvedAddress: address,

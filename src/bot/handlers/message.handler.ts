@@ -198,8 +198,43 @@ export interface MessageHandlerDeps {
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
 
-/** Temporary store for geo coordinates when asking user about location purpose */
-export const pendingGeoLocations = new Map<number, { latitude: number; longitude: number; timestamp: number }>();
+/** Temporary store for geo coordinates when asking user about location purpose. Auto-expires after 30 min. */
+const GEO_TTL_MS = 30 * 60 * 1000;
+
+class PendingGeoStore {
+  private store = new Map<number, { latitude: number; longitude: number; timestamp: number }>();
+
+  set(userId: number, data: { latitude: number; longitude: number }): void {
+    this.store.set(userId, { ...data, timestamp: Date.now() });
+  }
+
+  get(userId: number): { latitude: number; longitude: number } | null {
+    const entry = this.store.get(userId);
+    if (!entry) return null;
+    if (Date.now() - entry.timestamp > GEO_TTL_MS) {
+      this.store.delete(userId);
+      return null;
+    }
+    return entry;
+  }
+
+  delete(userId: number): void {
+    this.store.delete(userId);
+  }
+
+  /** Remove expired entries. Called periodically. */
+  cleanup(): void {
+    const now = Date.now();
+    for (const [userId, entry] of this.store) {
+      if (now - entry.timestamp > GEO_TTL_MS) this.store.delete(userId);
+    }
+  }
+}
+
+export const pendingGeoLocations = new PendingGeoStore();
+
+// Cleanup expired geo entries every 10 minutes
+setInterval(() => pendingGeoLocations.cleanup(), 10 * 60 * 1000);
 
 const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
 
@@ -1086,17 +1121,17 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       if (hasRecentUnverifiedEvent && deps.locationVerification) {
         // Ask if this location is for the recent event
         const kb = new InlineKeyboard()
-          .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_PICK}:geo:${latestEvent.id}`)
+          .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_GEO}:geo:${latestEvent.id}`)
           .row()
-          .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_PICK}:city:${latitude}:${longitude}`)
+          .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_GEO}:city:${latitude}:${longitude}`)
           .row()
-          .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_PICK}:other:${latitude}:${longitude}`);
+          .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_GEO}:other:${latitude}:${longitude}`);
         await ctx.send(msgs.aiTools.location.geoForEvent(latestEvent.title), {
           parse_mode: 'HTML',
           reply_markup: kb,
         });
         // Store coordinates temporarily for callback handler
-        pendingGeoLocations.set(user.telegram_id, { latitude, longitude, timestamp: Date.now() });
+        pendingGeoLocations.set(user.telegram_id, { latitude, longitude });
         return;
       }
 
