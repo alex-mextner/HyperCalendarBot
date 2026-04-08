@@ -4,6 +4,7 @@ import { type Lang, t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
+import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import type { GoogleCalendarApi } from './calendar-api.ts';
@@ -254,6 +255,112 @@ export class SyncService {
     // TypeScript loses track of the mutable variable after the transaction closure; reassert the type.
     const notify = conflictNotification as (() => Promise<void>) | null;
     if (notify) await notify();
+  }
+
+  async pushParticipantEvent(
+    api: GoogleCalendarApi,
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+    participantSyncRepo: ParticipantGoogleSyncRepository,
+  ): Promise<void> {
+    if (action === 'delete') {
+      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+      if (!syncRecord?.google_event_id) {
+        participantSyncRepo.delete(participantUserId, eventId);
+        return;
+      }
+      try {
+        await api.deleteEvent(syncRecord.google_calendar_id, syncRecord.google_event_id);
+      } catch (err) {
+        const code = (err as { code?: number }).code;
+        if (code !== 404 && code !== 410) throw err;
+        // Event already gone from Google — proceed with local cleanup
+      }
+      participantSyncRepo.delete(participantUserId, eventId);
+      this.syncRepo.logSync({
+        user_id: participantUserId,
+        event_id: eventId,
+        google_event_id: syncRecord.google_event_id,
+        direction: 'push',
+        action: 'delete',
+        details: 'participant_sync',
+      });
+      return;
+    }
+
+    const event = this.eventRepo.findByIdUnfiltered(eventId);
+    if (!event) return;
+
+    const calendarId = 'primary';
+    const gEvent = localToGoogle(event);
+
+    if (action === 'create') {
+      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+      if (syncRecord?.google_event_id) {
+        // Already pushed — treat as update
+        const updated = await api.updateEvent(calendarId, syncRecord.google_event_id, gEvent);
+        participantSyncRepo.updateSyncFields(participantUserId, eventId, {
+          google_etag: updated.etag ?? undefined,
+          sync_status: 'synced',
+          last_synced_at: new Date().toISOString(),
+        });
+      } else {
+        const created = await api.insertEvent(calendarId, gEvent);
+        participantSyncRepo.upsert(participantUserId, eventId, {
+          google_event_id: created.id,
+          google_calendar_id: calendarId,
+          google_etag: created.etag,
+          sync_status: 'synced',
+          last_synced_at: new Date().toISOString(),
+        });
+      }
+      this.syncRepo.logSync({
+        user_id: participantUserId,
+        event_id: eventId,
+        direction: 'push',
+        action: 'create',
+        details: 'participant_sync',
+      });
+    } else {
+      // update
+      const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
+      if (!syncRecord?.google_event_id) {
+        // Never pushed — create instead
+        const created = await api.insertEvent(calendarId, gEvent);
+        participantSyncRepo.upsert(participantUserId, eventId, {
+          google_event_id: created.id,
+          google_calendar_id: calendarId,
+          google_etag: created.etag,
+          sync_status: 'synced',
+          last_synced_at: new Date().toISOString(),
+        });
+        this.syncRepo.logSync({
+          user_id: participantUserId,
+          event_id: eventId,
+          direction: 'push',
+          action: 'create',
+          details: 'participant_sync',
+        });
+      } else {
+        const updated = await api.updateEvent(calendarId, syncRecord.google_event_id, gEvent);
+        participantSyncRepo.updateSyncFields(participantUserId, eventId, {
+          google_etag: updated.etag ?? undefined,
+          sync_status: 'synced',
+          last_synced_at: new Date().toISOString(),
+        });
+        this.syncRepo.logSync({
+          user_id: participantUserId,
+          event_id: eventId,
+          google_event_id: syncRecord.google_event_id,
+          direction: 'push',
+          action: 'update',
+          details: 'participant_sync',
+        });
+      }
+    }
+
+    syncLogger.info({ participantUserId, eventId, action }, 'Participant event synced to Google');
   }
 
   async setupWatchChannel(

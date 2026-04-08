@@ -105,6 +105,9 @@ let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleRedisClient: Bun.RedisClient | undefined;
+let participantPushSchedulerRef:
+  | ((participantUserId: number, eventId: number, action: 'create' | 'update' | 'delete') => Promise<void>)
+  | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
@@ -113,7 +116,7 @@ let mtprotoResolveUsername:
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
-  const { createPushScheduler } = await import('./services/google/push-scheduler.ts');
+  const { createPushScheduler, createParticipantPushScheduler } = await import('./services/google/push-scheduler.ts');
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
@@ -146,6 +149,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     eventRepo: db.events,
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
+    participantSyncRepo: db.participantGoogleSync,
     getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
@@ -178,6 +182,8 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   const pushScheduler = createPushScheduler(db.googleSync, db.events, queue);
+  const participantPushScheduler = createParticipantPushScheduler(db.googleSync, db.participantGoogleSync, queue);
+  participantPushSchedulerRef = participantPushScheduler;
 
   const disconnectDeps: DisconnectDeps = {
     config,
@@ -198,6 +204,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     calendarRepo: db.googleCalendars,
     syncRepo: db.googleSync,
     schedulePush: pushScheduler,
+    scheduleParticipantPush: participantPushScheduler,
     triggerSync: async (userId: number) => {
       await queue.add('pull-sync', { type: 'pull-sync', userId, trigger: 'manual' });
     },
@@ -701,6 +708,32 @@ if (config.REDIS_URL) {
 }
 
 const domainEventBus = new DomainEventBus();
+
+// Participant Google Sync — push accepted invitation events to invitee's Google Calendar
+if (participantPushSchedulerRef) {
+  const schedParticipant = participantPushSchedulerRef;
+  domainEventBus.on('myInvitations.accepted', ({ inviteeId, event }) => {
+    schedParticipant(inviteeId, event.id, 'create').catch((err) =>
+      botLogger.error({ err, inviteeId, eventId: event.id }, 'Failed to schedule participant Google push'),
+    );
+  });
+  domainEventBus.on('myInvitations.rejected', ({ inviteeId, event }) => {
+    schedParticipant(inviteeId, event.id, 'delete').catch((err) =>
+      botLogger.error({ err, inviteeId, eventId: event.id }, 'Failed to schedule participant Google delete'),
+    );
+  });
+  domainEventBus.on('myGroup.newEvent', ({ groupChatId, newEvent }) => {
+    const members = db.groupMembers.getActiveMembers(groupChatId);
+    for (const member of members) {
+      schedParticipant(member.user_id, newEvent.id, 'create').catch((err) =>
+        botLogger.error(
+          { err, userId: member.user_id, eventId: newEvent.id },
+          'Failed to schedule group event Google push',
+        ),
+      );
+    }
+  });
+}
 
 const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
   createBot(

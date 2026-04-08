@@ -379,6 +379,32 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       .catch((err) => logger.error({ err }, 'schedulePush failed'));
   }
 
+  // Push update to all accepted participants' Google Calendars
+  if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
+    const participants = ctx.participantRepo
+      .getByEvent(event_id)
+      .filter((p) => p.status === 'accepted' && p.user_id !== userId);
+    for (const p of participants) {
+      ctx.google
+        .scheduleParticipantPush(p.user_id, updated.id, 'update')
+        .catch((err) =>
+          logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed'),
+        );
+    }
+  }
+
+  // Push update to all group members' Google Calendars
+  if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
+    ctx.group.groupMemberRepo
+      .getActiveMembers(ctx.groupChatId!)
+      .filter((m) => m.user_id !== ctx.user.telegram_id)
+      .forEach((m) => {
+        ctx.google!.scheduleParticipantPush!(m.user_id, updated.id, 'update').catch((err) =>
+          logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed'),
+        );
+      });
+  }
+
   let conflictHint: string | undefined;
   if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
     const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
@@ -438,6 +464,19 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     if (!event) {
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
+    // Remove from all group members' Google Calendars before deleting
+    if (ctx.google?.scheduleParticipantPush && ctx.group) {
+      for (const m of ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!)) {
+        ctx.google
+          .scheduleParticipantPush(m.user_id, input.event_id, 'delete')
+          .catch((err) =>
+            logger.error(
+              { err, userId: m.user_id, eventId: input.event_id },
+              'scheduleParticipantPush group delete failed',
+            ),
+          );
+      }
+    }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
     return {
       success: true,
@@ -452,12 +491,35 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     const participant = ctx.participantRepo.findByEventAndUser(input.event_id, userId);
     if (participant && participant.status === 'accepted') {
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
+      // Remove from this participant's Google Calendar
+      ctx.google
+        ?.scheduleParticipantPush?.(userId, input.event_id, 'delete')
+        .catch((err) =>
+          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed'),
+        );
       return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
     }
   }
 
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  // Remove from all participants' Google Calendars before deleting
+  if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
+    const participants = ctx.participantRepo
+      .getByEvent(input.event_id)
+      .filter((p) => p.status === 'accepted' && p.user_id !== userId);
+    for (const p of participants) {
+      ctx.google
+        .scheduleParticipantPush(p.user_id, input.event_id, 'delete')
+        .catch((err) =>
+          logger.error(
+            { err, participantUserId: p.user_id, eventId: input.event_id },
+            'scheduleParticipantPush delete failed',
+          ),
+        );
+    }
   }
 
   const googleEventId = event.google_event_id ?? undefined;

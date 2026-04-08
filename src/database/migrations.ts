@@ -928,4 +928,30 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '051_participant_google_sync',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS participant_google_sync (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          event_id INTEGER NOT NULL,
+          google_event_id TEXT,
+          google_calendar_id TEXT NOT NULL DEFAULT 'primary',
+          google_etag TEXT,
+          sync_status TEXT NOT NULL DEFAULT 'pending_push',
+          last_synced_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(user_id, event_id),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_part_gsync_user_status
+          ON participant_google_sync(user_id, sync_status);
+        CREATE INDEX IF NOT EXISTS idx_part_gsync_event
+          ON participant_google_sync(event_id);
+      `);
+    },
+  },
 ];

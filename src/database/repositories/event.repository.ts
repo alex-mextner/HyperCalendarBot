@@ -59,6 +59,11 @@ export class EventRepository {
     return this.findById(id, data.user_id)!;
   }
 
+  /** Load event by ID without ownership checks. For internal service use only (sync workers, etc.). */
+  findByIdUnfiltered(id: number): CalendarEvent | null {
+    return this.db.prepare('SELECT * FROM events WHERE id = ? AND is_cancelled = 0').get(id) as CalendarEvent | null;
+  }
+
   findById(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(
