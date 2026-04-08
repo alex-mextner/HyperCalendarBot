@@ -181,8 +181,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
   Don't refactor surroundings "while you're at it".
 - **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
-- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
-  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `object` type** — neither as a standalone type nor as a generic parameter (e.g. `Bun.Server<object>`).
+  Use a specific interface, `{ [key: string]: unknown }`, or the correct generic argument.
+  `object` accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
 - **No `Record<string, unknown>`** — this utility type alias is entirely banned:
   - Known shape at compile time → specific interface or Zod-inferred type
   - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
@@ -192,8 +193,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
   fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
   The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
-- **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
-  There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **No `as unknown as ConcreteType`** — absolute ban, no exceptions. This double cast bypasses all
+  TypeScript checks. If you think you need it, the types are wrong — fix them. GramIO `.derive()`
+  types flow through `.on()` handlers; `Bun.serve()` accepts split branches without casts.
 - **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
   It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
 - **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test
