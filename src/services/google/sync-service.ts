@@ -18,6 +18,7 @@ export class SyncService {
     private calendarRepo: GoogleCalendarRepository,
     private notifyUser?: (userId: number, message: string) => Promise<void>,
     private getUserLang?: (userId: number) => Lang,
+    private participantSyncRepo?: ParticipantGoogleSyncRepository,
   ) {}
 
   async initialSync(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<number> {
@@ -262,8 +263,10 @@ export class SyncService {
     participantUserId: number,
     eventId: number,
     action: 'create' | 'update' | 'delete',
-    participantSyncRepo: ParticipantGoogleSyncRepository,
+    participantSyncRepoOverride?: ParticipantGoogleSyncRepository,
   ): Promise<void> {
+    const participantSyncRepo = participantSyncRepoOverride ?? this.participantSyncRepo;
+    if (!participantSyncRepo) throw new Error('participantSyncRepo required for pushParticipantEvent');
     if (action === 'delete') {
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
       if (!syncRecord?.google_event_id) {

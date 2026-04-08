@@ -78,11 +78,15 @@ export function createParticipantPushScheduler(
       }
     }
 
-    await queue.add('push-participant-event', {
-      type: 'push-participant-event',
-      userId: participantUserId,
-      eventId,
-      action,
-    });
+    await queue.add(
+      'push-participant-event',
+      {
+        type: 'push-participant-event',
+        userId: participantUserId,
+        eventId,
+        action,
+      },
+      { jobId: `part-sync-${participantUserId}-${eventId}-${action}` },
+    );
   };
 }

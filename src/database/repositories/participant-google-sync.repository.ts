@@ -56,6 +56,13 @@ export class ParticipantGoogleSyncRepository {
       .all(userId) as ParticipantGoogleSync[];
   }
 
+  private static readonly ALLOWED_SYNC_FIELDS = new Set([
+    'google_event_id',
+    'google_etag',
+    'sync_status',
+    'last_synced_at',
+  ]);
+
   updateSyncFields(
     userId: number,
     eventId: number,
@@ -70,6 +77,7 @@ export class ParticipantGoogleSyncRepository {
     const values: (string | number)[] = [];
     for (const [k, v] of Object.entries(data)) {
       if (v !== undefined) {
+        if (!ParticipantGoogleSyncRepository.ALLOWED_SYNC_FIELDS.has(k)) throw new Error(`Unknown sync field: ${k}`);
         fields.push(`${k} = ?`);
         values.push(v);
       }

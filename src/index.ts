@@ -192,6 +192,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     eventRepo: db.events,
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
+    participantSyncRepo: db.participantGoogleSync,
     stopWatchChannels: async (userId) => {
       await queue.add('stop-watch', { type: 'stop-watch', userId });
     },

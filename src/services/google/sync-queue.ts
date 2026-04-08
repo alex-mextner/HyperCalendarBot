@@ -73,7 +73,15 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
 
   const syncService =
     deps.syncService ??
-    new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage, deps.getUserLang);
+    new SyncService(
+      deps.db,
+      deps.eventRepo,
+      deps.syncRepo,
+      deps.calendarRepo,
+      deps.sendMessage,
+      deps.getUserLang,
+      deps.participantSyncRepo,
+    );
 
   const worker = new Worker<GoogleSyncJobData>(
     'google-sync',
@@ -144,8 +152,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         }
         case 'push-participant-event': {
           if (!eventId || !action) throw new Error('eventId and action required for push-participant-event');
-          if (!deps.participantSyncRepo) throw new Error('participantSyncRepo required for push-participant-event');
-          await syncService.pushParticipantEvent(api, userId, eventId, action, deps.participantSyncRepo);
+          await syncService.pushParticipantEvent(api, userId, eventId, action);
           break;
         }
         case 'refresh-calendars': {
