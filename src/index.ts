@@ -713,12 +713,14 @@ let locationVerification:
   | import('./services/location/location-verification-service.ts').LocationVerificationService
   | undefined;
 let addressCache: import('./services/location/address-cache.ts').AddressCache | undefined;
+let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingGeoStore | undefined;
 
 if (config.GOOGLE_API_KEY && config.REDIS_URL) {
   const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
   const { AddressCache } = await import('./services/location/address-cache.ts');
   const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
   const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
+  const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
 
   const locationRedis = new Bun.RedisClient(config.REDIS_URL);
   const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
@@ -752,6 +754,13 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
         botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
       });
     },
+  });
+
+  pendingGeoStore = new RedisPendingGeoStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
   });
 
   botLogger.info('Location verification initialized (Google Maps + Redis)');
@@ -793,6 +802,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       nliClassifier,
       locationVerification,
       addressCache,
+      pendingGeoStore,
       envConfig: {
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,

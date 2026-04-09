@@ -129,6 +129,7 @@ export interface CreateBotOpts {
   nliClassifier?: import('../services/nli/nli-classifier.ts').NliClassifier;
   locationVerification?: import('../services/location/location-verification-service.ts').LocationVerificationService;
   addressCache?: import('../services/location/address-cache.ts').AddressCache;
+  pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
     | 'BOT_ADMIN_ID'
@@ -159,6 +160,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     envConfig,
     locationVerification,
     addressCache,
+    pendingGeoStore,
     weatherService,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
@@ -416,6 +418,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     scenePauseService,
     locationVerification,
     addressCache,
+    pendingGeoStore,
   };
 
   // AI Assistant commands (not in setMyCommands — internal use only)
@@ -793,6 +796,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           scenePauseService,
         },
         locationVerification,
+        pendingGeoStore,
         weatherService,
       })(ctx);
     })

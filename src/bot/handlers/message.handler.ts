@@ -192,49 +192,12 @@ export interface MessageHandlerDeps {
   onboardingScene?: AnyScene;
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
   addressCache?: import('../../services/location/address-cache.ts').AddressCache;
+  pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
 // Step indices are owned by each scene and imported here to avoid duplication.
 export const CALLBACK_ONLY_STEPS = new Map<string, Set<number>>([['add_event', CALLBACK_ONLY_STEP_INDICES]]);
-
-/** Temporary store for geo coordinates when asking user about location purpose. Auto-expires after 30 min. */
-const GEO_TTL_MS = 30 * 60 * 1000;
-
-class PendingGeoStore {
-  private store = new Map<number, { latitude: number; longitude: number; timestamp: number }>();
-
-  set(userId: number, data: { latitude: number; longitude: number }): void {
-    this.store.set(userId, { ...data, timestamp: Date.now() });
-  }
-
-  get(userId: number): { latitude: number; longitude: number } | null {
-    const entry = this.store.get(userId);
-    if (!entry) return null;
-    if (Date.now() - entry.timestamp > GEO_TTL_MS) {
-      this.store.delete(userId);
-      return null;
-    }
-    return entry;
-  }
-
-  delete(userId: number): void {
-    this.store.delete(userId);
-  }
-
-  /** Remove expired entries. Called periodically. */
-  cleanup(): void {
-    const now = Date.now();
-    for (const [userId, entry] of this.store) {
-      if (now - entry.timestamp > GEO_TTL_MS) this.store.delete(userId);
-    }
-  }
-}
-
-export const pendingGeoLocations = new PendingGeoStore();
-
-// Cleanup expired geo entries every 10 minutes
-setInterval(() => pendingGeoLocations.cleanup(), 10 * 60 * 1000);
 
 const SceneStepCodec = jsonCodec(z.object({ name: z.string().optional(), step: z.number().optional() }));
 
@@ -1118,7 +1081,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         !latestEvent.location_verified &&
         Date.now() - new Date(latestEvent.created_at).getTime() < 30 * 60 * 1000; // within 30 min
 
-      if (hasRecentUnverifiedEvent && deps.locationVerification) {
+      if (hasRecentUnverifiedEvent && deps.locationVerification && deps.pendingGeoStore) {
         // Ask if this location is for the recent event
         const kb = new InlineKeyboard()
           .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_GEO}:geo:${latestEvent.id}`)
@@ -1130,8 +1093,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           parse_mode: 'HTML',
           reply_markup: kb,
         });
-        // Store coordinates temporarily for callback handler
-        pendingGeoLocations.set(user.telegram_id, { latitude, longitude });
+        // Store coordinates in Redis for callback handler
+        await deps.pendingGeoStore.set(user.telegram_id, { latitude, longitude });
         return;
       }
 

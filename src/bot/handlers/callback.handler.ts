@@ -152,6 +152,7 @@ export interface CallbackHandlerOpts {
   };
   triggerSync?: (userId: number) => Promise<void>;
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
   weatherService?: WeatherService;
 }
 
@@ -197,6 +198,7 @@ export function createCallbackHandler(
     scenePauseDeps,
     triggerSync,
     locationVerification,
+    pendingGeoStore,
     weatherService,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
@@ -1193,7 +1195,7 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
     const msgs = t(lang);
 
-    if (!locationVerification || !userRepo) return;
+    if (!locationVerification || !userRepo || !pendingGeoStore) return;
 
     const action = parts[1]; // 'geo', 'city', 'other'
 
@@ -1201,8 +1203,7 @@ export function createCallbackHandler(
       const eventId = Number.parseInt(parts[2] ?? '', 10);
       if (Number.isNaN(eventId)) return;
 
-      const { pendingGeoLocations } = await import('./message.handler.ts');
-      const geo = pendingGeoLocations.get(user.telegram_id);
+      const geo = await pendingGeoStore.get(user.telegram_id);
       if (!geo) {
         await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
         return;
@@ -1214,7 +1215,7 @@ export function createCallbackHandler(
         geo.longitude,
         user.telegram_id,
       );
-      pendingGeoLocations.delete(user.telegram_id);
+      await pendingGeoStore.delete(user.telegram_id);
 
       if (success) {
         const event = eventRepo?.findById(eventId, user.telegram_id);
@@ -1231,8 +1232,7 @@ export function createCallbackHandler(
       const lng = Number.parseFloat(parts[3] ?? '');
       if (Number.isNaN(lat) || Number.isNaN(lng)) return;
 
-      const { pendingGeoLocations } = await import('./message.handler.ts');
-      pendingGeoLocations.delete(user.telegram_id);
+      await pendingGeoStore.delete(user.telegram_id);
 
       const tz = resolveTimezone(lat, lng);
       const offset = formatUtcOffset(tz);
@@ -1250,8 +1250,7 @@ export function createCallbackHandler(
         { reply_markup: undefined },
       );
     } else if (action === 'other') {
-      const { pendingGeoLocations } = await import('./message.handler.ts');
-      pendingGeoLocations.delete(user.telegram_id);
+      await pendingGeoStore.delete(user.telegram_id);
       await ctx.editText(msgs.aiTools.location.geoExplain, { reply_markup: undefined });
     }
   });
