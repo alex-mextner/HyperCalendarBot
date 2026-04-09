@@ -59,6 +59,45 @@ export class EventRepository {
     return this.findById(id, data.user_id)!;
   }
 
+  /** Load event by ID without ownership checks. For internal service use only (sync workers, etc.). */
+  findByIdUnfiltered(
+    id: number,
+  ): Pick<
+    CalendarEvent,
+    | 'id'
+    | 'title'
+    | 'description'
+    | 'start_at'
+    | 'end_at'
+    | 'all_day'
+    | 'timezone'
+    | 'location'
+    | 'recurrence_rule'
+    | 'reminder_overrides'
+    | 'sync_version'
+  > | null {
+    return this.db
+      .prepare(
+        `SELECT id, title, description, start_at, end_at, all_day, timezone, location,
+                recurrence_rule, reminder_overrides, sync_version
+         FROM events WHERE id = ? AND is_cancelled = 0`,
+      )
+      .get(id) as Pick<
+      CalendarEvent,
+      | 'id'
+      | 'title'
+      | 'description'
+      | 'start_at'
+      | 'end_at'
+      | 'all_day'
+      | 'timezone'
+      | 'location'
+      | 'recurrence_rule'
+      | 'reminder_overrides'
+      | 'sync_version'
+    > | null;
+  }
+
   findById(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(

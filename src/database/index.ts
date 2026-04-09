@@ -27,6 +27,7 @@ import { InvitationRepository } from './repositories/invitation.repository.ts';
 import { NotificationLogRepository } from './repositories/notification-log.repository.ts';
 import { NotificationPreferencesRepository } from './repositories/notification-preferences.repository.ts';
 import { ParticipantRepository } from './repositories/participant.repository.ts';
+import { ParticipantGoogleSyncRepository } from './repositories/participant-google-sync.repository.ts';
 import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
@@ -66,6 +67,7 @@ export class DatabaseService {
   readonly actionLog: ActionLogRepository;
   readonly alerts: AlertRepository;
   readonly featureUsage: FeatureUsageRepository;
+  readonly participantGoogleSync: ParticipantGoogleSyncRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -111,6 +113,7 @@ export class DatabaseService {
     this.actionLog = new ActionLogRepository(this.db);
     this.alerts = new AlertRepository(this.db);
     this.featureUsage = new FeatureUsageRepository(this.db);
+    this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);
   }
 
   close(): void {

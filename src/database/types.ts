@@ -179,6 +179,21 @@ export interface SyncLogEntry {
   created_at: string;
 }
 
+// ── Participant Google Sync ──
+
+export interface ParticipantGoogleSync {
+  id: number;
+  user_id: number;
+  event_id: number;
+  google_event_id: string | null;
+  google_calendar_id: string;
+  google_etag: string | null;
+  sync_status: SyncStatus;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Computed types ──
 
 export interface EventOccurrence {

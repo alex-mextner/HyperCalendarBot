@@ -93,6 +93,11 @@ export interface GoogleCapability {
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
   ) => Promise<void>;
+  scheduleParticipantPush?: (
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+  ) => Promise<void>;
 }
 
 export interface NotificationsCapability {

@@ -101,6 +101,11 @@ export interface GoogleBotDeps {
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
   ) => Promise<void>;
+  scheduleParticipantPush?: (
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+  ) => Promise<void>;
   triggerSync?: (userId: number) => Promise<void>;
 }
 
@@ -318,6 +323,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
     googleSchedulePush: googleDeps?.schedulePush,
+    googleScheduleParticipantPush: googleDeps?.scheduleParticipantPush,
     deepLinkService,
     sceneStorage: scenesSetup.storage,
     botUsername: envConfig?.BOT_USERNAME,
