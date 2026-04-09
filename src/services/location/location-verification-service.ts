@@ -1,5 +1,6 @@
 // src/services/location/location-verification-service.ts
-import type { Database } from 'bun:sqlite';
+
+import { t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
@@ -18,7 +19,6 @@ export interface LocationVerificationDeps {
   eventRepo: EventRepository;
   userRepo: UserRepository;
   invitationRepo: InvitationRepository;
-  db: Database;
   /** Temporary store for location candidates (Redis-backed with TTL) */
   candidateStore: LocationCandidateStore;
   /** Callback to send a message to a user (for confirmation/clarification) */
@@ -221,9 +221,7 @@ export class LocationVerificationService {
   }
 
   private async askUserToChoose(event: CalendarEvent, user: User, candidates: GeocodedLocation[]): Promise<void> {
-    const lang = user.language;
-    const header =
-      lang === 'ru' ? `📍 Уточни адрес для «${event.title}»:` : `📍 Clarify the address for "${event.title}":`;
+    const header = t(user.language).aiTools.location.clarifyAddress(event.title);
 
     const limited = candidates.slice(0, 5);
     const options = limited.map((c, i) => `${i + 1}. ${c.formattedAddress}`);

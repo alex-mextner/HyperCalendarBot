@@ -73,17 +73,16 @@ if (config.AGENT_JWT_SECRET) {
 
 // Mutable ref — patched after bot creation
 const botRef: {
-  sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
-  sendMessageFull: (
-    userId: number,
+  sendMessage: (
+    telegramId: number,
     text: string,
-    options?: { parse_mode?: string; reply_markup?: unknown },
-  ) => Promise<void>;
+    parseMode?: string,
+    replyMarkup?: unknown,
+  ) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
   editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
-  sendMessageFull: async () => {},
   sendVoice: async () => {},
   editMessage: async () => {},
 };
@@ -742,10 +741,9 @@ if (config.GOOGLE_API_KEY && config.REDIS_URL) {
     eventRepo: db.events,
     userRepo: db.users,
     invitationRepo: db.invitations,
-    db: db.db,
     candidateStore,
     sendMessage: async (userId, text, options) => {
-      await botRef.sendMessageFull(userId, text, options).catch((err: unknown) => {
+      await botRef.sendMessage(userId, text, options?.parse_mode, options?.reply_markup).catch((err: unknown) => {
         botLogger.error({ err, userId }, 'Location verification: failed to send message');
       });
     },
@@ -816,13 +814,21 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   );
 
 // Patch bot ref to use real bot API
-botRef.sendMessage = async (telegramId, text, parseMode) => {
-  const msg = await bot.api.sendMessage({
+botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
+  const params = {
     chat_id: telegramId,
     text,
     ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
-  });
-  return { message_id: msg.message_id };
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  };
+  const msg = replyMarkup
+    ? await bot.api.sendMessage(params as Parameters<typeof bot.api.sendMessage>[0])
+    : await bot.api.sendMessage({
+        chat_id: telegramId,
+        text,
+        ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+      });
+  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
@@ -835,16 +841,6 @@ botRef.editMessage = async (chatId, messageId, text, parseMode) => {
 botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
-};
-
-// Patch location send to use full bot API (supports reply_markup for candidate selection)
-botRef.sendMessageFull = async (userId, text, options) => {
-  await bot.api.sendMessage({
-    chat_id: userId,
-    text,
-    ...(options?.parse_mode ? { parse_mode: options.parse_mode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
-    ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
-  } as Parameters<typeof bot.api.sendMessage>[0]);
 };
 
 // Scheduled AI calls + trigger system — requires Redis for BullMQ
