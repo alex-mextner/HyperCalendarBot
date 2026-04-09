@@ -59,7 +59,7 @@ describe('handleWeek', () => {
     const { handleWeek } = await import('../../../src/bot/commands/week.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
-    const renderService = { render: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
     await handleWeek(ctx as never, svc as never, undefined, renderService as never);
 
