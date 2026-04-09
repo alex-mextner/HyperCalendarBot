@@ -78,8 +78,8 @@ import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
-import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
+import { createInlineHandler } from './handlers/inline.handler.ts';
+import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -87,7 +87,6 @@ import { createUserResolver, createUserResolverComposer } from './middleware/use
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
-import type { BotCallbackContext } from './types.ts';
 
 export interface GoogleBotDeps {
   oauthService: GoogleOAuthService;
@@ -139,6 +138,7 @@ export interface CreateBotOpts {
     | 'INLINE_BOT_TOKEN'
     | 'AI_FAST_MODEL'
   >;
+  weatherService?: import('../services/weather/weather-service.ts').WeatherService;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -159,6 +159,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     envConfig,
     locationVerification,
     addressCache,
+    weatherService,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -298,7 +299,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as unknown as NonNullable<MessageHandlerDeps['callSettingsRepo']>,
+    callSettingsRepo: db.callSettings,
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -792,7 +793,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           scenePauseService,
         },
         locationVerification,
-      })(ctx as unknown as BotCallbackContext);
+        weatherService,
+      })(ctx);
     })
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>
@@ -1029,17 +1031,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     inlineBot = new Bot(inlineBotToken);
     inlineBot
       .derive(createUserResolver(db))
-      .on('inline_query', (ctx) =>
-        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
-      )
+      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx))
       .onError(({ error }) => {
         botLogger.error({ err: error }, 'Inline bot error');
       });
   } else {
     // No separate inline bot — register on main bot
-    bot.on('inline_query', (ctx) =>
-      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
-    );
+    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx));
   }
 
   return {

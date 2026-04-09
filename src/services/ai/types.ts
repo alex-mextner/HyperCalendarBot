@@ -259,6 +259,7 @@ export interface AgentConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+  validationModel?: string;
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
   fallback?: {
     model: string;

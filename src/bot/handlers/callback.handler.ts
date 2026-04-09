@@ -44,6 +44,8 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
+import { formatDayWeatherLine } from '../../services/weather/format.ts';
+import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
@@ -59,7 +61,6 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import type { CtxWithChat } from '../group-context.ts';
 import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
@@ -151,6 +152,7 @@ export interface CallbackHandlerOpts {
   };
   triggerSync?: (userId: number) => Promise<void>;
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  weatherService?: WeatherService;
 }
 
 /**
@@ -195,6 +197,7 @@ export function createCallbackHandler(
     scenePauseDeps,
     triggerSync,
     locationVerification,
+    weatherService,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
 
@@ -469,7 +472,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -545,7 +548,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -736,7 +739,25 @@ export function createCallbackHandler(
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
       const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
+
+      // Append weather forecast if available and event is within 7 days
+      let weatherLine = '';
+      if (weatherService && event && subAction === 'accept') {
+        const eventMs = new Date(event.start_at).getTime();
+        const daysAhead = (eventMs - Date.now()) / (24 * 60 * 60 * 1000);
+        if (daysAhead >= 0 && daysAhead <= 7) {
+          const forecast = await weatherService.getWeekWeather(user.timezone, lang).catch(() => null);
+          if (forecast) {
+            const eventDate = event.start_at.slice(0, 10);
+            const dayForecast = forecast.days.find((d) => d.date === eventDate);
+            if (dayForecast) {
+              weatherLine = `\n${formatDayWeatherLine(lang, dayForecast)}`;
+            }
+          }
+        }
+      }
+
+      const editText = eventCard ? `${statusLabel}\n\n${eventCard}${weatherLine}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -828,7 +849,7 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
 
     // In groups, only the user who triggered the question can answer
-    const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+    const clickerId = ctx.from.id;
     if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
       await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
       return;
@@ -836,9 +857,7 @@ export function createCallbackHandler(
 
     await ctx.answer();
     await ctx.editText(`✅ ${answerText}`);
-    const cbChatId =
-      (ctx as unknown as { chat?: { id: number } }).chat?.id ??
-      (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
+    const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
       onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
         cmdLogger.error({ err: e }, 'AI button continuation failed');
@@ -1123,10 +1142,13 @@ export function createCallbackHandler(
         await ctx.answer(t(lang).callbackErrors.unavailable);
         return;
       }
-      const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
-      const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
+      if (!ctx.message || !ctx.chatId) {
+        cmdLogger.warn({ userId: user.telegram_id }, 'settings change_tz: missing message or chatId');
+        await ctx.answer();
+        return;
+      }
       await ctx.answer();
-      await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
+      await ctx.scene.enter(timezoneScene, { settingsMsgId: ctx.message.id, settingsChatId: ctx.chatId });
       return;
     }
     return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);
@@ -1270,7 +1292,7 @@ export function createCallbackHandler(
   // Group settings: timezone picker
   dispatch.set(CB.GROUP_SETTINGS_TZ, async (ctx, payload, _parts, user) => {
     if (!groupRepo) return;
-    const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+    const chatId = ctx.chatId ?? null;
     if (!chatId) {
       await ctx.answer();
       return;
@@ -1419,7 +1441,7 @@ export function createCallbackHandler(
     intentDeps.intentRepo.updateStatus(intentId, 'approved');
     intentDeps.intentMatcher?.reload();
     await ctx.answer(t(lang).callbackErrors.intentApproved);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
   });
 
@@ -1434,7 +1456,7 @@ export function createCallbackHandler(
     }
     intentDeps.intentRepo.updateStatus(intentId, 'rejected');
     await ctx.answer(t(lang).callbackErrors.intentRejected);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
   });
 

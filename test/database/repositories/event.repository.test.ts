@@ -624,6 +624,77 @@ describe('EventRepository', () => {
     });
   });
 
+  describe('search includes accepted participant events', () => {
+    const OWNER_ID = USER_ID;
+    const PARTICIPANT_ID = 456;
+
+    beforeEach(() => {
+      new UserRepository(db).create({ telegram_id: PARTICIPANT_ID });
+    });
+
+    function addParticipant(eventId: number, userId: number, status: string) {
+      db.prepare('INSERT INTO event_participants (event_id, user_id, status) VALUES (?, ?, ?)').run(
+        eventId,
+        userId,
+        status,
+      );
+    }
+
+    test('searchWithEventType finds events where user is an accepted participant', () => {
+      const event = events.create({
+        user_id: OWNER_ID,
+        title: 'Team Planning',
+        start_at: '2026-05-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      addParticipant(event.id, PARTICIPANT_ID, 'accepted');
+
+      const results = events.searchWithEventType(PARTICIPANT_ID, 'planning', null);
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Team Planning');
+    });
+
+    test('searchWithEventType does NOT find events where user is a declined participant', () => {
+      const event = events.create({
+        user_id: OWNER_ID,
+        title: 'Team Planning',
+        start_at: '2026-05-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      addParticipant(event.id, PARTICIPANT_ID, 'declined');
+
+      const results = events.searchWithEventType(PARTICIPANT_ID, 'planning', null);
+      expect(results.length).toBe(0);
+    });
+
+    test('search finds events where user is an accepted participant', () => {
+      const event = events.create({
+        user_id: OWNER_ID,
+        title: 'Quarterly Review',
+        start_at: '2026-06-01T14:00:00Z',
+        timezone: 'UTC',
+      });
+      addParticipant(event.id, PARTICIPANT_ID, 'accepted');
+
+      const results = events.search(PARTICIPANT_ID, 'quarterly');
+      expect(results.length).toBe(1);
+      expect(results[0]!.title).toBe('Quarterly Review');
+    });
+
+    test('search does NOT find events where user is a declined participant', () => {
+      const event = events.create({
+        user_id: OWNER_ID,
+        title: 'Quarterly Review',
+        start_at: '2026-06-01T14:00:00Z',
+        timezone: 'UTC',
+      });
+      addParticipant(event.id, PARTICIPANT_ID, 'declined');
+
+      const results = events.search(PARTICIPANT_ID, 'quarterly');
+      expect(results.length).toBe(0);
+    });
+  });
+
   test('searchWithEventType with event_type=regular returns non-birthday events', () => {
     events.create({
       user_id: USER_ID,

@@ -433,6 +433,14 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
   }
 }
 
+// Weather service — optional, requires OPENWEATHER_API_KEY
+let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
+if (config.OPENWEATHER_API_KEY) {
+  const { WeatherService } = await import('./services/weather/weather-service.ts');
+  weatherService = new WeatherService({ apiKey: config.OPENWEATHER_API_KEY });
+  botLogger.info('Weather service initialized');
+}
+
 // Notification scheduler — requires Redis for BullMQ queue
 if (config.REDIS_URL) {
   const { createNotificationQueue, createNotificationWorker, setupNotificationTick } = await import(
@@ -446,14 +454,6 @@ if (config.REDIS_URL) {
   const notifEventService = new EventService({
     eventRepo: db.events,
   });
-
-  // Weather service — optional, requires OPENWEATHER_API_KEY
-  let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
-  if (config.OPENWEATHER_API_KEY) {
-    const { WeatherService } = await import('./services/weather/weather-service.ts');
-    weatherService = new WeatherService({ apiKey: config.OPENWEATHER_API_KEY });
-    botLogger.info('Weather service initialized');
-  }
 
   const scheduler = new NotificationScheduler({
     prefsRepo: db.notificationPreferences,
@@ -767,6 +767,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       apiKey: config.ANTHROPIC_API_KEY,
       baseUrl: config.AI_BASE_URL,
       model: config.AI_MODEL,
+      validationModel: config.AI_FAST_MODEL,
       debugLogger: aiDebugLogger,
       ...(config.AI_MODEL_FALLBACK && {
         fallback: {
@@ -800,6 +801,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
         AI_FAST_MODEL: config.AI_FAST_MODEL,
       },
+      weatherService,
     },
   );
 

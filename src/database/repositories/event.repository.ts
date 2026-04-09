@@ -290,11 +290,15 @@ export class EventRepository {
       SELECT * FROM events
       WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-          OR ${groupVisibleSql('')})
+          OR ${groupVisibleSql('')}
+          OR id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          ))
       ORDER BY start_at ASC
       LIMIT ?
     `)
-      .all(`%${this.escapeLike(query)}%`, userId, userId, limit) as CalendarEvent[];
+      .all(`%${this.escapeLike(query)}%`, userId, userId, userId, limit) as CalendarEvent[];
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -627,9 +631,13 @@ export class EventRepository {
     const conditions: string[] = [
       'e.is_cancelled = 0',
       `((e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-        OR ${groupVisibleSql('e')})`,
+        OR ${groupVisibleSql('e')}
+        OR e.id IN (
+          SELECT event_id FROM event_participants
+          WHERE user_id = ? AND status = 'accepted'
+        ))`,
     ];
-    const params: (string | number | null)[] = [userId, userId];
+    const params: (string | number | null)[] = [userId, userId, userId];
 
     if (query) {
       conditions.push('e.title LIKE ?');

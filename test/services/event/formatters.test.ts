@@ -346,17 +346,19 @@ describe('formatWeekAgenda', () => {
 // ── formatEventDetail edge cases (lines 91, 97, 112) ──
 
 describe('formatEventDetail — edge cases', () => {
-  test('all-day event shows "All day" label', () => {
+  test('all-day event shows date and "all day" label', () => {
     const event = makeEvent({ title: 'Conference', all_day: 1 });
     const result = formatEventDetail(event, 'UTC', 'en');
-    expect(result).toContain('All day');
+    expect(result).toContain('all day');
+    expect(result).toContain('📅');
     expect(result).not.toContain('🕐');
   });
 
-  test('all-day event shows "Весь день" in Russian', () => {
+  test('all-day event shows date and "весь день" in Russian', () => {
     const event = makeEvent({ title: 'Конференция', all_day: 1 });
     const result = formatEventDetail(event, 'UTC', 'ru');
-    expect(result).toContain('Весь день');
+    expect(result).toContain('весь день');
+    expect(result).toContain('📅');
   });
 
   test('event without end_at omits duration', () => {
@@ -487,7 +489,7 @@ describe('formatInvitation', () => {
   test('all-day event — no timezone annotation', () => {
     const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
     const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
-    expect(result).toContain('All day');
+    expect(result).toContain('all day');
     expect(result).not.toContain('Europe/Moscow)');
   });
 
