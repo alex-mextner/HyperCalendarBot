@@ -270,6 +270,8 @@ export class SyncService {
     if (action === 'delete') {
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
       if (!syncRecord?.google_event_id) {
+        // Never pushed to Google — clean up the pending tracking record
+        // (needed for decline scenario where the event itself stays but participant opts out)
         participantSyncRepo.delete(participantUserId, eventId);
         return;
       }
