@@ -14,6 +14,7 @@ import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { initProviderAlerts } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
@@ -47,6 +48,10 @@ const db = createDatabase(config.DATABASE_PATH);
 
 if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
+}
+
+if (config.BOT_ADMIN_ID) {
+  initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 }
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
