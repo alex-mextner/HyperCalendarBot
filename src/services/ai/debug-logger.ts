@@ -12,6 +12,19 @@ const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min idle → new file
 export type DebugMessage = OpenAI.ChatCompletionMessageParam;
 
 function serializeMessage(msg: DebugMessage): string {
+  // Assistant message with tool_calls — render each call as a compact marker.
+  // Check this BEFORE the content-is-string short-circuit, because an
+  // assistant turn that only calls tools has content='' (or null) and would
+  // otherwise lose the tool-call info from the debug log.
+  if (msg.role === 'assistant' && 'tool_calls' in msg && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+    const toolParts = msg.tool_calls.map((tc) => {
+      if (tc.type !== 'function') return `[${tc.type}]`;
+      return `[tool_use: ${tc.function.name} | input: ${tc.function.arguments.slice(0, 200)}]`;
+    });
+    const textPart = typeof msg.content === 'string' && msg.content.length > 0 ? `${msg.content} ` : '';
+    return `${textPart}${toolParts.join(' ')}`;
+  }
+
   // Plain-text content on user/assistant/system/developer messages
   if (typeof msg.content === 'string') return msg.content;
 
@@ -28,16 +41,6 @@ function serializeMessage(msg: DebugMessage): string {
         return '';
       })
       .filter(Boolean)
-      .join(' ');
-  }
-
-  // Assistant message with tool_calls — render each call as a compact marker
-  if (msg.role === 'assistant' && 'tool_calls' in msg && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
-    return msg.tool_calls
-      .map((tc) => {
-        if (tc.type !== 'function') return `[${tc.type}]`;
-        return `[tool_use: ${tc.function.name} | input: ${tc.function.arguments.slice(0, 200)}]`;
-      })
       .join(' ');
   }
 

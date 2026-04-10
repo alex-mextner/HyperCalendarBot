@@ -290,7 +290,7 @@ describe('CalendarBotAgent', () => {
         calls.push({ chatId, limit });
         return [];
       },
-    } as never;
+    } as unknown as ChatHistoryRepository;
     const groupCtx: AgentContext = { ...ctx, isGroup: true, groupChatId: 456, chatHistory: mockChatHistory };
 
     const agent = new CalendarBotAgent(config, sender);

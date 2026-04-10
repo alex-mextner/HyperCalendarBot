@@ -580,7 +580,7 @@ export class CalendarBotAgent {
             );
             rejected = true;
             pendingAssistantTurn = null;
-            await this.runRetryAfterRejection(
+            const retryOutcome = await this.runRetryAfterRejection(
               ctx,
               currentMessages,
               responseText,
@@ -591,6 +591,27 @@ export class CalendarBotAgent {
               allToolResults,
               startTime,
             );
+
+            // If the retry ALSO produced a tool-less answer, validate it once
+            // more. If the second pass also rejects, we log and ship anyway —
+            // the alternative is a blank or useless apology and we only get
+            // one retry budget per user request.
+            if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
+              const reValidation = await validateResponse(
+                {
+                  userMessage: ctx.messageText,
+                  toolCalls: allToolCalls.map((tc) => tc.name),
+                  response: retryOutcome.lastRoundText,
+                },
+                this.streamImpl,
+              );
+              if (!reValidation.approved) {
+                aiLogger.warn(
+                  { userId: ctx.user.telegram_id, reason: reValidation.reason },
+                  'Retry response ALSO rejected by validator — shipping anyway, user asked once',
+                );
+              }
+            }
           }
         }
       }
@@ -669,7 +690,13 @@ export class CalendarBotAgent {
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
     startTime: number,
-  ): Promise<{ hitStopLoop: boolean }> {
+  ): Promise<{
+    hitStopLoop: boolean;
+    /** Text produced by the most recent round of the retry loop (for re-validation). */
+    lastRoundText: string;
+    /** Whether the last round called any tools. Used to decide if re-validation is needed. */
+    lastRoundHadToolCalls: boolean;
+  }> {
     // Actually throw away the rejected text — commitIntermediate() would push
     // it into the final execution log, which is the opposite of what we want.
     writer.resetBuffers();
@@ -694,7 +721,7 @@ export class CalendarBotAgent {
       if (Date.now() - startTime > TIMEOUT_MS) {
         aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout (retry)');
         writer.appendText('\n\n⚠️ Timeout reached.');
-        return { hitStopLoop: false };
+        return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
       }
 
       const callbacks: StreamCallbacks = {
@@ -726,7 +753,7 @@ export class CalendarBotAgent {
         if (!ctx.supplementMode) {
           this.saveAssistantTurn(ctx, result.assistantMessage);
         }
-        return { hitStopLoop: false };
+        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
 
       if (!ctx.supplementMode) {
@@ -775,11 +802,11 @@ export class CalendarBotAgent {
       if (stopLoopTriggered) {
         // A tool like ask_user / end_conversation already sent its own UI —
         // do not produce additional assistant text after it.
-        return { hitStopLoop: true };
+        return { hitStopLoop: true, lastRoundText: '', lastRoundHadToolCalls: true };
       }
 
       currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
     }
-    return { hitStopLoop: false };
+    return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: true };
   }
 }

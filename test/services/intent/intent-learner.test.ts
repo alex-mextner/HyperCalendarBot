@@ -1,6 +1,6 @@
 // test/services/intent/intent-learner.test.ts
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import type OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
@@ -130,52 +130,31 @@ describe('IntentLearner', () => {
     const truncatedJson = '{"canonical_name":"show_today","phrases":["что сегодня"],"workflow":{';
     const learner = buildLearner(makeTruncatedStub(truncatedJson));
 
-    const originalWarn = cmdLogger.warn.bind(cmdLogger);
-    const originalError = cmdLogger.error.bind(cmdLogger);
-    let warnCalled = false;
-    let errorCalled = false;
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).warn = (...args: unknown[]) => {
-      warnCalled = true;
-      return originalWarn(...(args as Parameters<typeof originalWarn>));
-    };
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).error = (...args: unknown[]) => {
-      errorCalled = true;
-      return originalError(...(args as Parameters<typeof originalError>));
-    };
+    const warnSpy = spyOn(cmdLogger, 'warn').mockImplementation(() => {});
+    const errorSpy = spyOn(cmdLogger, 'error').mockImplementation(() => {});
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
       expect(result).toBeNull();
-      expect(warnCalled).toBe(true);
-      expect(errorCalled).toBe(false);
+      expect(warnSpy).toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).warn = originalWarn;
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).error = originalError;
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
     }
   });
 
   test('returns null silently when AI returns skip-only response {"skip":true}', async () => {
     const learner = buildLearner(makeStreamStub(['{"skip":true}']));
 
-    const originalError = cmdLogger.error.bind(cmdLogger);
-    let errorCalled = false;
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).error = (...args: unknown[]) => {
-      errorCalled = true;
-      return originalError(...(args as Parameters<typeof originalError>));
-    };
+    const errorSpy = spyOn(cmdLogger, 'error').mockImplementation(() => {});
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
       expect(result).toBeNull();
-      expect(errorCalled).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).error = originalError;
+      errorSpy.mockRestore();
     }
   });
 
