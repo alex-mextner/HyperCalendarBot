@@ -133,7 +133,7 @@ export interface CreateBotOpts {
     | 'BOT_USERNAME'
     | 'AGENT_DOWNLOAD_URL'
     | 'INLINE_BOT_TOKEN'
-    | 'AI_FAST_MODEL'
+    | 'ZAI_FAST_MODEL'
   >;
 }
 
@@ -208,7 +208,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     !!googleDeps,
     prefsService,
     holidayService,
-    envConfig?.AI_FAST_MODEL,
+    envConfig?.ZAI_FAST_MODEL,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
   );
 
@@ -346,7 +346,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminEditSessions,
     adminReplySession,
     intentLearner,
-    aiCityModel: envConfig?.AI_FAST_MODEL,
+    aiCityModel: envConfig?.ZAI_FAST_MODEL,
     botAdminId,
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,

@@ -302,9 +302,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
     const ttsTranslationService = new TtsTranslationService({
-      apiKey: config.ANTHROPIC_API_KEY,
-      baseUrl: config.AI_BASE_URL,
-      model: config.AI_FAST_MODEL,
+      apiKey: config.ZAI_API_KEY,
+      baseUrl: config.ZAI_BASE_URL,
+      model: config.ZAI_FAST_MODEL,
     });
     const ttsService = new TtsService();
 
@@ -321,9 +321,9 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     };
     const voiceAgent = new CalendarBotAgent(
       {
-        apiKey: config.ANTHROPIC_API_KEY,
-        baseUrl: config.AI_BASE_URL,
-        model: config.AI_MODEL,
+        apiKey: config.ZAI_API_KEY,
+        baseUrl: config.ZAI_BASE_URL,
+        model: config.ZAI_MODEL,
         debugLogger: aiDebugLogger,
       },
       voiceSender,
@@ -691,17 +691,10 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
     config.BOT_TOKEN,
     db,
     {
-      apiKey: config.ANTHROPIC_API_KEY,
-      baseUrl: config.AI_BASE_URL,
-      model: config.AI_MODEL,
+      apiKey: config.ZAI_API_KEY,
+      baseUrl: config.ZAI_BASE_URL,
+      model: config.ZAI_MODEL,
       debugLogger: aiDebugLogger,
-      ...(config.AI_MODEL_FALLBACK && {
-        fallback: {
-          model: config.AI_MODEL_FALLBACK,
-          baseUrl: config.AI_BASE_URL_FALLBACK,
-          apiKey: config.AI_API_KEY_FALLBACK,
-        },
-      }),
     },
     {
       googleDeps,
@@ -722,7 +715,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_USERNAME: config.BOT_USERNAME,
         AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
-        AI_FAST_MODEL: config.AI_FAST_MODEL,
+        ZAI_FAST_MODEL: config.ZAI_FAST_MODEL,
       },
     },
   );
