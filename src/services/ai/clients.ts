@@ -6,7 +6,8 @@
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 
-const DEFAULT_TIMEOUT_MS = 15_000;
+const ZAI_TIMEOUT_MS = 15_000;
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 let zai: OpenAI | null = null;
 let hf: OpenAI | null = null;
@@ -18,7 +19,7 @@ export function zaiClient(): OpenAI {
     zai = new OpenAI({
       apiKey: cfg.ZAI_API_KEY,
       baseURL: cfg.ZAI_BASE_URL,
-      timeout: DEFAULT_TIMEOUT_MS,
+      timeout: ZAI_TIMEOUT_MS,
       maxRetries: 0,
     });
   }

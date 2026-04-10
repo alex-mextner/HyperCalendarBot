@@ -18,7 +18,7 @@ import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 300_000;
 
 type MessageParam = OpenAI.ChatCompletionMessageParam;
 
