@@ -85,9 +85,15 @@ function isProviderDown(error: unknown): boolean {
 export function isRetryableError(error: unknown): boolean {
   if (isProviderDown(error)) return true;
   if (error instanceof Error && error.name === 'AbortError') return true;
+  // OpenAI SDK v6 throws APIUserAbortError (extends APIError, status=undefined)
+  // when an AbortSignal fires. This comes from the agent's per-round timeout,
+  // not from the user — treat as retryable so the chain can try a faster provider.
+  if (error instanceof OpenAI.APIError && error.status === undefined) return true;
   if (error instanceof OpenAI.APIError && typeof error.status === 'number') {
     return error.status === 429 || error.status >= 500;
   }
+  // "Request timed out." from the OpenAI SDK's built-in connection timeout
+  if (error instanceof Error && error.message.includes('timed out')) return true;
   return false;
 }
 

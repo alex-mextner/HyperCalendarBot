@@ -6,7 +6,7 @@
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 15_000;
 
 let zai: OpenAI | null = null;
 let hf: OpenAI | null = null;
