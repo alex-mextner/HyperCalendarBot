@@ -1514,6 +1514,45 @@ Kill the running bot, restart, send a test message in a group chat. Verify:
 - Tool calling (e.g. "what's on my calendar today") works
 - Fallback triggers if z.ai is manually broken (e.g. by temporarily changing the API key)
 
-- [ ] **Step 4: Deploy to production and monitor**
+- [ ] **Step 4: Update production .env on the server**
 
-Watch logs for `provider-used` to confirm z.ai is the primary and fallbacks are rare.
+The production bot runs from `/opt/hypercal/.env` on `104.248.84.190`. Without the new required env vars (`HF_BASE_URL`, `HF_MODEL`, `HF_FAST_MODEL`, `GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_MODEL`, `GEMINI_FAST_MODEL`, `AI_BASE_URL` pointing to coding endpoint), the bot will throw at startup after deploy.
+
+**Before deploying the new code**, SSH in and append the new vars:
+
+```bash
+ssh root@104.248.84.190 "cat >> /opt/hypercal/.env <<'ENV'
+
+# OpenAI SDK migration (2026-04-10) — added by plan 2026-04-10-openai-sdk-migration
+AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+AI_MODEL=glm-5.1
+AI_FAST_MODEL=glm-4.5-flash
+
+HF_BASE_URL=https://router.huggingface.co/v1
+HF_MODEL=Qwen/Qwen3-235B-A22B
+HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct
+
+GEMINI_API_KEY=<copy from local .env or ExpenseSyncBot>
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MODEL=gemini-2.5-pro
+GEMINI_FAST_MODEL=gemini-2.5-flash
+ENV"
+```
+
+**Important:** if the prod `.env` already has `AI_BASE_URL` pointing to the old `api.z.ai/api/anthropic` endpoint, that line must be **removed or updated** — otherwise the last occurrence wins and the bot will try the wrong endpoint. Verify with:
+
+```bash
+ssh root@104.248.84.190 "grep -E '^AI_BASE_URL|^AI_MODEL|^AI_FAST_MODEL|^HF_|^GEMINI_' /opt/hypercal/.env"
+```
+
+Delete any duplicate/old lines before continuing.
+
+- [ ] **Step 5: Deploy to production and monitor**
+
+Push the feature branch, create PR, merge to main. CI deploys automatically. Watch container logs:
+
+```bash
+ssh root@104.248.84.190 "docker logs hypercal-bot --since 2m 2>&1 | grep -E 'provider|Trying|failed'"
+```
+
+Verify z.ai is the primary and fallbacks only trigger on real failures. If the bot fails to start with "environment variable is required", a new var is missing on prod — add it and restart the container.
