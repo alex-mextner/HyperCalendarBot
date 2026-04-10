@@ -11,7 +11,7 @@
 - `FAST_CHAIN = z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
 
 **Defaults (via env):**
-- `AI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `AI_MODEL=glm-5.1`, `AI_FAST_MODEL=glm-4.5-flash`
+- `AI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `AI_MODEL=glm-5.1`, `AI_FAST_MODEL=glm-4.7-flash`
 - `HF_BASE_URL=https://router.huggingface.co/v1`, `HF_MODEL=Qwen/Qwen3-235B-A22B`, `HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct`
 - `GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`, `GEMINI_MODEL=gemini-2.5-pro`, `GEMINI_FAST_MODEL=gemini-2.5-flash`
 
@@ -164,7 +164,7 @@ BOT_TOKEN=your_bot_token
 ANTHROPIC_API_KEY=your_zai_api_key
 AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.5-flash
+AI_FAST_MODEL=glm-4.7-flash
 
 # HuggingFace Router (fallback, tool calling capable)
 HF_TOKEN=your_hf_token
@@ -188,7 +188,7 @@ Add the real values:
 ```env
 AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.5-flash
+AI_FAST_MODEL=glm-4.7-flash
 
 HF_BASE_URL=https://router.huggingface.co/v1
 HF_MODEL=Qwen/Qwen3-235B-A22B
@@ -1525,7 +1525,7 @@ The production bot runs from `/opt/hypercal/.env` on `104.248.84.190`. Without t
 | `ANTHROPIC_API_KEY` | ✓ | **verify balance** (was `28eec...` danny key — 429 insufficient balance). Use the Alex key that's in the `#` comment on the line, or top up. |
 | `AI_BASE_URL` | ✓ | **CHANGE** from `https://api.z.ai/api/anthropic` → `https://api.z.ai/api/coding/paas/v4` |
 | `AI_MODEL` | ✓ | keep as `glm-5.1` |
-| `AI_FAST_MODEL` | ✓ | **CHANGE** from `glm-4.7-flash` (500 errors on coding endpoint) → `glm-4.5-flash` |
+| `AI_FAST_MODEL` | ✓ | **CHANGE** from `glm-4.7-flash` (500 errors on coding endpoint) → `glm-4.7-flash` |
 | `HF_TOKEN` | ✓ | keep |
 | `HF_BASE_URL` | ✗ | **ADD** `https://router.huggingface.co/v1` |
 | `HF_MODEL` | ✗ | **ADD** `Qwen/Qwen3-235B-A22B` |
