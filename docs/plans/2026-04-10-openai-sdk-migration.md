@@ -128,7 +128,7 @@ git commit -m "refactor(env): replace Anthropic env vars with multi-provider key
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 
-const ZAI_BASE_URL = 'https://api.z.ai/api/paas/v4';
+const ZAI_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
 const HF_BASE_URL = 'https://router.huggingface.co/v1';
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 
@@ -421,6 +421,13 @@ function openaiStreamSlot(name: string, getClient: () => OpenAI, model: string):
             }
           : {}),
       };
+
+      // z.ai coding endpoint returns reasoning_content instead of content for text-only
+      // responses. If we got 200 OK but no text and no tool calls, treat as empty response
+      // so the chain falls through to the next provider.
+      if (!text && toolCallsArray.length === 0) {
+        throw new Error('Provider returned empty response (coding endpoint reasoning-only)');
+      }
 
       return { text, toolCalls: toolCallsArray, finishReason, assistantMessage };
     },
