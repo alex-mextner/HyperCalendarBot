@@ -8,7 +8,7 @@ import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import type { AgentDispatcher } from '../../agent/dispatcher.ts';
 import type { AgentRegistry } from '../../agent/registry.ts';
-import { t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
@@ -51,13 +51,14 @@ import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import type { NliClassifier } from '../../services/nli/nli-classifier.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { PrivacyService } from '../../services/sharing/privacy-service.ts';
 import type { SharingService } from '../../services/sharing/sharing-service.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
-import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
+import { getTimezoneDisplay, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { KokoroTtsService } from '../../services/voice/kokoro-tts-service.ts';
 import type { SileroTtsService } from '../../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
@@ -74,7 +75,7 @@ import { parseSimpleDate } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { escapeHtml } from '../../utils/telegram.ts';
+import { escapeHtml, formatUtcOffset } from '../../utils/telegram.ts';
 import { pendingDurationInput, pendingGroupTzInput } from '../commands/settings.ts';
 import { createAiAgentLayer } from '../pipeline/ai-agent-layer.ts';
 import { createFeedbackRouterLayer } from '../pipeline/feedback-router-layer.ts';
@@ -130,6 +131,11 @@ export interface MessageHandlerDeps {
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
   ) => Promise<void>;
+  googleScheduleParticipantPush?: (
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
+  ) => Promise<void>;
   deepLinkService?: DeepLinkService;
   sceneStorage: SceneStorage;
   botUsername?: string;
@@ -156,12 +162,15 @@ export interface MessageHandlerDeps {
   workflowSessions?: WorkflowSessionStore;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
+  // NLI semantic filter for group messages
+  nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
   // Admin reply sessions: adminId → { threadId, userId }
   adminReplySession?: Map<number, { threadId: number; userId: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
+  sendMessageToChat?: AgentContext['sendMessageToChat'];
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
   proposeTimeSessions?: Map<number, { invitationId: number }>;
@@ -183,6 +192,9 @@ export interface MessageHandlerDeps {
   triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
   // Onboarding scene for mandatory timezone/language setup
   onboardingScene?: AnyScene;
+  locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  addressCache?: import('../../services/location/address-cache.ts').AddressCache;
+  pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -361,7 +373,11 @@ const TG_API = 'https://api.telegram.org';
 
 async function downloadTelegramFile(botToken: string, fileId: string): Promise<Buffer> {
   const metaRes = await fetch(`${TG_API}/bot${botToken}/getFile?file_id=${fileId}`);
-  const meta = (await metaRes.json()) as { ok: boolean; result?: { file_path: string } };
+  const tgFileSchema = z.object({
+    ok: z.boolean(),
+    result: z.object({ file_path: z.string() }).optional(),
+  });
+  const meta = tgFileSchema.parse(await metaRes.json());
   if (!meta.ok || !meta.result?.file_path) {
     throw new Error(`Failed to get file path from Telegram: ${JSON.stringify(meta)}`);
   }
@@ -512,6 +528,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       onBotResponse?: (messageId: number) => void;
       incomingMessageId?: number;
     },
+    incomingMessageId?: number,
   ): AgentContext => {
     const activeFor = deps.secretaryRepo?.getActiveSecretaryFor(user.telegram_id) ?? [];
     const secretaryForLine =
@@ -529,7 +546,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       user,
       chatId,
       messageText,
-      incomingMessageId: groupInfo?.incomingMessageId,
+      incomingMessageId,
       isGroup: groupInfo?.isGroup ?? false,
       groupChatId: groupInfo?.groupChatId,
       groupTitle: groupInfo?.groupTitle,
@@ -546,6 +563,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
       resolveUsername: deps.resolveUsername,
+      sendMessageToChat: deps.sendMessageToChat,
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
         : (() => {
@@ -611,7 +629,11 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
           : undefined,
       notifications: deps.notificationPrefs ? { notificationPrefs: deps.notificationPrefs } : undefined,
       google: deps.googleCalendarRepo
-        ? { googleCalendarRepo: deps.googleCalendarRepo, schedulePush: deps.googleSchedulePush }
+        ? {
+            googleCalendarRepo: deps.googleCalendarRepo,
+            schedulePush: deps.googleSchedulePush,
+            scheduleParticipantPush: deps.googleScheduleParticipantPush,
+          }
         : undefined,
       agents:
         deps.agentRegistry && deps.agentDispatcher
@@ -643,6 +665,9 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               triggerService: deps.triggerService,
             }
           : undefined,
+      locationVerification: deps.locationVerification,
+      addressCache: deps.addressCache,
+      pendingGeoStore: deps.pendingGeoStore,
     };
   };
 }
@@ -973,8 +998,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
 
   const aiAgentLayer = createAiAgentLayer({
     agent: deps.agent,
-    agentContextBuilder: (user, chatId, messageText, groupInfo) => {
-      const ctx = agentContextBuilder(user, chatId, messageText, groupInfo);
+    agentContextBuilder: (user, chatId, messageText, groupInfo, incomingMessageId) => {
+      const ctx = agentContextBuilder(user, chatId, messageText, groupInfo, incomingMessageId);
       ctx.onEventMentioned = (eventId) => {
         Promise.resolve(eventMentionStore.set(user.telegram_id, eventId)).catch((err: unknown) => {
           cmdLogger.error({ err: err, userId: user.telegram_id }, 'Failed to persist last mentioned event');
@@ -1026,6 +1051,60 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const voice = ctx.voice;
     if (voice && deps.transcriptionService && deps.botToken) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
+    }
+
+    // Location message in private chat → context-aware handling
+    const location = ctx.location;
+    if (location && ctx.chat.type === 'private') {
+      const { latitude, longitude } = location;
+      const lang = user.language;
+      const msgs = t(lang);
+
+      // ALWAYS persist the pin so the AI can read it from system prompt and
+      // attach it to any event the user mentions next. Auto-expires in 30 min.
+      if (deps.pendingGeoStore) {
+        await deps.pendingGeoStore
+          .set(user.telegram_id, { latitude, longitude })
+          .catch((err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to persist pending geo'));
+      }
+
+      // Check if user has a recent event that could use this location
+      const latestEvent = deps.eventService.getLatestCreated(user.telegram_id);
+      const hasRecentUnverifiedEvent =
+        latestEvent?.location &&
+        !latestEvent.location_verified &&
+        Date.now() - new Date(latestEvent.created_at).getTime() < 30 * 60 * 1000; // within 30 min
+
+      if (hasRecentUnverifiedEvent && deps.locationVerification && deps.pendingGeoStore) {
+        // Ask if this location is for the recent event
+        const kb = new InlineKeyboard()
+          .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_GEO}:geo:${latestEvent.id}`)
+          .row()
+          .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_GEO}:city:${latitude}:${longitude}`)
+          .row()
+          .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_GEO}:other:${latitude}:${longitude}`);
+        await ctx.send(msgs.aiTools.location.geoForEvent(latestEvent.title), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        return;
+      }
+
+      // Default behavior: timezone update (pin already stored above — AI can use it)
+      const tz = resolveTimezone(latitude, longitude);
+      const offset = formatUtcOffset(tz);
+      if (tz !== user.timezone) {
+        const kb = new InlineKeyboard()
+          .text(msgs.geo_tz_confirm_btn, `${CB.GEO_TZ_CONFIRM}:${tz}`)
+          .text(msgs.geo_tz_dismiss_btn, CB.GEO_TZ_DISMISS);
+        await ctx.send(msgs.geo_tz_confirm_prompt(user.timezone, tz, offset), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+      } else {
+        await ctx.send(msgs.tz_same_from_location(tz, offset));
+      }
+      return;
     }
 
     const text = ctx.text as string | undefined;
@@ -1140,6 +1219,16 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         deps.groupSessions!.tick(Number(chatId));
         isGroupSessionMessage = true;
       }
+
+      // Stage 2: NLI semantic filter — verify keyword-matched messages are actually calendar-related.
+      // Only runs when: keyword matched (not reply/session), NLI is configured, text is long enough.
+      if (!isGroupSessionMessage && !isReplyToBot && deps.nliClassifier && text.length >= 10) {
+        const isCalendar = await deps.nliClassifier.isCalendarRelated(text);
+        if (!isCalendar) {
+          cmdLogger.debug({ chatId: Number(chatId), text: text.slice(0, 80) }, 'NLI rejected keyword-matched message');
+          return;
+        }
+      }
     }
 
     // Build context info for group messages
@@ -1206,11 +1295,17 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             deps.intentRepo,
             deps.intentExecutor,
             (toolName, input) => {
-              const agentCtx = agentContextBuilder(user, Number(ctx.chatId!), messageText, {
-                isGroup,
-                groupChatId: isGroup ? Number(chatId) : undefined,
-                groupTitle: chat?.title ?? undefined,
-              });
+              const agentCtx = agentContextBuilder(
+                user,
+                Number(ctx.chatId!),
+                messageText,
+                {
+                  isGroup,
+                  groupChatId: isGroup ? Number(chatId) : undefined,
+                  groupTitle: chat?.title ?? undefined,
+                },
+                incomingMsgId,
+              );
               // Inject sender so pick_users / ask_user / send_invitation work in intent context
               agentCtx.sender = deps.agent.getSender();
               // chatHistoryId is set via buildAgentContextFactory from deps.chatHistoryIds
@@ -1242,7 +1337,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           isGroup: true as const,
           groupChatId: Number(chatId),
           groupTitle: chat?.title ?? undefined,
-          incomingMessageId: incomingMsgId,
           onBotResponse: deps.groupSessions
             ? (messageId: number) => {
                 if (deps.groupSessions!.hasActiveSession(Number(chatId))) {
@@ -1275,12 +1369,12 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sendTyping();
       const typingInterval = setInterval(sendTyping, 6000);
       try {
-        await runPipeline(ctx, messageText, layers, groupContext);
+        await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
       } finally {
         clearInterval(typingInterval);
       }
     } else {
-      await runPipeline(ctx, messageText, layers, groupContext);
+      await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
     }
   };
 }

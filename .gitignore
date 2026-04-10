@@ -49,6 +49,7 @@ data/thinking-phrases/
 lib/
 mtproto-session*
 .claude/worktrees/
+.claude/projects/
 venv/
 packages/agent-macos/node_modules
 packages/agent-macos/dist

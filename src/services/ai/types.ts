@@ -7,6 +7,7 @@ import type { ChatHistoryRepository } from '../../database/repositories/chat-his
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
+import type { FeatureUsageRepository } from '../../database/repositories/feature-usage.repository.ts';
 import type { FeedbackRepository } from '../../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
@@ -33,6 +34,8 @@ import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
 import type { ImageRenderer } from '../image/render-service.ts';
 import type { EventSummary } from '../intent/variable-resolver.ts';
+import type { AddressCache } from '../location/address-cache.ts';
+import type { LocationVerificationService } from '../location/location-verification-service.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 import type { ScheduledAiCall, Trigger } from '../scheduled/types.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
@@ -91,6 +94,11 @@ export interface GoogleCapability {
     eventId: number,
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
+  ) => Promise<void>;
+  scheduleParticipantPush?: (
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
   ) => Promise<void>;
 }
 
@@ -192,6 +200,7 @@ export interface AgentContext {
   /** Scene key storage — used by cancel_scene to delete the GramIO scene entry. Always wired from sceneStorage dep. */
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
+  featureUsageRepo?: FeatureUsageRepository;
 
   // Capability groups
   sharing?: SharingCapability;
@@ -205,6 +214,13 @@ export interface AgentContext {
   scene?: SceneCapability;
   agents?: AgentsCapability;
   birthday?: BirthdayCapability;
+  locationVerification?: LocationVerificationService;
+  addressCache?: AddressCache;
+  pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
+  /** Preloaded address context for system prompt (loaded async before agent runs) */
+  preloadedAddressContext?: string;
+  /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */
+  preloadedPendingGeo?: { latitude: number; longitude: number } | null;
 }
 
 /** Structured data from tool handlers for intent executor consumption. */

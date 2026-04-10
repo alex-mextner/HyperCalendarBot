@@ -35,13 +35,13 @@ services:
     environment:
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379
       - NODE_ENV=production
-      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     ports:
       - "3001:3311"
+    # Chromium (Playwright) needs more than Docker's default 64MB /dev/shm
+    shm_size: '256m'
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - /root/.cache/ms-playwright:/ms-playwright:ro
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3311/health"]
       interval: 30s

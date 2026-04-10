@@ -1,4 +1,5 @@
 // src/services/voice/stress-dictionary.ts
+import { z } from 'zod';
 import { voiceLogger } from './types';
 
 /**
@@ -72,7 +73,7 @@ export class StressDictionary {
 
   static async loadFromFile(path: string): Promise<StressDictionary> {
     const file = Bun.file(path);
-    const data = (await file.json()) as Record<string, string>;
+    const data = z.record(z.string(), z.string()).parse(await file.json());
     return new StressDictionary(data);
   }
 }

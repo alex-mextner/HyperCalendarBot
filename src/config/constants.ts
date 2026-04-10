@@ -62,8 +62,12 @@ export const CB = {
   TZ_CANCEL: 'tzc',
   TZ_TYPE_CITY: 'tzt',
   TZ_GEO_PICK: 'tzg',
+  GEO_TZ_CONFIRM: 'gtzc',
+  GEO_TZ_DISMISS: 'gtzd',
   SCENE_HELP: 'scene_help',
   ADD_CANCEL: 'add:cancel',
+  LOCATION_GEO: 'loc_geo',
+  LOCATION_CANDIDATE: 'loc_cand',
 } as const;
 
 // i18n messages
@@ -74,6 +78,14 @@ export const MSG = {
     tz_detected: (tz: string, offset: string) => `Got it! Your timezone is ${tz} (${offset}).\nIs this correct?`,
     tz_confirm_yes: 'Yes ✓',
     tz_confirm_no: 'No, choose manually',
+    geo_tz_confirm_prompt: (currentTz: string, newTz: string, offset: string) =>
+      `📍 Your current timezone is <b>${currentTz}</b>.\nBased on your location, it looks like you're in <b>${newTz}</b> (${offset}).\n\nUpdating the timezone ensures reminders, agenda, and event times are shown correctly.\n\nUpdate timezone?`,
+    geo_tz_confirm_btn: 'Yes, update ✓',
+    geo_tz_dismiss_btn: 'No, keep current',
+    geo_tz_updated: (tz: string, offset: string) => `✅ Timezone updated to ${tz} (${offset}).`,
+    geo_tz_dismissed: 'OK, timezone left unchanged.',
+    tz_same_from_location: (tz: string, offset: string) =>
+      `📍 Your timezone is already ${tz} (${offset}) — no changes needed.`,
     share_location: '📍 Share Location',
     choose_manually: '⌨️ Choose Manually',
     country_prompt: 'Want to see public holidays in your calendar?',
@@ -346,6 +358,8 @@ export const MSG = {
       events: {
         noEventsInRange: 'No events found in this range.',
         noEventsMatching: 'No events found matching the query.',
+        noEventsMatchingScope: (scope: string) =>
+          `No events found matching the query in ${scope} calendar. Try searching the other scope.`,
         noUpcomingEvents: 'No upcoming events.',
         upcomingEvents: (count: number, lines: string) => `Next ${count} events:\n${lines}`,
         eventCreated: (parts: string) => `Event created: ${parts}`,
@@ -404,6 +418,20 @@ export const MSG = {
         triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
           `Trigger created (id: ${id}): when ${topic}${condition ? ` and (${condition})` : ''} → "${action}"`,
         triggerRemoved: (id: string) => `Trigger ${id} removed.`,
+      },
+      location: {
+        clarifyAddress: (title: string) => `📍 Clarify the address for "${title}":`,
+        locationResolved: (title: string, address: string) => `📍 Location for "${title}" resolved: ${address}`,
+        locationNotFound: (title: string) =>
+          `📍 Could not resolve location for "${title}". You can send a 📍 location pin or type the full address.`,
+        geoForEvent: (title: string) => `📍 Got your location! Is this for the event "${title}"?`,
+        geoForEventConfirm: 'Yes, use for this event',
+        geoNewLocation: 'No, this is my current location',
+        geoExplain: 'Something else',
+        geoOtherAck:
+          "📍 Got it. The pin is saved for 30 minutes — just tell me which event it's for and I'll attach it.",
+        geoPurposeQuestion:
+          '📍 Got your location! What is it for?\n1. Update your current city\n2. Set as location for your latest event\n3. Something else (please explain)',
       },
       agent: {
         connectMessage: (url: string) =>
@@ -489,6 +517,158 @@ export const MSG = {
       clockChangeBack: (duration: string) =>
         `🕐 Clocks moved ${duration} back last night. Double-check your alarms and meetings!`,
     },
+    weather: {
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      wind: (ms: number) => `${ms} m/s`,
+      weekForecast: '🌤 Weather this week:',
+    },
+    botTips: {
+      // ── Creating events ──
+      voice_create: "💡 Send a voice message to quickly create an event — I'll understand!",
+      add_command: '💡 Use /add to create a new event step by step.',
+      natural_language: '💡 Just type naturally: "Dentist on Friday at 3pm" — I\'ll create the event.',
+      recurring_events: '💡 I can create recurring events — try "standup every weekday at 10am".',
+      complex_recurrence: '💡 "Lunch with Anna every other Thursday at 1pm" — I handle complex recurrences too.',
+      ics_import: '💡 Import your existing calendar — just send an .ics file to this chat.',
+      // ── Reminders & not forgetting ──
+      call_before_flight: "💡 Don't want to miss a flight? Add your airport arrival time and ask me to call you!",
+      multiple_reminders: '💡 Set multiple reminders: "remind me 1 day and 2 hours before the meeting".',
+      voice_calls: '💡 I can call you on the phone before an important event — enable voice calls in /settings.',
+      daily_medicine: '💡 "Remind me to take medicine every day at 8am" — I\'ll send a notification daily.',
+      birthday_reminder: "💡 Set a reminder for a friend's birthday so you have time to pick a gift.",
+      // ── Planning & overview ──
+      week_overview: '💡 Ask "what\'s my week look like?" for a quick overview.',
+      free_slots: '💡 "When am I free on Wednesday?" — I\'ll find open slots in your schedule.',
+      month_view: '💡 Use /month to see a visual calendar of the whole month.',
+      meeting_count: '💡 "How many meetings do I have this week?" — I can count and summarize.',
+      morning_agenda:
+        '💡 Set up a morning agenda to start every day knowing what\'s ahead — "set morning agenda to 7:30".',
+      evening_review: '💡 Enable the evening review to prepare for tomorrow — "turn on evening review at 9pm".',
+      // ── Sharing & collaboration ──
+      share_schedule: '💡 Share your schedule: "share my week with @username" — they\'ll see your events.',
+      invite_people: '💡 Invite people to events: "invite @anna to Friday\'s dinner".',
+      accept_decline: '💡 When someone sends you an invitation, you can accept, decline, or propose a different time.',
+      group_calendar: '💡 Add the bot to a group chat to manage a shared group calendar!',
+      secretary_access: "💡 Give a colleague secretary access to manage your calendar when you're busy.",
+      // ── Google Calendar ──
+      connect_google: '💡 Connect Google Calendar with /connect_google — all your events will sync automatically.',
+      google_sync: '💡 After connecting Google, events from all your Google calendars appear here.',
+      // ── Life situations: Travel ──
+      pack_suitcase:
+        '💡 Planning a trip? Add "Pack suitcase" the day before and "Taxi to airport" with the exact time.',
+      hotel_checkin: "💡 Add hotel check-in/check-out times to your calendar so you don't miss them.",
+      visa_appointment:
+        '💡 "Visa appointment on March 15 at 9am, remind me 1 week and 1 day before" — for documents prep.',
+      timezone_change: '💡 Crossing time zones? Change your timezone: "set my timezone to America/New_York".',
+      // ── Life situations: Health ──
+      doctor_checkup: '💡 "Doctor appointment every 6 months" — I\'ll remind you to schedule checkups.',
+      gym_sessions: '💡 Track gym sessions: "gym every Mon, Wed, Fri at 7pm" — see how consistent you are.',
+      drink_water: '💡 "Remind me to drink water every 2 hours" — health habits as calendar events!',
+      // ── Life situations: Work ──
+      weekly_oneone: '💡 Weekly 1-on-1? "1-on-1 with manager every Tuesday at 4pm, remind 15 min before".',
+      sprint_review: '💡 "Sprint review every other Friday at 3pm" — I handle biweekly schedules.',
+      prep_time: '💡 Before a presentation, add prep time: "Prep slides — Friday 2pm to 4pm".',
+      event_descriptions: '💡 Use event descriptions to keep meeting agendas and notes organized.',
+      // ── Life situations: Personal ──
+      anniversary: '💡 Never forget an anniversary — "Wedding anniversary every year on June 15".',
+      movie_premieres: "💡 Add movie premieres, concert dates, or game releases you're excited about.",
+      rent_payment: '💡 "Rent payment every month on the 1st" — financial deadlines stay on track.',
+      subscriptions: '💡 Track subscriptions: "Netflix renewal every month on the 12th" — know when charges hit.',
+      reading_challenge: '💡 Reading challenge? "Read for 30 min every evening at 9pm" — build a habit.',
+      // ── Life situations: Family ──
+      family_calendar: '💡 Share your family calendar in a group chat — everyone sees school events and activities.',
+      kids_swimming: '💡 "Kids swimming class every Saturday at 10am" — family routines made easy.',
+      school_events: '💡 Add school parent meetings, picture days, and holidays to the group calendar.',
+      // ── Life situations: Social ──
+      birthday_party: '💡 "Birthday party for Max — Saturday 6pm at The Pub" — then invite friends from contacts.',
+      decline_propose:
+        "💡 Can't make it? Decline an invitation and propose a better time — the organizer gets notified.",
+      find_free_time: '💡 Use /free to find a time that works: "when am I free this Saturday afternoon?"',
+      // ── Power features ──
+      context_awareness: '💡 I remember context — say "move it to 3pm" and I\'ll know which event you mean.',
+      automated_reminders: '💡 Schedule automated messages: "remind me every Friday at 5pm to submit timesheets".',
+      public_holidays: "💡 Use /holidays to subscribe to public holidays — they'll appear in your calendar.",
+      save_contacts: '💡 Save contacts (/contacts) and invite them to events by name — no need for usernames.',
+      quiet_hours: "💡 Set up quiet hours so I don't disturb you at night — check /settings.",
+      language_switch: '💡 I speak Russian and English — switch language anytime in /settings.',
+      action_log: '💡 Send /log to see a full history of actions taken on your calendar.',
+      past_events: '💡 "What did I have last Tuesday?" — I can look up past events too.',
+    },
+    gtdQuotes: [
+      // David Allen, "Getting Things Done: The Art of Stress-Free Productivity" (2001/2015)
+      // Quotes verified across multiple public sources (Goodreads, GTD Forums, official site)
+      '📖 "Your mind is for having ideas, not holding them." — David Allen, GTD, ch. 1',
+      '📖 "If you don\'t pay appropriate attention to what has your attention, it will take more of your attention than it deserves." — David Allen, GTD, ch. 2',
+      '📖 "Your ability to generate power is directly proportional to your ability to relax." — David Allen, GTD, ch. 1',
+      '📖 "You don\'t actually do a project; you can only do action steps related to it." — David Allen, GTD, ch. 3',
+      '📖 "Much of the stress that people feel doesn\'t come from having too much to do. It comes from not finishing what they\'ve started." — David Allen, GTD, ch. 6',
+      '📖 "It is easier to act yourself into a better way of feeling than to feel yourself into a better way of action." — David Allen, GTD, ch. 12',
+      '📖 "Most people feel best about their work the week before their vacation, but it\'s not because of the vacation itself. What do you do the last week before you leave on a big trip? You clean up, close up, clarify, and renegotiate all your agreements with yourself and others. I just suggest that you do this weekly instead of yearly." — David Allen, GTD, ch. 8',
+      '📖 "There is usually an inverse relationship between how much something is on your mind and how much it\'s getting done." — David Allen, GTD, ch. 1',
+      '📖 "You can only feel good about what you\'re not doing when you know what you\'re not doing." — David Allen, GTD, ch. 9',
+      "📖 \"Anything that does not belong where it is, the way it is, is an 'open loop,' which will be pulling on your attention if it's not appropriately managed.\" — David Allen, GTD, ch. 2",
+      "📖 \"Getting things done requires two basic components: defining (1) what 'done' means (outcome) and (2) what 'doing' looks like (action).\" — David Allen, GTD, ch. 2",
+      '📖 "Your head is for having ideas, not for holding them. That\'s what a trusted system is for." — David Allen, GTD, ch. 4',
+      '📖 "The two-minute rule: if the next action can be done in two minutes or less, do it when you first pick the item up." — David Allen, GTD, ch. 6',
+      '📖 "Think like a man of action, act like a man of thought." — Henri Bergson, quoted in GTD, ch. 3',
+      '📖 "The big secret to efficient creative and productive thinking and action is to put the right things in your focus at the right time." — David Allen, GTD, ch. 9',
+      '📖 "One of the best tricks for enhancing your productivity is having organized, ready-to-review action reminders." — David Allen, GTD, ch. 7',
+      '📖 "The Weekly Review is the time to gather and process all your stuff, review your system, update your lists, and get clean, clear, current, and complete." — David Allen, GTD, ch. 8',
+      '📖 "A great hammer doesn\'t make a great carpenter; but a great carpenter will always want to have a great hammer." — David Allen, GTD, ch. 5',
+    ],
+    atomicHabitsQuotes: [
+      // James Clear, "Atomic Habits" (2018)
+      '📖 "You do not rise to the level of your goals. You fall to the level of your systems." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Every action you take is a vote for the type of person you wish to become." — James Clear, Atomic Habits, ch. 2',
+      '📖 "Habits are the compound interest of self-improvement." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The most effective way to change your habits is to focus not on what you want to achieve, but on who you wish to become." — James Clear, Atomic Habits, ch. 2',
+      '📖 "Be the designer of your world and not merely the consumer of it." — James Clear, Atomic Habits, ch. 6',
+      '📖 "When you fall in love with the process rather than the product, you don\'t have to wait to give yourself permission to be happy." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The task of breaking a bad habit is like uprooting a powerful oak within us." — James Clear, Atomic Habits, ch. 7',
+      '📖 "Success is the product of daily habits — not once-in-a-lifetime transformations." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Time magnifies the margin between success and failure. It will multiply whatever you feed it." — James Clear, Atomic Habits, ch. 1',
+      '📖 "You should be far more concerned with your current trajectory than with your current results." — James Clear, Atomic Habits, ch. 1',
+      '📖 "The purpose of setting goals is to win the game. The purpose of building systems is to continue playing the game." — James Clear, Atomic Habits, ch. 1',
+      '📖 "Missing once is an accident. Missing twice is the start of a new habit." — James Clear, Atomic Habits, ch. 16',
+    ],
+    deepWorkQuotes: [
+      // Cal Newport, "Deep Work: Rules for Focused Success in a Distracted World" (2016)
+      '📖 "If you don\'t produce, you won\'t thrive — no matter how skilled or talented you are." — Cal Newport, Deep Work, ch. 1',
+      '📖 "Clarity about what matters provides clarity about what does not." — Cal Newport, Deep Work, ch. 4',
+      '📖 "The ability to perform deep work is becoming increasingly rare at exactly the same time it is becoming increasingly valuable." — Cal Newport, Deep Work, intro',
+      '📖 "Two core abilities for thriving in the new economy: the ability to quickly master hard things, and the ability to produce at an elite level." — Cal Newport, Deep Work, ch. 1',
+      '📖 "Who you are, what you think, feel, and do, what you love — is the sum of what you focus on." — Cal Newport, Deep Work, ch. 3',
+      '📖 "A deep life is a good life, any way you look at it." — Cal Newport, Deep Work, conclusion',
+      '📖 "Efforts to deepen your focus will struggle if you don\'t simultaneously wean your mind from a dependence on distraction." — Cal Newport, Deep Work, rule 2',
+      '📖 "The key to developing a deep work habit is to move beyond good intentions and add routines and rituals to your working life." — Cal Newport, Deep Work, rule 1',
+      '📖 "Treat your time with respect. Schedule every minute of your day." — Cal Newport, Deep Work, rule 4',
+      '📖 "Don\'t take breaks from distraction. Instead take breaks from focus." — Cal Newport, Deep Work, rule 2',
+    ],
+    sevenHabitsQuotes: [
+      // Stephen R. Covey, "The 7 Habits of Highly Effective People" (1989)
+      '📖 "The key is not to prioritize what\'s on your schedule, but to schedule your priorities." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Begin with the end in mind." — Stephen Covey, 7 Habits, habit 2',
+      '📖 "Put first things first." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Most of us spend too much time on what is urgent and not enough time on what is important." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "The main thing is to keep the main thing the main thing." — Stephen Covey, 7 Habits, habit 3',
+      '📖 "Sow a thought, reap an action; sow an action, reap a habit; sow a habit, reap a character; sow a character, reap a destiny." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Between stimulus and response there is a space. In that space is our freedom and power to choose our response." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Be proactive. Highly effective people don\'t just react to circumstances — they create them." — Stephen Covey, 7 Habits, habit 1',
+      '📖 "Seek first to understand, then to be understood." — Stephen Covey, 7 Habits, habit 5',
+      '📖 "Live out of your imagination, not your history." — Stephen Covey, 7 Habits, habit 2',
+    ],
+    contextualTips: {
+      noEveningReview:
+        '💡 Your mornings are set — how about evenings? Enable the evening review to prepare for tomorrow: "turn on evening review at 9pm".',
+      noMorningAgenda:
+        '💡 Want to start each day with a plan? Enable the morning agenda: "set morning agenda to 7:30".',
+      noQuietHours: "💡 Protect your sleep — set up quiet hours so I don't disturb you at night. Check /settings.",
+      noGoogleCalendar: '💡 Connect Google Calendar to see all your events in one place — /connect_google.',
+      noCountry: '💡 Set your country to get public holidays in your calendar — /holidays.',
+      noVoiceCalls:
+        '💡 I can call you before important events so you never miss them. Enable voice calls in /settings.',
+    },
     speech: {
       allDay: 'all day',
       noEvents: 'no events',
@@ -510,6 +690,14 @@ export const MSG = {
     tz_detected: (tz: string, offset: string) => `Ваш часовой пояс: ${tz} (${offset}).\nВсё верно?`,
     tz_confirm_yes: 'Да ✓',
     tz_confirm_no: 'Нет, выбрать вручную',
+    geo_tz_confirm_prompt: (currentTz: string, newTz: string, offset: string) =>
+      `📍 Твой текущий часовой пояс — <b>${currentTz}</b>.\nПо геолокации похоже, что ты в <b>${newTz}</b> (${offset}).\n\nОбновление часового пояса нужно, чтобы напоминания, сводка дня и время событий отображались правильно.\n\nОбновить часовой пояс?`,
+    geo_tz_confirm_btn: 'Да, обновить ✓',
+    geo_tz_dismiss_btn: 'Нет, оставить',
+    geo_tz_updated: (tz: string, offset: string) => `✅ Часовой пояс обновлён: ${tz} (${offset}).`,
+    geo_tz_dismissed: 'ОК, часовой пояс не изменён.',
+    tz_same_from_location: (tz: string, offset: string) =>
+      `📍 Твой часовой пояс уже ${tz} (${offset}) — менять ничего не нужно.`,
     share_location: '📍 Отправить геолокацию',
     choose_manually: '⌨️ Выбрать вручную',
     country_prompt: 'Показывать государственные праздники в календаре?',
@@ -782,6 +970,8 @@ export const MSG = {
       events: {
         noEventsInRange: 'Событий в этом диапазоне не найдено.',
         noEventsMatching: 'Событий по запросу не найдено.',
+        noEventsMatchingScope: (scope: string) =>
+          `Событий по запросу не найдено в ${scope === 'personal' ? 'личном' : 'групповом'} календаре. Попробуй поискать в ${scope === 'personal' ? 'групповом' : 'личном'}.`,
         noUpcomingEvents: 'Предстоящих событий нет.',
         upcomingEvents: (count: number, lines: string) => `Следующие ${count}:\n${lines}`,
         eventCreated: (parts: string) => `Событие создано: ${parts}`,
@@ -840,6 +1030,20 @@ export const MSG = {
         triggerCreated: (id: string, topic: string, condition: string | null, action: string) =>
           `Триггер создан (id: ${id}): когда ${topic}${condition ? ` и (${condition})` : ''} → «${action}»`,
         triggerRemoved: (id: string) => `Триггер ${id} удалён.`,
+      },
+      location: {
+        clarifyAddress: (title: string) => `📍 Уточни адрес для «${title}»:`,
+        locationResolved: (title: string, address: string) => `📍 Адрес для «${title}» определён: ${address}`,
+        locationNotFound: (title: string) =>
+          `📍 Не удалось определить адрес для «${title}». Можешь отправить 📍 геолокацию или написать полный адрес.`,
+        geoForEvent: (title: string) => `📍 Получена геолокация! Это для события «${title}»?`,
+        geoForEventConfirm: 'Да, использовать для этого события',
+        geoNewLocation: 'Нет, это моё текущее местоположение',
+        geoExplain: 'Другое',
+        geoOtherAck:
+          '📍 Понял. Пин сохранён на 30 минут — просто скажи, к какому событию его привязать, и я сделаю это.',
+        geoPurposeQuestion:
+          '📍 Получена геолокация! Для чего она?\n1. Обновить город\n2. Задать локацию для последнего события\n3. Другое (напиши пояснение)',
       },
       agent: {
         connectMessage: (url: string) =>
@@ -927,6 +1131,160 @@ export const MSG = {
         `🕐 Сегодня ночью часы перевели на ${duration} вперёд. Проверь, что будильник и встречи правильно настроены!`,
       clockChangeBack: (duration: string) =>
         `🕐 Сегодня ночью часы перевели на ${duration} назад. Проверь, что будильник и встречи правильно настроены!`,
+    },
+    weather: {
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      wind: (ms: number) => `${ms} м/с`,
+      weekForecast: '🌤 Погода на неделю:',
+    },
+    botTips: {
+      // ── Создание событий ──
+      voice_create: '💡 Отправь голосовое сообщение — я пойму и создам событие!',
+      add_command: '💡 Используй /add чтобы создать событие по шагам.',
+      natural_language: '💡 Просто напиши: «Стоматолог в пятницу в 15:00» — я всё пойму.',
+      recurring_events: '💡 Умею создавать повторяющиеся события — попробуй «стендап каждый будний день в 10:00».',
+      complex_recurrence: '💡 «Обед с Аней каждый второй четверг в 13:00» — сложные повторения тоже работают.',
+      ics_import: '💡 Импортируй календарь — просто отправь .ics файл в этот чат.',
+      // ── Напоминания и не забыть ──
+      call_before_flight:
+        '💡 Чтобы не опоздать на самолёт — добавь время прибытия в аэропорт и попроси меня позвонить!',
+      multiple_reminders: '💡 Несколько напоминаний: «напомни за 1 день и за 2 часа до встречи».',
+      voice_calls: '💡 Я могу позвонить тебе перед важным событием — включи звонки в /settings.',
+      daily_medicine: '💡 «Напоминай пить таблетки каждый день в 8 утра» — и я буду присылать уведомление.',
+      birthday_reminder: '💡 Поставь напоминание о дне рождения друга заранее — успеешь выбрать подарок.',
+      // ── Планирование и обзор ──
+      week_overview: '💡 Спроси «что у меня на этой неделе?» — получишь быстрый обзор.',
+      free_slots: '💡 «Когда я свободен в среду?» — найду свободные окна в расписании.',
+      month_view: '💡 Используй /month чтобы увидеть календарь на весь месяц.',
+      meeting_count: '💡 «Сколько у меня встреч на этой неделе?» — посчитаю и подведу итог.',
+      morning_agenda:
+        '💡 Настрой утреннюю сводку, чтобы каждый день начинать с плана — «настрой утреннюю сводку на 7:30».',
+      evening_review:
+        '💡 Включи вечерний обзор, чтобы подготовиться к завтрашнему дню — «включи вечерний обзор в 21:00».',
+      // ── Шаринг и совместная работа ──
+      share_schedule: '💡 Поделись расписанием: «покажи мою неделю @username» — увидит твои события.',
+      invite_people: '💡 Приглашай людей: «пригласи @anna на ужин в пятницу».',
+      accept_decline: '💡 Получил приглашение? Можешь принять, отклонить или предложить другое время.',
+      group_calendar: '💡 Добавь бота в групповой чат — и ведите общий календарь!',
+      secretary_access: '💡 Дай коллеге доступ секретаря, чтобы он управлял твоим календарём, когда ты занят.',
+      // ── Google Calendar ──
+      connect_google: '💡 Подключи Google Calendar через /connect_google — все события синхронизируются автоматически.',
+      google_sync: '💡 После подключения Google все твои календари появятся здесь.',
+      // ── Жизненные ситуации: Путешествия ──
+      pack_suitcase:
+        '💡 Собираешься в поездку? Добавь «Собрать чемодан» за день и «Такси в аэропорт» с точным временем.',
+      hotel_checkin: '💡 Добавь время заезда и выезда из отеля — не пропустишь дедлайн.',
+      visa_appointment:
+        '💡 «Запись на визу 15 марта в 9:00, напомни за неделю и за день» — чтобы подготовить документы.',
+      timezone_change: '💡 Меняешь часовой пояс? Скажи «поменяй мой часовой пояс на America/New_York».',
+      // ── Жизненные ситуации: Здоровье ──
+      doctor_checkup: '💡 «Визит к врачу каждые 6 месяцев» — не забудешь о плановых обследованиях.',
+      gym_sessions: '💡 Тренировки: «зал каждый пн, ср, пт в 19:00» — следи за регулярностью.',
+      drink_water: '💡 «Напоминай пить воду каждые 2 часа» — здоровые привычки в календаре!',
+      // ── Жизненные ситуации: Работа ──
+      weekly_oneone: '💡 Еженедельный 1-on-1? «1-on-1 с руководителем каждый вторник в 16:00, напомни за 15 мин».',
+      sprint_review: '💡 «Ретро каждую вторую пятницу в 15:00» — двухнедельные повторения тоже умею.',
+      prep_time: '💡 Перед презентацией добавь время на подготовку: «Подготовить слайды — пт с 14:00 до 16:00».',
+      event_descriptions: '💡 Используй описания событий, чтобы хранить повестки и заметки к встречам.',
+      // ── Жизненные ситуации: Личное ──
+      anniversary: '💡 Никогда не забывай годовщину — «Годовщина свадьбы каждый год 15 июня».',
+      movie_premieres: '💡 Добавляй премьеры фильмов, концерты или релизы игр, которых ждёшь.',
+      rent_payment: '💡 «Оплата аренды каждый месяц 1 числа» — финансовые дедлайны под контролем.',
+      subscriptions: '💡 Подписки: «Продление Netflix каждый месяц 12 числа» — знай, когда списание.',
+      reading_challenge: '💡 «Читать 30 минут каждый вечер в 21:00» — формируй полезные привычки.',
+      // ── Жизненные ситуации: Семья ──
+      family_calendar: '💡 Веди семейный календарь в общем чате — все видят школьные события и кружки.',
+      kids_swimming: '💡 «Бассейн у детей каждую субботу в 10:00» — семейные рутины легко.',
+      school_events: '💡 Добавляй родительские собрания, утренники и каникулы в групповой календарь.',
+      // ── Жизненные ситуации: Социальное ──
+      birthday_party: '💡 «День рождения Макса — суббота в 18:00, Паб» — а потом пригласи друзей из контактов.',
+      decline_propose:
+        '💡 Не можешь прийти? Отклони приглашение и предложи удобное время — организатор получит уведомление.',
+      find_free_time: '💡 Ищешь время для встречи? «Когда я свободен в субботу днём?»',
+      // ── Мощные фичи ──
+      context_awareness: '💡 Я помню контекст — скажи «перенеси на 15:00» и я пойму, какое событие.',
+      automated_reminders: '💡 Запланируй автоматические сообщения: «напоминай каждую пятницу в 17:00 сдать таймшиты».',
+      public_holidays: '💡 Через /holidays подпишись на праздники — они появятся в календаре.',
+      save_contacts: '💡 Сохраняй контакты и приглашай по имени — не нужно помнить юзернеймы.',
+      quiet_hours: '💡 Настрой тихие часы, чтобы я не беспокоил ночью — смотри /settings.',
+      language_switch: '💡 Я говорю по-русски и по-английски — сменить язык можно в /settings.',
+      action_log: '💡 Отправь /log чтобы увидеть полную историю действий с календарём.',
+      past_events: '💡 «Что у меня было в прошлый вторник?» — я могу посмотреть прошлые события.',
+    },
+    gtdQuotes: [
+      // Дэвид Аллен, «Как привести дела в порядок» (Getting Things Done, 2001/2015)
+      // Цитаты в переводе, верифицированы по множеству открытых источников
+      '📖 «Твой разум создан для того, чтобы рождать идеи, а не хранить их.» — Дэвид Аллен, GTD, гл. 1',
+      '📖 «Если ты не уделяешь должного внимания тому, что занимает твоё внимание, оно потребует больше внимания, чем заслуживает.» — Дэвид Аллен, GTD, гл. 2',
+      '📖 «Твоя способность генерировать энергию прямо пропорциональна твоей способности расслабляться.» — Дэвид Аллен, GTD, гл. 1',
+      '📖 «Ты не можешь «сделать» проект — ты можешь лишь выполнять конкретные шаги, связанные с ним.» — Дэвид Аллен, GTD, гл. 3',
+      '📖 «Большая часть стресса, который люди испытывают, возникает не от избытка дел. Он возникает от того, что они не доводят до конца начатое.» — Дэвид Аллен, GTD, гл. 6',
+      '📖 «Легче через действие прийти к правильному настрою, чем через настрой прийти к действию.» — Дэвид Аллен, GTD, гл. 12',
+      '📖 «Большинство людей лучше всего чувствуют себя на работе за неделю до отпуска. Но дело не в отпуске. Что ты делаешь в последнюю неделю перед поездкой? Разгребаешь дела, закрываешь задачи, пересматриваешь обязательства. Я предлагаю делать это еженедельно, а не раз в год.» — Дэвид Аллен, GTD, гл. 8',
+      '📖 «Обычно существует обратная зависимость: чем больше что-то занимает твои мысли, тем меньше это делается.» — Дэвид Аллен, GTD, гл. 1',
+      '📖 «Ты можешь спокойно относиться к тому, что не делаешь, только когда точно знаешь, что именно ты не делаешь.» — Дэвид Аллен, GTD, гл. 9',
+      '📖 «Всё, что находится не там, где должно быть, и не в том состоянии — это «открытая петля», которая будет перетягивать твоё внимание.» — Дэвид Аллен, GTD, гл. 2',
+      '📖 «Чтобы довести дело до конца, нужны два компонента: определить (1) что значит «сделано» (результат) и (2) как выглядит «делание» (действие).» — Дэвид Аллен, GTD, гл. 2',
+      '📖 «Твоя голова — для того, чтобы рождать идеи, а не для хранения. Для хранения нужна надёжная система.» — Дэвид Аллен, GTD, гл. 4',
+      '📖 «Правило двух минут: если следующее действие можно сделать за две минуты или меньше, делай его сразу.» — Дэвид Аллен, GTD, гл. 6',
+      '📖 «Думай как человек действия, действуй как человек мысли.» — Анри Бергсон, цит. в GTD, гл. 3',
+      '📖 «Главный секрет продуктивного мышления и действий — направлять внимание на нужные вещи в нужное время.» — Дэвид Аллен, GTD, гл. 9',
+      '📖 «Один из лучших приёмов повышения продуктивности — иметь организованные, готовые к обзору напоминания о действиях.» — Дэвид Аллен, GTD, гл. 7',
+      '📖 «Еженедельный обзор — это время собрать и обработать все «входящие», обновить списки и привести систему в чистое, ясное, актуальное состояние.» — Дэвид Аллен, GTD, гл. 8',
+      '📖 «Отличный молоток не сделает из тебя отличного плотника, но отличный плотник всегда захочет иметь отличный молоток.» — Дэвид Аллен, GTD, гл. 5',
+    ],
+    atomicHabitsQuotes: [
+      // Джеймс Клир, «Атомные привычки» (2018)
+      '📖 «Ты не поднимаешься до уровня своих целей. Ты падаешь до уровня своих систем.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Каждое твоё действие — это голос за тот тип человека, которым ты хочешь стать.» — Джеймс Клир, Атомные привычки, гл. 2',
+      '📖 «Привычки — это сложный процент самосовершенствования.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Самый эффективный способ изменить привычки — сосредоточиться не на том, чего ты хочешь достичь, а на том, кем ты хочешь стать.» — Джеймс Клир, Атомные привычки, гл. 2',
+      '📖 «Будь дизайнером своего мира, а не просто его потребителем.» — Джеймс Клир, Атомные привычки, гл. 6',
+      '📖 «Когда ты влюбляешься в процесс, а не в результат, тебе не нужно ждать разрешения быть счастливым.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Избавиться от плохой привычки — как выкорчевать мощный дуб внутри себя.» — Джеймс Клир, Атомные привычки, гл. 7',
+      '📖 «Успех — это продукт ежедневных привычек, а не единичных трансформаций.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Время усиливает разрыв между успехом и провалом. Оно умножает то, чем ты его кормишь.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Тебя должна волновать текущая траектория, а не текущие результаты.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Цель постановки целей — выиграть игру. Цель построения систем — продолжать играть.» — Джеймс Клир, Атомные привычки, гл. 1',
+      '📖 «Пропустить один раз — случайность. Пропустить дважды — начало новой привычки.» — Джеймс Клир, Атомные привычки, гл. 16',
+    ],
+    deepWorkQuotes: [
+      // Кэл Ньюпорт, «Глубокая работа» (2016)
+      '📖 «Если ты не производишь результат — ты не преуспеешь, независимо от таланта и навыков.» — Кэл Ньюпорт, Глубокая работа, гл. 1',
+      '📖 «Ясность в том, что важно, даёт ясность в том, что не важно.» — Кэл Ньюпорт, Глубокая работа, гл. 4',
+      '📖 «Способность к глубокой работе становится всё более редкой именно тогда, когда становится всё более ценной.» — Кэл Ньюпорт, Глубокая работа, введение',
+      '📖 «Два ключевых навыка для успеха в новой экономике: быстро осваивать сложные вещи и производить результат на элитном уровне.» — Кэл Ньюпорт, Глубокая работа, гл. 1',
+      '📖 «Кто ты, что ты думаешь, чувствуешь и делаешь, что любишь — это сумма того, на чём ты фокусируешься.» — Кэл Ньюпорт, Глубокая работа, гл. 3',
+      '📖 «Глубокая жизнь — это хорошая жизнь, как ни посмотри.» — Кэл Ньюпорт, Глубокая работа, заключение',
+      '📖 «Попытки углубить фокус обречены, если ты одновременно не отучишь свой мозг от зависимости к отвлечениям.» — Кэл Ньюпорт, Глубокая работа, правило 2',
+      '📖 «Ключ к глубокой работе — выйти за рамки добрых намерений и добавить рутины и ритуалы в рабочую жизнь.» — Кэл Ньюпорт, Глубокая работа, правило 1',
+      '📖 «Относись к своему времени с уважением. Планируй каждую минуту дня.» — Кэл Ньюпорт, Глубокая работа, правило 4',
+      '📖 «Не бери перерывы от отвлечений. Бери перерывы от фокуса.» — Кэл Ньюпорт, Глубокая работа, правило 2',
+    ],
+    sevenHabitsQuotes: [
+      // Стивен Кови, «7 навыков высокоэффективных людей» (1989)
+      '📖 «Главное — не расставлять приоритеты в расписании, а планировать приоритеты.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Начинай, представляя конечную цель.» — Стивен Кови, 7 навыков, навык 2',
+      '📖 «Сначала делай то, что нужно делать сначала.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Большинство из нас тратит слишком много времени на срочное и слишком мало на важное.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Главное — сохранять главное главным.» — Стивен Кови, 7 навыков, навык 3',
+      '📖 «Посей мысль — пожнёшь действие; посей действие — пожнёшь привычку; посей привычку — пожнёшь характер; посей характер — пожнёшь судьбу.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Между стимулом и реакцией есть пространство. В этом пространстве — наша свобода и сила выбирать свой ответ.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Будь проактивным. Эффективные люди не просто реагируют на обстоятельства — они их создают.» — Стивен Кови, 7 навыков, навык 1',
+      '📖 «Сначала стремись понять, потом — быть понятым.» — Стивен Кови, 7 навыков, навык 5',
+      '📖 «Живи воображением, а не историей.» — Стивен Кови, 7 навыков, навык 2',
+    ],
+    contextualTips: {
+      noEveningReview:
+        '💡 Утро настроено — а вечер? Включи вечерний обзор, чтобы готовиться к завтрашнему дню: «включи вечерний обзор в 21:00».',
+      noMorningAgenda:
+        '💡 Хочешь начинать каждый день с плана? Включи утреннюю сводку: «настрой утреннюю сводку на 7:30».',
+      noQuietHours: '💡 Защити свой сон — настрой тихие часы, чтобы я не беспокоил ночью. Смотри /settings.',
+      noGoogleCalendar: '💡 Подключи Google Calendar, чтобы видеть все события в одном месте — /connect_google.',
+      noCountry: '💡 Укажи свою страну, чтобы праздники появились в календаре — /holidays.',
+      noVoiceCalls:
+        '💡 Я могу звонить перед важными событиями, чтобы ты ничего не пропустил. Включи звонки в /settings.',
     },
     speech: {
       allDay: 'весь день',

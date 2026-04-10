@@ -1,7 +1,22 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PlaywrightPool } from '../../src/worker/playwright-pool.ts';
 
-describe('PlaywrightPool', () => {
+// Probe whether Playwright chromium binary is installed.
+// Skip the entire suite when missing — these are integration tests requiring a real browser.
+const browserAvailable = await (async () => {
+  try {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch();
+    await browser.close();
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+const describeOrSkip = browserAvailable ? describe : describe.skip;
+
+describeOrSkip('PlaywrightPool', () => {
   let pool: PlaywrightPool;
 
   beforeAll(async () => {

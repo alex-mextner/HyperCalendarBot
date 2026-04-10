@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { localizeInterval, NotificationRenderer } from '../../../src/services/notification/renderer.ts';
+import type { DayWeather } from '../../../src/services/weather/types.ts';
 
 describe('NotificationRenderer', () => {
   const renderer = new NotificationRenderer();
@@ -151,7 +152,8 @@ describe('NotificationRenderer', () => {
         isAllDay: true,
       });
       expect(result.text).toContain('📅 Весь день');
-      expect(result.text).toContain('📍 Офис');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Офис</a>');
       expect(result.text).not.toContain('🕐');
     });
   });
@@ -165,7 +167,8 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('Reminders:');
       expect(result.text).toContain('• Standup — 10:00 (in 30 minutes)');
       expect(result.text).toContain('• Call — 10:00 (in 30 minutes)');
-      expect(result.text).toContain('📍 Zoom');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Zoom</a>');
     });
 
     test('renders batch in Russian', () => {
@@ -257,7 +260,8 @@ describe('NotificationRenderer', () => {
         },
       ]);
       expect(result.text).toContain('📅 Конференция (Весь день)');
-      expect(result.text).toContain('📍 Офис');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Офис</a>');
     });
   });
 
@@ -334,6 +338,90 @@ describe('NotificationRenderer', () => {
       const result = renderer.renderEveningReview('ru', 'четверг, 17 марта', []);
       expect(result.text).toContain('Завтра нет событий');
       expect(result.text).toContain('Просто напиши сообщение');
+    });
+  });
+
+  describe('weather in agendas', () => {
+    const clearWeather: DayWeather = {
+      tempMin: 5,
+      tempMax: 15,
+      tempCurrent: 10,
+      conditionCode: 800,
+      description: 'clear sky',
+      windSpeed: 3,
+    };
+
+    test('morning agenda includes weather line', () => {
+      const result = renderer.renderMorningAgenda(
+        'en',
+        'Monday, April 3',
+        [{ title: 'Meeting', startTime: '10:00', endTime: '11:00', location: null, duration: '1h' }],
+        { weather: clearWeather },
+      );
+      expect(result.text).toContain('☀️ 10°C (5..15°C), clear sky');
+      expect(result.text).toContain('Meeting');
+    });
+
+    test('morning agenda shows weather on free day', () => {
+      const result = renderer.renderMorningAgenda('ru', 'понедельник, 3 апреля', [], {
+        weather: clearWeather,
+      });
+      expect(result.text).toContain('☀️ 10°C (5..15°C), clear sky');
+      expect(result.text).toContain('Сегодня нет событий');
+    });
+
+    test('morning agenda shows bot tip on free day', () => {
+      const result = renderer.renderMorningAgenda('en', 'Monday, April 3', [], {
+        botTip: '💡 Tip: send a voice message to quickly create an event!',
+      });
+      expect(result.text).toContain('💡 Tip: send a voice message');
+    });
+
+    test('morning agenda does not show bot tip with events', () => {
+      const result = renderer.renderMorningAgenda(
+        'en',
+        'Monday, April 3',
+        [{ title: 'Meeting', startTime: '10:00', endTime: '11:00', location: null, duration: '1h' }],
+        { botTip: '💡 Some tip' },
+      );
+      // botTip is ignored when events exist (scheduler passes null, but renderer also won't show it)
+      // In renderAgenda, botTip is only shown in the empty-events branch
+      expect(result.text).not.toContain('💡 Some tip');
+    });
+
+    test('evening review includes weather for tomorrow', () => {
+      const tomorrowWeather: DayWeather = {
+        tempMin: -3,
+        tempMax: 2,
+        conditionCode: 600,
+        description: 'snow',
+        windSpeed: 8,
+      };
+      const result = renderer.renderEveningReview('ru', 'вторник, 4 апреля', [], {
+        weather: tomorrowWeather,
+      });
+      expect(result.text).toContain('🌨 -3..2°C, snow');
+    });
+
+    test('weekly digest includes weather per day', () => {
+      const days = [
+        { date: '2026-04-06', dayLabel: 'Mon 6', events: [{ title: 'Meeting', startTime: '10:00' }] },
+        { date: '2026-04-07', dayLabel: 'Tue 7', events: [] },
+      ];
+      const weatherByDate = {
+        '2026-04-06': { tempMin: 10, tempMax: 18, conditionCode: 800, description: 'clear', windSpeed: 3 },
+        '2026-04-07': { tempMin: 5, tempMax: 12, conditionCode: 500, description: 'rain', windSpeed: 6 },
+      };
+      const result = renderer.renderWeeklyDigest('en', '6–12 Apr', days, { weatherByDate });
+      expect(result.text).toContain('Mon 6: 10:00 Meeting ☀️ 10..18°');
+      expect(result.text).toContain('Tue 7: (no events) 🌧 5..12°');
+    });
+
+    test('weekly digest works without weather', () => {
+      const days = [{ date: '2026-04-06', dayLabel: 'Mon 6', events: [{ title: 'Meeting', startTime: '10:00' }] }];
+      const result = renderer.renderWeeklyDigest('en', '6–12 Apr', days);
+      expect(result.text).toContain('Mon 6: 10:00 Meeting');
+      expect(result.text).not.toContain('°');
     });
   });
 });

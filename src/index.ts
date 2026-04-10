@@ -1,5 +1,6 @@
 // src/index.ts
 
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
@@ -76,11 +77,19 @@ if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
 }
 
+type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
+type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
+
 // Mutable ref — patched after bot creation
 const botRef: {
-  sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
+  sendMessage: (
+    telegramId: number,
+    text: string,
+    parseMode?: ParseMode,
+    replyMarkup?: ReplyMarkup,
+  ) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
-  editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
@@ -110,6 +119,9 @@ let callQueueCleanup: { close: () => Promise<void> } | undefined;
 let notificationQueueCleanup: { close: () => Promise<void> } | undefined;
 let botTasksQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleRedisClient: Bun.RedisClient | undefined;
+let participantPushSchedulerRef:
+  | ((participantUserId: number, eventId: number, action: 'create' | 'update' | 'delete') => Promise<void>)
+  | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
@@ -118,7 +130,7 @@ let mtprotoResolveUsername:
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
   const { createGoogleSyncQueue } = await import('./services/google/sync-queue.ts');
-  const { createPushScheduler } = await import('./services/google/push-scheduler.ts');
+  const { createPushScheduler, createParticipantPushScheduler } = await import('./services/google/push-scheduler.ts');
   const { executeSyncCronTick, setupSyncCron } = await import('./services/google/sync-cron.ts');
   const { renewExpiringChannels, setupWatchRenewalCron } = await import('./services/google/watch-renewal-cron.ts');
   const { executeCleanup, setupCleanupCron } = await import('./services/google/cleanup-cron.ts');
@@ -151,6 +163,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     eventRepo: db.events,
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
+    participantSyncRepo: db.participantGoogleSync,
     getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
@@ -183,6 +196,8 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   };
 
   const pushScheduler = createPushScheduler(db.googleSync, db.events, queue);
+  const participantPushScheduler = createParticipantPushScheduler(db.googleSync, db.participantGoogleSync, queue);
+  participantPushSchedulerRef = participantPushScheduler;
 
   const disconnectDeps: DisconnectDeps = {
     config,
@@ -191,6 +206,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     eventRepo: db.events,
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
+    participantSyncRepo: db.participantGoogleSync,
     stopWatchChannels: async (userId) => {
       await queue.add('stop-watch', { type: 'stop-watch', userId });
     },
@@ -203,6 +219,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     calendarRepo: db.googleCalendars,
     syncRepo: db.googleSync,
     schedulePush: pushScheduler,
+    scheduleParticipantPush: participantPushScheduler,
     triggerSync: async (userId: number) => {
       await queue.add('pull-sync', { type: 'pull-sync', userId, trigger: 'manual' });
     },
@@ -251,25 +268,29 @@ if (config.REDIS_URL) {
   const { RenderService } = await import('./services/image/render-service.ts');
   const { playwrightPool } = await import('./worker/playwright-pool.ts');
 
-  await playwrightPool.initialize();
+  try {
+    await playwrightPool.initialize();
 
-  const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
-  worker.on('failed', onWorkerFailed('image-render'));
-  renderService = new RenderService(
-    imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
-    queueEvents,
-  );
+    const { queue: imageQueue, worker, queueEvents } = createImageRenderQueue(config.REDIS_URL);
+    worker.on('failed', onWorkerFailed('image-render'));
+    renderService = new RenderService(
+      imageQueue as import('bullmq').Queue<import('./worker/image-render.queue.ts').ImageRenderJob>,
+      queueEvents,
+    );
 
-  imageQueueCleanup = {
-    close: async () => {
-      await worker.close();
-      await imageQueue.close();
-      await queueEvents.close();
-      await playwrightPool.shutdown();
-    },
-  };
+    imageQueueCleanup = {
+      close: async () => {
+        await worker.close();
+        await imageQueue.close();
+        await queueEvents.close();
+        await playwrightPool.shutdown();
+      },
+    };
 
-  botLogger.info('Image render queue initialized');
+    botLogger.info('Image render queue initialized');
+  } catch (err) {
+    botLogger.error({ err }, 'Playwright initialization failed — image rendering disabled');
+  }
 }
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
@@ -416,6 +437,14 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
   }
 }
 
+// Weather service — optional, requires OPENWEATHER_API_KEY
+let weatherService: import('./services/weather/weather-service.ts').WeatherService | undefined;
+if (config.OPENWEATHER_API_KEY) {
+  const { WeatherService } = await import('./services/weather/weather-service.ts');
+  weatherService = new WeatherService({ apiKey: config.OPENWEATHER_API_KEY });
+  botLogger.info('Weather service initialized');
+}
+
 // Notification scheduler — requires Redis for BullMQ queue
 if (config.REDIS_URL) {
   const { createNotificationQueue, createNotificationWorker, setupNotificationTick } = await import(
@@ -447,6 +476,8 @@ if (config.REDIS_URL) {
           callQueue!.enqueue({ ...data, callLogId: log.id });
         }
       : undefined,
+    weatherService,
+    featureUsageRepo: db.featureUsage,
   });
 
   const notifWorker = createNotificationWorker(
@@ -454,7 +485,7 @@ if (config.REDIS_URL) {
     db.notificationLog,
     (telegramId, text) =>
       botRef
-        .sendMessage(telegramId, text)
+        .sendMessage(telegramId, text, 'HTML')
         .then(() => {})
         .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send notification')),
     scheduler,
@@ -591,6 +622,13 @@ if (config.HF_TOKEN) {
   botLogger.info('Kokoro TTS initialized');
 }
 
+let nliClassifier: import('./services/nli/nli-classifier.ts').NliClassifier | undefined;
+if (config.HF_TOKEN) {
+  const { NliClassifier } = await import('./services/nli/nli-classifier.ts');
+  nliClassifier = new NliClassifier(config.HF_TOKEN);
+  botLogger.info('NLI classifier initialized (group message semantic filter)');
+}
+
 let sileroTts: import('./services/voice/silero-tts-service.ts').SileroTtsService | undefined;
 if (config.SILERO_PYTHON_PATH && stressDictionary) {
   const { SileroTtsService } = await import('./services/voice/silero-tts-service.ts');
@@ -674,6 +712,91 @@ if (config.REDIS_URL) {
 
 const domainEventBus = new DomainEventBus();
 
+// Participant Google Sync — push accepted invitation events to invitee's Google Calendar
+if (participantPushSchedulerRef) {
+  const schedParticipant = participantPushSchedulerRef;
+  domainEventBus.on('myInvitations.accepted', ({ inviteeId, event }) => {
+    schedParticipant(inviteeId, event.id, 'create').catch((err) =>
+      botLogger.error({ err, inviteeId, eventId: event.id }, 'Failed to schedule participant Google push'),
+    );
+  });
+  domainEventBus.on('myInvitations.rejected', ({ inviteeId, event }) => {
+    schedParticipant(inviteeId, event.id, 'delete').catch((err) =>
+      botLogger.error({ err, inviteeId, eventId: event.id }, 'Failed to schedule participant Google delete'),
+    );
+  });
+  domainEventBus.on('myGroup.newEvent', ({ groupChatId, newEvent }) => {
+    const members = db.groupMembers.getActiveMembers(groupChatId);
+    for (const member of members) {
+      schedParticipant(member.user_id, newEvent.id, 'create').catch((err) =>
+        botLogger.error(
+          { err, userId: member.user_id, eventId: newEvent.id },
+          'Failed to schedule group event Google push',
+        ),
+      );
+    }
+  });
+}
+
+// Location verification — requires GOOGLE_API_KEY + Redis for address cache
+let locationVerification:
+  | import('./services/location/location-verification-service.ts').LocationVerificationService
+  | undefined;
+let addressCache: import('./services/location/address-cache.ts').AddressCache | undefined;
+let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingGeoStore | undefined;
+
+if (config.GOOGLE_API_KEY && config.REDIS_URL) {
+  const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
+  const { AddressCache } = await import('./services/location/address-cache.ts');
+  const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
+  const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
+  const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
+
+  const locationRedis = new Bun.RedisClient(config.REDIS_URL);
+  const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
+  addressCache = new AddressCache({
+    get: (key: string) => locationRedis.get(key),
+    set: (key: string, value: string) => locationRedis.set(key, value),
+  });
+  const candidateStore = new RedisLocationCandidateStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
+  });
+
+  // sendMessage / editMessage closures resolve botRef at call time (patched after createBot)
+  locationVerification = new LocationVerificationService({
+    geocodingService,
+    addressCache,
+    eventRepo: db.events,
+    userRepo: db.users,
+    invitationRepo: db.invitations,
+    candidateStore,
+    sendMessage: async (userId, text, options) => {
+      await botRef.sendMessage(userId, text, options?.parse_mode, options?.reply_markup).catch((err: unknown) => {
+        botLogger.error({ err, userId }, 'Location verification: failed to send message');
+      });
+    },
+    editMessage: async (chatId, messageId, text, parseMode) => {
+      await botRef.editMessage(chatId, messageId, text, parseMode).catch((err: unknown) => {
+        botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
+      });
+    },
+  });
+
+  pendingGeoStore = new RedisPendingGeoStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
+  });
+
+  botLogger.info('Location verification initialized (Google Maps + Redis)');
+} else if (config.GOOGLE_API_KEY) {
+  botLogger.info('Location verification disabled: REDIS_URL not set (address cache requires Redis)');
+}
+
 const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
   createBot(
     config.BOT_TOKEN,
@@ -692,6 +815,10 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       mtprotoResolveUsername,
       eventMentionStore,
       domainEventBus,
+      nliClassifier,
+      locationVerification,
+      addressCache,
+      pendingGeoStore,
       envConfig: {
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
@@ -699,24 +826,26 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
       },
+      weatherService,
     },
   );
 
 // Patch bot ref to use real bot API
-botRef.sendMessage = async (telegramId, text, parseMode) => {
+botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
   const msg = await bot.api.sendMessage({
     chat_id: telegramId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return { message_id: msg.message_id };
+  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
     chat_id: chatId,
     message_id: messageId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
   });
 };
 botRef.sendVoice = async (telegramId, audio) => {

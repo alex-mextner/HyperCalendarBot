@@ -1,4 +1,5 @@
 import type { AgentCommand } from '../../agent/protocol.ts';
+import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
 import { handleAssistantTool } from './tool-handlers/assistant.ts';
@@ -11,6 +12,7 @@ import {
   handleUpdateContact,
 } from './tool-handlers/contacts.ts';
 import {
+  handleAttachPendingLocationToEvent,
   handleCreateEvent,
   handleDeleteEvent,
   handleGetEvent,
@@ -106,6 +108,7 @@ export interface ToolInputMap {
     recurrence_rule?: string | null;
     scope?: 'personal' | 'group';
   };
+  attach_pending_location_to_event: { event_id: number };
   delete_event: { event_id: number; scope?: 'personal' | 'group' };
   get_free_slots: { date: string; scope?: 'personal' | 'group' };
   search_events: { query?: string; scope?: 'personal' | 'group'; event_type?: 'birthday' | 'regular' };
@@ -239,6 +242,51 @@ const SKIP_ACTION_LOG = new Set<string>([
   'get_action_log',
 ]);
 
+/** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
+const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
+  create_event: 'events_create',
+  create_birthday_event: 'events_create',
+  update_event: 'events_edit',
+  attach_pending_location_to_event: 'geolocation',
+  delete_event: 'events_edit',
+  snooze_event: 'events_edit',
+  get_event: 'events_create',
+  get_events: 'events_create',
+  get_upcoming: 'events_create',
+  search_events: 'events_create',
+  set_reminder: 'reminders',
+  get_reminders: 'reminders',
+  get_free_slots: 'free_slots',
+  share_event: 'sharing',
+  send_invitation: 'sharing',
+  share_agenda: 'sharing',
+  set_event_visibility: 'sharing',
+  cancel_invitation: 'sharing',
+  resend_invitation: 'sharing',
+  propose_edit: 'sharing',
+  get_invitation_status: 'sharing',
+  notify_participants: 'sharing',
+  get_contacts: 'contacts',
+  add_contact: 'contacts',
+  find_contact: 'contacts',
+  update_contact: 'contacts',
+  get_holidays: 'holidays',
+  get_google_calendar_status: 'google_calendar',
+  list_google_calendars: 'google_calendar',
+  make_call: 'voice_calls',
+  end_call: 'voice_calls',
+  schedule_ai_call: 'voice_calls',
+  schedule_ai_call_cancel: 'voice_calls',
+  manage_settings: 'settings',
+  get_history: 'history',
+  get_action_log: 'history',
+  manage_secretaries: 'secretary',
+  list_calendar_access: 'secretary',
+  render_month_image: 'month_view',
+  render_day_image: 'month_view',
+  render_week_image: 'month_view',
+};
+
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
@@ -249,6 +297,18 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
     if (result.success) {
       const eventId = extractEventId(input as ToolInputMap[ToolName], result);
       if (eventId !== undefined) ctx.onEventMentioned?.(eventId);
+    }
+
+    // Track feature usage for tip personalization
+    if (result.success && ctx.featureUsageRepo) {
+      const featureKey = TOOL_FEATURE_MAP[toolName];
+      if (featureKey) {
+        try {
+          ctx.featureUsageRepo.record(ctx.user.telegram_id, featureKey);
+        } catch (fuErr) {
+          aiLogger.warn({ err: fuErr, tool: toolName }, 'Failed to record feature usage');
+        }
+      }
     }
 
     // Log mutating tool calls to user_action_log
@@ -320,7 +380,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
     if (!result.success) {
       return {
         success: false,
-        output: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
+        error: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
       };
     }
     input = result.data as ToolInputMap[ToolName];
@@ -342,6 +402,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'update_event':
         return handleUpdateEvent(ctx, input as ToolInputMap['update_event']);
+
+      case 'attach_pending_location_to_event':
+        return handleAttachPendingLocationToEvent(ctx, input as ToolInputMap['attach_pending_location_to_event']);
 
       case 'delete_event':
         return handleDeleteEvent(ctx, input as ToolInputMap['delete_event']);

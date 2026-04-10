@@ -305,6 +305,13 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
         .catch((err) => logger.error({ err }, 'schedulePush failed'));
     }
 
+    // Trigger background location verification if event has a location
+    if (event.location && ctx.locationVerification) {
+      ctx.locationVerification
+        .verifyEventLocation(event, ctx.user)
+        .catch((err) => logger.error({ err, eventId: event.id }, 'Background location verification failed'));
+    }
+
     if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
       const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
       if (conflicts.length > 0) {
@@ -379,6 +386,35 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       .catch((err) => logger.error({ err }, 'schedulePush failed'));
   }
 
+  // Fetch accepted participants once — used for both Google sync and the hint
+  const acceptedParticipants = ctx.participantRepo
+    ? ctx.participantRepo.getByEvent(event_id).filter((p) => p.status === 'accepted' && p.user_id !== userId)
+    : [];
+
+  // Push update to all accepted participants' Google Calendars
+  if (ctx.google?.scheduleParticipantPush && acceptedParticipants.length > 0) {
+    for (const p of acceptedParticipants) {
+      ctx.google
+        .scheduleParticipantPush(p.user_id, updated.id, 'update')
+        .catch((err) =>
+          logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed'),
+        );
+    }
+  }
+
+  // Push update to all group members' Google Calendars
+  if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
+    const pushParticipant = ctx.google.scheduleParticipantPush;
+    const members = ctx.group.groupMemberRepo
+      .getActiveMembers(ctx.groupChatId!)
+      .filter((m) => m.user_id !== ctx.user.telegram_id);
+    for (const m of members) {
+      pushParticipant(m.user_id, updated.id, 'update').catch((err) =>
+        logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed'),
+      );
+    }
+  }
+
   let conflictHint: string | undefined;
   if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
     const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
@@ -404,19 +440,67 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
   let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
-  if (ctx.participantRepo) {
-    const accepted = ctx.participantRepo
-      .getByEvent(event_id)
-      .filter((p) => p.status === 'accepted' && p.user_id !== ctx.user.telegram_id);
-    if (accepted.length > 0) {
-      output +=
-        ctx.user.language === 'ru'
-          ? `. У этого события ${accepted.length} ${ruPlural(accepted.length, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
-          : `. This event has ${accepted.length} participant${accepted.length > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
-    }
+  if (acceptedParticipants.length > 0) {
+    const count = acceptedParticipants.length;
+    output +=
+      ctx.user.language === 'ru'
+        ? `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
+        : `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
+  }
+
+  // Trigger background location verification if location was updated
+  if (input.location && ctx.locationVerification) {
+    ctx.locationVerification
+      .verifyEventLocation(updated, ctx.user)
+      .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));
   }
 
   return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
+}
+
+export interface AttachPendingLocationInput {
+  event_id: number;
+}
+
+export async function handleAttachPendingLocationToEvent(
+  ctx: AgentContext,
+  input: AttachPendingLocationInput,
+): Promise<ToolResult> {
+  if (!ctx.locationVerification || !ctx.pendingGeoStore) {
+    return { success: false, error: 'Location verification is not available' };
+  }
+
+  const geo = await ctx.pendingGeoStore.get(ctx.user.telegram_id);
+  if (!geo) {
+    return {
+      success: false,
+      error: 'No pending location pin found. Ask the user to send a 📍 pin via Telegram, then try again.',
+    };
+  }
+
+  const success = await ctx.locationVerification.resolveFromCoordinates(
+    input.event_id,
+    geo.latitude,
+    geo.longitude,
+    ctx.user.telegram_id,
+  );
+
+  if (!success) {
+    return { success: false, error: `Could not resolve geo to address for event ${input.event_id}` };
+  }
+
+  // Clear the pending pin so subsequent calls don't reuse stale data
+  await ctx.pendingGeoStore.delete(ctx.user.telegram_id).catch((err) => {
+    logger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to clear pending geo after attach');
+  });
+
+  return {
+    success: true,
+    output:
+      ctx.user.language === 'ru'
+        ? `📍 Локация привязана к событию #${input.event_id}.`
+        : `📍 Location attached to event #${input.event_id}.`,
+  };
 }
 
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
@@ -438,6 +522,19 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     if (!event) {
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
+    // Remove from all group members' Google Calendars before deleting
+    if (ctx.google?.scheduleParticipantPush && ctx.group) {
+      for (const m of ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!)) {
+        ctx.google
+          .scheduleParticipantPush(m.user_id, input.event_id, 'delete')
+          .catch((err) =>
+            logger.error(
+              { err, userId: m.user_id, eventId: input.event_id },
+              'scheduleParticipantPush group delete failed',
+            ),
+          );
+      }
+    }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
     return {
       success: true,
@@ -452,12 +549,35 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     const participant = ctx.participantRepo.findByEventAndUser(input.event_id, userId);
     if (participant && participant.status === 'accepted') {
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
+      // Remove from this participant's Google Calendar
+      ctx.google
+        ?.scheduleParticipantPush?.(userId, input.event_id, 'delete')
+        .catch((err) =>
+          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed'),
+        );
       return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
     }
   }
 
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+  }
+
+  // Remove from all participants' Google Calendars before deleting
+  if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
+    const participants = ctx.participantRepo
+      .getByEvent(input.event_id)
+      .filter((p) => p.status === 'accepted' && p.user_id !== userId);
+    for (const p of participants) {
+      ctx.google
+        .scheduleParticipantPush(p.user_id, input.event_id, 'delete')
+        .catch((err) =>
+          logger.error(
+            { err, participantUserId: p.user_id, eventId: input.event_id },
+            'scheduleParticipantPush delete failed',
+          ),
+        );
+    }
   }
 
   const googleEventId = event.google_event_id ?? undefined;
@@ -503,7 +623,11 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   );
 
   if (events.length === 0) {
-    return { success: true, output: t(ctx.user.language).aiTools.events.noEventsMatching, data };
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.events.noEventsMatchingScope(scope),
+      data,
+    };
   }
 
   const lines = events.map((e) => {
@@ -513,7 +637,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     return parts.join(', ');
   });
 
-  return { success: true, output: lines.join('\n'), data };
+  return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };
 }
 
 export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {

@@ -282,7 +282,7 @@ function updatePrivacy(ctx: AgentContext, updates: PrivacyUpdates): ToolResult {
 
 function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolResult {
   if (typeof assistantEnabled !== 'boolean') {
-    return { success: false, output: 'Unknown action' };
+    return { success: false, error: 'Unknown action' };
   }
   ctx.userRepo.updateAssistantEnabled(ctx.user.telegram_id, assistantEnabled);
   ctx.user = { ...ctx.user, assistant_enabled: assistantEnabled ? 1 : 0 };

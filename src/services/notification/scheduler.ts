@@ -1,15 +1,19 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import { enUS, ru } from 'date-fns/locale';
-import { toLang } from '../../config/constants.ts';
+import { t, toLang } from '../../config/constants.ts';
 import type { CallLogRepository } from '../../database/repositories/call-log.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
+import type { FeatureUsageRepository } from '../../database/repositories/feature-usage.repository.ts';
 import type { HolidayRepository } from '../../database/repositories/holiday.repository.ts';
 import type { NotificationLogRepository } from '../../database/repositories/notification-log.repository.ts';
-import type { NotificationPreferencesRepository } from '../../database/repositories/notification-preferences.repository.ts';
+import type {
+  NotificationPreferencesRepository,
+  UserContextFlags,
+} from '../../database/repositories/notification-preferences.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { EventOccurrence } from '../../database/types.ts';
+import type { EventOccurrence, FeatureUsageRow, NotificationPreferencesRow } from '../../database/types.ts';
 import { getDayRangeUtc } from '../../utils/date.ts';
 import { notifyLogger } from '../../utils/logger.ts';
 import {
@@ -19,10 +23,13 @@ import {
   renderReminderForSpeech,
   renderWeeklyDigestForSpeech,
 } from '../voice/tts-renderer.ts';
+import type { DayWeather } from '../weather/types.ts';
+import type { WeatherService } from '../weather/weather-service.ts';
 import { detectClockChange, formatClockChangeNotice } from './clock-change.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
 import { NotificationRenderer } from './renderer.ts';
 import { isLocalTimeInWindow, isQuietHours } from './timezone.ts';
+import { BOT_TIP_FEATURE_MAP } from './tip-tags.ts';
 
 const renderer = new NotificationRenderer();
 
@@ -47,14 +54,25 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
       duration = lang === 'ru' ? `${hours}ч ${mins}мин` : `${hours}h ${mins}m`;
     }
     const isAllDay = occ.event.all_day === 1;
-    return { title: occ.event.title, startTime, endTime, location: occ.event.location, duration, isAllDay };
+    return {
+      title: occ.event.title,
+      startTime,
+      endTime,
+      location: occ.event.location,
+      resolvedAddress: occ.event.resolved_address,
+      googleMapsUrl: occ.event.google_maps_url,
+      venueName: occ.event.venue_name,
+      duration,
+      isAllDay,
+    };
   });
 }
 
 function makeDateLabel(dateStr: string, timezone: string, lang: string): string {
   const d = new TZDate(`${dateStr}T12:00:00Z`, timezone);
   const locale = lang === 'ru' ? ru : enUS;
-  return format(d, 'EEEE, MMMM d', { locale });
+  const pattern = lang === 'ru' ? 'EEEE, d MMMM' : 'EEEE, MMMM d';
+  return format(d, pattern, { locale });
 }
 
 function isoWeekNumber(date: Date): number {
@@ -97,6 +115,147 @@ function makeDayLabel(date: Date, lang: string): string {
 
 const DEFAULT_EVE_HOLIDAY_HHMM = '21:00';
 
+/** User context for contextual tip selection */
+export interface TipContext {
+  hasMorningAgenda: boolean;
+  hasEveningReview: boolean;
+  hasQuietHours: boolean;
+  hasGoogle: boolean;
+  hasCountry: boolean;
+  hasVoiceCalls: boolean;
+  /** Feature usage data for filtering tips */
+  featureUsage?: FeatureUsageRow[];
+}
+
+/** Build TipContext from a pref row with user context flags */
+function buildTipContext(
+  pref: NotificationPreferencesRow & UserContextFlags,
+  featureUsage?: FeatureUsageRow[],
+): TipContext {
+  return {
+    hasMorningAgenda: !!pref.morning_agenda_enabled,
+    hasEveningReview: !!pref.evening_review_enabled,
+    hasQuietHours: !!pref.quiet_hours_enabled,
+    hasGoogle: !!pref.has_google,
+    hasCountry: !!pref.has_country,
+    hasVoiceCalls: !!pref.has_voice_calls,
+    featureUsage,
+  };
+}
+
+/** Days threshold: features used more recently than this are "fresh" — don't tip about them */
+const RECENT_USAGE_DAYS = 7;
+/** Days threshold: features used before this are "stale" — re-engagement tips welcome */
+const STALE_USAGE_DAYS = 30;
+/** Minimum use count to consider a feature "well known" (skip discovery tips) */
+const WELL_KNOWN_COUNT = 5;
+
+/**
+ * Filter bot tips based on feature usage.
+ * - Remove tips about features used recently (< 7 days) and frequently (>= 5 uses)
+ * - Prioritize tips about features used a lot but stale (> 30 days) for re-engagement
+ */
+function filterTipsByUsage(
+  tipKeys: string[],
+  featureUsage: FeatureUsageRow[],
+): { normal: string[]; reEngage: string[] } {
+  const now = Date.now();
+  const usageMap = new Map(featureUsage.map((u) => [u.feature_key, u]));
+
+  const normal: string[] = [];
+  const reEngage: string[] = [];
+
+  for (const tipKey of tipKeys) {
+    const featureKey = BOT_TIP_FEATURE_MAP[tipKey];
+    if (!featureKey) {
+      normal.push(tipKey);
+      continue;
+    }
+    const usage = usageMap.get(featureKey);
+    if (!usage) {
+      // Never used — discovery tip
+      normal.push(tipKey);
+      continue;
+    }
+
+    const lastUsedMs = new Date(usage.last_used_at).getTime();
+    const daysSinceUse = (now - lastUsedMs) / 86_400_000;
+
+    if (daysSinceUse < RECENT_USAGE_DAYS && usage.use_count >= WELL_KNOWN_COUNT) {
+      // Used recently and frequently — skip this tip
+      continue;
+    }
+
+    if (daysSinceUse > STALE_USAGE_DAYS && usage.use_count >= WELL_KNOWN_COUNT) {
+      // Used a lot before but not recently — re-engagement candidate
+      reEngage.push(tipKey);
+    } else {
+      normal.push(tipKey);
+    }
+  }
+
+  return { normal, reEngage };
+}
+
+/** Pick a random bot tip, contextual tip, or book quote for free days (shown ~50% of the time) */
+export function pickBotTip(lang: string, ctx?: TipContext): string | null {
+  if (Math.random() > 0.5) return null;
+  const l = t(toLang(lang));
+
+  // 30% chance: try a contextual tip based on user's missing features
+  if (ctx && Math.random() < 0.3) {
+    const candidates: string[] = [];
+    if (!ctx.hasEveningReview) candidates.push(l.contextualTips.noEveningReview);
+    if (!ctx.hasMorningAgenda) candidates.push(l.contextualTips.noMorningAgenda);
+    if (!ctx.hasQuietHours) candidates.push(l.contextualTips.noQuietHours);
+    if (!ctx.hasGoogle) candidates.push(l.contextualTips.noGoogleCalendar);
+    if (!ctx.hasCountry) candidates.push(l.contextualTips.noCountry);
+    if (!ctx.hasVoiceCalls) candidates.push(l.contextualTips.noVoiceCalls);
+    if (candidates.length > 0) {
+      return candidates[Math.floor(Math.random() * candidates.length)]!;
+    }
+  }
+
+  // 50% bot tips, 50% book quotes
+  if (Math.random() < 0.5) {
+    const tipEntries = Object.entries(l.botTips);
+    const tipKeys = tipEntries.map(([k]) => k);
+    // Filter tips by feature usage if available
+    if (ctx?.featureUsage && ctx.featureUsage.length > 0) {
+      const tipMap = new Map(tipEntries);
+      const { normal, reEngage } = filterTipsByUsage(tipKeys, ctx.featureUsage);
+      // 40% chance to pick a re-engagement tip if available
+      if (reEngage.length > 0 && Math.random() < 0.4) {
+        const key = reEngage[Math.floor(Math.random() * reEngage.length)]!;
+        return tipMap.get(key)!;
+      }
+      if (normal.length > 0) {
+        const key = normal[Math.floor(Math.random() * normal.length)]!;
+        return tipMap.get(key)!;
+      }
+    }
+    const randomEntry = tipEntries[Math.floor(Math.random() * tipEntries.length)]!;
+    return randomEntry[1];
+  }
+  const allQuotes = [...l.gtdQuotes, ...l.atomicHabitsQuotes, ...l.deepWorkQuotes, ...l.sevenHabitsQuotes];
+  return allQuotes[Math.floor(Math.random() * allQuotes.length)]!;
+}
+
+/** Fetch day weather with graceful failure */
+async function fetchDayWeather(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+  lang = 'en',
+): Promise<DayWeather | null> {
+  if (!weatherService) return null;
+  try {
+    return await weatherService.getDayWeather(timezone, lang);
+  } catch (err) {
+    notifyLogger.warn({ err, timezone }, 'Weather fetch failed for agenda');
+    return null;
+  }
+}
+
 function truncateToMinute(d: Date): Date {
   const r = new Date(d);
   r.setSeconds(0, 0);
@@ -121,6 +280,8 @@ export interface SchedulerDeps {
   callSettingsRepo?: CallSettingsRepository;
   callLogRepo?: CallLogRepository;
   enqueueCall?: (data: EnqueueCallData) => void;
+  weatherService?: WeatherService;
+  featureUsageRepo?: FeatureUsageRepository;
 }
 
 export class NotificationScheduler {
@@ -184,6 +345,9 @@ export class NotificationScheduler {
           event_title: r.event_title,
           event_start_at: r.event_start_at,
           event_location: r.event_location,
+          event_resolved_address: r.event_resolved_address,
+          event_google_maps_url: r.event_google_maps_url,
+          event_venue_name: r.event_venue_name,
           interval_label: r.interval_label,
           is_all_day: r.interval_minutes === -1,
         }));
@@ -192,6 +356,9 @@ export class NotificationScheduler {
           title: item.event_title,
           startTime: format(new TZDate(item.event_start_at, user.timezone), 'HH:mm'),
           location: item.event_location,
+          resolvedAddress: item.event_resolved_address,
+          googleMapsUrl: item.event_google_maps_url,
+          venueName: item.event_venue_name,
           intervalLabel: item.interval_label,
           isAllDay: item.is_all_day,
         }));
@@ -241,6 +408,9 @@ export class NotificationScheduler {
         startTime,
         endTime,
         location: reminder.event_location,
+        resolvedAddress: reminder.event_resolved_address,
+        googleMapsUrl: reminder.event_google_maps_url,
+        venueName: reminder.event_venue_name,
         intervalLabel: reminder.interval_label,
         isAllDay,
       });
@@ -263,6 +433,7 @@ export class NotificationScheduler {
           startAt: reminder.event_start_at,
           timezone: user.timezone,
           location: reminder.event_location,
+          venueName: reminder.event_venue_name,
           language: user.language,
         });
         this.deps.enqueueCall?.({
@@ -293,8 +464,12 @@ export class NotificationScheduler {
       const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTodayIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
+      const weather = await fetchDayWeather(this.deps.weatherService, pref.timezone, lang);
+      const featureUsage = this.deps.featureUsageRepo?.getForUser(pref.user_id);
+      const tipCtx = buildTipContext(pref, featureUsage);
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang, tipCtx) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
-      let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents).text;
+      let payload = renderer.renderMorningAgenda(lang, dateLabel, agendaEvents, { weather, botTip }).text;
       if (clockChange) {
         payload += `\n\n${formatClockChangeNotice(lang, clockChange)}`;
       }
@@ -402,11 +577,28 @@ export class NotificationScheduler {
       const { start: tmStart, end: tmEnd } = getDayRangeUtc(new Date(`${localTomorrowIso}T12:00:00Z`), pref.timezone);
       const occurrences = this.deps.getEventsInRange(pref.user_id, tmStart, tmEnd);
       const refKey = `ev:${pref.user_id}:${localTomorrowIso}`;
-      const lang = pref.language ?? 'en';
+      const lang = toLang(pref.language);
       const dateLabel = makeDateLabel(localTomorrowIso, pref.timezone, lang);
       const agendaEvents = toAgendaEvents(occurrences, pref.timezone, lang);
+      // For evening review, fetch tomorrow's weather via week forecast (day index 1)
+      let tomorrowWeather: DayWeather | null = null;
+      if (this.deps.weatherService) {
+        try {
+          const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone, lang);
+          const dayW = weekW?.days.find((d) => d.date === localTomorrowIso);
+          if (dayW) tomorrowWeather = dayW;
+        } catch (err) {
+          notifyLogger.warn({ err, timezone: pref.timezone }, 'Weather fetch failed for evening review');
+        }
+      }
+      const featureUsage = this.deps.featureUsageRepo?.getForUser(pref.user_id);
+      const tipCtx = buildTipContext(pref, featureUsage);
+      const botTip = agendaEvents.length === 0 ? pickBotTip(lang, tipCtx) : null;
       // TODO: 'image' format requires sendPhoto (architectural change) — render as text for now
-      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents).text;
+      const payload = renderer.renderEveningReview(lang, dateLabel, agendaEvents, {
+        weather: tomorrowWeather,
+        botTip,
+      }).text;
       const logId = this.deps.logRepo.insert({
         user_id: pref.user_id,
         type: 'evening_review',
@@ -440,7 +632,7 @@ export class NotificationScheduler {
         const weekStr = `${weekYear}-W${String(weekNum).padStart(2, '0')}`;
         const refKey = `wd:${pref.user_id}:${weekStr}`;
 
-        const lang = pref.language ?? 'en';
+        const lang = toLang(pref.language);
 
         // Build Mon–Sun local calendar dates for next week.
         // Fetch all 7 days in one range query, then slice per day in memory.
@@ -474,7 +666,24 @@ export class NotificationScheduler {
         const sunCalDate = new Date(`${nextMonLocalIso}T12:00:00Z`);
         sunCalDate.setUTCDate(sunCalDate.getUTCDate() + 6);
         const weekRange = makeWeekRangeLabel(new Date(`${nextMonLocalIso}T12:00:00Z`), sunCalDate, lang);
-        const payload = renderer.renderWeeklyDigest(lang, weekRange, days).text;
+
+        // Fetch week weather for digest
+        let weatherByDate: { [date: string]: DayWeather } | undefined;
+        if (this.deps.weatherService) {
+          try {
+            const weekW = await this.deps.weatherService.getWeekWeather(pref.timezone, lang);
+            if (weekW) {
+              weatherByDate = {};
+              for (const d of weekW.days) {
+                weatherByDate[d.date] = d;
+              }
+            }
+          } catch (err) {
+            notifyLogger.warn({ err, timezone: pref.timezone }, 'Weather fetch failed for weekly digest');
+          }
+        }
+
+        const payload = renderer.renderWeeklyDigest(lang, weekRange, days, { weatherByDate }).text;
 
         const logId = this.deps.logRepo.insert({
           user_id: pref.user_id,

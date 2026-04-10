@@ -23,6 +23,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     extra?: {
       feedbackContext?: FeedbackThreadContext;
       groupContext?: GroupContext;
+      incomingMessageId?: number;
       supplementMode?: boolean;
       supplementAutoResponse?: string;
     },
@@ -32,7 +33,13 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     const chatId = ctx.chatId;
     if (!chatId) return { handled: false };
 
-    const agentContext = deps.agentContextBuilder(user, Number(chatId), messageText, extra?.groupContext);
+    const agentContext = deps.agentContextBuilder(
+      user,
+      Number(chatId),
+      messageText,
+      extra?.groupContext,
+      extra?.incomingMessageId,
+    );
 
     if (extra?.feedbackContext && agentContext.feedback) {
       agentContext.feedback.feedbackContext = extra.feedbackContext;

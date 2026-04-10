@@ -24,6 +24,7 @@ export interface User {
   voice_response_enabled: number | null;
   default_event_duration_minutes: number;
   assistant_enabled: number; // 0 | 1
+  city: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -56,6 +57,12 @@ export interface CalendarEvent {
   event_type?: 'birthday' | null;
   birth_year?: number | null;
   celebrant_id?: number | null;
+  resolved_address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  google_maps_url: string | null;
+  location_verified: number; // 0 | 1
+  venue_name: string | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -81,6 +88,7 @@ export interface UpdateUserData {
   onboarding_completed?: number;
   voice_response_enabled?: number | null;
   default_event_duration_minutes?: number;
+  city?: string | null;
 }
 
 export interface CreateEventData {
@@ -120,6 +128,12 @@ export interface UpdateEventData {
   sync_status?: SyncStatus;
   sync_version?: number;
   last_synced_at?: string | null;
+  resolved_address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  google_maps_url?: string | null;
+  location_verified?: number;
+  venue_name?: string | null;
 }
 
 export interface ChatHistoryMessage {
@@ -177,6 +191,21 @@ export interface SyncLogEntry {
   action: 'create' | 'update' | 'delete' | 'conflict_resolve';
   details: string | null;
   created_at: string;
+}
+
+// ── Participant Google Sync ──
+
+export interface ParticipantGoogleSync {
+  id: number;
+  user_id: number;
+  event_id: number;
+  google_event_id: string | null;
+  google_calendar_id: string;
+  google_etag: string | null;
+  sync_status: SyncStatus;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ── Computed types ──
@@ -572,6 +601,9 @@ export interface DueReminderRow extends EventReminderRow {
   event_start_at: string;
   event_end_at: string | null;
   event_location: string | null;
+  event_resolved_address: string | null;
+  event_google_maps_url: string | null;
+  event_venue_name: string | null;
 }
 
 // --- Holiday ---
@@ -658,6 +690,15 @@ export interface NotificationPreferencesRow {
 }
 
 export type NotificationPreferencesUpdate = Partial<Omit<NotificationPreferencesRow, 'user_id' | 'updated_at'>>;
+
+// --- Feature Usage ---
+
+export interface FeatureUsageRow {
+  user_id: number;
+  feature_key: string;
+  use_count: number;
+  last_used_at: string;
+}
 
 // --- User Memory ---
 

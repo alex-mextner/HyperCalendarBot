@@ -1,6 +1,82 @@
 import { cmdLogger } from '../../../utils/logger.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
+const TELEGRAM_REACTION_EMOJIS = new Set([
+  '❤',
+  '👍',
+  '👎',
+  '🔥',
+  '🥰',
+  '👏',
+  '😁',
+  '🤔',
+  '🤯',
+  '😱',
+  '🤬',
+  '😢',
+  '🎉',
+  '🤩',
+  '🤮',
+  '💩',
+  '🙏',
+  '👌',
+  '🕊',
+  '🤡',
+  '🥱',
+  '🥴',
+  '😍',
+  '🐳',
+  '❤\u200D🔥',
+  '🌚',
+  '🌭',
+  '💯',
+  '🤣',
+  '⚡',
+  '🍌',
+  '🏆',
+  '💔',
+  '🤨',
+  '😐',
+  '🍓',
+  '🍾',
+  '💋',
+  '🖕',
+  '😈',
+  '😴',
+  '😭',
+  '🤓',
+  '👻',
+  '👨\u200D💻',
+  '👀',
+  '🎃',
+  '🙈',
+  '😇',
+  '😨',
+  '🤝',
+  '✍',
+  '🤗',
+  '🫡',
+  '🎅',
+  '🎄',
+  '☃',
+  '💅',
+  '🤪',
+  '🗿',
+  '🆒',
+  '💘',
+  '🙉',
+  '🦄',
+  '😘',
+  '💊',
+  '🙊',
+  '😎',
+  '👾',
+  '🤷\u200D♂',
+  '🤷',
+  '🤷\u200D♀',
+  '😡',
+]);
+
 interface RememberUserFactInput {
   type: 'append' | 'rewrite';
   content: string;
@@ -25,7 +101,16 @@ export async function handleSetReaction(
   input: { message_id?: number; emoji: string },
 ): Promise<ToolResult> {
   if (!ctx.sender?.setReaction) {
+    cmdLogger.warn({ chatId: ctx.chatId, hasSender: !!ctx.sender }, 'set_reaction: sender.setReaction unavailable');
     return { success: false, error: 'Reactions not available' };
+  }
+  // Strip variation selectors (U+FE0E, U+FE0F) — AI models often add them but Telegram rejects them
+  const emoji = input.emoji.replace(/[\uFE0E\uFE0F]/g, '');
+  if (!TELEGRAM_REACTION_EMOJIS.has(emoji)) {
+    return {
+      success: false,
+      error: `Emoji "${input.emoji}" is not supported by Telegram reactions. Use one of the allowed emojis from the tool description.`,
+    };
   }
   const messageId = input.message_id ?? ctx.incomingMessageId;
   if (!messageId) {
@@ -33,11 +118,11 @@ export async function handleSetReaction(
   }
   const chatId = ctx.groupChatId ?? ctx.chatId;
   try {
-    await ctx.sender.setReaction(chatId, messageId, input.emoji);
+    await ctx.sender.setReaction(chatId, messageId, emoji);
     return { success: true, output: '' };
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    cmdLogger.error({ err, chatId, messageId }, 'set_reaction failed');
-    return { success: false, error: msg };
+    const msg = err instanceof Error ? err.message || err.constructor.name : String(err);
+    cmdLogger.error({ err, chatId, messageId, emoji }, 'set_reaction failed');
+    return { success: false, error: msg || 'Unknown reaction error' };
   }
 }

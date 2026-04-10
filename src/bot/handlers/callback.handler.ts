@@ -34,6 +34,7 @@ import { ConflictService } from '../../services/invite/conflict-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import type { SceneName, ScenePauseService } from '../../services/scene-pause.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import { guessCountryFromTimezone, resolveTimezone } from '../../services/timezone/timezone-service.ts';
 import type { StressDictionary } from '../../services/voice/stress-dictionary.ts';
 import {
   fixDateOrdinals,
@@ -43,12 +44,14 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
+import { formatDayWeatherLine } from '../../services/weather/format.ts';
+import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
-import type { ParseMode } from '../../utils/telegram.ts';
+import { formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -58,7 +61,6 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import type { CtxWithChat } from '../group-context.ts';
 import { isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
@@ -149,6 +151,9 @@ export interface CallbackHandlerOpts {
     scenePauseService: ScenePauseService;
   };
   triggerSync?: (userId: number) => Promise<void>;
+  locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
+  weatherService?: WeatherService;
 }
 
 /**
@@ -192,6 +197,9 @@ export function createCallbackHandler(
     groupRepo,
     scenePauseDeps,
     triggerSync,
+    locationVerification,
+    pendingGeoStore,
+    weatherService,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
 
@@ -466,7 +474,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -542,7 +550,7 @@ export function createCallbackHandler(
               disable_notification: options.disable_notification,
             }),
           sendMessage: (cid, text) => ctx.bot.api.sendMessage({ chat_id: cid, text }).then(() => {}),
-          isGroupChat: isGroup(ctx as unknown as CtxWithChat),
+          isGroupChat: isGroup(ctx),
           groupChatRepo: groupRepo,
         }).catch((err) => {
           imageLogger.error({ err }, 'autoPin failed');
@@ -733,7 +741,25 @@ export function createCallbackHandler(
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
       const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
+
+      // Append weather forecast if available and event is within 7 days
+      let weatherLine = '';
+      if (weatherService && event && subAction === 'accept') {
+        const eventMs = new Date(event.start_at).getTime();
+        const daysAhead = (eventMs - Date.now()) / (24 * 60 * 60 * 1000);
+        if (daysAhead >= 0 && daysAhead <= 7) {
+          const forecast = await weatherService.getWeekWeather(user.timezone, lang).catch(() => null);
+          if (forecast) {
+            const eventDate = event.start_at.slice(0, 10);
+            const dayForecast = forecast.days.find((d) => d.date === eventDate);
+            if (dayForecast) {
+              weatherLine = `\n${formatDayWeatherLine(lang, dayForecast)}`;
+            }
+          }
+        }
+      }
+
+      const editText = eventCard ? `${statusLabel}\n\n${eventCard}${weatherLine}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -825,7 +851,7 @@ export function createCallbackHandler(
     const lang = (user.language ?? 'en') as Lang;
 
     // In groups, only the user who triggered the question can answer
-    const clickerId = (ctx as unknown as { from?: { id: number } }).from?.id ?? user.telegram_id;
+    const clickerId = ctx.from.id;
     if (restrictedToUserId !== undefined && clickerId !== restrictedToUserId) {
       await ctx.answer({ text: t(lang).callbackErrors.notYourQuestion, show_alert: false });
       return;
@@ -833,9 +859,7 @@ export function createCallbackHandler(
 
     await ctx.answer();
     await ctx.editText(`✅ ${answerText}`);
-    const cbChatId =
-      (ctx as unknown as { chat?: { id: number } }).chat?.id ??
-      (ctx as unknown as { message?: { chat?: { id: number } } }).message?.chat?.id;
+    const cbChatId = ctx.chatId;
     if (onAiButtonClick && cbChatId) {
       onAiButtonClick(user.telegram_id, cbChatId, answerText).catch((e) => {
         cmdLogger.error({ err: e }, 'AI button continuation failed');
@@ -1120,19 +1144,155 @@ export function createCallbackHandler(
         await ctx.answer(t(lang).callbackErrors.unavailable);
         return;
       }
-      const settingsMsgId = (ctx as unknown as { message?: { id?: number; message_id?: number } }).message?.id ?? 0;
-      const settingsChatId = (ctx as unknown as { chatId?: number }).chatId ?? 0;
+      if (!ctx.message || !ctx.chatId) {
+        cmdLogger.warn({ userId: user.telegram_id }, 'settings change_tz: missing message or chatId');
+        await ctx.answer();
+        return;
+      }
       await ctx.answer();
-      await ctx.scene.enter(timezoneScene, { settingsMsgId, settingsChatId });
+      await ctx.scene.enter(timezoneScene, { settingsMsgId: ctx.message.id, settingsChatId: ctx.chatId });
       return;
     }
     return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);
   });
 
+  // Geo-location timezone: confirm update
+  dispatch.set(CB.GEO_TZ_CONFIRM, async (ctx, payload, _parts, user) => {
+    const tz = payload; // IANA timezone string, e.g. "Europe/Moscow"
+    const lang = (user.language ?? 'en') as Lang;
+    // Validate that the timezone is a real IANA zone
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: tz });
+    } catch {
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    if (!userRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'GEO_TZ_CONFIRM: userRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    const countryCode = guessCountryFromTimezone(tz);
+    userRepo.update(user.telegram_id, {
+      timezone: tz,
+      ...(countryCode ? { country_code: countryCode } : {}),
+    });
+    const offset = formatUtcOffset(tz);
+    await ctx.answer();
+    await ctx.editText(t(lang).geo_tz_updated(tz, offset), { reply_markup: undefined });
+  });
+
+  // Geo-location timezone: dismiss (keep current)
+  dispatch.set(CB.GEO_TZ_DISMISS, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    await ctx.answer();
+    await ctx.editText(t(lang).geo_tz_dismissed, { reply_markup: undefined });
+  });
+
+  // Location geo: user chose what to do with a geolocation pin (geo/city/other)
+  dispatch.set(CB.LOCATION_GEO, async (ctx, _payload, parts, user) => {
+    await ctx.answer();
+    const lang = (user.language ?? 'en') as Lang;
+    const msgs = t(lang);
+
+    if (!locationVerification || !userRepo || !pendingGeoStore) return;
+
+    const action = parts[1]; // 'geo', 'city', 'other'
+
+    if (action === 'geo') {
+      const eventId = Number.parseInt(parts[2] ?? '', 10);
+      if (Number.isNaN(eventId)) return;
+
+      const geo = await pendingGeoStore.get(user.telegram_id);
+      if (!geo) {
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+        return;
+      }
+
+      const success = await locationVerification.resolveFromCoordinates(
+        eventId,
+        geo.latitude,
+        geo.longitude,
+        user.telegram_id,
+      );
+      await pendingGeoStore.delete(user.telegram_id);
+
+      if (success) {
+        const event = eventRepo?.findById(eventId, user.telegram_id);
+        const address = event?.resolved_address ?? '';
+        await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+          parse_mode: 'HTML',
+          reply_markup: undefined,
+        });
+      } else {
+        await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      }
+    } else if (action === 'city') {
+      const lat = Number.parseFloat(parts[2] ?? '');
+      const lng = Number.parseFloat(parts[3] ?? '');
+      if (Number.isNaN(lat) || Number.isNaN(lng)) return;
+
+      await pendingGeoStore.delete(user.telegram_id);
+
+      const tz = resolveTimezone(lat, lng);
+      const offset = formatUtcOffset(tz);
+      if (tz !== user.timezone) {
+        userRepo.update(user.telegram_id, { timezone: tz });
+      }
+
+      const reverseResult = await locationVerification.reverseGeocodeForCity(lat, lng);
+      if (reverseResult?.city) {
+        userRepo.update(user.telegram_id, { city: reverseResult.city });
+      }
+
+      await ctx.editText(
+        tz !== user.timezone ? msgs.geo_tz_updated(tz, offset) : msgs.tz_same_from_location(tz, offset),
+        { reply_markup: undefined },
+      );
+    } else if (action === 'other') {
+      // Keep the pin in store — AI will see it via system prompt and can attach it
+      // to any event the user names in chat. The pin auto-expires in 30 minutes.
+      await ctx.editText(msgs.aiTools.location.geoOtherAck, { reply_markup: undefined });
+    }
+  });
+
+  // Location candidate: user picked a resolved address from multiple candidates
+  dispatch.set(CB.LOCATION_CANDIDATE, async (ctx, _payload, parts, user) => {
+    await ctx.answer();
+    const lang = (user.language ?? 'en') as Lang;
+    const msgs = t(lang);
+
+    if (!locationVerification) return;
+
+    const eventId = Number.parseInt(parts[1] ?? '', 10);
+    const choiceIndex = Number.parseInt(parts[2] ?? '', 10);
+    if (Number.isNaN(eventId) || Number.isNaN(choiceIndex)) return;
+
+    const candidates = await locationVerification.getStoredCandidates(eventId);
+    if (!candidates) {
+      cmdLogger.warn({ eventId, userId: user.telegram_id }, 'Location candidates expired or not found');
+      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+      return;
+    }
+
+    const success = await locationVerification.handleLocationChoice(eventId, user.telegram_id, choiceIndex, candidates);
+
+    if (success) {
+      const event = eventRepo?.findById(eventId, user.telegram_id);
+      const address = event?.resolved_address ?? '';
+      await ctx.editText(msgs.aiTools.location.locationResolved(event?.title ?? '', address), {
+        parse_mode: 'HTML',
+        reply_markup: undefined,
+      });
+    } else {
+      await ctx.editText(msgs.callbackErrors.error, { reply_markup: undefined });
+    }
+  });
+
   // Group settings: timezone picker
   dispatch.set(CB.GROUP_SETTINGS_TZ, async (ctx, payload, _parts, user) => {
     if (!groupRepo) return;
-    const chatId = (ctx as unknown as { chat?: { id: number } }).chat?.id;
+    const chatId = ctx.chatId ?? null;
     if (!chatId) {
       await ctx.answer();
       return;
@@ -1281,7 +1441,7 @@ export function createCallbackHandler(
     intentDeps.intentRepo.updateStatus(intentId, 'approved');
     intentDeps.intentMatcher?.reload();
     await ctx.answer(t(lang).callbackErrors.intentApproved);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n✅ APPROVED`).catch(() => {});
   });
 
@@ -1296,7 +1456,7 @@ export function createCallbackHandler(
     }
     intentDeps.intentRepo.updateStatus(intentId, 'rejected');
     await ctx.answer(t(lang).callbackErrors.intentRejected);
-    const currentText = (ctx as unknown as { message?: { text?: string } }).message?.text ?? '';
+    const currentText = ctx.message?.text ?? '';
     await ctx.editText(`${currentText}\n\n❌ REJECTED`).catch(() => {});
   });
 

@@ -100,9 +100,9 @@ describe('handleSetReaction', () => {
     ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
     ctx.isGroup = false;
 
-    await handleSetReaction(ctx, { message_id: 7, emoji: '😂' });
+    await handleSetReaction(ctx, { message_id: 7, emoji: '🤣' });
 
-    expect(setReaction).toHaveBeenCalledWith(USER_ID, 7, '😂');
+    expect(setReaction).toHaveBeenCalledWith(USER_ID, 7, '🤣');
   });
 
   test('returns error when setReaction is not available on sender', async () => {
@@ -144,6 +144,40 @@ describe('handleSetReaction', () => {
     const result = await handleSetReaction(ctx, { emoji: '👍' });
     expect(result.success).toBe(true);
     expect(setReaction).toHaveBeenCalledWith(-100123, 42, '👍');
+  });
+
+  test('set_reaction: returns non-empty error when API throws with empty message', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.groupChatId = -100123;
+    const emptyError = new Error('');
+    ctx.sender = {
+      setReaction: mock(() => Promise.reject(emptyError)),
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '👍' });
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  test('set_reaction: rejects unsupported emoji', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.groupChatId = -100123;
+    ctx.sender = {
+      setReaction: mock(() => Promise.resolve()),
+    } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '🖐' });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not supported');
+  });
+
+  test('set_reaction: strips variation selector from emoji', async () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.groupChatId = -100123;
+    const setReaction = mock(() => Promise.resolve());
+    ctx.sender = { setReaction } as Partial<AgentContext['sender']> as AgentContext['sender'];
+    // ❤️ = ❤ + U+FE0F variation selector
+    const result = await handleSetReaction(ctx, { message_id: 1, emoji: '❤️' });
+    expect(result.success).toBe(true);
+    expect(setReaction).toHaveBeenCalledWith(-100123, 1, '❤');
   });
 
   test('set_reaction: returns error when no message_id and no incomingMessageId', async () => {

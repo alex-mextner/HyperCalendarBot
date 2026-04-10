@@ -8,6 +8,7 @@ import type { EnvConfig } from '../../config/env.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
+import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { parseRedisUrl } from '../../utils/redis.ts';
 import { GoogleCalendarApi } from './calendar-api.ts';
@@ -18,6 +19,7 @@ export type GoogleSyncJobType =
   | 'initial-sync'
   | 'pull-sync'
   | 'push-event'
+  | 'push-participant-event'
   | 'refresh-calendars'
   | 'setup-watch'
   | 'stop-watch'
@@ -44,6 +46,7 @@ interface GoogleSyncQueueDeps {
   eventRepo: EventRepository;
   syncRepo: GoogleSyncRepository;
   calendarRepo: GoogleCalendarRepository;
+  participantSyncRepo?: ParticipantGoogleSyncRepository;
   onSyncComplete?: (userId: number, calendarId: string) => Promise<void>;
   onCalendarsRefreshed?: (userId: number) => Promise<void>;
   onCronSyncTick?: (queue: Queue<GoogleSyncJobData>) => Promise<void>;
@@ -70,7 +73,15 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
 
   const syncService =
     deps.syncService ??
-    new SyncService(deps.db, deps.eventRepo, deps.syncRepo, deps.calendarRepo, deps.sendMessage, deps.getUserLang);
+    new SyncService(
+      deps.db,
+      deps.eventRepo,
+      deps.syncRepo,
+      deps.calendarRepo,
+      deps.sendMessage,
+      deps.getUserLang,
+      deps.participantSyncRepo,
+    );
 
   const worker = new Worker<GoogleSyncJobData>(
     'google-sync',
@@ -137,6 +148,11 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
             break;
           }
           await syncService.pushEvent(api, userId, eventId, action);
+          break;
+        }
+        case 'push-participant-event': {
+          if (!eventId || !action) throw new Error('eventId and action required for push-participant-event');
+          await syncService.pushParticipantEvent(api, userId, eventId, action);
           break;
         }
         case 'refresh-calendars': {

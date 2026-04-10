@@ -275,19 +275,19 @@ describe('dispatchTool validation integration', () => {
   test('returns validation error for malformed get_events input', async () => {
     const result = await executeTool(ctx, 'get_events', { start_date: 123 });
     expect(result.success).toBe(false);
-    expect(result.output).toContain('Invalid input');
+    expect(result.error).toContain('Invalid input');
   });
 
   test('returns validation error for missing required fields', async () => {
     const result = await executeTool(ctx, 'create_event', {});
     expect(result.success).toBe(false);
-    expect(result.output).toContain('Invalid input');
+    expect(result.error).toContain('Invalid input');
   });
 
   test('returns validation error for wrong enum value', async () => {
     const result = await executeTool(ctx, 'send_feedback', { type: 'complaint', message: 'test' });
     expect(result.success).toBe(false);
-    expect(result.output).toContain('Invalid input');
+    expect(result.error).toContain('Invalid input');
   });
 
   test('passes valid input through to handler', async () => {
@@ -310,6 +310,6 @@ describe('dispatchTool validation integration', () => {
   test('returns validation error for completely garbage input', async () => {
     const result = await executeTool(ctx, 'calculate', 'not an object');
     expect(result.success).toBe(false);
-    expect(result.output).toContain('Invalid input');
+    expect(result.error).toContain('Invalid input');
   });
 });

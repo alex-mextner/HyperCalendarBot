@@ -59,6 +59,45 @@ export class EventRepository {
     return this.findById(id, data.user_id)!;
   }
 
+  /** Load event by ID without ownership checks. For internal service use only (sync workers, etc.). */
+  findByIdUnfiltered(
+    id: number,
+  ): Pick<
+    CalendarEvent,
+    | 'id'
+    | 'title'
+    | 'description'
+    | 'start_at'
+    | 'end_at'
+    | 'all_day'
+    | 'timezone'
+    | 'location'
+    | 'recurrence_rule'
+    | 'reminder_overrides'
+    | 'sync_version'
+  > | null {
+    return this.db
+      .prepare(
+        `SELECT id, title, description, start_at, end_at, all_day, timezone, location,
+                recurrence_rule, reminder_overrides, sync_version
+         FROM events WHERE id = ? AND is_cancelled = 0`,
+      )
+      .get(id) as Pick<
+      CalendarEvent,
+      | 'id'
+      | 'title'
+      | 'description'
+      | 'start_at'
+      | 'end_at'
+      | 'all_day'
+      | 'timezone'
+      | 'location'
+      | 'recurrence_rule'
+      | 'reminder_overrides'
+      | 'sync_version'
+    > | null;
+  }
+
   findById(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(
@@ -67,6 +106,35 @@ export class EventRepository {
            OR ${groupVisibleSql('')})`,
       )
       .get(id, userId, userId) as CalendarEvent | null;
+  }
+
+  /** Update resolved location fields. For background location verification. */
+  updateLocationFields(
+    eventId: number,
+    fields: {
+      resolved_address: string;
+      latitude: number;
+      longitude: number;
+      google_maps_url: string;
+      location_verified: number;
+      venue_name: string | null;
+    },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE events SET resolved_address = ?, latitude = ?, longitude = ?,
+         google_maps_url = ?, location_verified = ?, venue_name = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(
+        fields.resolved_address,
+        fields.latitude,
+        fields.longitude,
+        fields.google_maps_url,
+        fields.location_verified,
+        fields.venue_name,
+        eventId,
+      );
   }
 
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
@@ -172,6 +240,12 @@ export class EventRepository {
       'recurrence_rule',
       'recurrence_end_at',
       'reminder_overrides',
+      'resolved_address',
+      'latitude',
+      'longitude',
+      'google_maps_url',
+      'location_verified',
+      'venue_name',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
@@ -253,11 +327,15 @@ export class EventRepository {
       SELECT * FROM events
       WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-          OR ${groupVisibleSql('')})
+          OR ${groupVisibleSql('')}
+          OR id IN (
+            SELECT event_id FROM event_participants
+            WHERE user_id = ? AND status = 'accepted'
+          ))
       ORDER BY start_at ASC
       LIMIT ?
     `)
-      .all(`%${this.escapeLike(query)}%`, userId, userId, limit) as CalendarEvent[];
+      .all(`%${this.escapeLike(query)}%`, userId, userId, userId, limit) as CalendarEvent[];
   }
 
   getUpcoming(userId: number, limit = 10, now?: Date): CalendarEvent[] {
@@ -590,9 +668,13 @@ export class EventRepository {
     const conditions: string[] = [
       'e.is_cancelled = 0',
       `((e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
-        OR ${groupVisibleSql('e')})`,
+        OR ${groupVisibleSql('e')}
+        OR e.id IN (
+          SELECT event_id FROM event_participants
+          WHERE user_id = ? AND status = 'accepted'
+        ))`,
     ];
-    const params: (string | number | null)[] = [userId, userId];
+    const params: (string | number | null)[] = [userId, userId, userId];
 
     if (query) {
       conditions.push('e.title LIKE ?');

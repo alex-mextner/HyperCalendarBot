@@ -65,6 +65,57 @@ describe('renderReminderForSpeech', () => {
     expect(text).not.toContain('&amp;');
     expect(text).toContain('&');
   });
+
+  test('prefers venueName over raw location when both are set', () => {
+    const text = renderReminderForSpeech({
+      title: 'Lunch',
+      startAt: '2026-03-16T12:00:00Z',
+      timezone: 'UTC',
+      location: 'кофемания на большой никитской',
+      venueName: 'Кофемания',
+      language: 'ru',
+    });
+    expect(text).toContain('Кофемания');
+    // The raw verbose text should NOT appear
+    expect(text).not.toContain('большой никитской');
+  });
+
+  test('falls back to raw location when venueName is not set', () => {
+    const text = renderReminderForSpeech({
+      title: 'Picnic',
+      startAt: '2026-03-16T12:00:00Z',
+      timezone: 'UTC',
+      location: 'Парк Горького',
+      language: 'ru',
+    });
+    expect(text).toContain('Парк Горького');
+  });
+
+  test('falls back to raw location when venueName is null', () => {
+    const text = renderReminderForSpeech({
+      title: 'Run',
+      startAt: '2026-03-16T12:00:00Z',
+      timezone: 'UTC',
+      location: 'Embankment',
+      venueName: null,
+      language: 'en',
+    });
+    expect(text).toContain('Embankment');
+  });
+
+  test('no location spoken when both venueName and location are null', () => {
+    const text = renderReminderForSpeech({
+      title: 'Call mom',
+      startAt: '2026-03-16T12:00:00Z',
+      timezone: 'UTC',
+      location: null,
+      venueName: null,
+      language: 'en',
+    });
+    expect(text).toContain('Call mom');
+    // The location prefix from the i18n string should not appear
+    expect(text.toLowerCase()).not.toContain('location:');
+  });
 });
 
 describe('renderMorningAgendaForSpeech', () => {

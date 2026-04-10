@@ -19,6 +19,7 @@ import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { formatInvitation } from '../services/event/formatters.ts';
+import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
 import { GroupMemberService } from '../services/group/member-service.ts';
@@ -77,8 +78,8 @@ import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
-import { createInlineHandler, type InlineQueryContext } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
+import { createInlineHandler } from './handlers/inline.handler.ts';
+import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -86,7 +87,6 @@ import { createUserResolver, createUserResolverComposer } from './middleware/use
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
 import { createScenesPlugin } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
-import type { BotCallbackContext } from './types.ts';
 
 export interface GoogleBotDeps {
   oauthService: GoogleOAuthService;
@@ -100,6 +100,11 @@ export interface GoogleBotDeps {
     eventId: number,
     action: 'create' | 'update' | 'delete',
     opts?: { googleEventId?: string },
+  ) => Promise<void>;
+  scheduleParticipantPush?: (
+    participantUserId: number,
+    eventId: number,
+    action: 'create' | 'update' | 'delete',
   ) => Promise<void>;
   triggerSync?: (userId: number) => Promise<void>;
 }
@@ -126,10 +131,15 @@ export interface CreateBotOpts {
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
+  nliClassifier?: import('../services/nli/nli-classifier.ts').NliClassifier;
+  locationVerification?: import('../services/location/location-verification-service.ts').LocationVerificationService;
+  addressCache?: import('../services/location/address-cache.ts').AddressCache;
+  pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
     'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
   >;
+  weatherService?: import('../services/weather/weather-service.ts').WeatherService;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -148,6 +158,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     domainEventBus,
     pushAiMessage,
     envConfig,
+    locationVerification,
+    addressCache,
+    pendingGeoStore,
+    weatherService,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -283,7 +297,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sharedEventRepo: db.sharedEvents,
     privacyService,
     renderService,
-    callSettingsRepo: db.callSettings as unknown as NonNullable<MessageHandlerDeps['callSettingsRepo']>,
+    callSettingsRepo: db.callSettings,
     callQueue: callQueue
       ? {
           enqueue: (userId: number, text: string) => {
@@ -306,6 +320,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     },
     googleCalendarRepo: googleDeps?.calendarRepo,
     googleSchedulePush: googleDeps?.schedulePush,
+    googleScheduleParticipantPush: googleDeps?.scheduleParticipantPush,
     deepLinkService,
     sceneStorage: scenesSetup.storage,
     botUsername: envConfig?.BOT_USERNAME,
@@ -337,14 +352,28 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminEditSessions,
     adminReplySession,
     intentLearner,
+    nliClassifier: opts.nliClassifier,
     botAdminId,
     sendMessageToUser: async (chatId: number, text: string) => {
       await bot.api.sendMessage({ chat_id: chatId, text });
+    },
+    sendMessageToChat: async (
+      chatId: number,
+      text: string,
+      options?: { reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup },
+    ) => {
+      const result = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
+      });
+      return result;
     },
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
     actionLogRepo: db.actionLog,
+    featureUsageRepo: db.featureUsage,
     chatHistoryIds,
     agentRegistry,
     agentDispatcher,
@@ -380,6 +409,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       });
     },
     scenePauseService,
+    locationVerification,
+    addressCache,
+    pendingGeoStore,
   };
 
   // AI Assistant commands (not in setMyCommands — internal use only)
@@ -519,6 +551,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       return next();
     })
     .extend(scenesSetup.plugin)
+    // Feature usage tracking for commands
+    .on('message', (ctx, next) => {
+      const text = ctx.text;
+      const userId = ctx.dbUser?.telegram_id;
+      if (text && userId && text.startsWith('/')) {
+        const cmd = text.slice(1).split(/[\s@]/)[0]!;
+        trackFeatureUsage(db.featureUsage, userId, 'command', cmd);
+      }
+      return next();
+    })
     // Commands
     .command('start', (ctx) =>
       handleStart(ctx, {
@@ -603,11 +645,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             },
           }
         : undefined;
-      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo));
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo, ctx.id));
     })
     // Callback queries
-    .on('callback_query', (ctx) =>
-      createCallbackHandler(eventService, scenesSetup.scenes.editValueScene, holidayService, prefsService, {
+    .on('callback_query', (ctx) => {
+      const data = ctx.data;
+      const userId = ctx.dbUser?.telegram_id;
+      if (data && userId) {
+        trackFeatureUsage(db.featureUsage, userId, 'callback', callbackPrefix(data));
+      }
+      return createCallbackHandler(eventService, scenesSetup.scenes.editValueScene, holidayService, prefsService, {
         calendarRepo: googleDeps?.calendarRepo,
         disconnectDeps: googleDeps?.disconnectDeps,
         onCalendarsDone: googleDeps?.onCalendarsDone,
@@ -741,8 +788,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           sceneStorage: kvStorage,
           scenePauseService,
         },
-      })(ctx as unknown as BotCallbackContext),
-    )
+        locationVerification,
+        pendingGeoStore,
+        weatherService,
+      })(ctx);
+    })
     // Chat member updates (bot added/removed from groups)
     .on('my_chat_member', (ctx) =>
       createChatMemberHandler(
@@ -944,10 +994,21 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
     // so any .command() registered after it will never fire.
-    .on('message', (ctx) => createMessageHandler(msgDeps)(ctx))
+    .on('message', (ctx) => {
+      const userId = ctx.dbUser?.telegram_id;
+      if (userId) {
+        if (ctx.voice) trackFeatureUsage(db.featureUsage, userId, 'action', 'voice_message');
+        if (ctx.document?.fileName?.endsWith('.ics')) trackFeatureUsage(db.featureUsage, userId, 'action', 'ics_file');
+        if (ctx.location) trackFeatureUsage(db.featureUsage, userId, 'action', 'geolocation');
+      }
+      return createMessageHandler(msgDeps)(ctx);
+    })
     // Error handler
+    // GramIO's onError context is a wide union of all context types — property access
+    // requires runtime 'in' checks because static narrowing is not possible here.
     .onError(({ context, kind, error }) => {
-      botLogger.error({ kind, err: error }, 'Bot error');
+      const ctx = context as { from?: { id?: number }; chatId?: number } | undefined;
+      botLogger.error({ kind, err: error, userId: ctx?.from?.id, chatId: ctx?.chatId }, 'Bot error');
       try {
         if (context && 'send' in context) {
           const dbUser = 'dbUser' in context ? (context as { dbUser?: { language?: string } }).dbUser : undefined;
@@ -956,7 +1017,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             .send(t(errLang).something_wrong)
             .catch((sendErr: unknown) => botLogger.warn({ err: sendErr }, 'Failed to send error message to user'));
         }
-      } catch {}
+      } catch (sendErr) {
+        botLogger.warn({ err: sendErr }, 'Failed to build error response for user');
+      }
     });
   // Inline bot: separate bot instance for inline queries (or fallback to main bot)
   const inlineBotToken = envConfig?.INLINE_BOT_TOKEN;
@@ -965,17 +1028,13 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     inlineBot = new Bot(inlineBotToken);
     inlineBot
       .derive(createUserResolver(db))
-      .on('inline_query', (ctx) =>
-        createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
-      )
+      .on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx))
       .onError(({ error }) => {
         botLogger.error({ err: error }, 'Inline bot error');
       });
   } else {
     // No separate inline bot — register on main bot
-    bot.on('inline_query', (ctx) =>
-      createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx as InlineQueryContext),
-    );
+    bot.on('inline_query', (ctx) => createInlineHandler(inlineService, db.users, db.sharingSettings)(ctx));
   }
 
   return {

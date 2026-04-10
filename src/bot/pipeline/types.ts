@@ -46,6 +46,7 @@ export type PipelineLayer = (
   extra?: {
     feedbackContext?: FeedbackThreadContext;
     groupContext?: GroupContext;
+    incomingMessageId?: number;
     supplementMode?: boolean;
     supplementAutoResponse?: string;
   },

@@ -33,92 +33,6 @@ Default to using Bun instead of Node.js.
 - Prefer `Bun.file` over `node:fs`'s readFile/writeFile
 - Bun.$`ls` instead of execa.
 
-## Testing
-
-Use `bun test` to run tests.
-
-```ts#index.test.ts
-import { test, expect } from "bun:test";
-
-test("hello world", () => {
-  expect(1).toBe(1);
-});
-```
-
-## Frontend
-
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
-
-Server:
-
-```ts#index.ts
-import index from "./index.html"
-
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
-
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
-
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
-
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
-
 ## Commands
 
 ```sh
@@ -155,6 +69,20 @@ Each layer returns `{ handled: true }` to stop propagation, or `{ handled: false
 ### Intent Learning System (`src/services/intent/`)
 
 After every AI interaction (no `ask_user` calls, no contextual pronouns), `IntentLearner.analyze()` calls a secondary Haiku model to generate a candidate intent. Candidates are sent to the admin (`BOT_ADMIN_ID`) as inline-keyboard messages (Accept / Edit / Reject). Approved intents are stored in the `intents` table and matched by `IntentMatcher` in future requests, bypassing the AI entirely.
+
+### Feature Usage Tracking (`src/services/feature-tracking.ts`)
+
+When adding a new command, callback, scene, AI tool, or abstract user action — update the corresponding
+feature tracking map so tip filtering and re-engagement work correctly:
+
+- `COMMAND_FEATURE_MAP` — `/command` → `FeatureKey` (21 entries)
+- `CALLBACK_FEATURE_MAP` — callback prefix → `FeatureKey` (17 entries)
+- `SCENE_FEATURE_MAP` — scene name → `FeatureKey` (4 entries)
+- `ACTION_FEATURE_MAP` — abstract action → `FeatureKey` (3 entries: `voice_message`, `ics_file`, `geolocation`)
+- `TOOL_FEATURE_MAP` in `src/services/ai/tool-executor.ts` — AI tool name → `FeatureKey` (43 entries)
+- `BOT_TIP_FEATURE_MAP` in `src/services/notification/tip-tags.ts` — tip key → `FeatureKey` (54 entries, keys must match `botTips` keys in constants.ts)
+
+If you add a new `FeatureKey`, add it to `FEATURE_KEYS` in `src/database/repositories/feature-usage.repository.ts`.
 
 ### Workers (`src/worker/`)
 
@@ -253,8 +181,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
   Don't refactor surroundings "while you're at it".
 - **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
-- **No bare `object` type** — use `{ [key: string]: unknown }` or a specific interface. `object`
-  accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
+- **No `object` type** — neither as a standalone type nor as a generic parameter (e.g. `Bun.Server<object>`).
+  Use a specific interface, `{ [key: string]: unknown }`, or the correct generic argument.
+  `object` accepts any non-primitive but gives no information about shape — nearly as bad as `any`.
 - **No `Record<string, unknown>`** — this utility type alias is entirely banned:
   - Known shape at compile time → specific interface or Zod-inferred type
   - Parse boundary (DB JSON, external API) → `unknown`, then validate before use
@@ -264,8 +193,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
   fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
   The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
-- **No `as unknown as ConcreteType`** — this is a double cast that bypasses all TypeScript checks.
-  There is no acceptable use case. If you think you need it, the types are wrong — fix them.
+- **No `as unknown as ConcreteType`** — absolute ban, no exceptions. This double cast bypasses all
+  TypeScript checks. If you think you need it, the types are wrong — fix them. GramIO `.derive()`
+  types flow through `.on()` handlers; `Bun.serve()` accepts split branches without casts.
 - **No `as never`** — this cast silences any type error by pretending a value is the bottom type.
   It's worse than `as any` because it hides the mismatch completely. Fix the actual type instead.
 - **Test-only cast exceptions** — the three rules above apply to production code (`src/`). In test
@@ -277,10 +207,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. `as never` remains banned everywhere — use `as unknown as X` in test factories
   4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
      (bun:test types `calls` as `unknown[][]` — no way around it)
-- **`JSON.parse` must always go through Zod** — never use the raw return value. Always
-  `z.schema().parse(JSON.parse(...))` or `z.schema().safeParse(JSON.parse(...))`.
-  For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the matching
-  Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **`JSON.parse` and `Response.json()` must always go through Zod** — never use the raw return
+  value, never cast with `as`. Always `z.schema().parse(JSON.parse(...))` or
+  `z.schema().parse(await res.json())`. No `(await res.json()) as SomeType` — define a Zod schema
+  and `.parse()` it. For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the
+  matching Zod array schema. For complex DB types, validate the structural shape with Zod.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
   No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
@@ -304,11 +235,6 @@ Optional features that depend on an env var must deactivate gracefully when the 
   types directly from their canonical source (`database/types.ts`, domain `types.ts`). A re-export
   creates two valid import paths for the same type, making the canonical location ambiguous and
   imports harder to audit.
-- **Why we write precise types**: good types make TypeScript useful as a bug-finder, not just a syntax
-  checker. Specifically: grouping related optional fields into a single optional sub-object forces callers
-  to check `if (ctx.sharing)` once — TypeScript then guarantees all fields inside are non-null, eliminating
-  `!` assertions and `?.` on every individual field. This catches missing capability wiring at compile time
-  instead of at runtime.
 - No commented-out code. No template literals without variables. `Number.parseInt`. `T[]` not `Array<T>`.
 - Unused parameters: remove entirely (parameter + argument at call sites), don't prefix with `_`.
 - **No silent fallbacks for missing required values** — `ctx.message?.id ?? 0` and similar patterns
@@ -324,6 +250,15 @@ Optional features that depend on an env var must deactivate gracefully when the 
   }
   const messageId = ctx.message.id;
   ```
+- **No silent optional-dependency guards** — `if (ctx.something) { doWork() }` that silently skips
+  when the dependency is missing is a bug factory. When a tool handler or service depends on an
+  injected capability (`sendMessageToChat`, `sender`, etc.):
+  1. If the feature CANNOT work without it → return `{ success: false, error: '...' }` with a clear message
+  2. If the feature CAN partially work → log a warning (`logger.warn`) and include an `agentHint` in
+     the result so the AI knows something is degraded
+  3. NEVER silently skip and return success — the caller (AI agent, admin, user) must know the action
+     was not fully performed
+  The same applies to `deps.*` in handlers: if a dep is required for a code path, log when absent.
 - **Always handle `.catch()`** on fire-and-forget promises — at minimum log the error. Silent promise
   rejections hide bugs and make debugging impossible.
 - **No silent `catch` blocks** — every `catch` must either log the error or have a comment explaining
@@ -353,6 +288,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. Write ONLY enough code to make the test pass
   4. Run the test — confirm it passes
   5. Refactor while keeping tests green
+- **No hardcoded future dates in tests** — absolute ISO timestamps become past dates and break
+  validation that guards against past input (e.g. `run_at must be in the future`). Always use
+  relative expressions: `new Date(Date.now() + 60 * 60 * 1000).toISOString()` or
+  `new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()`. This applies to any value
+  validated against `Date.now()` at runtime: scheduled calls, reminders, event start times.
 - **Tests must exercise production code**: never reimplement logic in tests.
   Import helpers/utilities from `src/` — don't copy-paste them into test files.
 - **Never delete a failing test**. Investigate and fix the root cause.
@@ -364,29 +304,7 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **Regression tests for every bugfix**: reproduce the exact bug scenario in a test BEFORE fixing.
 - **Maintain ~80% test coverage**: run `bun test --coverage` regularly. Currently at ~93% lines.
   New files must have corresponding test files. No shipping untested code.
-- **Centralize test casts in factory functions** — never write `as unknown as X` inline at the
-  test call site. Casts are allowed only inside `makeCtx`/`makeDeps`/`mockWs`-style factories
-  (see "Test-only cast exceptions" in Coding Guidelines). The factory parameter must be
-  `Partial<RealInterface>`, not `Record<string, unknown>`.
-  ```ts
-  // Bad — inline cast at call site, no type checking
-  const ctx = { send: mock(() => {}) } as unknown as AgentContext;
-  // Good — cast centralized in factory, overrides are typed
-  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
-    return { ...baseCtx, ...overrides } as unknown as AgentContext;
-  }
-  const ctx = makeCtx({ send: mock(() => {}) }); // no cast here
-  ```
-- **No `Record<string, unknown>` in mock factories** — use `Partial<ConcreteInterface>` for
-  override parameters. `Record<string, unknown>` defeats the purpose of typed tests: you can pass
-  any garbage and the test will happily compile. When the production interface changes, tests using
-  `Record<string, unknown>` won't break — which means they stop protecting you.
-  ```ts
-  // Bad — any shape accepted, no compile-time checks
-  function makeCtx(overrides: Record<string, unknown> = {}) { ... }
-  // Good — only valid properties accepted
-  function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext { ... }
-  ```
+- **Centralize test casts in factory functions** — see "Test-only cast exceptions" in Coding Guidelines.
 - **Tests must assert behavior, not mock wiring** — "mock was called with X" is a weak assertion.
   Prefer asserting the observable outcome (return value, DB state, sent message content).
   Mock-call assertions are acceptable only when the side effect IS the behavior (e.g., verifying
@@ -432,54 +350,10 @@ No `@mtcute/bun` — pyrogram handles everything.
 
 ## Python / uv
 
-Python dependencies are declared in `pyproject.toml`. Use `uv` — never `pip` directly.
+Python deps in `pyproject.toml`. Use `uv` — never `pip` directly.
+Commands: `uv pip install -r pyproject.toml --python venv/bin/python`, `uv venv --python 3.12 venv`.
 
-```bash
-# Install all dependencies into venv
-uv pip install -r pyproject.toml --python venv/bin/python
-
-# Add a new package
-uv pip install <package> --python venv/bin/python
-
-# List installed packages
-uv pip list --python venv/bin/python
-```
-
-Create venv:
-```bash
-uv venv --python 3.12 venv
-```
-
-ntgcalls is NOT in `pyproject.toml` — it must be built from source with a patch (see below).
-
-## ntgcalls — Deploy Setup
-
-ntgcalls has a bug in v2.1.0: P2P calls connect but audio is silent.
-Fix: `NativeNetworkInterface::UpdateAggregateStates_n()` never calls `OnNetworkAvailability(true)`.
-Patch: `scripts/ntgcalls-fix-network-state.patch`.
-
-**The compiled `.so` is NOT in git (venv/ is gitignored). Must rebuild on each server.**
-
-On every new Linux server:
-
-```bash
-# 1. Install uv (if not present)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. Create Python venv and install deps
-uv venv --python 3.12 venv
-uv pip install -r pyproject.toml --python venv/bin/python
-
-# 3. Build patched ntgcalls from source (~5 min, needs ~5GB RAM, ~2GB disk)
-./scripts/build-patched-ntgcalls.sh python3.12 venv
-
-# 4. Authenticate Pyrogram session (one-time interactive)
-venv/bin/python scripts/pyrogram-auth.py
-```
-
-- macOS arm64 `.dylib` ≠ Linux x86_64 `.so` — binaries are platform-specific, not portable
-- `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it, audio will be silent
-- Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
+ntgcalls must be built from source with a patch — see `docs/reference/deploy-runbook.md`.
 
 ## Backward Compatibility
 
@@ -495,12 +369,8 @@ When renaming variables, constants, config keys, or any other interface:
 - Find similar working code in the same codebase. Compare working vs broken.
 - State a single hypothesis, make the smallest possible change to test it.
 - NEVER add multiple fixes at once. ALWAYS test after each change.
-- **Library type limitations — clone and investigate**: when a dependency produces poor types
-  (`unknown`, missing generics, no `.derive()` on a class), don't guess or cast. Clone the library
-  source into `~/xp/` in a background agent and read the actual code. Often the library already has
-  the capability you need (e.g. `.extend()` instead of `.derive()`) or the fix is a small PR.
-  This "recon by fire" approach — start investigating as if you'll patch, but pivot if the source
-  reveals a built-in solution — avoids both blind casting and unnecessary library forks.
+- **Library type limitations — clone and investigate**: when a dependency produces poor types,
+  clone the library source into `~/xp/` and read the actual code before guessing or casting.
 
 ## Session Wrap-Up
 
@@ -544,200 +414,28 @@ All user-facing bot messages must follow these rules:
 
 ## Telegram Bot API Limits
 
-### Message length
-- `sendMessage` / `editMessageText`: **4 096 chars**
-- Caption (photo, document, video, etc.): **1 024 chars** (4 096 for Telegram Premium users)
-- Quote in reply: **1 024 chars**
-- `answerCallbackQuery` alert: **200 chars**
-
-When text may exceed 4 096 chars, use `splitMessage()` from `src/utils/telegram.ts`.
-Never send a caption > 1 024 — it silently fails for non-Premium users.
-
-### Rate limits
-Telegram doesn't publish exact numbers — limits are dynamic. Practical rules:
-- **~1 msg/sec per chat** — safe burst rate for a single user/group
-- **~30 msg/sec globally** across all chats (official FAQ)
-- **20 msg/min per group/channel**
-- Exceeding any limit → HTTP **429** with `retry_after` (seconds). A 429 **blocks all API calls**, not just sendMessage — implement global backoff, not per-method.
-
-### Inline keyboard
-- Max **8 buttons per row**
-- Max **100 buttons total**
-- Total `reply_markup` JSON: **10 KB** — easy to exceed with 100 buttons with long labels
-- `callback_data` per button: **64 bytes** (UTF-8). Exceeding → `400 BUTTON_DATA_INVALID`. Store state server-side, pass a short key.
-
-### Commands
-- Command name: **1–32 chars** (lowercase a-z, 0-9, `_`)
-- Command description: **256 chars**
-- Max commands registered: **100**
-- `/start` deep-link payload: **64 bytes**
-
-### File size
-- Upload to Telegram: **50 MB**
-- Download via `getFile`: **20 MB**
-- Video note (circle): **12 MB**, max **1 min**, **384px** diameter
-- Album (`sendMediaGroup`): **2–10 items**
-- File name: **60 chars**
-
-### Inline queries
-- Query text: **256 chars**
-- Results per response: **50**
-
-### Formatting entities
-- Max **100 entities per message** — don't generate unbounded lists of bold/italic/code spans.
-- `parse_mode` and explicit `entities` are mutually exclusive.
-
-### Message editing
-- Editable for **48 hours** after sending (channels: no limit).
-- Can't edit messages sent by other bots or users.
-
-### Miscellaneous
-- Scheduled messages per chat: **100**
-- Scheduled up to: **365 days** ahead
-- Poll question: **1–255 chars**; answer option: **1–100 chars**; options: **2–12**
+Key limits (full reference: `docs/reference/telegram-limits.md`):
+- **Message**: 4 096 chars. Use `splitMessage()` from `src/utils/telegram.ts` when may exceed.
+- **Caption**: 1 024 chars (silently fails for non-Premium). Never exceed.
+- **callback_data**: 64 bytes. Store state server-side, pass a short key.
+- **Rate**: ~30 msg/sec global, ~1/sec per chat. HTTP 429 blocks ALL API calls — global backoff.
+- **Entities**: max 100 per message. Don't generate unbounded bold/italic/code spans.
 
 ## Deployment
+
+Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfile, volume ownership, migration hazard, shared server rules).
 
 ### Server
 
 - **Host**: 104.248.84.190 (Digital Ocean, 1 CPU, shared with other projects)
-- **SSH**: `root@` for docker/sudo, `www-data@` for files. www-data has no passwordless sudo.
-- **Deploy path**: `/opt/hypercal` — the only active path. CI deploys here (`DEPLOY_PATH` secret).
-  `/var/www/hypercal.invntrm.ru` was an old path — it has been deleted.
-  The running container mounts `/opt/hypercal/data` and reads `/opt/hypercal/.env`.
+- **SSH**: `root@` for docker/sudo, `www-data@` for files.
+- **Deploy path**: `/opt/hypercal`. Container mounts `/opt/hypercal/data`, reads `/opt/hypercal/.env`.
 - **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS)
-- **Caddy config**: `/etc/caddy/Caddyfile` imports `/var/www/*/Caddyfile` (other projects)
-  AND `import /opt/hypercal/Caddyfile` (this bot). CI deploys the repo's `Caddyfile` to
-  `/opt/hypercal/Caddyfile` and runs `caddy reload` — always update the repo's `Caddyfile`.
-- **Server scripts**: `scripts/backup-db.sh` and `scripts/healthcheck-alert.sh` are deployed
-  to `/opt/hypercal/scripts/` by CI (scp-action). Cron on the server runs them:
-  `0 3 * * *` — backup, `*/2 * * * *` — healthcheck (both log to `/opt/hypercal/logs/`).
-- **Alert queue**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN — triggers
-  mac-alert-watcher → Claude. CI `notify-failure` job does the same on CI/CD failure.
-
-### .env на сервере
-
-Единственный `.env` — `/opt/hypercal/.env`. Именно его читает `docker compose`.
-
-Если добавляешь новую переменную (например, через GitHub Actions secrets):
-1. Добавь secret в репо
-2. Прокинь в deploy-шаг через `envs:` и запиши в `.env` через `echo ... >> .env`, **или**
-3. Пропиши вручную в `/opt/hypercal/.env` на сервере
-
-После изменения `.env` нужно **пересоздать** контейнер (не просто restart):
-```bash
-cd /opt/hypercal
-docker stop hypercal-bot && docker rm hypercal-bot
-docker compose up -d --no-deps bot
-```
-`docker restart` не перечитывает `env_file`.
-
-### Диагностика
-
-```bash
-# Docker logs (pino JSON):
-ssh root@104.248.84.190 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --tail 100 bot'
-
-# Health check:
-curl https://hypercal.invntrm.ru/health
-```
-
-`logs/chats/{chatId}/{timestamp}.log` на сервере содержит подробные логи общения бота
-через ИИ с пользователями: system prompt, history, tool calls, ответы. Включается через
-`AI_DEBUG_LOGS=true`. Смотри при отладке неожиданного поведения ИИ.
-
-```bash
-# Последний лог для чата (AI_DEBUG_LOGS=true, логи внутри контейнера /app/logs/):
-ssh root@104.248.84.190 'docker exec hypercal-bot ls -lt /app/logs/chats/5153477378/ | head -3'
-ssh root@104.248.84.190 'docker exec hypercal-bot cat /app/logs/chats/5153477378/<timestamp>.log'
-```
-
-### Shared server — DO NOT touch other projects
-
-The server runs multiple PM2 services alongside our Docker containers:
-- `expensesyncbot` — `/var/www/ExpenseSyncBot`
-- `log-viewer` — `/var/www/log-viewer` (port 3002)
-- `psy_froggy_bot` — `/var/www/psy_froggy_bot`
-
-**Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.**
-Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
-
-### Docker
-
-- Bot + Redis via `docker-compose.yml`, Docker Compose v2 plugin.
-- GHCR private registry — deploy step must `docker login ghcr.io` before pull.
-- `docker compose` requires root (www-data not in docker group).
-- Resource limits: bot 1G/0.9cpu, redis 256M/0.5cpu (server is 1 CPU — never exceed 1.0).
-- GitHub Actions secrets: `SSH_HOST`, `SSH_USER`, `SSH_KEY`, `DEPLOY_PATH`.
-
-### Dockerfile
-
-- Base: `debian:bookworm-slim` + bun installed via `bun.sh/install` script (version pinned).
-- NOT `oven/bun:1-debian` — bun Docker Hub tags lag behind releases.
-- `ln -s bun node` required — Playwright CLI uses `#!/usr/bin/env node`.
-- `bun install --ignore-scripts` — skips lefthook postinstall (needs git, absent in Docker).
-
-### bun lockfile and --frozen-lockfile
-
-`--frozen-lockfile` is **cross-platform incompatible**: a macOS arm64 lockfile fails on linux amd64
-even with the same bun version and build hash. Platform-specific optional deps (e.g.
-`@rollup/rollup-darwin-arm64` vs `@rollup/rollup-linux-x64-gnu`) cause the mismatch.
-`bun install` without `--frozen` does NOT rewrite an existing lockfile, but `--frozen-lockfile`
-considers the difference a violation.
-
-- **CI** (linux): `bun install` → `bun install --frozen-lockfile` — validates lockfile integrity.
-- **Docker** (linux): `bun install --ignore-scripts` — respects lockfile version pins, adjusts
-  only platform-specific optional deps.
-- **Local** (macOS): `bun install` — generates/updates lockfile normally.
-
-### bun install --production in Docker
-
-`bun install --production` with an **existing lockfile** always acts as `--frozen-lockfile` and
-fails if the lockfile format differs from what `--production` would generate (it strips devDep
-entries from the lockfile). **Never use `--production` with `COPY bun.lock`.**
-
-For a prod-deps Docker stage that installs only production deps:
-```dockerfile
-# Stage 2: production deps only
-COPY package.json ./          # ← no bun.lock
-RUN bun install --production --ignore-scripts
-```
-Without a pre-existing lockfile, bun generates a fresh production lockfile on linux without conflicts.
-The runner stage is still deterministic via the image SHA tag.
-
-### Docker prod data volume ownership
-
-The bot runs as `botuser` (uid=999) inside the container. The data volume on the host
-(`/opt/hypercal/data/`) must be owned by uid 999, otherwise SQLite throws `SQLITE_READONLY`.
-
-**If the bot fails with `attempt to write a readonly database`:**
-```bash
-# Find actual botuser UID:
-docker run --rm --entrypoint id ghcr.io/alex-mextner/hypercalendarbot:latest
-# Fix ownership (replace 999 with actual UID):
-chown -R 999:999 /opt/hypercal/data/
-```
-
-This happens when the data dir is created by root (e.g. via `docker run --rm` during deploy for
-stress dict generation). Prevention: run the stress dict step as the same user, or fix chown in
-the deploy script after the step.
-
-### Migration renumbering hazard
-
-If a migration is renumbered (e.g. `042_foo` → `043_foo`), the existing production DB has the old
-name recorded and the new code tries to apply it again, causing "duplicate column" or "table already
-exists" errors. **Never renumber existing migrations** — only append new ones at the end.
-
-If it already happened on prod, manually insert the new name into `migrations`:
-```bash
-docker run --rm -v /opt/hypercal/data:/data ghcr.io/alex-mextner/hypercalendarbot:latest \
-  bun -e "
-import { Database } from 'bun:sqlite';
-const db = new Database('/data/calendar.db');
-db.run('INSERT OR IGNORE INTO migrations (name) VALUES (?)', ['043_new_name_here']);
-db.close();
-"
-```
+- **Caddy config**: CI deploys repo's `Caddyfile` to `/opt/hypercal/Caddyfile` and runs `caddy reload`.
+- **Cron**: `0 3 * * *` backup, `*/2 * * * *` healthcheck (both log to `/opt/hypercal/logs/`).
+- **Alerts**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN. CI `notify-failure` does the same.
+- **Never renumber existing migrations** — only append new ones at the end.
+- **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking. Port 3001 = HyperCalendarBot.
 
 ## MCP Tools
 

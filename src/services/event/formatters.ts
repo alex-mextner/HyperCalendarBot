@@ -12,6 +12,7 @@ import {
 } from '../../utils/date.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
+import { formatLocationHtml } from '../location/format-location.ts';
 
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
@@ -35,8 +36,10 @@ export function formatDayAgenda(
     return `${header}\n\n${noEvents}`;
   }
 
+  const allDayLabel = lang === 'ru' ? 'весь день' : 'all day';
   const eventLines = occurrences.map((occ) => {
-    const time = formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
+    const isAllDay = occ.event.all_day === 1;
+    const time = isAllDay ? allDayLabel : formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
     const isBirthday = occ.event.event_type === 'birthday';
     const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
     let title = escapeHtml(occ.event.title);
@@ -93,8 +96,10 @@ export function formatWeekAgenda(
       lines.push(
         `${dayLabel}  ▪ ${dayEvents.length} ${lang === 'ru' ? ruPlural(dayEvents.length, 'событие', 'события', 'событий') : dayEvents.length === 1 ? 'event' : 'events'}`,
       );
+      const allDayLabel = lang === 'ru' ? 'весь день' : 'all day';
       for (const occ of dayEvents) {
-        const time = formatTime(occ.occurrence_start, timezone);
+        const isAllDay = occ.event.all_day === 1;
+        const time = isAllDay ? allDayLabel : formatTime(occ.occurrence_start, timezone);
         const isBirthday = occ.event.event_type === 'birthday';
         const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
         let title = escapeHtml(occ.event.title);
@@ -132,15 +137,16 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
     lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
   }
 
+  const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${lang === 'ru' ? 'Весь день' : 'All day'}`);
+    lines.push(`📅 ${dateStr}, ${lang === 'ru' ? 'весь день' : 'all day'}`);
   } else {
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
       const duration = formatDuration(event.start_at, event.end_at, lang);
-      lines.push(`🕐 ${time} (${duration})`);
+      lines.push(`🕐 ${dateStr}, ${time} (${duration})`);
     } else {
-      lines.push(`🕐 ${time}`);
+      lines.push(`🕐 ${dateStr}, ${time}`);
     }
   }
 
@@ -148,7 +154,8 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
     lines.push(`📝 ${escapeHtml(event.description)}`);
   }
   if (event.location) {
-    lines.push(`📍 ${escapeHtml(event.location)}`);
+    const locationLink = formatLocationHtml(event);
+    lines.push(`📍 ${locationLink}`);
   }
   if (event.category) {
     lines.push(`🏷 ${escapeHtml(event.category)}`);
@@ -195,7 +202,8 @@ export function formatInvitation(
 }
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {
-  const time = formatTime(event.start_at, timezone);
+  const isAllDay = event.all_day === 1;
+  const timePart = isAllDay ? (lang === 'ru' ? 'весь день' : 'all day') : formatTime(event.start_at, timezone);
   const isBirthday = event.event_type === 'birthday';
   const isRecurring = !isBirthday && !!(event.recurrence_rule || event.parent_event_id);
   let title = escapeHtml(event.title);
@@ -205,7 +213,7 @@ export function formatEventListItem(event: CalendarEvent, timezone: string, inde
       age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
     title = `🎁 ${title}${escapeHtml(suffix)}`;
   }
-  return `${index + 1}. ${time} — ${title}${isRecurring ? ' 🔁' : ''}`;
+  return `${index + 1}. ${timePart} — ${title}${isRecurring ? ' 🔁' : ''}`;
 }
 
 export function formatRecurrenceHuman(rrule: string, lang: string): string {

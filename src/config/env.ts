@@ -44,6 +44,8 @@ export interface EnvConfig {
   DISABLE_VOICE?: boolean;
   AI_DEBUG_LOGS?: boolean;
   ADMIN_ALERT_TOKEN?: string;
+  OPENWEATHER_API_KEY?: string;
+  GOOGLE_API_KEY?: string;
 }
 
 function requireEnv(name: string): string {
@@ -140,5 +142,7 @@ export function loadConfig(): EnvConfig {
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
     AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
     ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
+    OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
+    GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || undefined,
   };
 }

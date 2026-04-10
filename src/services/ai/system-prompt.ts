@@ -57,6 +57,14 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
         ? `\n## What I Know About You\n${memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
         : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
 
+  const addressSection = ctx.preloadedAddressContext
+    ? `\n## Known Locations\n${ctx.preloadedAddressContext}\nWhen the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.\n\n## Setting event location\n- If the user wants to set/change an event location, call update_event with the location field.\n- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."\n- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`
+    : '';
+
+  const pendingGeoSection = ctx.preloadedPendingGeo
+    ? `\n## Pending Location Pin\nThe user just sent a 📍 location pin (lat=${ctx.preloadedPendingGeo.latitude}, lng=${ctx.preloadedPendingGeo.longitude}). It is currently waiting to be assigned to an event. If the user mentions which event it's for, call attach_pending_location_to_event with that event_id. You can also proactively offer: "Хочешь, я привяжу эту локацию к какому-то событию? К какому?" / "Would you like me to attach this location to an event? Which one?" Use get_events or get_upcoming to find candidate events first.`
+    : '';
+
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
 
@@ -68,9 +76,12 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
 - Timezone: ${ctx.user.timezone} (${utcOffset})
 - Current local time: ${nowLocal}
 - ${tzFreshness}
+${ctx.user.city ? `- City: ${ctx.user.city}` : '- City: unknown (ask user to share location or type their city)'}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 ${ctx.secretary?.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretary?.secretaryForLine}` : ''}
 ${memorySection}
+${addressSection}
+${pendingGeoSection}
 ## Context
 - "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min"). "next week" → calculate("2026-03-18 + 7days"). "in 2 weeks" → calculate("2026-03-18 + 2weeks"). "next month" → calculate("2026-03-18 + 1month"). "next year" → calculate("2026-03-18 + 1year"). "how long is this meeting" → calculate("2026-03-18T18:00:00Z - 2026-03-18T17:00:00Z"). If calculate returns an error, report it to the user — do not compute manually.
@@ -94,7 +105,9 @@ ${eventsWindowSection}
 - For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".
 - Use Telegram-safe formatting: bold with *, italic with _, code with \`. Never use markdown tables — Telegram does not render them. When you have tabular data: ALWAYS call render_table with the full Markdown table AND present the same data as a bullet list in your text reply (e.g. • 11:00 — Урок с Настей). Both actions are mandatory — never skip either.
 - NEVER start your reply with a prefix like "[Bot:", "[Assistant:", or any similar label. Just write the message directly.
+- CRITICAL — set_reaction protocol: after calling set_reaction, your ENTIRE text response must be EXACTLY "[SKIP]" — nothing before, nothing after, no emoji, no "Готово", no commentary. The reaction emoji on the message IS your complete response to the user. Writing any text defeats the purpose — the user sees both the reaction AND your text, which is redundant and noisy. "[SKIP]" is a machine-parsed 6-character token (English, uppercase, square brackets) that tells the system to delete the progress message. Do not translate it.
 - Never invent events — only report what tools return.
+- SEARCH SCOPE: When searching for events (search_events), if the default scope returns no results, retry with the other scope before telling the user nothing was found. In DMs: try "personal" first, then "group" — both are safe. In groups: try "group" first. If group scope returns empty, do NOT silently search "personal" — personal calendar data must NEVER be exposed in a group without the user's explicit request. Instead, tell the user the event was not found in the group calendar and suggest they check their personal calendar in DM. Only search personal scope in a group if the user explicitly asked for it (e.g. "мой личный календарь", "my personal events"). When reporting "not found", specify which scope you searched — never say generic "в календаре нет" without clarifying whether you checked personal, group, or both.
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
@@ -197,7 +210,7 @@ Available scopes:
 
 Rules for groups:
 - Be brief. Multiple people are reading.
-- The [From: name] prefix tells you who is speaking. Address them by name.
+- The [From: name] prefix tells you who is speaking. Always respond TO the sender of the last message — they are your addressee ("ты"). When the message mentions other group members, refer to those people by name in third person. Never switch "ты" to someone who was merely mentioned.
 
 **When to stay silent (no text reply):**
 For messages that are off-topic or not directly addressed to you, do NOT send a text reply.
@@ -207,7 +220,8 @@ Instead, you MAY silently:
 - Call send_feedback if the message contains a bug report or feature request about the bot
 
 After any of these silent actions, output [SKIP] — no text.
-CRITICAL: After calling set_reaction, remember_user_fact, or send_feedback in "silent mode", you MUST output ONLY "[SKIP]" as your text. Do NOT add any commentary, explanation, or message. The reaction IS your response — no text needed.
+CRITICAL: The skip marker is EXACTLY the 6-character string [SKIP]. Not [ПРОПУСК], not [skip], not (skip), not any translation or variation. ALWAYS output [SKIP] in English, in square brackets, uppercase. This is a machine-parsed token, not a word — do not translate it.
+After calling set_reaction, remember_user_fact, or send_feedback in "silent mode", you MUST output ONLY "[SKIP]" as your text. Do NOT add any commentary, explanation, or message. The reaction IS your response — no text needed.
 If none of those apply, output [SKIP] immediately with zero tool calls.
 
 CRITICAL: When you decide to stay silent, output [SKIP] and NOTHING ELSE. Do NOT write your reasoning. Do NOT explain why you can't help. Do NOT say "I don't have access to X". Do NOT think out loud. If you are not responding — the only correct output is "[SKIP]".

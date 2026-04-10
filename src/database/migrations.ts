@@ -914,4 +914,67 @@ export const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_users_timezone');
     },
   },
+  {
+    name: '050_feature_usage',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS feature_usage (
+          user_id INTEGER NOT NULL,
+          feature_key TEXT NOT NULL,
+          use_count INTEGER NOT NULL DEFAULT 1,
+          last_used_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (user_id, feature_key)
+        );
+      `);
+    },
+  },
+  {
+    name: '051_participant_google_sync',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS participant_google_sync (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          event_id INTEGER NOT NULL,
+          google_event_id TEXT,
+          google_calendar_id TEXT NOT NULL DEFAULT 'primary',
+          google_etag TEXT,
+          sync_status TEXT NOT NULL DEFAULT 'pending_push',
+          last_synced_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(user_id, event_id),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE,
+          FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_part_gsync_user_status
+          ON participant_google_sync(user_id, sync_status);
+        CREATE INDEX IF NOT EXISTS idx_part_gsync_event
+          ON participant_google_sync(event_id);
+      `);
+    },
+  },
+  {
+    name: '052_location_verification',
+    up: (db) => {
+      // Add city to users for location biasing
+      db.exec('ALTER TABLE users ADD COLUMN city TEXT DEFAULT NULL');
+
+      // Add resolved location fields to events
+      db.exec('ALTER TABLE events ADD COLUMN resolved_address TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN latitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN longitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN google_maps_url TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN location_verified INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+  {
+    name: '053_event_venue_name',
+    up: (db) => {
+      // venue_name stores the place/organization name from Google Places API
+      // (e.g. "Кофемания" when user wrote "кофемания на тверской"). Used by TTS
+      // to read out a short, natural name instead of the full formatted address.
+      db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
+    },
+  },
 ];

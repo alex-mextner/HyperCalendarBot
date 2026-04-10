@@ -1,12 +1,42 @@
 import type { Lang } from '../../config/constants.ts';
 import { t } from '../../config/constants.ts';
+import { escapeHtml } from '../../utils/telegram.ts';
+import { buildGoogleMapsSearchUrl } from '../location/geocoding-service.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
+import { formatDayWeatherLine } from '../weather/format.ts';
+import type { DayWeather } from '../weather/types.ts';
+import { weatherEmoji } from '../weather/weather-service.ts';
+
+/**
+ * Format location as HTML link to Google Maps.
+ * Display text priority: venue name → resolved address → raw location.
+ * When venue exists AND differs from resolved address, show both: "Venue — Address".
+ */
+function locationLink(
+  location: string | null,
+  resolvedAddress?: string | null,
+  googleMapsUrl?: string | null,
+  venueName?: string | null,
+): string {
+  if (!location) return '';
+  let displayText: string;
+  if (venueName) {
+    displayText = resolvedAddress ? `${escapeHtml(venueName)} — ${escapeHtml(resolvedAddress)}` : escapeHtml(venueName);
+  } else if (resolvedAddress) {
+    displayText = escapeHtml(resolvedAddress);
+  } else {
+    displayText = escapeHtml(location);
+  }
+  const url = googleMapsUrl ?? buildGoogleMapsSearchUrl(location);
+  return `<a href="${escapeHtml(url)}">${displayText}</a>`;
+}
 
 export interface VoiceRenderInput {
   title: string;
   startAt: string;
   timezone: string;
   location?: string | null;
+  venueName?: string | null;
   language: string;
 }
 
@@ -20,6 +50,9 @@ export interface AgendaEvent {
   startTime: string;
   endTime: string;
   location: string | null;
+  resolvedAddress?: string | null;
+  googleMapsUrl?: string | null;
+  venueName?: string | null;
   duration: string;
   isAllDay?: boolean;
 }
@@ -29,6 +62,9 @@ export interface ReminderData {
   startTime: string;
   endTime?: string;
   location: string | null;
+  resolvedAddress?: string | null;
+  googleMapsUrl?: string | null;
+  venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
 }
@@ -37,6 +73,9 @@ export interface BatchReminderItem {
   title: string;
   startTime: string;
   location: string | null;
+  resolvedAddress?: string | null;
+  googleMapsUrl?: string | null;
+  venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
 }
@@ -80,21 +119,45 @@ export function localizeInterval(lang: string, label: string): string {
 type NotificationLabels = ReturnType<typeof t>['notifications'];
 
 function formatAgendaEventLine(e: AgendaEvent, l: NotificationLabels): string {
-  const line = e.isAllDay ? `📅 ${e.title} (${l.allDay})` : `${e.startTime} — ${e.title} (${e.duration})`;
-  return e.location ? `${line}\n        📍 ${e.location}` : line;
+  const safeTitle = escapeHtml(e.title);
+  const line = e.isAllDay ? `📅 ${safeTitle} (${l.allDay})` : `${e.startTime} — ${safeTitle} (${e.duration})`;
+  return e.location
+    ? `${line}\n        📍 ${locationLink(e.location, e.resolvedAddress, e.googleMapsUrl, e.venueName)}`
+    : line;
+}
+
+interface AgendaConfig {
+  emoji: string;
+  greeting: string;
+  greetingFree: string;
+  freeDay: string;
+  footer: string;
+  lang: Lang;
+  weather?: DayWeather | null;
+  botTip?: string | null;
 }
 
 function renderAgenda(
   l: NotificationLabels,
   dateLabel: string,
   events: AgendaEvent[],
-  config: { emoji: string; greeting: string; greetingFree: string; freeDay: string; footer: string },
+  config: AgendaConfig,
 ): RenderedNotification {
   const lines: string[] = [];
+  const countLabel = events.length === 0 ? l.noEvents : l.eventsCount(events.length);
+  lines.push(`📅 ${dateLabel} (${countLabel})`);
+  if (config.weather) {
+    lines.push(formatDayWeatherLine(config.lang, config.weather));
+  }
   if (events.length === 0) {
-    lines.push(`${config.emoji} ${config.greetingFree}`, '', `📅 ${dateLabel}`, '', config.freeDay);
+    lines.push(`${config.emoji} ${config.greetingFree}`);
+    lines.push('', config.freeDay);
+    if (config.botTip) {
+      lines.push('', config.botTip);
+    }
   } else {
-    lines.push(`${config.emoji} ${config.greeting}`, '', `📅 ${dateLabel}`, '');
+    lines.push(`${config.emoji} ${config.greeting}`);
+    lines.push('');
     for (const e of events) {
       lines.push(formatAgendaEventLine(e, l));
     }
@@ -103,28 +166,43 @@ function renderAgenda(
   return { channel: 'telegram_text', text: lines.join('\n') };
 }
 
+export interface AgendaWeatherOpts {
+  weather?: DayWeather | null;
+  botTip?: string | null;
+}
+
 export class NotificationRenderer {
-  renderMorningAgenda(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderMorningAgenda(
+    lang: string,
+    dateLabel: string,
+    events: AgendaEvent[],
+    opts?: AgendaWeatherOpts,
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     return renderAgenda(l, dateLabel, events, {
-      emoji: '☀️',
+      emoji: '👋',
       greeting: l.morning,
       greetingFree: l.morningFree,
       freeDay: l.freeDayMorning,
       footer: l.haveADay,
+      lang: langKey,
+      weather: opts?.weather,
+      botTip: opts?.botTip,
     });
   }
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
     const l = t(lang as Lang).notifications;
     const localized = localizeInterval(lang, data.intervalLabel);
+    const safeTitle = escapeHtml(data.title);
     const lines: string[] = [];
     if (data.intervalLabel === 'at start') {
-      lines.push(`⏰ ${data.title} — ${l.startingNow}`);
+      lines.push(`⏰ ${safeTitle} — ${l.startingNow}`);
     } else if (data.isAllDay) {
-      lines.push(`⏰ ${l.reminder} ${data.title} — ${localized}`);
+      lines.push(`⏰ ${l.reminder} ${safeTitle} — ${localized}`);
     } else {
-      lines.push(`⏰ ${l.reminder} ${data.title} ${l.inLabel} ${localized}`);
+      lines.push(`⏰ ${l.reminder} ${safeTitle} ${l.inLabel} ${localized}`);
     }
     lines.push('');
     if (data.isAllDay) {
@@ -135,7 +213,7 @@ export class NotificationRenderer {
       lines.push(`🕐 ${data.startTime}`);
     }
     if (data.location) {
-      lines.push(`📍 ${data.location}`);
+      lines.push(`📍 ${locationLink(data.location, data.resolvedAddress, data.googleMapsUrl, data.venueName)}`);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
@@ -156,8 +234,11 @@ export class NotificationRenderer {
         intervalText = `${l.inLabel} ${localized}`;
       }
       const timeInfo = item.isAllDay ? l.allDay : item.startTime;
-      let line = `• ${item.title} — ${timeInfo} (${intervalText})`;
-      if (item.location) line += `\n  📍 ${item.location}`;
+      const safeTitle = escapeHtml(item.title);
+      let line = `• ${safeTitle} — ${timeInfo} (${intervalText})`;
+      if (item.location) {
+        line += `\n  📍 ${locationLink(item.location, item.resolvedAddress, item.googleMapsUrl, item.venueName)}`;
+      }
       lines.push(line);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
@@ -169,24 +250,37 @@ export class NotificationRenderer {
       startAt: input.startAt,
       timezone: input.timezone,
       location: input.location,
+      venueName: input.venueName,
       language: input.language,
     });
     return { channel: 'telegram_voice_call', text };
   }
 
-  renderWeeklyDigest(lang: string, weekRange: string, days: WeeklyDigestDay[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderWeeklyDigest(
+    lang: string,
+    weekRange: string,
+    days: WeeklyDigestDay[],
+    opts?: { weatherByDate?: { [date: string]: DayWeather } },
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
+    const weatherMap = opts?.weatherByDate;
     const lines: string[] = [];
     lines.push(l.weeklyDigest(weekRange));
     lines.push('');
     for (const day of days) {
+      const dayW = weatherMap?.[day.date];
+      const weatherSuffix = dayW ? ` ${weatherEmoji(dayW.conditionCode)} ${dayW.tempMin}..${dayW.tempMax}°` : '';
       if (day.events.length === 0) {
-        lines.push(`${day.dayLabel}: (${l.noEvents})`);
+        lines.push(`${day.dayLabel}: (${l.noEvents})${weatherSuffix}`);
       } else {
         const eventList = day.events
-          .map((e) => (e.isAllDay ? `${l.allDay}: ${e.title}` : `${e.startTime} ${e.title}`))
+          .map((e) => {
+            const safeTitle = escapeHtml(e.title);
+            return e.isAllDay ? `${l.allDay}: ${safeTitle}` : `${e.startTime} ${safeTitle}`;
+          })
           .join(', ');
-        lines.push(`${day.dayLabel}: ${eventList}`);
+        lines.push(`${day.dayLabel}: ${eventList}${weatherSuffix}`);
       }
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
@@ -197,14 +291,23 @@ export class NotificationRenderer {
     return { channel: 'telegram_text', text: l.eveHoliday(holidayName) };
   }
 
-  renderEveningReview(lang: string, dateLabel: string, events: AgendaEvent[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+  renderEveningReview(
+    lang: string,
+    dateLabel: string,
+    events: AgendaEvent[],
+    opts?: AgendaWeatherOpts,
+  ): RenderedNotification {
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     return renderAgenda(l, dateLabel, events, {
       emoji: '🌙',
       greeting: l.evening,
       greetingFree: l.eveningFree,
       freeDay: l.freeDayEvening,
       footer: `${l.eventsCount(events.length)} ${l.tomorrow}. ${l.goodNight}`,
+      lang: langKey,
+      weather: opts?.weather,
+      botTip: opts?.botTip,
     });
   }
 }

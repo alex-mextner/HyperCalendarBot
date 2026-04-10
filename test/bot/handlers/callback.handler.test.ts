@@ -18,11 +18,12 @@ interface MockCallbackCtxOverrides {
 function makeCtx(data: string, overrides: MockCallbackCtxOverrides = {}) {
   return {
     data,
+    chatId: 100,
     dbUser: { telegram_id: 100, language: 'ru', timezone: 'UTC' },
     answer: mock(() => Promise.resolve()),
     editText: mock(() => Promise.resolve()),
-    message: { chat: { id: 100 }, send: mock(() => Promise.resolve()) },
-    chat: { id: 100 },
+    message: { id: 1, text: '', chat: { id: 100, type: 'private' }, send: mock(() => Promise.resolve()) },
+    from: { id: 100 },
     ...overrides,
   };
 }
@@ -333,5 +334,104 @@ describe('parseAiBtnPayload', () => {
 
   test('non-numeric prefix with colons treated as plain text', () => {
     expect(parseAiBtnPayload('yes:please')).toEqual({ answerText: 'yes:please' });
+  });
+});
+
+describe('geo timezone confirm/dismiss callbacks', () => {
+  test('GEO_TZ_CONFIRM updates user timezone and edits message', async () => {
+    const update = mock(() => ({ telegram_id: 100, timezone: 'Europe/Moscow' }));
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      userRepo: { update, findByTelegramId: mock(() => null) } as never,
+    });
+    const ctx = makeCtx('gtzc:Europe/Moscow');
+    await handler(ctx as never);
+
+    expect(update).toHaveBeenCalledTimes(1);
+    const [id, data] = update.mock.calls[0] as unknown as [number, { timezone: string; country_code?: string }];
+    expect(id).toBe(100);
+    expect(data.timezone).toBe('Europe/Moscow');
+    expect(data.country_code).toBe('RU');
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).toHaveBeenCalledTimes(1);
+    const editedText = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(editedText).toContain('Europe/Moscow');
+  });
+
+  test('GEO_TZ_DISMISS keeps timezone and edits message', async () => {
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
+    const ctx = makeCtx('gtzd');
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).toHaveBeenCalledTimes(1);
+    const editedText = (ctx.editText.mock.calls[0] as unknown[])[0] as string;
+    expect(editedText).toContain('не изменён');
+  });
+
+  test('GEO_TZ_CONFIRM shows error when userRepo is absent', async () => {
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
+    const ctx = makeCtx('gtzc:Europe/Moscow');
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    const answerArg = ctx.answer.mock.calls[0] as unknown[];
+    expect(answerArg[0]).toEqual({ text: 'Ошибка' });
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('GEO_TZ_CONFIRM rejects invalid timezone payload', async () => {
+    const update = mock(() => null);
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      userRepo: { update, findByTelegramId: mock(() => null) } as never,
+    });
+    const ctx = makeCtx('gtzc:Invalid/Timezone_Zone');
+    await handler(ctx as never);
+
+    expect(update).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+});
+
+describe('group settings timezone callback', () => {
+  test('gst:select stores pending input and sends city prompt', async () => {
+    const { pendingGroupTzInput } = await import('../../../src/bot/commands/settings.ts');
+    const groupRepo = { findByChatId: mock(() => null) };
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      groupRepo: groupRepo as never,
+    });
+    const send = mock(() => Promise.resolve());
+    const ctx = {
+      ...makeCtx('gst:select'),
+      chatId: -200,
+      send,
+    };
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    const prompt = send.mock.calls[0] as unknown as [string];
+    expect(prompt[0]).toContain('Введите название города');
+    const pending = pendingGroupTzInput.get(100);
+    expect(pending).toBeDefined();
+    expect(pending?.chatId).toBe(-200);
+    pendingGroupTzInput.delete(100);
+  });
+
+  test('gst:select returns early when chatId is missing', async () => {
+    const groupRepo = { findByChatId: mock(() => null) };
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
+      groupRepo: groupRepo as never,
+    });
+    const send = mock(() => Promise.resolve());
+    const ctx = {
+      ...makeCtx('gst:select'),
+      chatId: undefined,
+      send,
+    };
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
   });
 });

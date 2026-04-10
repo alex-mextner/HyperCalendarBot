@@ -38,6 +38,12 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     owner_type: 'user',
     group_id: null,
     created_by: null,
+    resolved_address: null,
+    latitude: null,
+    longitude: null,
+    google_maps_url: null,
+    location_verified: 0,
+    venue_name: null,
     last_synced_at: null,
     created_at: '',
     updated_at: '',
@@ -74,6 +80,14 @@ describe('formatDayAgenda', () => {
     expect(result).toContain('Standup');
     expect(result).toContain('09:00');
     expect(result).toContain('Lunch');
+  });
+
+  test('all-day event line has no time range', () => {
+    const events = [makeOccurrence('Conference', '2026-03-11T00:00:00Z', '2026-03-11T23:59:59Z', { all_day: 1 })];
+    const result = formatDayAgenda(events, '2026-03-11T12:00:00Z', 'UTC', 'en');
+    const eventLine = result.split('\n').find((l) => l.includes('Conference'));
+    expect(eventLine).toBeDefined();
+    expect(eventLine).not.toMatch(/\d{2}:\d{2}/);
   });
 
   test('shows color dot when google_calendar_id matches calendarColors map', () => {
@@ -152,6 +166,12 @@ describe('formatEventDetail', () => {
       owner_type: 'user',
       group_id: null,
       created_by: null,
+      resolved_address: null,
+      latitude: null,
+      longitude: null,
+      google_maps_url: null,
+      location_verified: 0,
+      venue_name: null,
       last_synced_at: null,
       created_at: '',
       updated_at: '',
@@ -206,6 +226,37 @@ describe('formatWeekAgenda', () => {
     expect(result.match(/нет событий/g)?.length).toBe(7);
   });
 
+  test('Russian weekday labels are 2 characters (вс, not вск)', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'ru');
+    // 2-char Russian abbreviations
+    expect(result).toContain('пн');
+    expect(result).toContain('вт');
+    expect(result).toContain('ср');
+    expect(result).toContain('чт');
+    expect(result).toContain('пт');
+    expect(result).toContain('сб');
+    expect(result).toContain('вс');
+    // 3-char forms must NOT appear
+    expect(result).not.toContain('пнд');
+    expect(result).not.toContain('втр');
+    expect(result).not.toContain('срд');
+    expect(result).not.toContain('чтв');
+    expect(result).not.toContain('птн');
+    expect(result).not.toContain('суб');
+    expect(result).not.toContain('вск');
+  });
+
+  test('English weekday labels use standard US 3-char abbreviations', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).toContain('Mon');
+    expect(result).toContain('Tue');
+    expect(result).toContain('Wed');
+    expect(result).toContain('Thu');
+    expect(result).toContain('Fri');
+    expect(result).toContain('Sat');
+    expect(result).toContain('Sun');
+  });
+
   test('renders events grouped by day', () => {
     const events = [
       makeOccurrence('Monday Standup', '2026-03-09T09:00:00Z', '2026-03-09T09:30:00Z'),
@@ -222,6 +273,29 @@ describe('formatWeekAgenda', () => {
     expect(result).toContain('1 event');
     // Other 5 days should say "no events"
     expect(result.match(/no events/g)?.length).toBe(5);
+  });
+
+  test('all-day event does not render a time', () => {
+    const events = [makeOccurrence('Conference', '2026-03-09T00:00:00Z', '2026-03-09T23:59:59Z', { all_day: 1 })];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).toContain('Conference');
+    // No time prefix before the title. Match the event line specifically.
+    const eventLine = result.split('\n').find((l) => l.includes('Conference'));
+    expect(eventLine).toBeDefined();
+    expect(eventLine).not.toMatch(/\d{2}:\d{2}/);
+  });
+
+  test('all-day and timed events on the same day — only the timed one has a time', () => {
+    const events = [
+      makeOccurrence('All-day thing', '2026-03-09T00:00:00Z', '2026-03-09T23:59:59Z', { all_day: 1 }),
+      makeOccurrence('Lunch', '2026-03-09T12:00:00Z', '2026-03-09T13:00:00Z'),
+    ];
+    const result = formatWeekAgenda(events, '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    const lines = result.split('\n');
+    const allDayLine = lines.find((l) => l.includes('All-day thing'));
+    const lunchLine = lines.find((l) => l.includes('Lunch'));
+    expect(allDayLine).not.toMatch(/\d{2}:\d{2}/);
+    expect(lunchLine).toContain('12:00');
   });
 
   test('renders single event day with singular "событие" in Russian', () => {
@@ -336,17 +410,19 @@ describe('formatWeekAgenda', () => {
 // ── formatEventDetail edge cases (lines 91, 97, 112) ──
 
 describe('formatEventDetail — edge cases', () => {
-  test('all-day event shows "All day" label', () => {
+  test('all-day event shows date and "all day" label', () => {
     const event = makeEvent({ title: 'Conference', all_day: 1 });
     const result = formatEventDetail(event, 'UTC', 'en');
-    expect(result).toContain('All day');
+    expect(result).toContain('all day');
+    expect(result).toContain('📅');
     expect(result).not.toContain('🕐');
   });
 
-  test('all-day event shows "Весь день" in Russian', () => {
+  test('all-day event shows date and "весь день" in Russian', () => {
     const event = makeEvent({ title: 'Конференция', all_day: 1 });
     const result = formatEventDetail(event, 'UTC', 'ru');
-    expect(result).toContain('Весь день');
+    expect(result).toContain('весь день');
+    expect(result).toContain('📅');
   });
 
   test('event without end_at omits duration', () => {
@@ -373,7 +449,8 @@ describe('formatEventDetail — edge cases', () => {
     });
     const result = formatEventDetail(event, 'UTC', 'en');
     expect(result).toContain('📝 A detailed description');
-    expect(result).toContain('📍 Office 42');
+    expect(result).toContain('📍 <a href=');
+    expect(result).toContain('Office 42</a>');
     expect(result).toContain('🏷 work');
     expect(result).toContain('🔁 Daily, 3 times');
   });
@@ -476,7 +553,7 @@ describe('formatInvitation', () => {
   test('all-day event — no timezone annotation', () => {
     const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
     const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
-    expect(result).toContain('All day');
+    expect(result).toContain('all day');
     expect(result).not.toContain('Europe/Moscow)');
   });
 
@@ -493,6 +570,13 @@ describe('formatEventListItem', () => {
     const event = makeEvent({ title: 'Standup', start_at: '2026-03-11T09:00:00Z' });
     const result = formatEventListItem(event, 'UTC', 0);
     expect(result).toBe('1. 09:00 — Standup');
+  });
+
+  test('all-day event list item has no time', () => {
+    const event = makeEvent({ title: 'Conference', all_day: 1, start_at: '2026-03-11T00:00:00Z' });
+    const result = formatEventListItem(event, 'UTC', 0);
+    expect(result).toContain('Conference');
+    expect(result).not.toMatch(/\d{2}:\d{2}/);
   });
 
   test('uses 1-based index from 0-based input', () => {

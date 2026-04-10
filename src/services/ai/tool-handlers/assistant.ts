@@ -4,7 +4,7 @@ import type { AgentContext, ToolResult } from '../types.ts';
 function notConnected(lang: string): ToolResult {
   return {
     success: false,
-    output:
+    error:
       lang === 'ru'
         ? '⚠️ Агент не подключён. Скачай и настрой: /connect'
         : '⚠️ Agent not connected. Download and set up: /connect',
@@ -40,7 +40,7 @@ export async function handleAssistantTool(
   } catch (err) {
     return {
       success: false,
-      output: err instanceof Error ? err.message : String(err),
+      error: err instanceof Error ? err.message : String(err),
     };
   }
 }

@@ -151,6 +151,24 @@ const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'attach_pending_location_to_event',
+    description:
+      "Attach the user's most recently sent 📍 geolocation pin to a specific event. " +
+      'Use this when the user has sent a Telegram location pin (visible in the system prompt under "Pending Location Pin") ' +
+      'and confirms which event it belongs to. The pin is auto-resolved to a street address via Google Maps. ' +
+      'Returns an error if no pending pin is found (pin expired after 30 min, or user never sent one).',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        event_id: {
+          type: 'number',
+          description: 'ID of the event to attach the pin to',
+        },
+      },
+      required: ['event_id'],
+    },
+  },
+  {
     name: 'delete_event',
     description:
       'Delete a calendar event by its ID. If the user is a participant (not the creator), this declines the invitation instead of deleting — the event stays for the creator and other participants.',
@@ -1167,7 +1185,9 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
         emoji: {
           type: 'string',
           description:
-            'A single emoji supported by Telegram reactions, e.g. "👍", "❤️", "🔥", "👀", "😂", "🤔", "✍️", "🙏".',
+            'ONLY one of these Telegram reaction emojis (no others will work): ' +
+            '👍 👎 ❤ 🔥 🥰 👏 😁 🤔 🤯 😱 🤬 😢 🎉 🤩 🤮 💩 🙏 👌 🕊 🤡 🥱 🥴 😍 🐳 ❤‍🔥 🌚 🌭 💯 🤣 ⚡ 🍌 🏆 💔 🤨 😐 🍓 🍾 💋 🖕 😈 😴 😭 🤓 👻 👨‍💻 👀 🎃 🙈 😇 😨 🤝 ✍ 🤗 🫡 🎅 🎄 ☃ 💅 🤪 🗿 🆒 💘 🙉 🦄 😘 💊 🙊 😎 👾 🤷‍♂ 🤷 🤷‍♀ 😡. ' +
+            'Pick the closest match from this list.',
         },
       },
       required: ['emoji'],
