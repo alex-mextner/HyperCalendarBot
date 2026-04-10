@@ -4,7 +4,7 @@
 
 **Goal:** Replace Anthropic SDK with OpenAI SDK and add multi-provider fallback chains for reliability.
 
-**Architecture:** Two unified API functions — `aiStreamRound()` (streaming with callbacks) and `aiComplete()` (non-streaming) — each backed by a provider chain. Main chain: z.ai GLM 5.1 → Gemini 2.5 Pro → HF Qwen3-235B. Light chain: z.ai GLM Flash → Gemini 2.5 Flash → HF Llama-3.3-70B. All providers use OpenAI SDK with different `baseURL`.
+**Architecture:** Two unified API functions — `aiStreamRound()` (streaming with callbacks) and `aiComplete()` (non-streaming) — each backed by a provider chain. Streaming chain: z.ai GLM 5.1 → Gemini 2.5 Pro → HF Qwen3-235B. Main completion chain: Gemini 2.5 Pro → HF Qwen3-235B. Light completion chain: Gemini 2.5 Flash → HF Llama-3.3-70B. z.ai only used in streaming (coding endpoint doesn't produce text content for non-tool responses). All providers use OpenAI SDK with different `baseURL`.
 
 **Tech Stack:** `openai` npm package (replacing `@anthropic-ai/sdk`), Bun runtime
 
@@ -656,19 +656,17 @@ function callProvider(getClient: () => OpenAI, model: string): ModelSlot['call']
 
 // ── Chains ──────────────────────────────────────────────────────────────────
 
+// No z.ai in completion chains — coding endpoint doesn't produce text content
+// for non-tool responses (only reasoning_content).
 function buildMainChain(): ModelSlot[] {
-  const cfg = loadConfig();
   return [
-    { name: `z.ai (${cfg.AI_MODEL})`, call: callProvider(zaiClient, cfg.AI_MODEL) },
     { name: 'Gemini 2.5 Pro', call: callProvider(geminiClient, 'gemini-2.5-pro') },
     { name: 'HF Qwen3-235B', call: callProvider(hfClient, 'Qwen/Qwen3-235B-A22B') },
   ];
 }
 
 function buildLightChain(): ModelSlot[] {
-  const cfg = loadConfig();
   return [
-    { name: `z.ai (${cfg.AI_FAST_MODEL})`, call: callProvider(zaiClient, cfg.AI_FAST_MODEL) },
     { name: 'Gemini 2.5 Flash', call: callProvider(geminiClient, 'gemini-2.5-flash') },
     { name: 'HF Llama-3.3-70B', call: callProvider(hfClient, 'meta-llama/Llama-3.3-70B-Instruct') },
   ];
@@ -679,8 +677,8 @@ function buildLightChain(): ModelSlot[] {
 /**
  * Run a chat completion with automatic provider fallback.
  *
- * Main chain:  z.ai GLM 5.1 → Gemini 2.5 Pro → HF Qwen3-235B
- * Light chain: z.ai GLM Flash → Gemini 2.5 Flash → HF Llama-3.3-70B
+ * Main chain:  Gemini 2.5 Pro → HF Qwen3-235B
+ * Light chain: Gemini 2.5 Flash → HF Llama-3.3-70B
  *
  * On 5xx / timeout / balance exhausted the current model is abandoned immediately.
  */
