@@ -20,7 +20,10 @@ export function formatDateHeader(isoUtc: string, timezone: string, lang: string)
 export function formatDateShort(isoUtc: string, timezone: string, lang: string): string {
   const d = new TZDate(isoUtc, timezone);
   const locale = lang === 'ru' ? ru : enUS;
-  return format(d, 'EEE d', { locale });
+  // ru: EEEEEE → 2-char weekday (пн, вт, ..., вс).
+  // en: EEE → standard US 3-char weekday (Mon, Tue, ..., Sun).
+  const pattern = lang === 'ru' ? 'EEEEEE d' : 'EEE d';
+  return format(d, pattern, { locale });
 }
 
 export function formatTimeRange(startUtc: string, endUtc: string | null, timezone: string): string {
