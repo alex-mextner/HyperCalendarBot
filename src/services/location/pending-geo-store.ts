@@ -53,8 +53,10 @@ export class RedisPendingGeoStore implements PendingGeoStore {
 export class InMemoryPendingGeoStore implements PendingGeoStore {
   private store = new Map<number, { latitude: number; longitude: number; expiresAt: number }>();
 
+  constructor(private ttlSeconds: number = TTL_SECONDS) {}
+
   async set(userId: number, data: { latitude: number; longitude: number }): Promise<void> {
-    this.store.set(userId, { ...data, expiresAt: Date.now() + TTL_SECONDS * 1000 });
+    this.store.set(userId, { ...data, expiresAt: Date.now() + this.ttlSeconds * 1000 });
   }
 
   async get(userId: number): Promise<{ latitude: number; longitude: number } | null> {
