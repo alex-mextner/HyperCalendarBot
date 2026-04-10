@@ -5,29 +5,29 @@
  *   bun scripts/test-ai-chains.ts
  *
  * Required env vars (from .env, auto-loaded by Bun):
- *   ANTHROPIC_API_KEY  — z.ai API key
+ *   ZAI_API_KEY        — z.ai API key
  *   HF_TOKEN           — HuggingFace token
  *   GEMINI_API_KEY     — Google Gemini API key
- *   AI_MODEL           — primary model (default: glm-5.1)
- *   AI_FAST_MODEL      — light model (default: glm-flash)
+ *   ZAI_MODEL          — primary model (default: glm-5.1)
+ *   ZAI_FAST_MODEL     — fast model (default: glm-4.7-flash)
  */
 import OpenAI from 'openai';
 
 // ── Config ──────────────────────────────────────────────────────────────────
 
-const ZAI_BASE_URL = 'https://api.z.ai/api/paas/v4';
+const ZAI_BASE_URL = process.env.ZAI_BASE_URL || 'https://api.z.ai/api/coding/paas/v4';
 const HF_BASE_URL = 'https://router.huggingface.co/v1';
 const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
 
-const AI_MODEL = process.env.AI_MODEL || 'glm-5.1';
-const AI_FAST_MODEL = process.env.AI_FAST_MODEL || 'glm-flash';
+const ZAI_MODEL = process.env.ZAI_MODEL || 'glm-5.1';
+const ZAI_FAST_MODEL = process.env.ZAI_FAST_MODEL || 'glm-4.7-flash';
 
 const PLACEHOLDER_KEY = 'missing';
 
 // ── Clients ─────────────────────────────────────────────────────────────────
 
 const zaiClient = new OpenAI({
-  apiKey: process.env.ANTHROPIC_API_KEY || PLACEHOLDER_KEY,
+  apiKey: process.env.ZAI_API_KEY || PLACEHOLDER_KEY,
   baseURL: ZAI_BASE_URL,
   timeout: 30_000,
   maxRetries: 0,
@@ -104,13 +104,13 @@ interface ProviderTest {
 }
 
 const MAIN_PROVIDERS: ProviderTest[] = [
-  { name: 'z.ai (GLM 5.1)', client: zaiClient, model: AI_MODEL },
+  { name: 'z.ai (GLM 5.1)', client: zaiClient, model: ZAI_MODEL },
   { name: 'HF (DeepSeek-R1)', client: hfClient, model: 'deepseek-ai/DeepSeek-R1-0528' },
   { name: 'Gemini 2.5 Pro', client: geminiClient, model: 'gemini-2.5-pro' },
 ];
 
 const LIGHT_PROVIDERS: ProviderTest[] = [
-  { name: 'z.ai (GLM Flash)', client: zaiClient, model: AI_FAST_MODEL },
+  { name: 'z.ai (GLM Flash)', client: zaiClient, model: ZAI_FAST_MODEL },
   { name: 'Gemini 2.5 Flash', client: geminiClient, model: 'gemini-2.5-flash' },
   { name: 'HF (Llama 3.3 70B)', client: hfClient, model: 'meta-llama/Llama-3.3-70B-Instruct' },
 ];
@@ -299,8 +299,8 @@ async function runProviderTests(chainName: string, providers: ProviderTest[]) {
 
 async function main() {
   console.log('Testing AI provider chains via OpenAI SDK');
-  console.log(`AI_MODEL=${AI_MODEL}, AI_FAST_MODEL=${AI_FAST_MODEL}`);
-  console.log(`ANTHROPIC_API_KEY=${process.env.ANTHROPIC_API_KEY ? 'set' : 'MISSING'}`);
+  console.log(`ZAI_MODEL=${ZAI_MODEL}, ZAI_FAST_MODEL=${ZAI_FAST_MODEL}`);
+  console.log(`ZAI_API_KEY=${process.env.ZAI_API_KEY ? 'set' : 'MISSING'}`);
   console.log(`HF_TOKEN=${process.env.HF_TOKEN ? 'set' : 'MISSING'}`);
   console.log(`GEMINI_API_KEY=${process.env.GEMINI_API_KEY ? 'set' : 'MISSING'}`);
 

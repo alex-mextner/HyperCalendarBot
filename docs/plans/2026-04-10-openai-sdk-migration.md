@@ -7,11 +7,11 @@
 **Architecture:** Single unified streaming API `aiStreamRound()` backed by provider chains. Callbacks are optional — services without UI (validator, intent-learner, city-resolver, tts-translation) call it without callbacks and collect the full result. Two chains: main (heavy tool calling) and light (cheap/fast internal calls) selected via `{ fast: true }` option. All providers use OpenAI SDK with different `baseURL` (z.ai coding endpoint, HF router, Gemini OpenAI-compat). All base URLs and models are loaded from env — no hardcoded values.
 
 **Chains:**
-- `SMART_CHAIN = z.ai ${AI_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL}`
-- `FAST_CHAIN = z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
+- `SMART_CHAIN = z.ai ${ZAI_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL}`
+- `FAST_CHAIN = z.ai ${ZAI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
 
 **Defaults (via env):**
-- `AI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `AI_MODEL=glm-5.1`, `AI_FAST_MODEL=glm-4.7-flash`
+- `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `ZAI_MODEL=glm-5.1`, `ZAI_FAST_MODEL=glm-4.7-flash`
 - `HF_BASE_URL=https://router.huggingface.co/v1`, `HF_MODEL=Qwen/Qwen3-235B-A22B`, `HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct`
 - `GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`, `GEMINI_MODEL=gemini-2.5-pro`, `GEMINI_FAST_MODEL=gemini-2.5-flash`
 
@@ -64,10 +64,10 @@ export interface EnvConfig {
   NODE_ENV: 'development' | 'production';
 
   // AI primary provider (z.ai coding endpoint)
-  ANTHROPIC_API_KEY: string;  // keep name — it's the z.ai key
-  AI_BASE_URL: string;
-  AI_MODEL: string;
-  AI_FAST_MODEL: string;
+  ZAI_API_KEY: string;
+  ZAI_BASE_URL: string;
+  ZAI_MODEL: string;
+  ZAI_FAST_MODEL: string;
 
   // HuggingFace Router (fallback)
   HF_TOKEN: string;           // was optional, now required
@@ -107,7 +107,7 @@ export interface EnvConfig {
 }
 ```
 
-Remove: `AI_MODEL_FALLBACK`, `AI_BASE_URL_FALLBACK`, `AI_API_KEY_FALLBACK` (dead code from old fallback logic).
+Remove: `AI_MODEL_FALLBACK`, `AI_BASE_URL_FALLBACK`, `AI_API_KEY_FALLBACK` (dead code from old fallback logic — these are the OLD var names in the existing EnvConfig to delete).
 
 - [ ] **Step 2: Helper for required env vars**
 
@@ -132,10 +132,10 @@ return {
   NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
 
   // AI primary (z.ai)
-  ANTHROPIC_API_KEY: requireEnv('ANTHROPIC_API_KEY'),
-  AI_BASE_URL: requireEnv('AI_BASE_URL'),
-  AI_MODEL: requireEnv('AI_MODEL'),
-  AI_FAST_MODEL: requireEnv('AI_FAST_MODEL'),
+  ZAI_API_KEY: requireEnv('ZAI_API_KEY'),
+  ZAI_BASE_URL: requireEnv('ZAI_BASE_URL'),
+  ZAI_MODEL: requireEnv('ZAI_MODEL'),
+  ZAI_FAST_MODEL: requireEnv('ZAI_FAST_MODEL'),
 
   // HuggingFace
   HF_TOKEN: requireEnv('HF_TOKEN'),
@@ -153,7 +153,7 @@ return {
 };
 ```
 
-Remove the old `ANTHROPIC_API_KEY` check (it's now handled by `requireEnv`).
+Remove the old `ANTHROPIC_API_KEY` check (it's now handled by `requireEnv('ZAI_API_KEY')`).
 
 - [ ] **Step 4: Update .env.example**
 
@@ -161,10 +161,10 @@ Remove the old `ANTHROPIC_API_KEY` check (it's now handled by `requireEnv`).
 BOT_TOKEN=your_bot_token
 
 # AI primary — z.ai coding endpoint (GLM 5.1 via OpenAI-compat API)
-ANTHROPIC_API_KEY=your_zai_api_key
-AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.7-flash
+ZAI_API_KEY=your_zai_api_key
+ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_MODEL=glm-5.1
+ZAI_FAST_MODEL=glm-4.7-flash
 
 # HuggingFace Router (fallback, tool calling capable)
 HF_TOKEN=your_hf_token
@@ -186,9 +186,9 @@ GEMINI_FAST_MODEL=gemini-2.5-flash
 Add the real values:
 
 ```env
-AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.7-flash
+ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+ZAI_MODEL=glm-5.1
+ZAI_FAST_MODEL=glm-4.7-flash
 
 HF_BASE_URL=https://router.huggingface.co/v1
 HF_MODEL=Qwen/Qwen3-235B-A22B
@@ -240,8 +240,8 @@ export function zaiClient(): OpenAI {
   if (!_zai) {
     const cfg = loadConfig();
     _zai = new OpenAI({
-      apiKey: cfg.ANTHROPIC_API_KEY,
-      baseURL: cfg.AI_BASE_URL,
+      apiKey: cfg.ZAI_API_KEY,
+      baseURL: cfg.ZAI_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
       maxRetries: 0,
     });
@@ -355,8 +355,8 @@ Expected: FAIL — module not found
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
-//   FAST_CHAIN:            z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+//   FAST_CHAIN:            z.ai ${ZAI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, etc.) omit callbacks.
@@ -540,7 +540,7 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
-    streamingSlot(`z.ai (${cfg.AI_MODEL})`, zaiClient, cfg.AI_MODEL),
+    streamingSlot(`z.ai (${cfg.ZAI_MODEL})`, zaiClient, cfg.ZAI_MODEL),
     streamingSlot(`Gemini (${cfg.GEMINI_MODEL})`, geminiClient, cfg.GEMINI_MODEL),
     streamingSlot(`HF (${cfg.HF_MODEL})`, hfClient, cfg.HF_MODEL),
   ];
@@ -549,7 +549,7 @@ function buildSmartChain(): ProviderSlot[] {
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
-    streamingSlot(`z.ai (${cfg.AI_FAST_MODEL})`, zaiClient, cfg.AI_FAST_MODEL),
+    streamingSlot(`z.ai (${cfg.ZAI_FAST_MODEL})`, zaiClient, cfg.ZAI_FAST_MODEL),
     streamingSlot(`Gemini (${cfg.GEMINI_FAST_MODEL})`, geminiClient, cfg.GEMINI_FAST_MODEL),
     streamingSlot(`HF (${cfg.HF_FAST_MODEL})`, hfClient, cfg.HF_FAST_MODEL),
   ];
@@ -567,8 +567,8 @@ function buildFastChain(): ProviderSlot[] {
  * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
- *   light: false → z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
- *   fast: true  → z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+ *   light: false → z.ai ${ZAI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+ *   fast: true  → z.ai ${ZAI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
  *
  * Fallback rules:
  * - If a provider returns 5xx/timeout/429: try next
@@ -1355,7 +1355,7 @@ Validation is now **always enabled** (no flag) — `aiStreamRound({fast: true})`
 
 - [ ] **Step 2: Update index.ts**
 
-Remove all Anthropic client creation, fallback client setup. The agent no longer needs API keys. Remove imports of `createAnthropicClient`, any references to `AI_BASE_URL_FALLBACK`, etc.
+Remove all Anthropic client creation, fallback client setup. The agent no longer needs API keys. Remove imports of `createAnthropicClient`, any references to `ZAI_BASE_URL_FALLBACK`, etc.
 
 - [ ] **Step 3: Run full test suite**
 
@@ -1514,59 +1514,35 @@ Kill the running bot, restart, send a test message in a group chat. Verify:
 - Tool calling (e.g. "what's on my calendar today") works
 - Fallback triggers if z.ai is manually broken (e.g. by temporarily changing the API key)
 
-- [ ] **Step 4: Update production .env on the server**
+- [ ] **Step 4: Production .env already updated**
 
-The production bot runs from `/opt/hypercal/.env` on `104.248.84.190`. Without the new required env vars, the bot will throw at startup after deploy.
+The production `/opt/hypercal/.env` on `104.248.84.190` was updated during plan creation with all the new env vars (both old-style `ANTHROPIC_API_KEY`/`AI_BASE_URL` and new-style `ZAI_API_KEY`/`ZAI_BASE_URL` are present during transition).
 
-**Current state of prod `.env` (as of writing this plan):**
-
-| Var | Present? | Action |
-|-----|:--------:|--------|
-| `ANTHROPIC_API_KEY` | ✓ | **verify balance** (was `28eec...` danny key — 429 insufficient balance). Use the Alex key that's in the `#` comment on the line, or top up. |
-| `AI_BASE_URL` | ✓ | **CHANGE** from `https://api.z.ai/api/anthropic` → `https://api.z.ai/api/coding/paas/v4` |
-| `AI_MODEL` | ✓ | keep as `glm-5.1` |
-| `AI_FAST_MODEL` | ✓ | **CHANGE** from `glm-4.7-flash` (500 errors on coding endpoint) → `glm-4.7-flash` |
-| `HF_TOKEN` | ✓ | keep |
-| `HF_BASE_URL` | ✗ | **ADD** `https://router.huggingface.co/v1` |
-| `HF_MODEL` | ✗ | **ADD** `Qwen/Qwen3-235B-A22B` |
-| `HF_FAST_MODEL` | ✗ | **ADD** `meta-llama/Llama-3.3-70B-Instruct` |
-| `GEMINI_API_KEY` | ✗ | **ADD** — copy from local `.env` (Alex has it) |
-| `GEMINI_BASE_URL` | ✗ | **ADD** `https://generativelanguage.googleapis.com/v1beta/openai/` |
-| `GEMINI_MODEL` | ✗ | **ADD** `gemini-2.5-pro` |
-| `GEMINI_FAST_MODEL` | ✗ | **ADD** `gemini-2.5-flash` |
-
-**Before deploying the new code**, SSH in, back up the current file, and apply the changes:
+**Verification command:**
 
 ```bash
-ssh root@104.248.84.190 "cp /opt/hypercal/.env /opt/hypercal/.env.backup-$(date +%Y%m%d)"
-
-# Edit /opt/hypercal/.env manually to change AI_BASE_URL and AI_FAST_MODEL.
-# Then append the new vars:
-ssh root@104.248.84.190 "cat >> /opt/hypercal/.env <<'ENV'
-
-# OpenAI SDK migration (2026-04-10)
-HF_BASE_URL=https://router.huggingface.co/v1
-HF_MODEL=Qwen/Qwen3-235B-A22B
-HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct
-
-GEMINI_API_KEY=<paste real value here>
-GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-GEMINI_MODEL=gemini-2.5-pro
-GEMINI_FAST_MODEL=gemini-2.5-flash
-ENV"
+ssh root@104.248.84.190 "grep -E '^ZAI_|^HF_|^GEMINI_' /opt/hypercal/.env"
 ```
 
-**Important:** if there are duplicate `AI_BASE_URL` or `AI_FAST_MODEL` lines after the edit, the last occurrence wins. Verify with:
+Expected lines (12 total):
+- `ZAI_API_KEY=63d5d0b80b...` (Alex key, GLM Coding Pro)
+- `ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4`
+- `ZAI_MODEL=glm-5.1`
+- `ZAI_FAST_MODEL=glm-4.7-flash`
+- `HF_TOKEN=hf_...`
+- `HF_BASE_URL=https://router.huggingface.co/v1`
+- `HF_MODEL=Qwen/Qwen3-235B-A22B`
+- `HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct`
+- `GEMINI_API_KEY=AIzaSy...`
+- `GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`
+- `GEMINI_MODEL=gemini-2.5-pro`
+- `GEMINI_FAST_MODEL=gemini-2.5-flash`
+
+Backups at `/opt/hypercal/.env.backup-*`. Old `ANTHROPIC_API_KEY`, `AI_BASE_URL`, `AI_MODEL`, `AI_FAST_MODEL` lines remain for now (harmless — new code doesn't read them). **After successful deploy + verification, clean them up:**
 
 ```bash
-ssh root@104.248.84.190 "grep -cE '^AI_BASE_URL=|^AI_FAST_MODEL=' /opt/hypercal/.env"
-# Expected: 2 (one of each, no duplicates)
-
-ssh root@104.248.84.190 "grep -E '^AI_BASE_URL|^AI_MODEL|^AI_FAST_MODEL|^HF_|^GEMINI_|^ANTHROPIC_API_KEY' /opt/hypercal/.env"
-# Expected: 11 lines, all values correct
+ssh root@104.248.84.190 "sed -i '/^ANTHROPIC_API_KEY=/d; /^AI_BASE_URL=/d; /^AI_MODEL=/d; /^AI_FAST_MODEL=/d' /opt/hypercal/.env"
 ```
-
-Delete any duplicates before continuing.
 
 - [ ] **Step 5: Deploy to production and monitor**
 
