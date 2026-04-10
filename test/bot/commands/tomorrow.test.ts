@@ -59,11 +59,9 @@ describe('handleTomorrow', () => {
     const { handleTomorrow } = await import('../../../src/bot/commands/tomorrow.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
-    const renderService = { render: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
     await handleTomorrow(ctx as never, svc as never, undefined, renderService as never);
-
-    // renderDayImage throws internally since renderService.render doesn't match expected shape
     expect(ctx.send).toHaveBeenCalledTimes(1);
   });
 

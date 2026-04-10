@@ -59,9 +59,8 @@ describe('handleToday', () => {
     const { handleToday } = await import('../../../src/bot/commands/today.ts');
     const ctx = makeCtx();
     const svc = makeEventService();
-    const renderService = { render: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.reject(new Error('render failed'))) };
 
-    // renderDayImage calls renderService.renderDirect which is missing → throws
     await handleToday(ctx as never, svc as never, undefined, renderService as never);
 
     expect(ctx.send).toHaveBeenCalledTimes(1);

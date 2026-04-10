@@ -31,9 +31,13 @@ export class PlaywrightPool {
   }
 
   async initialize(): Promise<void> {
-    this.browser = await chromium.launch({
+    const browser = await chromium.launch({
       args: ['--no-sandbox', '--disable-gpu'],
     });
+    if (!browser) {
+      throw new Error('chromium.launch() returned no browser — Playwright browsers may not be installed');
+    }
+    this.browser = browser;
     this.reinitAttempts = 0;
     this.dead = false;
     this.browser.on('disconnected', () => {

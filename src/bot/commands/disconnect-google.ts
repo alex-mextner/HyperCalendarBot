@@ -6,6 +6,7 @@ import type { EnvConfig } from '../../config/env.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
+import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { GoogleOAuthService } from '../../services/google/oauth.ts';
 import { decrypt } from '../../utils/crypto.ts';
@@ -20,6 +21,7 @@ export interface DisconnectDeps {
   eventRepo: EventRepository;
   syncRepo: GoogleSyncRepository;
   calendarRepo: GoogleCalendarRepository;
+  participantSyncRepo?: ParticipantGoogleSyncRepository;
   stopWatchChannels?: (userId: number) => Promise<void>;
 }
 
@@ -68,6 +70,7 @@ export async function executeDisconnect(userId: number, deps: DisconnectDeps): P
   deps.userRepo.clearGoogleToken(userId);
 
   deps.eventRepo.clearGoogleSync(userId);
+  deps.participantSyncRepo?.deleteByUser(userId);
 
   cmdLogger.info({ userId }, 'Google Calendar disconnected');
 }
