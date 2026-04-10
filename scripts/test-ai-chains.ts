@@ -1,315 +1,110 @@
 /**
- * Test script for all AI provider chains via OpenAI SDK.
+ * Integration smoke test for the unified aiStreamRound helper.
  *
  * Usage:
  *   bun scripts/test-ai-chains.ts
  *
- * Required env vars (from .env, auto-loaded by Bun):
- *   ZAI_API_KEY        — z.ai API key
- *   HF_TOKEN           — HuggingFace token
- *   GEMINI_API_KEY     — Google Gemini API key
- *   ZAI_MODEL          — primary model (default: glm-5.1)
- *   ZAI_FAST_MODEL     — fast model (default: glm-4.7-flash)
+ * Hits real providers, so every env var loaded by src/config/env.ts must be set
+ * (all ZAI_*, HF_*, GEMINI_* plus BOT_TOKEN — the BOT_TOKEN is only read to
+ * satisfy loadConfig(), we don't actually talk to Telegram here).
  */
-import OpenAI from 'openai';
+import { aiStreamRound } from '../src/services/ai/streaming.ts';
 
-// ── Config ──────────────────────────────────────────────────────────────────
-
-const ZAI_BASE_URL = process.env.ZAI_BASE_URL || 'https://api.z.ai/api/coding/paas/v4';
-const HF_BASE_URL = 'https://router.huggingface.co/v1';
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-
-const ZAI_MODEL = process.env.ZAI_MODEL || 'glm-5.1';
-const ZAI_FAST_MODEL = process.env.ZAI_FAST_MODEL || 'glm-4.7-flash';
-
-const PLACEHOLDER_KEY = 'missing';
-
-// ── Clients ─────────────────────────────────────────────────────────────────
-
-const zaiClient = new OpenAI({
-  apiKey: process.env.ZAI_API_KEY || PLACEHOLDER_KEY,
-  baseURL: ZAI_BASE_URL,
-  timeout: 30_000,
-  maxRetries: 0,
-});
-
-const hfClient = new OpenAI({
-  apiKey: process.env.HF_TOKEN || PLACEHOLDER_KEY,
-  baseURL: HF_BASE_URL,
-  timeout: 30_000,
-  maxRetries: 0,
-});
-
-const geminiClient = new OpenAI({
-  apiKey: process.env.GEMINI_API_KEY || PLACEHOLDER_KEY,
-  baseURL: GEMINI_BASE_URL,
-  timeout: 30_000,
-  maxRetries: 0,
-});
-
-// ── Test tools ──────────────────────────────────────────────────────────────
-
-const TEST_TOOLS: OpenAI.ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'get_current_time',
-      description: 'Get current date and time in a given timezone',
-      parameters: {
-        type: 'object',
-        properties: {
-          timezone: {
-            type: 'string',
-            description: 'IANA timezone, e.g. Europe/Belgrade',
-          },
-        },
-        required: ['timezone'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'create_event',
-      description: 'Create a calendar event',
-      parameters: {
-        type: 'object',
-        properties: {
-          title: { type: 'string', description: 'Event title' },
-          date: { type: 'string', description: 'ISO date string' },
-          duration_minutes: { type: 'number', description: 'Duration in minutes' },
-        },
-        required: ['title', 'date'],
-      },
-    },
-  },
-];
-
-const MESSAGES_WITH_TOOLS: OpenAI.ChatCompletionMessageParam[] = [
-  { role: 'system', content: 'You are a calendar assistant. Use tools when appropriate. Reply in Russian.' },
-  { role: 'user', content: 'Какое сейчас время в Белграде?' },
-];
-
-const MESSAGES_SIMPLE: OpenAI.ChatCompletionMessageParam[] = [
-  { role: 'system', content: 'You are a helpful assistant. Reply briefly in Russian.' },
-  { role: 'user', content: 'Привет! Скажи одно предложение о погоде.' },
-];
-
-// ── Provider definitions ────────────────────────────────────────────────────
-
-interface ProviderTest {
-  name: string;
-  client: OpenAI;
-  model: string;
-}
-
-const MAIN_PROVIDERS: ProviderTest[] = [
-  { name: 'z.ai (GLM 5.1)', client: zaiClient, model: ZAI_MODEL },
-  { name: 'HF (DeepSeek-R1)', client: hfClient, model: 'deepseek-ai/DeepSeek-R1-0528' },
-  { name: 'Gemini 2.5 Pro', client: geminiClient, model: 'gemini-2.5-pro' },
-];
-
-const LIGHT_PROVIDERS: ProviderTest[] = [
-  { name: 'z.ai (GLM Flash)', client: zaiClient, model: ZAI_FAST_MODEL },
-  { name: 'Gemini 2.5 Flash', client: geminiClient, model: 'gemini-2.5-flash' },
-  { name: 'HF (Llama 3.3 70B)', client: hfClient, model: 'meta-llama/Llama-3.3-70B-Instruct' },
-];
-
-// ── Test functions ──────────────────────────────────────────────────────────
-
-function isBalanceError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  const msg = err.message.toLowerCase();
-  return (
-    msg.includes('insufficient balance') ||
-    msg.includes('no resource package') ||
-    msg.includes('billing') ||
-    msg.includes('quota exceeded') ||
-    msg.includes('exceeded your current quota') ||
-    msg.includes('payment required')
-  );
-}
-
-async function testCompletion(provider: ProviderTest): Promise<{ ok: boolean; text: string; ms: number }> {
+async function runCase(name: string, fn: () => Promise<void>) {
   const start = Date.now();
   try {
-    const response = await provider.client.chat.completions.create({
-      model: provider.model,
-      messages: MESSAGES_SIMPLE,
-      max_tokens: 100,
-      temperature: 0.3,
-    });
-    const text = response.choices[0]?.message?.content?.trim() ?? '(empty)';
-    return { ok: true, text, ms: Date.now() - start };
+    await fn();
+    console.log(`  ✓ ${name} (${Date.now() - start}ms)`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const prefix = isBalanceError(err) ? '💸 BALANCE: ' : '';
-    return { ok: false, text: `${prefix}${msg.slice(0, 200)}`, ms: Date.now() - start };
+    console.log(`  ✗ ${name} (${Date.now() - start}ms): ${msg.slice(0, 200)}`);
   }
 }
-
-async function testToolCalling(
-  provider: ProviderTest,
-): Promise<{ ok: boolean; toolCalls: string[]; text: string; ms: number }> {
-  const start = Date.now();
-  try {
-    const response = await provider.client.chat.completions.create({
-      model: provider.model,
-      messages: MESSAGES_WITH_TOOLS,
-      tools: TEST_TOOLS,
-      max_tokens: 200,
-      temperature: 0.3,
-    });
-    const choice = response.choices[0];
-    const toolCalls =
-      choice?.message?.tool_calls
-        ?.filter((tc): tc is OpenAI.ChatCompletionMessageToolCall & { type: 'function' } => tc.type === 'function')
-        .map((tc) => `${tc.function.name}(${tc.function.arguments})`) ?? [];
-    const text = choice?.message?.content?.trim() ?? '';
-    const finishReason = choice?.finish_reason ?? 'unknown';
-    const ok = toolCalls.length > 0 || finishReason === 'tool_calls';
-    return { ok, toolCalls, text: text || `finish_reason=${finishReason}`, ms: Date.now() - start };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, toolCalls: [], text: msg.slice(0, 200), ms: Date.now() - start };
-  }
-}
-
-async function testStreaming(
-  provider: ProviderTest,
-): Promise<{ ok: boolean; chunks: number; text: string; ms: number }> {
-  const start = Date.now();
-  try {
-    const stream = await provider.client.chat.completions.create({
-      model: provider.model,
-      messages: MESSAGES_SIMPLE,
-      max_tokens: 100,
-      temperature: 0.3,
-      stream: true,
-    });
-
-    let text = '';
-    let chunks = 0;
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta?.content;
-      if (delta) {
-        text += delta;
-        chunks++;
-      }
-    }
-    return { ok: chunks > 0, chunks, text: text.trim().slice(0, 100), ms: Date.now() - start };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, chunks: 0, text: msg.slice(0, 200), ms: Date.now() - start };
-  }
-}
-
-async function testStreamingWithTools(
-  provider: ProviderTest,
-): Promise<{ ok: boolean; toolCalls: string[]; text: string; ms: number }> {
-  const start = Date.now();
-  try {
-    const stream = await provider.client.chat.completions.create({
-      model: provider.model,
-      messages: MESSAGES_WITH_TOOLS,
-      tools: TEST_TOOLS,
-      max_tokens: 200,
-      temperature: 0.3,
-      stream: true,
-    });
-
-    let text = '';
-    const toolCallsMap = new Map<number, { id: string; name: string; args: string }>();
-    let finishReason = 'stop';
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-      if (!delta) continue;
-
-      if (delta.content) text += delta.content;
-
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const existing = toolCallsMap.get(tc.index);
-          if (existing) {
-            existing.args += tc.function?.arguments ?? '';
-            if (tc.id && !existing.id) existing.id = tc.id;
-            if (tc.function?.name && !existing.name) existing.name = tc.function.name;
-          } else {
-            toolCallsMap.set(tc.index, {
-              id: tc.id ?? '',
-              name: tc.function?.name ?? '',
-              args: tc.function?.arguments ?? '',
-            });
-          }
-        }
-      }
-
-      if (chunk.choices[0]?.finish_reason) {
-        finishReason = chunk.choices[0].finish_reason;
-      }
-    }
-
-    const toolCalls = [...toolCallsMap.values()].map((tc) => `${tc.name}(${tc.args})`);
-    const ok = toolCalls.length > 0;
-    return { ok, toolCalls, text: text || `finish_reason=${finishReason}`, ms: Date.now() - start };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { ok: false, toolCalls: [], text: msg.slice(0, 200), ms: Date.now() - start };
-  }
-}
-
-// ── Runner ──────────────────────────────────────────────────────────────────
-
-function icon(ok: boolean): string {
-  return ok ? '\x1b[32m✓\x1b[0m' : '\x1b[31m✗\x1b[0m';
-}
-
-async function runProviderTests(chainName: string, providers: ProviderTest[]) {
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log(`  ${chainName}`);
-  console.log(`${'═'.repeat(60)}`);
-
-  for (const provider of providers) {
-    console.log(`\n  ── ${provider.name} (${provider.model}) ──\n`);
-
-    // 1) Simple completion
-    const comp = await testCompletion(provider);
-    console.log(`  ${icon(comp.ok)} Completion (${comp.ms}ms): ${comp.text.slice(0, 80)}`);
-
-    // 2) Tool calling
-    const tools = await testToolCalling(provider);
-    console.log(
-      `  ${icon(tools.ok)} Tool calling (${tools.ms}ms): ${tools.toolCalls.length > 0 ? tools.toolCalls.join(', ') : tools.text.slice(0, 80)}`,
-    );
-
-    // 3) Streaming
-    const str = await testStreaming(provider);
-    console.log(`  ${icon(str.ok)} Streaming (${str.ms}ms, ${str.chunks} chunks): ${str.text.slice(0, 80)}`);
-
-    // 4) Streaming with tools
-    const strTools = await testStreamingWithTools(provider);
-    console.log(
-      `  ${icon(strTools.ok)} Stream+Tools (${strTools.ms}ms): ${strTools.toolCalls.length > 0 ? strTools.toolCalls.join(', ') : strTools.text.slice(0, 80)}`,
-    );
-  }
-}
-
-// ── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
-  console.log('Testing AI provider chains via OpenAI SDK');
-  console.log(`ZAI_MODEL=${ZAI_MODEL}, ZAI_FAST_MODEL=${ZAI_FAST_MODEL}`);
-  console.log(`ZAI_API_KEY=${process.env.ZAI_API_KEY ? 'set' : 'MISSING'}`);
-  console.log(`HF_TOKEN=${process.env.HF_TOKEN ? 'set' : 'MISSING'}`);
-  console.log(`GEMINI_API_KEY=${process.env.GEMINI_API_KEY ? 'set' : 'MISSING'}`);
+  console.log('Testing unified aiStreamRound() helper');
+  console.log('='.repeat(60));
 
-  await runProviderTests('STREAMING / TEXT CHAIN (main)', MAIN_PROVIDERS);
-  await runProviderTests('LIGHT CHAIN', LIGHT_PROVIDERS);
+  // 1) Smart chain, streaming callbacks
+  console.log('\n[1] SMART chain with streaming callbacks');
+  await runCase('streams text deltas and resolves', async () => {
+    let chunks = 0;
+    const result = await aiStreamRound(
+      {
+        messages: [
+          { role: 'system', content: 'Reply briefly in Russian.' },
+          { role: 'user', content: 'Привет, скажи одно предложение о погоде.' },
+        ],
+        maxTokens: 100,
+      },
+      {
+        onTextDelta: (t) => {
+          chunks++;
+          process.stdout.write(t);
+        },
+      },
+    );
+    process.stdout.write('\n');
+    console.log(`    provider=${result.providerUsed} chunks=${chunks} text="${result.text.slice(0, 80)}"`);
+    if (!result.text) throw new Error('empty text');
+  });
 
-  console.log(`\n${'═'.repeat(60)}`);
-  console.log('  Done!');
-  console.log(`${'═'.repeat(60)}\n`);
+  // 2) Smart chain, collect mode (no callbacks)
+  console.log('\n[2] SMART chain in collect mode (no callbacks)');
+  await runCase('collects full result', async () => {
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'Say hello in one short sentence.' }],
+      maxTokens: 60,
+    });
+    console.log(`    provider=${result.providerUsed} text="${result.text.slice(0, 80)}"`);
+    if (!result.text) throw new Error('empty text');
+  });
+
+  // 3) Fast chain
+  console.log('\n[3] FAST chain');
+  await runCase('fast chain resolves', async () => {
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'Привет!' }],
+      maxTokens: 60,
+      fast: true,
+    });
+    console.log(`    provider=${result.providerUsed} text="${result.text.slice(0, 80)}"`);
+    if (!result.text) throw new Error('empty text');
+  });
+
+  // 4) Tool calling on the smart chain
+  console.log('\n[4] Tool calling on the SMART chain');
+  await runCase('returns a tool call for "what time is it in Belgrade"', async () => {
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'What time is it in Belgrade?' }],
+      maxTokens: 200,
+      tools: [
+        {
+          type: 'function',
+          function: {
+            name: 'get_current_time',
+            description: 'Get the current time in a given IANA timezone.',
+            parameters: {
+              type: 'object',
+              properties: {
+                timezone: { type: 'string', description: 'IANA timezone, e.g. Europe/Belgrade' },
+              },
+              required: ['timezone'],
+            },
+          },
+        },
+      ],
+    });
+    console.log(`    provider=${result.providerUsed} toolCalls=${result.toolCalls.length}`);
+    for (const tc of result.toolCalls) {
+      console.log(`      → ${tc.name}(${tc.arguments})`);
+    }
+    if (result.toolCalls.length === 0 && !result.text.includes('time')) {
+      throw new Error('no tool call and no helpful text');
+    }
+  });
+
+  console.log(`\n${'='.repeat(60)}\nDone!\n`);
 }
 
 main().catch((err) => {
