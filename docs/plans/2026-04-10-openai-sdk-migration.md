@@ -4,9 +4,20 @@
 
 **Goal:** Replace Anthropic SDK with OpenAI SDK and add multi-provider fallback chains for reliability.
 
-**Architecture:** Two unified API functions — `aiStreamRound()` (streaming with callbacks) and `aiComplete()` (non-streaming) — each backed by a provider chain. Streaming chain: z.ai GLM 5.1 → Gemini 2.5 Pro → HF Qwen3-235B. Main completion chain: Gemini 2.5 Pro → HF Qwen3-235B. Light completion chain: Gemini 2.5 Flash → HF Llama-3.3-70B. z.ai only used in streaming (coding endpoint doesn't produce text content for non-tool responses). All providers use OpenAI SDK with different `baseURL`.
+**Architecture:** Single unified streaming API `aiStreamRound()` backed by provider chains. Callbacks are optional — services without UI (validator, intent-learner, city-resolver, tts-translation) call it without callbacks and collect the full result. Two chains: main (heavy tool calling) and light (cheap/fast internal calls) selected via `{ light: true }` option. All providers use OpenAI SDK with different `baseURL` (z.ai coding endpoint, HF router, Gemini OpenAI-compat). All base URLs and models are loaded from env — no hardcoded values.
 
-**Tech Stack:** `openai` npm package (replacing `@anthropic-ai/sdk`), Bun runtime
+**Chains:**
+- `STREAMING_CHAIN = z.ai ${AI_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL}`
+- `LIGHT_CHAIN = z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
+
+**Defaults (via env):**
+- `AI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `AI_MODEL=glm-5.1`, `AI_FAST_MODEL=glm-4.5-flash`
+- `HF_BASE_URL=https://router.huggingface.co/v1`, `HF_MODEL=Qwen/Qwen3-235B-A22B`, `HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct`
+- `GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/`, `GEMINI_MODEL=gemini-2.5-pro`, `GEMINI_FAST_MODEL=gemini-2.5-flash`
+
+**z.ai coding endpoint quirk:** Returns `content: ''` and populates `reasoning_content` for text-only responses (no tool calls). Tool calling works fine. Post-tool-result rounds also return proper `content`. Strategy: if z.ai returns 200 with empty text AND no tool calls, treat as provider failure → fall through to Gemini. This only affects pure text responses (greetings, [SKIP]), which are fine handled by Gemini.
+
+**Tech Stack:** `openai` npm package (replacing `@anthropic-ai/sdk`), Bun runtime.
 
 ---
 
@@ -14,101 +25,191 @@
 
 | Action | Path | Responsibility |
 |--------|------|----------------|
-| Create | `src/services/ai/clients.ts` | OpenAI client instances for z.ai, HF, Gemini |
-| Create | `src/services/ai/streaming.ts` | `aiStreamRound()` — one streaming round with provider fallback |
-| Create | `src/services/ai/completion.ts` | `aiComplete()` — non-streaming with provider fallback + light chain |
+| Create | `src/services/ai/clients.ts` | OpenAI client instances for z.ai, HF, Gemini — all reading base URLs from env |
+| Create | `src/services/ai/streaming.ts` | `aiStreamRound()` — single unified API with provider fallback, supports both streaming (with callbacks) and collection (without callbacks); `light?: boolean` selects chain |
 | Modify | `src/services/ai/agent.ts` | Rewrite streaming loop to use `aiStreamRound()` |
 | Modify | `src/services/ai/tools.ts` | Convert `input_schema` → `parameters`, wrap in `{type:'function', function:{...}}` |
-| Modify | `src/services/ai/types.ts` | Add `OpenAiMessage` type alias, remove Anthropic deps |
-| Modify | `src/services/ai/response-validator.ts` | Switch to `aiComplete()` |
+| Modify | `src/services/ai/types.ts` | Simplify `AgentConfig`, remove Anthropic deps |
+| Modify | `src/services/ai/response-validator.ts` | Switch to `aiStreamRound({light: true})` |
 | Modify | `src/services/ai/debug-logger.ts` | Replace `Anthropic.ContentBlockParam` with OpenAI types |
-| Modify | `src/services/ai/tool-executor.ts` | No changes (already SDK-agnostic) |
-| Modify | `src/services/intent/intent-learner.ts` | Replace raw `fetch()` with `aiComplete()` |
-| Modify | `src/services/timezone/city-resolver.ts` | Replace SDK call with `aiComplete()` |
-| Modify | `src/services/voice/tts-translation.ts` | Replace SDK call with `aiComplete()` |
-| Modify | `src/config/env.ts` | Add `GEMINI_API_KEY`, rename/restructure AI env vars |
-| Modify | `src/index.ts` | Remove Anthropic client creation, update AgentConfig |
-| Modify | `src/utils/ai-provider-alert.ts` | Already created — wire into streaming/completion |
+| Modify | `src/services/ai/tool-executor.ts` | No functional changes (already SDK-agnostic) |
+| Modify | `src/services/intent/intent-learner.ts` | Replace raw `fetch()` with `aiStreamRound({light: true})` |
+| Modify | `src/services/timezone/city-resolver.ts` | Replace SDK call with `aiStreamRound({light: true})` |
+| Modify | `src/services/voice/tts-translation.ts` | Replace SDK call with `aiStreamRound({light: true})` |
+| Modify | `src/config/env.ts` | Add `HF_BASE_URL`, `HF_MODEL`, `HF_FAST_MODEL`, `GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_MODEL`, `GEMINI_FAST_MODEL`. Remove old fallback vars. All AI-related vars become **required**. |
+| Modify | `.env.example` | Add all new env vars with documentation |
+| Modify | `.env` | Add new vars with real values (keys from ExpenseSyncBot where applicable) |
+| Modify | `src/index.ts` | Simplify — no more Anthropic client wiring, AgentConfig loses apiKey/baseUrl/model |
+| Modify | `src/utils/ai-provider-alert.ts` | Already created — wired into streaming |
 | Delete | `src/services/ai/anthropic-client.ts` | Replaced by `clients.ts` |
 | Remove dep | `@anthropic-ai/sdk` | No longer needed |
 
 ---
 
-### Task 1: Environment config — add new provider keys
+### Task 1: Environment config — add new provider keys (all required)
 
 **Files:**
 - Modify: `src/config/env.ts`
 - Modify: `.env.example`
+- Modify: `.env`
 
 - [ ] **Step 1: Update EnvConfig interface**
 
+In `src/config/env.ts`, update the `EnvConfig` interface:
+
 ```typescript
-// In src/config/env.ts, replace these fields:
-//   ANTHROPIC_API_KEY: string;
-//   AI_BASE_URL: string;
-//   AI_MODEL_FALLBACK?: string;
-//   AI_BASE_URL_FALLBACK?: string;
-//   AI_API_KEY_FALLBACK?: string;
-// With:
-  ZAI_API_KEY: string;
+export interface EnvConfig {
+  BOT_TOKEN: string;
+  DATABASE_PATH: string;
+  NODE_ENV: 'development' | 'production';
+
+  // AI primary provider (z.ai coding endpoint)
+  ANTHROPIC_API_KEY: string;  // keep name — it's the z.ai key
+  AI_BASE_URL: string;
   AI_MODEL: string;
   AI_FAST_MODEL: string;
-  HF_TOKEN: string;       // was optional, now required
-  GEMINI_API_KEY: string;  // new
+
+  // HuggingFace Router (fallback)
+  HF_TOKEN: string;           // was optional, now required
+  HF_BASE_URL: string;
+  HF_MODEL: string;
+  HF_FAST_MODEL: string;
+
+  // Google Gemini (fallback)
+  GEMINI_API_KEY: string;
+  GEMINI_BASE_URL: string;
+  GEMINI_MODEL: string;
+  GEMINI_FAST_MODEL: string;
+
+  REDIS_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  GOOGLE_REDIRECT_URI?: string;
+  OAUTH_SERVER_PORT?: number;
+  ENCRYPTION_KEY?: string;
+  PUBLIC_DOMAIN?: string;
+  BOT_USERNAME?: string;
+  MTPROTO_API_ID?: number;
+  MTPROTO_API_HASH?: string;
+  GROQ_API_KEY?: string;
+  BOT_ADMIN_ID?: number;
+  INTENT_LEARNER_DAILY_LIMIT: number;
+  INLINE_BOT_TOKEN?: string;
+  INLINE_BOT_USERNAME?: string;
+  AGENT_JWT_SECRET?: string;
+  AGENT_DOWNLOAD_URL?: string;
+  SILERO_PYTHON_PATH?: string;
+  DEEPGRAM_API_KEY?: string;
+  DISABLE_VOICE?: boolean;
+  AI_DEBUG_LOGS?: boolean;
+  ADMIN_ALERT_TOKEN?: string;
+  OPENWEATHER_API_KEY?: string;
+}
 ```
 
-Remove `AI_BASE_URL`, `AI_MODEL_FALLBACK`, `AI_BASE_URL_FALLBACK`, `AI_API_KEY_FALLBACK`.
+Remove: `AI_MODEL_FALLBACK`, `AI_BASE_URL_FALLBACK`, `AI_API_KEY_FALLBACK` (dead code from old fallback logic).
 
-- [ ] **Step 2: Update loadConfig()**
+- [ ] **Step 2: Helper for required env vars**
 
-Replace the `ANTHROPIC_API_KEY` validation block with:
+Add a helper near the top of `loadConfig()`:
 
 ```typescript
-const ZAI_API_KEY = process.env.ANTHROPIC_API_KEY ?? process.env.ZAI_API_KEY;
-if (!ZAI_API_KEY) {
-  throw new Error('ZAI_API_KEY (or ANTHROPIC_API_KEY) environment variable is required');
-}
-const HF_TOKEN = process.env.HF_TOKEN;
-if (!HF_TOKEN) {
-  throw new Error('HF_TOKEN environment variable is required');
-}
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  throw new Error('GEMINI_API_KEY environment variable is required');
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} environment variable is required`);
+  return value;
 }
 ```
 
-In the return object:
+- [ ] **Step 3: Update loadConfig()**
+
+Replace the return object to use `requireEnv()` for all AI vars:
+
 ```typescript
-ZAI_API_KEY,
-HF_TOKEN,
-GEMINI_API_KEY,
-AI_MODEL: process.env.AI_MODEL || 'glm-5.1',
-AI_FAST_MODEL: process.env.AI_FAST_MODEL || 'glm-4.7-flash',
+return {
+  BOT_TOKEN,
+  DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
+  NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
+
+  // AI primary (z.ai)
+  ANTHROPIC_API_KEY: requireEnv('ANTHROPIC_API_KEY'),
+  AI_BASE_URL: requireEnv('AI_BASE_URL'),
+  AI_MODEL: requireEnv('AI_MODEL'),
+  AI_FAST_MODEL: requireEnv('AI_FAST_MODEL'),
+
+  // HuggingFace
+  HF_TOKEN: requireEnv('HF_TOKEN'),
+  HF_BASE_URL: requireEnv('HF_BASE_URL'),
+  HF_MODEL: requireEnv('HF_MODEL'),
+  HF_FAST_MODEL: requireEnv('HF_FAST_MODEL'),
+
+  // Gemini
+  GEMINI_API_KEY: requireEnv('GEMINI_API_KEY'),
+  GEMINI_BASE_URL: requireEnv('GEMINI_BASE_URL'),
+  GEMINI_MODEL: requireEnv('GEMINI_MODEL'),
+  GEMINI_FAST_MODEL: requireEnv('GEMINI_FAST_MODEL'),
+
+  // ... rest unchanged
+};
 ```
 
-Remove: `ANTHROPIC_API_KEY`, `AI_BASE_URL`, `AI_MODEL_FALLBACK`, `AI_BASE_URL_FALLBACK`, `AI_API_KEY_FALLBACK`, `GROQ_API_KEY`.
+Remove the old `ANTHROPIC_API_KEY` check (it's now handled by `requireEnv`).
 
-- [ ] **Step 3: Update .env.example**
+- [ ] **Step 4: Update .env.example**
 
 ```env
-ZAI_API_KEY=your_zai_api_key
+BOT_TOKEN=your_bot_token
+
+# AI primary — z.ai coding endpoint (GLM 5.1 via OpenAI-compat API)
+ANTHROPIC_API_KEY=your_zai_api_key
+AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
 AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.7-flash
+AI_FAST_MODEL=glm-4.5-flash
+
+# HuggingFace Router (fallback, tool calling capable)
 HF_TOKEN=your_hf_token
+HF_BASE_URL=https://router.huggingface.co/v1
+HF_MODEL=Qwen/Qwen3-235B-A22B
+HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct
+
+# Google Gemini (fallback, tool calling capable)
 GEMINI_API_KEY=your_gemini_api_key
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MODEL=gemini-2.5-pro
+GEMINI_FAST_MODEL=gemini-2.5-flash
+
+# All AI provider fields above are REQUIRED — no hardcoded defaults.
 ```
 
-- [ ] **Step 4: Run tsc to check compile errors**
+- [ ] **Step 5: Update .env**
 
-Run: `tsc --noEmit 2>&1 | head -50`
-Expected: Errors in files that reference old env var names — that's fine, we'll fix them in subsequent tasks.
+Add the real values:
 
-- [ ] **Step 5: Commit**
+```env
+AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+AI_MODEL=glm-5.1
+AI_FAST_MODEL=glm-4.5-flash
+
+HF_BASE_URL=https://router.huggingface.co/v1
+HF_MODEL=Qwen/Qwen3-235B-A22B
+HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct
+
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+GEMINI_MODEL=gemini-2.5-pro
+GEMINI_FAST_MODEL=gemini-2.5-flash
+```
+
+(`HF_TOKEN` and `GEMINI_API_KEY` already present.)
+
+- [ ] **Step 6: Update tests that mock env**
+
+Run `bun test` and fix any test that mocks config to add the new required fields (or use a shared test helper to build a complete config).
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add src/config/env.ts .env.example
-git commit -m "refactor(env): replace Anthropic env vars with multi-provider keys (z.ai, HF, Gemini)"
+git add src/config/env.ts .env.example .env
+git commit -m "refactor(env): require all provider fields, add HF/Gemini base URLs and models"
 ```
 
 ---
@@ -124,34 +225,23 @@ git commit -m "refactor(env): replace Anthropic env vars with multi-provider key
 // src/services/ai/clients.ts
 // OpenAI SDK clients for all AI providers.
 // All use the same OpenAI SDK — only baseURL and apiKey differ.
+// Base URLs are loaded from env — no hardcoded values.
 
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 
-const ZAI_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
-const HF_BASE_URL = 'https://router.huggingface.co/v1';
-const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
-
 const DEFAULT_TIMEOUT_MS = 60_000;
-
-// Placeholder prevents OpenAI SDK from throwing at construction when key is missing
-// (e.g. in tests). Actual API calls will fail with 401.
-const PLACEHOLDER = 'missing';
 
 let _zai: OpenAI | null = null;
 let _hf: OpenAI | null = null;
 let _gemini: OpenAI | null = null;
 
-function env() {
-  return loadConfig();
-}
-
 export function zaiClient(): OpenAI {
   if (!_zai) {
-    const cfg = env();
+    const cfg = loadConfig();
     _zai = new OpenAI({
-      apiKey: cfg.ZAI_API_KEY || PLACEHOLDER,
-      baseURL: ZAI_BASE_URL,
+      apiKey: cfg.ANTHROPIC_API_KEY,
+      baseURL: cfg.AI_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
       maxRetries: 0,
     });
@@ -161,10 +251,10 @@ export function zaiClient(): OpenAI {
 
 export function hfClient(): OpenAI {
   if (!_hf) {
-    const cfg = env();
+    const cfg = loadConfig();
     _hf = new OpenAI({
-      apiKey: cfg.HF_TOKEN || PLACEHOLDER,
-      baseURL: HF_BASE_URL,
+      apiKey: cfg.HF_TOKEN,
+      baseURL: cfg.HF_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
       maxRetries: 0,
     });
@@ -174,10 +264,10 @@ export function hfClient(): OpenAI {
 
 export function geminiClient(): OpenAI {
   if (!_gemini) {
-    const cfg = env();
+    const cfg = loadConfig();
     _gemini = new OpenAI({
-      apiKey: cfg.GEMINI_API_KEY || PLACEHOLDER,
-      baseURL: GEMINI_BASE_URL,
+      apiKey: cfg.GEMINI_API_KEY,
+      baseURL: cfg.GEMINI_BASE_URL,
       timeout: DEFAULT_TIMEOUT_MS,
       maxRetries: 0,
     });
@@ -197,24 +287,24 @@ export function resetClients(): void {
 
 ```bash
 git add src/services/ai/clients.ts
-git commit -m "feat(ai): add OpenAI SDK client instances for z.ai, HF, Gemini"
+git commit -m "feat(ai): add OpenAI SDK client factories for z.ai, HF, Gemini"
 ```
 
 ---
 
-### Task 3: Create streaming module
+### Task 3: Create unified streaming module
 
 **Files:**
 - Create: `src/services/ai/streaming.ts`
 - Test: `test/services/ai/streaming.test.ts`
 
-- [ ] **Step 1: Write test for isRetryableError and getBackoffDelay**
+- [ ] **Step 1: Write test for error helpers**
 
 ```typescript
 // test/services/ai/streaming.test.ts
 import { describe, expect, test } from 'bun:test';
-import { isRetryableError, getBackoffDelay } from '../../src/services/ai/streaming.ts';
 import OpenAI from 'openai';
+import { getBackoffDelay, isRetryableError } from '../../src/services/ai/streaming.ts';
 
 describe('isRetryableError', () => {
   test('returns true for 429', () => {
@@ -232,7 +322,7 @@ describe('isRetryableError', () => {
     expect(isRetryableError(err)).toBe(false);
   });
 
-  test('returns true for timeout', () => {
+  test('returns true for network timeout', () => {
     const err = new Error('Request timed out');
     expect(isRetryableError(err)).toBe(true);
   });
@@ -262,17 +352,20 @@ Expected: FAIL — module not found
 
 ```typescript
 // src/services/ai/streaming.ts
-// Streaming AI round with automatic provider fallback.
-// STREAMING_CHAIN: z.ai GLM → Gemini Pro → HF Qwen3-235B
+// Unified AI streaming round with automatic provider fallback.
+//
+// Two chains, selected via options.light:
+//   STREAMING_CHAIN (main): z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+//   LIGHT_CHAIN:            z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//
+// Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
+// Callers that just want the final text (validator, intent-learner, etc.) omit callbacks.
 
 import type OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
+import { alertProviderBalanceExhausted, isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
-import {
-  alertProviderBalanceExhausted,
-  isBalanceExhausted,
-} from '../../utils/ai-provider-alert.ts';
-import { zaiClient, hfClient, geminiClient } from './clients.ts';
+import { geminiClient, hfClient, zaiClient } from './clients.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -283,6 +376,8 @@ export interface StreamRoundOptions {
   tools?: OpenAI.ChatCompletionTool[];
   maxTokens: number;
   temperature?: number;
+  /** Use light chain (cheap/fast) instead of main streaming chain. Default: false. */
+  light?: boolean;
   signal?: AbortSignal;
 }
 
@@ -302,11 +397,14 @@ export interface StreamRoundResult {
   toolCalls: StreamToolCall[];
   finishReason: string;
   assistantMessage: OpenAI.ChatCompletionMessageParam;
+  /** Which provider slot actually produced the result. */
+  providerUsed: string;
 }
 
 // ── Error helpers (exported for tests) ─────────────────────────────────────
 
 function isProviderDown(error: unknown): boolean {
+  const OpenAI = require('openai').default;
   if (error instanceof OpenAI.APIError && error.status !== undefined && error.status >= 500) {
     return true;
   }
@@ -323,15 +421,17 @@ function isProviderDown(error: unknown): boolean {
 export function isRetryableError(error: unknown): boolean {
   if (isProviderDown(error)) return true;
   if (error instanceof Error && error.name === 'AbortError') return true;
-  if (error instanceof OpenAI.APIError) {
-    return error.status === 429 || error.status >= 500;
-  }
+  // biome-ignore lint/suspicious/noExplicitAny: duck-typing for error detection
+  const status = (error as any)?.status;
+  if (typeof status === 'number' && (status === 429 || status >= 500)) return true;
   return false;
 }
 
 export function getBackoffDelay(attempt: number, error: unknown): number {
-  if (error instanceof OpenAI.APIError && error.status === 429) {
-    const retryAfter = error.headers?.['retry-after'];
+  // biome-ignore lint/suspicious/noExplicitAny: duck-typing
+  const anyErr = error as any;
+  if (anyErr?.status === 429) {
+    const retryAfter = anyErr?.headers?.['retry-after'];
     if (retryAfter) {
       const seconds = Number.parseInt(retryAfter, 10);
       if (!Number.isNaN(seconds) && seconds > 0) return Math.min(seconds * 1000, 30_000);
@@ -348,7 +448,8 @@ interface ProviderSlot {
   stream: (opts: StreamRoundOptions, cbs: StreamCallbacks) => Promise<StreamRoundResult>;
 }
 
-function openaiStreamSlot(name: string, getClient: () => OpenAI, model: string): ProviderSlot {
+/** Standard OpenAI streaming adapter (works for z.ai, Gemini, HF when supported). */
+function streamingSlot(name: string, getClient: () => OpenAI, model: string): ProviderSlot {
   return {
     name,
     stream: async (opts, cbs) => {
@@ -408,6 +509,13 @@ function openaiStreamSlot(name: string, getClient: () => OpenAI, model: string):
         arguments: tc.args,
       }));
 
+      // z.ai coding endpoint returns content='' and only reasoning_content for
+      // pure text responses (no tools). If we got 200 OK but nothing usable,
+      // treat as provider failure so the chain falls through.
+      if (!text && toolCallsArray.length === 0) {
+        throw new Error('Provider returned empty response (likely coding endpoint reasoning-only path)');
+      }
+
       const assistantMessage: OpenAI.ChatCompletionMessageParam = {
         role: 'assistant',
         content: text || null,
@@ -422,94 +530,58 @@ function openaiStreamSlot(name: string, getClient: () => OpenAI, model: string):
           : {}),
       };
 
-      // z.ai coding endpoint returns reasoning_content instead of content for text-only
-      // responses. If we got 200 OK but no text and no tool calls, treat as empty response
-      // so the chain falls through to the next provider.
-      if (!text && toolCallsArray.length === 0) {
-        throw new Error('Provider returned empty response (coding endpoint reasoning-only)');
-      }
-
-      return { text, toolCalls: toolCallsArray, finishReason, assistantMessage };
+      return { text, toolCalls: toolCallsArray, finishReason, assistantMessage, providerUsed: name };
     },
   };
 }
 
-/** Non-streaming fallback for providers with unreliable streaming. */
-function nonStreamSlot(name: string, getClient: () => OpenAI, model: string): ProviderSlot {
-  return {
-    name,
-    stream: async (opts, cbs) => {
-      const params: OpenAI.ChatCompletionCreateParamsNonStreaming = {
-        model,
-        messages: opts.messages,
-        max_tokens: opts.maxTokens,
-        temperature: opts.temperature ?? 0.3,
-      };
-      if (opts.tools && opts.tools.length > 0) {
-        params.tools = opts.tools;
-      }
-
-      const response = await getClient().chat.completions.create(params, { signal: opts.signal });
-      const choice = response.choices[0];
-      const text = choice?.message?.content?.trim() ?? '';
-
-      if (text) cbs.onTextDelta?.(text);
-
-      const toolCalls: StreamToolCall[] = (choice?.message?.tool_calls ?? []).map((tc) => {
-        if (tc.function.name) cbs.onToolCallStart?.(tc.function.name);
-        return { id: tc.id, name: tc.function.name, arguments: tc.function.arguments };
-      });
-
-      const assistantMessage: OpenAI.ChatCompletionMessageParam = {
-        role: 'assistant',
-        content: text || null,
-        ...(toolCalls.length > 0
-          ? {
-              tool_calls: toolCalls.map((tc) => ({
-                id: tc.id,
-                type: 'function' as const,
-                function: { name: tc.name, arguments: tc.arguments },
-              })),
-            }
-          : {}),
-      };
-
-      return {
-        text,
-        toolCalls,
-        finishReason: choice?.finish_reason ?? 'stop',
-        assistantMessage,
-      };
-    },
-  };
-}
-
-// ── Chain ───────────────────────────────────────────────────────────────────
+// ── Chains ─────────────────────────────────────────────────────────────────
 
 function buildStreamingChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
-    openaiStreamSlot(`z.ai (${cfg.AI_MODEL})`, zaiClient, cfg.AI_MODEL),
-    openaiStreamSlot('Gemini 2.5 Pro', geminiClient, 'gemini-2.5-pro'),
-    nonStreamSlot('HF Qwen3-235B', hfClient, 'Qwen/Qwen3-235B-A22B'),
+    streamingSlot(`z.ai (${cfg.AI_MODEL})`, zaiClient, cfg.AI_MODEL),
+    streamingSlot(`Gemini (${cfg.GEMINI_MODEL})`, geminiClient, cfg.GEMINI_MODEL),
+    streamingSlot(`HF (${cfg.HF_MODEL})`, hfClient, cfg.HF_MODEL),
+  ];
+}
+
+function buildLightChain(): ProviderSlot[] {
+  const cfg = loadConfig();
+  return [
+    streamingSlot(`z.ai (${cfg.AI_FAST_MODEL})`, zaiClient, cfg.AI_FAST_MODEL),
+    streamingSlot(`Gemini (${cfg.GEMINI_FAST_MODEL})`, geminiClient, cfg.GEMINI_FAST_MODEL),
+    streamingSlot(`HF (${cfg.HF_FAST_MODEL})`, hfClient, cfg.HF_FAST_MODEL),
   ];
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /**
- * Execute one streaming round with automatic provider fallback.
+ * Execute one AI round with automatic provider fallback.
  *
- * Chain: z.ai GLM → Gemini 2.5 Pro → HF Qwen3-235B.
+ * With callbacks: streams text deltas and tool-call starts to the caller
+ * (used by the main agent loop for live Telegram updates).
  *
- * Fallback happens ONLY on provider-down errors BEFORE text is emitted.
- * Once streaming starts, errors propagate to the caller.
+ * Without callbacks: collects the full result and returns it at the end
+ * (used by validator, intent-learner, city-resolver, tts-translation).
+ *
+ * Chains:
+ *   light: false → z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+ *   light: true  → z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+ *
+ * Fallback rules:
+ * - If a provider returns 5xx/timeout/429: try next
+ * - If balance exhausted: alert admin, try next
+ * - If provider streamed text to the user already: propagate the error (can't splice)
+ * - If provider returns 200 OK but empty text AND no tool calls: try next (z.ai quirk)
+ * - If 4xx non-429: propagate (client error)
  */
 export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
-  const chain = buildStreamingChain();
+  const chain = options.light ? buildLightChain() : buildStreamingChain();
   let lastError: Error | null = null;
   let textEmitted = false;
 
@@ -538,12 +610,11 @@ export async function aiStreamRound(
         throw error;
       }
 
-      if (isProviderDown(error) || isBalanceExhausted(error)) {
-        aiLogger.warn(`${slot.name} is down, trying next provider`);
+      if (isRetryableError(error) || isBalanceExhausted(error) || lastError.message.includes('empty response')) {
+        aiLogger.warn(`${slot.name} failed, trying next provider`);
         continue;
       }
 
-      // Non-provider error (4xx client error, etc.) — don't retry
       throw error;
     }
   }
@@ -561,193 +632,17 @@ Expected: PASS
 
 ```bash
 git add src/services/ai/streaming.ts test/services/ai/streaming.test.ts
-git commit -m "feat(ai): add streaming module with multi-provider fallback chain"
+git commit -m "feat(ai): add unified aiStreamRound with main + light provider chains"
 ```
 
 ---
 
-### Task 4: Create completion module
-
-**Files:**
-- Create: `src/services/ai/completion.ts`
-- Test: `test/services/ai/completion.test.ts`
-
-- [ ] **Step 1: Create completion.ts**
-
-```typescript
-// src/services/ai/completion.ts
-// Non-streaming AI completion with provider fallback.
-// Supports two chains: main (heavy) and light (fast/cheap).
-
-import type OpenAI from 'openai';
-import { loadConfig } from '../../config/env.ts';
-import { logger } from '../../utils/logger.ts';
-import {
-  alertProviderBalanceExhausted,
-  isBalanceExhausted,
-} from '../../utils/ai-provider-alert.ts';
-import { isRetryableError, getBackoffDelay } from './streaming.ts';
-import { zaiClient, hfClient, geminiClient } from './clients.ts';
-
-const aiLogger = logger.child({ module: 'ai-completion' });
-
-// ── Types ──────────────────────────────────────────────────────────────────
-
-export type ChatMessage = OpenAI.ChatCompletionMessageParam;
-
-export interface CompletionOptions {
-  messages: ChatMessage[];
-  maxTokens: number;
-  temperature?: number;
-  light?: boolean;
-  tools?: OpenAI.ChatCompletionTool[];
-  signal?: AbortSignal;
-}
-
-export interface ToolCallResult {
-  id: string;
-  name: string;
-  arguments: string;
-}
-
-export interface CompletionResult {
-  text: string;
-  finishReason: string | null;
-  model: string;
-  toolCalls?: ToolCallResult[];
-}
-
-// ── Provider slots ─────────────────────────────────────────────────────────
-
-interface ModelSlot {
-  name: string;
-  call: (opts: CompletionOptions) => Promise<CompletionResult>;
-}
-
-function callProvider(getClient: () => OpenAI, model: string): ModelSlot['call'] {
-  return async (opts) => {
-    const params: OpenAI.ChatCompletionCreateParamsNonStreaming = {
-      model,
-      messages: opts.messages,
-      max_tokens: opts.maxTokens,
-      temperature: opts.temperature ?? 0.3,
-    };
-    if (opts.tools && opts.tools.length > 0) {
-      params.tools = opts.tools;
-    }
-
-    const response = await getClient().chat.completions.create(params, { signal: opts.signal });
-    const choice = response.choices[0];
-    const text = choice?.message?.content?.trim() ?? '';
-    const toolCalls = choice?.message?.tool_calls?.map((tc) => ({
-      id: tc.id,
-      name: tc.function.name,
-      arguments: tc.function.arguments,
-    }));
-
-    return {
-      text,
-      finishReason: choice?.finish_reason ?? null,
-      model: `${model}`,
-      toolCalls: toolCalls && toolCalls.length > 0 ? toolCalls : undefined,
-    };
-  };
-}
-
-// ── Chains ──────────────────────────────────────────────────────────────────
-
-// No z.ai in completion chains — coding endpoint doesn't produce text content
-// for non-tool responses (only reasoning_content).
-function buildCompletionChain(): ModelSlot[] {
-  return [
-    { name: 'Gemini 2.5 Pro', call: callProvider(geminiClient, 'gemini-2.5-pro') },
-    { name: 'HF Qwen3-235B', call: callProvider(hfClient, 'Qwen/Qwen3-235B-A22B') },
-  ];
-}
-
-function buildLightChain(): ModelSlot[] {
-  return [
-    { name: 'Gemini 2.5 Flash', call: callProvider(geminiClient, 'gemini-2.5-flash') },
-    { name: 'HF Llama-3.3-70B', call: callProvider(hfClient, 'meta-llama/Llama-3.3-70B-Instruct') },
-  ];
-}
-
-// ── Public API ─────────────────────────────────────────────────────────────
-
-/**
- * Run a chat completion with automatic provider fallback.
- *
- * Completion chain: Gemini 2.5 Pro → HF Qwen3-235B
- * Light chain:      Gemini 2.5 Flash → HF Llama-3.3-70B
- *
- * On 5xx / timeout / balance exhausted the current model is abandoned immediately.
- */
-export async function aiComplete(options: CompletionOptions): Promise<CompletionResult> {
-  const chain = options.light ? buildLightChain() : buildCompletionChain();
-  let lastError: Error | null = null;
-
-  for (const slot of chain) {
-    try {
-      aiLogger.info(`Trying ${slot.name}`);
-      return await slot.call(options);
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
-      aiLogger.error({ err: lastError }, `${slot.name} failed`);
-
-      if (isBalanceExhausted(error)) {
-        alertProviderBalanceExhausted(slot.name, lastError.message);
-        continue;
-      }
-
-      if (isRetryableError(error)) {
-        aiLogger.warn(`${slot.name} is down, trying next provider`);
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  throw lastError ?? new Error('All providers failed');
-}
-```
-
-- [ ] **Step 2: Write test**
-
-```typescript
-// test/services/ai/completion.test.ts
-import { describe, expect, test } from 'bun:test';
-// Basic smoke test — integration tests will cover the real chains
-// Unit test focuses on chain logic with mocked providers
-
-describe('aiComplete', () => {
-  test('module exports aiComplete function', async () => {
-    const mod = await import('../../src/services/ai/completion.ts');
-    expect(typeof mod.aiComplete).toBe('function');
-  });
-});
-```
-
-- [ ] **Step 3: Run test**
-
-Run: `bun test test/services/ai/completion.test.ts`
-Expected: PASS
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/services/ai/completion.ts test/services/ai/completion.test.ts
-git commit -m "feat(ai): add completion module with main/light provider chains"
-```
-
----
-
-### Task 5: Convert tool definitions to OpenAI format
+### Task 4: Convert tool definitions to OpenAI format
 
 **Files:**
 - Modify: `src/services/ai/tools.ts`
 
-- [ ] **Step 1: Replace Anthropic tool type with OpenAI format**
+- [ ] **Step 1: Replace Anthropic tool type**
 
 At top of file, replace:
 ```typescript
@@ -782,15 +677,13 @@ To:
 }
 ```
 
-This is a mechanical transformation: every `input_schema` → `parameters`, every tool wrapped in `{ type: 'function', function: { ... } }`.
-
-Use a search-and-replace approach. There are 60+ tools — all follow the same pattern.
+Mechanical transformation: every `input_schema` → `parameters`, every tool wrapped in `{ type: 'function', function: { ... } }`. There are 60+ tools — all follow the same pattern.
 
 - [ ] **Step 3: Update getToolDefinitions return type**
 
-The function signature should return `OpenAI.ChatCompletionTool[]`.
+The function should return `OpenAI.ChatCompletionTool[]`.
 
-- [ ] **Step 4: Run tsc to verify types**
+- [ ] **Step 4: Verify with tsc**
 
 Run: `tsc --noEmit 2>&1 | grep tools.ts`
 Expected: No errors from tools.ts
@@ -804,12 +697,12 @@ git commit -m "refactor(tools): convert tool definitions from Anthropic to OpenA
 
 ---
 
-### Task 6: Rewrite agent.ts streaming loop
+### Task 5: Rewrite agent.ts streaming loop
 
 **Files:**
 - Modify: `src/services/ai/agent.ts`
 
-This is the biggest change. The agent loop switches from:
+Biggest change. Agent loop switches from:
 - `client.messages.stream()` → `aiStreamRound()`
 - `Anthropic.ContentBlockParam[]` / `Anthropic.ToolResultBlockParam[]` → `OpenAI.ChatCompletionMessageParam`
 - `stream.finalMessage()` → `StreamRoundResult.toolCalls` + `StreamRoundResult.assistantMessage`
@@ -825,8 +718,7 @@ import { createAnthropicClient } from './anthropic-client.ts';
 Add:
 ```typescript
 import type OpenAI from 'openai';
-import { aiStreamRound, type StreamCallbacks, type StreamRoundResult } from './streaming.ts';
-import { aiComplete } from './completion.ts';
+import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 ```
 
 - [ ] **Step 2: Replace MessageParam type**
@@ -843,38 +735,67 @@ With:
 type MessageParam = OpenAI.ChatCompletionMessageParam;
 ```
 
-- [ ] **Step 3: Remove client fields from CalendarBotAgent**
+- [ ] **Step 3: Simplify CalendarBotAgent class**
 
-Remove these class fields:
-```typescript
-private client: Anthropic;
-private fallbackClient: Anthropic | null;
-private model: string;
-private fallbackModel: string | null;
-private validationModel: string | null;
-```
+Remove client/model/fallback fields. The agent no longer holds API state — `aiStreamRound()` handles providers.
 
-Replace with:
 ```typescript
-private validationEnabled: boolean;
-```
+export class CalendarBotAgent {
+  private validationEnabled: boolean;
+  private sender: TelegramSender;
+  private debugLogger?: AiDebugLogger;
 
-Update constructor:
-```typescript
-constructor(config: AgentConfig, sender: TelegramSender) {
-  this.validationEnabled = config.validationModel !== undefined;
-  this.sender = sender;
-  this.debugLogger = config.debugLogger;
+  constructor(config: AgentConfig, sender: TelegramSender) {
+    this.validationEnabled = config.validationModel !== undefined;
+    this.sender = sender;
+    this.debugLogger = config.debugLogger;
+  }
+
+  getSender(): TelegramSender {
+    return this.sender;
+  }
+  // ...
 }
 ```
 
-- [ ] **Step 4: Update buildMessages to use OpenAI format**
+- [ ] **Step 4: Rewrite sanitizeMessages for OpenAI format**
 
-Messages become `OpenAI.ChatCompletionMessageParam[]`. System prompt goes as first message with `role: 'system'` instead of separate `system` parameter.
+OpenAI supports a `tool` role for tool results, but strict alternation is still wanted between user/assistant content rounds. Update:
 
-History messages map to `{ role: 'user' | 'assistant', content: string }`.
+```typescript
+function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
+  // OpenAI is more lenient than Anthropic but we still want consistent ordering.
+  // Tool messages (role: 'tool') can appear between assistant and next user/assistant.
+  // Primary rule: the first non-system message must be 'user'.
+  const result: MessageParam[] = [];
+  let hasSeenNonSystem = false;
+  for (const msg of messages) {
+    if (msg.role === 'system') {
+      result.push(msg);
+      continue;
+    }
+    if (!hasSeenNonSystem && msg.role !== 'user') {
+      result.push({ role: 'user', content: '...' });
+    }
+    hasSeenNonSystem = true;
+    result.push(msg);
+  }
+  return result;
+}
+```
 
-- [ ] **Step 5: Rewrite the main streaming loop**
+- [ ] **Step 5: Update buildMessages to use system message instead of system parameter**
+
+OpenAI uses `role: 'system'` as the first message:
+
+```typescript
+const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
+const historyMessages: MessageParam[] = chatHistory.map(/* ... */);
+const userMessage: MessageParam = { role: 'user', content: ctx.messageText };
+const messages: MessageParam[] = sanitizeMessages([systemMessage, ...historyMessages, userMessage]);
+```
+
+- [ ] **Step 6: Rewrite the main streaming loop**
 
 Replace the current loop body (lines 253-479) with:
 
@@ -905,26 +826,32 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
       tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
       maxTokens: 4096,
       temperature: 0.3,
-      signal: AbortSignal.timeout(TIMEOUT_MS - (Date.now() - startTime)),
+      signal: AbortSignal.timeout(Math.max(1000, TIMEOUT_MS - (Date.now() - startTime))),
     },
     callbacks,
   );
 
+  aiLogger.info(
+    { userId: ctx.user.telegram_id, providerUsed: result.providerUsed, round, toolCount: result.toolCalls.length },
+    'Agent round complete',
+  );
   dbg?.logAiText(result.text);
 
   if (result.toolCalls.length === 0) {
-    aiLogger.info(
-      { userId: ctx.user.telegram_id, chatId: ctx.chatId, round, textPreview: result.text.slice(0, 300) },
-      'AI text-only response (no tool calls)',
-    );
     break;
   }
 
   // Execute tools
-  const toolResultMessages: OpenAI.ChatCompletionMessageParam[] = [];
+  const toolResultMessages: MessageParam[] = [];
 
   for (const tc of result.toolCalls) {
-    const input = JSON.parse(tc.arguments);
+    let input: { [key: string]: unknown };
+    try {
+      input = JSON.parse(tc.arguments);
+    } catch (err) {
+      aiLogger.error({ err, tool: tc.name, arguments: tc.arguments }, 'Failed to parse tool arguments');
+      input = {};
+    }
 
     aiLogger.info({ tool: tc.name, input, userId: ctx.user.telegram_id, chatId: ctx.chatId }, 'Tool call');
     dbg?.logToolCall(tc.name, input);
@@ -935,10 +862,6 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
     const toolResult = await executeTool(ctx, tc.name, input);
 
     writer.markToolResult(toolResult.success);
-    aiLogger.info(
-      { tool: tc.name, success: toolResult.success, ...(!toolResult.success && { error: toolResult.error ?? toolResult.output ?? 'Unknown error' }), userId: ctx.user.telegram_id, chatId: ctx.chatId },
-      'Tool result',
-    );
     dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
 
     allToolCalls.push({ name: tc.name, input });
@@ -969,7 +892,7 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
     }
   }
 
-  // [SKIP] in a round with tool calls
+  // [SKIP] mid-loop: discard immediately
   if (isSkipText(writer.getText())) {
     await writer.discard();
     dbg?.logFinal('[SKIP] (mid-loop discard)', allToolCalls.length);
@@ -980,23 +903,17 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
   writer.clearToolLabel();
   writer.commitIntermediate();
 
-  // Append assistant message + tool results for next round
-  currentMessages = [
-    ...currentMessages,
-    result.assistantMessage,
-    ...toolResultMessages,
-  ];
+  currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
 }
 ```
 
 Key differences from old code:
-- No `finalMessage()` — tool calls come from `StreamRoundResult`
-- Tool results use `role: 'tool'` with `tool_call_id` (OpenAI format), not `role: 'user'` with content blocks
-- No `Anthropic.ContentBlockParam[]` or `Anthropic.ToolResultBlockParam[]`
+- No `finalMessage()` — everything comes from `StreamRoundResult`
+- Tool results use `role: 'tool'` with `tool_call_id` (OpenAI format)
 - No manual primary/fallback retry — `aiStreamRound()` handles the chain
-- System prompt passed as first message, not separate `system` parameter
+- No `Anthropic.ContentBlockParam[]` anywhere
 
-- [ ] **Step 6: Update response validation**
+- [ ] **Step 7: Update response validation call**
 
 Replace:
 ```typescript
@@ -1007,29 +924,20 @@ With:
 const validation = await validateResponse({...});
 ```
 
-(The validator will use `aiComplete({ light: true })` — see Task 7)
+- [ ] **Step 8: Rewrite runRetryLoop similarly**
 
-- [ ] **Step 7: Update runRetryLoop to use aiStreamRound**
+Use `aiStreamRound()` instead of `this.client.messages.stream()`, OpenAI message format for tool results.
 
-Rewrite `runRetryLoop()` similarly — replace `this.client.messages.stream()` with `aiStreamRound()`, and use OpenAI message format for tool results.
+- [ ] **Step 9: Remove saveToolResults/saveAssistantTurn Anthropic-specific logic**
 
-- [ ] **Step 8: Update buildMessages for system prompt as first message**
+These currently serialize `Anthropic.ContentBlockParam[]`. Update to serialize OpenAI messages (plain JSON.stringify works for both formats).
 
-In OpenAI format, system prompt is a message:
-```typescript
-const systemMessage: OpenAI.ChatCompletionMessageParam = {
-  role: 'system',
-  content: systemPrompt,
-};
-const messages: OpenAI.ChatCompletionMessageParam[] = [systemMessage, ...historyMessages, userMessage];
-```
-
-- [ ] **Step 9: Run existing agent tests**
+- [ ] **Step 10: Run agent tests**
 
 Run: `bun test test/services/ai/`
 Fix any test failures related to the new API.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add src/services/ai/agent.ts
@@ -1038,26 +946,25 @@ git commit -m "refactor(agent): rewrite streaming loop to use aiStreamRound with
 
 ---
 
-### Task 7: Update response-validator.ts
+### Task 6: Update response-validator.ts
 
 **Files:**
 - Modify: `src/services/ai/response-validator.ts`
 
-- [ ] **Step 1: Replace Anthropic SDK with aiComplete**
-
-Replace entire file — remove `Anthropic` import, use `aiComplete`:
+- [ ] **Step 1: Replace Anthropic SDK with aiStreamRound**
 
 ```typescript
 // src/services/ai/response-validator.ts
 import { logger } from '../../utils/logger.ts';
-import { aiComplete } from './completion.ts';
+import { aiStreamRound } from './streaming.ts';
 
 const aiLogger = logger.child({ module: 'response-validator' });
 
 const VALIDATION_TIMEOUT_MS = 15_000;
 const VALIDATION_MAX_TOKENS = 256;
 
-const VALIDATION_PROMPT = `...`; // Keep existing prompt unchanged
+const VALIDATION_PROMPT = `You are a strict QA validator for a calendar assistant bot.
+// ... (keep existing prompt unchanged)`;
 
 interface ValidationInput {
   userMessage: string;
@@ -1068,14 +975,12 @@ interface ValidationInput {
 export type ValidationResult = { approved: true } | { approved: false; reason: string };
 
 export async function validateResponse(input: ValidationInput): Promise<ValidationResult> {
-  const toolCallsSummary = input.toolCalls.length > 0
-    ? input.toolCalls.join(', ')
-    : '(none — no tools were called)';
+  const toolCallsSummary = input.toolCalls.length > 0 ? input.toolCalls.join(', ') : '(none — no tools were called)';
 
   const userContent = `USER MESSAGE: ${input.userMessage}\n\nTOOL CALLS MADE: ${toolCallsSummary}\n\nASSISTANT RESPONSE (first 2000 chars):\n${input.response.substring(0, 2000)}`;
 
   try {
-    const result = await aiComplete({
+    const result = await aiStreamRound({
       messages: [
         { role: 'system', content: VALIDATION_PROMPT },
         { role: 'user', content: userContent },
@@ -1086,7 +991,7 @@ export async function validateResponse(input: ValidationInput): Promise<Validati
     });
 
     const text = result.text.trim();
-    aiLogger.info({ result: text }, 'Response validation result');
+    aiLogger.info({ result: text, providerUsed: result.providerUsed }, 'Response validation result');
 
     if (text.startsWith('APPROVE')) return { approved: true };
 
@@ -1104,43 +1009,35 @@ export async function validateResponse(input: ValidationInput): Promise<Validati
 
 - [ ] **Step 2: Update call site in agent.ts**
 
-Change from:
-```typescript
-const validation = await validateResponse(this.client, this.validationModel, { ... });
-```
-To:
-```typescript
-const validation = await validateResponse({ ... });
-```
+Change from `await validateResponse(this.client, this.validationModel, { ... })` to `await validateResponse({ ... })`.
 
 - [ ] **Step 3: Run tests**
 
 Run: `bun test test/services/ai/`
-Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add src/services/ai/response-validator.ts src/services/ai/agent.ts
-git commit -m "refactor(validator): switch response validator to aiComplete with light chain"
+git commit -m "refactor(validator): switch to aiStreamRound with light chain"
 ```
 
 ---
 
-### Task 8: Migrate intent-learner.ts
+### Task 7: Migrate intent-learner.ts
 
 **Files:**
 - Modify: `src/services/intent/intent-learner.ts`
 
-- [ ] **Step 1: Replace raw fetch with aiComplete**
+- [ ] **Step 1: Replace raw fetch with aiStreamRound**
 
-In `callLearnerAI()`, replace the `fetch()` block (lines 158-172) with:
+Remove the `fetch()` block (lines 158-172) and the Anthropic response schema. Replace with:
 
 ```typescript
-import { aiComplete } from '../ai/completion.ts';
+import { aiStreamRound } from '../ai/streaming.ts';
 
-// Inside callLearnerAI:
-const result = await aiComplete({
+// Inside callLearnerAI():
+const result = await aiStreamRound({
   messages: [
     { role: 'system', content: LEARNER_SYSTEM_PROMPT },
     ...conversationMessages,
@@ -1149,43 +1046,43 @@ const result = await aiComplete({
   light: true,
 });
 
-const text = result.text;
-if (!text) return null;
 if (result.finishReason === 'length') {
   cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
   return null;
 }
+
+const text = result.text;
+if (!text) return null;
 ```
 
 - [ ] **Step 2: Remove Anthropic-specific config fields**
 
-Remove `baseUrl`, `apiKey`, `model` from the IntentLearner config — it now uses `aiComplete()` which handles provider selection internally.
+Remove `baseUrl`, `apiKey`, `model` from the IntentLearner config — it now uses `aiStreamRound()` which handles provider selection internally.
 
 The config becomes just `{ dailyLimit, intentRepo, adminId }`.
 
-- [ ] **Step 3: Remove the Anthropic response schema parse**
-
-The `anthropicResponseSchema` Zod schema (line 178) is no longer needed — `aiComplete()` already returns `{ text, finishReason }`.
-
-- [ ] **Step 4: Update call sites**
+- [ ] **Step 3: Update call sites in index.ts**
 
 Find everywhere IntentLearner is constructed and remove `baseUrl`, `apiKey`, `model` from the config.
+
+- [ ] **Step 4: Remove the anthropicResponseSchema Zod schema**
+
+Lines 178-181 become dead code — delete.
 
 - [ ] **Step 5: Run tests**
 
 Run: `bun test test/services/intent/`
-Expected: PASS (update mocks if needed)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/services/intent/intent-learner.ts
-git commit -m "refactor(intent-learner): replace raw Anthropic fetch with aiComplete"
+git add src/services/intent/intent-learner.ts src/index.ts
+git commit -m "refactor(intent-learner): replace raw Anthropic fetch with aiStreamRound"
 ```
 
 ---
 
-### Task 9: Migrate city-resolver.ts and tts-translation.ts
+### Task 8: Migrate city-resolver.ts and tts-translation.ts
 
 **Files:**
 - Modify: `src/services/timezone/city-resolver.ts`
@@ -1209,9 +1106,9 @@ const text = response.content[0]?.type === 'text' ? response.content[0].text.tri
 
 With:
 ```typescript
-import { aiComplete } from '../ai/completion.ts';
+import { aiStreamRound } from '../ai/streaming.ts';
 // ...
-const result = await aiComplete({
+const result = await aiStreamRound({
   messages: [
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: ... },
@@ -1222,14 +1119,14 @@ const result = await aiComplete({
 const text = result.text;
 ```
 
-Remove the `model` parameter from `resolveCity()` — model selection is now internal.
+Remove the `model` parameter from `resolveCity()`.
 
 - [ ] **Step 2: Update tts-translation.ts**
 
-Replace the `TtsTranslationService` class — it stored an Anthropic client instance. Simplify to use `aiComplete()`:
+Simplify the `TtsTranslationService` class:
 
 ```typescript
-import { aiComplete } from '../ai/completion.ts';
+import { aiStreamRound } from '../ai/streaming.ts';
 
 export class TtsTranslationService {
   private cache = new Map<string, string>();
@@ -1238,7 +1135,7 @@ export class TtsTranslationService {
     const cached = this.cache.get(text);
     if (cached) return cached;
 
-    const result = await aiComplete({
+    const result = await aiStreamRound({
       messages: [
         { role: 'system', content: `Translate to ${targetLang}. Return ONLY the translation.` },
         { role: 'user', content: text },
@@ -1267,18 +1164,17 @@ Find where `TtsTranslationService` is constructed and `resolveCity()` is called 
 - [ ] **Step 4: Run tests**
 
 Run: `bun test test/services/timezone/ test/services/voice/`
-Expected: PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/services/timezone/city-resolver.ts src/services/voice/tts-translation.ts
-git commit -m "refactor(ai): migrate city-resolver and tts-translation to aiComplete"
+git add src/services/timezone/city-resolver.ts src/services/voice/tts-translation.ts src/index.ts
+git commit -m "refactor(ai): migrate city-resolver and tts-translation to aiStreamRound"
 ```
 
 ---
 
-### Task 10: Update debug-logger.ts types
+### Task 9: Update debug-logger.ts types
 
 **Files:**
 - Modify: `src/services/ai/debug-logger.ts`
@@ -1294,19 +1190,22 @@ type ContentBlock = Anthropic.ContentBlockParam;
 With:
 ```typescript
 import type OpenAI from 'openai';
-type ContentBlock = OpenAI.ChatCompletionMessageParam;
+type ChatMessage = OpenAI.ChatCompletionMessageParam;
 ```
 
 Update `serializeContent()` to handle OpenAI message format:
 
 ```typescript
-function serializeContent(content: string | OpenAI.ChatCompletionMessageParam): string {
-  if (typeof content === 'string') return content;
-  if (typeof content.content === 'string') return content.content;
-  if (Array.isArray(content.content)) {
-    return content.content.map((p) => ('text' in p ? p.text : `[${p.type}]`)).join(' ');
+function serializeMessage(msg: ChatMessage): string {
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) {
+    return msg.content.map((p) => ('text' in p ? p.text : `[${p.type}]`)).join(' ');
   }
-  return JSON.stringify(content).slice(0, 500);
+  if (msg.role === 'assistant' && 'tool_calls' in msg && msg.tool_calls) {
+    return msg.tool_calls.map((tc) => `[tool_use: ${tc.function.name} | input: ${tc.function.arguments.slice(0, 200)}]`).join(' ');
+  }
+  if (msg.role === 'tool') return `[tool_result: ${String(msg.content).slice(0, 300)}]`;
+  return JSON.stringify(msg).slice(0, 500);
 }
 ```
 
@@ -1319,7 +1218,6 @@ Ensure `saveAssistantTurn()` and `saveToolResults()` pass OpenAI-format messages
 - [ ] **Step 3: Run tests**
 
 Run: `bun test test/services/ai/`
-Expected: PASS
 
 - [ ] **Step 4: Commit**
 
@@ -1330,7 +1228,7 @@ git commit -m "refactor(debug-logger): update types from Anthropic to OpenAI for
 
 ---
 
-### Task 11: Update AgentConfig and index.ts wiring
+### Task 10: Simplify AgentConfig and index.ts wiring
 
 **Files:**
 - Modify: `src/services/ai/types.ts`
@@ -1342,7 +1240,8 @@ In `types.ts`, the current `AgentConfig` has Anthropic-specific fields. Simplify
 
 ```typescript
 export interface AgentConfig {
-  validationModel?: string;  // keep for enable/disable validation
+  /** When set, enables post-response validation (value unused — kept as boolean flag for compatibility). */
+  validationModel?: string;
   debugLogger?: AiDebugLogger;
 }
 ```
@@ -1351,25 +1250,22 @@ Remove: `apiKey`, `baseUrl`, `model`, `fallback`.
 
 - [ ] **Step 2: Update index.ts**
 
-Remove all Anthropic client creation, fallback client setup. The agent no longer needs API keys — `aiStreamRound()` and `aiComplete()` handle providers internally.
-
-Remove imports of `createAnthropicClient`. Remove env var references to `AI_BASE_URL`, `AI_MODEL_FALLBACK`, etc.
+Remove all Anthropic client creation, fallback client setup. The agent no longer needs API keys. Remove imports of `createAnthropicClient`, any references to `AI_BASE_URL_FALLBACK`, etc.
 
 - [ ] **Step 3: Run full test suite**
 
 Run: `bun test`
-Expected: PASS
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add src/services/ai/types.ts src/index.ts
-git commit -m "refactor(config): simplify AgentConfig, remove Anthropic client wiring from index"
+git commit -m "refactor(config): simplify AgentConfig, remove Anthropic client wiring"
 ```
 
 ---
 
-### Task 12: Delete anthropic-client.ts and remove @anthropic-ai/sdk
+### Task 11: Delete anthropic-client.ts and remove @anthropic-ai/sdk
 
 **Files:**
 - Delete: `src/services/ai/anthropic-client.ts`
@@ -1377,9 +1273,10 @@ git commit -m "refactor(config): simplify AgentConfig, remove Anthropic client w
 
 - [ ] **Step 1: Verify no remaining imports**
 
-Run: `grep -r "anthropic-client" src/` — should return no results.
-Run: `grep -r "@anthropic-ai/sdk" src/` — should return no results.
-Run: `grep -r "Anthropic" src/ --include="*.ts"` — should return no results.
+Run the following Greps and confirm all return zero results in `src/`:
+- `anthropic-client`
+- `@anthropic-ai/sdk`
+- `import type Anthropic`
 
 - [ ] **Step 2: Delete the file**
 
@@ -1393,10 +1290,13 @@ rm src/services/ai/anthropic-client.ts
 bun remove @anthropic-ai/sdk
 ```
 
-- [ ] **Step 4: Run full test suite + tsc**
+- [ ] **Step 4: Run full suite**
 
-Run: `tsc --noEmit && bun test`
-Expected: PASS
+```bash
+tsc --noEmit && bun test && bun run lint && bunx knip
+```
+
+Expected: All pass.
 
 - [ ] **Step 5: Commit**
 
@@ -1407,85 +1307,108 @@ git commit -m "chore: remove @anthropic-ai/sdk, delete anthropic-client.ts"
 
 ---
 
-### Task 13: Integration test — run test-ai-chains.ts
+### Task 12: Integration test
 
 **Files:**
 - Modify: `scripts/test-ai-chains.ts`
 
 - [ ] **Step 1: Update test script to use the new modules**
 
-Import `aiStreamRound` and `aiComplete` from the actual modules and run them:
+Import `aiStreamRound` from the actual module and run it in both streaming and collect modes, for both chains:
 
 ```typescript
 import { aiStreamRound } from '../src/services/ai/streaming.ts';
-import { aiComplete } from '../src/services/ai/completion.ts';
 
-// Test streaming
-const streamResult = await aiStreamRound({
-  messages: [
-    { role: 'system', content: 'Reply briefly in Russian.' },
-    { role: 'user', content: 'Привет!' },
-  ],
+// Test streaming chain (main), with callbacks
+console.log('--- STREAMING (main) ---');
+await aiStreamRound(
+  {
+    messages: [
+      { role: 'system', content: 'Reply briefly in Russian.' },
+      { role: 'user', content: 'Привет!' },
+    ],
+    maxTokens: 100,
+  },
+  {
+    onTextDelta: (t) => process.stdout.write(t),
+  },
+);
+console.log();
+
+// Test streaming chain collect mode
+console.log('--- COLLECT (main) ---');
+const main = await aiStreamRound({
+  messages: [{ role: 'user', content: 'Привет!' }],
   maxTokens: 100,
 });
-console.log('Stream:', streamResult.text);
+console.log('provider:', main.providerUsed, 'text:', main.text);
 
-// Test completion (main)
-const mainResult = await aiComplete({
-  messages: [
-    { role: 'system', content: 'Reply briefly in Russian.' },
-    { role: 'user', content: 'Привет!' },
-  ],
-  maxTokens: 100,
-});
-console.log('Main:', mainResult.text);
-
-// Test completion (light)
-const lightResult = await aiComplete({
-  messages: [
-    { role: 'system', content: 'Reply briefly in Russian.' },
-    { role: 'user', content: 'Привет!' },
-  ],
+// Test light chain
+console.log('--- LIGHT ---');
+const light = await aiStreamRound({
+  messages: [{ role: 'user', content: 'Привет!' }],
   maxTokens: 100,
   light: true,
 });
-console.log('Light:', lightResult.text);
+console.log('provider:', light.providerUsed, 'text:', light.text);
+
+// Test tool calling
+console.log('--- TOOLS ---');
+const tools = await aiStreamRound({
+  messages: [{ role: 'user', content: 'What time is it in Belgrade?' }],
+  maxTokens: 200,
+  tools: [
+    {
+      type: 'function',
+      function: {
+        name: 'get_current_time',
+        description: 'Get current time',
+        parameters: {
+          type: 'object',
+          properties: { timezone: { type: 'string' } },
+          required: ['timezone'],
+        },
+      },
+    },
+  ],
+});
+console.log('provider:', tools.providerUsed, 'toolCalls:', tools.toolCalls);
 ```
 
 - [ ] **Step 2: Run it**
 
 Run: `bun scripts/test-ai-chains.ts`
-Expected: All three calls succeed with Russian text responses.
+Expected: All four calls succeed.
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add scripts/test-ai-chains.ts
-git commit -m "test: update integration test script for new AI chain modules"
+git commit -m "test: update integration script for unified aiStreamRound API"
 ```
 
 ---
 
-### Task 14: Final verification
+### Task 13: Final verification
 
 - [ ] **Step 1: Run full test suite with coverage**
 
 Run: `bun test --coverage`
-Expected: All tests pass, coverage ≥ 80%
+Expected: All pass, coverage ≥ 80%
 
-- [ ] **Step 2: Run linter**
+- [ ] **Step 2: Run linter + tsc + knip**
 
-Run: `bun run lint`
-Expected: No warnings, no errors
+```bash
+bun run lint && tsc --noEmit && bunx knip
+```
 
-- [ ] **Step 3: Run tsc**
+- [ ] **Step 3: Restart the bot locally and smoke test**
 
-Run: `tsc --noEmit`
-Expected: No errors
+Kill the running bot, restart, send a test message in a group chat. Verify:
+- Text-only greeting works
+- Tool calling (e.g. "what's on my calendar today") works
+- Fallback triggers if z.ai is manually broken (e.g. by temporarily changing the API key)
 
-- [ ] **Step 4: Run knip**
+- [ ] **Step 4: Deploy to production and monitor**
 
-Run: `bunx knip`
-Expected: No unused exports related to the migration
-
-- [ ] **Step 5: Final commit if any fixups needed**
+Watch logs for `provider-used` to confirm z.ai is the primary and fallbacks are rare.
