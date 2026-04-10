@@ -4,11 +4,11 @@
 
 **Goal:** Replace Anthropic SDK with OpenAI SDK and add multi-provider fallback chains for reliability.
 
-**Architecture:** Single unified streaming API `aiStreamRound()` backed by provider chains. Callbacks are optional — services without UI (validator, intent-learner, city-resolver, tts-translation) call it without callbacks and collect the full result. Two chains: main (heavy tool calling) and light (cheap/fast internal calls) selected via `{ light: true }` option. All providers use OpenAI SDK with different `baseURL` (z.ai coding endpoint, HF router, Gemini OpenAI-compat). All base URLs and models are loaded from env — no hardcoded values.
+**Architecture:** Single unified streaming API `aiStreamRound()` backed by provider chains. Callbacks are optional — services without UI (validator, intent-learner, city-resolver, tts-translation) call it without callbacks and collect the full result. Two chains: main (heavy tool calling) and light (cheap/fast internal calls) selected via `{ fast: true }` option. All providers use OpenAI SDK with different `baseURL` (z.ai coding endpoint, HF router, Gemini OpenAI-compat). All base URLs and models are loaded from env — no hardcoded values.
 
 **Chains:**
-- `STREAMING_CHAIN = z.ai ${AI_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL}`
-- `LIGHT_CHAIN = z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
+- `SMART_CHAIN = z.ai ${AI_MODEL} → Gemini ${GEMINI_MODEL} → HF ${HF_MODEL}`
+- `FAST_CHAIN = z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}`
 
 **Defaults (via env):**
 - `AI_BASE_URL=https://api.z.ai/api/coding/paas/v4`, `AI_MODEL=glm-5.1`, `AI_FAST_MODEL=glm-4.5-flash`
@@ -26,16 +26,16 @@
 | Action | Path | Responsibility |
 |--------|------|----------------|
 | Create | `src/services/ai/clients.ts` | OpenAI client instances for z.ai, HF, Gemini — all reading base URLs from env |
-| Create | `src/services/ai/streaming.ts` | `aiStreamRound()` — single unified API with provider fallback, supports both streaming (with callbacks) and collection (without callbacks); `light?: boolean` selects chain |
+| Create | `src/services/ai/streaming.ts` | `aiStreamRound()` — single unified API with provider fallback, supports both streaming (with callbacks) and collection (without callbacks); `fast?: boolean` selects chain |
 | Modify | `src/services/ai/agent.ts` | Rewrite streaming loop to use `aiStreamRound()` |
 | Modify | `src/services/ai/tools.ts` | Convert `input_schema` → `parameters`, wrap in `{type:'function', function:{...}}` |
 | Modify | `src/services/ai/types.ts` | Simplify `AgentConfig`, remove Anthropic deps |
-| Modify | `src/services/ai/response-validator.ts` | Switch to `aiStreamRound({light: true})` |
+| Modify | `src/services/ai/response-validator.ts` | Switch to `aiStreamRound({fast: true})` |
 | Modify | `src/services/ai/debug-logger.ts` | Replace `Anthropic.ContentBlockParam` with OpenAI types |
 | Modify | `src/services/ai/tool-executor.ts` | No functional changes (already SDK-agnostic) |
-| Modify | `src/services/intent/intent-learner.ts` | Replace raw `fetch()` with `aiStreamRound({light: true})` |
-| Modify | `src/services/timezone/city-resolver.ts` | Replace SDK call with `aiStreamRound({light: true})` |
-| Modify | `src/services/voice/tts-translation.ts` | Replace SDK call with `aiStreamRound({light: true})` |
+| Modify | `src/services/intent/intent-learner.ts` | Replace raw `fetch()` with `aiStreamRound()` — **smart chain**, intent extraction needs quality |
+| Modify | `src/services/timezone/city-resolver.ts` | Replace SDK call with `aiStreamRound({fast: true})` |
+| Modify | `src/services/voice/tts-translation.ts` | Replace SDK call with `aiStreamRound({fast: true})` |
 | Modify | `src/config/env.ts` | Add `HF_BASE_URL`, `HF_MODEL`, `HF_FAST_MODEL`, `GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_MODEL`, `GEMINI_FAST_MODEL`. Remove old fallback vars. All AI-related vars become **required**. |
 | Modify | `.env.example` | Add all new env vars with documentation |
 | Modify | `.env` | Add new vars with real values (keys from ExpenseSyncBot where applicable) |
@@ -354,9 +354,9 @@ Expected: FAIL — module not found
 // src/services/ai/streaming.ts
 // Unified AI streaming round with automatic provider fallback.
 //
-// Two chains, selected via options.light:
-//   STREAMING_CHAIN (main): z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
-//   LIGHT_CHAIN:            z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+// Two chains, selected via options.fast:
+//   SMART_CHAIN (main): z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+//   FAST_CHAIN:            z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, etc.) omit callbacks.
@@ -377,7 +377,7 @@ export interface StreamRoundOptions {
   maxTokens: number;
   temperature?: number;
   /** Use light chain (cheap/fast) instead of main streaming chain. Default: false. */
-  light?: boolean;
+  fast?: boolean;
   signal?: AbortSignal;
 }
 
@@ -537,7 +537,7 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
 
 // ── Chains ─────────────────────────────────────────────────────────────────
 
-function buildStreamingChain(): ProviderSlot[] {
+function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
     streamingSlot(`z.ai (${cfg.AI_MODEL})`, zaiClient, cfg.AI_MODEL),
@@ -546,7 +546,7 @@ function buildStreamingChain(): ProviderSlot[] {
   ];
 }
 
-function buildLightChain(): ProviderSlot[] {
+function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
     streamingSlot(`z.ai (${cfg.AI_FAST_MODEL})`, zaiClient, cfg.AI_FAST_MODEL),
@@ -568,7 +568,7 @@ function buildLightChain(): ProviderSlot[] {
  *
  * Chains:
  *   light: false → z.ai ${AI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
- *   light: true  → z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+ *   fast: true  → z.ai ${AI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
  *
  * Fallback rules:
  * - If a provider returns 5xx/timeout/429: try next
@@ -581,7 +581,7 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
-  const chain = options.light ? buildLightChain() : buildStreamingChain();
+  const chain = options.fast ? buildFastChain() : buildSmartChain();
   let lastError: Error | null = null;
   let textEmitted = false;
 
@@ -915,7 +915,7 @@ Key differences from old code:
 
 After the main loop completes, the agent must validate the response when NO tools were called. This prevents hallucinations (model claiming to have checked the calendar without actually calling `get_events`, etc.).
 
-Validation is **always enabled** — no flag. It uses the light chain via `aiStreamRound({light: true})` inside `validateResponse()`, so it's cheap.
+Validation is **always enabled** — no flag. It uses the light chain via `aiStreamRound({fast: true})` inside `validateResponse()`, so it's cheap.
 
 Add this block right after the `for (let round ...)` loop in `run()`:
 
@@ -1032,7 +1032,7 @@ export async function validateResponse(input: ValidationInput): Promise<Validati
         { role: 'user', content: userContent },
       ],
       maxTokens: VALIDATION_MAX_TOKENS,
-      light: true,
+      fast: true,
       signal: AbortSignal.timeout(VALIDATION_TIMEOUT_MS),
     });
 
@@ -1083,13 +1083,14 @@ Remove the `fetch()` block (lines 158-172) and the Anthropic response schema. Re
 import { aiStreamRound } from '../ai/streaming.ts';
 
 // Inside callLearnerAI():
+// Uses SMART chain (no fast flag) — intent extraction is a reasoning task
+// that benefits from the primary model, not a cheap fast one.
 const result = await aiStreamRound({
   messages: [
     { role: 'system', content: LEARNER_SYSTEM_PROMPT },
     ...conversationMessages,
   ],
   maxTokens: 2048,
-  light: true,
 });
 
 if (result.finishReason === 'length') {
@@ -1160,7 +1161,7 @@ const result = await aiStreamRound({
     { role: 'user', content: ... },
   ],
   maxTokens: 10,
-  light: true,
+  fast: true,
 });
 const text = result.text;
 ```
@@ -1220,7 +1221,7 @@ export class TtsTranslationService {
             { role: 'user', content: text },
           ],
           maxTokens: 1024,
-          light: true,
+          fast: true,
         },
         onDelta ? { onTextDelta: onDelta } : {},
       );
@@ -1350,7 +1351,7 @@ export interface AgentConfig {
 
 Remove entirely: `apiKey`, `baseUrl`, `model`, `fallback`, `validationModel`.
 
-Validation is now **always enabled** (no flag) — `aiStreamRound({light: true})` makes it cheap.
+Validation is now **always enabled** (no flag) — `aiStreamRound({fast: true})` makes it cheap.
 
 - [ ] **Step 2: Update index.ts**
 
@@ -1452,7 +1453,7 @@ console.log('--- LIGHT ---');
 const light = await aiStreamRound({
   messages: [{ role: 'user', content: 'Привет!' }],
   maxTokens: 100,
-  light: true,
+  fast: true,
 });
 console.log('provider:', light.providerUsed, 'text:', light.text);
 
