@@ -1167,41 +1167,99 @@ const text = result.text;
 
 Remove the `model` parameter from `resolveCity()`.
 
-- [ ] **Step 2: Update tts-translation.ts**
+- [ ] **Step 2: Update tts-translation.ts (with streaming callback)**
 
-Simplify the `TtsTranslationService` class:
+Translations for voice calls benefit from streaming — tokens can be fed to the TTS engine
+as they arrive, reducing perceived latency. Add an optional `onDelta` callback that the
+caller can pipe into the TTS engine. The full translated string is still returned (for
+caching and for callers that want the complete text).
 
 ```typescript
+import { createHash } from 'node:crypto';
 import { aiStreamRound } from '../ai/streaming.ts';
+import { voiceLogger } from './types';
+
+const MAX_CACHE_ENTRIES = 200;
+
+const SYSTEM_PROMPT = `You are a translator for a voice assistant. Translate the text to {language}.
+Output ONLY the translated text with no explanation, no quotes, no markdown.
+Preserve proper nouns, times (like "14:00"), and dates exactly as-is.
+Use natural spoken language suitable for text-to-speech synthesis.`;
 
 export class TtsTranslationService {
   private cache = new Map<string, string>();
 
-  async translate(text: string, targetLang: string): Promise<string> {
-    const cached = this.cache.get(text);
-    if (cached) return cached;
+  /**
+   * Translate text for TTS synthesis.
+   *
+   * @param text - source text
+   * @param targetLang - target language name (e.g. "Russian", "English")
+   * @param onDelta - optional callback fired with each streamed text chunk.
+   *                  Use this to feed the TTS engine incrementally for faster
+   *                  perceived response in voice calls. On cache hit, the
+   *                  callback is called once with the full cached text.
+   */
+  async translate(
+    text: string,
+    targetLang: string,
+    onDelta?: (chunk: string) => void,
+  ): Promise<string> {
+    const cacheKey = this.getCacheKey(text, targetLang);
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      onDelta?.(cached);
+      return cached;
+    }
 
-    const result = await aiStreamRound({
-      messages: [
-        { role: 'system', content: `Translate to ${targetLang}. Return ONLY the translation.` },
-        { role: 'user', content: text },
-      ],
-      maxTokens: 1024,
-      light: true,
-    });
+    try {
+      const systemPrompt = SYSTEM_PROMPT.replace('{language}', targetLang);
+      const result = await aiStreamRound(
+        {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: text },
+          ],
+          maxTokens: 1024,
+          light: true,
+        },
+        onDelta ? { onTextDelta: onDelta } : {},
+      );
 
-    const translated = result.text.trim();
-    this.cache.set(text, translated);
-    return translated;
+      const translated = result.text.trim();
+
+      if (this.cache.size >= MAX_CACHE_ENTRIES) {
+        const oldest = this.cache.keys().next().value;
+        if (oldest) this.cache.delete(oldest);
+      }
+      this.cache.set(cacheKey, translated);
+      return translated;
+    } catch (err) {
+      voiceLogger.error({ err, targetLang }, 'TTS translation failed, using original text');
+      onDelta?.(text);
+      return text;
+    }
+  }
+
+  get cacheSize(): number {
+    return this.cache.size;
   }
 
   clearCache(): void {
     this.cache.clear();
   }
+
+  private getCacheKey(text: string, targetLang: string): string {
+    return `${targetLang}:${createHash('sha256').update(text).digest('hex')}`;
+  }
 }
 ```
 
-Remove constructor params `apiKey`, `baseUrl`, `model`.
+Remove constructor params `apiKey`, `baseUrl`, `model` (the default constructor is empty now).
+
+**Note:** Wiring the `onDelta` callback into the actual TTS engine's streaming input is
+out of scope for this migration. This change just adds the hook; the TTS caller can adopt
+it later as a separate improvement. Current callers that don't pass `onDelta` behave
+identically to the non-streaming version.
 
 - [ ] **Step 3: Update call sites**
 
