@@ -28,7 +28,9 @@ export class EventReminderRepository {
                 e.title AS event_title,
                 COALESCE(er.occurrence_start, e.start_at) AS event_start_at,
                 COALESCE(er.occurrence_end, e.end_at) AS event_end_at,
-                e.location AS event_location
+                e.location AS event_location,
+                e.resolved_address AS event_resolved_address,
+                e.google_maps_url AS event_google_maps_url
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
          WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0`,

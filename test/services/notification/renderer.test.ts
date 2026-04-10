@@ -152,7 +152,8 @@ describe('NotificationRenderer', () => {
         isAllDay: true,
       });
       expect(result.text).toContain('📅 Весь день');
-      expect(result.text).toContain('📍 Офис');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Офис</a>');
       expect(result.text).not.toContain('🕐');
     });
   });
@@ -166,7 +167,8 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('Reminders:');
       expect(result.text).toContain('• Standup — 10:00 (in 30 minutes)');
       expect(result.text).toContain('• Call — 10:00 (in 30 minutes)');
-      expect(result.text).toContain('📍 Zoom');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Zoom</a>');
     });
 
     test('renders batch in Russian', () => {
@@ -258,7 +260,8 @@ describe('NotificationRenderer', () => {
         },
       ]);
       expect(result.text).toContain('📅 Конференция (Весь день)');
-      expect(result.text).toContain('📍 Офис');
+      expect(result.text).toContain('📍 <a href=');
+      expect(result.text).toContain('>Офис</a>');
     });
   });
 

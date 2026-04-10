@@ -480,7 +480,7 @@ if (config.REDIS_URL) {
     db.notificationLog,
     (telegramId, text) =>
       botRef
-        .sendMessage(telegramId, text)
+        .sendMessage(telegramId, text, 'HTML')
         .then(() => {})
         .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send notification')),
     scheduler,
