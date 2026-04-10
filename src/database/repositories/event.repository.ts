@@ -69,11 +69,6 @@ export class EventRepository {
       .get(id, userId, userId) as CalendarEvent | null;
   }
 
-  /** Find event by ID without user/group visibility filter. For background services only. */
-  findByIdUnfiltered(id: number): CalendarEvent | null {
-    return this.db.prepare('SELECT * FROM events WHERE id = ? AND is_cancelled = 0').get(id) as CalendarEvent | null;
-  }
-
   /** Update resolved location fields. For background location verification. */
   updateLocationFields(
     eventId: number,

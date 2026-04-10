@@ -1,5 +1,6 @@
 // src/index.ts
 
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
@@ -71,16 +72,19 @@ if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
 }
 
+type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
+type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
+
 // Mutable ref — patched after bot creation
 const botRef: {
   sendMessage: (
     telegramId: number,
     text: string,
-    parseMode?: string,
-    replyMarkup?: unknown,
+    parseMode?: ParseMode,
+    replyMarkup?: ReplyMarkup,
   ) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
-  editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
@@ -815,19 +819,12 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
 
 // Patch bot ref to use real bot API
 botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
-  const params = {
+  const msg = await bot.api.sendMessage({
     chat_id: telegramId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
-  };
-  const msg = replyMarkup
-    ? await bot.api.sendMessage(params as Parameters<typeof bot.api.sendMessage>[0])
-    : await bot.api.sendMessage({
-        chat_id: telegramId,
-        text,
-        ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
-      });
+  });
   return { message_id: 'message_id' in msg ? msg.message_id : 0 };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
@@ -835,7 +832,7 @@ botRef.editMessage = async (chatId, messageId, text, parseMode) => {
     chat_id: chatId,
     message_id: messageId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
   });
 };
 botRef.sendVoice = async (telegramId, audio) => {

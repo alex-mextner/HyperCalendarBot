@@ -1,5 +1,6 @@
 // src/services/location/location-verification-service.ts
 
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { t } from '../../config/constants.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
@@ -10,6 +11,9 @@ import { formatInvitation } from '../event/formatters.ts';
 import type { AddressCache } from './address-cache.ts';
 import type { GeocodedLocation, GeocodingService } from './geocoding-service.ts';
 import type { LocationCandidateStore } from './location-candidate-store.ts';
+
+type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
+type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
 
 const logger = botLogger.child({ module: 'location-verification' });
 
@@ -25,10 +29,10 @@ export interface LocationVerificationDeps {
   sendMessage: (
     userId: number,
     text: string,
-    options?: { parse_mode?: string; reply_markup?: unknown },
+    options?: { parse_mode?: ParseMode; reply_markup?: ReplyMarkup },
   ) => Promise<void>;
   /** Callback to edit an existing invitation message */
-  editMessage?: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
+  editMessage?: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
 }
 
 export interface LocationVerificationResult {
@@ -142,8 +146,18 @@ export class LocationVerificationService {
 
     logger.info({ eventId: event.id, resolvedAddress: geo.formattedAddress }, 'Event location resolved');
 
+    // Build the updated event in-memory (avoids re-fetching from DB just to get the new fields)
+    const updatedEvent: CalendarEvent = {
+      ...event,
+      resolved_address: geo.formattedAddress,
+      latitude: geo.latitude,
+      longitude: geo.longitude,
+      google_maps_url: geo.googleMapsUrl,
+      location_verified: 1,
+    };
+
     // Update invitation messages
-    await this.updateInvitationMessages(event.id);
+    await this.updateInvitationMessages(updatedEvent);
   }
 
   /** Handle user selecting a location from candidates */
@@ -153,7 +167,7 @@ export class LocationVerificationService {
     choiceIndex: number,
     candidates: GeocodedLocation[],
   ): Promise<boolean> {
-    const event = this.deps.eventRepo.findByIdUnfiltered(eventId);
+    const event = this.deps.eventRepo.findById(eventId, userId);
     if (!event) return false;
 
     const chosen = candidates[choiceIndex];
@@ -187,11 +201,12 @@ export class LocationVerificationService {
 
   /** Resolve location from coordinates (when user sends 📍 for an event) */
   async resolveFromCoordinates(eventId: number, lat: number, lng: number, userId: number): Promise<boolean> {
+    // Verify user has access to the event before doing any work
+    const event = this.deps.eventRepo.findById(eventId, userId);
+    if (!event) return false;
+
     const geo = await this.deps.geocodingService.reverseGeocode(lat, lng);
     if (!geo) return false;
-
-    const event = this.deps.eventRepo.findByIdUnfiltered(eventId);
-    if (!event) return false;
 
     const user = this.deps.userRepo.findByTelegramId(userId);
     if (!user) return false;
@@ -250,15 +265,12 @@ export class LocationVerificationService {
   }
 
   /** Update all invitation messages for an event after location is resolved */
-  private async updateInvitationMessages(eventId: number): Promise<void> {
+  private async updateInvitationMessages(event: CalendarEvent): Promise<void> {
     if (!this.deps.editMessage) return;
 
-    const event = this.deps.eventRepo.findByIdUnfiltered(eventId);
-    if (!event) return;
-
     // Find all invitations (pending + accepted) that have been delivered
-    const pending = this.deps.invitationRepo.getPendingForEvent(eventId);
-    const accepted = this.deps.invitationRepo.getAcceptedForEvent(eventId);
+    const pending = this.deps.invitationRepo.getPendingForEvent(event.id);
+    const accepted = this.deps.invitationRepo.getAcceptedForEvent(event.id);
     const allInvitations = [...pending, ...accepted];
 
     for (const inv of allInvitations) {
@@ -282,7 +294,7 @@ export class LocationVerificationService {
         await this.deps.editMessage(inv.chat_id, inv.message_id, text, 'HTML');
       } catch (err) {
         logger.warn(
-          { err, invitationId: inv.id, eventId },
+          { err, invitationId: inv.id, eventId: event.id },
           'Failed to update invitation message after location resolution',
         );
       }

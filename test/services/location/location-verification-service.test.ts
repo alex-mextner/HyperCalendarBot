@@ -92,7 +92,7 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
       getAddressContext: mock(() => Promise.resolve({ recent: [], frequent: [] })),
     },
     eventRepo: {
-      findByIdUnfiltered: mock(() => makeEvent()),
+      findById: mock(() => makeEvent()),
       updateLocationFields: mock(() => {}),
     },
     userRepo: {
@@ -287,5 +287,154 @@ describe('LocationVerificationService', () => {
     const result = await svc.reverseGeocodeForCity(0, 0);
 
     expect(result).toBeNull();
+  });
+
+  describe('updateInvitationMessages (via applyResolvedLocation)', () => {
+    function makeInvitation(overrides: { [key: string]: unknown } = {}) {
+      return {
+        id: 1,
+        event_id: 1,
+        inviter_id: 100,
+        invitee_id: 200,
+        status: 'pending',
+        message_id: 555,
+        chat_id: 200,
+        deep_link_code: null,
+        invitee_username: null,
+        created_at: '',
+        updated_at: '',
+        responded_at: null,
+        proposed_time: null,
+        ...overrides,
+      };
+    }
+
+    test('edits both pending and accepted invitation messages', async () => {
+      const pendingInv = makeInvitation({ id: 1, status: 'pending', message_id: 111, chat_id: 200 });
+      const acceptedInv = makeInvitation({ id: 2, status: 'accepted', message_id: 222, chat_id: 300 });
+      const deps = makeDeps({
+        invitationRepo: {
+          getPendingForEvent: mock(() => [pendingInv]),
+          getAcceptedForEvent: mock(() => [acceptedInv]),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      await svc.applyResolvedLocation(makeEvent(), makeGeoResult());
+
+      expect(deps.editMessage).toHaveBeenCalledTimes(2);
+      // First call: pending invitation
+      const firstCall = deps.editMessage.mock.calls[0] as unknown[];
+      expect(firstCall[0]).toBe(200); // chat_id
+      expect(firstCall[1]).toBe(111); // message_id
+      expect(firstCall[3]).toBe('HTML'); // parse mode
+      // Second call: accepted invitation
+      const secondCall = deps.editMessage.mock.calls[1] as unknown[];
+      expect(secondCall[0]).toBe(300);
+      expect(secondCall[1]).toBe(222);
+    });
+
+    test('skips invitations with no message_id (not yet delivered)', async () => {
+      const undelivered = makeInvitation({ id: 1, message_id: null, chat_id: null });
+      const delivered = makeInvitation({ id: 2, message_id: 999, chat_id: 200 });
+      const deps = makeDeps({
+        invitationRepo: {
+          getPendingForEvent: mock(() => [undelivered, delivered]),
+          getAcceptedForEvent: mock(() => []),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      await svc.applyResolvedLocation(makeEvent(), makeGeoResult());
+
+      expect(deps.editMessage).toHaveBeenCalledTimes(1);
+      expect((deps.editMessage.mock.calls[0] as unknown[])[1]).toBe(999);
+    });
+
+    test('does nothing when editMessage callback is not provided', async () => {
+      const pendingInv = makeInvitation({ message_id: 555, chat_id: 200 });
+      const deps = makeDeps({
+        editMessage: undefined,
+        invitationRepo: {
+          getPendingForEvent: mock(() => [pendingInv]),
+          getAcceptedForEvent: mock(() => []),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      await svc.applyResolvedLocation(makeEvent(), makeGeoResult());
+
+      // No editMessage to call — getPendingForEvent should not even be queried
+      expect(deps.invitationRepo.getPendingForEvent).not.toHaveBeenCalled();
+    });
+
+    test('continues processing other invitations when one edit fails', async () => {
+      const inv1 = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
+      const inv2 = makeInvitation({ id: 2, message_id: 222, chat_id: 300 });
+      const editMessage = mock((chatId: number) => {
+        if (chatId === 200) throw new Error('Telegram API error');
+        return Promise.resolve();
+      });
+      const deps = makeDeps({
+        editMessage,
+        invitationRepo: {
+          getPendingForEvent: mock(() => [inv1, inv2]),
+          getAcceptedForEvent: mock(() => []),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      await svc.applyResolvedLocation(makeEvent(), makeGeoResult());
+
+      // Both attempted despite first failure
+      expect(deps.editMessage).toHaveBeenCalledTimes(2);
+    });
+
+    test('uses invitee language for the formatted invitation', async () => {
+      const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
+      const ruInvitee = makeUser({ telegram_id: 200, language: 'ru' });
+      const inviter = makeUser({ telegram_id: 100, first_name: 'Alice' });
+      const deps = makeDeps({
+        invitationRepo: {
+          getPendingForEvent: mock(() => [inv]),
+          getAcceptedForEvent: mock(() => []),
+        },
+        userRepo: {
+          findByTelegramId: mock((id: number) => (id === 200 ? ruInvitee : inviter)),
+          update: mock(() => makeUser()),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      await svc.applyResolvedLocation(makeEvent({ title: 'Встреча' }), makeGeoResult());
+
+      const call = deps.editMessage.mock.calls[0] as unknown[];
+      const text = call[2] as string;
+      // Russian invitation header
+      expect(text).toContain('Приглашение');
+    });
+
+    test('updated event passed to formatter has the new resolved address', async () => {
+      const inv = makeInvitation({ id: 1, message_id: 111, chat_id: 200 });
+      const deps = makeDeps({
+        invitationRepo: {
+          getPendingForEvent: mock(() => [inv]),
+          getAcceptedForEvent: mock(() => []),
+        },
+      });
+      const svc = new LocationVerificationService(deps as never);
+
+      const geo = makeGeoResult({
+        formattedAddress: 'Кофемания, ул. Большая Никитская, 12',
+        googleMapsUrl: 'https://maps.google.com/?q=55.75,37.6',
+      });
+      await svc.applyResolvedLocation(makeEvent({ location: 'кофемания' }), geo);
+
+      const call = deps.editMessage.mock.calls[0] as unknown[];
+      const text = call[2] as string;
+      // The formatted invitation should embed the resolved address as a link
+      expect(text).toContain('Кофемания, ул. Большая Никитская, 12');
+      expect(text).toContain('https://maps.google.com');
+    });
   });
 });
