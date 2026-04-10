@@ -737,16 +737,14 @@ type MessageParam = OpenAI.ChatCompletionMessageParam;
 
 - [ ] **Step 3: Simplify CalendarBotAgent class**
 
-Remove client/model/fallback fields. The agent no longer holds API state — `aiStreamRound()` handles providers.
+Remove client/model/fallback/validationModel fields. The agent no longer holds API state — `aiStreamRound()` handles providers. Validation is always enabled.
 
 ```typescript
 export class CalendarBotAgent {
-  private validationEnabled: boolean;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
 
   constructor(config: AgentConfig, sender: TelegramSender) {
-    this.validationEnabled = config.validationModel !== undefined;
     this.sender = sender;
     this.debugLogger = config.debugLogger;
   }
@@ -913,16 +911,64 @@ Key differences from old code:
 - No manual primary/fallback retry — `aiStreamRound()` handles the chain
 - No `Anthropic.ContentBlockParam[]` anywhere
 
-- [ ] **Step 7: Update response validation call**
+- [ ] **Step 7: Preserve response validation logic**
 
-Replace:
+After the main loop completes, the agent must validate the response when NO tools were called. This prevents hallucinations (model claiming to have checked the calendar without actually calling `get_events`, etc.).
+
+Validation is **always enabled** — no flag. It uses the light chain via `aiStreamRound({light: true})` inside `validateResponse()`, so it's cheap.
+
+Add this block right after the `for (let round ...)` loop in `run()`:
+
 ```typescript
-const validation = await validateResponse(this.client, this.validationModel, {...});
+// Response validation: when no tools were called, verify the response isn't hallucinated.
+// Always enabled — cheap via light chain, critical for calendar correctness.
+// Skip when tools were NOT available (nothing to validate against) or in supplement mode.
+const availableTools = getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode);
+if (availableTools.length > 0 && allToolCalls.length === 0 && !ctx.supplementMode) {
+  const responseText = writer.getText().trim();
+  if (responseText && !isSkipText(responseText)) {
+    const validation = await validateResponse({
+      userMessage: ctx.messageText,
+      toolCalls: allToolCalls.map((tc) => tc.name),
+      response: responseText,
+    });
+
+    if (!validation.approved) {
+      aiLogger.info(
+        { userId: ctx.user.telegram_id, reason: validation.reason },
+        'Response validation REJECTED — retrying with tools',
+      );
+
+      writer.reset();
+      allToolCalls.length = 0;
+      allToolResults.length = 0;
+
+      const retryMessages: MessageParam[] = [
+        ...messages,
+        { role: 'assistant', content: responseText },
+        {
+          role: 'user',
+          content: `[SYSTEM] Your previous response was rejected by the quality validator. Reason: ${validation.reason}. You MUST call the appropriate tools and re-answer the question properly. Do NOT repeat the same mistake.`,
+        },
+      ];
+
+      const retryResult = await this.runRetryLoop(
+        ctx,
+        retryMessages,
+        systemPrompt,
+        writer,
+        dbg,
+        caps,
+        allToolCalls,
+        allToolResults,
+      );
+      if (retryResult) return retryResult;
+    }
+  }
+}
 ```
-With:
-```typescript
-const validation = await validateResponse({...});
-```
+
+Note the new `validateResponse()` signature takes only the input object — no client/model params (handled internally).
 
 - [ ] **Step 8: Rewrite runRetryLoop similarly**
 
@@ -1240,13 +1286,13 @@ In `types.ts`, the current `AgentConfig` has Anthropic-specific fields. Simplify
 
 ```typescript
 export interface AgentConfig {
-  /** When set, enables post-response validation (value unused — kept as boolean flag for compatibility). */
-  validationModel?: string;
   debugLogger?: AiDebugLogger;
 }
 ```
 
-Remove: `apiKey`, `baseUrl`, `model`, `fallback`.
+Remove entirely: `apiKey`, `baseUrl`, `model`, `fallback`, `validationModel`.
+
+Validation is now **always enabled** (no flag) — `aiStreamRound({light: true})` makes it cheap.
 
 - [ ] **Step 2: Update index.ts**
 
