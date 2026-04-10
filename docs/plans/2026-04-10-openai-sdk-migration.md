@@ -263,7 +263,7 @@ Expected: FAIL — module not found
 ```typescript
 // src/services/ai/streaming.ts
 // Streaming AI round with automatic provider fallback.
-// MAIN_CHAIN: z.ai GLM → Gemini Pro → HF Qwen3-235B
+// STREAMING_CHAIN: z.ai GLM → Gemini Pro → HF Qwen3-235B
 
 import type OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
@@ -486,7 +486,7 @@ function nonStreamSlot(name: string, getClient: () => OpenAI, model: string): Pr
 
 // ── Chain ───────────────────────────────────────────────────────────────────
 
-function buildMainChain(): ProviderSlot[] {
+function buildStreamingChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
     openaiStreamSlot(`z.ai (${cfg.AI_MODEL})`, zaiClient, cfg.AI_MODEL),
@@ -509,7 +509,7 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
-  const chain = buildMainChain();
+  const chain = buildStreamingChain();
   let lastError: Error | null = null;
   let textEmitted = false;
 
@@ -658,7 +658,7 @@ function callProvider(getClient: () => OpenAI, model: string): ModelSlot['call']
 
 // No z.ai in completion chains — coding endpoint doesn't produce text content
 // for non-tool responses (only reasoning_content).
-function buildMainChain(): ModelSlot[] {
+function buildCompletionChain(): ModelSlot[] {
   return [
     { name: 'Gemini 2.5 Pro', call: callProvider(geminiClient, 'gemini-2.5-pro') },
     { name: 'HF Qwen3-235B', call: callProvider(hfClient, 'Qwen/Qwen3-235B-A22B') },
@@ -677,13 +677,13 @@ function buildLightChain(): ModelSlot[] {
 /**
  * Run a chat completion with automatic provider fallback.
  *
- * Main chain:  Gemini 2.5 Pro → HF Qwen3-235B
- * Light chain: Gemini 2.5 Flash → HF Llama-3.3-70B
+ * Completion chain: Gemini 2.5 Pro → HF Qwen3-235B
+ * Light chain:      Gemini 2.5 Flash → HF Llama-3.3-70B
  *
  * On 5xx / timeout / balance exhausted the current model is abandoned immediately.
  */
 export async function aiComplete(options: CompletionOptions): Promise<CompletionResult> {
-  const chain = options.light ? buildLightChain() : buildMainChain();
+  const chain = options.light ? buildLightChain() : buildCompletionChain();
   let lastError: Error | null = null;
 
   for (const slot of chain) {
