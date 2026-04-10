@@ -1,29 +1,11 @@
 // test/services/ai/clients.test.ts
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
-
-interface CapturedOpts {
-  apiKey?: string;
-  baseURL?: string;
-  timeout?: number;
-  maxRetries?: number;
-}
-
-const captured: CapturedOpts[] = [];
-
-mock.module('openai', () => ({
-  default: class MockOpenAI {
-    constructor(opts: CapturedOpts = {}) {
-      captured.push(opts);
-    }
-  },
-}));
-
-const { zaiClient, hfClient, geminiClient, resetClients } = await import('../../../src/services/ai/clients.ts');
+import { afterEach, beforeEach, expect, test } from 'bun:test';
+import OpenAI from 'openai';
+import { geminiClient, hfClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
 
 const originalEnv = { ...process.env };
 
 beforeEach(() => {
-  captured.length = 0;
   resetClients();
   process.env = { ...originalEnv };
   process.env.BOT_TOKEN = 'test-token';
@@ -42,48 +24,50 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetClients();
   process.env = { ...originalEnv };
 });
 
-test('zaiClient uses ZAI env vars', () => {
-  zaiClient();
-  expect(captured).toHaveLength(1);
-  expect(captured[0]!.apiKey).toBe('zai-key');
-  expect(captured[0]!.baseURL).toBe('https://zai.example/v1');
-  expect(captured[0]!.maxRetries).toBe(0);
+test('zaiClient returns an OpenAI instance wired to ZAI env vars', () => {
+  const client = zaiClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('zai-key');
+  expect(client.baseURL).toBe('https://zai.example/v1');
+  expect(client.maxRetries).toBe(0);
 });
 
-test('hfClient uses HF env vars', () => {
-  hfClient();
-  expect(captured).toHaveLength(1);
-  expect(captured[0]!.apiKey).toBe('hf-token');
-  expect(captured[0]!.baseURL).toBe('https://hf.example/v1');
+test('hfClient returns an OpenAI instance wired to HF env vars', () => {
+  const client = hfClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('hf-token');
+  expect(client.baseURL).toBe('https://hf.example/v1');
 });
 
-test('geminiClient uses GEMINI env vars', () => {
-  geminiClient();
-  expect(captured).toHaveLength(1);
-  expect(captured[0]!.apiKey).toBe('gemini-key');
-  expect(captured[0]!.baseURL).toBe('https://gemini.example/v1/');
+test('geminiClient returns an OpenAI instance wired to GEMINI env vars', () => {
+  const client = geminiClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('gemini-key');
+  expect(client.baseURL).toBe('https://gemini.example/v1/');
 });
 
-test('clients are cached as singletons', () => {
-  zaiClient();
-  zaiClient();
-  zaiClient();
-  expect(captured).toHaveLength(1);
+test('each factory returns the same singleton on repeat calls', () => {
+  expect(zaiClient()).toBe(zaiClient());
+  expect(hfClient()).toBe(hfClient());
+  expect(geminiClient()).toBe(geminiClient());
 });
 
-test('resetClients clears the singletons', () => {
-  zaiClient();
+test('resetClients clears the singletons so new instances are built', () => {
+  const firstZai = zaiClient();
   resetClients();
-  zaiClient();
-  expect(captured).toHaveLength(2);
+  const secondZai = zaiClient();
+  expect(secondZai).not.toBe(firstZai);
 });
 
-test('each provider has its own singleton', () => {
-  zaiClient();
-  hfClient();
-  geminiClient();
-  expect(captured).toHaveLength(3);
+test('the three providers are independent singletons', () => {
+  const z = zaiClient();
+  const h = hfClient();
+  const g = geminiClient();
+  expect(z).not.toBe(h);
+  expect(h).not.toBe(g);
+  expect(z).not.toBe(g);
 });
