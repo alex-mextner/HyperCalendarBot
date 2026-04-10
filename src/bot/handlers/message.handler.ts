@@ -1075,6 +1075,14 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       const lang = user.language;
       const msgs = t(lang);
 
+      // ALWAYS persist the pin so the AI can read it from system prompt and
+      // attach it to any event the user mentions next. Auto-expires in 30 min.
+      if (deps.pendingGeoStore) {
+        await deps.pendingGeoStore
+          .set(user.telegram_id, { latitude, longitude })
+          .catch((err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to persist pending geo'));
+      }
+
       // Check if user has a recent event that could use this location
       const latestEvent = deps.eventService.getLatestCreated(user.telegram_id);
       const hasRecentUnverifiedEvent =
@@ -1094,12 +1102,10 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           parse_mode: 'HTML',
           reply_markup: kb,
         });
-        // Store coordinates in Redis for callback handler
-        await deps.pendingGeoStore.set(user.telegram_id, { latitude, longitude });
         return;
       }
 
-      // Default behavior: timezone update
+      // Default behavior: timezone update (pin already stored above — AI can use it)
       const tz = resolveTimezone(latitude, longitude);
       const offset = formatUtcOffset(tz);
       if (tz !== user.timezone) {

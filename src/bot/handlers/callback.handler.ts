@@ -1250,8 +1250,9 @@ export function createCallbackHandler(
         { reply_markup: undefined },
       );
     } else if (action === 'other') {
-      await pendingGeoStore.delete(user.telegram_id);
-      await ctx.editText(msgs.aiTools.location.geoExplain, { reply_markup: undefined });
+      // Keep the pin in store — AI will see it via system prompt and can attach it
+      // to any event the user names in chat. The pin auto-expires in 30 minutes.
+      await ctx.editText(msgs.aiTools.location.geoOtherAck, { reply_markup: undefined });
     }
   });
 

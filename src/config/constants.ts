@@ -428,6 +428,8 @@ export const MSG = {
         geoForEventConfirm: 'Yes, use for this event',
         geoNewLocation: 'No, this is my current location',
         geoExplain: 'Something else',
+        geoOtherAck:
+          "📍 Got it. The pin is saved for 30 minutes — just tell me which event it's for and I'll attach it.",
         geoPurposeQuestion:
           '📍 Got your location! What is it for?\n1. Update your current city\n2. Set as location for your latest event\n3. Something else (please explain)',
       },
@@ -1038,6 +1040,8 @@ export const MSG = {
         geoForEventConfirm: 'Да, использовать для этого события',
         geoNewLocation: 'Нет, это моё текущее местоположение',
         geoExplain: 'Другое',
+        geoOtherAck:
+          '📍 Понял. Пин сохранён на 30 минут — просто скажи, к какому событию его привязать, и я сделаю это.',
         geoPurposeQuestion:
           '📍 Получена геолокация! Для чего она?\n1. Обновить город\n2. Задать локацию для последнего события\n3. Другое (напиши пояснение)',
       },
