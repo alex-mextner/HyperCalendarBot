@@ -3,10 +3,25 @@ export interface EnvConfig {
   BOT_TOKEN: string;
   DATABASE_PATH: string;
   NODE_ENV: 'development' | 'production';
-  ANTHROPIC_API_KEY: string;
-  AI_BASE_URL: string;
-  AI_MODEL: string;
-  AI_FAST_MODEL: string;
+
+  // AI primary provider (z.ai coding endpoint)
+  ZAI_API_KEY: string;
+  ZAI_BASE_URL: string;
+  ZAI_MODEL: string;
+  ZAI_FAST_MODEL: string;
+
+  // HuggingFace Router (fallback, tool calling capable)
+  HF_TOKEN: string;
+  HF_BASE_URL: string;
+  HF_MODEL: string;
+  HF_FAST_MODEL: string;
+
+  // Google Gemini (fallback, tool calling capable)
+  GEMINI_API_KEY: string;
+  GEMINI_BASE_URL: string;
+  GEMINI_MODEL: string;
+  GEMINI_FAST_MODEL: string;
+
   REDIS_URL?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
@@ -17,7 +32,6 @@ export interface EnvConfig {
   BOT_USERNAME?: string;
   MTPROTO_API_ID?: number;
   MTPROTO_API_HASH?: string;
-  HF_TOKEN?: string;
   GROQ_API_KEY?: string;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
@@ -30,23 +44,18 @@ export interface EnvConfig {
   DISABLE_VOICE?: boolean;
   AI_DEBUG_LOGS?: boolean;
   ADMIN_ALERT_TOKEN?: string;
-  AI_MODEL_FALLBACK?: string;
-  AI_BASE_URL_FALLBACK?: string;
-  AI_API_KEY_FALLBACK?: string;
   OPENWEATHER_API_KEY?: string;
   GOOGLE_API_KEY?: string;
 }
 
-export function loadConfig(): EnvConfig {
-  const BOT_TOKEN = process.env.BOT_TOKEN;
-  if (!BOT_TOKEN) {
-    throw new Error('BOT_TOKEN environment variable is required');
-  }
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} environment variable is required`);
+  return value;
+}
 
-  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-  if (!ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY environment variable is required');
-  }
+export function loadConfig(): EnvConfig {
+  const BOT_TOKEN = requireEnv('BOT_TOKEN');
 
   const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || undefined;
   const REDIS_URL = process.env.REDIS_URL || undefined;
@@ -92,10 +101,25 @@ export function loadConfig(): EnvConfig {
     BOT_TOKEN,
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
     NODE_ENV: (process.env.NODE_ENV as EnvConfig['NODE_ENV']) || 'development',
-    ANTHROPIC_API_KEY,
-    AI_BASE_URL: process.env.AI_BASE_URL || 'https://api.anthropic.com',
-    AI_MODEL: process.env.AI_MODEL || 'claude-sonnet-4-20250514',
-    AI_FAST_MODEL: process.env.AI_FAST_MODEL || 'claude-haiku-4-5-20251001',
+
+    // AI primary (z.ai)
+    ZAI_API_KEY: requireEnv('ZAI_API_KEY'),
+    ZAI_BASE_URL: requireEnv('ZAI_BASE_URL'),
+    ZAI_MODEL: requireEnv('ZAI_MODEL'),
+    ZAI_FAST_MODEL: requireEnv('ZAI_FAST_MODEL'),
+
+    // HuggingFace
+    HF_TOKEN: requireEnv('HF_TOKEN'),
+    HF_BASE_URL: requireEnv('HF_BASE_URL'),
+    HF_MODEL: requireEnv('HF_MODEL'),
+    HF_FAST_MODEL: requireEnv('HF_FAST_MODEL'),
+
+    // Gemini
+    GEMINI_API_KEY: requireEnv('GEMINI_API_KEY'),
+    GEMINI_BASE_URL: requireEnv('GEMINI_BASE_URL'),
+    GEMINI_MODEL: requireEnv('GEMINI_MODEL'),
+    GEMINI_FAST_MODEL: requireEnv('GEMINI_FAST_MODEL'),
+
     REDIS_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || undefined,
@@ -106,7 +130,6 @@ export function loadConfig(): EnvConfig {
     BOT_USERNAME: process.env.BOT_USERNAME || undefined,
     MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
     MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
-    HF_TOKEN: process.env.HF_TOKEN || undefined,
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
@@ -119,9 +142,6 @@ export function loadConfig(): EnvConfig {
     DISABLE_VOICE: process.env.DISABLE_VOICE === 'true' || undefined,
     AI_DEBUG_LOGS: process.env.AI_DEBUG_LOGS === 'true' || undefined,
     ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
-    AI_MODEL_FALLBACK: process.env.AI_MODEL_FALLBACK || undefined,
-    AI_BASE_URL_FALLBACK: process.env.AI_BASE_URL_FALLBACK || undefined,
-    AI_API_KEY_FALLBACK: process.env.AI_API_KEY_FALLBACK || undefined,
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || undefined,
   };

@@ -17,7 +17,11 @@ interface TimezoneParams {
   settingsChatId: number;
 }
 
-export function createTimezoneScene(db: DatabaseService, userComposer: UserResolverComposer, aiModel?: string) {
+export function createTimezoneScene(
+  db: DatabaseService,
+  userComposer: UserResolverComposer,
+  resolveCityFn: typeof resolveCity = resolveCity,
+) {
   return (
     new Scene('timezone')
       .state<TimezoneState>()
@@ -60,7 +64,7 @@ export function createTimezoneScene(db: DatabaseService, userComposer: UserResol
           if (!cityInputMode) return;
           const text = context.text?.trim();
           if (!text) return;
-          const tz = await resolveCity(text, aiModel);
+          const tz = await resolveCityFn(text);
           if (tz) {
             await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
               reply_markup: timezoneConfirmKeyboard(lang),

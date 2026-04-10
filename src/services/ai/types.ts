@@ -201,8 +201,6 @@ export interface AgentContext {
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
   featureUsageRepo?: FeatureUsageRepository;
-  /** Fast model ID for lightweight AI tasks (city→timezone resolution). */
-  fastModel?: string;
 
   // Capability groups
   sharing?: SharingCapability;
@@ -264,16 +262,7 @@ export interface ToolResult {
 }
 
 export interface AgentConfig {
-  apiKey: string;
-  baseUrl: string;
-  model: string;
-  validationModel?: string;
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
-  fallback?: {
-    model: string;
-    baseUrl?: string;
-    apiKey?: string;
-  };
 }
 
 export interface TelegramSender {

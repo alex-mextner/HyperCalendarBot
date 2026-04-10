@@ -1,16 +1,20 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-// Mock Anthropic SDK before importing scene — avoids real AI calls without replacing city-resolver module
-const mockCreate = mock(async () => ({ content: [{ type: 'text', text: 'UNKNOWN' }] }));
-mock.module('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = { create: mockCreate };
-  },
-}));
-
 const { createTimezoneScene } = await import('../../../src/bot/scenes/timezone.scene.ts');
 const { CB } = await import('../../../src/config/constants.ts');
 const { createUserResolverComposer } = await import('../../../src/bot/middleware/user-resolver.ts');
+
+/**
+ * Injectable resolveCity stub — tests set `resolveCityStubValue` before each
+ * call to control whether the stub "finds" a timezone. If the input is an
+ * IANA-looking key (contains "/"), pass it through unchanged to match the
+ * real fast-path behaviour.
+ */
+let resolveCityStubValue: string | null = null;
+const resolveCityStub = mock(async (input: string) => {
+  if (input.includes('/')) return input;
+  return resolveCityStubValue;
+});
 
 import type { DatabaseService } from '../../../src/database/index.ts';
 
@@ -212,10 +216,10 @@ describe('timezone scene step handler', () => {
   let db: DatabaseService;
 
   beforeEach(() => {
-    mockCreate.mockReset();
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
+    resolveCityStub.mockClear();
+    resolveCityStubValue = null;
     db = makeDb();
-    fns = getStepFns(createTimezoneScene(db, createUserResolverComposer(db)));
+    fns = getStepFns(createTimezoneScene(db, createUserResolverComposer(db), resolveCityStub));
   });
 
   test('no user — exits scene immediately', async () => {
@@ -333,7 +337,7 @@ describe('timezone scene step handler', () => {
     test('with valid updatedUser + settingsMsgId — restores settings message', async () => {
       const updatedUser = { telegram_id: 1, language: 'en', timezone: 'Europe/Paris' };
       const localDb = { users: { update: mock(() => updatedUser) } } as unknown as DatabaseService;
-      const localFns = getStepFns(createTimezoneScene(localDb, createUserResolverComposer(localDb)));
+      const localFns = getStepFns(createTimezoneScene(localDb, createUserResolverComposer(localDb), resolveCityStub));
       const ctx = makeCtx({
         activeType: 'callback_query',
         stepId: 0,
@@ -421,7 +425,7 @@ describe('timezone scene step handler', () => {
     });
 
     test('cityInputMode=true, resolveCity returns timezone — shows confirm', async () => {
-      // 'London' resolves via city-timezones library without AI call
+      resolveCityStubValue = 'Europe/London';
       const ctx = makeCtx({ activeType: 'message', stepId: 0, text: 'London', state: { cityInputMode: true } });
       await fns[0]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);

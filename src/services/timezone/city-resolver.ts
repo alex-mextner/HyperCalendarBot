@@ -1,7 +1,7 @@
 // src/services/timezone/city-resolver.ts
 import cityTimezones from 'city-timezones';
 import { cmdLogger } from '../../utils/logger.ts';
-import { createAnthropicClient } from '../ai/anthropic-client.ts';
+import { aiStreamRound } from '../ai/streaming.ts';
 import { matchCity } from './russian-city-matcher.ts';
 
 const SYSTEM_PROMPT =
@@ -66,7 +66,18 @@ async function cacheSet(key: string, value: string): Promise<void> {
   }
 }
 
-export async function resolveCity(input: string, model?: string): Promise<string | null> {
+/**
+ * Resolve a city name or IANA timezone identifier to a canonical IANA key.
+ *
+ * @param input - user input (IANA, English, Russian, fuzzy)
+ * @param streamImpl - injection point used by tests to stub the AI fallback.
+ *                     In production the function uses the shared aiStreamRound
+ *                     that fan-outs across the fast provider chain.
+ */
+export async function resolveCity(
+  input: string,
+  streamImpl: typeof aiStreamRound = aiStreamRound,
+): Promise<string | null> {
   const trimmed = input.trim();
   const startMs = performance.now();
 
@@ -107,44 +118,42 @@ export async function resolveCity(input: string, model?: string): Promise<string
     return libResult;
   }
 
-  // 5. AI fallback — max 1 attempt (not 3, to avoid 20s+ delays)
+  // 5. AI fallback via the fast provider chain (z.ai flash → Gemini flash → HF Llama).
+  //    aiStreamRound handles provider selection, retries, and fallback internally.
   cmdLogger.info({ city: trimmed }, 'City resolver: falling back to AI');
-  const client = createAnthropicClient();
 
   try {
-    const response = await client.messages.create({
-      model: model ?? 'claude-haiku-4-5-20251001',
-      max_tokens: 64,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: trimmed }],
+    const result = await streamImpl({
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: trimmed },
+      ],
+      maxTokens: 64,
+      fast: true,
     });
 
-    const raw = response.content[0];
-    if (raw && 'text' in raw) {
-      const tz = raw.text.trim();
+    const tz = result.text.trim();
+    if (!tz || tz === 'UNKNOWN') return null;
 
-      if (tz === 'UNKNOWN') return null;
-
-      // Try library with AI result as city name
-      const libFallback = lookupLibrary(tz);
-      if (libFallback && validateTimezone(libFallback)) {
-        await cacheSet(cacheKey, libFallback);
-        cmdLogger.info(
-          { city: trimmed, resolved: libFallback, source: 'ai', ms: performance.now() - startMs },
-          'City resolved',
-        );
-        return libFallback;
-      }
-
-      // Direct IANA from AI
-      if (validateTimezone(tz)) {
-        await cacheSet(cacheKey, tz);
-        cmdLogger.info({ city: trimmed, resolved: tz, source: 'ai', ms: performance.now() - startMs }, 'City resolved');
-        return tz;
-      }
-
-      cmdLogger.warn({ city: trimmed, aiResult: tz, ms: performance.now() - startMs }, 'AI returned invalid timezone');
+    // Try library with AI result as city name
+    const libFallback = lookupLibrary(tz);
+    if (libFallback && validateTimezone(libFallback)) {
+      await cacheSet(cacheKey, libFallback);
+      cmdLogger.info(
+        { city: trimmed, resolved: libFallback, source: 'ai', ms: performance.now() - startMs },
+        'City resolved',
+      );
+      return libFallback;
     }
+
+    // Direct IANA from AI
+    if (validateTimezone(tz)) {
+      await cacheSet(cacheKey, tz);
+      cmdLogger.info({ city: trimmed, resolved: tz, source: 'ai', ms: performance.now() - startMs }, 'City resolved');
+      return tz;
+    }
+
+    cmdLogger.warn({ city: trimmed, aiResult: tz, ms: performance.now() - startMs }, 'AI returned invalid timezone');
   } catch (err) {
     cmdLogger.error({ err, city: trimmed, ms: performance.now() - startMs }, 'AI city resolution failed');
   }

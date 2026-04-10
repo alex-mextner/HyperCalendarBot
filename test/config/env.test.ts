@@ -1,5 +1,5 @@
 // test/config/env.test.ts
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { loadConfig } from '../../src/config/env.ts';
 
 describe('loadConfig', () => {
@@ -14,20 +14,94 @@ describe('loadConfig', () => {
     process.env.AGENT_DOWNLOAD_URL = 'https://example.com/agent';
   };
 
+  /** Set every required AI provider env var to a dummy value. */
+  const setAiVars = () => {
+    process.env.ZAI_API_KEY = 'test-zai-key';
+    process.env.ZAI_BASE_URL = 'https://api.z.ai/api/coding/paas/v4';
+    process.env.ZAI_MODEL = 'glm-5.1';
+    process.env.ZAI_FAST_MODEL = 'glm-4.7-flash';
+    process.env.HF_TOKEN = 'test-hf-token';
+    process.env.HF_BASE_URL = 'https://router.huggingface.co/v1';
+    process.env.HF_MODEL = 'Qwen/Qwen3-235B-A22B';
+    process.env.HF_FAST_MODEL = 'meta-llama/Llama-3.3-70B-Instruct';
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    process.env.GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    process.env.GEMINI_MODEL = 'gemini-2.5-pro';
+    process.env.GEMINI_FAST_MODEL = 'gemini-2.5-flash';
+  };
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.BOT_TOKEN = 'test-token';
+    setAiVars();
+  });
+
   test('throws if BOT_TOKEN is missing', () => {
     delete process.env.BOT_TOKEN;
     expect(() => loadConfig()).toThrow('BOT_TOKEN');
   });
 
-  test('throws if ANTHROPIC_API_KEY is missing', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    delete process.env.ANTHROPIC_API_KEY;
-    expect(() => loadConfig()).toThrow('ANTHROPIC_API_KEY');
+  test('throws if ZAI_API_KEY is missing', () => {
+    delete process.env.ZAI_API_KEY;
+    expect(() => loadConfig()).toThrow('ZAI_API_KEY');
+  });
+
+  test('throws if ZAI_BASE_URL is missing', () => {
+    delete process.env.ZAI_BASE_URL;
+    expect(() => loadConfig()).toThrow('ZAI_BASE_URL');
+  });
+
+  test('throws if ZAI_MODEL is missing', () => {
+    delete process.env.ZAI_MODEL;
+    expect(() => loadConfig()).toThrow('ZAI_MODEL');
+  });
+
+  test('throws if ZAI_FAST_MODEL is missing', () => {
+    delete process.env.ZAI_FAST_MODEL;
+    expect(() => loadConfig()).toThrow('ZAI_FAST_MODEL');
+  });
+
+  test('throws if HF_TOKEN is missing', () => {
+    delete process.env.HF_TOKEN;
+    expect(() => loadConfig()).toThrow('HF_TOKEN');
+  });
+
+  test('throws if HF_BASE_URL is missing', () => {
+    delete process.env.HF_BASE_URL;
+    expect(() => loadConfig()).toThrow('HF_BASE_URL');
+  });
+
+  test('throws if HF_MODEL is missing', () => {
+    delete process.env.HF_MODEL;
+    expect(() => loadConfig()).toThrow('HF_MODEL');
+  });
+
+  test('throws if HF_FAST_MODEL is missing', () => {
+    delete process.env.HF_FAST_MODEL;
+    expect(() => loadConfig()).toThrow('HF_FAST_MODEL');
+  });
+
+  test('throws if GEMINI_API_KEY is missing', () => {
+    delete process.env.GEMINI_API_KEY;
+    expect(() => loadConfig()).toThrow('GEMINI_API_KEY');
+  });
+
+  test('throws if GEMINI_BASE_URL is missing', () => {
+    delete process.env.GEMINI_BASE_URL;
+    expect(() => loadConfig()).toThrow('GEMINI_BASE_URL');
+  });
+
+  test('throws if GEMINI_MODEL is missing', () => {
+    delete process.env.GEMINI_MODEL;
+    expect(() => loadConfig()).toThrow('GEMINI_MODEL');
+  });
+
+  test('throws if GEMINI_FAST_MODEL is missing', () => {
+    delete process.env.GEMINI_FAST_MODEL;
+    expect(() => loadConfig()).toThrow('GEMINI_FAST_MODEL');
   });
 
   test('AGENT_JWT_SECRET is optional — bot starts without it', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();
@@ -35,8 +109,6 @@ describe('loadConfig', () => {
   });
 
   test('AGENT_DOWNLOAD_URL is optional — bot starts without it', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();
@@ -44,52 +116,40 @@ describe('loadConfig', () => {
   });
 
   test('AGENT_JWT_SECRET is loaded when present', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.AGENT_JWT_SECRET = 'test-agent-secret-at-least-32-chars!!';
     const config = loadConfig();
     expect(config.AGENT_JWT_SECRET).toBe('test-agent-secret-at-least-32-chars!!');
   });
 
   test('returns config with defaults when required vars are set', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     delete process.env.NODE_ENV;
-    delete process.env.AI_BASE_URL;
-    delete process.env.AI_MODEL;
     const config = loadConfig();
     expect(config.BOT_TOKEN).toBe('test-token');
     expect(config.DATABASE_PATH).toBe('./data/calendar.db');
     expect(config.NODE_ENV).toBe('development');
-    expect(config.ANTHROPIC_API_KEY).toBe('test-key');
-    expect(config.AI_BASE_URL).toBe('https://api.anthropic.com');
-    expect(config.AI_MODEL).toBe('claude-sonnet-4-20250514');
+    expect(config.ZAI_API_KEY).toBe('test-zai-key');
+    expect(config.ZAI_BASE_URL).toBe('https://api.z.ai/api/coding/paas/v4');
+    expect(config.ZAI_MODEL).toBe('glm-5.1');
+    expect(config.ZAI_FAST_MODEL).toBe('glm-4.7-flash');
+    expect(config.HF_TOKEN).toBe('test-hf-token');
+    expect(config.HF_BASE_URL).toBe('https://router.huggingface.co/v1');
+    expect(config.HF_MODEL).toBe('Qwen/Qwen3-235B-A22B');
+    expect(config.HF_FAST_MODEL).toBe('meta-llama/Llama-3.3-70B-Instruct');
+    expect(config.GEMINI_API_KEY).toBe('test-gemini-key');
+    expect(config.GEMINI_BASE_URL).toBe('https://generativelanguage.googleapis.com/v1beta/openai/');
+    expect(config.GEMINI_MODEL).toBe('gemini-2.5-pro');
+    expect(config.GEMINI_FAST_MODEL).toBe('gemini-2.5-flash');
   });
 
   test('respects DATABASE_PATH override', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     process.env.DATABASE_PATH = '/tmp/test.db';
     const config = loadConfig();
     expect(config.DATABASE_PATH).toBe('/tmp/test.db');
   });
 
-  test('loads custom AI_BASE_URL and AI_MODEL', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
-    setAgentVars();
-    process.env.AI_BASE_URL = 'https://custom.api';
-    process.env.AI_MODEL = 'custom-model';
-    const config = loadConfig();
-    expect(config.AI_BASE_URL).toBe('https://custom.api');
-    expect(config.AI_MODEL).toBe('custom-model');
-  });
-
   test('REDIS_URL is optional (bot works without it)', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     delete process.env.REDIS_URL;
     delete process.env.GOOGLE_CLIENT_ID;
@@ -98,16 +158,12 @@ describe('loadConfig', () => {
   });
 
   test('throws when GOOGLE_CLIENT_ID set but REDIS_URL missing', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     delete process.env.REDIS_URL;
     process.env.GOOGLE_CLIENT_ID = 'cid';
     expect(() => loadConfig()).toThrow('REDIS_URL is required when GOOGLE_CLIENT_ID is set');
   });
 
   test('throws when GOOGLE_CLIENT_ID set but ENCRYPTION_KEY missing', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
     process.env.GOOGLE_CLIENT_SECRET = 'csec';
@@ -116,8 +172,6 @@ describe('loadConfig', () => {
   });
 
   test('throws when ENCRYPTION_KEY is not 64 hex chars', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
     process.env.GOOGLE_CLIENT_SECRET = 'csec';
@@ -126,8 +180,6 @@ describe('loadConfig', () => {
   });
 
   test('loads all Google vars when present', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
@@ -141,8 +193,6 @@ describe('loadConfig', () => {
   });
 
   test('PUBLIC_DOMAIN derives GOOGLE_REDIRECT_URI when not explicit', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     process.env.REDIS_URL = 'redis://localhost:6379';
     process.env.GOOGLE_CLIENT_ID = 'cid';
@@ -155,8 +205,6 @@ describe('loadConfig', () => {
   });
 
   test('BOT_ADMIN_ID is undefined when not set', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     delete process.env.BOT_ADMIN_ID;
     const config = loadConfig();
@@ -164,8 +212,6 @@ describe('loadConfig', () => {
   });
 
   test('BOT_ADMIN_ID parses as number when set', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     process.env.BOT_ADMIN_ID = '12345';
     const config = loadConfig();
@@ -173,15 +219,11 @@ describe('loadConfig', () => {
   });
 
   test('throws when BOT_ADMIN_ID is not a valid number', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.BOT_ADMIN_ID = 'not-a-number';
     expect(() => loadConfig()).toThrow('BOT_ADMIN_ID must be a valid number');
   });
 
   test('INTENT_LEARNER_DAILY_LIMIT defaults to 100', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     delete process.env.INTENT_LEARNER_DAILY_LIMIT;
     const config = loadConfig();
@@ -189,8 +231,6 @@ describe('loadConfig', () => {
   });
 
   test('INTENT_LEARNER_DAILY_LIMIT uses custom value when set', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     setAgentVars();
     process.env.INTENT_LEARNER_DAILY_LIMIT = '50';
     const config = loadConfig();
@@ -198,8 +238,6 @@ describe('loadConfig', () => {
   });
 
   test('throws when INTENT_LEARNER_DAILY_LIMIT is not a valid number', () => {
-    process.env.BOT_TOKEN = 'test-token';
-    process.env.ANTHROPIC_API_KEY = 'test-key';
     process.env.INTENT_LEARNER_DAILY_LIMIT = 'invalid';
     expect(() => loadConfig()).toThrow('INTENT_LEARNER_DAILY_LIMIT must be a valid number');
   });

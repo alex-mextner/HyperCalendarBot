@@ -33,6 +33,7 @@ import type {
   UserCallSettings,
 } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import { aiStreamRound } from '../../services/ai/streaming.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
@@ -161,7 +162,6 @@ export interface MessageHandlerDeps {
   workflowSessions?: WorkflowSessionStore;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
-  aiCityModel?: string;
   // NLI semantic filter for group messages
   nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
@@ -173,9 +173,6 @@ export interface MessageHandlerDeps {
   sendMessageToChat?: AgentContext['sendMessageToChat'];
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
-  aiBaseUrl?: string;
-  aiApiKey?: string;
-  aiModel?: string;
   proposeTimeSessions?: Map<number, { invitationId: number }>;
   editMessage?: (chatId: number, messageId: number, text: string) => Promise<void>;
   notifyInviterProposal?: (
@@ -580,7 +577,6 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               return [];
             }
           })(),
-      fastModel: deps.aiCityModel,
       actionLogRepo: deps.actionLogRepo,
       chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       sceneStorage: {
@@ -771,38 +767,18 @@ async function handleIntentEditInstruction(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     let rawText: string | undefined;
     try {
-      const apiKey = deps.aiApiKey ?? '';
-      const baseUrl = deps.aiBaseUrl ?? 'https://api.anthropic.com';
-
-      const response = await fetch(`${baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: deps.aiModel ?? 'glm-5',
-          max_tokens: INTENT_EDIT_MAX_TOKENS,
-          system: INTENT_EDIT_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: 'user',
-              content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
-            },
-          ],
-        }),
+      const result = await aiStreamRound({
+        messages: [
+          { role: 'system', content: INTENT_EDIT_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
+          },
+        ],
+        maxTokens: INTENT_EDIT_MAX_TOKENS,
       });
 
-      if (!response.ok) {
-        throw new Error(`AI API error: ${response.status}`);
-      }
-
-      const anthropicResponseSchema = z.object({
-        content: z.array(z.object({ type: z.string(), text: z.string() })),
-      });
-      const data = anthropicResponseSchema.parse(await response.json());
-      rawText = data.content.find((c) => c.type === 'text')?.text;
+      rawText = result.text;
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
@@ -960,7 +936,7 @@ export async function tryHandleGroupTzInput(
   userId: number,
   text: string,
   groupChatRepo: GroupChatRepository,
-  aiModel?: string,
+  resolveCityFn: typeof resolveCity = resolveCity,
 ): Promise<boolean> {
   const entry = pendingGroupTzInput.get(userId);
   if (!entry) return false;
@@ -970,7 +946,7 @@ export async function tryHandleGroupTzInput(
     return false;
   }
 
-  const tz = await resolveCity(text.trim(), aiModel);
+  const tz = await resolveCityFn(text.trim());
   pendingGroupTzInput.delete(userId);
 
   if (!tz) {
@@ -1209,13 +1185,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       // Check pending group TZ input before relevance gate — the city name prompt
       // won't match any bot keyword, so it must be intercepted before the gate drops it
       if (deps.groupChatRepo) {
-        const groupTzHandled = await tryHandleGroupTzInput(
-          ctx,
-          user.telegram_id,
-          text,
-          deps.groupChatRepo,
-          deps.aiCityModel,
-        );
+        const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
         if (groupTzHandled) return;
       }
 

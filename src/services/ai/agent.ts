@@ -1,15 +1,14 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
+import type OpenAI from 'openai';
 import { z } from 'zod';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
-import { buildAddressContext } from '../location/address-context.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
-import { createAnthropicClient } from './anthropic-client.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import { validateResponse } from './response-validator.ts';
+import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
@@ -18,51 +17,250 @@ import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
 
-/** Text patterns that mean "stay silent" — works in both groups and DMs. */
-function isSkipText(text: string): boolean {
-  const trimmed = text.trim();
-  const upper = trimmed.toUpperCase();
-  return (
-    upper.includes('[SKIP]') ||
-    upper.includes('[ПРОПУСК]') ||
-    upper.includes('[SKIP') ||
-    upper.includes('ПРОПУСК]') ||
-    trimmed === '...' ||
-    trimmed === '…'
-  );
-}
-
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 90_000;
-const MAX_API_RETRIES = 2;
-const RETRY_DELAY_MS = 1500;
 
-interface MessageParam {
-  role: 'user' | 'assistant';
-  content: string | Anthropic.ContentBlockParam[];
-}
+type MessageParam = OpenAI.ChatCompletionMessageParam;
 
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
   const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
   return `[${local}] ${text}`;
 }
 
+/**
+ * Sanitize message history before handing it to the model.
+ *
+ * Two invariants, both enforced to keep OpenAI-compatible providers happy:
+ *   1. The first non-system message must be a user message. If the history
+ *      begins with an assistant or tool turn (e.g. a leading bot reply after
+ *      migration), insert a '...' user placeholder.
+ *   2. Every assistant message with `tool_calls` must be followed by one
+ *      tool-role message per tool_call_id. If any id is unmatched — usually
+ *      because a previous run crashed mid-loop and left an orphaned assistant
+ *      turn in `chat_history` — strip the `tool_calls` field entirely and
+ *      fall back to the text content (or drop the message if it's empty).
+ *      Without this, OpenAI returns `400 - An assistant message with
+ *      'tool_calls' must be followed by tool messages`.
+ */
 function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
-  // Ensure strict user/assistant alternation required by the API.
-  // Uses '...' placeholders so no history is lost.
+  const paired: MessageParam[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (
+      msg.role !== 'assistant' ||
+      !('tool_calls' in msg) ||
+      !Array.isArray(msg.tool_calls) ||
+      msg.tool_calls.length === 0
+    ) {
+      paired.push(msg);
+      continue;
+    }
+    // Collect tool_call_ids from the following consecutive tool messages.
+    const expectedIds = new Set(msg.tool_calls.map((tc) => tc.id));
+    const foundIds = new Set<string>();
+    let j = i + 1;
+    while (j < messages.length && messages[j]!.role === 'tool') {
+      const toolMsg = messages[j] as OpenAI.ChatCompletionToolMessageParam;
+      if (toolMsg.tool_call_id) foundIds.add(toolMsg.tool_call_id);
+      j++;
+    }
+    const allPaired = expectedIds.size > 0 && [...expectedIds].every((id) => foundIds.has(id));
+    if (allPaired) {
+      paired.push(msg);
+      continue;
+    }
+    // Orphaned tool_calls — strip them. Preserve any text content as a fallback;
+    // otherwise drop the assistant turn altogether so we don't leave an empty
+    // `assistant` message in the list.
+    const textContent = typeof msg.content === 'string' ? msg.content.trim() : '';
+    if (textContent) {
+      paired.push({ role: 'assistant', content: textContent });
+    }
+    // Note: we intentionally don't skip the orphaned trailing tool messages —
+    // OpenAI rejects tool messages without a matching tool_call above, so we
+    // also filter those out.
+    for (let k = i + 1; k < j; k++) {
+      const toolMsg = messages[k] as OpenAI.ChatCompletionToolMessageParam;
+      // Drop tool messages whose tool_call_id was part of the orphaned set.
+      if (!expectedIds.has(toolMsg.tool_call_id)) {
+        paired.push(messages[k]!);
+      }
+    }
+    i = j - 1; // advance past the orphaned tool block
+  }
+
+  // Second pass: ensure the first non-system message is a user.
   const result: MessageParam[] = [];
-  for (const msg of messages) {
-    const lastRole = result.length > 0 ? result[result.length - 1]!.role : null;
-    if (lastRole === null) {
-      // First message must be user
-      if (msg.role !== 'user') result.push({ role: 'user', content: '...' });
-    } else if (lastRole === msg.role) {
-      // Same role twice — insert opposite placeholder
-      result.push({ role: msg.role === 'user' ? 'assistant' : 'user', content: '...' });
+  let seenNonSystem = false;
+  for (const msg of paired) {
+    if (msg.role === 'system') {
+      result.push(msg);
+      continue;
+    }
+    if (!seenNonSystem) {
+      if (msg.role !== 'user') {
+        result.push({ role: 'user', content: '...' });
+      }
+      seenNonSystem = true;
     }
     result.push(msg);
   }
   return result;
+}
+
+/** Plain-text fallback for group-chat sender attribution. */
+function tagSender(content: string, name: string, userId: number): string {
+  const senderTag = `[From: ${name} (id:${userId})] `;
+  const tsPattern = /^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] )/;
+  return tsPattern.test(content) ? content.replace(tsPattern, `$1${senderTag}`) : `${senderTag}${content}`;
+}
+
+/**
+ * Schema for parsing stored OpenAI-format assistant turns back out of chat_history.
+ * The writer serializes via JSON.stringify on the full assistant message; this
+ * schema validates the minimum shape we need on the way back in.
+ */
+const StoredAssistantMessageSchema = z.object({
+  role: z.literal('assistant'),
+  content: z.string().nullable().optional(),
+  tool_calls: z
+    .array(
+      z.object({
+        id: z.string(),
+        type: z.literal('function'),
+        function: z.object({
+          name: z.string(),
+          arguments: z.string(),
+        }),
+      }),
+    )
+    .optional(),
+});
+
+const StoredToolResultArraySchema = z.array(
+  z.object({
+    role: z.literal('tool'),
+    tool_call_id: z.string(),
+    content: z.string(),
+  }),
+);
+
+/**
+ * Legacy Anthropic assistant turn — an array of content blocks with a `type`
+ * field. Pre-migration history rows use this shape. We flatten them into plain
+ * text so existing conversation context survives the SDK swap.
+ */
+const LegacyAnthropicContentBlocksSchema = z.array(z.object({ type: z.string() }).passthrough());
+
+const AssistantMessageCodec = jsonCodec(StoredAssistantMessageSchema);
+const ToolResultsCodec = jsonCodec(StoredToolResultArraySchema);
+const LegacyAnthropicContentBlocksCodec = jsonCodec(LegacyAnthropicContentBlocksSchema);
+const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
+
+/** Extract a best-effort plain-text summary from a legacy Anthropic content-block array. */
+function flattenLegacyContentBlocks(blocks: { type: string; [key: string]: unknown }[]): string {
+  const parts: string[] = [];
+  for (const block of blocks) {
+    if (block.type === 'text' && typeof block.text === 'string') {
+      parts.push(block.text);
+    } else if (block.type === 'tool_use' && typeof block.name === 'string') {
+      parts.push(`[tool_use: ${block.name}]`);
+    } else if (block.type === 'tool_result') {
+      const content =
+        typeof block.content === 'string'
+          ? block.content
+          : Array.isArray(block.content)
+            ? block.content
+                .map((p) => (p && typeof p === 'object' && 'text' in p ? String(p.text) : ''))
+                .filter(Boolean)
+                .join(' ')
+            : '';
+      parts.push(`[tool_result: ${content.slice(0, 300)}]`);
+    }
+  }
+  return parts.join(' ').trim();
+}
+
+/**
+ * Parse the content column of a chat_history row into zero or more OpenAI
+ * messages. Handles three formats:
+ *  1. OpenAI assistant turn (JSON of a single assistant message)
+ *  2. OpenAI tool results (JSON array of tool-role messages)
+ *  3. Activity event (JSON { kind: ... }) — rendered to a single flat string
+ *  4. Plain text fallback — rendered with a timestamp prefix
+ */
+function parseHistoryRow(msg: ChatHistoryMessage, timezone: string): MessageParam[] {
+  if (msg.role === 'assistant') {
+    const parsed = AssistantMessageCodec.safeParse(msg.content);
+    if (parsed.success) {
+      return [parsed.data];
+    }
+    // Legacy Anthropic content-blocks — flatten to plain-text assistant turn
+    // so existing conversation context survives the SDK swap.
+    const legacy = LegacyAnthropicContentBlocksCodec.safeParse(msg.content);
+    if (legacy.success) {
+      const flat = flattenLegacyContentBlocks(legacy.data as { type: string; [key: string]: unknown }[]);
+      if (flat) {
+        return [
+          {
+            role: 'assistant',
+            content: withTimestamp(flat, msg.created_at, timezone),
+          },
+        ];
+      }
+      return [];
+    }
+    // Activity event (bot reply / edit) — render to a readable text line.
+    const activity = ActivityEventCodec.safeParse(msg.content);
+    if (activity.success) {
+      return [
+        {
+          role: 'assistant',
+          content: withTimestamp(formatActivityEvent(activity.data as ActivityEvent), msg.created_at, timezone),
+        },
+      ];
+    }
+    return [
+      {
+        role: 'assistant',
+        content: withTimestamp(msg.content, msg.created_at, timezone),
+      },
+    ];
+  }
+
+  if (msg.role === 'tool') {
+    const parsed = ToolResultsCodec.safeParse(msg.content);
+    if (parsed.success) {
+      return parsed.data;
+    }
+    // Legacy Anthropic tool_result blocks — drop; they cannot be mapped to
+    // OpenAI without tool_call_ids and the stale ones won't match anything anyway.
+    return [];
+  }
+
+  // role === 'user'
+  const activity = ActivityEventCodec.safeParse(msg.content);
+  if (activity.success) {
+    return [
+      {
+        role: 'user',
+        content: withTimestamp(formatActivityEvent(activity.data as ActivityEvent), msg.created_at, timezone),
+      },
+    ];
+  }
+  return [
+    {
+      role: 'user',
+      content: withTimestamp(msg.content, msg.created_at, timezone),
+    },
+  ];
+}
+
+/** Detect [SKIP] / ellipsis-only outputs the bot should discard instead of sending. */
+function isSkipText(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0) return false; // empty text is handled separately; not a SKIP
+  return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
 export interface AgentToolCallRecord {
@@ -83,27 +281,14 @@ export interface AgentRunResult {
 }
 
 export class CalendarBotAgent {
-  private client: Anthropic;
-  private fallbackClient: Anthropic | null;
-  private model: string;
-  private fallbackModel: string | null;
-  private validationModel: string | null;
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
+  private streamImpl: typeof aiStreamRound;
 
-  constructor(config: AgentConfig, sender: TelegramSender) {
-    this.client = createAnthropicClient({ apiKey: config.apiKey, baseURL: config.baseUrl });
-    this.model = config.model;
-    this.validationModel = config.validationModel ?? null;
+  constructor(config: AgentConfig, sender: TelegramSender, opts?: { streamImpl?: typeof aiStreamRound }) {
     this.sender = sender;
     this.debugLogger = config.debugLogger;
-    this.fallbackClient = config.fallback
-      ? createAnthropicClient({
-          apiKey: config.fallback.apiKey ?? config.apiKey,
-          baseURL: config.fallback.baseUrl ?? config.baseUrl,
-        })
-      : null;
-    this.fallbackModel = config.fallback?.model ?? null;
+    this.streamImpl = opts?.streamImpl ?? aiStreamRound;
   }
 
   getSender(): TelegramSender {
@@ -118,8 +303,6 @@ export class CalendarBotAgent {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    // If this agent is ever called outside that middleware (e.g. from tests or a new entry point),
-    // the caller is responsible for saving the message first.
     const systemPrompt = buildSystemPrompt(ctx, caps);
 
     const relevantHistory =
@@ -128,54 +311,36 @@ export class CalendarBotAgent {
     const messages: MessageParam[] = [];
     const senderCache = new Map<number, string>();
 
-    const ContentBlocksCodec = jsonCodec(
-      z.array(z.object({ type: z.string(), text: z.string().optional() }).passthrough()),
-    );
-    const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
+    for (const row of relevantHistory) {
+      const parsedMessages = parseHistoryRow(row, ctx.user.timezone);
 
-    for (const msg of relevantHistory) {
-      let content: string | Anthropic.ContentBlockParam[];
-      const blocksResult = ContentBlocksCodec.safeParse(msg.content);
-      if (blocksResult.success) {
-        content = blocksResult.data as Anthropic.ContentBlockParam[];
-      } else {
-        const activityResult = ActivityEventCodec.safeParse(msg.content);
-        if (activityResult.success) {
-          content = withTimestamp(
-            formatActivityEvent(activityResult.data as ActivityEvent),
-            msg.created_at,
-            ctx.user.timezone,
-          );
-        } else {
-          content = withTimestamp(msg.content, msg.created_at, ctx.user.timezone);
+      for (const msg of parsedMessages) {
+        // For group chats, inject sender name+id into plain text user messages
+        // so the model can distinguish speakers.
+        if (ctx.isGroup && ctx.groupChatId && msg.role === 'user' && typeof msg.content === 'string') {
+          if (!senderCache.has(row.user_id)) {
+            const u = ctx.userRepo.findByTelegramId(row.user_id);
+            senderCache.set(row.user_id, u?.first_name ?? u?.username ?? 'User');
+          }
+          const name = senderCache.get(row.user_id)!;
+          messages.push({ role: 'user', content: tagSender(msg.content, name, row.user_id) });
+          continue;
         }
+        messages.push(msg);
       }
-      const role = msg.role === 'tool' ? 'user' : msg.role;
-
-      // For group chats, inject sender name+id into plain text user messages
-      if (ctx.isGroup && ctx.groupChatId && msg.role === 'user' && typeof content === 'string') {
-        if (!senderCache.has(msg.user_id)) {
-          const u = ctx.userRepo.findByTelegramId(msg.user_id);
-          senderCache.set(msg.user_id, u?.first_name ?? u?.username ?? 'User');
-        }
-        const name = senderCache.get(msg.user_id)!;
-        const senderTag = `[From: ${name} (id:${msg.user_id})] `;
-        const tsPattern = /^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] )/;
-        content = tsPattern.test(content) ? content.replace(tsPattern, `$1${senderTag}`) : `${senderTag}${content}`;
-      }
-
-      messages.push({ role, content } as MessageParam);
     }
 
     return { systemPrompt, messages: sanitizeMessages(messages) };
   }
 
-  saveAssistantTurn(ctx: AgentContext, contentBlocks: Anthropic.ContentBlockParam[]): void {
+  saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, contentBlocks, chatId);
+    // The conversation logger stores the full JSON payload under role='assistant'.
+    // We stringify manually here so parseHistoryRow can round-trip the value.
+    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, assistantMessage, chatId);
   }
 
-  saveToolResults(ctx: AgentContext, toolResults: Anthropic.ToolResultBlockParam[]): void {
+  saveToolResults(ctx: AgentContext, toolResults: MessageParam[]): void {
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
     ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toolResults, chatId);
   }
@@ -191,30 +356,11 @@ export class CalendarBotAgent {
       'Agent run started',
     );
 
-    // Preload address context (async) before building messages (sync)
-    if (ctx.addressCache && !ctx.preloadedAddressContext) {
-      try {
-        ctx.preloadedAddressContext = await buildAddressContext(ctx.addressCache, ctx.user.telegram_id);
-      } catch (err) {
-        aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to preload address context');
-      }
-    }
-
-    // Preload pending geo pin (set when user sent a 📍 within last 30 min)
-    if (ctx.pendingGeoStore && ctx.preloadedPendingGeo === undefined) {
-      try {
-        ctx.preloadedPendingGeo = await ctx.pendingGeoStore.get(ctx.user.telegram_id);
-      } catch (err) {
-        aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to preload pending geo');
-        ctx.preloadedPendingGeo = null;
-      }
-    }
-
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages } = this.buildMessages(ctx, history, caps);
+    const { systemPrompt, messages: historyMessages } = this.buildMessages(ctx, history, caps);
 
     const dbg: AiDebugRunContext | null =
       this.debugLogger?.createRunContext(
@@ -228,7 +374,7 @@ export class CalendarBotAgent {
         ctx.supplementAutoResponse,
       ) ?? null;
     dbg?.logSystemPrompt(systemPrompt);
-    dbg?.logHistory(messages);
+    dbg?.logHistory(historyMessages);
 
     const effectiveSender: TelegramSender = ctx.supplementMode
       ? ({
@@ -266,10 +412,16 @@ export class CalendarBotAgent {
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
+    // Last text-only assistant turn — buffered so we don't persist a tool-less
+    // hallucination to chat_history before the validator has a chance to reject it.
+    let pendingAssistantTurn: MessageParam | null = null;
+    let pendingResponseText = '';
+
+    // Build the full message list once (system first, then the reconstructed history).
+    const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
+    let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
 
     try {
-      let currentMessages = [...messages];
-
       for (let round = 0; round < MAX_ROUNDS; round++) {
         dbg?.logRound(round);
 
@@ -279,209 +431,111 @@ export class CalendarBotAgent {
           break;
         }
 
-        let hasToolUse = false;
-        const toolResults: Anthropic.ToolResultBlockParam[] = [];
-        const contentBlocks: Anthropic.ContentBlockParam[] = [];
+        const callbacks: StreamCallbacks = {
+          onTextDelta: (text) => {
+            writer.appendText(text);
+            writer.flush(false).catch(() => {});
+          },
+          onToolCallStart: (name) => {
+            writer.setToolLabel(name);
+            writer.flush(true).catch(() => {});
+          },
+        };
 
-        const makeStreamRequest = (client: Anthropic, model: string) =>
-          client.messages.stream({
-            model,
-            max_tokens: 4096,
-            system: [
-              {
-                type: 'text',
-                text: systemPrompt,
-                cache_control: { type: 'ephemeral' },
-              },
-            ],
+        const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
+        const result = await this.streamImpl(
+          {
             messages: currentMessages,
             tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
-          });
+            maxTokens: 4096,
+            temperature: 0.3,
+            signal: AbortSignal.timeout(remainingMs),
+          },
+          callbacks,
+        );
 
-        type StreamType = ReturnType<typeof makeStreamRequest>;
-        let stream: StreamType;
-        let lastError: unknown;
-        let usedFallback = false;
+        aiLogger.info(
+          {
+            userId: ctx.user.telegram_id,
+            provider: result.providerUsed,
+            round,
+            toolCount: result.toolCalls.length,
+          },
+          'Agent round complete',
+        );
+        dbg?.logAiText(result.text);
 
-        const consumeStream = async (s: StreamType) => {
-          // Register listeners to prevent Anthropic SDK's intentional Promise.reject()
-          // for unhandled abort/error events (MessageStream._emit lines 282, 299)
-          s.on('abort', (err) => aiLogger.warn({ err }, 'Anthropic stream aborted'));
-          s.on('error', (err) => aiLogger.warn({ err }, 'Anthropic stream error'));
-
-          for await (const event of s) {
-            if (event.type === 'content_block_delta') {
-              if (event.delta.type === 'text_delta') {
-                writer.appendText(event.delta.text);
-                await writer.flush(false);
-              }
-            }
-
-            if (event.type === 'content_block_start') {
-              if (event.content_block.type === 'tool_use') {
-                hasToolUse = true;
-                writer.setToolLabel(event.content_block.name);
-                await writer.flush(true);
-              }
-            }
-
-            if (event.type === 'message_delta') {
-              if (event.delta.stop_reason === 'tool_use') {
-                hasToolUse = true;
-              }
-            }
-          }
-        };
-
-        const isRetryableError = (err: unknown): boolean => {
-          const s = String(err);
-          return (
-            s.includes('Network') ||
-            s.includes('overloaded') ||
-            s.includes('AbortError') ||
-            s.includes('connection was closed') ||
-            s.includes('529') ||
-            s.includes('rate') ||
-            s.includes('ECONNRESET')
-          );
-        };
-
-        // Primary model retry loop
-        for (let attempt = 0; attempt <= MAX_API_RETRIES; attempt++) {
-          try {
-            stream = makeStreamRequest(this.client, this.model);
-            await consumeStream(stream);
-            lastError = undefined;
-            break;
-          } catch (err) {
-            lastError = err;
-            if (!isRetryableError(err) || attempt >= MAX_API_RETRIES) break;
-            aiLogger.warn({ attempt: attempt + 1, err, userId: ctx.user.telegram_id }, 'API call failed, retrying');
-            const baseDelay = RETRY_DELAY_MS * (attempt + 1);
-            const jitter = Math.random() * baseDelay;
-            await Bun.sleep(baseDelay + jitter);
-          }
-        }
-
-        // Fallback model: try once if primary exhausted retries
-        if (lastError && this.fallbackClient && this.fallbackModel) {
-          aiLogger.warn(
-            { err: lastError, fallbackModel: this.fallbackModel, userId: ctx.user.telegram_id },
-            'Primary model failed, trying fallback',
-          );
-          try {
-            stream = makeStreamRequest(this.fallbackClient, this.fallbackModel);
-            await consumeStream(stream);
-            lastError = undefined;
-            usedFallback = true;
-          } catch (fallbackErr) {
-            aiLogger.error({ err: fallbackErr, userId: ctx.user.telegram_id }, 'Fallback model also failed');
-            // Keep the original lastError — it's more informative
-          }
-        }
-
-        if (lastError) throw lastError;
-        if (usedFallback) {
-          aiLogger.info({ userId: ctx.user.telegram_id, model: this.fallbackModel }, 'Used fallback model');
-        }
-
-        const finalMessage = await stream!.finalMessage();
-
-        for (const block of finalMessage.content) {
-          if (block.type === 'text') {
-            contentBlocks.push({ type: 'text', text: block.text });
-          } else if (block.type === 'tool_use') {
-            contentBlocks.push({
-              type: 'tool_use',
-              id: block.id,
-              name: block.name,
-              input: block.input,
-            });
-
-            aiLogger.info(
-              { tool: block.name, input: block.input, userId: ctx.user.telegram_id, chatId: ctx.chatId },
-              'Tool call',
-            );
-            dbg?.logToolCall(block.name, block.input as { [key: string]: unknown });
-
-            writer.setToolLabel(block.name, block.input as { [key: string]: unknown });
-            await writer.flush(true);
-
-            const result = await executeTool(ctx, block.name, block.input);
-
-            writer.markToolResult(result.success);
-            aiLogger.info(
-              {
-                tool: block.name,
-                success: result.success,
-                ...(!result.success && { error: result.error ?? result.output ?? 'Unknown error' }),
-                userId: ctx.user.telegram_id,
-                chatId: ctx.chatId,
-              },
-              'Tool result',
-            );
-            dbg?.logToolResult(block.name, result.success, result.output, result.error);
-
-            allToolCalls.push({ name: block.name, input: block.input as { [key: string]: unknown } });
-            allToolResults.push({ success: result.success, output: result.output });
-
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: block.id,
-              content: result.success
-                ? `${result.output ?? 'OK'}${result.agentHint ? `\n[AGENT: ${result.agentHint}]` : ''}`
-                : `Error: ${result.error ?? result.output ?? 'Unknown error'}`,
-              is_error: !result.success,
-            });
-
-            if (result.stopLoop) {
-              // Tool requested to stop and wait for user input
-              writer.clearToolLabel();
-              if (!ctx.supplementMode) {
-                if (contentBlocks.length > 0) {
-                  this.saveAssistantTurn(ctx, contentBlocks);
-                }
-                this.saveToolResults(ctx, toolResults);
-              }
-              writer.commitIntermediate();
-              await writer.finalize();
-              dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
-              dbg?.flush();
-              if (allToolCalls.some((tc) => tc.name === 'end_conversation')) {
-                this.debugLogger?.endSession(ctx.chatId);
-              }
-              return {
-                responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
-                toolCalls: allToolCalls,
-                toolResults: allToolResults,
-                endCall: ctx.callEndRequested === true,
-              };
-            }
-          }
-        }
-
-        writer.clearToolLabel();
-
-        if (contentBlocks.length > 0) {
-          this.saveAssistantTurn(ctx, contentBlocks);
-        }
-
-        if (!hasToolUse || toolResults.length === 0) {
-          const roundText = writer.getText();
-          if (!hasToolUse) {
-            aiLogger.info(
-              { userId: ctx.user.telegram_id, chatId: ctx.chatId, round, textPreview: roundText.slice(0, 300) },
-              'AI text-only response (no tool calls)',
-            );
-            dbg?.logAiText(roundText);
-          }
+        // No tool calls → we're done with the streaming phase. Do NOT persist
+        // the assistant turn yet — validation runs after the loop and may
+        // reject+retry, in which case we don't want the rejected answer in
+        // chat_history. Final persistence happens after validation below.
+        if (result.toolCalls.length === 0) {
+          pendingAssistantTurn = result.assistantMessage;
+          pendingResponseText = result.text;
           break;
         }
 
-        // [SKIP] in a round with tool calls — discard immediately so it doesn't
-        // leak into intermediateChunks and appear in the finalized message.
-        // Intentionally skips saveToolResults: silent tools (set_reaction etc.)
-        // don't need history persistence — the side effect already happened.
+        // Persist the assistant turn (text + tool_calls) before executing tools
+        if (!ctx.supplementMode) {
+          this.saveAssistantTurn(ctx, result.assistantMessage);
+        }
+
+        const toolResultMessages: MessageParam[] = [];
+
+        for (const tc of result.toolCalls) {
+          let input: { [key: string]: unknown };
+          try {
+            input = JSON.parse(tc.arguments) as { [key: string]: unknown };
+          } catch (err) {
+            aiLogger.error({ err, tool: tc.name, arguments: tc.arguments }, 'Failed to parse tool arguments');
+            input = {};
+          }
+
+          aiLogger.info({ tool: tc.name, input, userId: ctx.user.telegram_id, chatId: ctx.chatId }, 'Tool call');
+          dbg?.logToolCall(tc.name, input);
+
+          writer.setToolLabel(tc.name, input);
+          await writer.flush(true);
+
+          const toolResult = await executeTool(ctx, tc.name, input);
+
+          writer.markToolResult(toolResult.success);
+          dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
+
+          allToolCalls.push({ name: tc.name, input });
+          allToolResults.push({ success: toolResult.success, output: toolResult.output });
+
+          const content = toolResult.success
+            ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`
+            : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
+
+          toolResultMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content,
+          });
+
+          if (toolResult.stopLoop) {
+            writer.clearToolLabel();
+            if (!ctx.supplementMode && toolResultMessages.length > 0) {
+              this.saveToolResults(ctx, toolResultMessages);
+            }
+            writer.commitIntermediate();
+            await writer.finalize();
+            dbg?.logFinal(writer.getText().trim(), allToolCalls.length);
+            dbg?.flush();
+            if (allToolCalls.some((call) => call.name === 'end_conversation')) {
+              this.debugLogger?.endSession(ctx.chatId);
+            }
+            return {
+              responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
+              toolCalls: allToolCalls,
+              toolResults: allToolResults,
+              endCall: ctx.callEndRequested === true,
+            };
+          }
+        }
+
         if (isSkipText(writer.getText())) {
           await writer.discard();
           dbg?.logFinal('[SKIP] (mid-loop discard)', allToolCalls.length);
@@ -489,57 +543,83 @@ export class CalendarBotAgent {
           return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
         }
 
+        writer.clearToolLabel();
+        if (!ctx.supplementMode) {
+          this.saveToolResults(ctx, toolResultMessages);
+        }
         writer.commitIntermediate();
-        this.saveToolResults(ctx, toolResults);
 
-        currentMessages = [
-          ...currentMessages,
-          { role: 'assistant' as const, content: contentBlocks },
-          { role: 'user' as const, content: toolResults },
-        ];
+        currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
       }
-      // Response validation: when no tools were called, verify the response isn't hallucinated
-      if (this.validationModel && allToolCalls.length === 0 && !ctx.supplementMode) {
-        const responseText = writer.getText().trim();
+
+      // Response validation: when no tools were called, verify the response isn't
+      // hallucinated. Always on — cheap via the fast chain, and critical for
+      // calendar correctness. Skip supplementMode (no user-visible output to validate).
+      const availableTools = getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode);
+      let rejected = false;
+      if (availableTools.length > 0 && allToolCalls.length === 0 && !ctx.supplementMode) {
+        // Use the model's actual emitted text, not the writer buffer — tests
+        // with scripted stream impls can produce an assistantMessage without
+        // calling onTextDelta, so writer.getText() may be empty even when the
+        // model did return content.
+        const responseText = pendingResponseText.trim();
         if (responseText && !isSkipText(responseText)) {
-          const validation = await validateResponse(this.client, this.validationModel, {
-            userMessage: ctx.messageText,
-            toolCalls: allToolCalls.map((tc) => tc.name),
-            response: responseText,
-          });
+          const validation = await validateResponse(
+            {
+              userMessage: ctx.messageText,
+              toolCalls: allToolCalls.map((tc) => tc.name),
+              response: responseText,
+            },
+            this.streamImpl,
+          );
 
           if (!validation.approved) {
             aiLogger.info(
               { userId: ctx.user.telegram_id, reason: validation.reason },
               'Response validation REJECTED — retrying with tools',
             );
-
-            writer.reset();
-            allToolCalls.length = 0;
-            allToolResults.length = 0;
-
-            const retryMessages: MessageParam[] = [
-              ...messages,
-              { role: 'assistant', content: responseText },
-              {
-                role: 'user',
-                content: `[SYSTEM] Your previous response was rejected by the quality validator. Reason: ${validation.reason}. You MUST call the appropriate tools and re-answer the question properly. Do NOT repeat the same mistake.`,
-              },
-            ];
-
-            const retryResult = await this.runRetryLoop(
+            rejected = true;
+            pendingAssistantTurn = null;
+            const retryOutcome = await this.runRetryAfterRejection(
               ctx,
-              retryMessages,
-              systemPrompt,
+              currentMessages,
+              responseText,
               writer,
               dbg,
               caps,
               allToolCalls,
               allToolResults,
+              startTime,
             );
-            if (retryResult) return retryResult;
+
+            // If the retry ALSO produced a tool-less answer, validate it once
+            // more. If the second pass also rejects, we log and ship anyway —
+            // the alternative is a blank or useless apology and we only get
+            // one retry budget per user request.
+            if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
+              const reValidation = await validateResponse(
+                {
+                  userMessage: ctx.messageText,
+                  toolCalls: allToolCalls.map((tc) => tc.name),
+                  response: retryOutcome.lastRoundText,
+                },
+                this.streamImpl,
+              );
+              if (!reValidation.approved) {
+                aiLogger.warn(
+                  { userId: ctx.user.telegram_id, reason: reValidation.reason },
+                  'Retry response ALSO rejected by validator — shipping anyway, user asked once',
+                );
+              }
+            }
           }
         }
+      }
+
+      // Persist the final tool-less assistant turn only if validation didn't
+      // reject it. Tool-bearing rounds persist as they happen, inside the loop.
+      if (pendingAssistantTurn && !rejected && !ctx.supplementMode) {
+        this.saveAssistantTurn(ctx, pendingAssistantTurn);
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
@@ -570,7 +650,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (isSkipText(finalText)) {
+    if (ctx.isGroup && isSkipText(finalText)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
@@ -591,121 +671,142 @@ export class CalendarBotAgent {
   }
 
   /**
-   * Single retry round after validation rejection.
-   * Runs one full agent loop iteration with the rejection feedback in context.
+   * Retry the round after the quality validator rejected a tool-less response.
+   *
+   * NOTE: the validator's REJECT reason is deliberately NOT forwarded to the
+   * retry prompt. The validator is itself an LLM whose free-form output can
+   * be influenced by the user's original message, so splicing the reason into
+   * a pseudo-system instruction would open a prompt-injection channel where a
+   * malicious user can steer the retry. Caller logs the reason once before
+   * calling this method; after that it is discarded.
    */
-  private async runRetryLoop(
+  private async runRetryAfterRejection(
     ctx: AgentContext,
-    retryMessages: MessageParam[],
-    systemPrompt: string,
+    messages: MessageParam[],
+    previousText: string,
     writer: TelegramStreamWriter,
     dbg: AiDebugRunContext | null,
     caps: UserCapabilities,
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
-  ): Promise<AgentRunResult | null> {
-    dbg?.logRound(-1); // special "retry" round marker
+    startTime: number,
+  ): Promise<{
+    hitStopLoop: boolean;
+    /** Text produced by the most recent round of the retry loop (for re-validation). */
+    lastRoundText: string;
+    /** Whether the last round called any tools. Used to decide if re-validation is needed. */
+    lastRoundHadToolCalls: boolean;
+  }> {
+    // Actually throw away the rejected text — commitIntermediate() would push
+    // it into the final execution log, which is the opposite of what we want.
+    writer.resetBuffers();
 
-    const stream = this.client.messages.stream({
-      model: this.model,
-      max_tokens: 4096,
-      system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-      messages: retryMessages,
-      tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
-    });
+    // Generic retry nudge. Does NOT echo the validator's REJECT string, which
+    // is an LLM-generated value that cannot be trusted as a system directive.
+    const retryMessages: MessageParam[] = [
+      ...messages,
+      { role: 'assistant', content: previousText },
+      {
+        role: 'user',
+        content:
+          '[SYSTEM] Your previous response was rejected by the quality validator because it answered a calendar question without calling any tools. You MUST call the appropriate tools (get_events, search_events, get_free_slots, etc.) and re-answer the question properly. Do NOT repeat the same mistake.',
+      },
+    ];
 
-    stream.on('abort', (err) => aiLogger.warn({ err }, 'Retry stream aborted'));
-    stream.on('error', (err) => aiLogger.warn({ err }, 'Retry stream error'));
+    let currentMessages = retryMessages;
 
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        writer.appendText(event.delta.text);
-        await writer.flush(false);
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      dbg?.logRound(100 + round);
+
+      if (Date.now() - startTime > TIMEOUT_MS) {
+        aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout (retry)');
+        writer.appendText('\n\n⚠️ Timeout reached.');
+        return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: false };
       }
-      if (event.type === 'content_block_start' && event.content_block.type === 'tool_use') {
-        writer.setToolLabel(event.content_block.name);
-        await writer.flush(true);
+
+      const callbacks: StreamCallbacks = {
+        onTextDelta: (text) => {
+          writer.appendText(text);
+          writer.flush(false).catch(() => {});
+        },
+        onToolCallStart: (name) => {
+          writer.setToolLabel(name);
+          writer.flush(true).catch(() => {});
+        },
+      };
+
+      const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
+      const result = await this.streamImpl(
+        {
+          messages: currentMessages,
+          tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+          maxTokens: 4096,
+          temperature: 0.3,
+          signal: AbortSignal.timeout(remainingMs),
+        },
+        callbacks,
+      );
+
+      dbg?.logAiText(result.text);
+
+      if (result.toolCalls.length === 0) {
+        if (!ctx.supplementMode) {
+          this.saveAssistantTurn(ctx, result.assistantMessage);
+        }
+        return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
-    }
 
-    const finalMessage = await stream.finalMessage();
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+      if (!ctx.supplementMode) {
+        this.saveAssistantTurn(ctx, result.assistantMessage);
+      }
 
-    for (const block of finalMessage.content) {
-      if (block.type === 'tool_use') {
-        writer.setToolLabel(block.name, block.input as { [key: string]: unknown });
+      const toolResultMessages: MessageParam[] = [];
+      let stopLoopTriggered = false;
+      for (const tc of result.toolCalls) {
+        let input: { [key: string]: unknown };
+        try {
+          input = JSON.parse(tc.arguments) as { [key: string]: unknown };
+        } catch (err) {
+          aiLogger.error({ err, tool: tc.name, arguments: tc.arguments }, 'Failed to parse tool arguments (retry)');
+          input = {};
+        }
+
+        writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
-        const result = await executeTool(ctx, block.name, block.input);
-        writer.markToolResult(result.success);
+        const toolResult = await executeTool(ctx, tc.name, input);
+        writer.markToolResult(toolResult.success);
+        dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
 
-        allToolCalls.push({ name: block.name, input: block.input as { [key: string]: unknown } });
-        allToolResults.push({ success: result.success, output: result.output });
+        allToolCalls.push({ name: tc.name, input });
+        allToolResults.push({ success: toolResult.success, output: toolResult.output });
 
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: block.id,
-          content: result.success
-            ? `${result.output ?? 'OK'}${result.agentHint ? `\n[AGENT: ${result.agentHint}]` : ''}`
-            : `Error: ${result.error ?? result.output ?? 'Unknown error'}`,
-          is_error: !result.success,
-        });
+        const content = toolResult.success
+          ? `${toolResult.output ?? 'OK'}${toolResult.agentHint ? `\n[AGENT: ${toolResult.agentHint}]` : ''}`
+          : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
 
-        if (result.stopLoop) {
-          writer.clearToolLabel();
-          writer.commitIntermediate();
-          await writer.finalize();
-          return {
-            responseText: ctx.inputMode !== 'text' ? writer.getPlainText() : writer.getText(),
-            toolCalls: allToolCalls,
-            toolResults: allToolResults,
-            endCall: ctx.callEndRequested === true,
-          };
+        toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content });
+
+        if (toolResult.stopLoop) {
+          stopLoopTriggered = true;
+          break;
         }
       }
-    }
 
-    writer.clearToolLabel();
-
-    // If tools were called, feed results back to the model for a text response
-    if (toolResults.length > 0) {
-      const contentBlocks: Anthropic.ContentBlockParam[] = [];
-      for (const block of finalMessage.content) {
-        if (block.type === 'text') {
-          contentBlocks.push({ type: 'text', text: block.text });
-        } else if (block.type === 'tool_use') {
-          contentBlocks.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
-        }
+      if (!ctx.supplementMode && toolResultMessages.length > 0) {
+        this.saveToolResults(ctx, toolResultMessages);
       }
-
+      writer.clearToolLabel();
       writer.commitIntermediate();
 
-      const followUpMessages: MessageParam[] = [
-        ...retryMessages,
-        { role: 'assistant' as const, content: contentBlocks },
-        { role: 'user' as const, content: toolResults },
-      ];
-
-      const followUp = this.client.messages.stream({
-        model: this.model,
-        max_tokens: 4096,
-        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-        messages: followUpMessages,
-        tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
-      });
-
-      followUp.on('abort', (err) => aiLogger.warn({ err }, 'Retry follow-up stream aborted'));
-      followUp.on('error', (err) => aiLogger.warn({ err }, 'Retry follow-up stream error'));
-
-      for await (const event of followUp) {
-        if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-          writer.appendText(event.delta.text);
-          await writer.flush(false);
-        }
+      if (stopLoopTriggered) {
+        // A tool like ask_user / end_conversation already sent its own UI —
+        // do not produce additional assistant text after it.
+        return { hitStopLoop: true, lastRoundText: '', lastRoundHadToolCalls: true };
       }
-    }
 
-    // Return null to let the normal finalization path handle it
-    return null;
+      currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
+    }
+    return { hitStopLoop: false, lastRoundText: '', lastRoundHadToolCalls: true };
   }
 }

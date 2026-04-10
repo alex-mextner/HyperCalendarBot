@@ -15,6 +15,7 @@ import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
+import { initProviderAlerts } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
@@ -48,6 +49,10 @@ const db = createDatabase(config.DATABASE_PATH);
 
 if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
+}
+
+if (config.BOT_ADMIN_ID) {
+  initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 }
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
@@ -317,11 +322,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
     }
 
     const { TtsTranslationService } = await import('./services/voice/tts-translation.ts');
-    const ttsTranslationService = new TtsTranslationService({
-      apiKey: config.ANTHROPIC_API_KEY,
-      baseUrl: config.AI_BASE_URL,
-      model: config.AI_FAST_MODEL,
-    });
+    const ttsTranslationService = new TtsTranslationService();
     const ttsService = new TtsService();
 
     const DEEPGRAM_API_KEY = config.DEEPGRAM_API_KEY ?? '';
@@ -335,15 +336,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
       editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
-    const voiceAgent = new CalendarBotAgent(
-      {
-        apiKey: config.ANTHROPIC_API_KEY,
-        baseUrl: config.AI_BASE_URL,
-        model: config.AI_MODEL,
-        debugLogger: aiDebugLogger,
-      },
-      voiceSender,
-    );
+    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger }, voiceSender);
 
     const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
     const voiceEventService = new EventService({
@@ -808,20 +801,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   createBot(
     config.BOT_TOKEN,
     db,
-    {
-      apiKey: config.ANTHROPIC_API_KEY,
-      baseUrl: config.AI_BASE_URL,
-      model: config.AI_MODEL,
-      validationModel: config.AI_FAST_MODEL,
-      debugLogger: aiDebugLogger,
-      ...(config.AI_MODEL_FALLBACK && {
-        fallback: {
-          model: config.AI_MODEL_FALLBACK,
-          baseUrl: config.AI_BASE_URL_FALLBACK,
-          apiKey: config.AI_API_KEY_FALLBACK,
-        },
-      }),
-    },
+    { debugLogger: aiDebugLogger },
     {
       googleDeps,
       renderService,
@@ -845,7 +825,6 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_USERNAME: config.BOT_USERNAME,
         AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
-        AI_FAST_MODEL: config.AI_FAST_MODEL,
       },
       weatherService,
     },

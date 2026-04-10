@@ -1,39 +1,72 @@
 // test/services/intent/intent-learner.test.ts
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
 import { IntentRepository } from '../../../src/database/repositories/intent.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { IntentLearner } from '../../../src/services/intent/intent-learner.ts';
 import { cmdLogger } from '../../../src/utils/logger.ts';
+
+/**
+ * Build a streamImpl stub that returns a canned text response on each call.
+ * The script is consumed in order; any extra calls re-use the last entry.
+ * Tests that need an error simply throw inside the returned promise.
+ */
+function makeStreamStub(
+  textsOrError: string[] | (() => Promise<string>),
+): (opts: StreamRoundOptions) => Promise<StreamRoundResult> {
+  if (typeof textsOrError === 'function') {
+    return async () => {
+      const text = await textsOrError();
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+    };
+  }
+  let call = 0;
+  return async () => {
+    const text = textsOrError[Math.min(call, textsOrError.length - 1)] ?? '';
+    call++;
+    const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+    return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+  };
+}
+
+function makeTruncatedStub(text: string): (opts: StreamRoundOptions) => Promise<StreamRoundResult> {
+  return async () => {
+    const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+    return { text, toolCalls: [], finishReason: 'length', assistantMessage: msg, providerUsed: 'stub' };
+  };
+}
 
 describe('IntentLearner', () => {
   let db: Database;
   let intentRepo: IntentRepository;
-  let learner: IntentLearner;
 
   beforeEach(() => {
     db = new Database(':memory:');
     runMigrations(db, migrations);
     intentRepo = new IntentRepository(db);
-    learner = new IntentLearner(intentRepo, {
-      apiKey: 'test-key',
-      baseUrl: 'http://localhost',
-      dailyLimit: 100,
-    });
   });
 
+  const buildLearner = (streamImpl?: (opts: StreamRoundOptions) => Promise<StreamRoundResult>) =>
+    new IntentLearner(intentRepo, { dailyLimit: 100, streamImpl });
+
   test('skips when no tool calls (chat response)', async () => {
+    const learner = buildLearner();
     const result = await learner.analyze('привет', [], []);
     expect(result).toBeNull();
   });
 
   test('skips when ask_user was called', async () => {
+    const learner = buildLearner();
     const result = await learner.analyze('delete it', [{ name: 'ask_user', input: {} }], []);
     expect(result).toBeNull();
   });
 
   test('skips contextual messages with pronouns', async () => {
+    const learner = buildLearner();
     const result = await learner.analyze(
       'перенеси это на завтра',
       [{ name: 'update_event', input: {} }],
@@ -43,32 +76,39 @@ describe('IntentLearner', () => {
   });
 
   test('skips Cyrillic pronouns without word boundary false negatives', async () => {
-    // \b does not work with Cyrillic in JS — verify fix via lookarounds
+    const learner = buildLearner();
     for (const msg of ['удали это', 'его отмени', 'её перенеси', 'их удали']) {
       const result = await learner.analyze(msg, [{ name: 'delete_event', input: {} }], [{ success: true }]);
       expect(result).toBeNull();
     }
-    // Substrings that contain pronoun letters but are not pronouns should NOT skip
-    // (tested indirectly — 'итого' contains 'ито' but not the listed pronouns, so no skip)
   });
 
   test('respects daily budget cap', async () => {
-    // Fill up the budget
+    let aiCalled = false;
+    const learner = buildLearner(async () => {
+      aiCalled = true;
+      throw new Error('should not be reached — budget should have blocked the call');
+    });
+    // Simulate a fresh analyze() call so resetDailyIfNeeded() initializes lastResetDate,
+    // then push the counter to the cap. Without this, the first analyze() call would
+    // reset the counter to 0.
+    await learner.analyze('примем звонок', [{ name: 'make_call', input: {} }], [{ success: true }]).catch(() => {});
     for (let i = 0; i < 100; i++) {
       learner.incrementCounter();
     }
+    aiCalled = false;
+
     const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
     expect(result).toBeNull();
+    expect(aiCalled).toBe(false);
   });
 
   test('deduplicates within 1 hour window', async () => {
-    // First call - will try to call API and return null (connection error), which is fine for dedup test
+    // First call: return null (invalid schema triggers ZodError → caught → null)
+    const learner = buildLearner(makeStreamStub(['not json']));
     await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
 
-    // Reset counter since first call incremented it
     learner.resetDailyCounter();
-
-    // Second call with same message - should be null due to dedup
     const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
     expect(result).toBeNull();
   });
@@ -80,95 +120,41 @@ describe('IntentLearner', () => {
       workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
       format: 'events_list',
     };
+    const learner = buildLearner(makeStreamStub([`\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\``]));
 
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          content: [{ type: 'text', text: `\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\`` }],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ) as Response;
-
-    try {
-      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
-      expect(result?.canonical_name).toBe('show_today');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+    expect(result?.canonical_name).toBe('show_today');
   });
 
-  test('returns null silently when API response is truncated (stop_reason: max_tokens)', async () => {
+  test('returns null silently when stream finishReason is "length" (truncated)', async () => {
     const truncatedJson = '{"canonical_name":"show_today","phrases":["что сегодня"],"workflow":{';
+    const learner = buildLearner(makeTruncatedStub(truncatedJson));
 
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          content: [{ type: 'text', text: truncatedJson }],
-          stop_reason: 'max_tokens',
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ) as Response;
-
-    const originalWarn = cmdLogger.warn.bind(cmdLogger);
-    const originalError = cmdLogger.error.bind(cmdLogger);
-    let warnCalled = false;
-    let errorCalled = false;
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).warn = (...args: unknown[]) => {
-      warnCalled = true;
-      return originalWarn(...(args as Parameters<typeof originalWarn>));
-    };
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).error = (...args: unknown[]) => {
-      errorCalled = true;
-      return originalError(...(args as Parameters<typeof originalError>));
-    };
+    const warnSpy = spyOn(cmdLogger, 'warn').mockImplementation(() => {});
+    const errorSpy = spyOn(cmdLogger, 'error').mockImplementation(() => {});
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
       expect(result).toBeNull();
-      expect(warnCalled).toBe(true); // took the silent-skip path
-      expect(errorCalled).toBe(false); // did NOT fall through to JSON.parse error
+      expect(warnSpy).toHaveBeenCalled();
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
-      globalThis.fetch = originalFetch;
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).warn = originalWarn;
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).error = originalError;
+      warnSpy.mockRestore();
+      errorSpy.mockRestore();
     }
   });
 
   test('returns null silently when AI returns skip-only response {"skip":true}', async () => {
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(
-        JSON.stringify({
-          content: [{ type: 'text', text: '{"skip":true}' }],
-        }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ) as Response;
+    const learner = buildLearner(makeStreamStub(['{"skip":true}']));
 
-    const originalError = cmdLogger.error.bind(cmdLogger);
-    let errorCalled = false;
-    // biome-ignore lint/suspicious/noExplicitAny: spy patching pino child logger
-    (cmdLogger as any).error = (...args: unknown[]) => {
-      errorCalled = true;
-      return originalError(...(args as Parameters<typeof originalError>));
-    };
+    const errorSpy = spyOn(cmdLogger, 'error').mockImplementation(() => {});
 
     try {
       const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
       expect(result).toBeNull();
-      expect(errorCalled).toBe(false);
+      expect(errorSpy).not.toHaveBeenCalled();
     } finally {
-      globalThis.fetch = originalFetch;
-      // biome-ignore lint/suspicious/noExplicitAny: restore spy
-      (cmdLogger as any).error = originalError;
+      errorSpy.mockRestore();
     }
   });
 
@@ -187,24 +173,17 @@ describe('IntentLearner', () => {
     };
 
     let callCount = 0;
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () => {
+    const learner = buildLearner(async () => {
       callCount++;
       const payload = callCount === 1 ? invalidPayload : validPayload;
-      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(payload) }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    };
+      const text = JSON.stringify(payload);
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+    });
 
-    try {
-      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
-      expect(result?.canonical_name).toBe('show_today');
-      expect(callCount).toBe(2); // one retry was needed
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+    expect(result?.canonical_name).toBe('show_today');
+    expect(callCount).toBe(2);
   });
 
   test('returns null after all 5 retries fail with invalid variables', async () => {
@@ -216,23 +195,16 @@ describe('IntentLearner', () => {
     };
 
     let callCount = 0;
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () => {
+    const learner = buildLearner(async () => {
       callCount++;
-      return new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(invalidPayload) }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    };
+      const text = JSON.stringify(invalidPayload);
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+    });
 
-    try {
-      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
-      expect(result).toBeNull();
-      expect(callCount).toBe(6); // 1 initial + 5 retries, all returned invalid variables
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+    expect(result).toBeNull();
+    expect(callCount).toBe(6); // 1 initial + 5 retries
   });
 
   test('does not crash when AI returns null for optional pattern field', async () => {
@@ -243,22 +215,11 @@ describe('IntentLearner', () => {
       workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
       format: 'text',
     };
+    const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));
 
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }) as Response;
-
-    try {
-      const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
-      expect(result?.canonical_name).toBe('show_today');
-      expect(result?.pattern).toBeUndefined();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze('что сегодня', [{ name: 'get_events', input: {} }], [{ success: true }]);
+    expect(result?.canonical_name).toBe('show_today');
+    expect(result?.pattern).toBeUndefined();
   });
 
   test('accepts empty phrases when pattern is present', async () => {
@@ -270,27 +231,16 @@ describe('IntentLearner', () => {
       workflow: { steps: [{ call: 'get_timezone_info', input: { timezone: '{{$1}}', at: '{{dates.now}}' } }] },
       format: 'text',
     };
+    const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));
 
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }) as Response;
-
-    try {
-      const result = await learner.analyze(
-        'который час в москве',
-        [{ name: 'get_timezone_info', input: {} }],
-        [{ success: true }],
-      );
-      expect(result?.canonical_name).toBe('get_time_in_timezone');
-      expect(result?.phrases).toEqual([]);
-      expect(result?.pattern).toBe('^(?:который час|время)\\s+(?:в|in)\\s+(.+)$');
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze(
+      'который час в москве',
+      [{ name: 'get_timezone_info', input: {} }],
+      [{ success: true }],
+    );
+    expect(result?.canonical_name).toBe('get_time_in_timezone');
+    expect(result?.phrases).toEqual([]);
+    expect(result?.pattern).toBe('^(?:который час|время)\\s+(?:в|in)\\s+(.+)$');
   });
 
   test('rejects empty phrases when no pattern', async () => {
@@ -300,24 +250,14 @@ describe('IntentLearner', () => {
       workflow: { steps: [{ call: 'get_events', input: { start_date: '{{dates.today}}' } }] },
       format: 'text',
     };
+    const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));
 
-    const originalFetch = globalThis.fetch;
-    // @ts-expect-error: mock fetch missing preconnect
-    globalThis.fetch = async () =>
-      new Response(JSON.stringify({ content: [{ type: 'text', text: JSON.stringify(intentPayload) }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }) as Response;
-
-    try {
-      const result = await learner.analyze('что-то', [{ name: 'get_events', input: {} }], [{ success: true }]);
-      expect(result).toBeNull();
-    } finally {
-      globalThis.fetch = originalFetch;
-    }
+    const result = await learner.analyze('что-то', [{ name: 'get_events', input: {} }], [{ success: true }]);
+    expect(result).toBeNull();
   });
 
   test('resets daily counter on new day', () => {
+    const learner = buildLearner();
     for (let i = 0; i < 50; i++) {
       learner.incrementCounter();
     }

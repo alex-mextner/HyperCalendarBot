@@ -319,10 +319,22 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - **NEVER use `git add -A`** without checking `git status` first.
 - **Deferred findings**: when skipping a review finding (out of scope, pre-existing), create a GitHub
   issue for it. Don't silently drop known issues.
-- **Before every commit** (3-stage review, mandatory even if the user just says "commit"):
+- **Atomic commits are mandatory**: every logical unit of work (one task, one refactor, one bugfix)
+  is its own commit. Never batch multiple unrelated changes into a single commit. When executing a
+  multi-step plan, each step/task gets its own commit — not one mega-commit at the end.
+- **Before every commit** (4-stage review, mandatory even if the user just says "commit"):
   1. Run `bunx knip` — fix unused exports, dependencies, and files.
-  2. Self-review your own changes.
-  3. Run `codex exec review --uncommitted` — address any issues it finds.
+  2. Self-review your own changes (read the diff, question each line).
+  3. Run `codex exec review --uncommitted` — address every issue it finds that isn't a false positive.
+  4. Run `codex exec "security review --uncommitted"` — address every security issue it finds that
+     isn't a false positive.
+- **Commits must NEVER break the tree**: before `git commit`, all of the following must pass clean:
+  - `tsc --noEmit` — zero type errors
+  - `bun run lint` — zero lint errors AND zero warnings
+  - `bun test` — all tests green (or a narrowly scoped subset when the change is truly local; run
+    the full suite before the final commit of a multi-commit series)
+  If any of these are red, fix the root cause before committing. Never commit on top of a broken tree
+  with a "will fix in next commit" note.
 - **Always restart the bot** after code changes to src/. Kill by exact PID, verify 1 process running.
 
 ## MTProto / Pyrogram

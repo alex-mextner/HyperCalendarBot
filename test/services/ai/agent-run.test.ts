@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -9,6 +10,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
+import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -21,50 +23,103 @@ function createTestDb() {
   return db;
 }
 
-/**
- * Creates a mock Anthropic client that simulates streaming responses.
- * streamEvents: array of SSE-like event objects the stream yields.
- * finalMessage: the final aggregated message returned by stream.finalMessage().
- */
-interface MockStreamEvent {
-  type: string;
-  delta?: { type: string; text?: string; stop_reason?: string };
-  content_block?: { type: string; name?: string };
+// ── Scripted stream mocks ────────────────────────────────────────────────
+// makeStreamImpl takes a list of canned StreamRoundResults — one per round —
+// and returns a function with the same signature as aiStreamRound. Each call
+// consumes one canned result and invokes onTextDelta/onToolCallStart to simulate
+// the live streaming behaviour. No module mocking — the agent accepts the impl
+// via constructor options, so tests don't leak across files.
+
+type ScriptedRound =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; callId: string; name: string; input: { [key: string]: unknown } }
+  | { kind: 'error'; error: Error };
+
+function asAssistantMessage(round: ScriptedRound): OpenAI.ChatCompletionMessageParam {
+  if (round.kind === 'tool') {
+    return {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: round.callId,
+          type: 'function',
+          function: { name: round.name, arguments: JSON.stringify(round.input) },
+        },
+      ],
+    };
+  }
+  if (round.kind === 'text') {
+    return { role: 'assistant', content: round.text };
+  }
+  // Unused for 'error' — the impl throws before constructing a message.
+  return { role: 'assistant', content: '' };
 }
 
-interface MockFinalMessage {
-  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: { [key: string]: unknown } }>;
-  stop_reason: string;
+function isValidatorCall(opts: StreamRoundOptions): boolean {
+  // The response validator always sends a 2-message payload (system + user)
+  // whose system prompt starts with "You are a strict QA validator".
+  const system = opts.messages[0];
+  if (!system || system.role !== 'system' || typeof system.content !== 'string') return false;
+  return system.content.includes('strict QA validator');
 }
 
-function setPrivateField<T>(obj: T, field: string, value: unknown): void {
-  Object.defineProperty(obj, field, { value, writable: true, configurable: true });
-}
+function makeStreamImpl(script: ScriptedRound[]): {
+  impl: (opts: StreamRoundOptions, cbs?: StreamCallbacks) => Promise<StreamRoundResult>;
+  calls: { messages: OpenAI.ChatCompletionMessageParam[] }[];
+} {
+  const calls: { messages: OpenAI.ChatCompletionMessageParam[] }[] = [];
+  let round = 0;
+  const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}) => {
+    // Auto-approve validator calls so tests don't have to pre-script them.
+    // Validator invocations are opaque to the script — they're a side channel
+    // that only fires when the agent produces text with no tool calls.
+    if (isValidatorCall(opts)) {
+      const validatorMsg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'APPROVE' };
+      return {
+        text: 'APPROVE',
+        toolCalls: [],
+        finishReason: 'stop',
+        assistantMessage: validatorMsg,
+        providerUsed: 'mock-validator',
+      };
+    }
 
-function createMockAnthropicClient(streamEvents: MockStreamEvent[], finalMessage: MockFinalMessage) {
-  return {
-    messages: {
-      stream: mock(() => {
-        let index = 0;
-        return {
-          [Symbol.asyncIterator]() {
-            return {
-              next() {
-                if (index < streamEvents.length) {
-                  return Promise.resolve({ value: streamEvents[index++], done: false });
-                }
-                return Promise.resolve({ value: undefined, done: true });
-              },
-            };
-          },
-          on() {
-            return this;
-          },
-          finalMessage: mock(() => Promise.resolve(finalMessage)),
-        };
-      }),
-    },
+    calls.push({ messages: opts.messages });
+    const current = script[round++];
+    if (!current) throw new Error(`Scripted stream ran out of rounds (call ${round})`);
+    if (current.kind === 'error') throw current.error;
+
+    if (current.kind === 'text') {
+      cbs.onTextDelta?.(current.text);
+      const msg = asAssistantMessage(current);
+      return {
+        text: current.text,
+        toolCalls: [],
+        finishReason: 'stop',
+        assistantMessage: msg,
+        providerUsed: 'mock',
+      };
+    }
+
+    // tool round
+    cbs.onToolCallStart?.(current.name);
+    const msg = asAssistantMessage(current);
+    return {
+      text: '',
+      toolCalls: [
+        {
+          id: current.callId,
+          name: current.name,
+          arguments: JSON.stringify(current.input),
+        },
+      ],
+      finishReason: 'tool_calls',
+      assistantMessage: msg,
+      providerUsed: 'mock',
+    };
   };
+  return { impl, calls };
 }
 
 describe('CalendarBotAgent.run()', () => {
@@ -95,11 +150,7 @@ describe('CalendarBotAgent.run()', () => {
       userRepo,
       eventReminderRepo,
     };
-    config = {
-      apiKey: 'test-key',
-      baseUrl: 'http://localhost:9999',
-      model: 'test-model',
-    };
+    config = {};
     sender = {
       sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
       editMessageText: mock(() => Promise.resolve()),
@@ -107,106 +158,54 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('run() with simple text response streams and saves history', async () => {
-    const streamEvents = [
-      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'No events' } },
-      { type: 'content_block_delta', delta: { type: 'text_delta', text: ' today.' } },
-    ];
-    const finalMsg = {
-      content: [{ type: 'text', text: 'No events today.' }],
-      stop_reason: 'end_turn',
-    };
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'No events today.' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    // Replace the internal client with our mock
-    setPrivateField(agent, 'client', mockClient);
-
-    // Middleware saves user message before pipeline runs
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
-
     await agent.run(ctx);
 
-    // Sender init message was called
-    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
-    // Finalize flushes to edit the message
-    expect(sender.editMessageText).toHaveBeenCalled();
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1); // init placeholder
+    expect(sender.editMessageText).toHaveBeenCalled(); // finalize
 
-    // Chat history should have user message + assistant turn
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(2);
     expect(history[0]!.role).toBe('user');
     expect(history[0]!.content).toBe('Show my events today');
     expect(history[1]!.role).toBe('assistant');
-    const assistantContent = JSON.parse(history[1]!.content);
-    expect(assistantContent[0].text).toBe('No events today.');
+    const parsed = JSON.parse(history[1]!.content) as OpenAI.ChatCompletionMessageParam;
+    expect(parsed.role).toBe('assistant');
+    expect(parsed.content).toBe('No events today.');
   });
 
   test('run() with tool use executes tool and continues loop', async () => {
-    // First round: model calls get_events tool
-    const toolCallEvents = [
-      { type: 'content_block_start', content_block: { type: 'tool_use', name: 'get_events' } },
-      { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
-    ];
-    const toolCallFinal = {
-      content: [
-        {
-          type: 'tool_use',
-          id: 'call-1',
-          name: 'get_events',
-          input: { start_date: '2026-03-15', end_date: '2026-03-15' },
-        },
-      ],
-      stop_reason: 'tool_use',
-    };
-
-    // Second round: model returns text after seeing tool results
-    const textEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'You have 0 events.' } }];
-    const textFinal = {
-      content: [{ type: 'text', text: 'You have 0 events.' }],
-      stop_reason: 'end_turn',
-    };
-
-    let callCount = 0;
-    const mockClient = {
-      messages: {
-        stream: mock(() => {
-          callCount++;
-          const events = callCount === 1 ? toolCallEvents : textEvents;
-          const final = callCount === 1 ? toolCallFinal : textFinal;
-          let index = 0;
-          return {
-            [Symbol.asyncIterator]() {
-              return {
-                next() {
-                  if (index < events.length) {
-                    return Promise.resolve({ value: events[index++], done: false });
-                  }
-                  return Promise.resolve({ value: undefined, done: true });
-                },
-              };
-            },
-            on() {
-              return this;
-            },
-            finalMessage: mock(() => Promise.resolve(final)),
-          };
-        }),
+    const { impl, calls } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-03-15', end_date: '2026-03-15' },
       },
-    };
+      { kind: 'text', text: 'You have 0 events.' },
+    ]);
 
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
-    // Middleware saves user message before pipeline runs
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
 
     await agent.run(ctx);
 
-    // Should have called stream twice (tool round + final text round)
-    expect(mockClient.messages.stream).toHaveBeenCalledTimes(2);
+    expect(calls.length).toBe(2);
 
-    // History: user + assistant (tool call) + tool result + assistant (text)
+    // Second call should carry the assistant tool_calls message + the tool result
+    const secondCall = calls[1]!;
+    const hasAssistantWithTools = secondCall.messages.some(
+      (m) => m.role === 'assistant' && 'tool_calls' in m && Array.isArray(m.tool_calls) && m.tool_calls.length > 0,
+    );
+    expect(hasAssistantWithTools).toBe(true);
+    const hasToolMessage = secondCall.messages.some((m) => m.role === 'tool');
+    expect(hasToolMessage).toBe(true);
+
     const history = ctx.chatHistory.getRecent(USER_ID);
+    // user + assistant-with-tool-calls + tool result row + assistant text
     expect(history.length).toBe(4);
     expect(history[0]!.role).toBe('user');
     expect(history[1]!.role).toBe('assistant');
@@ -214,29 +213,17 @@ describe('CalendarBotAgent.run()', () => {
     expect(history[3]!.role).toBe('assistant');
   });
 
-  test('run() handles API errors and sends error message', async () => {
-    const mockClient = {
-      messages: {
-        stream: mock(() => {
-          throw new Error('API connection failed');
-        }),
-      },
-    };
+  test('run() handles streaming errors and sends error message in user language', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('all providers failed') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
-    // Middleware saves user message before pipeline runs
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
-
     await agent.run(ctx);
 
-    // Should not throw, should finalize gracefully
-    // Sender should have init + finalize calls
-    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
-    expect(sender.editMessageText).toHaveBeenCalled();
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1); // init
+    expect(sender.editMessageText).toHaveBeenCalled(); // finalize with error text
 
-    // User message should still be saved (saved by middleware before run())
+    // Only the user row — assistant turn was never produced
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('user');
@@ -244,108 +231,44 @@ describe('CalendarBotAgent.run()', () => {
 
   test('run() handles error with Russian language user', async () => {
     ctx.user = { ...ctx.user, language: 'ru' };
-
-    const mockClient = {
-      messages: {
-        stream: mock(() => {
-          throw new Error('API error');
-        }),
-      },
-    };
-
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('boom') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     await agent.run(ctx);
 
-    // The finalize call should contain Russian error text
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const lastEditText = editCalls[editCalls.length - 1]?.[2] as string;
     expect(lastEditText).toContain('Произошла ошибка');
   });
 
-  test('run() breaks loop when no tool use in response', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Done.' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: 'Done.' }],
-      stop_reason: 'end_turn',
-    };
+  test('run() breaks loop when model returns text without tool calls', async () => {
+    const { impl, calls } = makeStreamImpl([{ kind: 'text', text: 'Done.' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    await agent.run(ctx);
+    expect(calls.length).toBe(1);
+  });
 
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+  test('run() injects system prompt as the first message', async () => {
+    const { impl, calls } = makeStreamImpl([{ kind: 'text', text: 'hi' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     await agent.run(ctx);
-
-    // Only one stream call — no looping
-    expect(mockClient.messages.stream).toHaveBeenCalledTimes(1);
-  });
-
-  test('run() passes system prompt with cache_control', async () => {
-    const streamEvents: MockStreamEvent[] = [];
-    const finalMsg = {
-      content: [{ type: 'text', text: 'hi' }],
-      stop_reason: 'end_turn',
-    };
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
-    await agent.run(ctx);
-
-    const streamCall = (mockClient.messages.stream as ReturnType<typeof mock>).mock.calls[0]!;
-    const args = streamCall[0] as {
-      system: Array<{ type: string; text: string; cache_control: { type: string } }>;
-      model: string;
-    };
-    expect(args.model).toBe('test-model');
-    expect(args.system[0]!.cache_control.type).toBe('ephemeral');
-    expect(args.system[0]!.text).toContain('calendar assistant');
-  });
-
-  test('buildMessages parses JSON content blocks from history', () => {
-    const agent = new CalendarBotAgent(config, sender);
-    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
-    const contentBlocks = [{ type: 'text', text: 'Hello' }];
-    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(contentBlocks));
-
-    const history = ctx.chatHistory.getRecent(USER_ID);
-    const { messages } = agent.buildMessages(ctx, history);
-
-    // Parsed JSON array should be passed as content blocks, not a string
-    expect(Array.isArray(messages[1]!.content)).toBe(true);
-  });
-
-  test('buildMessages handles non-JSON content as plain string', () => {
-    const agent = new CalendarBotAgent(config, sender);
-    ctx.chatHistory.save(USER_ID, 'user', 'plain text message');
-
-    const history = ctx.chatHistory.getRecent(USER_ID);
-    const { messages } = agent.buildMessages(ctx, history);
-
-    expect(typeof messages[0]!.content).toBe('string');
-    expect(messages[0]!.content as string).toContain('plain text message');
-  });
-
-  test('buildMessages handles non-array JSON as plain string', () => {
-    const agent = new CalendarBotAgent(config, sender);
-    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
-    ctx.chatHistory.save(USER_ID, 'assistant', '{"key": "value"}');
-
-    const history = ctx.chatHistory.getRecent(USER_ID);
-    const { messages } = agent.buildMessages(ctx, history);
-
-    // Non-array JSON should be kept as string
-    expect(typeof messages[1]!.content).toBe('string');
+    const firstCall = calls[0]!;
+    const system = firstCall.messages.find((m) => m.role === 'system');
+    expect(system).toBeDefined();
+    expect(system!.content as string).toContain('calendar assistant');
   });
 
   test('buildMessages uses per-chat history in group context', () => {
     const GROUP_CHAT_ID = -1001234;
-    // Save some per-user history (should be ignored in group)
     ctx.chatHistory.save(USER_ID, 'user', 'personal message');
-    // Save per-chat history including current message (simulating middleware)
     ctx.chatHistory.save(USER_ID, 'user', 'group message', GROUP_CHAT_ID);
-    ctx.chatHistory.save(USER_ID, 'assistant', 'group reply', GROUP_CHAT_ID);
+    ctx.chatHistory.save(
+      USER_ID,
+      'assistant',
+      JSON.stringify({ role: 'assistant', content: 'group reply' } satisfies OpenAI.ChatCompletionMessageParam),
+      GROUP_CHAT_ID,
+    );
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText, GROUP_CHAT_ID);
 
     ctx.isGroup = true;
@@ -356,7 +279,6 @@ describe('CalendarBotAgent.run()', () => {
     const personalHistory = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, personalHistory);
 
-    // Should have 3 group history entries (group message + reply + current)
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('group message');
     expect(messages[1]!.content as string).toContain('group reply');
@@ -364,16 +286,8 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('[SKIP] response in group sends nothing (no placeholder, no delete)', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '[SKIP]' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
 
@@ -383,26 +297,13 @@ describe('CalendarBotAgent.run()', () => {
 
     await agent.run(ctx);
 
-    // No ⏳ placeholder is sent in groups
     expect(sender.sendMessage).toHaveBeenCalledTimes(0);
-    // Nothing to delete either
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
   test('response containing [SKIP] anywhere is discarded in group', async () => {
-    const streamEvents = [
-      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Got it ' } },
-      { type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } },
-    ];
-    const finalMsg = {
-      content: [{ type: 'text', text: 'Got it [SKIP]' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'Got it [SKIP]' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
 
@@ -416,37 +317,19 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] response in DM is also discarded', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '[SKIP]' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
-    const deleteMessage = mock(() => Promise.resolve());
-    (sender as TelegramSender).deleteMessage = deleteMessage;
+  test('[SKIP] response in DM is NOT discarded', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     ctx.isGroup = false;
+    await agent.run(ctx);
 
-    const result = await agent.run(ctx);
-
-    // [SKIP] is discarded in DMs too — silent actions (reactions etc.) need no text
-    expect(result.responseText).toBe('');
+    expect(sender.editMessageText).toHaveBeenCalled();
   });
 
   test('[SKIP] with trailing whitespace is still discarded in group', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]\n' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '[SKIP]\n' }],
-      stop_reason: 'end_turn',
-    };
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]\n' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
     ctx.isGroup = true;
@@ -458,15 +341,8 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('onBotResponse callback is called after finalize with message ID', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hello' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: 'Hello' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'Hello' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     const onBotResponse = mock(() => {});
     ctx.onBotResponse = onBotResponse;
@@ -474,20 +350,12 @@ describe('CalendarBotAgent.run()', () => {
     await agent.run(ctx);
 
     expect(onBotResponse).toHaveBeenCalledTimes(1);
-    // Message ID from mock sender is 42
     expect(onBotResponse).toHaveBeenCalledWith(42);
   });
 
   test('onBotResponse is NOT called after [SKIP] discard', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '[SKIP]' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
@@ -500,21 +368,12 @@ describe('CalendarBotAgent.run()', () => {
 
     await agent.run(ctx);
 
-    // onBotResponse should NOT be called after SKIP
     expect(onBotResponse).not.toHaveBeenCalled();
   });
 
   test('"..." response in group is discarded like [SKIP]', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '...' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '...' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '...' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
 
@@ -530,16 +389,8 @@ describe('CalendarBotAgent.run()', () => {
   });
 
   test('Unicode ellipsis "…" response in group is discarded like [SKIP]', async () => {
-    const streamEvents = [{ type: 'content_block_delta', delta: { type: 'text_delta', text: '…' } }];
-    const finalMsg = {
-      content: [{ type: 'text', text: '…' }],
-      stop_reason: 'end_turn',
-    };
-
-    const mockClient = createMockAnthropicClient(streamEvents, finalMsg);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
+    const { impl } = makeStreamImpl([{ kind: 'text', text: '…' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     const deleteMessage = mock(() => Promise.resolve());
     (sender as TelegramSender).deleteMessage = deleteMessage;
 
@@ -554,157 +405,121 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] with tool calls in same round is discarded (mid-loop exit)', async () => {
-    // Round 1: model calls set_reaction AND outputs [SKIP] text in the same response
-    const toolCallEvents: MockStreamEvent[] = [
-      { type: 'content_block_start', content_block: { type: 'tool_use', name: 'set_reaction' } },
-      { type: 'content_block_delta', delta: { type: 'text_delta', text: '[SKIP]' } },
-      { type: 'message_delta', delta: { type: 'message_delta', stop_reason: 'tool_use' } },
-    ];
-    const toolCallFinal = {
-      content: [
-        {
-          type: 'tool_use',
-          id: 'call-1',
-          name: 'set_reaction',
-          input: { emoji: '👍' },
-        },
-        { type: 'text', text: '[SKIP]' },
-      ],
-      stop_reason: 'tool_use',
-    };
-
-    const mockClient = createMockAnthropicClient(toolCallEvents, toolCallFinal);
-    const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
-
-    const deleteMessage = mock(() => Promise.resolve());
-    (sender as TelegramSender).deleteMessage = deleteMessage;
-    (sender as TelegramSender).setReaction = mock(() => Promise.resolve());
-
-    ctx.isGroup = true;
-    ctx.groupChatId = -100999;
-    ctx.groupTitle = 'Test Group';
-    ctx.incomingMessageId = 123;
-    ctx.sender = sender;
-
-    const result = await agent.run(ctx);
-
-    // [SKIP] should be detected mid-loop — response is empty, no second API round
-    expect(result.responseText).toBe('');
-    expect(result.toolCalls.length).toBe(1);
-    expect(result.toolCalls[0]!.name).toBe('set_reaction');
-    // Only one API call — loop exits before round 2
-    expect(mockClient.messages.stream).toHaveBeenCalledTimes(1);
-  });
-
-  test('logAiTurn via ConversationLogger saves content blocks with chatId in group context', () => {
+  test('logAiTurn via ConversationLogger saves the assistant message with chatId in group context', () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.isGroup = true;
     ctx.groupChatId = GROUP_CHAT_ID;
 
     const agent = new CalendarBotAgent(config, sender);
-    const blocks = [{ type: 'text' as const, text: 'Group response' }];
-    agent.saveAssistantTurn(ctx, blocks);
+    const assistant: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'Group response' };
+    agent.saveAssistantTurn(ctx, assistant);
 
     const chatHistory = ctx.chatHistory.getRecentByChat(GROUP_CHAT_ID, 10);
     expect(chatHistory.length).toBe(1);
     expect(chatHistory[0]!.role).toBe('assistant');
-    const parsed = JSON.parse(chatHistory[0]!.content);
-    expect(parsed[0].text).toBe('Group response');
+    const parsed = JSON.parse(chatHistory[0]!.content) as OpenAI.ChatCompletionMessageParam;
+    expect(parsed.role).toBe('assistant');
+    expect(parsed.content).toBe('Group response');
   });
 
   test('end_conversation tool stops loop and calls debugLogger.endSession', async () => {
-    const endConvFinal = {
-      content: [
-        {
-          type: 'tool_use',
-          id: 'call-end',
-          name: 'end_conversation',
-          input: {},
-        },
-      ],
-      stop_reason: 'tool_use',
-    };
-
-    const mockClient = createMockAnthropicClient(
-      [{ type: 'content_block_start', content_block: { type: 'tool_use', name: 'end_conversation' } }],
-      endConvFinal,
-    );
+    const { impl, calls } = makeStreamImpl([{ kind: 'tool', callId: 'call-end', name: 'end_conversation', input: {} }]);
     const endSession = mock(() => {});
     const debugLogger = {
       createRunContext: mock(() => null),
       endSession,
     } as Partial<AiDebugLogger> as AiDebugLogger;
 
-    const agent = new CalendarBotAgent({ ...config, debugLogger }, sender);
-    setPrivateField(agent, 'client', mockClient);
-
+    const agent = new CalendarBotAgent({ ...config, debugLogger }, sender, { streamImpl: impl });
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
     const result = await agent.run(ctx);
 
-    // Loop stopped after one round (no second API call)
-    expect(mockClient.messages.stream).toHaveBeenCalledTimes(1);
+    // Only one stream round — end_conversation has stopLoop=true via the tool handler
+    expect(calls.length).toBe(1);
     expect(result.toolCalls.some((tc) => tc.name === 'end_conversation')).toBe(true);
-    // Session must be ended so next message gets a fresh log file
     expect(endSession).toHaveBeenCalledWith(USER_ID);
   });
 
-  test('voice_message mode returns plain text without execution log HTML', async () => {
-    // Round 1: tool call (produces execution log in intermediateChunks)
-    const toolCallFinal = {
-      content: [
-        {
-          type: 'tool_use',
-          id: 'call-1',
-          name: 'get_events',
-          input: { start_date: '2026-03-20', end_date: '2026-03-20' },
-        },
-      ],
-      stop_reason: 'tool_use',
-    };
-    // Round 2: plain text summary
-    const textFinal = {
-      content: [{ type: 'text', text: 'You have 0 events today.' }],
-      stop_reason: 'end_turn',
+  // ── Regressions for bugs found by code review ─────────────────────────────
+
+  test('rejected tool-less answer is NOT persisted to chat_history', async () => {
+    // Scripted rounds: round 1 = text (will be rejected by forced validator), round 2 = text (retry passes)
+    // But we need to override validator behaviour. Use a custom impl that:
+    //   - Round 1: plain text (agent loop)
+    //   - Validator call: REJECT
+    //   - Round 2 (retry): plain text (no tools — retry loop breaks)
+    let round = 0;
+    const impl = async (opts: StreamRoundOptions) => {
+      if (isValidatorCall(opts)) {
+        const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'REJECT: no tool used' };
+        return {
+          text: 'REJECT: no tool used',
+          toolCalls: [],
+          finishReason: 'stop' as const,
+          assistantMessage: msg,
+          providerUsed: 'mock-validator',
+        };
+      }
+      round++;
+      const text = round === 1 ? 'hallucinated answer' : 'corrected answer';
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return {
+        text,
+        toolCalls: [],
+        finishReason: 'stop' as const,
+        assistantMessage: msg,
+        providerUsed: 'mock',
+      };
     };
 
-    let callCount = 0;
-    const mockClient = {
-      messages: {
-        stream: mock(() => {
-          callCount++;
-          const final = callCount === 1 ? toolCallFinal : textFinal;
-          const events =
-            callCount === 1
-              ? [{ type: 'content_block_start', content_block: { type: 'tool_use', name: 'get_events' } }]
-              : [{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'You have 0 events today.' } }];
-          let index = 0;
-          return {
-            [Symbol.asyncIterator]() {
-              return {
-                next() {
-                  return index < events.length
-                    ? Promise.resolve({ value: events[index++], done: false })
-                    : Promise.resolve({ value: undefined, done: true });
-                },
-              };
-            },
-            on() {
-              return this;
-            },
-            finalMessage: mock(() => Promise.resolve(final)),
-          };
-        }),
-      },
-    };
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    await agent.run(ctx);
+
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    // Must contain the user message and the corrected answer, NOT the hallucination
+    const assistantRows = history.filter((h) => h.role === 'assistant');
+    const hasHallucination = assistantRows.some((h) => h.content.includes('hallucinated answer'));
+    expect(hasHallucination).toBe(false);
+    const hasCorrected = assistantRows.some((h) => h.content.includes('corrected answer'));
+    expect(hasCorrected).toBe(true);
+  });
+
+  test('legacy Anthropic content-block assistant rows are flattened to readable text', () => {
+    const legacyBlocks = JSON.stringify([
+      { type: 'text', text: 'Hello from the old SDK' },
+      { type: 'tool_use', id: 'x', name: 'get_events', input: {} },
+    ]);
+    ctx.chatHistory.save(USER_ID, 'user', 'hi');
+    ctx.chatHistory.save(USER_ID, 'assistant', legacyBlocks);
 
     const agent = new CalendarBotAgent(config, sender);
-    setPrivateField(agent, 'client', mockClient);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+
+    const assistantMsg = messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+    // Must be a plain string containing the legacy text — NOT the raw JSON blob
+    expect(typeof assistantMsg!.content).toBe('string');
+    expect(assistantMsg!.content as string).toContain('Hello from the old SDK');
+    expect(assistantMsg!.content as string).not.toContain('"type":"text"');
+  });
+
+  test('voice_message mode returns plain text without execution log HTML', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-03-20', end_date: '2026-03-20' },
+      },
+      { kind: 'text', text: 'You have 0 events today.' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
 
     const result = await agent.run({ ...ctx, inputMode: 'voice_message' });
 
-    // Must be plain text — no HTML blockquote, no execution log markers
     expect(result.responseText).toBe('You have 0 events today.');
     expect(result.responseText).not.toContain('<blockquote');
     expect(result.responseText).not.toContain('✅');

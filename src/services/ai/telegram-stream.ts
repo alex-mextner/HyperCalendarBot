@@ -279,6 +279,22 @@ export class TelegramStreamWriter {
     }
   }
 
+  /**
+   * Drop any buffered content (current text, intermediate chunks, tool lines)
+   * without touching Telegram. Used when the response validator rejects a
+   * tool-less answer and the agent wants to discard it and retry cleanly —
+   * the rejected text must NOT appear in the final execution log.
+   */
+  resetBuffers(): void {
+    this.text = '';
+    this.lastFlushedLength = 0;
+    this.toolLabel = null;
+    this.toolLines = [];
+    this.pendingIndicators = [];
+    this.intermediateChunks = [];
+    this.plainResponseText = '';
+  }
+
   getMessageId(): number | null {
     return this.messageId;
   }

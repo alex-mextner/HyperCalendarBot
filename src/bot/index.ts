@@ -137,12 +137,7 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    | 'BOT_ADMIN_ID'
-    | 'INTENT_LEARNER_DAILY_LIMIT'
-    | 'BOT_USERNAME'
-    | 'AGENT_DOWNLOAD_URL'
-    | 'INLINE_BOT_TOKEN'
-    | 'AI_FAST_MODEL'
+    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
 }
@@ -222,7 +217,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     !!googleDeps,
     prefsService,
     holidayService,
-    envConfig?.AI_FAST_MODEL,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
   );
 
@@ -266,9 +260,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentLearner =
     botAdminId && !Number.isNaN(botAdminId)
       ? new IntentLearner(intentRepo, {
-          apiKey: aiConfig.apiKey,
-          baseUrl: aiConfig.baseUrl,
-          model: aiConfig.model,
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
           sendToAdmin: async (text, replyMarkup) => {
@@ -362,11 +353,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminReplySession,
     intentLearner,
     nliClassifier: opts.nliClassifier,
-    aiCityModel: envConfig?.AI_FAST_MODEL,
     botAdminId,
-    aiBaseUrl: aiConfig.baseUrl,
-    aiApiKey: aiConfig.apiKey,
-    aiModel: aiConfig.model,
     sendMessageToUser: async (chatId: number, text: string) => {
       await bot.api.sendMessage({ chat_id: chatId, text });
     },
