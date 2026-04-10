@@ -108,6 +108,35 @@ export class EventRepository {
       .get(id, userId, userId) as CalendarEvent | null;
   }
 
+  /** Update resolved location fields. For background location verification. */
+  updateLocationFields(
+    eventId: number,
+    fields: {
+      resolved_address: string;
+      latitude: number;
+      longitude: number;
+      google_maps_url: string;
+      location_verified: number;
+      venue_name: string | null;
+    },
+  ): void {
+    this.db
+      .prepare(
+        `UPDATE events SET resolved_address = ?, latitude = ?, longitude = ?,
+         google_maps_url = ?, location_verified = ?, venue_name = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(
+        fields.resolved_address,
+        fields.latitude,
+        fields.longitude,
+        fields.google_maps_url,
+        fields.location_verified,
+        fields.venue_name,
+        eventId,
+      );
+  }
+
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
     return this.db
       .prepare(
@@ -211,6 +240,12 @@ export class EventRepository {
       'recurrence_rule',
       'recurrence_end_at',
       'reminder_overrides',
+      'resolved_address',
+      'latitude',
+      'longitude',
+      'google_maps_url',
+      'location_verified',
+      'venue_name',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];

@@ -30,6 +30,8 @@ function setupDb(): Database {
     original_start_at TEXT, is_cancelled INTEGER NOT NULL DEFAULT 0,
     owner_type TEXT NOT NULL DEFAULT 'user', group_id INTEGER, created_by INTEGER,
     reminder_overrides TEXT, google_event_id TEXT, google_calendar_id TEXT,
+    resolved_address TEXT, latitude REAL, longitude REAL,
+    google_maps_url TEXT, venue_name TEXT, location_verified INTEGER NOT NULL DEFAULT 0,
     last_synced_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),

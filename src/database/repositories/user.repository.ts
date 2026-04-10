@@ -122,6 +122,7 @@ export class UserRepository {
       'onboarding_completed',
       'voice_response_enabled',
       'default_event_duration_minutes',
+      'city',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];

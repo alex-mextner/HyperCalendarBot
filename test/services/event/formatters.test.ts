@@ -38,6 +38,12 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     owner_type: 'user',
     group_id: null,
     created_by: null,
+    resolved_address: null,
+    latitude: null,
+    longitude: null,
+    google_maps_url: null,
+    location_verified: 0,
+    venue_name: null,
     last_synced_at: null,
     created_at: '',
     updated_at: '',
@@ -152,6 +158,12 @@ describe('formatEventDetail', () => {
       owner_type: 'user',
       group_id: null,
       created_by: null,
+      resolved_address: null,
+      latitude: null,
+      longitude: null,
+      google_maps_url: null,
+      location_verified: 0,
+      venue_name: null,
       last_synced_at: null,
       created_at: '',
       updated_at: '',
@@ -375,7 +387,8 @@ describe('formatEventDetail — edge cases', () => {
     });
     const result = formatEventDetail(event, 'UTC', 'en');
     expect(result).toContain('📝 A detailed description');
-    expect(result).toContain('📍 Office 42');
+    expect(result).toContain('📍 <a href=');
+    expect(result).toContain('Office 42</a>');
     expect(result).toContain('🏷 work');
     expect(result).toContain('🔁 Daily, 3 times');
   });

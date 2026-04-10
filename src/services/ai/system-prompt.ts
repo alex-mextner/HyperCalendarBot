@@ -57,6 +57,14 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
         ? `\n## What I Know About You\n${memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
         : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
 
+  const addressSection = ctx.preloadedAddressContext
+    ? `\n## Known Locations\n${ctx.preloadedAddressContext}\nWhen the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.\n\n## Setting event location\n- If the user wants to set/change an event location, call update_event with the location field.\n- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."\n- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`
+    : '';
+
+  const pendingGeoSection = ctx.preloadedPendingGeo
+    ? `\n## Pending Location Pin\nThe user just sent a 📍 location pin (lat=${ctx.preloadedPendingGeo.latitude}, lng=${ctx.preloadedPendingGeo.longitude}). It is currently waiting to be assigned to an event. If the user mentions which event it's for, call attach_pending_location_to_event with that event_id. You can also proactively offer: "Хочешь, я привяжу эту локацию к какому-то событию? К какому?" / "Would you like me to attach this location to an event? Which one?" Use get_events or get_upcoming to find candidate events first.`
+    : '';
+
   const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
   const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
 
@@ -68,9 +76,12 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
 - Timezone: ${ctx.user.timezone} (${utcOffset})
 - Current local time: ${nowLocal}
 - ${tzFreshness}
+${ctx.user.city ? `- City: ${ctx.user.city}` : '- City: unknown (ask user to share location or type their city)'}
 - To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
 ${ctx.secretary?.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretary?.secretaryForLine}` : ''}
 ${memorySection}
+${addressSection}
+${pendingGeoSection}
 ## Context
 - "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min"). "next week" → calculate("2026-03-18 + 7days"). "in 2 weeks" → calculate("2026-03-18 + 2weeks"). "next month" → calculate("2026-03-18 + 1month"). "next year" → calculate("2026-03-18 + 1year"). "how long is this meeting" → calculate("2026-03-18T18:00:00Z - 2026-03-18T17:00:00Z"). If calculate returns an error, report it to the user — do not compute manually.

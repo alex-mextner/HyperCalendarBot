@@ -12,6 +12,7 @@ import {
   handleUpdateContact,
 } from './tool-handlers/contacts.ts';
 import {
+  handleAttachPendingLocationToEvent,
   handleCreateEvent,
   handleDeleteEvent,
   handleGetEvent,
@@ -107,6 +108,7 @@ export interface ToolInputMap {
     recurrence_rule?: string | null;
     scope?: 'personal' | 'group';
   };
+  attach_pending_location_to_event: { event_id: number };
   delete_event: { event_id: number; scope?: 'personal' | 'group' };
   get_free_slots: { date: string; scope?: 'personal' | 'group' };
   search_events: { query?: string; scope?: 'personal' | 'group'; event_type?: 'birthday' | 'regular' };
@@ -245,6 +247,7 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   create_event: 'events_create',
   create_birthday_event: 'events_create',
   update_event: 'events_edit',
+  attach_pending_location_to_event: 'geolocation',
   delete_event: 'events_edit',
   snooze_event: 'events_edit',
   get_event: 'events_create',
@@ -399,6 +402,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'update_event':
         return handleUpdateEvent(ctx, input as ToolInputMap['update_event']);
+
+      case 'attach_pending_location_to_event':
+        return handleAttachPendingLocationToEvent(ctx, input as ToolInputMap['attach_pending_location_to_event']);
 
       case 'delete_event':
         return handleDeleteEvent(ctx, input as ToolInputMap['delete_event']);

@@ -954,4 +954,27 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '052_location_verification',
+    up: (db) => {
+      // Add city to users for location biasing
+      db.exec('ALTER TABLE users ADD COLUMN city TEXT DEFAULT NULL');
+
+      // Add resolved location fields to events
+      db.exec('ALTER TABLE events ADD COLUMN resolved_address TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN latitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN longitude REAL DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN google_maps_url TEXT DEFAULT NULL');
+      db.exec('ALTER TABLE events ADD COLUMN location_verified INTEGER NOT NULL DEFAULT 0');
+    },
+  },
+  {
+    name: '053_event_venue_name',
+    up: (db) => {
+      // venue_name stores the place/organization name from Google Places API
+      // (e.g. "Кофемания" when user wrote "кофемания на тверской"). Used by TTS
+      // to read out a short, natural name instead of the full formatted address.
+      db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
+    },
+  },
 ];

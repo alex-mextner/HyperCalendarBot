@@ -23,6 +23,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     voice_response_enabled: null,
     default_event_duration_minutes: 30,
     assistant_enabled: 1,
+    city: null,
     created_at: '',
     updated_at: '',
     ...overrides,

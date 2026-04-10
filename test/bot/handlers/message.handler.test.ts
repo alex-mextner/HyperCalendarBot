@@ -9,7 +9,7 @@ import {
 function makeDeps(overrides: { [key: string]: unknown } = {}) {
   return {
     agent: { run: mock(() => Promise.resolve()) },
-    eventService: { getEventsInRange: mock(() => []) },
+    eventService: { getEventsInRange: mock(() => []), getLatestCreated: mock(() => null) },
     holidayService: {},
     chatHistory: {},
     conversationLogger: { logUserMessage: mock(() => {}), logBotResponse: mock(() => {}) },
@@ -721,6 +721,146 @@ describe('createMessageHandler', () => {
       expect(ctx.send).not.toHaveBeenCalled();
       expect(deps.agent.run).not.toHaveBeenCalled();
     });
+
+    test('always persists pin to pendingGeoStore even in default timezone path', async () => {
+      const setMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        pendingGeoStore: {
+          set: setMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 40.7128,
+        longitude: -74.006,
+      };
+      await handler(ctx as never);
+
+      expect(setMock).toHaveBeenCalledTimes(1);
+      const call = setMock.mock.calls[0] as unknown as [number, { latitude: number; longitude: number }];
+      expect(call[0]).toBe(100);
+      expect(call[1]).toEqual({ latitude: 40.7128, longitude: -74.006 });
+    });
+
+    test('shows event-specific buttons when user has a recent unverified event', async () => {
+      const recentEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe near work',
+        location_verified: 0,
+        created_at: new Date().toISOString(),
+      };
+      const recentSetMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => recentEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: recentSetMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      expect(ctx.send).toHaveBeenCalledTimes(1);
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).toContain('Lunch');
+      const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup: unknown };
+      expect(opts.reply_markup).toBeDefined();
+      // Pin should be persisted for the callback handler
+      expect(recentSetMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('does NOT show event-specific UI when latest event is already verified', async () => {
+      const verifiedEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe',
+        location_verified: 1,
+        created_at: new Date().toISOString(),
+      };
+      const verifiedSetMock = mock(() => Promise.resolve());
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => verifiedEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: verifiedSetMock,
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      // Falls through to timezone update flow, but pin still persisted
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).not.toContain('Lunch');
+      expect(verifiedSetMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('does NOT show event-specific UI when latest event is older than 30 minutes', async () => {
+      const oldEvent = {
+        id: 42,
+        title: 'Lunch',
+        location: 'Cafe',
+        location_verified: 0,
+        created_at: new Date(Date.now() - 60 * 60 * 1000).toISOString(), // 1 hour ago
+      };
+      const deps = makeDeps({
+        eventService: {
+          getEventsInRange: mock(() => []),
+          getLatestCreated: mock(() => oldEvent),
+        },
+        locationVerification: { verifyEventLocation: mock(() => Promise.resolve()) },
+        pendingGeoStore: {
+          set: mock(() => Promise.resolve()),
+          get: mock(() => Promise.resolve(null)),
+          delete: mock(() => Promise.resolve()),
+        },
+      });
+      const handler = createMessageHandler(deps as never);
+      const ctx = makeCtx({
+        text: undefined,
+        dbUser: { telegram_id: 100, language: 'en', timezone: 'UTC', onboarding_completed: 1 },
+      });
+      (ctx as { location?: { latitude: number; longitude: number } }).location = {
+        latitude: 55.7558,
+        longitude: 37.6173,
+      };
+      await handler(ctx as never);
+
+      const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+      expect(msg).not.toContain('Lunch');
+    });
   });
 });
 
@@ -750,6 +890,12 @@ describe('toEventSummary', () => {
     owner_type: 'user' as const,
     group_id: null,
     created_by: null,
+    resolved_address: null,
+    latitude: null,
+    longitude: null,
+    google_maps_url: null,
+    location_verified: 0,
+    venue_name: null,
     last_synced_at: null,
     created_at: '2026-03-19T10:00:00Z',
     updated_at: '2026-03-19T10:00:00Z',

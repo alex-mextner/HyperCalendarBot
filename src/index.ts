@@ -1,5 +1,6 @@
 // src/index.ts
 
+import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
 import { initPairingSecret } from './agent/pairing.ts';
@@ -71,11 +72,19 @@ if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
 }
 
+type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
+type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
+
 // Mutable ref — patched after bot creation
 const botRef: {
-  sendMessage: (telegramId: number, text: string, parseMode?: string) => Promise<{ message_id: number }>;
+  sendMessage: (
+    telegramId: number,
+    text: string,
+    parseMode?: ParseMode,
+    replyMarkup?: ReplyMarkup,
+  ) => Promise<{ message_id: number }>;
   sendVoice: (telegramId: number, audio: Buffer) => Promise<void>;
-  editMessage: (chatId: number, messageId: number, text: string, parseMode?: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string, parseMode?: ParseMode) => Promise<void>;
 } = {
   sendMessage: async () => ({ message_id: 0 }),
   sendVoice: async () => {},
@@ -483,7 +492,7 @@ if (config.REDIS_URL) {
     db.notificationLog,
     (telegramId, text) =>
       botRef
-        .sendMessage(telegramId, text)
+        .sendMessage(telegramId, text, 'HTML')
         .then(() => {})
         .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send notification')),
     scheduler,
@@ -736,6 +745,65 @@ if (participantPushSchedulerRef) {
   });
 }
 
+// Location verification — requires GOOGLE_API_KEY + Redis for address cache
+let locationVerification:
+  | import('./services/location/location-verification-service.ts').LocationVerificationService
+  | undefined;
+let addressCache: import('./services/location/address-cache.ts').AddressCache | undefined;
+let pendingGeoStore: import('./services/location/pending-geo-store.ts').PendingGeoStore | undefined;
+
+if (config.GOOGLE_API_KEY && config.REDIS_URL) {
+  const { createGeocodingService } = await import('./services/location/geocoding-service.ts');
+  const { AddressCache } = await import('./services/location/address-cache.ts');
+  const { LocationVerificationService } = await import('./services/location/location-verification-service.ts');
+  const { RedisLocationCandidateStore } = await import('./services/location/location-candidate-store.ts');
+  const { RedisPendingGeoStore } = await import('./services/location/pending-geo-store.ts');
+
+  const locationRedis = new Bun.RedisClient(config.REDIS_URL);
+  const geocodingService = createGeocodingService(config.GOOGLE_API_KEY);
+  addressCache = new AddressCache({
+    get: (key: string) => locationRedis.get(key),
+    set: (key: string, value: string) => locationRedis.set(key, value),
+  });
+  const candidateStore = new RedisLocationCandidateStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
+  });
+
+  // sendMessage / editMessage closures resolve botRef at call time (patched after createBot)
+  locationVerification = new LocationVerificationService({
+    geocodingService,
+    addressCache,
+    eventRepo: db.events,
+    userRepo: db.users,
+    invitationRepo: db.invitations,
+    candidateStore,
+    sendMessage: async (userId, text, options) => {
+      await botRef.sendMessage(userId, text, options?.parse_mode, options?.reply_markup).catch((err: unknown) => {
+        botLogger.error({ err, userId }, 'Location verification: failed to send message');
+      });
+    },
+    editMessage: async (chatId, messageId, text, parseMode) => {
+      await botRef.editMessage(chatId, messageId, text, parseMode).catch((err: unknown) => {
+        botLogger.error({ err, chatId, messageId }, 'Location verification: failed to edit message');
+      });
+    },
+  });
+
+  pendingGeoStore = new RedisPendingGeoStore({
+    set: (key: string, value: string, opts?: { ex?: number }) =>
+      opts?.ex ? locationRedis.set(key, value, 'EX', opts.ex) : locationRedis.set(key, value),
+    get: (key: string) => locationRedis.get(key),
+    del: (key: string) => locationRedis.del(key),
+  });
+
+  botLogger.info('Location verification initialized (Google Maps + Redis)');
+} else if (config.GOOGLE_API_KEY) {
+  botLogger.info('Location verification disabled: REDIS_URL not set (address cache requires Redis)');
+}
+
 const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, scheduleRepo, triggerRepo, msgDeps } =
   createBot(
     config.BOT_TOKEN,
@@ -768,6 +836,9 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       eventMentionStore,
       domainEventBus,
       nliClassifier,
+      locationVerification,
+      addressCache,
+      pendingGeoStore,
       envConfig: {
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
@@ -781,20 +852,21 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   );
 
 // Patch bot ref to use real bot API
-botRef.sendMessage = async (telegramId, text, parseMode) => {
+botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
   const msg = await bot.api.sendMessage({
     chat_id: telegramId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return { message_id: msg.message_id };
+  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
     chat_id: chatId,
     message_id: messageId,
     text,
-    ...(parseMode ? { parse_mode: parseMode as 'HTML' | 'MarkdownV2' | 'Markdown' } : {}),
+    ...(parseMode ? { parse_mode: parseMode } : {}),
   });
 };
 botRef.sendVoice = async (telegramId, audio) => {

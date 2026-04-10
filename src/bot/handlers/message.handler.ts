@@ -195,6 +195,9 @@ export interface MessageHandlerDeps {
   triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
   // Onboarding scene for mandatory timezone/language setup
   onboardingScene?: AnyScene;
+  locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
+  addressCache?: import('../../services/location/address-cache.ts').AddressCache;
+  pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -666,6 +669,9 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               triggerService: deps.triggerService,
             }
           : undefined,
+      locationVerification: deps.locationVerification,
+      addressCache: deps.addressCache,
+      pendingGeoStore: deps.pendingGeoStore,
     };
   };
 }
@@ -1071,14 +1077,46 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       return handleVoiceMessage(ctx, user, { file_id: voice.fileId, duration: voice.duration }, deps);
     }
 
-    // Location message in private chat → ask to update timezone from geolocation
+    // Location message in private chat → context-aware handling
     const location = ctx.location;
     if (location && ctx.chat.type === 'private') {
       const { latitude, longitude } = location;
-      const tz = resolveTimezone(latitude, longitude);
-      const offset = formatUtcOffset(tz);
       const lang = user.language;
       const msgs = t(lang);
+
+      // ALWAYS persist the pin so the AI can read it from system prompt and
+      // attach it to any event the user mentions next. Auto-expires in 30 min.
+      if (deps.pendingGeoStore) {
+        await deps.pendingGeoStore
+          .set(user.telegram_id, { latitude, longitude })
+          .catch((err) => cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to persist pending geo'));
+      }
+
+      // Check if user has a recent event that could use this location
+      const latestEvent = deps.eventService.getLatestCreated(user.telegram_id);
+      const hasRecentUnverifiedEvent =
+        latestEvent?.location &&
+        !latestEvent.location_verified &&
+        Date.now() - new Date(latestEvent.created_at).getTime() < 30 * 60 * 1000; // within 30 min
+
+      if (hasRecentUnverifiedEvent && deps.locationVerification && deps.pendingGeoStore) {
+        // Ask if this location is for the recent event
+        const kb = new InlineKeyboard()
+          .text(msgs.aiTools.location.geoForEventConfirm, `${CB.LOCATION_GEO}:geo:${latestEvent.id}`)
+          .row()
+          .text(msgs.aiTools.location.geoNewLocation, `${CB.LOCATION_GEO}:city:${latitude}:${longitude}`)
+          .row()
+          .text(msgs.aiTools.location.geoExplain, `${CB.LOCATION_GEO}:other:${latitude}:${longitude}`);
+        await ctx.send(msgs.aiTools.location.geoForEvent(latestEvent.title), {
+          parse_mode: 'HTML',
+          reply_markup: kb,
+        });
+        return;
+      }
+
+      // Default behavior: timezone update (pin already stored above — AI can use it)
+      const tz = resolveTimezone(latitude, longitude);
+      const offset = formatUtcOffset(tz);
       if (tz !== user.timezone) {
         const kb = new InlineKeyboard()
           .text(msgs.geo_tz_confirm_btn, `${CB.GEO_TZ_CONFIRM}:${tz}`)
