@@ -315,15 +315,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
       editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
-    const voiceAgent = new CalendarBotAgent(
-      {
-        apiKey: config.ZAI_API_KEY,
-        baseUrl: config.ZAI_BASE_URL,
-        model: config.ZAI_MODEL,
-        debugLogger: aiDebugLogger,
-      },
-      voiceSender,
-    );
+    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger }, voiceSender);
 
     const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
     const voiceEventService = new EventService({
@@ -686,12 +678,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   createBot(
     config.BOT_TOKEN,
     db,
-    {
-      apiKey: config.ZAI_API_KEY,
-      baseUrl: config.ZAI_BASE_URL,
-      model: config.ZAI_MODEL,
-      debugLogger: aiDebugLogger,
-    },
+    { debugLogger: aiDebugLogger },
     {
       googleDeps,
       renderService,

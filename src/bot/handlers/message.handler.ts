@@ -33,6 +33,7 @@ import type {
   UserCallSettings,
 } from '../../database/types.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import { aiStreamRound } from '../../services/ai/streaming.ts';
 import { executeTool } from '../../services/ai/tool-executor.ts';
 import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
@@ -163,9 +164,6 @@ export interface MessageHandlerDeps {
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   // Admin intent edit sessions
   adminEditSessions?: Map<number, AdminEditSession>;
-  aiBaseUrl?: string;
-  aiApiKey?: string;
-  aiModel?: string;
   proposeTimeSessions?: Map<number, { invitationId: number }>;
   editMessage?: (chatId: number, messageId: number, text: string) => Promise<void>;
   notifyInviterProposal?: (
@@ -744,35 +742,18 @@ async function handleIntentEditInstruction(
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     let rawText: string | undefined;
     try {
-      const apiKey = deps.aiApiKey ?? '';
-      const baseUrl = deps.aiBaseUrl ?? 'https://api.anthropic.com';
-
-      const response = await fetch(`${baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: deps.aiModel ?? 'glm-5',
-          max_tokens: INTENT_EDIT_MAX_TOKENS,
-          system: INTENT_EDIT_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: 'user',
-              content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
-            },
-          ],
-        }),
+      const result = await aiStreamRound({
+        messages: [
+          { role: 'system', content: INTENT_EDIT_SYSTEM_PROMPT },
+          {
+            role: 'user',
+            content: `Current intent:\n${currentJson}\n\nAdmin instructions: ${instruction}`,
+          },
+        ],
+        maxTokens: INTENT_EDIT_MAX_TOKENS,
       });
 
-      if (!response.ok) {
-        throw new Error(`AI API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as { content: { type: string; text: string }[] };
-      rawText = data.content.find((c) => c.type === 'text')?.text;
+      rawText = result.text;
       if (!rawText) throw new Error('Empty AI response');
 
       const text = stripJsonFences(rawText);
@@ -930,6 +911,7 @@ export async function tryHandleGroupTzInput(
   userId: number,
   text: string,
   groupChatRepo: GroupChatRepository,
+  resolveCityFn: typeof resolveCity = resolveCity,
 ): Promise<boolean> {
   const entry = pendingGroupTzInput.get(userId);
   if (!entry) return false;
@@ -939,7 +921,7 @@ export async function tryHandleGroupTzInput(
     return false;
   }
 
-  const tz = await resolveCity(text.trim());
+  const tz = await resolveCityFn(text.trim());
   pendingGroupTzInput.delete(userId);
 
   if (!tz) {

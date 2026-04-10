@@ -338,9 +338,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminReplySession,
     intentLearner,
     botAdminId,
-    aiBaseUrl: aiConfig.baseUrl,
-    aiApiKey: aiConfig.apiKey,
-    aiModel: aiConfig.model,
     sendMessageToUser: async (chatId: number, text: string) => {
       await bot.api.sendMessage({ chat_id: chatId, text });
     },

@@ -50,11 +50,7 @@ describe('CalendarBotAgent', () => {
       userRepo,
       eventReminderRepo,
     };
-    config = {
-      apiKey: 'test-key',
-      baseUrl: 'http://localhost:9999',
-      model: 'test-model',
-    };
+    config = {};
     sender = {
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
       editMessageText: mock(() => Promise.resolve()),
