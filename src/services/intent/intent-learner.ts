@@ -1,9 +1,11 @@
 // src/services/intent/intent-learner.ts
+import type OpenAI from 'openai';
 import { z } from 'zod';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { CreateIntentData } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
+import { aiStreamRound } from '../ai/streaming.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
@@ -37,12 +39,14 @@ interface InlineKeyboardMarkup {
 }
 
 interface LearnerConfig {
-  apiKey: string;
-  baseUrl: string;
-  model?: string;
   dailyLimit: number;
   adminId?: number;
   sendToAdmin?: (text: string, replyMarkup: InlineKeyboardMarkup) => Promise<void>;
+  /**
+   * Optional override for the underlying stream function. Tests inject a
+   * scripted impl here so analysis runs offline. Defaults to aiStreamRound.
+   */
+  streamImpl?: typeof aiStreamRound;
 }
 
 export class IntentLearner {
@@ -149,43 +153,25 @@ export class IntentLearner {
     toolResults: ToolResultRecord[],
   ): Promise<CreateIntentData | null> {
     const firstUserMessage = JSON.stringify({ message, toolCalls, toolResults });
-    const conversationMessages: { role: 'user' | 'assistant'; content: string }[] = [
-      { role: 'user', content: firstUserMessage },
-    ];
+    const conversationMessages: OpenAI.ChatCompletionMessageParam[] = [{ role: 'user', content: firstUserMessage }];
 
     const MAX_RETRIES = 5;
+    const streamImpl = this.config.streamImpl ?? aiStreamRound;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      const response = await fetch(`${this.config.baseUrl}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': this.config.apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model: this.config.model ?? 'claude-haiku-4-5-20251001',
-          max_tokens: 2048,
-          system: LEARNER_SYSTEM_PROMPT,
-          messages: conversationMessages,
-        }),
+      // Uses the SMART chain (no fast flag) — intent extraction is a reasoning
+      // task that benefits from the primary model, not a cheap fallback.
+      const result = await streamImpl({
+        messages: [{ role: 'system', content: LEARNER_SYSTEM_PROMPT }, ...conversationMessages],
+        maxTokens: 2048,
       });
 
-      if (!response.ok) {
-        throw new Error(`Learner API error: ${response.status}`);
-      }
-
-      const data = (await response.json()) as {
-        content: { type: string; text: string }[];
-        stop_reason?: string;
-      };
-
-      if (data.stop_reason === 'max_tokens') {
+      if (result.finishReason === 'length') {
         cmdLogger.warn('IntentLearner response truncated (max_tokens), skipping');
         return null;
       }
 
-      const text = data.content.find((c) => c.type === 'text')?.text;
+      const text = result.text;
       if (!text) return null;
 
       // Strip markdown code fences if model ignored "no markdown" instruction
@@ -197,13 +183,13 @@ export class IntentLearner {
       // Parse and validate JSON response.
       // Use safeParse first — a {"skip":true} response omits required fields and
       // would throw a ZodError with .parse(), even though it's a valid AI decision.
-      const result = LearnerResponseCodec.safeParse(json);
-      if (!result.success) {
+      const parsedResult = LearnerResponseCodec.safeParse(json);
+      if (!parsedResult.success) {
         const skipCheck = jsonCodec(z.object({ skip: z.boolean().optional() }).passthrough()).safeParse(json);
         if (skipCheck.success && skipCheck.data.skip) return null;
-        throw result.error;
+        throw parsedResult.error;
       }
-      const parsed = result.data;
+      const parsed = parsedResult.data;
 
       if (parsed.skip) return null;
 

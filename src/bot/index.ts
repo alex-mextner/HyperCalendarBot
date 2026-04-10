@@ -252,9 +252,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentLearner =
     botAdminId && !Number.isNaN(botAdminId)
       ? new IntentLearner(intentRepo, {
-          apiKey: aiConfig.apiKey,
-          baseUrl: aiConfig.baseUrl,
-          model: aiConfig.model,
           dailyLimit: intentLearnerDailyLimit,
           adminId: botAdminId,
           sendToAdmin: async (text, replyMarkup) => {

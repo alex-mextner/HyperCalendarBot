@@ -1,8 +1,34 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
 
-type ToolDefinition = Anthropic.Tool;
+/**
+ * Internal tool definition format — the shape we author tools in.
+ * Converted to OpenAI.ChatCompletionTool on the way out via toOpenAITool().
+ * Keeping this intermediate form lets each tool stay a flat object (no
+ * `{ type: 'function', function: {...} }` wrapping in every declaration).
+ */
+interface ToolDefinition {
+  name: string;
+  description: string;
+  input_schema: {
+    type: 'object';
+    properties: { [key: string]: unknown };
+    required?: string[];
+  };
+}
 
-export const toolDefinitions: ToolDefinition[] = [
+/** Wrap an internal ToolDefinition into the OpenAI SDK format. */
+function toOpenAITool(t: ToolDefinition): OpenAI.ChatCompletionTool {
+  return {
+    type: 'function',
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema,
+    },
+  };
+}
+
+const toolDefinitions: ToolDefinition[] = [
   {
     name: 'get_events',
     description: 'Get events for a date range. Returns a list of events with their details.',
@@ -1296,7 +1322,7 @@ export function getToolDefinitions(
   inputMode?: string,
   caps?: UserCapabilities,
   supplementMode?: boolean,
-): ToolDefinition[] {
+): OpenAI.ChatCompletionTool[] {
   let tools: ToolDefinition[];
   if (inputMode === 'live_call') {
     tools = toolDefinitions.filter((t) => !CALL_EXCLUDED_TOOLS.has(t.name));
@@ -1316,12 +1342,12 @@ export function getToolDefinitions(
         name: 'supplement_skip',
         description: 'Call when the automatic response was correct and complete. Suppresses your response.',
         input_schema: {
-          type: 'object' as const,
+          type: 'object',
           properties: {},
           required: [],
         },
       },
     ];
   }
-  return tools;
+  return tools.map(toOpenAITool);
 }

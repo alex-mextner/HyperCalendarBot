@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -78,13 +79,16 @@ describe('CalendarBotAgent', () => {
 
   test('buildMessages includes chat history', () => {
     ctx.chatHistory.save(USER_ID, 'user', 'Previous question');
-    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Previous answer' }]));
-    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // current msg saved by middleware
+    // Assistant turns are stored as OpenAI-format JSON now
+    const prevAssistant: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'Previous answer' };
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(prevAssistant));
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
     const { messages } = agent.buildMessages(ctx, history);
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('Previous question');
+    expect(messages[1]!.content as string).toBe('Previous answer');
     expect(messages[2]!.content as string).toContain(ctx.messageText);
   });
 
@@ -96,15 +100,6 @@ describe('CalendarBotAgent', () => {
     expect(typeof messages[0]!.content).toBe('string');
     expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
     expect(messages[0]!.content as string).toContain('Hello');
-  });
-
-  test('buildMessages prefixes user messages with local timestamp', () => {
-    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText); // middleware saves it
-    const history = ctx.chatHistory.getRecent(USER_ID);
-    const agent = new CalendarBotAgent(config, sender);
-    const { messages } = agent.buildMessages(ctx, history);
-    expect(messages[0]!.content as string).toMatch(/^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
-    expect(messages[0]!.content as string).toContain(ctx.messageText);
   });
 
   test('buildMessages formats button activity event as readable text', () => {
@@ -139,68 +134,102 @@ describe('CalendarBotAgent', () => {
     expect(content).toContain('[Bot: Сегодня 3 события]');
   });
 
-  test('buildMessages does not add timestamp to ContentBlockParam arrays', () => {
-    ctx.chatHistory.save(USER_ID, 'user', 'Hello');
-    const blocks = JSON.stringify([{ type: 'text', text: 'AI response' }]);
-    ctx.chatHistory.save(USER_ID, 'assistant', blocks);
+  test('buildMessages round-trips an assistant turn with tool_calls', () => {
+    const assistantWithTools: OpenAI.ChatCompletionMessageParam = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call_abc',
+          type: 'function',
+          function: { name: 'get_events', arguments: '{"start_date":"2026-04-10"}' },
+        },
+      ],
+    };
+    ctx.chatHistory.save(USER_ID, 'user', 'What do I have?');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(assistantWithTools));
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
-    // ContentBlock array should not be a string
-    expect(Array.isArray(messages[1]!.content)).toBe(true);
+    const assistantMsg = messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+    const tools = (assistantMsg as OpenAI.ChatCompletionAssistantMessageParam).tool_calls;
+    expect(tools).toBeDefined();
+    expect(tools![0]!.type).toBe('function');
+    if (tools![0]!.type === 'function') {
+      expect(tools![0]!.function.name).toBe('get_events');
+    }
   });
 
-  test('buildMessages maps tool role to user for Anthropic API', () => {
-    const toolBlocks = JSON.stringify([{ type: 'tool_result', tool_use_id: 'abc', content: 'result' }]);
-    ctx.chatHistory.save(USER_ID, 'tool', toolBlocks);
-
+  test('buildMessages expands a stored tool-role row into individual tool messages', () => {
+    const toolResults: OpenAI.ChatCompletionMessageParam[] = [
+      { role: 'tool', tool_call_id: 'call_a', content: 'result a' },
+      { role: 'tool', tool_call_id: 'call_b', content: 'result b' },
+    ];
+    ctx.chatHistory.save(USER_ID, 'user', 'Show me');
+    ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(toolResults));
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
-    // tool role should be mapped to 'user'
+    const toolMessages = messages.filter((m) => m.role === 'tool');
+    expect(toolMessages).toHaveLength(2);
+    expect((toolMessages[0] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_a');
+    expect((toolMessages[1] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_b');
+  });
+
+  test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', () => {
+    const legacyAnthropic = JSON.stringify([{ type: 'tool_result', tool_use_id: 'abc', content: 'ok' }]);
+    ctx.chatHistory.save(USER_ID, 'user', 'What?');
+    ctx.chatHistory.save(USER_ID, 'tool', legacyAnthropic);
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    // The user message survives; the legacy tool row is dropped since it has no tool_call_id we could map.
+    expect(messages).toHaveLength(1);
     expect(messages[0]!.role).toBe('user');
   });
 
-  test('saveAssistantTurn saves content blocks as JSON', () => {
+  test('saveAssistantTurn persists the full OpenAI assistant message as JSON', () => {
     const agent = new CalendarBotAgent(config, sender);
-    const blocks = [{ type: 'text' as const, text: 'Here are your events...' }];
-    agent.saveAssistantTurn(ctx, blocks);
+    const assistant: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'Here are your events.' };
+    agent.saveAssistantTurn(ctx, assistant);
 
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('assistant');
-    const parsed = JSON.parse(history[0]!.content);
-    expect(parsed[0].text).toBe('Here are your events...');
+    const parsed = JSON.parse(history[0]!.content) as OpenAI.ChatCompletionMessageParam;
+    expect(parsed.role).toBe('assistant');
+    expect(parsed.content).toBe('Here are your events.');
   });
 
-  test('saveToolResults saves tool results as tool role', () => {
+  test('saveToolResults persists the array of tool-role messages under role=tool', () => {
     const agent = new CalendarBotAgent(config, sender);
-    const results = [{ type: 'tool_result' as const, tool_use_id: 'abc', content: 'ok' }];
+    const results: OpenAI.ChatCompletionMessageParam[] = [{ role: 'tool', tool_call_id: 'call_abc', content: 'ok' }];
     agent.saveToolResults(ctx, results);
 
     const history = ctx.chatHistory.getRecent(USER_ID);
     expect(history.length).toBe(1);
     expect(history[0]!.role).toBe('tool');
+    const parsed = JSON.parse(history[0]!.content);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].tool_call_id).toBe('call_abc');
   });
 
   describe('supplement mode', () => {
-    test('buildMessages does not append current user message when supplementMode is true', () => {
+    test('buildMessages returns empty messages when history is empty and supplementMode is true', () => {
       const agent = new CalendarBotAgent(config, sender);
       const supplementCtx = { ...ctx, supplementMode: true };
       const { messages } = agent.buildMessages(supplementCtx, []);
-      // In supplement mode, user message is already in history — no extra append
       expect(messages.length).toBe(0);
     });
 
-    test('buildMessages does not append current user message when supplementMode is false', () => {
+    test('buildMessages returns empty messages when history is empty and supplementMode is false', () => {
       const agent = new CalendarBotAgent(config, sender);
       const { messages } = agent.buildMessages(ctx, []);
-      // ConversationLogger middleware saves the message before pipeline runs — no append here
       expect(messages.length).toBe(0);
     });
   });
 
-  // Test limit=50 — must use group context because buildMessages calls getRecentByChat directly for groups
   test('buildMessages fetches 50 entries for group chats', () => {
     const calls: { chatId: number; limit: number }[] = [];
     const mockChatHistory = {
@@ -222,22 +251,19 @@ describe('CalendarBotAgent', () => {
     const userRepo = new UserRepository(db);
     userRepo.create({ telegram_id: USER_ID, timezone: 'UTC', language: 'en' });
     const chatHistoryRepo = new ChatHistoryRepository(db);
-    const logger = new ConversationLogger(chatHistoryRepo);
+    const log = new ConversationLogger(chatHistoryRepo);
 
-    logger.logUserMessage(USER_ID, 'add meeting');
-    logger.logBotResponse(USER_ID, 'Meeting added!');
+    log.logUserMessage(USER_ID, 'add meeting');
+    log.logBotResponse(USER_ID, 'Meeting added!');
 
     const history = chatHistoryRepo.getRecent(USER_ID);
     expect(history).toHaveLength(2);
     expect(history[0]!.role).toBe('user');
     expect(history[1]!.role).toBe('assistant');
-    // User row id is lower than assistant row id — strict ordering
     expect(history[0]!.id).toBeLessThan(history[1]!.id);
   });
 
-  // Confirm no duplicate: current message in history once, not twice
   test('buildMessages does not re-append current message already in history', () => {
-    // Simulate middleware having saved the current message before pipeline ran
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const agent = new CalendarBotAgent(config, sender);
@@ -266,7 +292,7 @@ describe('CalendarBotAgent', () => {
       return { id, user_id: userId, role, content, chat_id: 456, created_at: '2026-01-01 10:00:00' };
     }
 
-    test('inserts ... placeholder between consecutive user messages', () => {
+    test('passes consecutive user messages through unchanged (OpenAI-permissive)', () => {
       const history: ChatHistoryMessage[] = [
         fakeMsg(1, USER_ID, 'user', 'Hello'),
         fakeMsg(2, USER_ID, 'user', 'Anyone there?'),
@@ -275,19 +301,14 @@ describe('CalendarBotAgent', () => {
       const groupCtx = makeGroupCtx({ getRecentByChat: () => history });
       const agent = new CalendarBotAgent(config, sender);
       const { messages } = agent.buildMessages(groupCtx, []);
-      // 3 user → 2 '...' placeholders → 5 total
-      expect(messages).toHaveLength(5);
-      expect(messages[0]!.role).toBe('user');
-      expect(messages[1]!.role).toBe('assistant');
-      expect(messages[1]!.content).toBe('...');
-      expect(messages[2]!.role).toBe('user');
-      expect(messages[3]!.role).toBe('assistant');
-      expect(messages[3]!.content).toBe('...');
-      expect(messages[4]!.role).toBe('user');
+      // OpenAI allows consecutive user turns — no synthetic assistant placeholder.
+      expect(messages).toHaveLength(3);
+      expect(messages.every((m) => m.role === 'user')).toBe(true);
     });
 
-    test('inserts ... placeholder before leading assistant message', () => {
-      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Stale response' }]));
+    test('inserts ... user placeholder before leading assistant message', () => {
+      const staleAssistant: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'Stale response' };
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(staleAssistant));
       ctx.chatHistory.save(USER_ID, 'user', 'Hello again');
       const history = ctx.chatHistory.getRecent(USER_ID);
       const agent = new CalendarBotAgent(config, sender);
@@ -302,8 +323,9 @@ describe('CalendarBotAgent', () => {
     });
 
     test('does not modify already alternating user/assistant messages', () => {
+      const reply: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'Answer' };
       ctx.chatHistory.save(USER_ID, 'user', 'Question');
-      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Answer' }]));
+      ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(reply));
       ctx.chatHistory.save(USER_ID, 'user', 'Follow-up');
       const history = ctx.chatHistory.getRecent(USER_ID);
       const agent = new CalendarBotAgent(config, sender);
@@ -347,23 +369,6 @@ describe('CalendarBotAgent', () => {
       const { messages } = agent.buildMessages(ctx, history);
       const content = messages[0]!.content as string;
       expect(content).not.toContain('[From:');
-    });
-
-    test('does not add sender info to tool result messages', () => {
-      const toolResult = JSON.stringify([{ type: 'tool_result', tool_use_id: 'abc', content: 'ok' }]);
-      const history: ChatHistoryMessage[] = [
-        { id: 1, user_id: USER_ID, role: 'tool', content: toolResult, chat_id: 456, created_at: '2026-01-01 10:00:00' },
-      ];
-      const groupCtx: AgentContext = {
-        ...ctx,
-        isGroup: true,
-        groupChatId: 456,
-        chatHistory: { getRecentByChat: () => history } as Partial<ChatHistoryRepository> as ChatHistoryRepository,
-      };
-      const agent = new CalendarBotAgent(config, sender);
-      const { messages } = agent.buildMessages(groupCtx, []);
-      // Tool results are arrays, not strings — no sender prefix
-      expect(Array.isArray(messages[0]!.content)).toBe(true);
     });
   });
 });

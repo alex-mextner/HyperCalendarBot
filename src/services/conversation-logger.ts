@@ -1,4 +1,4 @@
-import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
 import type { ChatHistoryRepository } from '../database/repositories/chat-history.repository.ts';
 
 export class ConversationLogger {
@@ -28,11 +28,20 @@ export class ConversationLogger {
     this.repo.save(userId, 'user', JSON.stringify({ kind: 'edited', text }), chatId);
   }
 
-  logAiTurn(userId: number, blocks: Anthropic.ContentBlockParam[], chatId?: number): void {
-    this.repo.save(userId, 'assistant', JSON.stringify(blocks), chatId);
+  /**
+   * Persist an assistant turn produced by aiStreamRound as JSON under role='assistant'.
+   * The agent's buildMessages parses it back via StoredAssistantMessageSchema.
+   */
+  logAiTurn(userId: number, message: OpenAI.ChatCompletionMessageParam, chatId?: number): void {
+    this.repo.save(userId, 'assistant', JSON.stringify(message), chatId);
   }
 
-  logToolResults(userId: number, results: Anthropic.ToolResultBlockParam[], chatId?: number): void {
+  /**
+   * Persist an array of tool-role messages (the tool results for one round) as JSON
+   * under role='tool'. Stored as an array so parseHistoryRow can expand it back into
+   * multiple MessageParam entries on read.
+   */
+  logToolResults(userId: number, results: OpenAI.ChatCompletionMessageParam[], chatId?: number): void {
     this.repo.save(userId, 'tool', JSON.stringify(results), chatId);
   }
 }

@@ -5,31 +5,46 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type Anthropic from '@anthropic-ai/sdk';
+import type OpenAI from 'openai';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min idle → new file
 
-type ContentBlock = Anthropic.ContentBlockParam;
+export type DebugMessage = OpenAI.ChatCompletionMessageParam;
 
-function serializeContent(content: string | ContentBlock[]): string {
-  if (typeof content === 'string') return content;
-  return content
-    .map((b) => {
-      if (b.type === 'text') return b.text;
-      if (b.type === 'tool_use') return `[tool_use: ${b.name} | input: ${JSON.stringify(b.input).slice(0, 200)}]`;
-      if (b.type === 'tool_result') {
-        const c = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
-        return `[tool_result${b.is_error ? ' ERROR' : ''}: ${c.slice(0, 300)}]`;
-      }
-      return `[${b.type}]`;
-    })
-    .join(' ');
-}
+function serializeMessage(msg: DebugMessage): string {
+  // Plain-text content on user/assistant/system/developer messages
+  if (typeof msg.content === 'string') return msg.content;
 
-export interface DebugMessage {
-  role: 'user' | 'assistant';
-  content: string | ContentBlock[];
-  created_at?: string;
+  // Structured content parts (array form) — pick out text and stringify the rest
+  if (Array.isArray(msg.content)) {
+    return msg.content
+      .map((part) => {
+        if (part && typeof part === 'object' && 'text' in part && typeof part.text === 'string') {
+          return part.text;
+        }
+        if (part && typeof part === 'object' && 'type' in part && typeof part.type === 'string') {
+          return `[${part.type}]`;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  // Assistant message with tool_calls — render each call as a compact marker
+  if (msg.role === 'assistant' && 'tool_calls' in msg && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+    return msg.tool_calls
+      .map((tc) => {
+        if (tc.type !== 'function') return `[${tc.type}]`;
+        return `[tool_use: ${tc.function.name} | input: ${tc.function.arguments.slice(0, 200)}]`;
+      })
+      .join(' ');
+  }
+
+  // Tool role with a non-string content — safely coerce
+  if (msg.role === 'tool') return `[tool_result: ${String(msg.content).slice(0, 300)}]`;
+
+  return JSON.stringify(msg).slice(0, 500);
 }
 
 export class AiDebugRunContext {
@@ -76,9 +91,8 @@ export class AiDebugRunContext {
     this.parts.push('');
     this.parts.push(`## HISTORY [${messages.length} messages]`);
     for (const msg of messages) {
-      const ts = msg.created_at ? ` | ${msg.created_at}` : '';
-      const text = serializeContent(msg.content);
-      this.parts.push(`[${msg.role}${ts}]`);
+      const text = serializeMessage(msg);
+      this.parts.push(`[${msg.role}]`);
       this.parts.push(text.slice(0, 500));
     }
     this.parts.push('## END HISTORY');
