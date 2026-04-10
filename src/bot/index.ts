@@ -128,12 +128,7 @@ export interface CreateBotOpts {
   pushAiMessage?: (data: AiMessageJobData) => Promise<void>;
   envConfig?: Pick<
     EnvConfig,
-    | 'BOT_ADMIN_ID'
-    | 'INTENT_LEARNER_DAILY_LIMIT'
-    | 'BOT_USERNAME'
-    | 'AGENT_DOWNLOAD_URL'
-    | 'INLINE_BOT_TOKEN'
-    | 'ZAI_FAST_MODEL'
+    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
   >;
 }
 
@@ -208,7 +203,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     !!googleDeps,
     prefsService,
     holidayService,
-    envConfig?.ZAI_FAST_MODEL,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
   );
 
@@ -343,7 +337,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     adminEditSessions,
     adminReplySession,
     intentLearner,
-    aiCityModel: envConfig?.ZAI_FAST_MODEL,
     botAdminId,
     aiBaseUrl: aiConfig.baseUrl,
     aiApiKey: aiConfig.apiKey,

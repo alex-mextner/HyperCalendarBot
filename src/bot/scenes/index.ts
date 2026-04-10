@@ -21,7 +21,6 @@ export function createScenesPlugin(
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
-  aiModel?: string,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
 ) {
   const storage = createSceneStorage(db.db);
@@ -32,15 +31,8 @@ export function createScenesPlugin(
   const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog, onEventCreated);
   const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
-  const timezoneScene = createTimezoneScene(db, userComposer, aiModel);
-  const onboardingScene = createOnboardingScene(
-    db,
-    userComposer,
-    gcalConfigured,
-    prefsService,
-    holidayService,
-    aiModel,
-  );
+  const timezoneScene = createTimezoneScene(db, userComposer);
+  const onboardingScene = createOnboardingScene(db, userComposer, gcalConfigured, prefsService, holidayService);
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
 
   return {

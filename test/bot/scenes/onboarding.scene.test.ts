@@ -1,16 +1,19 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 
-// Mock Anthropic SDK before importing scene — avoids real AI calls without replacing city-resolver module
-const mockCreate = mock(async () => ({ content: [{ type: 'text', text: 'UNKNOWN' }] }));
-mock.module('@anthropic-ai/sdk', () => ({
-  default: class {
-    messages = { create: mockCreate };
-  },
-}));
-
 const { createOnboardingScene } = await import('../../../src/bot/scenes/onboarding.scene.ts');
 const { CB } = await import('../../../src/config/constants.ts');
 const { createUserResolverComposer } = await import('../../../src/bot/middleware/user-resolver.ts');
+
+/**
+ * Injectable resolveCity stub — avoids hitting the real provider chain in tests.
+ * Tests that need a specific resolution reassign `resolveCityStubValue`.
+ */
+let resolveCityStubValue: string | null = null;
+const resolveCityStub = mock(async (input: string) => {
+  // Simulate the "fast path": if input looks like an IANA key, return it unchanged.
+  if (input.includes('/')) return input;
+  return resolveCityStubValue;
+});
 
 import type { DatabaseService } from '../../../src/database/index.ts';
 import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -238,10 +241,10 @@ describe('onboarding step 1: timezone', () => {
   let fns: GramioFn[];
 
   beforeEach(() => {
-    mockCreate.mockReset();
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: 'UNKNOWN' }] });
+    resolveCityStub.mockClear();
+    resolveCityStubValue = null;
     db = makeDb();
-    fns = getStepFns(createOnboardingScene(db, mockComposer));
+    fns = getStepFns(createOnboardingScene(db, mockComposer, false, undefined, undefined, resolveCityStub));
   });
 
   test('firstTime — sends city prompt with keyboard', async () => {
@@ -254,7 +257,7 @@ describe('onboarding step 1: timezone', () => {
 
   describe('message: city name', () => {
     test('resolveCity returns timezone — sends confirm', async () => {
-      // 'Berlin' resolves via city-timezones library without AI call
+      resolveCityStubValue = 'Europe/Berlin';
       const ctx = makeCtx({ activeType: 'message', stepId: 1, text: 'Berlin', state: { lang: 'en' } });
       await fns[1]!(ctx, NOOP_NEXT);
       expect(ctx.send).toHaveBeenCalledTimes(1);

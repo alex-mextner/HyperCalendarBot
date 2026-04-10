@@ -31,7 +31,6 @@ export function createOnboardingScene(
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
-  aiModel?: string,
   resolveCityFn?: typeof resolveCity,
 ) {
   const resolveCity_ = resolveCityFn ?? resolveCity;
@@ -73,7 +72,7 @@ export function createOnboardingScene(
         if (context.is('message')) {
           const text = context.text?.trim();
           if (!text) return;
-          const tz = await resolveCity_(text, aiModel);
+          const tz = await resolveCity_(text);
           if (tz) {
             await context.send(`✅ ${getTimezoneDisplay(tz)}`, {
               reply_markup: timezoneConfirmKeyboard(l),

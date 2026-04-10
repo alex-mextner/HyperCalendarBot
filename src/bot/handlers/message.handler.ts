@@ -155,7 +155,6 @@ export interface MessageHandlerDeps {
   workflowSessions?: WorkflowSessionStore;
   // Pipeline: intent learning
   intentLearner?: IntentLearner;
-  aiCityModel?: string;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
   // Admin reply sessions: adminId → { threadId, userId }
@@ -562,7 +561,6 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               return [];
             }
           })(),
-      fastModel: deps.aiCityModel,
       actionLogRepo: deps.actionLogRepo,
       chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       sceneStorage: {
@@ -932,7 +930,6 @@ export async function tryHandleGroupTzInput(
   userId: number,
   text: string,
   groupChatRepo: GroupChatRepository,
-  aiModel?: string,
 ): Promise<boolean> {
   const entry = pendingGroupTzInput.get(userId);
   if (!entry) return false;
@@ -942,7 +939,7 @@ export async function tryHandleGroupTzInput(
     return false;
   }
 
-  const tz = await resolveCity(text.trim(), aiModel);
+  const tz = await resolveCity(text.trim());
   pendingGroupTzInput.delete(userId);
 
   if (!tz) {
@@ -1127,13 +1124,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       // Check pending group TZ input before relevance gate — the city name prompt
       // won't match any bot keyword, so it must be intercepted before the gate drops it
       if (deps.groupChatRepo) {
-        const groupTzHandled = await tryHandleGroupTzInput(
-          ctx,
-          user.telegram_id,
-          text,
-          deps.groupChatRepo,
-          deps.aiCityModel,
-        );
+        const groupTzHandled = await tryHandleGroupTzInput(ctx, user.telegram_id, text, deps.groupChatRepo);
         if (groupTzHandled) return;
       }
 

@@ -149,10 +149,10 @@ export function handleGetTimezoneInfo(input: { timezone: string | string[]; at?:
  * 1. city-timezones library lookup
  * 2. AI fast model resolution with retries
  */
-export async function handleGetTimezoneInfoWithCityFallback(
-  input: { timezone: string | string[]; at?: string },
-  fastModel?: string,
-): Promise<ToolResult> {
+export async function handleGetTimezoneInfoWithCityFallback(input: {
+  timezone: string | string[];
+  at?: string;
+}): Promise<ToolResult> {
   // Only attempt city resolution for single timezone string
   if (typeof input.timezone !== 'string') return handleGetTimezoneInfo(input);
 
@@ -163,7 +163,7 @@ export async function handleGetTimezoneInfoWithCityFallback(
     if (syncResult.success) return syncResult;
   }
 
-  const resolved = await resolveCity(input.timezone, fastModel);
+  const resolved = await resolveCity(input.timezone);
   if (!resolved) return invalidTimezoneError(input.timezone);
 
   return handleGetTimezoneInfo({ timezone: resolved, at: input.at });

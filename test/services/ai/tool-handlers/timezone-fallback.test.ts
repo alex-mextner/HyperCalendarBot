@@ -23,14 +23,14 @@ describe('handleGetTimezoneInfoWithCityFallback', () => {
     resolveCityMock.mockClear();
     resolveCityMock.mockResolvedValueOnce('America/New_York');
 
-    const result = await handleGetTimezoneInfoWithCityFallback(
-      { timezone: 'Miami', at: '2026-01-15T12:00:00Z' },
-      'test-model',
-    );
+    const result = await handleGetTimezoneInfoWithCityFallback({
+      timezone: 'Miami',
+      at: '2026-01-15T12:00:00Z',
+    });
     expect(result.success).toBe(true);
     const data = JSON.parse(result.output!);
     expect(data.timezone).toBe('America/New_York');
-    expect(resolveCityMock).toHaveBeenCalledWith('Miami', 'test-model');
+    expect(resolveCityMock).toHaveBeenCalledWith('Miami');
   });
 
   test('array of timezones does not attempt city resolution', async () => {
@@ -49,6 +49,6 @@ describe('handleGetTimezoneInfoWithCityFallback', () => {
     const result = await handleGetTimezoneInfoWithCityFallback({ timezone: 'Неизвестный город' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid timezone');
-    expect(resolveCityMock).toHaveBeenCalledWith('Неизвестный город', undefined);
+    expect(resolveCityMock).toHaveBeenCalledWith('Неизвестный город');
   });
 });

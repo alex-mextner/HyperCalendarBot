@@ -461,7 +461,7 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleCalculate(input as ToolInputMap['calculate']);
 
       case 'get_timezone_info':
-        return handleGetTimezoneInfoWithCityFallback(input as ToolInputMap['get_timezone_info'], ctx.fastModel);
+        return handleGetTimezoneInfoWithCityFallback(input as ToolInputMap['get_timezone_info']);
 
       case 'convert_to_timezone':
         return handleConvertToTimezone(input as ToolInputMap['convert_to_timezone']);
