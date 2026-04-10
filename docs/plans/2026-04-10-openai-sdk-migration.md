@@ -1516,36 +1516,57 @@ Kill the running bot, restart, send a test message in a group chat. Verify:
 
 - [ ] **Step 4: Update production .env on the server**
 
-The production bot runs from `/opt/hypercal/.env` on `104.248.84.190`. Without the new required env vars (`HF_BASE_URL`, `HF_MODEL`, `HF_FAST_MODEL`, `GEMINI_API_KEY`, `GEMINI_BASE_URL`, `GEMINI_MODEL`, `GEMINI_FAST_MODEL`, `AI_BASE_URL` pointing to coding endpoint), the bot will throw at startup after deploy.
+The production bot runs from `/opt/hypercal/.env` on `104.248.84.190`. Without the new required env vars, the bot will throw at startup after deploy.
 
-**Before deploying the new code**, SSH in and append the new vars:
+**Current state of prod `.env` (as of writing this plan):**
+
+| Var | Present? | Action |
+|-----|:--------:|--------|
+| `ANTHROPIC_API_KEY` | ✓ | **verify balance** (was `28eec...` danny key — 429 insufficient balance). Use the Alex key that's in the `#` comment on the line, or top up. |
+| `AI_BASE_URL` | ✓ | **CHANGE** from `https://api.z.ai/api/anthropic` → `https://api.z.ai/api/coding/paas/v4` |
+| `AI_MODEL` | ✓ | keep as `glm-5.1` |
+| `AI_FAST_MODEL` | ✓ | **CHANGE** from `glm-4.7-flash` (500 errors on coding endpoint) → `glm-4.5-flash` |
+| `HF_TOKEN` | ✓ | keep |
+| `HF_BASE_URL` | ✗ | **ADD** `https://router.huggingface.co/v1` |
+| `HF_MODEL` | ✗ | **ADD** `Qwen/Qwen3-235B-A22B` |
+| `HF_FAST_MODEL` | ✗ | **ADD** `meta-llama/Llama-3.3-70B-Instruct` |
+| `GEMINI_API_KEY` | ✗ | **ADD** — copy from local `.env` (Alex has it) |
+| `GEMINI_BASE_URL` | ✗ | **ADD** `https://generativelanguage.googleapis.com/v1beta/openai/` |
+| `GEMINI_MODEL` | ✗ | **ADD** `gemini-2.5-pro` |
+| `GEMINI_FAST_MODEL` | ✗ | **ADD** `gemini-2.5-flash` |
+
+**Before deploying the new code**, SSH in, back up the current file, and apply the changes:
 
 ```bash
+ssh root@104.248.84.190 "cp /opt/hypercal/.env /opt/hypercal/.env.backup-$(date +%Y%m%d)"
+
+# Edit /opt/hypercal/.env manually to change AI_BASE_URL and AI_FAST_MODEL.
+# Then append the new vars:
 ssh root@104.248.84.190 "cat >> /opt/hypercal/.env <<'ENV'
 
-# OpenAI SDK migration (2026-04-10) — added by plan 2026-04-10-openai-sdk-migration
-AI_BASE_URL=https://api.z.ai/api/coding/paas/v4
-AI_MODEL=glm-5.1
-AI_FAST_MODEL=glm-4.5-flash
-
+# OpenAI SDK migration (2026-04-10)
 HF_BASE_URL=https://router.huggingface.co/v1
 HF_MODEL=Qwen/Qwen3-235B-A22B
 HF_FAST_MODEL=meta-llama/Llama-3.3-70B-Instruct
 
-GEMINI_API_KEY=<copy from local .env or ExpenseSyncBot>
+GEMINI_API_KEY=<paste real value here>
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
 GEMINI_MODEL=gemini-2.5-pro
 GEMINI_FAST_MODEL=gemini-2.5-flash
 ENV"
 ```
 
-**Important:** if the prod `.env` already has `AI_BASE_URL` pointing to the old `api.z.ai/api/anthropic` endpoint, that line must be **removed or updated** — otherwise the last occurrence wins and the bot will try the wrong endpoint. Verify with:
+**Important:** if there are duplicate `AI_BASE_URL` or `AI_FAST_MODEL` lines after the edit, the last occurrence wins. Verify with:
 
 ```bash
-ssh root@104.248.84.190 "grep -E '^AI_BASE_URL|^AI_MODEL|^AI_FAST_MODEL|^HF_|^GEMINI_' /opt/hypercal/.env"
+ssh root@104.248.84.190 "grep -cE '^AI_BASE_URL=|^AI_FAST_MODEL=' /opt/hypercal/.env"
+# Expected: 2 (one of each, no duplicates)
+
+ssh root@104.248.84.190 "grep -E '^AI_BASE_URL|^AI_MODEL|^AI_FAST_MODEL|^HF_|^GEMINI_|^ANTHROPIC_API_KEY' /opt/hypercal/.env"
+# Expected: 11 lines, all values correct
 ```
 
-Delete any duplicate/old lines before continuing.
+Delete any duplicates before continuing.
 
 - [ ] **Step 5: Deploy to production and monitor**
 
