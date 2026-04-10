@@ -53,6 +53,8 @@ export interface GeocodedLocation {
   country: string | null;
   placeId: string | null;
   googleMapsUrl: string;
+  /** Venue/organization name (only when found via Places API by business name). */
+  venueName?: string | null;
 }
 
 export interface GeocodingService {
@@ -117,6 +119,7 @@ export function createGeocodingService(apiKey: string): GeocodingService {
         country: extractCountry(r.address_components),
         placeId: r.place_id ?? null,
         googleMapsUrl: buildGoogleMapsUrl(r.geometry.location.lat, r.geometry.location.lng, r.place_id),
+        venueName: null, // geocode API doesn't return venue names
       }));
     } catch (err) {
       logger.error({ err, query: fullQuery }, 'Geocode API request failed');
@@ -143,6 +146,7 @@ export function createGeocodingService(apiKey: string): GeocodingService {
         country: extractCountry(r.address_components),
         placeId: r.place_id ?? null,
         googleMapsUrl: buildGoogleMapsUrl(r.geometry.location.lat, r.geometry.location.lng, r.place_id),
+        venueName: null,
       };
     } catch (err) {
       logger.error({ err, lat, lng }, 'Reverse geocode failed');
@@ -177,6 +181,8 @@ export function createGeocodingService(apiKey: string): GeocodingService {
           country: reverseResult?.country ?? null,
           placeId: c.place_id ?? null,
           googleMapsUrl: buildGoogleMapsUrl(c.geometry.location.lat, c.geometry.location.lng, c.place_id),
+          // Places API returns the business/venue name (e.g. "Кофемания")
+          venueName: c.name ?? null,
         });
       }
       return results;

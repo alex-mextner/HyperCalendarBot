@@ -61,6 +61,7 @@ function toAgendaEvents(occurrences: EventOccurrence[], timezone: string, lang: 
       location: occ.event.location,
       resolvedAddress: occ.event.resolved_address,
       googleMapsUrl: occ.event.google_maps_url,
+      venueName: occ.event.venue_name,
       duration,
       isAllDay,
     };
@@ -346,6 +347,7 @@ export class NotificationScheduler {
           event_location: r.event_location,
           event_resolved_address: r.event_resolved_address,
           event_google_maps_url: r.event_google_maps_url,
+          event_venue_name: r.event_venue_name,
           interval_label: r.interval_label,
           is_all_day: r.interval_minutes === -1,
         }));
@@ -356,6 +358,7 @@ export class NotificationScheduler {
           location: item.event_location,
           resolvedAddress: item.event_resolved_address,
           googleMapsUrl: item.event_google_maps_url,
+          venueName: item.event_venue_name,
           intervalLabel: item.interval_label,
           isAllDay: item.is_all_day,
         }));
@@ -407,6 +410,7 @@ export class NotificationScheduler {
         location: reminder.event_location,
         resolvedAddress: reminder.event_resolved_address,
         googleMapsUrl: reminder.event_google_maps_url,
+        venueName: reminder.event_venue_name,
         intervalLabel: reminder.interval_label,
         isAllDay,
       });
@@ -429,6 +433,7 @@ export class NotificationScheduler {
           startAt: reminder.event_start_at,
           timezone: user.timezone,
           location: reminder.event_location,
+          venueName: reminder.event_venue_name,
           language: user.language,
         });
         this.deps.enqueueCall?.({

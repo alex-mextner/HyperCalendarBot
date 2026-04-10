@@ -942,4 +942,13 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE events ADD COLUMN location_verified INTEGER NOT NULL DEFAULT 0');
     },
   },
+  {
+    name: '052_event_venue_name',
+    up: (db) => {
+      // venue_name stores the place/organization name from Google Places API
+      // (e.g. "Кофемания" when user wrote "кофемания на тверской"). Used by TTS
+      // to read out a short, natural name instead of the full formatted address.
+      db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
+    },
+  },
 ];

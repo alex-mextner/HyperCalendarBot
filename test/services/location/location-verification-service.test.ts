@@ -57,6 +57,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     longitude: null,
     google_maps_url: null,
     location_verified: 0,
+    venue_name: null,
     last_synced_at: null,
     created_at: new Date().toISOString(),
     updated_at: '',
@@ -73,6 +74,7 @@ function makeGeoResult(overrides: Partial<GeocodedLocation> = {}): GeocodedLocat
     country: 'Россия',
     placeId: 'ChIJ123',
     googleMapsUrl: 'https://www.google.com/maps/search/?api=1&query=55.7558,37.6173',
+    venueName: null,
     ...overrides,
   };
 }

@@ -36,6 +36,7 @@ function makeOccurrence(
       longitude: null,
       google_maps_url: null,
       location_verified: 0,
+      venue_name: null,
       last_synced_at: null,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',

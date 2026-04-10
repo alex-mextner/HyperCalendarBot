@@ -18,6 +18,7 @@ export interface AddressMapping {
   latitude: number;
   longitude: number;
   placeId: string | null;
+  venueName?: string | null;
   timestamp: number;
 }
 
@@ -43,6 +44,8 @@ const AddressMappingSchema = z.object({
   latitude: z.number(),
   longitude: z.number(),
   placeId: z.string().nullable(),
+  // Optional for backward compat with pre-052 cache entries (will be null after parse).
+  venueName: z.string().nullable().optional(),
   timestamp: z.number(),
 });
 
@@ -88,6 +91,7 @@ export class AddressCache {
         latitude: mapping.latitude,
         longitude: mapping.longitude,
         placeId: mapping.placeId,
+        venueName: mapping.venueName ?? null,
         timestamp: Date.now(),
       };
 

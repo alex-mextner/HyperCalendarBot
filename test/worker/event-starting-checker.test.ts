@@ -44,6 +44,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     longitude: null,
     google_maps_url: null,
     location_verified: 0,
+    venue_name: null,
     last_synced_at: null,
     created_at: now.toISOString(),
     updated_at: now.toISOString(),

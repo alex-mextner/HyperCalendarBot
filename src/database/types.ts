@@ -62,6 +62,7 @@ export interface CalendarEvent {
   longitude: number | null;
   google_maps_url: string | null;
   location_verified: number; // 0 | 1
+  venue_name: string | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -132,6 +133,7 @@ export interface UpdateEventData {
   longitude?: number | null;
   google_maps_url?: string | null;
   location_verified?: number;
+  venue_name?: string | null;
 }
 
 export interface ChatHistoryMessage {
@@ -586,6 +588,7 @@ export interface DueReminderRow extends EventReminderRow {
   event_location: string | null;
   event_resolved_address: string | null;
   event_google_maps_url: string | null;
+  event_venue_name: string | null;
 }
 
 // --- Holiday ---

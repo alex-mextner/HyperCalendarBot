@@ -16,6 +16,7 @@ export const GeocodedLocationSchema = z.object({
   country: z.string().nullable(),
   placeId: z.string().nullable(),
   googleMapsUrl: z.string(),
+  venueName: z.string().nullable().optional(),
 });
 
 const CandidatesSchema = z.array(GeocodedLocationSchema);

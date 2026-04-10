@@ -78,12 +78,13 @@ export class EventRepository {
       longitude: number;
       google_maps_url: string;
       location_verified: number;
+      venue_name: string | null;
     },
   ): void {
     this.db
       .prepare(
         `UPDATE events SET resolved_address = ?, latitude = ?, longitude = ?,
-         google_maps_url = ?, location_verified = ?, updated_at = datetime('now')
+         google_maps_url = ?, location_verified = ?, venue_name = ?, updated_at = datetime('now')
          WHERE id = ?`,
       )
       .run(
@@ -92,6 +93,7 @@ export class EventRepository {
         fields.longitude,
         fields.google_maps_url,
         fields.location_verified,
+        fields.venue_name,
         eventId,
       );
   }
@@ -204,6 +206,7 @@ export class EventRepository {
       'longitude',
       'google_maps_url',
       'location_verified',
+      'venue_name',
     ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];

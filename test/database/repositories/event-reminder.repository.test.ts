@@ -27,6 +27,7 @@ describe('EventReminderRepository', () => {
       latitude REAL,
       longitude REAL,
       google_maps_url TEXT,
+      venue_name TEXT,
       location_verified INTEGER NOT NULL DEFAULT 0,
       timezone TEXT NOT NULL DEFAULT 'UTC',
       all_day INTEGER NOT NULL DEFAULT 0,

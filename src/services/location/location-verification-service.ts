@@ -75,8 +75,11 @@ export class LocationVerificationService {
     // 1. Check address cache
     const cached = await this.deps.addressCache.findMapping(user.telegram_id, location);
     if (cached) {
-      logger.info({ eventId: event.id, cached: cached.resolvedAddress }, 'Found cached address mapping');
-      await this.applyResolvedLocation(event, {
+      logger.info(
+        { eventId: event.id, cached: cached.resolvedAddress, venue: cached.venueName ?? null },
+        'Found cached address mapping',
+      );
+      const geoFromCache: GeocodedLocation = {
         formattedAddress: cached.resolvedAddress,
         latitude: cached.latitude,
         longitude: cached.longitude,
@@ -84,18 +87,12 @@ export class LocationVerificationService {
         country: null,
         placeId: cached.placeId,
         googleMapsUrl: cached.googleMapsUrl,
-      });
+        venueName: cached.venueName ?? null,
+      };
+      await this.applyResolvedLocation(event, geoFromCache);
       return {
         resolved: true,
-        geocoded: {
-          formattedAddress: cached.resolvedAddress,
-          latitude: cached.latitude,
-          longitude: cached.longitude,
-          city: null,
-          country: null,
-          placeId: cached.placeId,
-          googleMapsUrl: cached.googleMapsUrl,
-        },
+        geocoded: geoFromCache,
         cityExtracted: null,
         candidates: [],
       };
@@ -135,6 +132,7 @@ export class LocationVerificationService {
 
   /** Apply resolved location to event and update invitations */
   async applyResolvedLocation(event: CalendarEvent, geo: GeocodedLocation): Promise<void> {
+    const venueName = geo.venueName ?? null;
     // Update event in DB
     this.deps.eventRepo.updateLocationFields(event.id, {
       resolved_address: geo.formattedAddress,
@@ -142,9 +140,10 @@ export class LocationVerificationService {
       longitude: geo.longitude,
       google_maps_url: geo.googleMapsUrl,
       location_verified: 1,
+      venue_name: venueName,
     });
 
-    logger.info({ eventId: event.id, resolvedAddress: geo.formattedAddress }, 'Event location resolved');
+    logger.info({ eventId: event.id, resolvedAddress: geo.formattedAddress, venueName }, 'Event location resolved');
 
     // Build the updated event in-memory (avoids re-fetching from DB just to get the new fields)
     const updatedEvent: CalendarEvent = {
@@ -154,6 +153,7 @@ export class LocationVerificationService {
       longitude: geo.longitude,
       google_maps_url: geo.googleMapsUrl,
       location_verified: 1,
+      venue_name: venueName,
     };
 
     // Update invitation messages
@@ -226,6 +226,7 @@ export class LocationVerificationService {
       latitude: geo.latitude,
       longitude: geo.longitude,
       placeId: geo.placeId,
+      venueName: geo.venueName,
     });
 
     // Update user city if not set and we extracted one

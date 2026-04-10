@@ -12,6 +12,7 @@ function makeGeoResult(overrides: Partial<GeocodedLocation> = {}): GeocodedLocat
     country: 'Россия',
     placeId: 'test_id',
     googleMapsUrl: 'https://maps.google.com/test',
+    venueName: null,
     ...overrides,
   };
 }

@@ -7,7 +7,10 @@ interface ReminderSpeechInput {
   title: string;
   startAt: string;
   timezone: string;
+  /** Raw user-typed location (fallback when no venue resolved). */
   location?: string | null;
+  /** Resolved venue/organization name from Google Places — preferred for TTS. */
+  venueName?: string | null;
   language: string;
 }
 
@@ -15,15 +18,30 @@ function stripHtml(text: string): string {
   return text.replace(/<[^>]*>/g, '');
 }
 
+/**
+ * Pick the best-sounding location text for TTS.
+ * Prefer venue name ("Кофемания") over raw user text ("кофемания на никитской")
+ * over full formatted address (too long for voice).
+ */
+function pickSpeakableLocation(
+  venueName: string | null | undefined,
+  location: string | null | undefined,
+): string | null {
+  if (venueName && venueName.trim().length > 0) return venueName;
+  if (location && location.trim().length > 0) return location;
+  return null;
+}
+
 export function renderReminderForSpeech(input: ReminderSpeechInput): string {
-  const { title, startAt, timezone, location, language } = input;
+  const { title, startAt, timezone, location, venueName, language } = input;
   const cleanTitle = stripHtml(title);
   const start = new TZDate(startAt, timezone);
   const timeStr = format(start, 'HH:mm');
   const s = t(language as Lang).speech;
 
   const parts = [s.reminderIntro(cleanTitle, timeStr)];
-  if (location) parts.push(s.location(stripHtml(location)));
+  const spoken = pickSpeakableLocation(venueName, location);
+  if (spoken) parts.push(s.location(stripHtml(spoken)));
   return parts.join(' ');
 }
 
