@@ -125,5 +125,8 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
         reaction: [{ type: 'emoji', emoji: emoji as TelegramReactionTypeEmojiEmoji }],
       });
     },
+    async sendChatAction(chatId: number, action: 'typing') {
+      await bot.api.sendChatAction({ chat_id: chatId, action });
+    },
   };
 }

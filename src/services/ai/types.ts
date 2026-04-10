@@ -293,4 +293,5 @@ export interface TelegramSender {
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
+  sendChatAction?(chatId: number, action: 'typing'): Promise<void>;
 }

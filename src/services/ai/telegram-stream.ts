@@ -56,6 +56,7 @@ export class TelegramStreamWriter {
   private plainResponseText = '';
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
+  private typingInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private sender: TelegramSender,
@@ -66,6 +67,21 @@ export class TelegramStreamWriter {
     this.userTranscript = opts?.userTranscript;
     this.messageId = opts?.existingMessageId ?? null;
     this.noPlaceholder = opts?.noPlaceholder ?? false;
+    this.startTypingLoop();
+  }
+
+  private startTypingLoop(): void {
+    this.sender.sendChatAction?.(this.chatId, 'typing').catch(() => {});
+    this.typingInterval = setInterval(() => {
+      this.sender.sendChatAction?.(this.chatId, 'typing').catch(() => {});
+    }, 5000);
+  }
+
+  private stopTypingLoop(): void {
+    if (this.typingInterval) {
+      clearInterval(this.typingInterval);
+      this.typingInterval = null;
+    }
   }
 
   async init(): Promise<void> {
@@ -169,6 +185,10 @@ export class TelegramStreamWriter {
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
+    // Append "..." while still generating — removed on finalize
+    if (displayText !== '⏳') {
+      displayText += '...';
+    }
     if (this.toolLabel) {
       displayText = displayText ? `${displayText}\n\n${this.toolLabel}` : this.toolLabel;
     }
@@ -195,6 +215,7 @@ export class TelegramStreamWriter {
   }
 
   async finalize(): Promise<void> {
+    this.stopTypingLoop();
     this.toolLabel = null;
     this.plainResponseText = this.text.trim();
 
@@ -256,6 +277,7 @@ export class TelegramStreamWriter {
   }
 
   async discard(): Promise<void> {
+    this.stopTypingLoop();
     if (this.messageId) {
       try {
         await this.sender.deleteMessage?.(this.chatId, this.messageId);
