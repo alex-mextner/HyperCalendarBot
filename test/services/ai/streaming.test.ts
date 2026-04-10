@@ -1,7 +1,7 @@
 // test/services/ai/streaming.test.ts
 import { describe, expect, test } from 'bun:test';
 import OpenAI from 'openai';
-import { getBackoffDelay, isRetryableError } from '../../../src/services/ai/streaming.ts';
+import { EmptyProviderResponseError, isRetryableError } from '../../../src/services/ai/streaming.ts';
 
 function makeApiError(status: number, headers?: Record<string, string>): InstanceType<typeof OpenAI.APIError> {
   return new OpenAI.APIError(status, { error: { message: 'boom' } }, `http ${status}`, new Headers(headers ?? {}));
@@ -55,33 +55,17 @@ describe('isRetryableError', () => {
   });
 });
 
-describe('getBackoffDelay', () => {
-  test('exponential 2s → 6s → 18s', () => {
-    const err = new Error('network');
-    expect(getBackoffDelay(0, err)).toBe(2000);
-    expect(getBackoffDelay(1, err)).toBe(6000);
-    expect(getBackoffDelay(2, err)).toBe(18000);
+describe('EmptyProviderResponseError', () => {
+  test('is an Error subclass with name set', () => {
+    const err = new EmptyProviderResponseError('z.ai (glm-5.1)');
+    expect(err).toBeInstanceOf(Error);
+    expect(err.name).toBe('EmptyProviderResponseError');
+    expect(err.message).toContain('z.ai (glm-5.1)');
   });
 
-  test('caps at 30s for higher attempts', () => {
-    const err = new Error('network');
-    expect(getBackoffDelay(3, err)).toBe(30_000);
-    expect(getBackoffDelay(10, err)).toBe(30_000);
-  });
-
-  test('429 without retry-after header → 5s', () => {
-    expect(getBackoffDelay(0, makeApiError(429))).toBe(5000);
-  });
-
-  test('429 with numeric retry-after → honored (in ms)', () => {
-    expect(getBackoffDelay(0, makeApiError(429, { 'retry-after': '7' }))).toBe(7000);
-  });
-
-  test('429 retry-after capped at 30s', () => {
-    expect(getBackoffDelay(0, makeApiError(429, { 'retry-after': '120' }))).toBe(30_000);
-  });
-
-  test('429 with invalid retry-after falls back to 5s', () => {
-    expect(getBackoffDelay(0, makeApiError(429, { 'retry-after': 'bogus' }))).toBe(5000);
+  test('instanceof check works across module boundaries (used by aiStreamRound fallback logic)', () => {
+    const err: unknown = new EmptyProviderResponseError('provider-a');
+    expect(err instanceof EmptyProviderResponseError).toBe(true);
+    expect(err instanceof Error).toBe(true);
   });
 });

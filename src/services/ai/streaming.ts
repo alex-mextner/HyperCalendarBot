@@ -49,6 +49,19 @@ export interface StreamRoundResult {
   providerUsed: string;
 }
 
+/**
+ * Sentinel error type: provider returned 200 OK but no usable output
+ * (z.ai coding endpoint's reasoning-only quirk). We detect this via instanceof
+ * rather than substring-matching the message — a future copy-edit to the
+ * message text would otherwise silently break the fallback decision.
+ */
+export class EmptyProviderResponseError extends Error {
+  constructor(provider: string) {
+    super(`Provider ${provider} returned 200 OK with no text and no tool calls`);
+    this.name = 'EmptyProviderResponseError';
+  }
+}
+
 // ── Error helpers (exported for tests) ─────────────────────────────────────
 
 /**
@@ -76,21 +89,6 @@ export function isRetryableError(error: unknown): boolean {
     return error.status === 429 || error.status >= 500;
   }
   return false;
-}
-
-export function getBackoffDelay(attempt: number, error: unknown): number {
-  if (error instanceof OpenAI.APIError && error.status === 429) {
-    // OpenAI SDK v6 stores headers as a Headers instance (Web API), not a plain object.
-    const retryAfterRaw = error.headers?.get?.('retry-after');
-    if (retryAfterRaw) {
-      const seconds = Number.parseInt(retryAfterRaw, 10);
-      if (!Number.isNaN(seconds) && seconds > 0) {
-        return Math.min(seconds * 1000, 30_000);
-      }
-    }
-    return 5000;
-  }
-  return Math.min(2000 * 3 ** attempt, 30_000);
 }
 
 // ── Provider adapters ──────────────────────────────────────────────────────
@@ -133,7 +131,29 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
 
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
-            const existing = toolCalls.get(tc.index);
+            // OpenAI spec requires `index` on every tool_call delta, but some
+            // providers (HF Router, early Gemini) ship chunks without it.
+            //
+            // Resolution:
+            //   1. If `tc.index` is a number, use it directly.
+            //   2. Otherwise, if this chunk has an id OR a function name, treat
+            //      it as a NEW tool call and allocate a fresh slot.
+            //   3. Otherwise (pure args-fragment chunk without index), append
+            //      to the most recently opened slot.
+            let key: number;
+            if (typeof tc.index === 'number') {
+              key = tc.index;
+            } else if (tc.id || tc.function?.name) {
+              key = toolCalls.size;
+            } else if (toolCalls.size > 0) {
+              // continuation of the last open slot
+              key = [...toolCalls.keys()].pop() as number;
+            } else {
+              // orphan fragment with no prior slot — skip it safely
+              continue;
+            }
+
+            const existing = toolCalls.get(key);
             if (existing) {
               existing.args += tc.function?.arguments ?? '';
               if (tc.id && !existing.id) existing.id = tc.id;
@@ -141,7 +161,7 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
             } else {
               const tcName = tc.function?.name ?? '';
               if (tcName) cbs.onToolCallStart?.(tcName);
-              toolCalls.set(tc.index, {
+              toolCalls.set(key, {
                 id: tc.id ?? '',
                 name: tcName,
                 args: tc.function?.arguments ?? '',
@@ -165,7 +185,7 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
       // pure text responses (no tools). If we got 200 OK but nothing usable,
       // treat as provider failure so the chain falls through.
       if (!text && toolCallsArray.length === 0) {
-        throw new Error('Provider returned empty response (likely coding-endpoint reasoning-only path)');
+        throw new EmptyProviderResponseError(name);
       }
 
       const assistantMessage: OpenAI.ChatCompletionMessageParam =
@@ -255,7 +275,8 @@ export async function aiStreamRound(
       lastError = error instanceof Error ? error : new Error(String(error));
       aiLogger.error({ err: lastError, provider: slot.name }, 'Provider failed');
 
-      if (isBalanceExhausted(error)) {
+      const balanceExhausted = isBalanceExhausted(error);
+      if (balanceExhausted) {
         alertProviderBalanceExhausted(slot.name, lastError.message);
       }
 
@@ -264,8 +285,7 @@ export async function aiStreamRound(
         throw error;
       }
 
-      const emptyResponse = lastError.message.includes('empty response');
-      if (isRetryableError(error) || isBalanceExhausted(error) || emptyResponse) {
+      if (isRetryableError(error) || balanceExhausted || error instanceof EmptyProviderResponseError) {
         aiLogger.warn({ provider: slot.name }, 'Falling through to next provider');
         continue;
       }

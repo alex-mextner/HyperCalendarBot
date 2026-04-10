@@ -130,7 +130,7 @@ describe('CalendarBotAgent', () => {
     expect(content).toContain('[Bot: Сегодня 3 события]');
   });
 
-  test('buildMessages round-trips an assistant turn with tool_calls', () => {
+  test('buildMessages round-trips an assistant turn with tool_calls (paired with tool result)', () => {
     const assistantWithTools: OpenAI.ChatCompletionMessageParam = {
       role: 'assistant',
       content: null,
@@ -142,8 +142,14 @@ describe('CalendarBotAgent', () => {
         },
       ],
     };
+    const toolResult: OpenAI.ChatCompletionMessageParam = {
+      role: 'tool',
+      tool_call_id: 'call_abc',
+      content: '[]',
+    };
     ctx.chatHistory.save(USER_ID, 'user', 'What do I have?');
     ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(assistantWithTools));
+    ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify([toolResult]));
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
     const { messages } = agent.buildMessages(ctx, history);
@@ -155,6 +161,56 @@ describe('CalendarBotAgent', () => {
     if (tools![0]!.type === 'function') {
       expect(tools![0]!.function.name).toBe('get_events');
     }
+  });
+
+  test('sanitizeMessages strips orphaned tool_calls (assistant.tool_calls without matching tool result)', () => {
+    const orphanedAssistant: OpenAI.ChatCompletionMessageParam = {
+      role: 'assistant',
+      content: 'I checked your calendar',
+      tool_calls: [
+        {
+          id: 'call_orphan',
+          type: 'function',
+          function: { name: 'get_events', arguments: '{}' },
+        },
+      ],
+    };
+    ctx.chatHistory.save(USER_ID, 'user', 'What do I have?');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(orphanedAssistant));
+    ctx.chatHistory.save(USER_ID, 'user', 'hello again');
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+
+    const assistantMsg = messages.find((m) => m.role === 'assistant');
+    expect(assistantMsg).toBeDefined();
+    // Text content is preserved, tool_calls field is gone
+    expect((assistantMsg as OpenAI.ChatCompletionAssistantMessageParam).tool_calls).toBeUndefined();
+    expect(assistantMsg!.content).toBe('I checked your calendar');
+  });
+
+  test('sanitizeMessages drops orphan assistant entirely when content is empty', () => {
+    const orphanedEmpty: OpenAI.ChatCompletionMessageParam = {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call_x',
+          type: 'function',
+          function: { name: 'get_events', arguments: '{}' },
+        },
+      ],
+    };
+    ctx.chatHistory.save(USER_ID, 'user', 'hi');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(orphanedEmpty));
+    ctx.chatHistory.save(USER_ID, 'user', 'are you there');
+    const agent = new CalendarBotAgent(config, sender);
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const { messages } = agent.buildMessages(ctx, history);
+    // No assistant message in the sanitized output — the orphan was dropped,
+    // and the two user messages remain.
+    expect(messages.filter((m) => m.role === 'assistant')).toHaveLength(0);
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(2);
   });
 
   test('buildMessages expands a stored tool-role row into individual tool messages', () => {
