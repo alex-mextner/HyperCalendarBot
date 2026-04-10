@@ -200,6 +200,16 @@ export class CalendarBotAgent {
       }
     }
 
+    // Preload pending geo pin (set when user sent a 📍 within last 30 min)
+    if (ctx.pendingGeoStore && ctx.preloadedPendingGeo === undefined) {
+      try {
+        ctx.preloadedPendingGeo = await ctx.pendingGeoStore.get(ctx.user.telegram_id);
+      } catch (err) {
+        aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to preload pending geo');
+        ctx.preloadedPendingGeo = null;
+      }
+    }
+
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
     };

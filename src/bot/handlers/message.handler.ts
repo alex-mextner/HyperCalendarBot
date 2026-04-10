@@ -662,6 +662,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
           : undefined,
       locationVerification: deps.locationVerification,
       addressCache: deps.addressCache,
+      pendingGeoStore: deps.pendingGeoStore,
     };
   };
 }

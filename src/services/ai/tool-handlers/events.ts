@@ -433,6 +433,51 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
+export interface AttachPendingLocationInput {
+  event_id: number;
+}
+
+export async function handleAttachPendingLocationToEvent(
+  ctx: AgentContext,
+  input: AttachPendingLocationInput,
+): Promise<ToolResult> {
+  if (!ctx.locationVerification || !ctx.pendingGeoStore) {
+    return { success: false, error: 'Location verification is not available' };
+  }
+
+  const geo = await ctx.pendingGeoStore.get(ctx.user.telegram_id);
+  if (!geo) {
+    return {
+      success: false,
+      error: 'No pending location pin found. Ask the user to send a 📍 pin via Telegram, then try again.',
+    };
+  }
+
+  const success = await ctx.locationVerification.resolveFromCoordinates(
+    input.event_id,
+    geo.latitude,
+    geo.longitude,
+    ctx.user.telegram_id,
+  );
+
+  if (!success) {
+    return { success: false, error: `Could not resolve geo to address for event ${input.event_id}` };
+  }
+
+  // Clear the pending pin so subsequent calls don't reuse stale data
+  await ctx.pendingGeoStore.delete(ctx.user.telegram_id).catch((err) => {
+    logger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to clear pending geo after attach');
+  });
+
+  return {
+    success: true,
+    output:
+      ctx.user.language === 'ru'
+        ? `📍 Локация привязана к событию #${input.event_id}.`
+        : `📍 Location attached to event #${input.event_id}.`,
+  };
+}
+
 export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,

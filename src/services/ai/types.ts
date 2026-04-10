@@ -213,8 +213,11 @@ export interface AgentContext {
   birthday?: BirthdayCapability;
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
+  pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
   /** Preloaded address context for system prompt (loaded async before agent runs) */
   preloadedAddressContext?: string;
+  /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */
+  preloadedPendingGeo?: { latitude: number; longitude: number } | null;
 }
 
 /** Structured data from tool handlers for intent executor consumption. */
