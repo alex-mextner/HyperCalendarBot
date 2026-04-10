@@ -5,6 +5,16 @@ export function escapeHtml(text: string): string {
   return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Strip all HTML tags, decode &amp; &lt; &gt; &quot; back to plain characters. */
+export function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
 export function escapeMarkdown(text: string): string {
   return text.replace(/([_*`[\]])/g, '\\$1');
 }

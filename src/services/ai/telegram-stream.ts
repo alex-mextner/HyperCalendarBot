@@ -190,17 +190,6 @@ export class TelegramStreamWriter {
       if (errStr.includes('message is not modified')) {
         return;
       }
-      if (errStr.includes("can't parse entities") || errStr.includes('parse')) {
-        aiLogger.warn('HTML parse failed, falling back to plain text');
-        try {
-          await this.sender.editMessageText(this.chatId, this.messageId, this.text || '⏳');
-          this.lastFlushedLength = this.text.length;
-          this.lastFlushTime = Date.now();
-        } catch (retryError) {
-          aiLogger.error({ err: retryError }, 'Fallback plain text edit also failed');
-        }
-        return;
-      }
       aiLogger.error({ error: errStr }, 'Failed to edit stream message');
     }
   }
@@ -237,25 +226,22 @@ export class TelegramStreamWriter {
     this.text = chunks[0]!;
     this.lastFlushedLength = 0;
 
-    // First chunk: edit existing placeholder or send fresh message
+    // First chunk: edit existing placeholder or send fresh message.
+    // ALWAYS use parse_mode: 'HTML' — our HTML is well-formed. If Telegram
+    // rejects it (rate limit, transient error), log and move on. Never
+    // downgrade to no parse_mode — that shows raw tags to the user.
     if (this.messageId) {
       try {
         await this.sender.editMessageText(this.chatId, this.messageId, this.text, 'HTML');
-      } catch {
-        try {
-          await this.sender.editMessageText(this.chatId, this.messageId, this.text);
-        } catch (e) {
-          aiLogger.error({ err: e }, 'Finalize edit failed');
-        }
+      } catch (err) {
+        aiLogger.error({ err }, 'Finalize edit failed');
       }
     } else if (this.text.trim()) {
       try {
         const result = await this.sender.sendMessage(this.chatId, this.text, 'HTML');
         this.messageId = result.message_id;
-      } catch {
-        await this.sender.sendMessage(this.chatId, this.text).catch((e: unknown) => {
-          aiLogger.error({ err: e }, 'Finalize send failed');
-        });
+      } catch (err) {
+        aiLogger.error({ err }, 'Finalize send failed');
       }
     }
 

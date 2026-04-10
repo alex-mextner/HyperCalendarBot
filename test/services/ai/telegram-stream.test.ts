@@ -86,7 +86,7 @@ describe('TelegramStreamWriter', () => {
     await writer.flush(true);
   });
 
-  test('falls back to plain text when HTML parse fails', async () => {
+  test('does NOT downgrade to plain text on HTML parse error — always sends with HTML', async () => {
     const parseError = new Error("Bad Request: can't parse entities");
     editMock = mock()
       .mockImplementationOnce(() => Promise.reject(parseError))
@@ -98,9 +98,8 @@ describe('TelegramStreamWriter', () => {
     writer.appendText('Hello @larichkina_b');
     await writer.flush(true);
 
-    expect(editMock).toHaveBeenCalledTimes(2);
-    const secondCall = editMock.mock.calls[1]!;
-    expect(secondCall[3]).toBeUndefined();
+    // Only one edit attempt — no fallback to plain text
+    expect(editMock).toHaveBeenCalledTimes(1);
   });
 
   test('finalize splits long messages and sends extras as new messages', async () => {
