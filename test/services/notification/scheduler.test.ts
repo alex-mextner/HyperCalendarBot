@@ -442,7 +442,7 @@ describe('NotificationScheduler', () => {
     await captureScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedPayload).toContain('Standup');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('forward');
+    expect(capturedPayload).toContain('shifted by +');
   });
 
   test('morning agenda does NOT include clock-change notice on non-DST day', async () => {
@@ -489,7 +489,7 @@ describe('NotificationScheduler', () => {
     await standaloneScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedTypes).toContain('clock_change');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('вперёд');
+    expect(capturedPayload).toContain('переведены на +');
   });
 
   test('standalone clock-change NOT sent at wrong time', async () => {
@@ -531,7 +531,7 @@ describe('NotificationScheduler', () => {
     await noEventsScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedType).toBe('morning_agenda');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('forward');
+    expect(capturedPayload).toContain('shifted by +');
   });
 
   test('evening review includes event at 00:30 local tomorrow (22:30 UTC today) for UTC+2 user', async () => {

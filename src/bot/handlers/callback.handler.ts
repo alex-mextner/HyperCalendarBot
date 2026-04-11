@@ -114,7 +114,7 @@ export interface CallbackHandlerOpts {
   onboardingScene?: AnyScene;
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: ParseMode }) => Promise<void>;
+    sendMessage: (chatId: number, text: string, options?: { parse_mode: ParseMode }) => Promise<void>;
   };
   callSettingsRepo?: CallSettingsRepository;
   sharingSettingsRepo?: SharingSettingsRepository;
@@ -824,23 +824,22 @@ export function createCallbackHandler(
 
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification, {
-          parse_mode: 'HTML',
-        })
-        .catch(() => {});
+      const notifyText = updated
+        ? t(proposerLang).callbackErrors.proposalAcceptedNotification(updated.title)
+        : t(proposerLang).callbackErrors.proposalAcceptedNotificationNoTitle;
+      editProposalDeps.sendMessage(proposal.proposer_id, notifyText).catch(() => {});
     } else if (subAction === 'reject') {
+      const eventForReject = eventService.getEvent(proposal.event_id, ownerId);
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
       await ctx.answer();
       await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification, {
-          parse_mode: 'HTML',
-        })
-        .catch(() => {});
+      const notifyText = eventForReject
+        ? t(proposerLang).callbackErrors.proposalRejectedNotification(eventForReject.title)
+        : t(proposerLang).callbackErrors.proposalRejectedNotificationNoTitle;
+      editProposalDeps.sendMessage(proposal.proposer_id, notifyText).catch(() => {});
     }
   });
 
@@ -1331,7 +1330,7 @@ export function createCallbackHandler(
     const threadUser = userRepo?.findByTelegramId(thread.user_id);
     const threadUserLang = (threadUser?.language ?? lang) as Lang;
     feedbackDeps
-      .sendMessage(thread.user_id, t(threadUserLang).callbackErrors.feedbackThreadResolved)
+      .sendMessage(thread.user_id, t(threadUserLang).callbackErrors.feedbackThreadResolved(thread.subject))
       .catch((e: unknown) => {
         cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
       });

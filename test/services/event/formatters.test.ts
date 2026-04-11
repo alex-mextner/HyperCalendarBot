@@ -561,6 +561,38 @@ describe('formatInvitation', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg', 'Europe/Kyiv', true);
     expect(result).toContain('@alice_tg');
   });
+
+  test('English header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    // Title must appear in the first line so phone notification previews
+    // show the specific event, not a generic "Invitation" label.
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('invitation from');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('Russian header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алиса', 1, 'alice_tg');
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('приглашение от');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('header escapes HTML special chars in event title', () => {
+    const tricky = makeEvent({
+      title: 'A & B <foo>',
+      start_at: '2026-03-11T12:00:00Z',
+      end_at: '2026-03-11T13:00:00Z',
+      timezone: 'Europe/Moscow',
+    });
+    const result = formatInvitation(tricky, 'Europe/Moscow', 'en', 'Alice', 1);
+    const firstLine = result.split('\n')[0]!;
+    // HTML specials must be escaped — otherwise Telegram parser rejects the message.
+    expect(firstLine).toContain('A &amp; B &lt;foo&gt;');
+    expect(firstLine).not.toContain('A & B <foo>');
+  });
 });
 
 // ── formatEventListItem (lines 118-119) ──

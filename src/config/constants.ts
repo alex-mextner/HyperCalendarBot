@@ -179,8 +179,7 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `The user hasn't started the bot yet. Forward this link so they can accept:\n\n${url}\n\n(Invitation to "<b>${title}</b>")`,
     invitation_sent: 'Invitation sent',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Invitation</b>\n${from} invites you to: <b>${title}</b>`,
+    invitation_received: (title: string, from: string) => `📨 <b>${title}</b> — invitation from ${from}`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -485,9 +484,11 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Proposal accepted. Event "${title}" updated.`,
       proposalAcceptedNoEvent: '✅ Proposal accepted.',
       proposalRejected: '❌ Proposal rejected.',
-      proposalAcceptedNotification: '✅ Your edit proposal was accepted.',
-      proposalRejectedNotification: '❌ Your edit proposal was rejected.',
-      feedbackThreadResolved: 'Your feedback thread has been resolved.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — edit accepted`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — edit rejected`,
+      proposalAcceptedNotificationNoTitle: '✅ Edit proposal accepted',
+      proposalRejectedNotificationNoTitle: '❌ Edit proposal rejected',
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — resolved`,
     },
     notifications: {
       morning: "Good morning! Here's your day:",
@@ -788,8 +789,7 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `Пользователь ещё не запустил бота. Перешлите ссылку для принятия:\n\n${url}\n\n(Приглашение на "<b>${title}</b>")`,
     invitation_sent: 'Приглашение отправлено',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Приглашение</b>\n${from} приглашает вас: <b>${title}</b>`,
+    invitation_received: (title: string, from: string) => `📨 <b>${title}</b> — приглашение от ${from}`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',
@@ -1093,9 +1093,11 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Предложение принято. Событие «${title}» обновлено.`,
       proposalAcceptedNoEvent: '✅ Предложение принято.',
       proposalRejected: '❌ Предложение отклонено.',
-      proposalAcceptedNotification: '✅ Твоё предложение по редактированию принято.',
-      proposalRejectedNotification: '❌ Твоё предложение по редактированию отклонено.',
-      feedbackThreadResolved: 'Твой вопрос помечен как решённый.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
+      proposalAcceptedNotificationNoTitle: '✅ Правка принята',
+      proposalRejectedNotificationNoTitle: '❌ Правка отклонена',
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
       proposalAlreadyProcessed: (status: string) => {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
         return `Уже ${map[status] ?? status}`;

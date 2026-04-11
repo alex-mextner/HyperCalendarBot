@@ -1,5 +1,6 @@
 // src/services/event/formatters.ts
 import { TZDate } from '@date-fns/tz';
+import { type Lang, t } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -180,7 +181,7 @@ export function formatInvitation(
   const inviterLink = inviterUsername
     ? `@${escapeHtml(inviterUsername)}`
     : `<a href="tg://user?id=${inviterId}">${escapeHtml(inviterName)}</a>`;
-  const header = lang === 'ru' ? `📨 <b>Приглашение</b> от ${inviterLink}` : `📨 <b>Invitation</b> from ${inviterLink}`;
+  const header = t(lang as Lang).invitation_received(escapeHtml(event.title), inviterLink);
 
   if (!event.all_day) {
     const timeLabel = formatTimeWithTimezones(

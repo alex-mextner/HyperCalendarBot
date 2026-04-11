@@ -412,8 +412,9 @@ describe('LocationVerificationService', () => {
 
       const call = deps.editMessage.mock.calls[0] as unknown[];
       const text = call[2] as string;
-      // Russian invitation header
-      expect(text).toContain('Приглашение');
+      // Russian invitation header with front-loaded event title
+      expect(text).toContain('приглашение от');
+      expect(text).toContain('Встреча');
     });
 
     test('updated event passed to formatter has the new resolved address', async () => {
