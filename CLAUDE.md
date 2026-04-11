@@ -427,13 +427,18 @@ All user-facing bot messages must follow these rules:
   Bad:  ⏰ Напоминания:            (batch header is generic)
   Good: ⏰ Лазер + ещё 2           (first title front-loaded)
 
-  Bad:  🕐 Сегодня ночью часы перевели на 1 час вперёд. Double-check …
-  Good: 🕐 Часы вперёд на 1 час — проверь будильник и встречи!
+  Bad:  🕐 Сегодня ночью часы перевели на 1 час вперёд. Double-check your alarms…
+  Good: 🕐 Часы переведены на +1 час
   ```
   Drop filler words ("is a", "moved", "Сегодня ночью", "Напоминание:") — they push the real
   content out of the preview. Prefer short dashes/separators over prepositions when they convey
   the same meaning. This applies to every push-style message: reminders, agenda headers, holiday
   notices, clock-change notices, birthday reminders, proposal/invitation notifications.
+- **Don't instruct the user to do what the system does automatically.** Phones and OS auto-adjust
+  alarms for DST; calendars auto-recalculate event times. Informational notifications should
+  inform, not nag. Don't tack on "проверь будильник", "double-check your meetings", "не забудь"
+  unless the user genuinely must take manual action. Shorter is better: the fewer words, the
+  higher the chance the whole message is visible in the preview.
 
 ## Telegram Bot API Limits
 

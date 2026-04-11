@@ -511,9 +511,8 @@ export const MSG = {
       durationHours: (h: number) => `${h}h`,
       durationMinutes: (m: number) => `${m} min`,
       batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} +${restCount} more`,
-      clockChangeForward: (duration: string) =>
-        `🕐 Clocks forward ${duration} last night — check your alarms and meetings!`,
-      clockChangeBack: (duration: string) => `🕐 Clocks back ${duration} last night — check your alarms and meetings!`,
+      clockChangeForward: (duration: string) => `🕐 Clocks shifted by +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Clocks shifted by -${duration}`,
     },
     weather: {
       tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
@@ -1124,8 +1123,8 @@ export const MSG = {
       durationHours: (h: number) => `${h} ${ruPlural(h, 'час', 'часа', 'часов')}`,
       durationMinutes: (m: number) => `${m} ${ruPlural(m, 'минуту', 'минуты', 'минут')}`,
       batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} + ещё ${restCount}`,
-      clockChangeForward: (duration: string) => `🕐 Часы вперёд на ${duration} — проверь будильник и встречи!`,
-      clockChangeBack: (duration: string) => `🕐 Часы назад на ${duration} — проверь будильник и встречи!`,
+      clockChangeForward: (duration: string) => `🕐 Часы переведены на +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Часы переведены на -${duration}`,
     },
     weather: {
       tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
