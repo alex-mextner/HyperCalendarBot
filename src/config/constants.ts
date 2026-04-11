@@ -179,7 +179,12 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `The user hasn't started the bot yet. Forward this link so they can accept:\n\n${url}\n\n(Invitation to "<b>${title}</b>")`,
     invitation_sent: 'Invitation sent',
-    invitation_received: (title: string, from: string) => `📨 <b>${title}</b> — invitation from ${from}`,
+    // SAFETY: both arguments must be HTML-safe when passed — either escaped
+    // plain text via `escapeHtml(...)` or a pre-built HTML fragment like
+    // `<a href="tg://user?id=...">name</a>`. The template wraps `titleHtml`
+    // in `<b>...</b>` and concatenates `fromHtml` verbatim.
+    invitation_received: (titleHtml: string, fromHtml: string) =>
+      `📨 <b>${titleHtml}</b> — invitation from ${fromHtml}`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -791,7 +796,9 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `Пользователь ещё не запустил бота. Перешлите ссылку для принятия:\n\n${url}\n\n(Приглашение на "<b>${title}</b>")`,
     invitation_sent: 'Приглашение отправлено',
-    invitation_received: (title: string, from: string) => `📨 <b>${title}</b> — приглашение от ${from}`,
+    // SAFETY: see en.invitation_received — both args must be HTML-safe before
+    // being passed; template wraps `titleHtml` in <b> and concatenates `fromHtml`.
+    invitation_received: (titleHtml: string, fromHtml: string) => `📨 <b>${titleHtml}</b> — приглашение от ${fromHtml}`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',

@@ -119,7 +119,7 @@ export class EventRepository {
    * is still set, and group membership is still valid, so the same access
    * predicate as `findById` is applied here — minus `is_deleted = 0`.
    */
-  findByIdIncludingDeleted(id: number, userId: number): CalendarEvent | null {
+  findByIdIncludingSoftDeleted(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(
         `SELECT * FROM events WHERE id = ? AND is_cancelled = 0
@@ -319,12 +319,20 @@ export class EventRepository {
         )
         .run(id, userId, userId);
       if (result.changes === 0) return false;
-      this.cascadeCleanupChildren(id);
+      this.cascadeCleanupChildren(id, 0);
       return true;
     })();
   }
 
-  private cascadeCleanupChildren(eventId: number): void {
+  private static readonly CASCADE_MAX_DEPTH = 8;
+
+  private cascadeCleanupChildren(eventId: number, depth: number): void {
+    // In practice SQLite recurrence exceptions nest 2 levels at most
+    // (template → exception). The guard is defense-in-depth against a
+    // corrupted graph or a future schema change that introduces cycles.
+    if (depth > EventRepository.CASCADE_MAX_DEPTH) {
+      throw new Error(`cascadeCleanupChildren: depth > ${EventRepository.CASCADE_MAX_DEPTH} for event ${eventId}`);
+    }
     // Tables that used to cascade via ON DELETE CASCADE. edit_proposals is
     // intentionally absent — that row is what lets us resolve the title for
     // the proposer notification after the owner soft-deletes the event.
@@ -357,7 +365,7 @@ export class EventRepository {
       .all(eventId) as { id: number }[];
     for (const exc of exceptions) {
       this.db.prepare("UPDATE events SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?").run(exc.id);
-      this.cascadeCleanupChildren(exc.id);
+      this.cascadeCleanupChildren(exc.id, depth + 1);
     }
   }
 
@@ -721,7 +729,7 @@ export class EventRepository {
         )
         .run(id, groupId);
       if (result.changes === 0) return false;
-      this.cascadeCleanupChildren(id);
+      this.cascadeCleanupChildren(id, 0);
       return true;
     })();
   }

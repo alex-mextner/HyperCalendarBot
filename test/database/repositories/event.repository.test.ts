@@ -141,9 +141,9 @@ describe('EventRepository', () => {
     expect(removed).toBe(true);
     // User-facing read filters out soft-deleted rows.
     expect(events.findById(created.id, USER_ID)).toBeNull();
-    // The owner can still resolve the title via findByIdIncludingDeleted —
+    // The owner can still resolve the title via findByIdIncludingSoftDeleted —
     // ownership is preserved (events.user_id is unchanged by soft-delete).
-    const raw = events.findByIdIncludingDeleted(created.id, USER_ID);
+    const raw = events.findByIdIncludingSoftDeleted(created.id, USER_ID);
     expect(raw).not.toBeNull();
     expect(raw!.title).toBe('Del');
     expect(raw!.is_deleted).toBe(1);
@@ -196,7 +196,7 @@ describe('EventRepository', () => {
     expect(events.getExceptions(template.id).map((e) => e.id)).not.toContain(exception.id);
   });
 
-  test('findByIdIncludingDeleted enforces ownership (not an IDOR)', () => {
+  test('findByIdIncludingSoftDeleted enforces ownership (not an IDOR)', () => {
     const OTHER_USER = 999;
     const created = events.create({
       user_id: USER_ID,
@@ -208,9 +208,9 @@ describe('EventRepository', () => {
     // A different user (not owner, not group member) cannot resolve the
     // title even after soft-delete — the method bypasses only the soft-
     // delete filter, ownership/group-visibility is still enforced.
-    expect(events.findByIdIncludingDeleted(created.id, OTHER_USER)).toBeNull();
+    expect(events.findByIdIncludingSoftDeleted(created.id, OTHER_USER)).toBeNull();
     // But the actual owner can.
-    expect(events.findByIdIncludingDeleted(created.id, USER_ID)).not.toBeNull();
+    expect(events.findByIdIncludingSoftDeleted(created.id, USER_ID)).not.toBeNull();
   });
 
   test('search finds events by title substring', () => {

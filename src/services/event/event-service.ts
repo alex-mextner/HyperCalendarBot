@@ -146,8 +146,8 @@ export class EventService {
    * systems that need the title of a removed event (e.g. proposal accept/
    * reject notifications to the proposer).
    */
-  getEventIncludingDeleted(id: number, userId: number): CalendarEvent | null {
-    return this.eventRepo.findByIdIncludingDeleted(id, userId);
+  getEventIncludingSoftDeleted(id: number, userId: number): CalendarEvent | null {
+    return this.eventRepo.findByIdIncludingSoftDeleted(id, userId);
   }
 
   getLatestCreated(userId: number): CalendarEvent | null {

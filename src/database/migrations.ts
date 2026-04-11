@@ -991,4 +991,15 @@ export const migrations: Migration[] = [
       db.exec('CREATE INDEX idx_events_is_deleted ON events(is_deleted) WHERE is_deleted = 1');
     },
   },
+  {
+    name: '055_drop_is_deleted_partial_index',
+    up: (db) => {
+      // The partial index from 054 only helps admin queries like "show me
+      // removed events" that we don't currently run. Hot-path reads filter
+      // `is_deleted = 0` alongside existing indexed predicates (`user_id`,
+      // `start_at`, `group_id`), so SQLite's query planner uses those and
+      // ignores the partial index anyway. Drop it to keep the schema tidy.
+      db.exec('DROP INDEX IF EXISTS idx_events_is_deleted');
+    },
+  },
 ];

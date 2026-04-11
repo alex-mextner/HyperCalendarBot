@@ -816,7 +816,7 @@ export function createCallbackHandler(
     // referenced, even if the owner has since removed it. The lookup
     // still enforces ownership via the user.telegram_id check, so this
     // is not an IDOR (we already verified `ownerId === user.telegram_id`).
-    const eventForTitle = eventService.getEventIncludingDeleted(proposal.event_id, user.telegram_id);
+    const eventForTitle = eventService.getEventIncludingSoftDeleted(proposal.event_id, user.telegram_id);
     const eventTitle = eventForTitle?.title ?? `#${proposal.event_id}`;
 
     if (subAction === 'accept') {

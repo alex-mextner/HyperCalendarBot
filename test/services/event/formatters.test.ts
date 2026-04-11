@@ -614,6 +614,14 @@ describe('formatInvitation', () => {
     expect(occurrences).toHaveLength(1);
     expect(result).not.toContain('📌');
   });
+
+  test('full invitation output snapshot — locks layout against regression', () => {
+    // Locks the entire formatted output so any future change to
+    // formatEventDetail or the invitation header that reintroduces the
+    // duplicated title (or shifts the overall layout) trips this test.
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    expect(result).toBe(`📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)`);
+  });
 });
 
 // ── formatEventListItem (lines 118-119) ──
