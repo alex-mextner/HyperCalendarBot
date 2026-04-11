@@ -14,10 +14,29 @@ type Scope = 'personal' | 'group';
 
 const renderLogger = logger.child({ module: 'ai-tools' });
 
-export function handleRenderDayImage(
+/**
+ * Pin the rendered image if chat policy demands it. Pin is a secondary
+ * side-effect: the photo is already delivered before this runs, so the tool
+ * result is returned with the pin still in flight. Any failure is logged and
+ * swallowed — pinning is best-effort, not a delivery guarantee.
+ */
+function schedulePinFireAndForget(ctx: AgentContext, messageId: number): void {
+  const sender = ctx.sender;
+  if (!sender) return;
+  autoPin(ctx.chatId, messageId, {
+    pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as true),
+    sendMessage: (cId, text) => sender.sendMessage(cId, text).then(() => {}),
+    isGroupChat: ctx.isGroup,
+    groupChatRepo: ctx.group?.groupChatRepo,
+  }).catch((err) => {
+    renderLogger.error({ err }, 'autoPin failed');
+  });
+}
+
+export async function handleRenderDayImage(
   ctx: AgentContext,
   input: { date: string; scope?: Scope; owner_id?: number },
-): ToolResult {
+): Promise<ToolResult> {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
@@ -44,35 +63,37 @@ export function handleRenderDayImage(
   const holidays = ctx.holidayService?.getHolidaysForDate(userId, input.date) ?? [];
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
+  const tr = t(lang).aiTools.meta;
 
-  const chatId = ctx.chatId;
-  const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.group?.groupChatRepo;
-
-  renderDayImage(ctx.renderService!, occurrences, input.date, ctx.user.timezone, lang, userId, holidays)
-    .then(async (buffer) => {
-      const file = new File([buffer], 'day.png', { type: 'image/png' });
-      const sent = await sender.sendPhoto!(chatId, file);
-      autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as true),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text).then(() => {}),
-        isGroupChat,
-        groupChatRepo,
-      }).catch((err) => {
-        renderLogger.error({ err }, 'autoPin failed');
-      });
-    })
-    .catch((err) => {
-      renderLogger.error({ err }, 'Day image render failed');
-    });
-
-  return { success: true, output: t(lang).aiTools.meta.dayImageRendering(input.date) };
+  try {
+    const buffer = await renderDayImage(
+      ctx.renderService,
+      occurrences,
+      input.date,
+      ctx.user.timezone,
+      lang,
+      userId,
+      holidays,
+    );
+    const file = new File([buffer], 'day.png', { type: 'image/png' });
+    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    schedulePinFireAndForget(ctx, sent.message_id);
+    return {
+      success: true,
+      output: tr.dayImageSent(input.date),
+      agentHint:
+        'The day image has already been delivered to the chat. Do NOT call render_day_image again for this date in this turn.',
+    };
+  } catch (err) {
+    renderLogger.error({ err, date: input.date }, 'Day image render failed');
+    return { success: false, error: tr.dayImageFailed(input.date) };
+  }
 }
 
-export function handleRenderTable(
+export async function handleRenderTable(
   ctx: AgentContext,
   input: { title: string; markdown: string; caption?: string },
-): ToolResult {
+): Promise<ToolResult> {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
@@ -80,12 +101,9 @@ export function handleRenderTable(
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const tr = t(lang).aiTools.meta;
   const sender = ctx.sender;
-  const chatId = ctx.chatId;
-  const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.group?.groupChatRepo;
 
-  ctx.renderService
-    .renderDirect({
+  try {
+    const buffer = await ctx.renderService.renderDirect({
       type: 'md-table',
       data: {
         title: input.title,
@@ -94,35 +112,28 @@ export function handleRenderTable(
         theme: getTheme(),
       },
       userId: ctx.user.telegram_id,
-    })
-    .then(async (buffer) => {
-      const file = new File([buffer], 'table.png', { type: 'image/png' });
-      const sent = await sender.sendPhoto!(chatId, file);
-      autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as true),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text).then(() => {}),
-        isGroupChat,
-        groupChatRepo,
-      }).catch((err) => {
-        renderLogger.error({ err }, 'autoPin failed');
-      });
-    })
-    .catch((err) => {
-      renderLogger.error({ err }, 'Table image render failed');
     });
+    const file = new File([buffer], 'table.png', { type: 'image/png' });
+    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    schedulePinFireAndForget(ctx, sent.message_id);
 
-  const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
-
-  return {
-    success: true,
-    output: `${tr.tableRendering(input.title)}${voiceNote}`,
-  };
+    const voiceNote = ctx.inputMode === 'live_call' ? ` ${tr.tableRenderingVoice}` : '';
+    return {
+      success: true,
+      output: `${tr.tableSent(input.title)}${voiceNote}`,
+      agentHint:
+        'The table has already been delivered to the chat. Do NOT call render_table again with identical arguments in this turn.',
+    };
+  } catch (err) {
+    renderLogger.error({ err, title: input.title }, 'Table image render failed');
+    return { success: false, error: tr.tableFailed(input.title) };
+  }
 }
 
-export function handleRenderWeekImage(
+export async function handleRenderWeekImage(
   ctx: AgentContext,
   input: { week_start: string; scope?: Scope; owner_id?: number },
-): ToolResult {
+): Promise<ToolResult> {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
@@ -155,34 +166,36 @@ export function handleRenderWeekImage(
 
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
-  const chatId = ctx.chatId;
-  const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.group?.groupChatRepo;
+  const tr = t(lang).aiTools.meta;
 
-  renderWeekImage(ctx.renderService!, occurrences, input.week_start, ctx.user.timezone, lang, userId)
-    .then(async (buffer) => {
-      const file = new File([buffer], 'week.png', { type: 'image/png' });
-      const sent = await sender.sendPhoto!(chatId, file);
-      autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as true),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text).then(() => {}),
-        isGroupChat,
-        groupChatRepo,
-      }).catch((err) => {
-        renderLogger.error({ err }, 'autoPin failed');
-      });
-    })
-    .catch((err) => {
-      renderLogger.error({ err }, 'Week image render failed');
-    });
-
-  return { success: true, output: t(lang).aiTools.meta.weekImageRendering(input.week_start) };
+  try {
+    const buffer = await renderWeekImage(
+      ctx.renderService,
+      occurrences,
+      input.week_start,
+      ctx.user.timezone,
+      lang,
+      userId,
+    );
+    const file = new File([buffer], 'week.png', { type: 'image/png' });
+    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    schedulePinFireAndForget(ctx, sent.message_id);
+    return {
+      success: true,
+      output: tr.weekImageSent(input.week_start),
+      agentHint:
+        'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
+    };
+  } catch (err) {
+    renderLogger.error({ err, weekStart: input.week_start }, 'Week image render failed');
+    return { success: false, error: tr.weekImageFailed(input.week_start) };
+  }
 }
 
-export function handleRenderMonthImage(
+export async function handleRenderMonthImage(
   ctx: AgentContext,
   input: { month: string; scope?: Scope; owner_id?: number },
-): ToolResult {
+): Promise<ToolResult> {
   if (!ctx.renderService || !ctx.sender?.sendPhoto) {
     return { success: false, error: 'Image rendering not available.' };
   }
@@ -214,26 +227,21 @@ export function handleRenderMonthImage(
 
   const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
-  const chatId = ctx.chatId;
-  const isGroupChat = ctx.isGroup;
-  const groupChatRepo = ctx.group?.groupChatRepo;
+  const tr = t(lang).aiTools.meta;
 
-  renderMonthImage(ctx.renderService!, occurrences, year, month, ctx.user.timezone, lang, userId)
-    .then(async (buffer) => {
-      const file = new File([buffer], 'month.png', { type: 'image/png' });
-      const sent = await sender.sendPhoto!(chatId, file);
-      autoPin(chatId, sent.message_id, {
-        pinChatMessage: (cId, mId, opts) => sender.pinChatMessage?.(cId, mId, opts) ?? Promise.resolve(true as true),
-        sendMessage: (cId, text) => sender.sendMessage(cId, text).then(() => {}),
-        isGroupChat,
-        groupChatRepo,
-      }).catch((err) => {
-        renderLogger.error({ err }, 'autoPin failed');
-      });
-    })
-    .catch((err) => {
-      renderLogger.error({ err }, 'Month image render failed');
-    });
-
-  return { success: true, output: t(lang).aiTools.meta.monthImageRendering(input.month) };
+  try {
+    const buffer = await renderMonthImage(ctx.renderService, occurrences, year, month, ctx.user.timezone, lang, userId);
+    const file = new File([buffer], 'month.png', { type: 'image/png' });
+    const sent = await sender.sendPhoto!(ctx.chatId, file);
+    schedulePinFireAndForget(ctx, sent.message_id);
+    return {
+      success: true,
+      output: tr.monthImageSent(input.month),
+      agentHint:
+        'The monthly image has already been delivered to the chat. Do NOT call render_month_image again with identical arguments in this turn.',
+    };
+  } catch (err) {
+    renderLogger.error({ err, month: input.month }, 'Month image render failed');
+    return { success: false, error: tr.monthImageFailed(input.month) };
+  }
 }

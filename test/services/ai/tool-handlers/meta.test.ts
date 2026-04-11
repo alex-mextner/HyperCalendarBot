@@ -404,14 +404,14 @@ describe('meta tool handlers', () => {
       };
     });
 
-    test('returns error when renderService not available', () => {
+    test('returns error when renderService not available', async () => {
       ctx.renderService = undefined;
-      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not available');
     });
 
-    test('fetches personal events by default when isGroup=false', () => {
+    test('fetches personal events by default when isGroup=false', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Event',
@@ -419,12 +419,12 @@ describe('meta tool handlers', () => {
         end_at: '2026-03-15T11:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
     });
 
-    test('fetches group events when scope=group', () => {
+    test('fetches group events when scope=group', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Only',
@@ -448,19 +448,19 @@ describe('meta tool handlers', () => {
         groupChatId: GROUP_CHAT_ID,
         chatId: GROUP_CHAT_ID,
       };
-      const result = handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
+      const result = await handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
     });
 
-    test('scope defaults to group when isGroup=true', () => {
+    test('scope defaults to group when isGroup=true', async () => {
       const gCtx: AgentContext = {
         ...ctx,
         isGroup: true,
         groupChatId: GROUP_CHAT_ID,
         chatId: GROUP_CHAT_ID,
       };
-      const result = handleRenderDayImage(gCtx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(gCtx, { date: '2026-03-15' });
       expect(result.success).toBe(true);
       // Just verifying it doesn't crash — scope resolved to group
     });
