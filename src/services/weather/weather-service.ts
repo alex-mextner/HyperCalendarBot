@@ -102,11 +102,18 @@ export class WeatherService {
    * Returns an hourly point when the event is inside the 48h hourly horizon,
    * otherwise a daily point while the event is still inside the 7-day daily horizon.
    * Returns null if the event is in the past or beyond the forecast horizon.
+   * Pass `opts.allDay = true` for all-day events — hourly is skipped and the
+   * daily forecast for the event's date is used regardless of how close it is.
    */
-  async getForecastAt(timezone: string, eventTimeMs: number, lang = 'en'): Promise<EventForecast | null> {
+  async getForecastAt(
+    timezone: string,
+    eventTimeMs: number,
+    lang = 'en',
+    opts?: { allDay?: boolean },
+  ): Promise<EventForecast | null> {
     const week = await this.getWeekWeather(timezone, lang);
     if (!week) return null;
-    return pickForecastAt(week, eventTimeMs);
+    return pickForecastAt(week, eventTimeMs, opts);
   }
 
   private async fetchCurrentWeather(coords: Coordinates, lang: string): Promise<DayWeather | null> {
@@ -197,13 +204,22 @@ export class WeatherService {
  * Pick the forecast point that best covers a given event time.
  * Prefers hourly (closest hour within 90 minutes), falls back to daily
  * when the event is beyond the hourly horizon but still within the daily one.
+ * For all-day events, hourly is skipped and the daily forecast for the
+ * event's date is used — showing the temperature at midnight of a whole-day
+ * event is misleading.
  * Returns null for past events or events beyond the daily horizon.
  */
-export function pickForecastAt(week: WeekWeather, eventTimeMs: number): EventForecast | null {
+export function pickForecastAt(
+  week: WeekWeather,
+  eventTimeMs: number,
+  opts?: { allDay?: boolean },
+): EventForecast | null {
   if (eventTimeMs < Date.now() - 60 * 60_000) return null;
 
-  const closestHour = findClosestHour(week.hours, eventTimeMs);
-  if (closestHour) return { kind: 'hour', hour: closestHour };
+  if (!opts?.allDay) {
+    const closestHour = findClosestHour(week.hours, eventTimeMs);
+    if (closestHour) return { kind: 'hour', hour: closestHour };
+  }
 
   const eventDate = new Date(eventTimeMs).toISOString().slice(0, 10);
   const day = week.days.find((d) => d.date === eventDate);

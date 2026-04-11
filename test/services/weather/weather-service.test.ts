@@ -370,4 +370,17 @@ describe('pickForecastAt', () => {
     const result = pickForecastAt(week, eventMs);
     expect(result).toBeNull();
   });
+
+  test('allDay option skips hourly and returns daily forecast', () => {
+    const eventMs = Date.now() + 3600_000; // 1h ahead — hourly would match
+    const week = buildWeek(eventMs);
+    const hourly = pickForecastAt(week, eventMs);
+    expect(hourly?.kind).toBe('hour');
+    const daily = pickForecastAt(week, eventMs, { allDay: true });
+    expect(daily?.kind).toBe('day');
+    if (daily?.kind === 'day') {
+      expect(daily.day.tempMin).toBe(5);
+      expect(daily.day.tempMax).toBe(15);
+    }
+  });
 });

@@ -256,16 +256,23 @@ async function fetchDayWeather(
   }
 }
 
-/** Fetch forecast anchored to a specific event time (hourly when possible) */
+/**
+ * Fetch forecast anchored to a specific event time (hourly when possible).
+ * For all-day events the daily forecast for the event's date is returned —
+ * showing the temperature at midnight of a whole-day event is misleading.
+ */
 async function fetchEventForecast(
   weatherService: WeatherService | undefined,
   timezone: string,
   eventStartAt: string,
+  isAllDay: boolean,
   lang = 'en',
 ): Promise<EventForecast | null> {
   if (!weatherService) return null;
   try {
-    return await weatherService.getForecastAt(timezone, new Date(eventStartAt).getTime(), lang);
+    return await weatherService.getForecastAt(timezone, new Date(eventStartAt).getTime(), lang, {
+      allDay: isAllDay,
+    });
   } catch (err) {
     notifyLogger.warn({ err, timezone }, 'Weather fetch failed for event reminder');
     return null;
@@ -370,9 +377,7 @@ export class NotificationScheduler {
         const refKey = `erb:${firstReminder.user_id}:${firstReminder.remind_at_utc}`;
         const batchForecasts = await Promise.all(
           batchItems.map((item) =>
-            item.is_all_day
-              ? Promise.resolve(null)
-              : fetchEventForecast(this.deps.weatherService, user.timezone, item.event_start_at, lang),
+            fetchEventForecast(this.deps.weatherService, user.timezone, item.event_start_at, item.is_all_day, lang),
           ),
         );
         const renderItems = batchItems.map((item, idx) => ({
@@ -427,9 +432,13 @@ export class NotificationScheduler {
         ? format(new TZDate(reminder.event_end_at, user.timezone), 'HH:mm')
         : undefined;
       const isAllDay = reminder.interval_minutes === -1;
-      const forecast = isAllDay
-        ? null
-        : await fetchEventForecast(this.deps.weatherService, user.timezone, reminder.event_start_at, lang);
+      const forecast = await fetchEventForecast(
+        this.deps.weatherService,
+        user.timezone,
+        reminder.event_start_at,
+        isAllDay,
+        lang,
+      );
       const rendered = renderer.renderEventReminder(lang, {
         title: reminder.event_title,
         startTime,

@@ -739,11 +739,14 @@ export function createCallbackHandler(
       await ctx.answer(statusLabel);
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
-      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days)
+      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days).
+      // For all-day events the daily forecast is used regardless — no midnight temperature.
       const forecast =
-        weatherService && event && subAction === 'accept' && !event.all_day
+        weatherService && event && subAction === 'accept'
           ? await weatherService
-              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang)
+              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang, {
+                allDay: event.all_day === 1,
+              })
               .catch(() => null)
           : null;
       const eventCard = event ? formatEventDetail(event, event.timezone, lang, forecast) : '';
