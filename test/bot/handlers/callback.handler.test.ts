@@ -130,6 +130,124 @@ describe('createCallbackHandler', () => {
   });
 });
 
+// ── editProposal:accept|reject end-to-end callback wiring ─────────
+// Regression coverage: editProposalDeps was never injected in bot/index.ts
+// for an unknown period — the button clicks from `sendEditProposal` reached
+// the dispatch table but returned early because of the missing dep. These
+// tests lock the happy paths so a future refactor can't silently re-break it.
+
+function makeEditProposalDeps(
+  overrides: {
+    proposalStatus?: 'pending' | 'accepted' | 'rejected';
+    proposalEventId?: number;
+    ownerId?: number;
+    updatedEvent?: { id: number; title: string } | null;
+    proposerLang?: 'en' | 'ru';
+  } = {},
+) {
+  const {
+    proposalStatus = 'pending',
+    proposalEventId = 42,
+    ownerId = 100,
+    updatedEvent = { id: 42, title: 'Team meeting' },
+    proposerLang = 'en',
+  } = overrides;
+
+  const updateStatus = mock(() => true);
+  const sendMessage = mock(async () => {});
+
+  const eventService = {
+    getEvent: mock(() => ({ id: proposalEventId, title: 'Team meeting' })),
+    getEventOwnerId: mock(() => ownerId),
+    getEventIncludingSoftDeleted: mock(() => ({ id: proposalEventId, title: 'Team meeting' })),
+    updateEvent: mock(() => updatedEvent),
+    getEventsForDay: mock(() => []),
+    getEventsForWeek: mock(() => []),
+  };
+
+  const handler = createCallbackHandler(eventService as never, {} as never, {} as never, {} as never, {
+    editProposalDeps: {
+      editProposalRepo: {
+        findById: mock(() => ({
+          id: 7,
+          event_id: proposalEventId,
+          proposer_id: 200,
+          changes: JSON.stringify({ title: 'New title' }),
+          status: proposalStatus,
+          reason: null,
+          created_at: '',
+        })),
+        updateStatus,
+      } as never,
+      sendMessage,
+    },
+    userRepo: {
+      findByTelegramId: mock(() => ({ telegram_id: 200, language: proposerLang })),
+    } as never,
+  });
+
+  return { handler, eventService, updateStatus, sendMessage };
+}
+
+describe('editProposal callback wiring', () => {
+  test('owner Accept: updates status, updates event, notifies proposer with title', async () => {
+    const { handler, eventService, updateStatus, sendMessage } = makeEditProposalDeps();
+    const ctx = makeCtx('epr:accept:7', { from: { id: 100 } });
+    await handler(ctx as never);
+
+    expect(updateStatus).toHaveBeenCalledWith(7, 'accepted');
+    expect(eventService.updateEvent).toHaveBeenCalledWith(42, 100, { title: 'New title' });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string];
+    expect(chatId).toBe(200);
+    expect(text).toContain('Team meeting');
+    expect(text).toContain('accepted');
+  });
+
+  test('owner Reject: updates status, notifies proposer with title', async () => {
+    const { handler, updateStatus, sendMessage } = makeEditProposalDeps();
+    const ctx = makeCtx('epr:reject:7', { from: { id: 100 } });
+    await handler(ctx as never);
+
+    expect(updateStatus).toHaveBeenCalledWith(7, 'rejected');
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string];
+    expect(chatId).toBe(200);
+    expect(text).toContain('Team meeting');
+    expect(text).toContain('rejected');
+  });
+
+  test('Reject still notifies with title even after event is soft-deleted', async () => {
+    // Simulates the flow that motivated the whole soft-delete refactor:
+    // owner has removed the event before processing the proposal. The
+    // notification must still carry the event title via
+    // getEventIncludingSoftDeleted.
+    const { handler, updateStatus, sendMessage } = makeEditProposalDeps({ updatedEvent: null });
+    const ctx = makeCtx('epr:reject:7', { from: { id: 100 } });
+    await handler(ctx as never);
+    expect(updateStatus).toHaveBeenCalledWith(7, 'rejected');
+    const [, text] = sendMessage.mock.calls[0] as unknown as [number, string];
+    expect(text).toContain('Team meeting');
+  });
+
+  test('non-owner click is rejected with notAuthorized and no side effects', async () => {
+    const { handler, eventService, updateStatus, sendMessage } = makeEditProposalDeps({ ownerId: 100 });
+    // Different clicker id — not the owner.
+    const ctx = makeCtx('epr:accept:7', { from: { id: 999 } });
+    (ctx as { dbUser: { telegram_id: number } }).dbUser = {
+      telegram_id: 999,
+      language: 'en',
+      timezone: 'UTC',
+    } as never;
+    await handler(ctx as never);
+
+    expect(updateStatus).not.toHaveBeenCalled();
+    expect(eventService.updateEvent).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledWith({ text: 'Not authorized' });
+  });
+});
+
 const pendingRecord = {
   id: 5,
   owner_id: 10,
