@@ -125,17 +125,25 @@ export function formatWeekAgenda(
   return `📅 ${lang === 'ru' ? 'Неделя' : 'Week'} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
 }
 
-export function formatEventDetail(event: CalendarEvent, timezone: string, lang: string): string {
+export function formatEventDetail(
+  event: CalendarEvent,
+  timezone: string,
+  lang: string,
+  opts?: { includeTitle?: boolean },
+): string {
+  const includeTitle = opts?.includeTitle ?? true;
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
 
-  if (isBirthday) {
-    const age = birthdayAge(event.birth_year, event.start_at);
-    const ageSuffix =
-      age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
-    lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
-  } else {
-    lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+  if (includeTitle) {
+    if (isBirthday) {
+      const age = birthdayAge(event.birth_year, event.start_at);
+      const ageSuffix =
+        age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+      lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
+    } else {
+      lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+    }
   }
 
   const dateStr = formatDateShort(event.start_at, timezone, lang);
@@ -183,6 +191,7 @@ export function formatInvitation(
     : `<a href="tg://user?id=${inviterId}">${escapeHtml(inviterName)}</a>`;
   const header = t(lang as Lang).invitation_received(escapeHtml(event.title), inviterLink);
 
+  // Title is already in the header — skip it in the detail block to avoid duplication.
   if (!event.all_day) {
     const timeLabel = formatTimeWithTimezones(
       event.start_at,
@@ -190,7 +199,7 @@ export function formatInvitation(
       recipientTimezone ?? null,
       recipientOnboarded ?? false,
     );
-    const eventDetail = formatEventDetail(event, timezone, lang);
+    const eventDetail = formatEventDetail(event, timezone, lang, { includeTitle: false });
     // Replace the plain time in the event detail with the timezone-annotated one
     const plainTime = event.end_at
       ? `${formatTime(event.start_at, timezone)}–${formatTime(event.end_at, timezone)}`
@@ -199,7 +208,7 @@ export function formatInvitation(
     return `${header}\n\n${annotatedDetail}`;
   }
 
-  return `${header}\n\n${formatEventDetail(event, timezone, lang)}`;
+  return `${header}\n\n${formatEventDetail(event, timezone, lang, { includeTitle: false })}`;
 }
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {

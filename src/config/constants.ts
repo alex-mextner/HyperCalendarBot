@@ -486,8 +486,6 @@ export const MSG = {
       proposalRejected: '❌ Proposal rejected.',
       proposalAcceptedNotification: (title: string) => `✅ «${title}» — edit accepted`,
       proposalRejectedNotification: (title: string) => `❌ «${title}» — edit rejected`,
-      proposalAcceptedNotificationNoTitle: '✅ Edit proposal accepted',
-      proposalRejectedNotificationNoTitle: '❌ Edit proposal rejected',
       feedbackThreadResolved: (subject: string) => `✅ «${subject}» — resolved`,
     },
     notifications: {
@@ -1095,8 +1093,6 @@ export const MSG = {
       proposalRejected: '❌ Предложение отклонено.',
       proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
       proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
-      proposalAcceptedNotificationNoTitle: '✅ Правка принята',
-      proposalRejectedNotificationNoTitle: '❌ Правка отклонена',
       feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
       proposalAlreadyProcessed: (status: string) => {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };

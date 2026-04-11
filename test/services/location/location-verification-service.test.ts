@@ -43,6 +43,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,

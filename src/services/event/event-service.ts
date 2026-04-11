@@ -139,6 +139,15 @@ export class EventService {
     return this.eventRepo.findById(id, userId);
   }
 
+  /**
+   * Fetch an event by id, bypassing soft-delete and user-visibility filters.
+   * Used by downstream systems that need the title of a removed event —
+   * e.g. proposal accept/reject notifications to the proposer.
+   */
+  getEventIncludingDeleted(id: number): CalendarEvent | null {
+    return this.eventRepo.findByIdIncludingDeleted(id);
+  }
+
   getLatestCreated(userId: number): CalendarEvent | null {
     return this.eventRepo.findLatestCreatedByUser(userId);
   }

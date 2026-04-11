@@ -811,6 +811,12 @@ export function createCallbackHandler(
       return;
     }
 
+    // Resolve the event title up front — bypass soft-delete so the
+    // proposer's notification always shows which event their proposal
+    // referenced, even if the owner has since removed it.
+    const eventForTitle = eventService.getEventIncludingDeleted(proposal.event_id);
+    const eventTitle = eventForTitle?.title ?? `#${proposal.event_id}`;
+
     if (subAction === 'accept') {
       const changes = JSON.parse(proposal.changes) as UpdateEventData;
       const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
@@ -824,22 +830,19 @@ export function createCallbackHandler(
 
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      const notifyText = updated
-        ? t(proposerLang).callbackErrors.proposalAcceptedNotification(updated.title)
-        : t(proposerLang).callbackErrors.proposalAcceptedNotificationNoTitle;
-      editProposalDeps.sendMessage(proposal.proposer_id, notifyText).catch(() => {});
+      editProposalDeps
+        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification(eventTitle))
+        .catch(() => {});
     } else if (subAction === 'reject') {
-      const eventForReject = eventService.getEvent(proposal.event_id, ownerId);
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
       await ctx.answer();
       await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      const notifyText = eventForReject
-        ? t(proposerLang).callbackErrors.proposalRejectedNotification(eventForReject.title)
-        : t(proposerLang).callbackErrors.proposalRejectedNotificationNoTitle;
-      editProposalDeps.sendMessage(proposal.proposer_id, notifyText).catch(() => {});
+      editProposalDeps
+        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification(eventTitle))
+        .catch(() => {});
     }
   });
 

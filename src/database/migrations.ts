@@ -977,4 +977,18 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
     },
   },
+  {
+    name: '054_event_soft_delete',
+    up: (db) => {
+      // Soft-delete flag: `remove()` sets is_deleted = 1 instead of hard-deleting.
+      // Keeps the title (and every other column) around so downstream systems
+      // that reference the event by id — edit proposals, action log, feedback
+      // threads, notifications — can always resolve the title, even after the
+      // owner removes the event. All user-facing read paths filter on
+      // is_deleted = 0; only the few internal lookups that need the title of a
+      // removed event skip the filter.
+      db.exec('ALTER TABLE events ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+      db.exec('CREATE INDEX idx_events_is_deleted ON events(is_deleted) WHERE is_deleted = 1');
+    },
+  },
 ];

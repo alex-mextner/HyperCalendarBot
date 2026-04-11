@@ -29,6 +29,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,
@@ -157,6 +158,7 @@ describe('formatEventDetail', () => {
       parent_event_id: null,
       original_start_at: null,
       is_cancelled: 0,
+      is_deleted: 0,
       reminder_overrides: null,
       google_event_id: null,
       google_calendar_id: null,
@@ -592,6 +594,25 @@ describe('formatInvitation', () => {
     // HTML specials must be escaped — otherwise Telegram parser rejects the message.
     expect(firstLine).toContain('A &amp; B &lt;foo&gt;');
     expect(firstLine).not.toContain('A & B <foo>');
+  });
+
+  test('body does NOT repeat the title (header already front-loads it)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
+    // Title appears exactly once — in the header line. The event detail
+    // block below the header skips the 📌 <title> line to avoid duplication.
+    const occurrences = result.match(/Team Meeting/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    // The 📌 pinned-event marker (which would carry the duplicated title)
+    // must not appear at all.
+    expect(result).not.toContain('📌');
+  });
+
+  test('all-day invitation body also does NOT repeat title', () => {
+    const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
+    const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1);
+    const occurrences = result.match(/Holiday/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    expect(result).not.toContain('📌');
   });
 });
 

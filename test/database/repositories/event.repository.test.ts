@@ -130,7 +130,7 @@ describe('EventRepository', () => {
     expect(updated!.title).toBe('New');
   });
 
-  test('remove deletes event', () => {
+  test('remove soft-deletes event (row persists, filtered from reads)', () => {
     const created = events.create({
       user_id: USER_ID,
       title: 'Del',
@@ -139,7 +139,14 @@ describe('EventRepository', () => {
     });
     const removed = events.remove(created.id, USER_ID);
     expect(removed).toBe(true);
+    // User-facing read filters out soft-deleted rows.
     expect(events.findById(created.id, USER_ID)).toBeNull();
+    // But the row itself still exists — downstream systems (edit proposals,
+    // action log) can still resolve the title by id.
+    const raw = events.findByIdIncludingDeleted(created.id);
+    expect(raw).not.toBeNull();
+    expect(raw!.title).toBe('Del');
+    expect(raw!.is_deleted).toBe(1);
   });
 
   test('search finds events by title substring', () => {
