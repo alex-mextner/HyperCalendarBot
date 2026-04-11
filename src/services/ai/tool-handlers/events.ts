@@ -235,7 +235,7 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
   return { success: true, output: lines.join('\n'), data };
 }
 
-export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
+export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -268,7 +268,7 @@ export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): T
   return executeCreateEvent(ctx, input, userId);
 }
 
-function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: number): ToolResult {
+async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: number): Promise<ToolResult> {
   try {
     const scope = resolveScope(input, ctx);
     if (scope === 'group' && ctx.groupChatId === undefined) {
@@ -299,10 +299,12 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
 
     if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
 
-    if (scope !== 'group') {
-      ctx.google
-        ?.schedulePush?.(userId, event.id, 'create')
-        .catch((err) => logger.error({ err }, 'schedulePush failed'));
+    if (scope !== 'group' && ctx.google?.schedulePush) {
+      try {
+        await ctx.google.schedulePush(userId, event.id, 'create');
+      } catch (err) {
+        logger.error({ err }, 'schedulePush failed');
+      }
     }
 
     // Trigger background location verification if event has a location
@@ -344,13 +346,17 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
       success: true,
       output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
       data: eventToSummary(event, ctx.user.timezone),
+      agentHint:
+        scope === 'group'
+          ? 'The group event is saved. Member notifications are being delivered in the background — do NOT call create_event again for this event.'
+          : undefined,
     };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
   }
 }
 
-export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
+export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -380,10 +386,12 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
 
   if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
 
-  if (scope !== 'group') {
-    ctx.google
-      ?.schedulePush?.(userId, updated.id, 'update')
-      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+  if (scope !== 'group' && ctx.google?.schedulePush) {
+    try {
+      await ctx.google.schedulePush(userId, updated.id, 'update');
+    } catch (err) {
+      logger.error({ err }, 'schedulePush failed');
+    }
   }
 
   // Fetch accepted participants once — used for both Google sync and the hint
@@ -394,11 +402,11 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   // Push update to all accepted participants' Google Calendars
   if (ctx.google?.scheduleParticipantPush && acceptedParticipants.length > 0) {
     for (const p of acceptedParticipants) {
-      ctx.google
-        .scheduleParticipantPush(p.user_id, updated.id, 'update')
-        .catch((err) =>
-          logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed'),
-        );
+      try {
+        await ctx.google.scheduleParticipantPush(p.user_id, updated.id, 'update');
+      } catch (err) {
+        logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed');
+      }
     }
   }
 
@@ -409,9 +417,11 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       .getActiveMembers(ctx.groupChatId!)
       .filter((m) => m.user_id !== ctx.user.telegram_id);
     for (const m of members) {
-      pushParticipant(m.user_id, updated.id, 'update').catch((err) =>
-        logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed'),
-      );
+      try {
+        await pushParticipant(m.user_id, updated.id, 'update');
+      } catch (err) {
+        logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed');
+      }
     }
   }
 
@@ -455,7 +465,13 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));
   }
 
-  return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
+  const groupHint =
+    scope === 'group'
+      ? 'The group event is updated. Member notifications are being delivered in the background — do NOT call update_event again with identical arguments.'
+      : undefined;
+  const mergedHint = [conflictHint, groupHint].filter(Boolean).join(' ') || undefined;
+
+  return { success: true, output, agentHint: mergedHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
 export interface AttachPendingLocationInput {
@@ -503,7 +519,7 @@ export async function handleAttachPendingLocationToEvent(
   };
 }
 
-export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
+export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -524,15 +540,16 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     }
     // Remove from all group members' Google Calendars before deleting
     if (ctx.google?.scheduleParticipantPush && ctx.group) {
+      const pushParticipant = ctx.google.scheduleParticipantPush;
       for (const m of ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!)) {
-        ctx.google
-          .scheduleParticipantPush(m.user_id, input.event_id, 'delete')
-          .catch((err) =>
-            logger.error(
-              { err, userId: m.user_id, eventId: input.event_id },
-              'scheduleParticipantPush group delete failed',
-            ),
+        try {
+          await pushParticipant(m.user_id, input.event_id, 'delete');
+        } catch (err) {
+          logger.error(
+            { err, userId: m.user_id, eventId: input.event_id },
+            'scheduleParticipantPush group delete failed',
           );
+        }
       }
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
@@ -550,11 +567,13 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     if (participant && participant.status === 'accepted') {
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
       // Remove from this participant's Google Calendar
-      ctx.google
-        ?.scheduleParticipantPush?.(userId, input.event_id, 'delete')
-        .catch((err) =>
-          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed'),
-        );
+      if (ctx.google?.scheduleParticipantPush) {
+        try {
+          await ctx.google.scheduleParticipantPush(userId, input.event_id, 'delete');
+        } catch (err) {
+          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed');
+        }
+      }
       return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
     }
   }
@@ -565,18 +584,19 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
 
   // Remove from all participants' Google Calendars before deleting
   if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
+    const pushParticipant = ctx.google.scheduleParticipantPush;
     const participants = ctx.participantRepo
       .getByEvent(input.event_id)
       .filter((p) => p.status === 'accepted' && p.user_id !== userId);
     for (const p of participants) {
-      ctx.google
-        .scheduleParticipantPush(p.user_id, input.event_id, 'delete')
-        .catch((err) =>
-          logger.error(
-            { err, participantUserId: p.user_id, eventId: input.event_id },
-            'scheduleParticipantPush delete failed',
-          ),
+      try {
+        await pushParticipant(p.user_id, input.event_id, 'delete');
+      } catch (err) {
+        logger.error(
+          { err, participantUserId: p.user_id, eventId: input.event_id },
+          'scheduleParticipantPush delete failed',
         );
+      }
     }
   }
 
@@ -584,9 +604,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   ctx.eventService.deleteEvent(input.event_id, userId);
 
   if (ctx.google?.schedulePush && googleEventId) {
-    ctx.google
-      .schedulePush(userId, input.event_id, 'delete', { googleEventId })
-      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+    try {
+      await ctx.google.schedulePush(userId, input.event_id, 'delete', { googleEventId });
+    } catch (err) {
+      logger.error({ err }, 'schedulePush failed');
+    }
   }
 
   return {
