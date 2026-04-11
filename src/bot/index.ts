@@ -140,6 +140,7 @@ export interface CreateBotOpts {
     'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
+  broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -162,6 +163,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     addressCache,
     pendingGeoStore,
     weatherService,
+    broadcastEnqueuer,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -372,6 +374,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
+    broadcastEnqueuer,
     actionLogRepo: db.actionLog,
     featureUsageRepo: db.featureUsage,
     chatHistoryIds,

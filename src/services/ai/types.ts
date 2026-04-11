@@ -144,6 +144,13 @@ export interface BirthdayCapability {
   userMemoryRepo: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
 }
 
+export interface BroadcastCapability {
+  /** Enqueue a single per-recipient broadcast. */
+  enqueue: (data: import('../../worker/broadcast-queue.ts').BroadcastJobData) => Promise<void>;
+  /** Enqueue multiple recipients in one Redis round-trip. */
+  enqueueBatch: (items: import('../../worker/broadcast-queue.ts').BroadcastJobData[]) => Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // Main context
 // ---------------------------------------------------------------------------
@@ -214,6 +221,7 @@ export interface AgentContext {
   scene?: SceneCapability;
   agents?: AgentsCapability;
   birthday?: BirthdayCapability;
+  broadcast?: BroadcastCapability;
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;

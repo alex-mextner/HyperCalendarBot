@@ -293,6 +293,34 @@ if (config.REDIS_URL) {
   }
 }
 
+let broadcastEnqueuer: import('./worker/broadcast-queue.ts').BroadcastEnqueuer | undefined;
+let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
+if (config.REDIS_URL) {
+  const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
+  const { parseRedisUrl } = await import('./utils/redis.ts');
+  const connection = parseRedisUrl(config.REDIS_URL);
+  const { queue: broadcastQueue, enqueuer } = createBroadcastQueue(connection);
+  broadcastEnqueuer = enqueuer;
+
+  // Worker's sendMessage closes over botRef so it picks up the patched bot API
+  // once the GramIO instance is live. Queue jobs are only enqueued from tool
+  // handlers that run AFTER the bot is fully initialized, so by the time the
+  // worker dequeues anything, botRef.sendMessage is the real implementation.
+  const broadcastWorker = createBroadcastWorker(connection, {
+    sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
+  });
+  broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
+
+  broadcastQueueCleanup = {
+    close: async () => {
+      await broadcastWorker.close();
+      await broadcastQueue.close();
+    },
+  };
+
+  botLogger.info('Broadcast notification queue initialized');
+}
+
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
@@ -827,6 +855,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
       },
       weatherService,
+      broadcastEnqueuer,
     },
   );
 
@@ -1036,6 +1065,7 @@ async function shutdown(): Promise<void> {
   if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
+  if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
   if (googleRedisClient) googleRedisClient.close();
   if (webServerHandle) webServerHandle.stop();

@@ -25,7 +25,6 @@ import { ConflictChecker } from '../../../../src/services/event/conflict-checker
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
-import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -423,26 +422,29 @@ describe('event tool handlers', () => {
       });
       participantRepo.add(event.id, otherUserId, 'accepted');
 
-      const sent: { chatId: number; text: string }[] = [];
-      const ctxWithSender = {
+      const enqueuedBatches: { recipientId: number; text: string; origin: string }[][] = [];
+      const ctxWithBroadcast = {
         ...ctx,
         participantRepo,
-        sender: {
-          sendMessage: async (chatId: number, text: string) => {
-            sent.push({ chatId, text });
-            return { message_id: 1 };
+        broadcast: {
+          enqueue: async () => {},
+          enqueueBatch: async (items: { recipientId: number; text: string; origin: string }[]) => {
+            enqueuedBatches.push(items);
           },
-          editMessageText: async () => {},
         },
       };
 
-      const result = await handleNotifyParticipants(ctxWithSender, {
+      const result = await handleNotifyParticipants(ctxWithBroadcast, {
         event_id: event.id,
         message: 'Meeting moved to 11:00',
       });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('1 participant');
+      expect(enqueuedBatches).toHaveLength(1);
+      expect(enqueuedBatches[0]).toHaveLength(1);
+      expect(enqueuedBatches[0]![0]!.recipientId).toBe(otherUserId);
+      expect(enqueuedBatches[0]![0]!.text).toContain('Meeting moved to 11:00');
     });
 
     test('returns error when event not found', async () => {
@@ -463,7 +465,11 @@ describe('event tool handlers', () => {
         timezone: 'UTC',
       });
 
-      const ctxWithParticipants = { ...ctx, participantRepo };
+      const ctxWithParticipants = {
+        ...ctx,
+        participantRepo,
+        broadcast: { enqueue: async () => {}, enqueueBatch: async () => {} },
+      };
       const result = await handleNotifyParticipants(ctxWithParticipants, {
         event_id: event.id,
         message: 'Test',
@@ -708,18 +714,37 @@ describe('event tool handlers', () => {
       return { getRegisteredMembers: mock(async () => memberIds) } as Partial<GroupMemberService> as GroupMemberService;
     }
 
-    test('handleCreateEvent notifies all group members including creator', async () => {
+    // Collect enqueued broadcast jobs via a shared captor. Each test that
+    // exercises the group-notification path wires this into ctx.broadcast so
+    // we can assert on exactly what was queued for delivery.
+    interface CapturedJob {
+      recipientId: number;
+      text: string;
+      parseMode?: string;
+      origin: string;
+    }
+    function makeCapturingBroadcast(): {
+      captured: CapturedJob[];
+      broadcast: { enqueue: (d: CapturedJob) => Promise<void>; enqueueBatch: (items: CapturedJob[]) => Promise<void> };
+    } {
+      const captured: CapturedJob[] = [];
+      return {
+        captured,
+        broadcast: {
+          enqueue: async (d) => {
+            captured.push(d);
+          },
+          enqueueBatch: async (items) => {
+            captured.push(...items);
+          },
+        },
+      };
+    }
+
+    test('handleCreateEvent enqueues notifications for all group members including creator', async () => {
       const MEMBER_ID = 456;
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
-
-      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
-          sent.push({ chatId, text, parseMode });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const mockGroupChatRepo = { findByChatId: () => null } as never;
       const gCtx: AgentContext = {
@@ -730,7 +755,7 @@ describe('event tool handlers', () => {
           groupMemberService,
           checkGroupMembership: undefined as never,
         },
-        sender,
+        broadcast,
       };
       const result = await handleCreateEvent(gCtx, {
         title: 'Party',
@@ -740,32 +765,24 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(captured.length).toBe(2);
+      const chatIds = captured.map((j) => j.recipientId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
-      expect(sent.every((s) => s.text.includes('Party'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('18:00'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.text.includes('Party'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('Test Group'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('18:00'))).toBe(true);
+      expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.origin.startsWith('group_event_created:'))).toBe(true);
     });
 
-    test('handleCreateEvent sends notification in recipient language', async () => {
+    test('handleCreateEvent renders notification in recipient language at enqueue time', async () => {
       const RU_MEMBER_ID = 789;
       const userRepo = ctx.userRepo as UserRepository;
       userRepo.create({ telegram_id: RU_MEMBER_ID, timezone: 'UTC', language: 'ru' });
       const groupMemberService = makeMemberService([USER_ID, RU_MEMBER_ID]);
+      const { captured, broadcast } = makeCapturingBroadcast();
 
-      const sent: { chatId: number; text: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string) => {
-          sent.push({ chatId, text });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
-
-      handleCreateEvent(
+      await handleCreateEvent(
         {
           ...makeGroupCtx(),
           group: {
@@ -774,7 +791,7 @@ describe('event tool handlers', () => {
             groupMemberService,
             checkGroupMembership: undefined as never,
           },
-          sender,
+          broadcast,
         } as AgentContext,
         {
           title: 'Встреча',
@@ -784,26 +801,17 @@ describe('event tool handlers', () => {
         },
       );
 
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const ruNotification = sent.find((s) => s.chatId === RU_MEMBER_ID);
-      expect(ruNotification?.text).toContain('Новое событие');
+      expect(captured.length).toBe(2);
+      const ruJob = captured.find((j) => j.recipientId === RU_MEMBER_ID);
+      expect(ruJob?.text).toContain('Новое событие');
     });
 
-    test('handleUpdateEvent notifies group members on group update', async () => {
+    test('handleUpdateEvent enqueues notifications for group members on update', async () => {
       const MEMBER_ID = 456;
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const event = createGroupEvent('Sprint Planning', '2026-03-21T09:00:00Z');
-
-      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
-          sent.push({ chatId, text, parseMode });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
 
       const result = await handleUpdateEvent(
         {
@@ -814,7 +822,7 @@ describe('event tool handlers', () => {
             groupMemberService,
             checkGroupMembership: undefined as never,
           },
-          sender,
+          broadcast,
         } as AgentContext,
         {
           event_id: event.id,
@@ -824,13 +832,13 @@ describe('event tool handlers', () => {
       );
 
       expect(result.success).toBe(true);
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(captured.length).toBe(2);
+      const chatIds = captured.map((j) => j.recipientId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
-      expect(sent.every((s) => s.text.includes('Sprint Planning Updated'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.text.includes('Sprint Planning Updated'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('Test Group'))).toBe(true);
+      expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.origin.startsWith('group_event_updated:'))).toBe(true);
     });
 
     test('handleCreateEvent uses invite link as clickable group link when available', async () => {
@@ -840,14 +848,7 @@ describe('event tool handlers', () => {
       groupChatRepo.setInviteLink(GROUP_CHAT_ID, INVITE_LINK);
 
       const groupMemberService = makeMemberService([USER_ID]);
-      const sent: { text: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (_chatId: number, text: string) => {
-          sent.push({ text });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
@@ -857,14 +858,18 @@ describe('event tool handlers', () => {
           groupMemberService,
           checkGroupMembership: undefined as never,
         },
-        sender,
+        broadcast,
       };
-      handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
+      await handleCreateEvent(gCtx, {
+        title: 'Drinks',
+        start_at: '2026-03-20T19:00:00Z',
+        scope: 'group',
+        force: true,
+      });
 
-      await flushPromises();
-      expect(sent.length).toBe(1);
-      expect(sent[0]!.text).toContain(`href="${INVITE_LINK}"`);
-      expect(sent[0]!.text).toContain('Test Group');
+      expect(captured.length).toBe(1);
+      expect(captured[0]!.text).toContain(`href="${INVITE_LINK}"`);
+      expect(captured[0]!.text).toContain('Test Group');
     });
   });
 

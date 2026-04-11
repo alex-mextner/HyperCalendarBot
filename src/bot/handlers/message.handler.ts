@@ -183,6 +183,7 @@ export interface MessageHandlerDeps {
   ) => Promise<void>;
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  broadcastEnqueuer?: import('../../worker/broadcast-queue.ts').BroadcastEnqueuer;
   actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
   chatHistoryIds?: Map<number, number>;
   agentRegistry?: AgentRegistry;
@@ -650,6 +651,12 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               userMemoryRepo: deps.userMemoryRepo,
             }
           : undefined,
+      broadcast: deps.broadcastEnqueuer
+        ? {
+            enqueue: deps.broadcastEnqueuer.enqueue.bind(deps.broadcastEnqueuer),
+            enqueueBatch: deps.broadcastEnqueuer.enqueueBatch.bind(deps.broadcastEnqueuer),
+          }
+        : undefined,
       feedback:
         deps.feedbackRepo && deps.botAdminId !== undefined
           ? {
