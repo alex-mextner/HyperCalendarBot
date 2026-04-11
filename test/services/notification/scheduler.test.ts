@@ -315,7 +315,8 @@ describe('NotificationScheduler', () => {
     const log = logRepo.getById(capturedLogId) as NotificationLogRow;
     const parsed = JSON.parse(log.payload!) as { text: string; event_ids: number[] };
     expect(parsed.event_ids).toEqual([1, 2]);
-    expect(parsed.text).toContain('Reminders:');
+    expect(parsed.text).toContain('⏰ Standup +1 more');
+    expect(parsed.text).not.toContain('Reminders:');
     expect(parsed.text).toContain('Standup');
     expect(parsed.text).toContain('Call');
     expect(parsed.text).not.toContain('"event_title"');
