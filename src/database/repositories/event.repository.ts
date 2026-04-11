@@ -109,14 +109,24 @@ export class EventRepository {
   }
 
   /**
-   * Fetch an event by id, bypassing the soft-delete filter. Used by downstream
-   * systems that need the original title/details of a removed event — e.g.
-   * proposal accept/reject notifications where the proposer must see which
-   * event their proposal referenced even after the owner removed it.
-   * Intentionally does NOT check user visibility — callers must authorize.
+   * Fetch an event by id, bypassing ONLY the soft-delete filter. Ownership
+   * and group-visibility checks are still enforced — the caller must have
+   * had access to the event before it was soft-deleted. Used by downstream
+   * systems that need the title of an event the user removed themselves,
+   * e.g. proposal accept/reject notifications to the proposer.
+   *
+   * Visibility information does not disappear on soft-delete: `events.user_id`
+   * is still set, and group membership is still valid, so the same access
+   * predicate as `findById` is applied here — minus `is_deleted = 0`.
    */
-  findByIdIncludingDeleted(id: number): CalendarEvent | null {
-    return this.db.prepare('SELECT * FROM events WHERE id = ?').get(id) as CalendarEvent | null;
+  findByIdIncludingDeleted(id: number, userId: number): CalendarEvent | null {
+    return this.db
+      .prepare(
+        `SELECT * FROM events WHERE id = ? AND is_cancelled = 0
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR ${groupVisibleSql('')})`,
+      )
+      .get(id, userId, userId) as CalendarEvent | null;
   }
 
   /** Update resolved location fields. For background location verification. */

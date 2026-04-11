@@ -51,7 +51,7 @@ import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
-import { formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
+import { escapeHtml, formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -699,7 +699,7 @@ export function createCallbackHandler(
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
               )
-            : t(inviteeLang).invitation_received(eventTitle, inviterName);
+            : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
           const keyboard = new InlineKeyboard()
             .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
             .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -813,8 +813,10 @@ export function createCallbackHandler(
 
     // Resolve the event title up front — bypass soft-delete so the
     // proposer's notification always shows which event their proposal
-    // referenced, even if the owner has since removed it.
-    const eventForTitle = eventService.getEventIncludingDeleted(proposal.event_id);
+    // referenced, even if the owner has since removed it. The lookup
+    // still enforces ownership via the user.telegram_id check, so this
+    // is not an IDOR (we already verified `ownerId === user.telegram_id`).
+    const eventForTitle = eventService.getEventIncludingDeleted(proposal.event_id, user.telegram_id);
     const eventTitle = eventForTitle?.title ?? `#${proposal.event_id}`;
 
     if (subAction === 'accept') {
@@ -1015,7 +1017,7 @@ export function createCallbackHandler(
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
           )
-        : t(inviteeLang).invitation_received(eventTitle, inviterName);
+        : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -1084,7 +1086,7 @@ export function createCallbackHandler(
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
           )
-        : t(inviteeLang).invitation_received(eventTitle, inviterName);
+        : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)

@@ -1,6 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, Visibility } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
+import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatInvitation } from '../../event/formatters.ts';
 import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -54,7 +55,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
         invitee?.timezone ?? null,
         !!invitee?.onboarding_completed,
       )
-    : t(lang).invitation_received(eventTitle, inviterName);
+    : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
   const invRepo = ctx.sharing!.invitationRepo;
   const sender = ctx.sender;
   const chatId = ctx.chatId;
