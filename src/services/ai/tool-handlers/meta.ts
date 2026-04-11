@@ -66,7 +66,10 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
   };
 }
 
-export function handleAskUser(ctx: AgentContext, input: { question: string; options: string[] }): ToolResult {
+export async function handleAskUser(
+  ctx: AgentContext,
+  input: { question: string; options: string[] },
+): Promise<ToolResult> {
   if (ctx.inputMode === 'live_call') {
     // During a call, no buttons — speak the question with options as numbered list
     const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');
@@ -82,9 +85,12 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   const CANCEL = 'Отмена';
   const options = input.options.some((o) => o === CANCEL) ? input.options : [...input.options, CANCEL];
   const userId = ctx.isGroup ? ctx.user.telegram_id : undefined;
-  ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId).catch((err) => {
+  try {
+    await ctx.sender.sendButtons(ctx.chatId, input.question, options, 'HTML', userId);
+  } catch (err) {
     metaLogger.error({ err }, 'Failed to send buttons');
-  });
+    return { success: false, error: 'ASK_USER_DELIVERY_FAILED: failed to send the question to the user.' };
+  }
   return {
     success: true,
     output: t(ctx.user.language).aiTools.meta.questionSent,
@@ -92,14 +98,20 @@ export function handleAskUser(ctx: AgentContext, input: { question: string; opti
   };
 }
 
-export function handlePickUsers(ctx: AgentContext, input: { event_id: number; prompt: string }): ToolResult {
+export async function handlePickUsers(
+  ctx: AgentContext,
+  input: { event_id: number; prompt: string },
+): Promise<ToolResult> {
   if (!ctx.sender?.sendUserPicker) {
     return { success: false, error: 'User picker not supported.' };
   }
-  // Use event_id as request_id so we can match the response
-  ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id).catch((err) => {
+  try {
+    // Use event_id as request_id so we can match the response
+    await ctx.sender.sendUserPicker(ctx.chatId, input.prompt, input.event_id);
+  } catch (err) {
     metaLogger.error({ err }, 'Failed to send user picker');
-  });
+    return { success: false, error: 'PICK_USERS_DELIVERY_FAILED: failed to send the user picker.' };
+  }
   return { success: true, output: t(ctx.user.language).aiTools.meta.userPickerSent, stopLoop: true };
 }
 

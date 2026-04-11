@@ -809,7 +809,7 @@ interface NotifyParticipantsInput {
   message: string;
 }
 
-export function handleNotifyParticipants(ctx: AgentContext, input: NotifyParticipantsInput): ToolResult {
+export async function handleNotifyParticipants(ctx: AgentContext, input: NotifyParticipantsInput): Promise<ToolResult> {
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
@@ -827,21 +827,40 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
     return { success: false, error: 'This event has no accepted participants to notify.' };
   }
 
+  // Sequential send with per-recipient catch so one failure doesn't block the
+  // rest. Telegram rate limit (~30/sec) easily absorbs this for N<30 and
+  // degrades gracefully beyond — future work: BullMQ broadcast queue.
+  let deliveredCount = 0;
+  let failedCount = 0;
   if (ctx.sender) {
     const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
     const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
     for (const p of accepted) {
-      ctx.sender.sendMessage(p.user_id, text).catch((err) => {
-        eventsLogger.error({ err: err, userId: p.user_id }, 'Participant notification failed');
-      });
+      try {
+        await ctx.sender.sendMessage(p.user_id, text);
+        deliveredCount++;
+      } catch (err) {
+        eventsLogger.error({ err, userId: p.user_id, eventId: input.event_id }, 'Participant notification failed');
+        failedCount++;
+      }
     }
+  } else {
+    return { success: false, error: 'Message delivery not available.' };
   }
 
+  const lang = ctx.user.language;
+  const output =
+    lang === 'ru'
+      ? `Уведомление отправлено ${deliveredCount} ${ruPlural(deliveredCount, 'участнику', 'участникам', 'участникам')}${failedCount > 0 ? ` (не доставлено ${failedCount})` : ''}.`
+      : `Notification sent to ${deliveredCount} participant${deliveredCount !== 1 ? 's' : ''}${failedCount > 0 ? ` (${failedCount} failed)` : ''}.`;
+
   return {
-    success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? `Уведомление отправлено ${accepted.length} ${ruPlural(accepted.length, 'участнику', 'участникам', 'участникам')}.`
-        : `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
+    success: deliveredCount > 0,
+    output,
+    error: deliveredCount === 0 ? 'NOTIFY_PARTICIPANTS_ALL_FAILED' : undefined,
+    agentHint:
+      failedCount > 0
+        ? `Partial delivery: ${deliveredCount} delivered, ${failedCount} failed. Do NOT claim everyone was notified.`
+        : undefined,
   };
 }

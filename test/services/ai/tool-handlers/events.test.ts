@@ -436,7 +436,7 @@ describe('event tool handlers', () => {
         },
       };
 
-      const result = handleNotifyParticipants(ctxWithSender, {
+      const result = await handleNotifyParticipants(ctxWithSender, {
         event_id: event.id,
         message: 'Meeting moved to 11:00',
       });
@@ -446,7 +446,7 @@ describe('event tool handlers', () => {
     });
 
     test('returns error when event not found', async () => {
-      const result = handleNotifyParticipants(ctx, {
+      const result = await handleNotifyParticipants(ctx, {
         event_id: 9999,
         message: 'hello',
       });
@@ -464,7 +464,7 @@ describe('event tool handlers', () => {
       });
 
       const ctxWithParticipants = { ...ctx, participantRepo };
-      const result = handleNotifyParticipants(ctxWithParticipants, {
+      const result = await handleNotifyParticipants(ctxWithParticipants, {
         event_id: event.id,
         message: 'Test',
       });

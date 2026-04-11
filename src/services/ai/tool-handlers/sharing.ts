@@ -21,7 +21,7 @@ interface DeliveryParams {
   ctx: AgentContext;
 }
 
-function deliverInvitationAsync(params: DeliveryParams): void {
+async function deliverInvitation(params: DeliveryParams): Promise<{ delivered: boolean; viaDeepLink: boolean }> {
   const {
     invitationId,
     eventId,
@@ -34,7 +34,9 @@ function deliverInvitationAsync(params: DeliveryParams): void {
     lang,
     ctx,
   } = params;
-  if (!ctx.sender?.sendInvitation || !ctx.sharing?.invitationRepo) return;
+  if (!ctx.sender?.sendInvitation || !ctx.sharing?.invitationRepo) {
+    return { delivered: false, viaDeepLink: false };
+  }
 
   const eventTitle = event?.title ?? `Event #${eventId}`;
   deliveryLogger.info(
@@ -90,36 +92,40 @@ function deliverInvitationAsync(params: DeliveryParams): void {
         }
       : undefined;
 
-  deliverMessage({
-    targetId: inviteeId,
-    targetUsername: inviteeUsername,
-    text,
-    fallbackRecipientId: chatId,
-    fallbackText: fallbackMsg,
-    botSend: async (recipientId, msgText) => {
-      if (recipientId === inviteeId) {
-        if (!sender.sendInvitation) throw new Error('sendInvitation not available');
-        const sent = await sender.sendInvitation(recipientId, msgText, invitationId);
-        if (!sent) throw new Error('Bot API delivery failed');
-        return sent;
-      }
-      return sender.sendMessage(recipientId, msgText);
-    },
-    mtprotoSend,
-  })
-    .then((result) => {
-      if (result.delivered && result.messageId !== undefined) {
-        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
-        invRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
-      } else if (result.delivered) {
-        deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
-      } else {
-        deliveryLogger.info({ invitationId, chatId }, 'Sending deep link fallback to inviter');
-      }
-    })
-    .catch((error) => {
-      deliveryLogger.error({ invitationId, inviteeId, err: error }, 'Delivery chain failed');
+  try {
+    const result = await deliverMessage({
+      targetId: inviteeId,
+      targetUsername: inviteeUsername,
+      text,
+      fallbackRecipientId: chatId,
+      fallbackText: fallbackMsg,
+      botSend: async (recipientId, msgText) => {
+        if (recipientId === inviteeId) {
+          if (!sender.sendInvitation) throw new Error('sendInvitation not available');
+          const sent = await sender.sendInvitation(recipientId, msgText, invitationId);
+          if (!sent) throw new Error('Bot API delivery failed');
+          return sent;
+        }
+        return sender.sendMessage(recipientId, msgText);
+      },
+      mtprotoSend,
     });
+
+    if (result.delivered && result.messageId !== undefined) {
+      deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
+      invRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
+      return { delivered: true, viaDeepLink: false };
+    }
+    if (result.delivered) {
+      deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
+      return { delivered: true, viaDeepLink: false };
+    }
+    deliveryLogger.info({ invitationId, chatId }, 'Sending deep link fallback to inviter');
+    return { delivered: false, viaDeepLink: true };
+  } catch (error) {
+    deliveryLogger.error({ invitationId, inviteeId, err: error }, 'Delivery chain failed');
+    return { delivered: false, viaDeepLink: false };
+  }
 }
 
 function lookupInviteeUsername(ctx: AgentContext, inviteeId: number): string | undefined {
@@ -199,7 +205,7 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
   };
 }
 
-export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): ToolResult {
+export async function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): Promise<ToolResult> {
   if (!ctx.sharing?.invitationService) {
     return { success: false, error: 'Invitations are not configured.' };
   }
@@ -231,7 +237,7 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
   }
 
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
-  deliverInvitationAsync({
+  const delivery = await deliverInvitation({
     invitationId: invitation.id,
     eventId: input.event_id,
     inviteeId: input.invitee_id,
@@ -247,8 +253,11 @@ export function handleSendInvitation(ctx: AgentContext, input: SendInvitationInp
   return {
     success: true,
     output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, input.invitee_id),
-    agentHint:
-      'Do NOT say the notification was delivered — say the invitation was created and the notification is being sent.',
+    agentHint: delivery.delivered
+      ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
+      : delivery.viaDeepLink
+        ? 'Bot-API delivery failed. A deep-link fallback was sent to the inviter to forward manually. Tell the user to share the link.'
+        : 'Invitation delivery failed entirely. Tell the user there was a delivery problem.',
   };
 }
 
@@ -266,10 +275,10 @@ export function handleCancelInvitation(ctx: AgentContext, input: { invitation_id
   };
 }
 
-export function handleResendInvitation(
+export async function handleResendInvitation(
   ctx: AgentContext,
   input: { invitation_id: number; invitee_username?: string },
-): ToolResult {
+): Promise<ToolResult> {
   if (!ctx.sharing) {
     return { success: false, error: 'Invitations are not configured.' };
   }
@@ -286,7 +295,7 @@ export function handleResendInvitation(
 
   if (ctx.sender?.sendInvitation) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
-    deliverInvitationAsync({
+    const delivery = await deliverInvitation({
       invitationId: invitation.id,
       eventId: invitation.event_id,
       inviteeId: invitation.invitee_id,
@@ -302,7 +311,11 @@ export function handleResendInvitation(
     return {
       success: true,
       output: t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
-      agentHint: 'Do NOT say the reminder was delivered — say it was queued and the notification is being sent.',
+      agentHint: delivery.delivered
+        ? 'The invitation reminder was delivered to the invitee. Tell the user it is sent.'
+        : delivery.viaDeepLink
+          ? 'Bot-API reminder failed. Deep-link fallback sent to the inviter.'
+          : 'Reminder delivery failed entirely. Tell the user there was a delivery problem.',
     };
   }
 
@@ -428,7 +441,7 @@ interface ProposeEditInput {
   reason?: string;
 }
 
-export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): ToolResult {
+export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): Promise<ToolResult> {
   if (!ctx.participantRepo) {
     return { success: false, error: 'Participants feature is not configured.' };
   }
@@ -448,6 +461,7 @@ export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): T
     reason: input.reason,
   });
 
+  let ownerNotified = true;
   if (ctx.sender?.sendEditProposal) {
     const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
     if (ownerId) {
@@ -456,12 +470,27 @@ export function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): T
         .map(([k, v]) => `  ${k}: ${v ?? '(remove)'}`)
         .join('\n');
       const text = `📝 <b>Edit proposal</b> from ${proposerName}:\n${changeLines}${input.reason ? `\n\nReason: ${input.reason}` : ''}`;
-      ctx.sender.sendEditProposal(ownerId, text, proposal.id).catch(() => {});
+      try {
+        await ctx.sender.sendEditProposal(ownerId, text, proposal.id);
+      } catch (err) {
+        deliveryLogger.error(
+          { err, proposalId: proposal.id, ownerId },
+          'Failed to notify event owner of edit proposal',
+        );
+        ownerNotified = false;
+      }
+    } else {
+      ownerNotified = false;
     }
+  } else {
+    ownerNotified = false;
   }
 
   return {
     success: true,
     output: t(ctx.user.language).aiTools.sharing.editProposalSubmitted(proposal.id),
+    agentHint: ownerNotified
+      ? undefined
+      : 'Proposal is saved in the DB but the owner notification could NOT be delivered. Tell the user the owner may not see it immediately.',
   };
 }
