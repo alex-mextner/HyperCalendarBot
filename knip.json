@@ -15,12 +15,7 @@
     "packages/agent-macos/dist/**",
     "packages/agent-macos/out/**"
   ],
-  "ignoreDependencies": [
-    "lefthook",
-    "@biomejs/biome",
-    "electron",
-    "electron-builder"
-  ],
+  "ignoreDependencies": ["lefthook", "@biomejs/biome", "electron", "electron-builder"],
   "ignoreExportsUsedInFile": true,
   "rules": {
     "types": "off",
