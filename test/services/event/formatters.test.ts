@@ -508,6 +508,50 @@ describe('formatEventDetail — edge cases', () => {
     expect(result).not.toContain('turns');
     expect(result).not.toContain('лет');
   });
+
+  test('hourly forecast adds event-time weather line (no day range)', () => {
+    const event = makeEvent({ title: 'Run', start_at: '2026-03-12T18:00:00Z' });
+    const result = formatEventDetail(event, 'UTC', 'en', {
+      kind: 'hour',
+      hour: {
+        dt: new Date('2026-03-12T18:00:00Z').getTime() / 1000,
+        temp: 8,
+        conditionCode: 500,
+        description: 'light rain',
+        windSpeed: 4,
+      },
+    });
+    expect(result).toContain('🌧');
+    expect(result).toContain('8°C');
+    expect(result).toContain('light rain');
+    // Must NOT fall back to a day range when we have hourly data
+    expect(result).not.toContain('..');
+  });
+
+  test('daily forecast falls back to min..max range when no hourly available', () => {
+    const event = makeEvent({ title: 'Conference', start_at: '2026-03-15T09:00:00Z' });
+    const result = formatEventDetail(event, 'UTC', 'en', {
+      kind: 'day',
+      day: {
+        date: '2026-03-15',
+        tempMin: 2,
+        tempMax: 11,
+        conditionCode: 801,
+        description: 'few clouds',
+        windSpeed: 3,
+      },
+    });
+    expect(result).toContain('⛅');
+    expect(result).toContain('2..11°C');
+  });
+
+  test('omits weather line when forecast is undefined or null', () => {
+    const event = makeEvent({ title: 'Run' });
+    const noForecast = formatEventDetail(event, 'UTC', 'en');
+    const nullForecast = formatEventDetail(event, 'UTC', 'en', null);
+    expect(noForecast).not.toContain('°C');
+    expect(nullForecast).not.toContain('°C');
+  });
 });
 
 // ── formatInvitation ──

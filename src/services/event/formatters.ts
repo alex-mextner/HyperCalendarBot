@@ -1,5 +1,6 @@
 // src/services/event/formatters.ts
 import { TZDate } from '@date-fns/tz';
+import type { Lang } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -13,6 +14,8 @@ import {
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
+import { formatEventWeatherLine } from '../weather/format.ts';
+import type { EventForecast } from '../weather/types.ts';
 
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
@@ -124,7 +127,12 @@ export function formatWeekAgenda(
   return `📅 ${lang === 'ru' ? 'Неделя' : 'Week'} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
 }
 
-export function formatEventDetail(event: CalendarEvent, timezone: string, lang: string): string {
+export function formatEventDetail(
+  event: CalendarEvent,
+  timezone: string,
+  lang: string,
+  forecast?: EventForecast | null,
+): string {
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
 
@@ -162,6 +170,9 @@ export function formatEventDetail(event: CalendarEvent, timezone: string, lang: 
   }
   if (event.recurrence_rule && !isBirthday) {
     lines.push(`🔁 ${formatRecurrenceHuman(event.recurrence_rule, lang)}`);
+  }
+  if (forecast) {
+    lines.push(formatEventWeatherLine(lang as Lang, forecast));
   }
 
   return lines.join('\n');

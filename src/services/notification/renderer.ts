@@ -3,8 +3,8 @@ import { t } from '../../config/constants.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { buildGoogleMapsSearchUrl } from '../location/geocoding-service.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
-import { formatDayWeatherLine } from '../weather/format.ts';
-import type { DayWeather } from '../weather/types.ts';
+import { formatDayWeatherLine, formatEventWeatherLine } from '../weather/format.ts';
+import type { DayWeather, EventForecast } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
 
 /**
@@ -67,6 +67,8 @@ export interface ReminderData {
   venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
+  /** Weather forecast anchored to the event's start time (hourly when possible) */
+  forecast?: EventForecast | null;
 }
 
 export interface BatchReminderItem {
@@ -78,6 +80,8 @@ export interface BatchReminderItem {
   venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
+  /** Weather forecast anchored to the event's start time (hourly when possible) */
+  forecast?: EventForecast | null;
 }
 
 export interface WeeklyDigestEvent {
@@ -193,7 +197,8 @@ export class NotificationRenderer {
   }
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     const localized = localizeInterval(lang, data.intervalLabel);
     const safeTitle = escapeHtml(data.title);
     const lines: string[] = [];
@@ -215,11 +220,15 @@ export class NotificationRenderer {
     if (data.location) {
       lines.push(`📍 ${locationLink(data.location, data.resolvedAddress, data.googleMapsUrl, data.venueName)}`);
     }
+    if (data.forecast) {
+      lines.push(formatEventWeatherLine(langKey, data.forecast));
+    }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
 
   renderBatchReminder(lang: string, items: BatchReminderItem[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     const lines: string[] = [];
     lines.push(`⏰ ${l.reminders}:`);
     lines.push('');
@@ -238,6 +247,9 @@ export class NotificationRenderer {
       let line = `• ${safeTitle} — ${timeInfo} (${intervalText})`;
       if (item.location) {
         line += `\n  📍 ${locationLink(item.location, item.resolvedAddress, item.googleMapsUrl, item.venueName)}`;
+      }
+      if (item.forecast) {
+        line += `\n  ${formatEventWeatherLine(langKey, item.forecast)}`;
       }
       lines.push(line);
     }

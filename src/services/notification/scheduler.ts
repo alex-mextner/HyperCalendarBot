@@ -23,7 +23,7 @@ import {
   renderReminderForSpeech,
   renderWeeklyDigestForSpeech,
 } from '../voice/tts-renderer.ts';
-import type { DayWeather } from '../weather/types.ts';
+import type { DayWeather, EventForecast } from '../weather/types.ts';
 import type { WeatherService } from '../weather/weather-service.ts';
 import { detectClockChange, formatClockChangeNotice } from './clock-change.ts';
 import type { AgendaEvent, WeeklyDigestDay } from './renderer.ts';
@@ -256,6 +256,22 @@ async function fetchDayWeather(
   }
 }
 
+/** Fetch forecast anchored to a specific event time (hourly when possible) */
+async function fetchEventForecast(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+  eventStartAt: string,
+  lang = 'en',
+): Promise<EventForecast | null> {
+  if (!weatherService) return null;
+  try {
+    return await weatherService.getForecastAt(timezone, new Date(eventStartAt).getTime(), lang);
+  } catch (err) {
+    notifyLogger.warn({ err, timezone }, 'Weather fetch failed for event reminder');
+    return null;
+  }
+}
+
 function truncateToMinute(d: Date): Date {
   const r = new Date(d);
   r.setSeconds(0, 0);
@@ -352,7 +368,14 @@ export class NotificationScheduler {
           is_all_day: r.interval_minutes === -1,
         }));
         const refKey = `erb:${firstReminder.user_id}:${firstReminder.remind_at_utc}`;
-        const renderItems = batchItems.map((item) => ({
+        const batchForecasts = await Promise.all(
+          batchItems.map((item) =>
+            item.is_all_day
+              ? Promise.resolve(null)
+              : fetchEventForecast(this.deps.weatherService, user.timezone, item.event_start_at, lang),
+          ),
+        );
+        const renderItems = batchItems.map((item, idx) => ({
           title: item.event_title,
           startTime: format(new TZDate(item.event_start_at, user.timezone), 'HH:mm'),
           location: item.event_location,
@@ -361,6 +384,7 @@ export class NotificationScheduler {
           venueName: item.event_venue_name,
           intervalLabel: item.interval_label,
           isAllDay: item.is_all_day,
+          forecast: batchForecasts[idx] ?? null,
         }));
         const rendered = renderer.renderBatchReminder(lang, renderItems);
         const eventIds = batchItems.map((item) => item.event_id);
@@ -403,6 +427,9 @@ export class NotificationScheduler {
         ? format(new TZDate(reminder.event_end_at, user.timezone), 'HH:mm')
         : undefined;
       const isAllDay = reminder.interval_minutes === -1;
+      const forecast = isAllDay
+        ? null
+        : await fetchEventForecast(this.deps.weatherService, user.timezone, reminder.event_start_at, lang);
       const rendered = renderer.renderEventReminder(lang, {
         title: reminder.event_title,
         startTime,
@@ -413,6 +440,7 @@ export class NotificationScheduler {
         venueName: reminder.event_venue_name,
         intervalLabel: reminder.interval_label,
         isAllDay,
+        forecast,
       });
       const payload = JSON.stringify({ text: rendered.text, event_id: reminder.event_id });
       const logId = this.deps.logRepo.insert({

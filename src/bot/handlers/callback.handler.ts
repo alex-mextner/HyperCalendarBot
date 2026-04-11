@@ -44,7 +44,6 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
-import { formatDayWeatherLine } from '../../services/weather/format.ts';
 import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
@@ -740,26 +739,16 @@ export function createCallbackHandler(
       await ctx.answer(statusLabel);
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
-      const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
+      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days)
+      const forecast =
+        weatherService && event && subAction === 'accept' && !event.all_day
+          ? await weatherService
+              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang)
+              .catch(() => null)
+          : null;
+      const eventCard = event ? formatEventDetail(event, event.timezone, lang, forecast) : '';
 
-      // Append weather forecast if available and event is within 7 days
-      let weatherLine = '';
-      if (weatherService && event && subAction === 'accept') {
-        const eventMs = new Date(event.start_at).getTime();
-        const daysAhead = (eventMs - Date.now()) / (24 * 60 * 60 * 1000);
-        if (daysAhead >= 0 && daysAhead <= 7) {
-          const forecast = await weatherService.getWeekWeather(user.timezone, lang).catch(() => null);
-          if (forecast) {
-            const eventDate = event.start_at.slice(0, 10);
-            const dayForecast = forecast.days.find((d) => d.date === eventDate);
-            if (dayForecast) {
-              weatherLine = `\n${formatDayWeatherLine(lang, dayForecast)}`;
-            }
-          }
-        }
-      }
-
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}${weatherLine}` : statusLabel;
+      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response

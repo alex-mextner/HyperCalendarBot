@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { localizeInterval, NotificationRenderer } from '../../../src/services/notification/renderer.ts';
-import type { DayWeather } from '../../../src/services/weather/types.ts';
+import type { DayWeather, EventForecast } from '../../../src/services/weather/types.ts';
 
 describe('NotificationRenderer', () => {
   const renderer = new NotificationRenderer();
@@ -155,6 +155,68 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('📍 <a href=');
       expect(result.text).toContain('>Офис</a>');
       expect(result.text).not.toContain('🕐');
+    });
+
+    test('appends hourly forecast to event reminder at the exact event time', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: {
+          dt: 1_700_000_000,
+          temp: 14,
+          conditionCode: 500,
+          description: 'light rain',
+          windSpeed: 3,
+        },
+      };
+      const result = renderer.renderEventReminder('en', {
+        title: 'Run',
+        startTime: '18:00',
+        endTime: '18:30',
+        location: null,
+        intervalLabel: '15 minutes',
+        forecast,
+      });
+      expect(result.text).toContain('🌧');
+      expect(result.text).toContain('14°C');
+      expect(result.text).toContain('light rain');
+      // Hourly must not show a daily range
+      expect(result.text).not.toContain('..');
+    });
+
+    test('appends daily fallback forecast when hourly is not available', () => {
+      const forecast: EventForecast = {
+        kind: 'day',
+        day: {
+          date: '2026-04-15',
+          tempMin: 5,
+          tempMax: 12,
+          conditionCode: 801,
+          description: 'few clouds',
+          windSpeed: 4,
+        },
+      };
+      const result = renderer.renderEventReminder('en', {
+        title: 'Lunch',
+        startTime: '13:00',
+        endTime: '14:00',
+        location: null,
+        intervalLabel: '1 hour',
+        forecast,
+      });
+      expect(result.text).toContain('⛅');
+      expect(result.text).toContain('5..12°C');
+    });
+
+    test('omits weather line when forecast is null', () => {
+      const result = renderer.renderEventReminder('en', {
+        title: 'Meeting',
+        startTime: '14:00',
+        endTime: '15:00',
+        location: null,
+        intervalLabel: '15 minutes',
+        forecast: null,
+      });
+      expect(result.text).not.toContain('°C');
     });
   });
 
