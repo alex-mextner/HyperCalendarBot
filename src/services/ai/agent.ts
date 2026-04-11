@@ -263,6 +263,24 @@ function isSkipText(text: string): boolean {
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
+/**
+ * Canonical dedup key for (tool name, input). Keys are sorted so that two
+ * inputs differing only in property order collide as expected. Values are
+ * JSON-stringified recursively, which is fine because tool inputs are flat
+ * primitives / small arrays per the tool schemas.
+ */
+function toolCallKey(name: string, input: { [key: string]: unknown }): string {
+  const sortedKeys = Object.keys(input).sort();
+  const canonical: { [key: string]: unknown } = {};
+  for (const k of sortedKeys) canonical[k] = input[k];
+  return `${name}:${JSON.stringify(canonical)}`;
+}
+
+const DUPLICATE_MARKER =
+  'DUPLICATE: you already called this tool with identical arguments earlier in this turn. ' +
+  'Use the previous result. Do NOT call this tool again — respond to the user with a final answer ' +
+  'or call a different tool.';
+
 export interface AgentToolCallRecord {
   name: string;
   input: { [key: string]: unknown };
@@ -412,6 +430,11 @@ export class CalendarBotAgent {
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
+    // Keys of tool calls already executed in this run — used to short-circuit
+    // duplicate calls with identical arguments and prevent agent-level loops
+    // where the model keeps invoking the same tool (e.g. render_day_image,
+    // which has user-visible side effects).
+    const seenToolCallKeys = new Set<string>();
     // Last text-only assistant turn — buffered so we don't persist a tool-less
     // hallucination to chat_history before the validator has a chance to reject it.
     let pendingAssistantTurn: MessageParam | null = null;
@@ -493,6 +516,25 @@ export class CalendarBotAgent {
 
           aiLogger.info({ tool: tc.name, input, userId: ctx.user.telegram_id, chatId: ctx.chatId }, 'Tool call');
           dbg?.logToolCall(tc.name, input);
+
+          // Dedup: if the model already called this exact (name, args) earlier
+          // in the run, short-circuit and return a synthetic DUPLICATE result
+          // without invoking the real handler. This prevents user-visible side
+          // effects (photo sends, notifications) from being duplicated during
+          // model loops.
+          const dedupKey = toolCallKey(tc.name, input);
+          if (seenToolCallKeys.has(dedupKey)) {
+            aiLogger.warn(
+              { tool: tc.name, input, userId: ctx.user.telegram_id, round },
+              'Duplicate tool call skipped (in-run dedup)',
+            );
+            dbg?.logToolResult(tc.name, true, DUPLICATE_MARKER, undefined);
+            allToolCalls.push({ name: tc.name, input });
+            allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+            toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
+            continue;
+          }
+          seenToolCallKeys.add(dedupKey);
 
           writer.setToolLabel(tc.name, input);
           await writer.flush(true);
@@ -590,6 +632,7 @@ export class CalendarBotAgent {
               allToolCalls,
               allToolResults,
               startTime,
+              seenToolCallKeys,
             );
 
             // If the retry ALSO produced a tool-less answer, validate it once
@@ -690,6 +733,7 @@ export class CalendarBotAgent {
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
     startTime: number,
+    seenToolCallKeys: Set<string>,
   ): Promise<{
     hitStopLoop: boolean;
     /** Text produced by the most recent round of the retry loop (for re-validation). */
@@ -770,6 +814,22 @@ export class CalendarBotAgent {
           aiLogger.error({ err, tool: tc.name, arguments: tc.arguments }, 'Failed to parse tool arguments (retry)');
           input = {};
         }
+
+        // Same in-run dedup as the main loop — share the Set so both loops
+        // respect each other's calls.
+        const dedupKey = toolCallKey(tc.name, input);
+        if (seenToolCallKeys.has(dedupKey)) {
+          aiLogger.warn(
+            { tool: tc.name, input, userId: ctx.user.telegram_id, round },
+            'Duplicate tool call skipped (in-run dedup, retry loop)',
+          );
+          dbg?.logToolResult(tc.name, true, DUPLICATE_MARKER, undefined);
+          allToolCalls.push({ name: tc.name, input });
+          allToolResults.push({ success: true, output: DUPLICATE_MARKER });
+          toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
+          continue;
+        }
+        seenToolCallKeys.add(dedupKey);
 
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);

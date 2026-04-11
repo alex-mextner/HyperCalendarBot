@@ -10,7 +10,7 @@ import { SharedEventRepository } from '../../../src/database/repositories/shared
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { executeTool } from '../../../src/services/ai/tool-executor.ts';
+import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -30,6 +30,9 @@ describe('executeTool', () => {
   const USER_ID = 123;
 
   beforeEach(() => {
+    // Throttle state is module-level and must not leak between tests that
+    // reuse the same (chatId, toolName, args) tuple.
+    _resetToolThrottleForTest();
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
@@ -597,6 +600,95 @@ describe('executeTool', () => {
       expect(logs).toHaveLength(1);
       const meta = JSON.parse(logs[0]!.metadata!);
       expect(meta._inputMode).toBe('voice_message');
+    });
+  });
+
+  // ── Cross-run time throttle ────────────────────────────────────────────────
+  // Defence-in-depth against repeated tool calls with identical arguments
+  // within a short time window — regardless of whether they come from a single
+  // agent run or two back-to-back runs. Catches cases where in-run dedup would
+  // not fire (e.g. the bot crashes, restarts, and the model asks for the same
+  // rendering again within seconds).
+
+  describe('time-based throttle', () => {
+    beforeEach(() => {
+      _resetToolThrottleForTest();
+    });
+
+    test('second identical call within 5s window is throttled', async () => {
+      const r1 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(r1.success).toBe(true);
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+
+      const r2 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(r2.success).toBe(true);
+      expect(r2.output ?? '').toContain('THROTTLED');
+    });
+
+    test('throttle key normalizes argument order', async () => {
+      await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      const r2 = await executeTool(ctx, 'get_events', {
+        end_date: '2026-03-15T23:59:59Z',
+        start_date: '2026-03-15T00:00:00Z',
+      });
+      expect(r2.output ?? '').toContain('THROTTLED');
+    });
+
+    test('different args are NOT throttled', async () => {
+      const r1 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      const r2 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-16T00:00:00Z',
+        end_date: '2026-03-16T23:59:59Z',
+      });
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different chats do NOT share throttle state', async () => {
+      const otherCtx: AgentContext = { ...ctx, chatId: 999999 };
+      await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      const r2 = await executeTool(otherCtx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different tool names are NOT throttled against each other', async () => {
+      await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      const r2 = await executeTool(ctx, 'get_upcoming', { limit: 5 });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('throttle entry expires after TTL (simulated via reset)', async () => {
+      await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      _resetToolThrottleForTest();
+      const r2 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
     });
   });
 });

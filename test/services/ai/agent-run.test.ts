@@ -11,6 +11,7 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -129,6 +130,9 @@ describe('CalendarBotAgent.run()', () => {
   const USER_ID = 456;
 
   beforeEach(() => {
+    // Module-level throttle state must be reset between tests so repeated
+    // (tool, args) combinations across tests don't cross-contaminate.
+    _resetToolThrottleForTest();
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
@@ -523,5 +527,160 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).toBe('You have 0 events today.');
     expect(result.responseText).not.toContain('<blockquote');
     expect(result.responseText).not.toContain('✅');
+  });
+
+  // ── In-run tool call dedup ─────────────────────────────────────────────────
+  // Regression: a model that keeps calling render_day_image with the same date
+  // (or any other tool with identical args) must NOT trigger the real handler
+  // on every repeat — otherwise fire-and-forget render handlers spam the user
+  // with duplicate photos inside a single agent run.
+
+  test('duplicate tool calls with identical args are deduped within a run (no real execution)', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-2',
+        name: 'get_events',
+        // Same args — should be deduped
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-3',
+        name: 'get_events',
+        // Key-order variant — must still be detected as duplicate
+        input: { end_date: '2026-04-16', start_date: '2026-04-16' },
+      },
+      { kind: 'text', text: 'No events.' },
+    ]);
+
+    // Spy on eventService.getEventsForDay — the real backing call for get_events.
+    // It should fire exactly once; the other two are deduped.
+    const originalGetEvents = ctx.eventService.getEventsInRange.bind(ctx.eventService);
+    let realCallCount = 0;
+    ctx.eventService.getEventsInRange = ((userId: number, start: string, end: string) => {
+      realCallCount++;
+      return originalGetEvents(userId, start, end);
+    }) as typeof ctx.eventService.getEventsInRange;
+
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    const result = await agent.run(ctx);
+
+    // All three tool calls recorded in the run result…
+    expect(result.toolCalls.length).toBe(3);
+    // …but the real backing service was invoked once.
+    expect(realCallCount).toBe(1);
+    // Two of the three results are synthetic DUPLICATE markers.
+    const duplicateResults = result.toolResults.filter((r) => (r.output ?? '').includes('DUPLICATE'));
+    expect(duplicateResults.length).toBe(2);
+  });
+
+  test('dedup key normalizes argument key order', async () => {
+    // Two calls with same semantic args but different key order must be deduped.
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-2',
+        name: 'get_events',
+        input: { end_date: '2026-04-16', start_date: '2026-04-16' },
+      },
+      { kind: 'text', text: 'ok' },
+    ]);
+
+    let realCallCount = 0;
+    const originalGetEvents = ctx.eventService.getEventsInRange.bind(ctx.eventService);
+    ctx.eventService.getEventsInRange = ((userId: number, start: string, end: string) => {
+      realCallCount++;
+      return originalGetEvents(userId, start, end);
+    }) as typeof ctx.eventService.getEventsInRange;
+
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    await agent.run(ctx);
+
+    expect(realCallCount).toBe(1);
+  });
+
+  test('different args with same tool name are NOT deduped', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-2',
+        name: 'get_events',
+        // Different date — must execute for real
+        input: { start_date: '2026-04-17', end_date: '2026-04-17' },
+      },
+      { kind: 'text', text: 'ok' },
+    ]);
+
+    let realCallCount = 0;
+    const originalGetEvents = ctx.eventService.getEventsInRange.bind(ctx.eventService);
+    ctx.eventService.getEventsInRange = ((userId: number, start: string, end: string) => {
+      realCallCount++;
+      return originalGetEvents(userId, start, end);
+    }) as typeof ctx.eventService.getEventsInRange;
+
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    await agent.run(ctx);
+
+    expect(realCallCount).toBe(2);
+  });
+
+  test('duplicate tool result is passed back to the model in the next round', async () => {
+    // Model sees the DUPLICATE marker in the tool result and should use it to
+    // understand the call was skipped. Verify the model input on round 3
+    // contains the synthetic tool result for call-2.
+    const { impl, calls } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-1',
+        name: 'get_events',
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      {
+        kind: 'tool',
+        callId: 'call-2',
+        name: 'get_events',
+        input: { start_date: '2026-04-16', end_date: '2026-04-16' },
+      },
+      { kind: 'text', text: 'final' },
+    ]);
+
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    await agent.run(ctx);
+
+    // The third model call (after 2 tool rounds) must see call-2's result,
+    // and that result must contain DUPLICATE.
+    const thirdCall = calls[2];
+    expect(thirdCall).toBeDefined();
+    const toolMessagesInThirdCall = thirdCall!.messages.filter((m) => m.role === 'tool');
+    const call2Result = toolMessagesInThirdCall.find(
+      (m) => 'tool_call_id' in m && (m as { tool_call_id: string }).tool_call_id === 'call-2',
+    );
+    expect(call2Result).toBeDefined();
+    const content = (call2Result as { content: string }).content;
+    expect(content).toContain('DUPLICATE');
   });
 });

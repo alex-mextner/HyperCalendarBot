@@ -204,6 +204,58 @@ export type ToolName = keyof ToolInputMap;
 
 const aiLogger = logger.child({ module: 'ai' });
 
+// ── Cross-run time throttle ────────────────────────────────────────────────
+// Defence-in-depth against repeated tool calls with identical arguments within
+// a short window. Complements the in-run dedup in CalendarBotAgent.run() — that
+// catches loops inside one agent run; this catches rapid cross-run repeats
+// (e.g. bot restart mid-run, or multiple queued user messages triggering the
+// same tool).
+
+const THROTTLE_TTL_MS = 5_000;
+/** Maximum number of entries kept in the throttle map (LRU soft bound). */
+const THROTTLE_MAX_ENTRIES = 1_000;
+
+const throttleMap = new Map<string, number>();
+
+/**
+ * Build a canonical throttle key. Keys are sorted so `{a,b}` and `{b,a}`
+ * collide. Input is shallow — tool schemas are flat primitives / small arrays
+ * so shallow sort is sufficient for dedup without canonicalising nested shapes.
+ */
+function buildThrottleKey(chatId: number, toolName: string, input: unknown): string {
+  let canonicalArgs = '';
+  if (input && typeof input === 'object') {
+    const record = input as { [key: string]: unknown };
+    const sortedKeys = Object.keys(record).sort();
+    const ordered: { [key: string]: unknown } = {};
+    for (const k of sortedKeys) ordered[k] = record[k];
+    canonicalArgs = JSON.stringify(ordered);
+  } else {
+    canonicalArgs = JSON.stringify(input);
+  }
+  return `${chatId}:${toolName}:${canonicalArgs}`;
+}
+
+/**
+ * Evict stale entries opportunistically when the map grows beyond the soft
+ * cap. Called on each insert. O(n) but only triggered at the ceiling.
+ */
+function evictStaleThrottleEntries(now: number): void {
+  if (throttleMap.size < THROTTLE_MAX_ENTRIES) return;
+  for (const [key, ts] of throttleMap) {
+    if (now - ts >= THROTTLE_TTL_MS) throttleMap.delete(key);
+  }
+}
+
+/** Test-only: clears the throttle map so each test starts clean. */
+export function _resetToolThrottleForTest(): void {
+  throttleMap.clear();
+}
+
+const THROTTLE_MARKER =
+  'THROTTLED: this tool was just called with identical arguments (within the last 5 seconds). ' +
+  'Use the previous result. Do NOT call it again — respond to the user or call a different tool.';
+
 /** Tools that are read-only or meta — not worth logging as user actions. */
 const SKIP_ACTION_LOG = new Set<string>([
   'supplement_skip',
@@ -289,6 +341,22 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
 
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
+
+  // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
+  // THROTTLED result without invoking the handler. Prevents rapid cross-run
+  // repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
+  const now = Date.now();
+  const throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
+  const lastCalledAt = throttleMap.get(throttleKey);
+  if (lastCalledAt !== undefined && now - lastCalledAt < THROTTLE_TTL_MS) {
+    aiLogger.warn(
+      { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
+      'Tool call throttled (identical within 5s)',
+    );
+    return { success: true, output: THROTTLE_MARKER };
+  }
+  evictStaleThrottleEntries(now);
+  throttleMap.set(throttleKey, now);
 
   try {
     const result = await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]);
