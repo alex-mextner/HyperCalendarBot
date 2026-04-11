@@ -519,6 +519,10 @@ export const MSG = {
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
     },
+    eventCard: {
+      allDayInline: 'all day',
+      birthdayAgeSuffix: (age: number) => ` — turns ${age}`,
+    },
     botTips: {
       // ── Creating events ──
       voice_create: "💡 Send a voice message to quickly create an event — I'll understand!",
@@ -1129,6 +1133,10 @@ export const MSG = {
       tempRange: (min: number, max: number) => `${min}..${max}°C`,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
+    },
+    eventCard: {
+      allDayInline: 'весь день',
+      birthdayAgeSuffix: (age: number) => ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}`,
     },
     botTips: {
       // ── Создание событий ──

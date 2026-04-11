@@ -711,6 +711,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           },
           adminId: botAdminId,
         },
+        editProposalDeps: {
+          editProposalRepo: db.editProposals,
+          sendMessage: async (chatId: number, text: string, options?: { parse_mode: ParseMode }) => {
+            await bot.api.sendMessage({
+              chat_id: chatId,
+              text,
+              ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
+            });
+          },
+        },
         userRepo: db.users,
         intentDeps: {
           intentRepo,

@@ -132,14 +132,14 @@ export function formatEventDetail(
   opts?: { includeTitle?: boolean },
 ): string {
   const includeTitle = opts?.includeTitle ?? true;
+  const l = t(lang as Lang).eventCard;
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
 
   if (includeTitle) {
     if (isBirthday) {
       const age = birthdayAge(event.birth_year, event.start_at);
-      const ageSuffix =
-        age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+      const ageSuffix = age !== null ? l.birthdayAgeSuffix(age) : '';
       lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
     } else {
       lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
@@ -148,7 +148,7 @@ export function formatEventDetail(
 
   const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${dateStr}, ${lang === 'ru' ? 'весь день' : 'all day'}`);
+    lines.push(`📅 ${dateStr}, ${l.allDayInline}`);
   } else {
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
