@@ -137,9 +137,10 @@ check `src/database/migrations.ts` for the latest and append).
 [Подключить] [Отмена]
 ```
 
-> Note: the §13 automatic timezone detection line ("Определять твою таймзону…") has been removed
-> from the consent screen because §13 is tracked as a Phase-2 follow-up (see §14). When §13 is
-> implemented, the consent screen must be updated to re-add the line and the user must re-consent.
+> Note: the §13 timezone detection bullet is added back to the consent screen in the Task 13
+> rollout. Users who connected before §13 shipped must re-consent via a one-time confirmation
+> prompt before the first `account.getAuthorizations()` call — tracked via
+> `user_telegram_sessions.tz_detection_consent_at`.
 
 **Step 2: Phone number**
 ```
@@ -434,7 +435,7 @@ is exposed (it was in an earlier draft that stored `phone_last4` as a plain colu
 Used by AI agent to provide contextual help when the user creates an event with
 participants who haven't started the bot. See Section 10.1.
 
-### 10.1 Contextual Connect Prompt *(Phase 2 — out of scope for initial implementation)*
+### 10.1 Contextual Connect Prompt
 
 When the AI agent creates an event that includes participants who haven't started the bot,
 and the user has NOT connected their Telegram account, the agent should suggest connecting:
@@ -458,7 +459,7 @@ Do NOT show this prompt if:
 - The event has no external participants (all participants use the bot)
 - The user has dismissed this suggestion before (track via user preferences)
 
-### 10.2 Post-Connect Invitation Flow *(Phase 2 — out of scope for initial implementation)*
+### 10.2 Post-Connect Invitation Flow
 
 When `/connect_telegram` completes successfully AND was triggered in the context of a
 recently created event with uninvited external participants, the success message includes
@@ -546,17 +547,12 @@ so first-person "Приглашаю" would be confusing.
 | User deletes account | Bot API delivery of regular messages also fails → user cleanup cascade |
 | Connect cooldown | 60-second in-memory cooldown on scene re-entry to avoid FloodWait from repeated send_code |
 | Symlink race on /tmp | Temp session file created with `O_CREAT|O_EXCL|O_WRONLY`, 0o600 — fails closed if path exists |
-| Connect triggered after event creation *(Phase 2)* | Scene receives `pendingEventId` + `pendingInviteeIds`, offers to invite on success |
-| User dismisses connect prompt *(Phase 2)* | Track in user preferences, don't show again for 30 days |
+| Connect triggered after event creation | Scene receives `pendingEventId` + `pendingInviteeIds`, offers to invite on success |
+| User dismisses connect prompt | Track in `users.connect_telegram_dismissed_at`, don't show again for 30 days |
 
 ---
 
-## 13. Automatic Timezone Detection *(Phase 2 — out of scope for initial implementation)*
-
-> Tracked as a follow-up GitHub issue. When implemented, the consent screen in §3 must be updated
-> to include the "Determine timezone by connection region" bullet and the user must re-consent.
-> Until then, assume the bot does not touch `account.getAuthorizations()` and never inspects IP /
-> region metadata of user sessions.
+## 13. Automatic Timezone Detection
 
 ### Overview
 
@@ -622,14 +618,8 @@ Add to the consent screen (Section 3, Step 1):
 
 ## 14. Out of Scope
 
-**Permanently out of scope:**
 - Reading user's messages or contacts
 - Sending anything other than event invitations
 - Background session keep-alive (sessions are opened on-demand)
 - Web UI for managing sessions
 - Session sharing between bot instances
-
-**Phase 2 (tracked as follow-up issues):**
-- §10.1 — Contextual connect prompt after event creation
-- §10.2 — Post-connect invitation flow with `pendingEventId`/`pendingInviteeIds`
-- §13 — Automatic timezone detection via `account.getAuthorizations()`

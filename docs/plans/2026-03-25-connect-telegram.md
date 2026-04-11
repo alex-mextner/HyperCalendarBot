@@ -8,7 +8,7 @@
 
 **Tech stack:** AES-256-GCM (`node:crypto`), Pyrogram (Python bridge via `Bun.spawn`), `@gramio/scenes` ^0.5, `bun:sqlite`, zod v4 (`z.codec` for JSON parsing without external try/catch).
 
-**Scope note:** Spec sections §10.1 (contextual connect prompt), §10.2 (post-connect invitation flow), and §13 (automatic timezone detection) are Phase 2 and deliberately out of scope for this plan. They are called out in Task 12 as follow-up GitHub issues.
+**Scope note:** All spec sections are in scope, including §10.1 (contextual connect prompt), §10.2 (post-connect invitation flow), and §13 (automatic timezone detection). These are implemented in Tasks 12 and 13 after the core flow is complete in Tasks 1–11.
 
 **Spec:** `docs/specs/2026-03-24-connect-telegram.md`
 
@@ -26,8 +26,10 @@
 | `src/services/telegram-session/session-bridge.ts` | TypeScript wrapper for Python bridge scripts (`Bun.spawn`) with zod-codec stdout parsing |
 | `src/services/telegram-session/connected-user-sender.ts` | Factory for `sendAsConnectedUser`: decrypts session, writes temp file atomically, spawns `send-as-user.py`, cleans up. Builds first-person invitation text. |
 | `src/services/telegram-session/invitation-text.ts` | `buildUserSessionInvitationText(event, inviter, deepLinkUrl, lang)` — first-person format per spec §11 |
-| `src/bot/scenes/connect-telegram.scene.ts` | GramIO scene + `ConnectTelegramState` interface (co-located) |
-| `scripts/connect-session.py` | Pyrogram auth: `send_code`, `sign_in`, `check_password`, `log_out` subcommands |
+| `src/services/telegram-session/timezone-detector.ts` | Resolves country+region from `account.getAuthorizations()` to an IANA timezone (spec §13) |
+| `src/services/event/recent-external-events.ts` | `findMostRecentEventWithExternalParticipants(userId)` — used by the connect command to seed `pendingEventId` / `pendingInviteeIds` (spec §10.2) |
+| `src/bot/scenes/connect-telegram.scene.ts` | GramIO scene + `ConnectTelegramState` / `ConnectTelegramParams` interfaces (co-located) |
+| `scripts/connect-session.py` | Pyrogram auth: `send_code`, `sign_in`, `check_password`, `log_out`, `get_authorizations` subcommands |
 | `scripts/send-as-user.py` | Send message via user's Pyrogram session |
 | `test/database/repositories/telegram-session.repository.test.ts` | Repository tests |
 | `test/services/crypto/session-crypto.test.ts` | Crypto roundtrip + tamper detection tests |
@@ -35,8 +37,11 @@
 | `test/services/telegram-session/session-bridge.test.ts` | Bridge wrapper tests (zod-codec stdout parsing) |
 | `test/services/telegram-session/connected-user-sender.test.ts` | Factory tests for the user-session send path |
 | `test/services/telegram-session/invitation-text.test.ts` | First-person invitation text formatter tests |
+| `test/services/telegram-session/timezone-detector.test.ts` | Timezone resolution tests (single-tz and multi-tz countries) |
 | `test/bot/scenes/connect-telegram.scene.test.ts` | Scene helpers and state transition tests |
+| `test/bot/scenes/connect-telegram.pending.test.ts` | Post-connect invitation flow tests (spec §10.2) |
 | `test/services/ai/tool-handlers/connect-telegram-status.test.ts` | AI tool handler test |
+| `test/services/ai/tool-handlers/dismiss-connect-telegram-prompt.test.ts` | Dismissal tool handler test (spec §10.1) |
 
 ### Modified files
 
@@ -45,7 +50,7 @@
 | `src/config/env.ts` | Add `TELEGRAM_SESSION_MASTER_KEY?: string` with hex-length validation |
 | `src/config/constants.ts` | Add i18n strings for connect / disconnect UI and the new AI tool |
 | `src/database/types.ts` | Add `TelegramSession` interface + `NotificationLogChannel` union that includes `'mtproto_user'` |
-| `src/database/migrations.ts` | Migration **054**: `user_telegram_sessions` table (+ encrypted phone column) |
+| `src/database/migrations.ts` | Migrations **054** (`user_telegram_sessions`), **055** (`users.connect_telegram_dismissed_at`), **056** (`user_telegram_sessions.tz_detection_consent_at`) |
 | `src/database/index.ts` | Register `TelegramSessionRepository` in `DatabaseService` |
 | `src/bot/scenes/index.ts` | Wire `connect-telegram` scene, thread `TelegramSessionRepository` and master key through `createScenesPlugin` |
 | `src/bot/commands/settings.ts` | Add Telegram account row to settings UI + callbacks |
@@ -2679,24 +2684,592 @@ git commit -m "feat(connect-telegram): AI tool for checking connection status"
 
 ---
 
-## Task 12: Phase-2 Follow-Ups (GitHub issues, no code)
+## Task 12: Contextual Connect Prompt + Post-Connect Invitation Flow (spec §10.1 / §10.2)
 
-Spec sections out of scope for this plan but tracked as follow-up issues:
+**Files:**
+- Modify: `src/database/migrations.ts` — migration **055** adds `connect_telegram_dismissed_at` to users
+- Modify: `src/database/types.ts` — add the new field to `User`
+- Modify: `src/database/repositories/user.repository.ts` — add `setConnectTelegramDismissedAt`
+- Modify: `src/services/ai/system-prompt.ts` — instruction for the agent
+- Modify: `src/services/ai/tool-handlers/settings.ts` — new handler `handleDismissConnectTelegramPrompt`
+- Modify: `src/services/ai/tools.ts` — tool definition `dismiss_connect_telegram_prompt`
+- Modify: `src/services/ai/tool-executor.ts` — dispatch
+- Modify: `src/bot/scenes/connect-telegram.scene.ts` — accept `pendingEventId` / `pendingInviteeIds` params
+- Modify: `src/bot/scenes/index.ts` — thread the new scene params type
+- Create: `test/bot/scenes/connect-telegram.pending.test.ts`
+- Create: `test/services/ai/tool-handlers/dismiss-connect-telegram-prompt.test.ts`
 
-- [ ] **Step 1: Create issue for §10.1 — Contextual Connect Prompt**
-  > AI agent should suggest `/connect_telegram` in `system-prompt.ts` after creating an event with external participants, checked via `connect_telegram_status` tool and a "dismissed this suggestion before" preference (30-day cooldown).
+Goal: after the agent creates an event with non-bot participants, suggest `/connect_telegram`
+(§10.1). When the user runs `/connect_telegram` *in that context*, offer to send the pending
+invitation immediately after the connection completes (§10.2).
 
-- [ ] **Step 2: Create issue for §10.2 — Post-Connect Invitation Flow**
-  > Scene parameters `pendingEventId` / `pendingInviteeIds` passed when entering the scene from the contextual prompt; on success, show "Send invitation now?" instead of the generic success message.
+### Step 1: Migration 055 for dismissal tracking
 
-- [ ] **Step 3: Create issue for §13 — Automatic Timezone Detection**
-  > Implement `account.getAuthorizations()` opportunistic check during delivery, map country+region → IANA tz via `geo-tz`, send confirmation message before updating `users.timezone`. Never auto-update — VPN false positives.
+- [ ] Add `connect_telegram_dismissed_at TEXT NULL` to `users` via migration 055. Used to suppress
+  the suggestion for 30 days after a dismissal.
 
-Use `gh issue create` with labels `enhancement` and `connect-telegram`.
+```ts
+{
+  name: '055_users_connect_telegram_dismissed_at',
+  up: (db) => {
+    db.exec('ALTER TABLE users ADD COLUMN connect_telegram_dismissed_at TEXT DEFAULT NULL');
+  },
+},
+```
+
+### Step 2: Repository method + User type
+
+```ts
+// user.repository.ts
+setConnectTelegramDismissedAt(userId: number, at: string | null): void {
+  this.db
+    .prepare('UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ?')
+    .run(at, userId);
+}
+```
+
+Add `connect_telegram_dismissed_at: string | null` to the `User` interface in `database/types.ts`.
+
+### Step 3: AI tool `dismiss_connect_telegram_prompt`
+
+```ts
+// tools.ts
+{
+  name: 'dismiss_connect_telegram_prompt',
+  description: 'Record that user dismissed the /connect_telegram suggestion. Used by the agent when the user says "no", "not now", "позже" etc. in response to the contextual prompt. Suppresses the suggestion for 30 days.',
+  input_schema: { type: 'object', properties: {} },
+},
+```
+
+Handler sets `connect_telegram_dismissed_at` to `datetime('now')` and returns a short confirmation
+output. Register in `tool-executor.ts` + `TOOL_FEATURE_MAP` (`'telegram_connect'`).
+
+### Step 4: System-prompt instruction
+
+In `src/services/ai/system-prompt.ts`, append a section that runs after the "event tools" block:
+
+```
+## /connect_telegram suggestion
+
+When you have just created an event that has external participants (participants who have not
+started the bot — detected by `sendInvitation` returning a bot-API failure OR by a participant
+resolved from contacts without `telegram_id`), consider suggesting `/connect_telegram` to the
+user so future invitations come from their own account:
+
+1. Call `connect_telegram_status`
+2. If `connected: true` — do nothing, skip the suggestion
+3. If `connected: false` — check if the user dismissed the suggestion recently (the tool output
+   will indicate this via the `dismissed_recently` flag once we add it to the status payload)
+4. Otherwise, append to your response (after the "event created" confirmation):
+
+   RU: "Кстати, можешь подключить свой Telegram-аккаунт — тогда приглашения будут приходить от тебя, а не от бота. Люди отвечают охотнее. /connect_telegram"
+   EN: "You can connect your Telegram account so invitations come from you, not the bot — people respond better. /connect_telegram"
+
+If the user responds "нет", "позже", "потом", "not now" etc. call `dismiss_connect_telegram_prompt`.
+
+NEVER pester. One suggestion per event creation, and only if the user hasn't dismissed it recently.
+```
+
+### Step 5: Extend `connect_telegram_status` to expose `dismissed_recently`
+
+Update the handler from Task 11 to also return `dismissed_recently: boolean` (true if
+`connect_telegram_dismissed_at` is within the last 30 days). This lets the agent skip the
+suggestion without a second tool call.
+
+Update `TelegramSessionData` union:
+```ts
+| { connected: false; dismissed_recently: boolean }
+| { connected: true; phone_masked: string; status: string }
+```
+
+### Step 6: Scene params for post-connect flow
+
+Add a params type to the connect-telegram scene:
+
+```ts
+export interface ConnectTelegramParams {
+  pendingEventId?: number;
+  pendingInviteeIds?: number[];
+}
+```
+
+Update the scene builder:
+```ts
+new Scene('connect-telegram')
+  .state<ConnectTelegramState>()
+  .params<ConnectTelegramParams>()
+  .extend(userComposer)
+  // ... steps
+```
+
+**Remember:** `.extend()` MUST come AFTER `.params()` and `.state()` (GramIO quirk — `params()`
+uses `Modify<Derives>` which replaces derives; `extend()` intersects, so order matters).
+
+### Step 7: Post-connect offer in `finalizeSession`
+
+At the end of `finalizeSession`, replace the generic `context.send(s.success(...))` with:
+
+```ts
+const pending = context.scene.params;
+if (pending?.pendingEventId && pending.pendingInviteeIds?.length) {
+  const event = eventService.getEvent(pending.pendingEventId, userId);
+  const inviteeId = pending.pendingInviteeIds[0]; // most recent; spec §10.2: "show only most recent"
+  if (event && inviteeId !== undefined) {
+    const inviteeName = resolveInviteeDisplayName(inviteeId, ctx); // helper: users table → contacts fallback
+    const kb = new InlineKeyboard()
+      .text(s.sendPendingBtn, `ct:send_pending:${event.id}:${inviteeId}`)
+      .text(s.skipPendingBtn, 'ct:skip_pending');
+    await context.send(
+      s.successWithPending(maskPhone(state.phone!), event.title, formatEventStart(event, ctx.user.timezone, lang), inviteeName),
+      { reply_markup: kb },
+    );
+    // NOTE: we do NOT exit the scene here — wait for the callback_query below
+    return;
+  }
+}
+await context.send(s.success(maskPhone(state.phone!)));
+await context.scene.exit();
+```
+
+Add a final step that handles `callback_query`:
+
+```ts
+.step('callback_query', async (context) => {
+  const data = context.data;
+  if (!data) return;
+
+  if (data === 'ct:skip_pending') {
+    await context.answer();
+    await context.send(t(context.lang ?? 'en').connectTelegram.cancelled);
+    return context.scene.exit();
+  }
+
+  const match = /^ct:send_pending:(\d+):(\d+)$/.exec(data);
+  if (match) {
+    const eventId = Number(match[1]);
+    const inviteeId = Number(match[2]);
+    await context.answer();
+    // Fire the existing sendInvitation tool so it flows through the invitation-text helper
+    // and the user-session delivery chain added in Task 9.
+    await invitationService.sendInvitation(eventId, context.from.id, inviteeId);
+    await context.send(t(context.lang ?? 'en').connectTelegram.pendingSent);
+    return context.scene.exit();
+  }
+})
+```
+
+The scene now needs `invitationService` injected. Add it to `createConnectTelegramScene` deps.
+
+### Step 8: New i18n strings
+
+Add to `MSG.en.connectTelegram` and `MSG.ru.connectTelegram`:
+
+```ts
+// EN:
+successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
+  `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine}) — ${inviteeName} has not been invited yet.\nSend the invitation from your account?`,
+sendPendingBtn: 'Send',
+skipPendingBtn: 'Not now',
+pendingSent: '✅ Invitation sent.',
+
+// RU:
+successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
+  `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine}) — ${inviteeName} ещё не приглашён.\nОтправить приглашение от твоего имени?`,
+sendPendingBtn: 'Отправить',
+skipPendingBtn: 'Не сейчас',
+pendingSent: '✅ Приглашение отправлено.',
+```
+
+### Step 9: Trigger the scene with params from the agent
+
+The agent cannot pass scene params directly — it only knows about tools. Extend the existing AI
+tool that "starts the connect flow" path:
+
+Option A (preferred): the agent suggests `/connect_telegram` in text, and when the user *clicks*
+the deep link or types the command, the bot checks `ctx.dbUser.connect_telegram_dismissed_at` and
+loads the most recent event from `action_log` where external participants exist. Pass it as
+params:
+
+```ts
+bot.command('connect_telegram', async (ctx) => {
+  const recentEvent = findMostRecentEventWithExternalParticipants(ctx.dbUser.telegram_id); // new helper
+  await ctx.scene.enter('connect-telegram', recentEvent
+    ? { pendingEventId: recentEvent.id, pendingInviteeIds: recentEvent.externalInviteeIds }
+    : {}
+  );
+});
+```
+
+`findMostRecentEventWithExternalParticipants(userId)` — new helper in `src/services/event/`
+that queries `action_log` for the most recent `create_event` action within the last 10 minutes
+whose resulting event has `event_participants` rows with `telegram_id IS NULL` (or resolved
+from contacts but not in users table).
+
+### Step 10: Tests
+
+```ts
+// test/bot/scenes/connect-telegram.pending.test.ts
+describe('connect-telegram post-connect flow', () => {
+  test('finalize without pending params → generic success', async () => { /* ... */ });
+  test('finalize with pendingEventId → offer inline keyboard', async () => { /* ... */ });
+  test('ct:send_pending callback → sendInvitation called with correct ids', async () => { /* ... */ });
+  test('ct:skip_pending callback → scene exits without sending', async () => { /* ... */ });
+});
+```
+
+```ts
+// test/services/ai/tool-handlers/dismiss-connect-telegram-prompt.test.ts
+describe('handleDismissConnectTelegramPrompt', () => {
+  test('sets connect_telegram_dismissed_at to current time', () => { /* ... */ });
+  test('second call idempotent', () => { /* ... */ });
+});
+```
+
+```ts
+// Update test/services/ai/tool-handlers/connect-telegram-status.test.ts
+test('dismissed_recently true when dismissed within 30 days', () => { /* ... */ });
+test('dismissed_recently false when dismissed 31 days ago', () => { /* ... */ });
+```
+
+### Step 11: Run tests, type-check, commit
+
+```bash
+bun test test/bot/scenes/connect-telegram.pending.test.ts \
+         test/services/ai/tool-handlers/dismiss-connect-telegram-prompt.test.ts \
+         test/services/ai/tool-handlers/connect-telegram-status.test.ts
+tsc --noEmit
+git add src/database/migrations.ts src/database/types.ts \
+  src/database/repositories/user.repository.ts \
+  src/services/ai/system-prompt.ts src/services/ai/tools.ts \
+  src/services/ai/tool-executor.ts src/services/ai/tool-handlers/settings.ts \
+  src/bot/scenes/connect-telegram.scene.ts src/bot/scenes/index.ts \
+  src/config/constants.ts src/services/event/ src/bot/index.ts \
+  test/bot/scenes/connect-telegram.pending.test.ts \
+  test/services/ai/tool-handlers/dismiss-connect-telegram-prompt.test.ts
+git commit -m "feat(connect-telegram): contextual prompt + post-connect invitation flow (spec §10.1 / §10.2)"
+```
 
 ---
 
-## Task 13: Final Integration
+## Task 13: Automatic Timezone Detection (spec §13)
+
+**Files:**
+- Modify: `scripts/connect-session.py` — new subcommand `get_authorizations`
+- Modify: `src/services/telegram-session/session-bridge.ts` — wrapper + zod codec schema
+- Create: `src/services/telegram-session/timezone-detector.ts`
+- Create: `test/services/telegram-session/timezone-detector.test.ts`
+- Modify: `src/services/telegram-session/connected-user-sender.ts` — opportunistic check piggyback
+- Modify: `src/database/migrations.ts` — migration **056** adds `tz_detection_consent_at` to `user_telegram_sessions`
+- Modify: `src/database/types.ts` — add the new field to `TelegramSession`
+- Modify: `src/config/constants.ts` — new i18n strings for tz confirmation
+- Modify: `src/bot/scenes/connect-telegram.scene.ts` — add tz consent bullet to consent screen
+- Add: `geo-tz` npm package
+
+Goal: passively detect timezone changes by reading `account.getAuthorizations()` session metadata
+(country, region, last_active). No message or content access. Always confirm with the user
+before updating `users.timezone` — VPN users would get false positives.
+
+### Step 1: Migration 056 — consent timestamp for §13
+
+- [ ] Add `tz_detection_consent_at TEXT NULL` to `user_telegram_sessions`. Users who connected
+  before §13 shipped must re-consent via a one-time confirmation before the first
+  `getAuthorizations()` call.
+
+```ts
+{
+  name: '056_user_telegram_sessions_tz_consent',
+  up: (db) => {
+    db.exec('ALTER TABLE user_telegram_sessions ADD COLUMN tz_detection_consent_at TEXT DEFAULT NULL');
+  },
+},
+```
+
+### Step 2: Install `geo-tz`
+
+```bash
+bun add geo-tz
+```
+
+`geo-tz` gives `find(lat, lon) → string[]` (IANA). For country+region → IANA mapping we also need
+a lightweight lookup table. For single-timezone countries (JP, KR, IN, AE, SG, IL, TR) country
+alone is enough; for multi-timezone (US, RU, CA, AU, BR, CN, ID) the region maps to known IANA
+zones. Build the table inline in `timezone-detector.ts` — ~40 entries total.
+
+### Step 3: Python `get_authorizations` subcommand
+
+```python
+async def cmd_get_authorizations(args: argparse.Namespace) -> None:
+    client = make_client(args.session_path)
+    await client.connect()
+    try:
+        # Pyrogram wrapper over account.getAuthorizations
+        auths = await client.invoke(
+            __import__('pyrogram.raw.functions.account', fromlist=['GetAuthorizations']).GetAuthorizations()
+        )
+        result = [
+            {
+                "hash": a.hash,
+                "device_model": a.device_model,
+                "platform": a.platform,
+                "system_version": a.system_version,
+                "app_name": a.app_name,
+                "country": a.country,
+                "region": a.region,
+                "ip": a.ip,
+                "date_active": a.date_active,
+                "current": bool(a.current),
+            }
+            for a in auths.authorizations
+        ]
+        print(json.dumps({"authorizations": result}))
+    except Exception as e:
+        print(error_json("AUTH_QUERY_FAILED", str(e)))
+        sys.exit(1)
+    finally:
+        await client.disconnect()
+```
+
+Add `p_auth = sub.add_parser("get_authorizations"); p_auth.add_argument("--session_path", required=True)`
+and register in the commands dict.
+
+### Step 4: Bridge wrapper + schema
+
+```ts
+// Add to session-bridge.ts
+const AuthorizationSchema = z.object({
+  hash: z.number(),
+  device_model: z.string(),
+  platform: z.string(),
+  system_version: z.string(),
+  app_name: z.string(),
+  country: z.string(),
+  region: z.string(),
+  ip: z.string(),
+  date_active: z.number(),
+  current: z.boolean(),
+});
+const GetAuthorizationsSchema = z.object({ authorizations: z.array(AuthorizationSchema) });
+export type Authorization = z.infer<typeof AuthorizationSchema>;
+
+// Add to SuccessSchema union
+const SuccessSchema = z.union([
+  SendCodeSchema,
+  SignInSchema,
+  CheckPasswordSchema,
+  SendAsUserSchema,
+  LogOutSchema,
+  GetAuthorizationsSchema,
+]);
+
+// New method
+static async getAuthorizations(sessionPath: string): Promise<BridgeResult> {
+  return SessionBridge.spawn([CONNECT_SCRIPT, 'get_authorizations', '--session_path', sessionPath]);
+}
+```
+
+### Step 5: Timezone detector
+
+```ts
+// src/services/telegram-session/timezone-detector.ts
+import type { Authorization } from './session-bridge.ts';
+
+interface DetectionResult {
+  detectedTimezone: string;
+  country: string;
+  region: string;
+}
+
+/** Single-timezone ISO country codes. */
+const SINGLE_TZ_COUNTRIES: Record<string, string> = {
+  JP: 'Asia/Tokyo',
+  KR: 'Asia/Seoul',
+  IN: 'Asia/Kolkata',
+  AE: 'Asia/Dubai',
+  SG: 'Asia/Singapore',
+  IL: 'Asia/Jerusalem',
+  TR: 'Europe/Istanbul',
+  GB: 'Europe/London',
+  FR: 'Europe/Paris',
+  DE: 'Europe/Berlin',
+  NL: 'Europe/Amsterdam',
+  RS: 'Europe/Belgrade',
+  IT: 'Europe/Rome',
+  ES: 'Europe/Madrid', // Canary Islands ignored — extremely rare
+  PL: 'Europe/Warsaw',
+  CZ: 'Europe/Prague',
+  AT: 'Europe/Vienna',
+  GR: 'Europe/Athens',
+  HU: 'Europe/Budapest',
+  SE: 'Europe/Stockholm',
+  NO: 'Europe/Oslo',
+  DK: 'Europe/Copenhagen',
+  FI: 'Europe/Helsinki',
+  PT: 'Europe/Lisbon',
+  BE: 'Europe/Brussels',
+  CH: 'Europe/Zurich',
+  IE: 'Europe/Dublin',
+  UA: 'Europe/Kyiv',
+  BY: 'Europe/Minsk',
+  MD: 'Europe/Chisinau',
+  // ... extend as real users travel
+};
+
+/** Multi-timezone countries: region (as Telegram returns it) → IANA. */
+const MULTI_TZ_REGIONS: Record<string, Record<string, string>> = {
+  RU: {
+    'Moscow': 'Europe/Moscow',
+    'Saint Petersburg': 'Europe/Moscow',
+    'Kaliningrad': 'Europe/Kaliningrad',
+    'Ekaterinburg': 'Asia/Yekaterinburg',
+    'Novosibirsk': 'Asia/Novosibirsk',
+    'Krasnoyarsk': 'Asia/Krasnoyarsk',
+    'Irkutsk': 'Asia/Irkutsk',
+    'Vladivostok': 'Asia/Vladivostok',
+    // ... add as needed
+  },
+  US: {
+    'New York': 'America/New_York',
+    'California': 'America/Los_Angeles',
+    'Texas': 'America/Chicago',
+    'Illinois': 'America/Chicago',
+    'Colorado': 'America/Denver',
+    'Washington': 'America/Los_Angeles',
+    'Florida': 'America/New_York',
+    // ... add as needed
+  },
+  CA: {
+    'Ontario': 'America/Toronto',
+    'Quebec': 'America/Toronto',
+    'British Columbia': 'America/Vancouver',
+    'Alberta': 'America/Edmonton',
+  },
+  AU: {
+    'New South Wales': 'Australia/Sydney',
+    'Victoria': 'Australia/Melbourne',
+    'Queensland': 'Australia/Brisbane',
+    'Western Australia': 'Australia/Perth',
+  },
+};
+
+/**
+ * Picks the most recently active mobile session from the authorizations list
+ * and resolves it to an IANA timezone. Returns null if the detected tz matches
+ * currentTimezone, or if the country is unknown.
+ */
+export function detectTimezoneFromAuthorizations(
+  auths: Authorization[],
+  currentTimezone: string,
+): DetectionResult | null {
+  const mobile = auths
+    .filter((a) => a.platform === 'iOS' || a.platform === 'Android')
+    .sort((a, b) => b.date_active - a.date_active);
+  const active = mobile[0];
+  if (!active) return null;
+
+  const countryCode = active.country.toUpperCase().slice(0, 2); // heuristic; Telegram returns ISO 3166-1 alpha-2
+  const single = SINGLE_TZ_COUNTRIES[countryCode];
+  if (single) {
+    if (single === currentTimezone) return null;
+    return { detectedTimezone: single, country: active.country, region: active.region };
+  }
+
+  const multi = MULTI_TZ_REGIONS[countryCode];
+  if (multi) {
+    const resolved = multi[active.region];
+    if (resolved && resolved !== currentTimezone) {
+      return { detectedTimezone: resolved, country: active.country, region: active.region };
+    }
+  }
+
+  return null;
+}
+```
+
+### Step 6: Opportunistic check in delivery path
+
+In `connected-user-sender.ts`, after `SessionBridge.sendAsUser` succeeds, piggyback one
+`getAuthorizations` call (only if `tz_detection_consent_at IS NOT NULL` and the session is
+already warm from the send). Post the detection result to an in-process queue that the bot
+drains into a "Update timezone?" inline keyboard message to the user.
+
+**Do not spawn a second Python process** — add a flag `--also_authorizations` to `send-as-user.py`
+and have the single process do both `send_message` + `get_authorizations` before disconnect.
+This keeps the "one spawn per send" invariant and makes the feature effectively free.
+
+Simplification for MVP: keep it as two separate Python calls for now (one send, one auth query).
+Optimize to single-spawn later if tests show the overhead matters.
+
+### Step 7: Consent update
+
+Add to the consent screen (§3 Step 1 in i18n strings):
+
+```ts
+// MSG.ru.connectTelegram.consent — add to "Бот БУДЕТ:" list:
+'• Определять твою таймзону по региону подключения для автоматического обновления часового пояса',
+
+// MSG.en.connectTelegram.consent — add to "The bot WILL:" list:
+'• Detect your timezone from the connection region so events show at the correct local time',
+```
+
+Users who connected BEFORE this feature shipped: track via `tz_detection_consent_at`. Before
+the first `getAuthorizations()` call, send:
+
+```
+🌍 Бот теперь умеет автоматически определять твою таймзону по подключению Telegram.
+Согласен? (читается только страна и регион, не сообщения)
+[Да] [Нет]
+```
+
+On "Да" → `UPDATE user_telegram_sessions SET tz_detection_consent_at = datetime('now')`.
+On "Нет" → skip forever (store a sentinel like `'never'`).
+
+### Step 8: User-facing confirmation message
+
+When `detectTimezoneFromAuthorizations` returns a non-null result, send:
+
+```
+Похоже, ты сейчас в {city} {country_flag}
+Обновить таймзону на {iana_tz}?
+[Да] [Нет]
+```
+
+The city is derived from `active.region` (display only; not used for resolution). Callback handlers
+`ct:tz_update:{iana}` and `ct:tz_skip` in the main bot router (not inside the scene — this fires
+after delivery, not during connect flow).
+
+### Step 9: Tests
+
+```ts
+// test/services/telegram-session/timezone-detector.test.ts
+describe('detectTimezoneFromAuthorizations', () => {
+  test('single-timezone country resolves by country code (JP)', () => { /* ... */ });
+  test('multi-timezone country resolves by region (US / California → America/Los_Angeles)', () => { /* ... */ });
+  test('returns null when detected equals current', () => { /* ... */ });
+  test('returns null for unknown country', () => { /* ... */ });
+  test('picks most recent mobile session when multiple present', () => { /* ... */ });
+  test('ignores desktop sessions', () => { /* ... */ });
+});
+```
+
+### Step 10: Run tests, commit
+
+```bash
+bun test test/services/telegram-session/timezone-detector.test.ts
+tsc --noEmit
+git add scripts/connect-session.py \
+  src/services/telegram-session/session-bridge.ts \
+  src/services/telegram-session/timezone-detector.ts \
+  src/services/telegram-session/connected-user-sender.ts \
+  src/database/migrations.ts src/database/types.ts \
+  src/config/constants.ts src/bot/index.ts \
+  test/services/telegram-session/timezone-detector.test.ts \
+  package.json bun.lock
+git commit -m "feat(connect-telegram): automatic timezone detection via account.getAuthorizations (spec §13)"
+```
+
+---
+
+## Task 14: Final Integration
 
 - [ ] **Step 1: Full test suite**
 
@@ -2751,12 +3324,12 @@ Address every non-false-positive finding.
 
 ## Summary
 
-13 tasks, roughly 20 commits (one per logical step). The plan reflects:
+14 tasks, roughly 25 commits (one per logical step). The plan reflects:
 
-- Correct migration number (054)
-- Real `@gramio/scenes` API (`.state().extend().onEnter().step()` + `context.scene.step.firstTime/next`)
+- Correct migration numbers: **054** (sessions table), **055** (dismissal column), **056** (tz consent column)
+- Real `@gramio/scenes` API (`.state().params().extend().onEnter().step()` + `context.scene.step.firstTime/next`)
 - `NotificationLogRepository.insert(data)` with proper schema (not a fake `.log()` method)
-- Zod-codec JSON parsing (no external try/catch)
+- Zod-codec JSON parsing (no external try/catch) — matches new CLAUDE.md rule
 - Encrypted phone storage; masked display via `libphonenumber-js`
 - First-person invitation text from spec §11
 - Fail-fast master-key check at startup
@@ -2764,4 +3337,4 @@ Address every non-false-positive finding.
 - Stdin password delivery for 2FA (no CLI arg leak)
 - Feature tracking (COMMAND/CALLBACK/SCENE/TOOL maps + FEATURE_KEYS)
 - `setMyCommands` in both RU and EN
-- Phase-2 features (§10.1, §10.2, §13) explicitly out of scope, tracked as issues
+- **All spec sections in scope**, including the contextual prompt (§10.1), post-connect flow (§10.2) and automatic timezone detection (§13). No deferred follow-ups.
