@@ -27,7 +27,43 @@ function groupMemberAnySql(alias: string): string {
 }
 
 export class EventRepository {
-  constructor(private db: Database) {}
+  /**
+   * Tables that `cascadeCleanupChildren` should wipe when a parent event
+   * is soft-deleted. Computed once at construction from `sqlite_master`
+   * — test DBs with minimal schemas may not have all of them.
+   */
+  private readonly cascadeTargets: readonly string[];
+  private readonly cascadeDeleteStmts: ReadonlyMap<string, ReturnType<Database['prepare']>>;
+  private readonly cascadeSoftDeleteExceptionStmt: ReturnType<Database['prepare']>;
+  private readonly cascadeFindChildrenStmt: ReturnType<Database['prepare']>;
+
+  constructor(private db: Database) {
+    const candidates = [
+      'event_participants',
+      'invitations',
+      'event_visibility',
+      'shared_events',
+      'group_shared_events',
+      'birth_event_metadata',
+      'participant_google_sync',
+      'reminders',
+      'event_reminders',
+    ];
+    const tableNames = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
+    ).map((r) => r.name);
+    const existing = new Set(tableNames);
+    this.cascadeTargets = candidates.filter((t) => existing.has(t));
+    const deleteStmts = new Map<string, ReturnType<Database['prepare']>>();
+    for (const table of this.cascadeTargets) {
+      deleteStmts.set(table, db.prepare(`DELETE FROM ${table} WHERE event_id = ?`));
+    }
+    this.cascadeDeleteStmts = deleteStmts;
+    this.cascadeSoftDeleteExceptionStmt = db.prepare(
+      "UPDATE events SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?",
+    );
+    this.cascadeFindChildrenStmt = db.prepare('SELECT id FROM events WHERE parent_event_id = ? AND is_deleted = 0');
+  }
 
   create(data: CreateEventData): CalendarEvent {
     const result = this.db
@@ -336,35 +372,15 @@ export class EventRepository {
     // Tables that used to cascade via ON DELETE CASCADE. edit_proposals is
     // intentionally absent — that row is what lets us resolve the title for
     // the proposer notification after the owner soft-deletes the event.
-    // Filter by sqlite_master so the cleanup is a no-op for tables that
-    // don't exist in a particular test's minimal DB setup.
-    const candidateTables = [
-      'event_participants',
-      'invitations',
-      'event_visibility',
-      'shared_events',
-      'group_shared_events',
-      'birth_event_metadata',
-      'participant_google_sync',
-      'reminders',
-      'event_reminders',
-    ];
-    const existingTables = new Set(
-      (this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(
-        (r) => r.name,
-      ),
-    );
-    for (const table of candidateTables) {
-      if (!existingTables.has(table)) continue;
-      this.db.prepare(`DELETE FROM ${table} WHERE event_id = ?`).run(eventId);
+    // Statements + resolved target list are cached at construction.
+    for (const table of this.cascadeTargets) {
+      this.cascadeDeleteStmts.get(table)!.run(eventId);
     }
     // Recursively soft-delete child exception rows so the same cleanup chain
     // applies to them.
-    const exceptions = this.db
-      .prepare('SELECT id FROM events WHERE parent_event_id = ? AND is_deleted = 0')
-      .all(eventId) as { id: number }[];
+    const exceptions = this.cascadeFindChildrenStmt.all(eventId) as { id: number }[];
     for (const exc of exceptions) {
-      this.db.prepare("UPDATE events SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?").run(exc.id);
+      this.cascadeSoftDeleteExceptionStmt.run(exc.id);
       this.cascadeCleanupChildren(exc.id, depth + 1);
     }
   }
