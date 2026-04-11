@@ -245,7 +245,9 @@ export class EventRepository {
   }
 
   getExceptions(parentEventId: number): CalendarEvent[] {
-    return this.db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(parentEventId) as CalendarEvent[];
+    return this.db
+      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND is_deleted = 0')
+      .all(parentEventId) as CalendarEvent[];
   }
 
   private buildUpdateQuery(data: UpdateEventData): { fields: string[]; values: SQLQueryBindings[] } {
@@ -453,7 +455,7 @@ export class EventRepository {
 
   getExceptionsFrom(parentEventId: number, fromDate: string): CalendarEvent[] {
     return this.db
-      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ?')
+      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ? AND is_deleted = 0')
       .all(parentEventId, fromDate) as CalendarEvent[];
   }
 
@@ -471,9 +473,9 @@ export class EventRepository {
 
   setRecurrenceUntil(eventId: number, untilDate: string): void {
     const untilStr = untilDate.replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-    const event = this.db.prepare('SELECT recurrence_rule FROM events WHERE id = ?').get(eventId) as {
-      recurrence_rule: string;
-    } | null;
+    const event = this.db
+      .prepare('SELECT recurrence_rule FROM events WHERE id = ? AND is_deleted = 0')
+      .get(eventId) as { recurrence_rule: string } | null;
     if (!event?.recurrence_rule) return;
 
     const lines = event.recurrence_rule.split('\n');
@@ -800,6 +802,7 @@ export class EventRepository {
       WHERE start_at >= ? AND start_at <= ?
       AND all_day = 0
       AND recurrence_rule IS NULL
+      AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY start_at ASC
     `)
       .all(now, until) as CalendarEvent[];
