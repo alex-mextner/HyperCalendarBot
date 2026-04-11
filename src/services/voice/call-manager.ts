@@ -12,6 +12,11 @@ type SpawnResult = {
   exited: Promise<number>;
 };
 
+export interface Mp3ToOggResult {
+  ok: boolean;
+  stderr?: string;
+}
+
 export interface CallManagerDeps {
   primaryTts?: { synthesize: (text: string, lang: string) => Promise<Buffer> };
   fallbackTts: { synthesize: (text: string, lang: string) => Promise<Buffer> };
@@ -23,7 +28,20 @@ export interface CallManagerDeps {
   pyBridgePath: string;
   registerSession?: (sessionId: string, userId: number, language: string) => void;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
+  /** Convert MP3 → OGG Opus (fallback TTS returns MP3, pytgcalls needs OGG).
+   *  Default impl spawns ffmpeg; tests inject a stub so they don't need ffmpeg on PATH. */
+  convertMp3ToOgg?: (mp3File: string, oggFile: string) => Promise<Mp3ToOggResult>;
   notifyUser?: (userId: number, msg: string) => void;
+}
+
+async function ffmpegMp3ToOgg(mp3File: string, oggFile: string): Promise<Mp3ToOggResult> {
+  const proc = Bun.spawn(['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile], {
+    stderr: 'pipe',
+  });
+  const exitCode = await proc.exited;
+  if (exitCode === 0) return { ok: true };
+  const stderr = await new Response(proc.stderr).text();
+  return { ok: false, stderr: stderr.slice(0, 200) };
 }
 
 export class CallManager {
@@ -61,14 +79,10 @@ export class CallManager {
         // TtsService returns MP3 — convert to OGG Opus for pytgcalls
         const mp3File = `/tmp/call-${job.callLogId}-raw.mp3`;
         await Bun.write(mp3File, audioBuffer);
-        const ffmpeg = Bun.spawn(
-          ['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile],
-          { stderr: 'pipe' },
-        );
-        const ffmpegExit = await ffmpeg.exited;
-        if (ffmpegExit !== 0) {
-          const ffmpegErr = await new Response(ffmpeg.stderr).text();
-          voiceLogger.warn({ exitCode: ffmpegExit, stderr: ffmpegErr.slice(0, 200) }, 'ffmpeg conversion failed');
+        const convert = this.deps.convertMp3ToOgg ?? ffmpegMp3ToOgg;
+        const result = await convert(mp3File, oggFile);
+        if (!result.ok) {
+          voiceLogger.warn({ stderr: result.stderr }, 'ffmpeg conversion failed');
         }
         try {
           await unlink(mp3File);
