@@ -56,14 +56,15 @@
 | `src/bot/commands/settings.ts` | Add Telegram account row to settings UI + callbacks |
 | `src/bot/index.ts` | Register `/connect_telegram`, `/disconnect_telegram` commands, inject connected-user sender, run startup master-key check, extend `setMyCommands` |
 | `src/services/ai/tools.ts` | Add `connect_telegram_status` tool definition |
-| `src/services/ai/tool-executor.ts` | Add dispatch case for the new tool + add it to `TOOL_FEATURE_MAP` |
-| `src/services/ai/tool-handlers/settings.ts` | Add handler for `connect_telegram_status` |
-| `src/services/ai/types.ts` | Add `TelegramSessionData` variant to `ToolResultData`, add `sendAsConnectedUser` to `TelegramSender` |
+| `src/services/ai/tool-executor.ts` | Add dispatch case for `connect_telegram_status` + `dismiss_connect_telegram_prompt`, add both to `TOOL_FEATURE_MAP` |
+| `src/services/ai/tool-handlers/settings.ts` | Add handlers for `connect_telegram_status` and `dismiss_connect_telegram_prompt` |
+| `src/services/ai/types.ts` | Add `TelegramSessionData` variant to `ToolResultData`, add `sendAsConnectedUser` to `TelegramSender`, add `telegramSessionRepo` / `telegramMasterKey` to `AgentContext` |
 | `src/services/ai/tool-handlers/sharing.ts` | Chain user-session delivery into `deliverInvitationAsync` with the first-person text helper |
 | `src/services/ai/telegram-sender.ts` | Accept `sendAsConnectedUser` factory option and expose it on the sender |
-| `src/services/feature-tracking.ts` | Add `telegram_connect` to `COMMAND_FEATURE_MAP` and `FeatureKey` |
-| `src/services/ai/tool-executor.ts` | Add entry to `TOOL_FEATURE_MAP` |
+| `src/services/ai/system-prompt.ts` | Add `/connect_telegram` suggestion instruction (spec §10.1) |
+| `src/services/feature-tracking.ts` | Add `telegram_connect` to `FeatureKey` union, `COMMAND_FEATURE_MAP`, `CALLBACK_FEATURE_MAP`, `SCENE_FEATURE_MAP` |
 | `src/database/repositories/feature-usage.repository.ts` | Add `telegram_connect` to `FEATURE_KEYS` |
+| `src/database/repositories/user.repository.ts` | Add `setConnectTelegramDismissedAt` method |
 
 ---
 
@@ -1496,7 +1497,7 @@ describe('buildUserSessionInvitationText', () => {
 // src/services/telegram-session/invitation-text.ts
 import type { Event } from '../../database/types.ts';
 import { t } from '../../config/constants.ts';
-import { formatDateTimeInTimezone } from '../event/formatters.ts';
+import { formatDateShort, formatTime } from '../../utils/date.ts';
 
 const DESC_MAX = 100;
 
@@ -1509,7 +1510,7 @@ interface Input {
 
 export function buildUserSessionInvitationText(input: Input): string {
   const { event, inviterTimezone, deepLink, lang } = input;
-  const dateLine = formatDateTimeInTimezone(event.start_utc, inviterTimezone, lang);
+  const dateLine = `${formatDateShort(event.start_utc, inviterTimezone, lang)}, ${formatTime(event.start_utc, inviterTimezone)}`;
   const locationLine = event.location ? `\n📍 ${event.location}` : '';
   const descriptionLine = event.description
     ? `\n${truncate(event.description, DESC_MAX)}`
@@ -1530,7 +1531,7 @@ function truncate(s: string, max: number): string {
 }
 ```
 
-Note: `formatDateTimeInTimezone` may or may not exist at this canonical name — check `src/services/event/formatters.ts` for the right helper (`formatEventStart`, `formatDateTime`, etc.) and use it. Do not reimplement date formatting.
+Uses `formatDateShort` (e.g. "пн 20") + `formatTime` (e.g. "13:00") from `src/utils/date.ts`.
 
 - [ ] **Step 3: Run test, commit**
 
@@ -1616,7 +1617,7 @@ import { InlineKeyboard } from 'gramio';
 import { t, maskPhone } from '../../config/constants.ts';
 import type { EnvConfig } from '../../config/env.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
-import { encryptBlob, encryptString } from '../../services/crypto/session-crypto.ts';
+import { encryptBlob, encryptString, decryptString } from '../../services/crypto/session-crypto.ts';
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
 import { logger } from '../../utils/logger.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
@@ -1678,12 +1679,7 @@ export function createConnectTelegramScene(
           const masterKey = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
           let masked = '+••• ••••';
           try {
-            const phone = encryptString; // import note: use decryptString here
-            const decrypted = (await import('../../services/crypto/session-crypto.ts')).decryptString(
-              Buffer.from(existing.encrypted_phone),
-              masterKey,
-            );
-            masked = maskPhone(decrypted);
+            masked = maskPhone(decryptString(Buffer.from(existing.encrypted_phone), masterKey));
           } catch (err) {
             sceneLogger.warn({ err, userId: context.from.id }, 'Failed to decrypt phone for display');
           }
@@ -2815,12 +2811,13 @@ if (pending?.pendingEventId && pending.pendingInviteeIds?.length) {
   const event = eventService.getEvent(pending.pendingEventId, userId);
   const inviteeId = pending.pendingInviteeIds[0]; // most recent; spec §10.2: "show only most recent"
   if (event && inviteeId !== undefined) {
-    const inviteeName = resolveInviteeDisplayName(inviteeId, ctx); // helper: users table → contacts fallback
+    const inviteeName = resolveInviteeDisplayName(inviteeId, context.from.id, userRepo, contactRepo);
+    const dateLine = `${formatDateShort(event.start_utc, context.userTimezone ?? 'UTC', lang)}, ${formatTime(event.start_utc, context.userTimezone ?? 'UTC')}`;
     const kb = new InlineKeyboard()
       .text(s.sendPendingBtn, `ct:send_pending:${event.id}:${inviteeId}`)
       .text(s.skipPendingBtn, 'ct:skip_pending');
     await context.send(
-      s.successWithPending(maskPhone(state.phone!), event.title, formatEventStart(event, ctx.user.timezone, lang), inviteeName),
+      s.successWithPending(maskPhone(state.phone!), event.title, dateLine, inviteeName),
       { reply_markup: kb },
     );
     // NOTE: we do NOT exit the scene here — wait for the callback_query below
@@ -2830,6 +2827,31 @@ if (pending?.pendingEventId && pending.pendingInviteeIds?.length) {
 await context.send(s.success(maskPhone(state.phone!)));
 await context.scene.exit();
 ```
+
+`resolveInviteeDisplayName` is a small helper defined in the scene file:
+
+```ts
+import { formatDateShort, formatTime } from '../../utils/date.ts';
+
+function resolveInviteeDisplayName(
+  inviteeId: number,
+  inviterId: number,
+  userRepo: UserRepository,
+  contactRepo?: ContactRepository,
+): string {
+  const user = userRepo.findByTelegramId(inviteeId);
+  if (user?.first_name) return user.first_name;
+  if (contactRepo) {
+    // contactRepo.findByTelegramId(ownerUserId, contactTelegramId) — two-arg signature
+    const contact = contactRepo.findByTelegramId(inviterId, inviteeId);
+    if (contact?.preferred_name) return contact.preferred_name;
+    if (contact?.first_name) return contact.first_name;
+  }
+  return `user ${inviteeId}`;
+}
+```
+
+`inviterId` = `context.from.id` (the person who connected). `userRepo` and `contactRepo` are injected through the scene's deps (passed from `createScenesPlugin`).
 
 Add a final step that handles `callback_query`:
 
@@ -2858,7 +2880,33 @@ Add a final step that handles `callback_query`:
 })
 ```
 
-The scene now needs `invitationService` injected. Add it to `createConnectTelegramScene` deps.
+The scene now needs `invitationService`, `userRepo`, and `contactRepo` injected. Update `createConnectTelegramScene` to the final signature:
+
+```ts
+export function createConnectTelegramScene(
+  sessionRepo: TelegramSessionRepository,
+  config: EnvConfig,
+  userComposer: UserResolverComposer,
+  invitationService: InvitationService,
+  userRepo: UserRepository,
+  contactRepo?: ContactRepository,
+)
+```
+
+And update the call site in `src/bot/scenes/index.ts`:
+
+```ts
+const connectTelegramScene = createConnectTelegramScene(
+  db.telegramSessions,
+  config,
+  userComposer,
+  invitationService,     // threaded from createScenesPlugin params
+  db.users,
+  db.contacts,
+);
+```
+
+`createScenesPlugin` signature grows with one more dep — `invitationService: InvitationService`. If the param list is getting unwieldy, consider a single `deps` object with named fields instead of positional args.
 
 ### Step 8: New i18n strings
 
