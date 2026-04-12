@@ -108,7 +108,8 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day before',
         isAllDay: true,
       });
-      expect(result.text).toContain('Напоминание: Зарплата как CTO — завтра');
+      expect(result.text).toContain('⏰ Зарплата как CTO — завтра');
+      expect(result.text).not.toContain('Напоминание');
       expect(result.text).toContain('📅 Весь день');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain('через');
@@ -123,7 +124,8 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day of',
         isAllDay: true,
       });
-      expect(result.text).toContain('Напоминание: Праздник — сегодня');
+      expect(result.text).toContain('⏰ Праздник — сегодня');
+      expect(result.text).not.toContain('Напоминание');
       expect(result.text).toContain('📅 Весь день');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain('через');
@@ -137,10 +139,33 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day before',
         isAllDay: true,
       });
-      expect(result.text).toContain('Reminder: Salary — day before');
+      expect(result.text).toContain('⏰ Salary — day before');
+      expect(result.text).not.toContain('Reminder:');
       expect(result.text).toContain('📅 All day');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain(' in ');
+    });
+
+    test('single reminder does not contain the word "Reminder"/"Напоминание"', () => {
+      const ru = renderer.renderEventReminder('ru', {
+        title: 'Лазер',
+        startTime: '14:00',
+        location: null,
+        intervalLabel: 'day before',
+        isAllDay: true,
+      });
+      expect(ru.text.startsWith('⏰ Лазер')).toBe(true);
+      expect(ru.text).not.toContain('Напоминание');
+
+      const en = renderer.renderEventReminder('en', {
+        title: 'Laser',
+        startTime: '14:00',
+        endTime: '15:00',
+        location: null,
+        intervalLabel: '30 minutes',
+      });
+      expect(en.text.startsWith('⏰ Laser')).toBe(true);
+      expect(en.text).not.toContain('Reminder:');
     });
 
     test('renders all-day reminder with location', () => {
@@ -164,7 +189,8 @@ describe('NotificationRenderer', () => {
         { title: 'Standup', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
         { title: 'Call', startTime: '10:00', location: 'Zoom', intervalLabel: '30 minutes' },
       ]);
-      expect(result.text).toContain('Reminders:');
+      expect(result.text.startsWith('⏰ Standup +1 more')).toBe(true);
+      expect(result.text).not.toContain('Reminders:');
       expect(result.text).toContain('• Standup — 10:00 (in 30 minutes)');
       expect(result.text).toContain('• Call — 10:00 (in 30 minutes)');
       expect(result.text).toContain('📍 <a href=');
@@ -176,7 +202,8 @@ describe('NotificationRenderer', () => {
         { title: 'Стендап', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
         { title: 'Звонок', startTime: '10:00', location: null, intervalLabel: 'at start' },
       ]);
-      expect(result.text).toContain('Напоминания:');
+      expect(result.text.startsWith('⏰ Стендап + ещё 1')).toBe(true);
+      expect(result.text).not.toContain('Напоминания:');
       expect(result.text).toContain('через 30 минут');
       expect(result.text).toContain('начинается!');
     });
@@ -189,6 +216,24 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('• Стендап — 10:00 (через 30 минут)');
       expect(result.text).toContain('• Праздник — Весь день (сегодня)');
       expect(result.text).not.toContain('03:00');
+    });
+
+    test('batch header uses first title as first content word (phone preview)', () => {
+      // Phone notification previews show the first ~2 words.
+      // The old "⏰ Reminders:" header wasted them on a generic label.
+      const en = renderer.renderBatchReminder('en', [
+        { title: 'Laser', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Meeting', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Call', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      expect(en.text.split('\n')[0]).toBe('⏰ Laser +2 more');
+
+      const ru = renderer.renderBatchReminder('ru', [
+        { title: 'Лазер', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Встреча', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Звонок', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      expect(ru.text.split('\n')[0]).toBe('⏰ Лазер + ещё 2');
     });
   });
 

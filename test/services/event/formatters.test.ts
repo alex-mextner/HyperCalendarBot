@@ -29,6 +29,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,
@@ -157,6 +158,7 @@ describe('formatEventDetail', () => {
       parent_event_id: null,
       original_start_at: null,
       is_cancelled: 0,
+      is_deleted: 0,
       reminder_overrides: null,
       google_event_id: null,
       google_calendar_id: null,
@@ -560,6 +562,65 @@ describe('formatInvitation', () => {
   test('includes inviter username link when provided', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg', 'Europe/Kyiv', true);
     expect(result).toContain('@alice_tg');
+  });
+
+  test('English header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    // Title must appear in the first line so phone notification previews
+    // show the specific event, not a generic "Invitation" label.
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('invitation from');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('Russian header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алиса', 1, 'alice_tg');
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('приглашение от');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('header escapes HTML special chars in event title', () => {
+    const tricky = makeEvent({
+      title: 'A & B <foo>',
+      start_at: '2026-03-11T12:00:00Z',
+      end_at: '2026-03-11T13:00:00Z',
+      timezone: 'Europe/Moscow',
+    });
+    const result = formatInvitation(tricky, 'Europe/Moscow', 'en', 'Alice', 1);
+    const firstLine = result.split('\n')[0]!;
+    // HTML specials must be escaped — otherwise Telegram parser rejects the message.
+    expect(firstLine).toContain('A &amp; B &lt;foo&gt;');
+    expect(firstLine).not.toContain('A & B <foo>');
+  });
+
+  test('body does NOT repeat the title (header already front-loads it)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
+    // Title appears exactly once — in the header line. The event detail
+    // block below the header skips the 📌 <title> line to avoid duplication.
+    const occurrences = result.match(/Team Meeting/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    // The 📌 pinned-event marker (which would carry the duplicated title)
+    // must not appear at all.
+    expect(result).not.toContain('📌');
+  });
+
+  test('all-day invitation body also does NOT repeat title', () => {
+    const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
+    const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1);
+    const occurrences = result.match(/Holiday/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    expect(result).not.toContain('📌');
+  });
+
+  test('full invitation output snapshot — locks layout against regression', () => {
+    // Locks the entire formatted output so any future change to
+    // formatEventDetail or the invitation header that reintroduces the
+    // duplicated title (or shifts the overall layout) trips this test.
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    expect(result).toBe(`📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)`);
   });
 });
 

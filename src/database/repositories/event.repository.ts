@@ -27,7 +27,43 @@ function groupMemberAnySql(alias: string): string {
 }
 
 export class EventRepository {
-  constructor(private db: Database) {}
+  /**
+   * Tables that `cascadeCleanupChildren` should wipe when a parent event
+   * is soft-deleted. Computed once at construction from `sqlite_master`
+   * — test DBs with minimal schemas may not have all of them.
+   */
+  private readonly cascadeTargets: readonly string[];
+  private readonly cascadeDeleteStmts: ReadonlyMap<string, ReturnType<Database['prepare']>>;
+  private readonly cascadeSoftDeleteExceptionStmt: ReturnType<Database['prepare']>;
+  private readonly cascadeFindChildrenStmt: ReturnType<Database['prepare']>;
+
+  constructor(private db: Database) {
+    const candidates = [
+      'event_participants',
+      'invitations',
+      'event_visibility',
+      'shared_events',
+      'group_shared_events',
+      'birth_event_metadata',
+      'participant_google_sync',
+      'reminders',
+      'event_reminders',
+    ];
+    const tableNames = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]
+    ).map((r) => r.name);
+    const existing = new Set(tableNames);
+    this.cascadeTargets = candidates.filter((t) => existing.has(t));
+    const deleteStmts = new Map<string, ReturnType<Database['prepare']>>();
+    for (const table of this.cascadeTargets) {
+      deleteStmts.set(table, db.prepare(`DELETE FROM ${table} WHERE event_id = ?`));
+    }
+    this.cascadeDeleteStmts = deleteStmts;
+    this.cascadeSoftDeleteExceptionStmt = db.prepare(
+      "UPDATE events SET is_deleted = 1, updated_at = datetime('now') WHERE id = ?",
+    );
+    this.cascadeFindChildrenStmt = db.prepare('SELECT id FROM events WHERE parent_event_id = ? AND is_deleted = 0');
+  }
 
   create(data: CreateEventData): CalendarEvent {
     const result = this.db
@@ -80,7 +116,7 @@ export class EventRepository {
       .prepare(
         `SELECT id, title, description, start_at, end_at, all_day, timezone, location,
                 recurrence_rule, reminder_overrides, sync_version
-         FROM events WHERE id = ? AND is_cancelled = 0`,
+         FROM events WHERE id = ? AND is_cancelled = 0 AND is_deleted = 0`,
       )
       .get(id) as Pick<
       CalendarEvent,
@@ -99,6 +135,27 @@ export class EventRepository {
   }
 
   findById(id: number, userId: number): CalendarEvent | null {
+    return this.db
+      .prepare(
+        `SELECT * FROM events WHERE id = ? AND is_cancelled = 0 AND is_deleted = 0
+         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+           OR ${groupVisibleSql('')})`,
+      )
+      .get(id, userId, userId) as CalendarEvent | null;
+  }
+
+  /**
+   * Fetch an event by id, bypassing ONLY the soft-delete filter. Ownership
+   * and group-visibility checks are still enforced — the caller must have
+   * had access to the event before it was soft-deleted. Used by downstream
+   * systems that need the title of an event the user removed themselves,
+   * e.g. proposal accept/reject notifications to the proposer.
+   *
+   * Visibility information does not disappear on soft-delete: `events.user_id`
+   * is still set, and group membership is still valid, so the same access
+   * predicate as `findById` is applied here — minus `is_deleted = 0`.
+   */
+  findByIdIncludingSoftDeleted(id: number, userId: number): CalendarEvent | null {
     return this.db
       .prepare(
         `SELECT * FROM events WHERE id = ? AND is_cancelled = 0
@@ -140,7 +197,7 @@ export class EventRepository {
   findLatestCreatedByUser(userId: number): CalendarEvent | null {
     return this.db
       .prepare(
-        `SELECT * FROM events WHERE is_cancelled = 0
+        `SELECT * FROM events WHERE is_cancelled = 0 AND is_deleted = 0
          AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
            OR ${groupVisibleSql('')})
          ORDER BY id DESC LIMIT 1`,
@@ -158,7 +215,7 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE start_at >= ? AND start_at <= ?
-        AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
+        AND is_cancelled = 0 AND is_deleted = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupVisibleSql('')})
       ORDER BY start_at
@@ -170,7 +227,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0 AND is_deleted = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupMemberAnySql('')})
     `)
@@ -185,7 +242,7 @@ export class EventRepository {
       LEFT JOIN birth_event_metadata m ON m.event_id = e.id
       WHERE e.recurrence_rule IS NOT NULL
         AND e.parent_event_id IS NULL
-        AND e.is_cancelled = 0
+        AND e.is_cancelled = 0 AND e.is_deleted = 0
         AND (
           (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
           OR ${groupMemberAnySql('e')}
@@ -205,7 +262,7 @@ export class EventRepository {
       .prepare(
         `
       SELECT DISTINCT e.* FROM events e
-      WHERE e.is_cancelled = 0
+      WHERE e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.parent_event_id IS NULL
         AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
         AND (
@@ -224,7 +281,9 @@ export class EventRepository {
   }
 
   getExceptions(parentEventId: number): CalendarEvent[] {
-    return this.db.prepare('SELECT * FROM events WHERE parent_event_id = ?').all(parentEventId) as CalendarEvent[];
+    return this.db
+      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND is_deleted = 0')
+      .all(parentEventId) as CalendarEvent[];
   }
 
   private buildUpdateQuery(data: UpdateEventData): { fields: string[]; values: SQLQueryBindings[] } {
@@ -277,14 +336,53 @@ export class EventRepository {
   }
 
   remove(id: number, userId: number): boolean {
-    const result = this.db
-      .prepare(
-        `DELETE FROM events WHERE id = ?
-         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
-           OR ${groupVisibleSql('')})`,
-      )
-      .run(id, userId, userId);
-    return result.changes > 0;
+    // Soft-delete: keep the events row so downstream systems (edit proposals,
+    // action log) can still resolve the title by id. All user-facing read
+    // paths filter `is_deleted = 0`.
+    //
+    // Child data that would have been nuked by ON DELETE CASCADE is cleaned
+    // up explicitly here — participants, invitations, sharing state, reminder
+    // rows, birthday metadata, and recursively child exception rows. edit
+    // proposals are intentionally preserved so the proposer notification can
+    // still look up the title.
+    return this.db.transaction((): boolean => {
+      const result = this.db
+        .prepare(
+          `UPDATE events SET is_deleted = 1, updated_at = datetime('now')
+           WHERE id = ? AND is_deleted = 0
+           AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
+             OR ${groupVisibleSql('')})`,
+        )
+        .run(id, userId, userId);
+      if (result.changes === 0) return false;
+      this.cascadeCleanupChildren(id, 0);
+      return true;
+    })();
+  }
+
+  private static readonly CASCADE_MAX_DEPTH = 8;
+
+  private cascadeCleanupChildren(eventId: number, depth: number): void {
+    // In practice SQLite recurrence exceptions nest 2 levels at most
+    // (template → exception). The guard is defense-in-depth against a
+    // corrupted graph or a future schema change that introduces cycles.
+    if (depth > EventRepository.CASCADE_MAX_DEPTH) {
+      throw new Error(`cascadeCleanupChildren: depth > ${EventRepository.CASCADE_MAX_DEPTH} for event ${eventId}`);
+    }
+    // Tables that used to cascade via ON DELETE CASCADE. edit_proposals is
+    // intentionally absent — that row is what lets us resolve the title for
+    // the proposer notification after the owner soft-deletes the event.
+    // Statements + resolved target list are cached at construction.
+    for (const table of this.cascadeTargets) {
+      this.cascadeDeleteStmts.get(table)!.run(eventId);
+    }
+    // Recursively soft-delete child exception rows so the same cleanup chain
+    // applies to them.
+    const exceptions = this.cascadeFindChildrenStmt.all(eventId) as { id: number }[];
+    for (const exc of exceptions) {
+      this.cascadeSoftDeleteExceptionStmt.run(exc.id);
+      this.cascadeCleanupChildren(exc.id, depth + 1);
+    }
   }
 
   getVisibleInRange(userId: number, startUtc: string, endUtc: string): CalendarEvent[] {
@@ -293,7 +391,7 @@ export class EventRepository {
         `
       SELECT DISTINCT e.* FROM events e
       WHERE e.start_at >= ? AND e.start_at < ?
-        AND e.is_cancelled = 0
+        AND e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
         AND (
@@ -325,7 +423,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0
+      WHERE title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupVisibleSql('')}
           OR id IN (
@@ -343,7 +441,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE user_id = ? AND is_cancelled = 0 AND parent_event_id IS NULL
+      WHERE user_id = ? AND is_cancelled = 0 AND is_deleted = 0 AND parent_event_id IS NULL
         AND (start_at > ? OR recurrence_rule IS NOT NULL)
       ORDER BY start_at
       LIMIT ?
@@ -381,7 +479,7 @@ export class EventRepository {
 
   getExceptionsFrom(parentEventId: number, fromDate: string): CalendarEvent[] {
     return this.db
-      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ?')
+      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ? AND is_deleted = 0')
       .all(parentEventId, fromDate) as CalendarEvent[];
   }
 
@@ -399,9 +497,9 @@ export class EventRepository {
 
   setRecurrenceUntil(eventId: number, untilDate: string): void {
     const untilStr = untilDate.replace(/[-:]/g, '').replace(/\.\d{3}/, '');
-    const event = this.db.prepare('SELECT recurrence_rule FROM events WHERE id = ?').get(eventId) as {
-      recurrence_rule: string;
-    } | null;
+    const event = this.db
+      .prepare('SELECT recurrence_rule FROM events WHERE id = ? AND is_deleted = 0')
+      .get(eventId) as { recurrence_rule: string } | null;
     if (!event?.recurrence_rule) return;
 
     const lines = event.recurrence_rule.split('\n');
@@ -422,7 +520,9 @@ export class EventRepository {
 
   findByGoogleEventId(userId: number, googleCalendarId: string, googleEventId: string): CalendarEvent | null {
     return this.db
-      .prepare('SELECT * FROM events WHERE user_id = ? AND google_calendar_id = ? AND google_event_id = ?')
+      .prepare(
+        'SELECT * FROM events WHERE user_id = ? AND google_calendar_id = ? AND google_event_id = ? AND is_deleted = 0',
+      )
       .get(userId, googleCalendarId, googleEventId) as CalendarEvent | null;
   }
 
@@ -523,7 +623,7 @@ export class EventRepository {
       : '';
     const sql = `
       SELECT DISTINCT e.* FROM events e
-      WHERE e.is_cancelled = 0
+      WHERE e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
         AND e.start_at < ?
@@ -550,7 +650,7 @@ export class EventRepository {
     const row = this.db
       .prepare(`
       SELECT COUNT(*) as count FROM events
-      WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0
+      WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND is_deleted = 0
         AND (owner_type IS NULL OR owner_type = 'user')
     `)
       .get(userId, startUtc, endUtc) as { count: number };
@@ -559,14 +659,16 @@ export class EventRepository {
 
   findByIdInGroup(id: number, groupId: number): CalendarEvent | null {
     return this.db
-      .prepare("SELECT * FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ? AND is_cancelled = 0")
+      .prepare(
+        "SELECT * FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0",
+      )
       .get(id, groupId) as CalendarEvent | null;
   }
 
   getByDateRangeForGroup(groupId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(
-        "SELECT * FROM events WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 ORDER BY start_at",
+        "SELECT * FROM events WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND is_deleted = 0 ORDER BY start_at",
       )
       .all(groupId, startUtc, endUtc) as CalendarEvent[];
   }
@@ -576,7 +678,7 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ?
-        AND is_cancelled = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
+        AND is_cancelled = 0 AND is_deleted = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
       ORDER BY start_at
     `)
       .all(groupId, startUtc, endUtc) as CalendarEvent[];
@@ -587,7 +689,7 @@ export class EventRepository {
       .prepare(`
       SELECT e.*, m.birth_year FROM events e
       LEFT JOIN birth_event_metadata m ON m.event_id = e.id
-      WHERE e.owner_type = 'group' AND e.group_id = ? AND e.recurrence_rule IS NOT NULL AND e.parent_event_id IS NULL AND e.is_cancelled = 0
+      WHERE e.owner_type = 'group' AND e.group_id = ? AND e.recurrence_rule IS NOT NULL AND e.parent_event_id IS NULL AND e.is_cancelled = 0 AND e.is_deleted = 0
     `)
       .all(groupId) as CalendarEvent[];
   }
@@ -596,7 +698,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0
+      WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY start_at ASC
       LIMIT ?
     `)
@@ -608,7 +710,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND parent_event_id IS NULL
+      WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0 AND parent_event_id IS NULL
         AND (start_at > ? OR recurrence_rule IS NOT NULL)
       ORDER BY start_at
       LIMIT ?
@@ -634,10 +736,18 @@ export class EventRepository {
   }
 
   removeFromGroup(id: number, groupId: number): boolean {
-    const result = this.db
-      .prepare("DELETE FROM events WHERE id = ? AND owner_type = 'group' AND group_id = ?")
-      .run(id, groupId);
-    return result.changes > 0;
+    // Soft-delete — see remove() for rationale.
+    return this.db.transaction((): boolean => {
+      const result = this.db
+        .prepare(
+          `UPDATE events SET is_deleted = 1, updated_at = datetime('now')
+           WHERE id = ? AND owner_type = 'group' AND group_id = ? AND is_deleted = 0`,
+        )
+        .run(id, groupId);
+      if (result.changes === 0) return false;
+      this.cascadeCleanupChildren(id, 0);
+      return true;
+    })();
   }
 
   getBirthdays(userId: number): CalendarEvent[] {
@@ -645,7 +755,7 @@ export class EventRepository {
       .prepare(
         `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
-         WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+         WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0 AND e.is_deleted = 0
            AND (e.owner_type IS NULL OR e.owner_type = 'user')
          ORDER BY e.start_at`,
       )
@@ -657,7 +767,7 @@ export class EventRepository {
       .prepare(
         `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
-         WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0
+         WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0 AND e.is_deleted = 0
            AND e.owner_type = 'group'
          ORDER BY e.start_at`,
       )
@@ -666,7 +776,7 @@ export class EventRepository {
 
   searchWithEventType(userId: number, query: string | null, eventType: string | null): CalendarEvent[] {
     const conditions: string[] = [
-      'e.is_cancelled = 0',
+      'e.is_cancelled = 0 AND e.is_deleted = 0',
       `((e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
         OR ${groupVisibleSql('e')}
         OR e.id IN (
@@ -702,7 +812,7 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0
+      WHERE recurrence_rule IS NOT NULL AND parent_event_id IS NULL AND is_cancelled = 0 AND is_deleted = 0
     `)
       .all() as CalendarEvent[];
   }
@@ -716,6 +826,7 @@ export class EventRepository {
       WHERE start_at >= ? AND start_at <= ?
       AND all_day = 0
       AND recurrence_rule IS NULL
+      AND is_cancelled = 0 AND is_deleted = 0
       ORDER BY start_at ASC
     `)
       .all(now, until) as CalendarEvent[];

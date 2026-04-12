@@ -179,8 +179,12 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `The user hasn't started the bot yet. Forward this link so they can accept:\n\n${url}\n\n(Invitation to "<b>${title}</b>")`,
     invitation_sent: 'Invitation sent',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Invitation</b>\n${from} invites you to: <b>${title}</b>`,
+    // SAFETY: both arguments must be HTML-safe when passed — either escaped
+    // plain text via `escapeHtml(...)` or a pre-built HTML fragment like
+    // `<a href="tg://user?id=...">name</a>`. The template wraps `titleHtml`
+    // in `<b>...</b>` and concatenates `fromHtml` verbatim.
+    invitation_received: (titleHtml: string, fromHtml: string) =>
+      `📨 <b>${titleHtml}</b> — invitation from ${fromHtml}`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -485,24 +489,22 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Proposal accepted. Event "${title}" updated.`,
       proposalAcceptedNoEvent: '✅ Proposal accepted.',
       proposalRejected: '❌ Proposal rejected.',
-      proposalAcceptedNotification: '✅ Your edit proposal was accepted.',
-      proposalRejectedNotification: '❌ Your edit proposal was rejected.',
-      feedbackThreadResolved: 'Your feedback thread has been resolved.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — edit accepted`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — edit rejected`,
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — resolved`,
     },
     notifications: {
       morning: "Good morning! Here's your day:",
       morningFree: 'Good morning!',
       evening: "Tomorrow's schedule:",
       eveningFree: 'Good evening!',
-      reminder: 'Reminder:',
-      reminders: 'Reminders',
       inLabel: 'in',
       startingNow: 'starting now!',
       eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
       goodNight: 'Good night!',
       tomorrow: 'tomorrow',
       haveADay: 'Have a productive day!',
-      eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
+      eveHoliday: (name: string) => `🎉 ${name} tomorrow`,
       weeklyDigest: (range: string) => `📅 Week ${range}:`,
       noEvents: 'no events',
       allDay: 'All day',
@@ -512,16 +514,35 @@ export const MSG = {
         'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
       durationHours: (h: number) => `${h}h`,
       durationMinutes: (m: number) => `${m} min`,
-      clockChangeForward: (duration: string) =>
-        `🕐 Clocks moved ${duration} forward last night. Double-check your alarms and meetings!`,
-      clockChangeBack: (duration: string) =>
-        `🕐 Clocks moved ${duration} back last night. Double-check your alarms and meetings!`,
+      batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} +${restCount} more`,
+      clockChangeForward: (duration: string) => `🕐 Clocks shifted by +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Clocks shifted by -${duration}`,
     },
     weather: {
       tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
       tempRange: (min: number, max: number) => `${min}..${max}°C`,
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
+    },
+    eventCard: {
+      allDayInline: 'all day',
+      birthdayAgeSuffix: (age: number) => ` — turns ${age}`,
+      dayAgendaEmpty: 'No events. Use /add to create one.',
+      weekAgendaDayEmpty: '— no events',
+      weekHeader: 'Week',
+      eventsWord: (n: number) => (n === 1 ? 'event' : 'events'),
+      recurrenceEvery: (interval: number, unit: string) => `Every ${interval} ${unit}`,
+      recurrenceCountSuffix: (count: string) => `, ${count} times`,
+      recurrenceMonthShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      recurrenceUntilSuffix: (day: number, monthShort: string) => ` until ${monthShort} ${day}`,
+      recurrenceUnitDays: (n: number) => (n === 1 ? 'day' : 'days'),
+      recurrenceUnitWeeks: (n: number) => (n === 1 ? 'week' : 'weeks'),
+      recurrenceUnitMonths: (n: number) => (n === 1 ? 'month' : 'months'),
+      recurrenceUnitYears: (n: number) => (n === 1 ? 'year' : 'years'),
+      recurrenceFreqDaily: 'Daily',
+      recurrenceFreqWeekly: 'Weekly',
+      recurrenceFreqMonthly: 'Monthly',
+      recurrenceFreqYearly: 'Yearly',
     },
     botTips: {
       // ── Creating events ──
@@ -791,8 +812,9 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `Пользователь ещё не запустил бота. Перешлите ссылку для принятия:\n\n${url}\n\n(Приглашение на "<b>${title}</b>")`,
     invitation_sent: 'Приглашение отправлено',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Приглашение</b>\n${from} приглашает вас: <b>${title}</b>`,
+    // SAFETY: see en.invitation_received — both args must be HTML-safe before
+    // being passed; template wraps `titleHtml` in <b> and concatenates `fromHtml`.
+    invitation_received: (titleHtml: string, fromHtml: string) => `📨 <b>${titleHtml}</b> — приглашение от ${fromHtml}`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',
@@ -1096,28 +1118,26 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Предложение принято. Событие «${title}» обновлено.`,
       proposalAcceptedNoEvent: '✅ Предложение принято.',
       proposalRejected: '❌ Предложение отклонено.',
-      proposalAcceptedNotification: '✅ Твоё предложение по редактированию принято.',
-      proposalRejectedNotification: '❌ Твоё предложение по редактированию отклонено.',
-      feedbackThreadResolved: 'Твой вопрос помечен как решённый.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
       proposalAlreadyProcessed: (status: string) => {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
         return `Уже ${map[status] ?? status}`;
       },
     },
     notifications: {
-      morning: 'Доброе утро! Ваш день:',
+      morning: 'Доброе утро! Твой день:',
       morningFree: 'Доброе утро!',
       evening: 'Расписание на завтра:',
       eveningFree: 'Добрый вечер!',
-      reminder: 'Напоминание:',
-      reminders: 'Напоминания',
       inLabel: 'через',
       startingNow: 'начинается!',
       eventsCount: (n: number) => `${n} ${ruPlural(n, 'событие', 'события', 'событий')}`,
       goodNight: 'Спокойной ночи!',
       tomorrow: 'завтра',
       haveADay: 'Продуктивного дня!',
-      eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
+      eveHoliday: (name: string) => `🎉 ${name} завтра`,
       weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
       noEvents: 'нет событий',
       allDay: 'Весь день',
@@ -1127,16 +1147,35 @@ export const MSG = {
         'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
       durationHours: (h: number) => `${h} ${ruPlural(h, 'час', 'часа', 'часов')}`,
       durationMinutes: (m: number) => `${m} ${ruPlural(m, 'минуту', 'минуты', 'минут')}`,
-      clockChangeForward: (duration: string) =>
-        `🕐 Сегодня ночью часы перевели на ${duration} вперёд. Проверь, что будильник и встречи правильно настроены!`,
-      clockChangeBack: (duration: string) =>
-        `🕐 Сегодня ночью часы перевели на ${duration} назад. Проверь, что будильник и встречи правильно настроены!`,
+      batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} + ещё ${restCount}`,
+      clockChangeForward: (duration: string) => `🕐 Часы переведены на +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Часы переведены на -${duration}`,
     },
     weather: {
       tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
       tempRange: (min: number, max: number) => `${min}..${max}°C`,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
+    },
+    eventCard: {
+      allDayInline: 'весь день',
+      birthdayAgeSuffix: (age: number) => ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}`,
+      dayAgendaEmpty: 'Нет событий. /add для создания.',
+      weekAgendaDayEmpty: '— нет событий',
+      weekHeader: 'Неделя',
+      eventsWord: (n: number) => ruPlural(n, 'событие', 'события', 'событий'),
+      recurrenceEvery: (interval: number, unit: string) => `Каждые ${interval} ${unit}`,
+      recurrenceCountSuffix: (count: string) => `, ${count} раз`,
+      recurrenceMonthShort: ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'],
+      recurrenceUntilSuffix: (day: number, monthShort: string) => ` до ${day} ${monthShort}`,
+      recurrenceUnitDays: (n: number) => ruPlural(n, 'день', 'дня', 'дней'),
+      recurrenceUnitWeeks: (n: number) => ruPlural(n, 'неделю', 'недели', 'недель'),
+      recurrenceUnitMonths: (n: number) => ruPlural(n, 'месяц', 'месяца', 'месяцев'),
+      recurrenceUnitYears: (n: number) => ruPlural(n, 'год', 'года', 'лет'),
+      recurrenceFreqDaily: 'Ежедневно',
+      recurrenceFreqWeekly: 'Еженедельно',
+      recurrenceFreqMonthly: 'Ежемесячно',
+      recurrenceFreqYearly: 'Ежегодно',
     },
     botTips: {
       // ── Создание событий ──
