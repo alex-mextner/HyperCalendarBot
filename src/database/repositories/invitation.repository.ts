@@ -79,7 +79,7 @@ export class InvitationRepository {
       .prepare(
         `UPDATE invitations SET status = 'expired', updated_at = datetime('now')
          WHERE status IN ('pending', 'maybe')
-         AND event_id IN (SELECT id FROM events WHERE start_at < datetime('now'))`,
+         AND event_id IN (SELECT id FROM events WHERE start_at < datetime('now') AND is_deleted = 0)`,
       )
       .run();
     return result.changes;

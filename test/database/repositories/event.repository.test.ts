@@ -130,7 +130,7 @@ describe('EventRepository', () => {
     expect(updated!.title).toBe('New');
   });
 
-  test('remove deletes event', () => {
+  test('remove soft-deletes event (row persists, filtered from reads)', () => {
     const created = events.create({
       user_id: USER_ID,
       title: 'Del',
@@ -139,7 +139,78 @@ describe('EventRepository', () => {
     });
     const removed = events.remove(created.id, USER_ID);
     expect(removed).toBe(true);
+    // User-facing read filters out soft-deleted rows.
     expect(events.findById(created.id, USER_ID)).toBeNull();
+    // The owner can still resolve the title via findByIdIncludingSoftDeleted —
+    // ownership is preserved (events.user_id is unchanged by soft-delete).
+    const raw = events.findByIdIncludingSoftDeleted(created.id, USER_ID);
+    expect(raw).not.toBeNull();
+    expect(raw!.title).toBe('Del');
+    expect(raw!.is_deleted).toBe(1);
+  });
+
+  test('findStartingWithin excludes soft-deleted events', () => {
+    // Critical regression: EventStartingChecker fires myCalendar.eventStarting
+    // for upcoming events every minute. If soft-deleted events leak through,
+    // the bot may fire AI actions on events the user has removed.
+    const soon = new Date(Date.now() + 2 * 60 * 1000).toISOString();
+    const alive = events.create({
+      user_id: USER_ID,
+      title: 'Alive',
+      start_at: soon,
+      timezone: 'UTC',
+    });
+    const doomed = events.create({
+      user_id: USER_ID,
+      title: 'Doomed',
+      start_at: soon,
+      timezone: 'UTC',
+    });
+    events.remove(doomed.id, USER_ID);
+
+    const starting = events.findStartingWithin(5 * 60 * 1000);
+    const ids = starting.map((e) => e.id);
+    expect(ids).toContain(alive.id);
+    expect(ids).not.toContain(doomed.id);
+  });
+
+  test('getExceptions excludes soft-deleted exception rows', () => {
+    const template = events.create({
+      user_id: USER_ID,
+      title: 'Weekly',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+      recurrence_rule: 'FREQ=WEEKLY',
+    });
+    const exception = events.createException(template.id, {
+      user_id: USER_ID,
+      title: 'Weekly (moved)',
+      start_at: '2026-03-18T12:00:00Z',
+      timezone: 'UTC',
+      original_start_at: '2026-03-18T10:00:00Z',
+    });
+    // Exception is returned while it's alive.
+    expect(events.getExceptions(template.id).map((e) => e.id)).toContain(exception.id);
+    // After soft-deleting the exception directly, it must not surface.
+    events.remove(exception.id, USER_ID);
+    expect(events.getExceptions(template.id).map((e) => e.id)).not.toContain(exception.id);
+  });
+
+  test('findByIdIncludingSoftDeleted enforces ownership (not an IDOR)', () => {
+    const OTHER_USER = 999;
+    const created = events.create({
+      user_id: USER_ID,
+      title: 'Private',
+      start_at: '2026-03-11T10:00:00Z',
+      timezone: 'UTC',
+    });
+    events.remove(created.id, USER_ID);
+    // A different user (not owner, not group member) cannot resolve the
+    // title even after soft-delete — the method bypasses only the soft-
+    // delete filter, ownership/group-visibility is still enforced.
+    expect(events.findByIdIncludingSoftDeleted(created.id, OTHER_USER)).toBeNull();
+    // But the actual owner can.
+    expect(events.findByIdIncludingSoftDeleted(created.id, USER_ID)).not.toBeNull();
   });
 
   test('search finds events by title substring', () => {

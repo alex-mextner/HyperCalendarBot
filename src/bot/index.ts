@@ -46,7 +46,7 @@ import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
-import type { ParseMode } from '../utils/telegram.ts';
+import { escapeHtml, type ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import {
@@ -712,6 +712,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           },
           adminId: botAdminId,
         },
+        editProposalDeps: {
+          editProposalRepo: db.editProposals,
+          sendMessage: async (chatId: number, text: string, options?: { parse_mode: ParseMode }) => {
+            await bot.api.sendMessage({
+              chat_id: chatId,
+              text,
+              ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
+            });
+          },
+        },
         userRepo: db.users,
         intentDeps: {
           intentRepo,
@@ -869,7 +879,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                   inviteeUser?.timezone ?? null,
                   !!inviteeUser?.onboarding_completed,
                 )
-              : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
+              : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
             telegramSender.sendInvitation!(shared.userId, invText, inv.invitation.id)
               .then((sent) => {
                 if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, shared.userId);
@@ -931,7 +941,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
               )
-            : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
+            : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
           telegramSender.sendInvitation!(inviteeId, invText, inv.invitation.id)
             .then((sent) => {
               if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);

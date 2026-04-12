@@ -1,6 +1,6 @@
 // src/services/event/formatters.ts
 import { TZDate } from '@date-fns/tz';
-import type { Lang } from '../../config/constants.ts';
+import { type Lang, t } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
   formatDateHeader,
@@ -30,26 +30,24 @@ export function formatDayAgenda(
   holidays?: HolidayEntry[],
   calendarColors?: Map<string, string>,
 ): string {
+  const l = t(lang as Lang).eventCard;
   const header = `📅 ${formatDateHeader(dateIso, timezone, lang)}`;
 
   const holidayLines = (holidays ?? []).map((h) => `  🎉 ${escapeHtml(h.name)}`);
 
   if (occurrences.length === 0 && holidayLines.length === 0) {
-    const noEvents = lang === 'ru' ? 'Нет событий. /add для создания.' : 'No events. Use /add to create one.';
-    return `${header}\n\n${noEvents}`;
+    return `${header}\n\n${l.dayAgendaEmpty}`;
   }
 
-  const allDayLabel = lang === 'ru' ? 'весь день' : 'all day';
   const eventLines = occurrences.map((occ) => {
     const isAllDay = occ.event.all_day === 1;
-    const time = isAllDay ? allDayLabel : formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
+    const time = isAllDay ? l.allDayInline : formatTimeRange(occ.occurrence_start, occ.occurrence_end, timezone);
     const isBirthday = occ.event.event_type === 'birthday';
     const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
     let title = escapeHtml(occ.event.title);
     if (isBirthday) {
       const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
-      const suffix =
-        age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+      const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
       title = `🎁 ${title}${escapeHtml(suffix)}`;
     }
     const colorDot =
@@ -70,6 +68,7 @@ export function formatWeekAgenda(
   lang: string,
   holidaysByDate?: Map<string, HolidayEntry[]>,
 ): string {
+  const l = t(lang as Lang).eventCard;
   const byDay = new Map<string, EventOccurrence[]>();
   for (const occ of occurrences) {
     const dayKey = new TZDate(new Date(occ.occurrence_start), timezone).toISOString().slice(0, 10);
@@ -93,27 +92,18 @@ export function formatWeekAgenda(
     }
 
     if (dayEvents.length === 0 && dayHolidays.length === 0) {
-      const noEvents = lang === 'ru' ? '— нет событий' : '— no events';
-      lines.push(`${dayLabel}  ${noEvents}`);
+      lines.push(`${dayLabel}  ${l.weekAgendaDayEmpty}`);
     } else if (dayEvents.length > 0) {
-      lines.push(
-        `${dayLabel}  ▪ ${dayEvents.length} ${lang === 'ru' ? ruPlural(dayEvents.length, 'событие', 'события', 'событий') : dayEvents.length === 1 ? 'event' : 'events'}`,
-      );
-      const allDayLabel = lang === 'ru' ? 'весь день' : 'all day';
+      lines.push(`${dayLabel}  ▪ ${dayEvents.length} ${l.eventsWord(dayEvents.length)}`);
       for (const occ of dayEvents) {
         const isAllDay = occ.event.all_day === 1;
-        const time = isAllDay ? allDayLabel : formatTime(occ.occurrence_start, timezone);
+        const time = isAllDay ? l.allDayInline : formatTime(occ.occurrence_start, timezone);
         const isBirthday = occ.event.event_type === 'birthday';
         const isRecurring = !isBirthday && !!(occ.event.recurrence_rule || occ.event.parent_event_id);
         let title = escapeHtml(occ.event.title);
         if (isBirthday) {
           const age = birthdayAge(occ.event.birth_year, occ.occurrence_start);
-          const suffix =
-            age !== null
-              ? lang === 'ru'
-                ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}`
-                : ` — turns ${age}`
-              : '';
+          const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
           title = `🎁 ${title}${escapeHtml(suffix)}`;
         }
         lines.push(`  ${time} ${title}${isRecurring ? ' 🔁' : ''}`);
@@ -124,30 +114,34 @@ export function formatWeekAgenda(
 
   const headerStart = formatDateShort(startDateIso, timezone, lang);
   const headerEnd = formatDateShort(endDateIso, timezone, lang);
-  return `📅 ${lang === 'ru' ? 'Неделя' : 'Week'} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
+  return `📅 ${l.weekHeader} ${headerStart}–${headerEnd}\n\n${lines.join('\n').trim()}`;
 }
 
 export function formatEventDetail(
   event: CalendarEvent,
   timezone: string,
   lang: string,
-  forecast?: EventForecast | null,
+  opts?: { includeTitle?: boolean; forecast?: EventForecast | null },
 ): string {
+  const includeTitle = opts?.includeTitle ?? true;
+  const forecast = opts?.forecast;
+  const l = t(lang as Lang).eventCard;
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
 
-  if (isBirthday) {
-    const age = birthdayAge(event.birth_year, event.start_at);
-    const ageSuffix =
-      age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
-    lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
-  } else {
-    lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+  if (includeTitle) {
+    if (isBirthday) {
+      const age = birthdayAge(event.birth_year, event.start_at);
+      const ageSuffix = age !== null ? l.birthdayAgeSuffix(age) : '';
+      lines.push(`🎁 <b>${escapeHtml(event.title)}${escapeHtml(ageSuffix)}</b>`);
+    } else {
+      lines.push(`📌 <b>${escapeHtml(event.title)}</b>`);
+    }
   }
 
   const dateStr = formatDateShort(event.start_at, timezone, lang);
   if (event.all_day) {
-    lines.push(`📅 ${dateStr}, ${lang === 'ru' ? 'весь день' : 'all day'}`);
+    lines.push(`📅 ${dateStr}, ${l.allDayInline}`);
   } else {
     const time = formatTimeRange(event.start_at, event.end_at, timezone);
     if (event.end_at) {
@@ -191,8 +185,9 @@ export function formatInvitation(
   const inviterLink = inviterUsername
     ? `@${escapeHtml(inviterUsername)}`
     : `<a href="tg://user?id=${inviterId}">${escapeHtml(inviterName)}</a>`;
-  const header = lang === 'ru' ? `📨 <b>Приглашение</b> от ${inviterLink}` : `📨 <b>Invitation</b> from ${inviterLink}`;
+  const header = t(lang as Lang).invitation_received(escapeHtml(event.title), inviterLink);
 
+  // Title is already in the header — skip it in the detail block to avoid duplication.
   if (!event.all_day) {
     const timeLabel = formatTimeWithTimezones(
       event.start_at,
@@ -200,7 +195,7 @@ export function formatInvitation(
       recipientTimezone ?? null,
       recipientOnboarded ?? false,
     );
-    const eventDetail = formatEventDetail(event, timezone, lang);
+    const eventDetail = formatEventDetail(event, timezone, lang, { includeTitle: false });
     // Replace the plain time in the event detail with the timezone-annotated one
     const plainTime = event.end_at
       ? `${formatTime(event.start_at, timezone)}–${formatTime(event.end_at, timezone)}`
@@ -209,19 +204,19 @@ export function formatInvitation(
     return `${header}\n\n${annotatedDetail}`;
   }
 
-  return `${header}\n\n${formatEventDetail(event, timezone, lang)}`;
+  return `${header}\n\n${formatEventDetail(event, timezone, lang, { includeTitle: false })}`;
 }
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {
+  const l = t(lang as Lang).eventCard;
   const isAllDay = event.all_day === 1;
-  const timePart = isAllDay ? (lang === 'ru' ? 'весь день' : 'all day') : formatTime(event.start_at, timezone);
+  const timePart = isAllDay ? l.allDayInline : formatTime(event.start_at, timezone);
   const isBirthday = event.event_type === 'birthday';
   const isRecurring = !isBirthday && !!(event.recurrence_rule || event.parent_event_id);
   let title = escapeHtml(event.title);
   if (isBirthday) {
     const age = birthdayAge(event.birth_year, event.start_at);
-    const suffix =
-      age !== null ? (lang === 'ru' ? ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}` : ` — turns ${age}`) : '';
+    const suffix = age !== null ? l.birthdayAgeSuffix(age) : '';
     title = `🎁 ${title}${escapeHtml(suffix)}`;
   }
   return `${index + 1}. ${timePart} — ${title}${isRecurring ? ' 🔁' : ''}`;
@@ -239,6 +234,7 @@ export function formatRecurrenceHuman(rrule: string, lang: string): string {
     }),
   );
 
+  const l = t(lang as Lang).eventCard;
   const freq = parts.get('FREQ');
   const interval = Number(parts.get('INTERVAL') ?? 1);
   const count = parts.get('COUNT');
@@ -247,36 +243,34 @@ export function formatRecurrenceHuman(rrule: string, lang: string): string {
   let base: string;
 
   if (interval > 1) {
-    const unitMap: Record<string, Record<string, string>> = {
-      DAILY: { en: 'days', ru: ruPlural(interval, 'день', 'дня', 'дней') },
-      WEEKLY: { en: 'weeks', ru: ruPlural(interval, 'неделю', 'недели', 'недель') },
-      MONTHLY: { en: 'months', ru: ruPlural(interval, 'месяц', 'месяца', 'месяцев') },
-      YEARLY: { en: 'years', ru: ruPlural(interval, 'год', 'года', 'лет') },
+    const unitFn: Record<string, ((n: number) => string) | undefined> = {
+      DAILY: l.recurrenceUnitDays,
+      WEEKLY: l.recurrenceUnitWeeks,
+      MONTHLY: l.recurrenceUnitMonths,
+      YEARLY: l.recurrenceUnitYears,
     };
-    const unit = unitMap[freq!]?.[lang] ?? freq;
-    base = lang === 'ru' ? `Каждые ${interval} ${unit}` : `Every ${interval} ${unit}`;
+    const unit = unitFn[freq!]?.(interval) ?? freq ?? '';
+    base = l.recurrenceEvery(interval, unit);
   } else {
-    const freqMap: Record<string, Record<string, string>> = {
-      DAILY: { en: 'Daily', ru: 'Ежедневно' },
-      WEEKLY: { en: 'Weekly', ru: 'Еженедельно' },
-      MONTHLY: { en: 'Monthly', ru: 'Ежемесячно' },
-      YEARLY: { en: 'Yearly', ru: 'Ежегодно' },
+    const freqMap: Record<string, string | undefined> = {
+      DAILY: l.recurrenceFreqDaily,
+      WEEKLY: l.recurrenceFreqWeekly,
+      MONTHLY: l.recurrenceFreqMonthly,
+      YEARLY: l.recurrenceFreqYearly,
     };
-    base = freqMap[freq!]?.[lang] ?? rrule;
+    base = freqMap[freq!] ?? rrule;
   }
 
   if (count) {
-    base += lang === 'ru' ? `, ${count} раз` : `, ${count} times`;
+    base += l.recurrenceCountSuffix(count);
   }
 
   if (until) {
     const untilDate = parseUntilDate(until);
     if (untilDate) {
-      const monthsEn = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      const monthsRu = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
       const day = untilDate.getUTCDate();
-      const mon = lang === 'ru' ? monthsRu[untilDate.getUTCMonth()]! : monthsEn[untilDate.getUTCMonth()]!;
-      base += lang === 'ru' ? ` до ${day} ${mon}` : ` until ${mon} ${day}`;
+      const mon = l.recurrenceMonthShort[untilDate.getUTCMonth()]!;
+      base += l.recurrenceUntilSuffix(day, mon);
     }
   }
 

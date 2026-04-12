@@ -1,5 +1,4 @@
 import { expect, mock, test } from 'bun:test';
-import type { InferenceClient } from '@huggingface/inference';
 import { KokoroTtsService } from '../../../src/services/voice/kokoro-tts-service.ts';
 
 // Minimal WAV header: RIFF + WAVE + fmt + data chunks (44 bytes + silence)
@@ -23,31 +22,42 @@ function makeWavBuffer(): Buffer {
   return buf;
 }
 
-// Install a fake HF client onto the service without `as any`.
-// The real client type is large and only textToSpeech is used here.
-function attachFakeClient(svc: KokoroTtsService, blob: Blob): void {
-  const fakeClient: Partial<InferenceClient> = {
-    textToSpeech: mock(async () => blob),
-  };
-  (svc as unknown as { client: Partial<InferenceClient> }).client = fakeClient;
+// OGG Opus magic-bytes stub — a minimal buffer that satisfies the
+// "result starts with OggS" assertion without actually running ffmpeg.
+function makeOggStub(): Buffer {
+  const buf = Buffer.alloc(32);
+  buf.write('OggS', 0);
+  return buf;
 }
 
 test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
   const wavBuffer = makeWavBuffer();
   const fakeBlob = new Blob([wavBuffer], { type: 'audio/wav' });
-  // Injected converter writes a fake OGG file with the correct magic header.
-  const convertWavToOgg = mock(async (_wav: string, ogg: string) => {
-    const oggBytes = Buffer.concat([Buffer.from('OggS'), Buffer.alloc(100)]);
-    await Bun.write(ogg, oggBytes);
-    return { ok: true };
+
+  const spawnFfmpeg = mock((cmd: string[], _opts: { stderr: 'pipe' }) => {
+    // Stub: pretend ffmpeg succeeded. The service then reads tmpOgg
+    // from disk, so pre-populate it with a minimal OGG-magic buffer.
+    const tmpOgg = cmd[cmd.length - 1]!;
+    Bun.write(tmpOgg, makeOggStub());
+    return {
+      stderr: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.close();
+        },
+      }),
+      exited: Promise.resolve(0),
+    };
   });
 
-  const svc = new KokoroTtsService('fake-token', convertWavToOgg);
-  attachFakeClient(svc, fakeBlob);
+  const svc = new KokoroTtsService('fake-token', { spawnFfmpeg });
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
+  (svc as any).client = {
+    textToSpeech: mock(async () => fakeBlob),
+  };
 
   const result = await svc.synthesize('hello');
 
-  expect(convertWavToOgg).toHaveBeenCalledTimes(1);
+  expect(spawnFfmpeg).toHaveBeenCalledTimes(1);
   // OGG Opus magic bytes: OggS
   expect(result.slice(0, 4).toString('ascii')).toBe('OggS');
   expect(result.length).toBeGreaterThan(0);
@@ -55,12 +65,22 @@ test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
 
 test('synthesize throws if ffmpeg fails', async () => {
   const fakeBlob = new Blob([Buffer.from('not-a-wav')], { type: 'audio/wav' });
-  const convertWavToOgg = mock(() =>
-    Promise.resolve({ ok: false, exitCode: 1, stderr: 'Invalid data found when processing input' }),
-  );
 
-  const svc = new KokoroTtsService('fake-token', convertWavToOgg);
-  attachFakeClient(svc, fakeBlob);
+  const spawnFfmpeg = mock(() => ({
+    stderr: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('Invalid data found when processing input'));
+        c.close();
+      },
+    }),
+    exited: Promise.resolve(1),
+  }));
+
+  const svc = new KokoroTtsService('fake-token', { spawnFfmpeg });
+  // biome-ignore lint/suspicious/noExplicitAny: test mock
+  (svc as any).client = {
+    textToSpeech: mock(async () => fakeBlob),
+  };
 
   await expect(svc.synthesize('hello')).rejects.toThrow('ffmpeg WAV→OGG failed');
 });

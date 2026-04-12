@@ -47,7 +47,7 @@ export class GroupChatRepository {
       .prepare(
         `SELECT gse.* FROM group_shared_events gse
          JOIN events e ON e.id = gse.event_id
-         WHERE gse.chat_id = ?
+         WHERE gse.chat_id = ? AND e.is_deleted = 0 AND e.is_cancelled = 0
          ORDER BY e.start_at ASC
          LIMIT ? OFFSET ?`,
       )

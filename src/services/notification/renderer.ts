@@ -205,9 +205,9 @@ export class NotificationRenderer {
     if (data.intervalLabel === 'at start') {
       lines.push(`⏰ ${safeTitle} — ${l.startingNow}`);
     } else if (data.isAllDay) {
-      lines.push(`⏰ ${l.reminder} ${safeTitle} — ${localized}`);
+      lines.push(`⏰ ${safeTitle} — ${localized}`);
     } else {
-      lines.push(`⏰ ${l.reminder} ${safeTitle} ${l.inLabel} ${localized}`);
+      lines.push(`⏰ ${safeTitle} ${l.inLabel} ${localized}`);
     }
     lines.push('');
     if (data.isAllDay) {
@@ -230,7 +230,11 @@ export class NotificationRenderer {
     const langKey = lang as Lang;
     const l = t(langKey).notifications;
     const lines: string[] = [];
-    lines.push(`⏰ ${l.reminders}:`);
+    const first = items[0];
+    if (!first) return { channel: 'telegram_text', text: '' };
+    const header =
+      items.length === 1 ? escapeHtml(first.title) : l.batchHeader(escapeHtml(first.title), items.length - 1);
+    lines.push(`⏰ ${header}`);
 
     // When every item shares the same forecast, show it once at the bottom
     const formattedForecasts = items.map((item) =>

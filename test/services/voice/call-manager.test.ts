@@ -17,6 +17,17 @@ function makeSpawn(exitCode = 0) {
   }));
 }
 
+function makeFfmpegSpawn(exitCode = 0) {
+  return mock(() => ({
+    stderr: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.close();
+      },
+    }),
+    exited: Promise.resolve(exitCode),
+  }));
+}
+
 function makeJob(
   overrides: Partial<{ userId: number; callLogId: number; ttsText: string; language: string; sessionId: string }> = {},
 ) {
@@ -39,8 +50,7 @@ function makeDeps(overrides: Partial<CallManagerDeps> = {}): CallManagerDeps {
     },
     pyBridgePath: 'scripts/voice-call-bridge.py',
     spawnProcess: makeSpawn(),
-    // Stub ffmpeg so tests don't need the binary on PATH
-    convertMp3ToOgg: mock(() => Promise.resolve({ ok: true })),
+    spawnFfmpeg: makeFfmpegSpawn(),
     ...overrides,
   };
 }

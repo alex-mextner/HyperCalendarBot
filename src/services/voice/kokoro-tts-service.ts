@@ -4,32 +4,25 @@ import { unlink } from 'node:fs/promises';
 import { InferenceClient } from '@huggingface/inference';
 import { voiceLogger } from './types.ts';
 
-/** Result of a WAV→OGG conversion step (ffmpeg by default, injectable for tests) */
-export interface WavToOggResult {
-  ok: boolean;
-  exitCode?: number;
-  stderr?: string;
-}
+export type FfmpegSpawnResult = {
+  stderr: ReadableStream<Uint8Array> | null;
+  exited: Promise<number>;
+};
 
-export type ConvertWavToOgg = (wavFile: string, oggFile: string) => Promise<WavToOggResult>;
+export type FfmpegSpawn = (cmd: string[], opts: { stderr: 'pipe' }) => FfmpegSpawnResult;
 
-async function ffmpegWavToOgg(wavFile: string, oggFile: string): Promise<WavToOggResult> {
-  const proc = Bun.spawn(['ffmpeg', '-y', '-i', wavFile, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile], {
-    stderr: 'pipe',
-  });
-  const exitCode = await proc.exited;
-  if (exitCode === 0) return { ok: true, exitCode };
-  const stderr = await new Response(proc.stderr).text();
-  return { ok: false, exitCode, stderr: stderr.slice(0, 200) };
+export interface KokoroTtsServiceDeps {
+  /** Optional spawn override — lets tests stub ffmpeg without a system binary. */
+  spawnFfmpeg?: FfmpegSpawn;
 }
 
 export class KokoroTtsService {
   private client: InferenceClient;
-  private convertWavToOgg: ConvertWavToOgg;
+  private spawnFfmpeg: FfmpegSpawn;
 
-  constructor(hfToken: string, convertWavToOgg: ConvertWavToOgg = ffmpegWavToOgg) {
+  constructor(hfToken: string, deps: KokoroTtsServiceDeps = {}) {
     this.client = new InferenceClient(hfToken);
-    this.convertWavToOgg = convertWavToOgg;
+    this.spawnFfmpeg = deps.spawnFfmpeg ?? ((cmd, opts) => Bun.spawn(cmd, opts));
   }
 
   async synthesize(text: string): Promise<Buffer> {
@@ -45,13 +38,18 @@ export class KokoroTtsService {
     const tmpOgg = `/tmp/kokoro-${Date.now()}.ogg`;
     await Bun.write(tmpWav, wavBuffer);
 
-    const result = await this.convertWavToOgg(tmpWav, tmpOgg);
+    const proc = this.spawnFfmpeg(
+      ['ffmpeg', '-y', '-i', tmpWav, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', tmpOgg],
+      { stderr: 'pipe' },
+    );
+    const exitCode = await proc.exited;
 
     await unlink(tmpWav).catch(() => {});
 
-    if (!result.ok) {
+    if (exitCode !== 0) {
+      const stderr = proc.stderr ? await new Response(proc.stderr).text() : '';
       await unlink(tmpOgg).catch(() => {});
-      throw new Error(`ffmpeg WAV→OGG failed (exit ${result.exitCode ?? '?'}): ${result.stderr ?? ''}`);
+      throw new Error(`ffmpeg WAV→OGG failed (exit ${exitCode}): ${stderr}`);
     }
 
     const oggBuffer = Buffer.from(await Bun.file(tmpOgg).arrayBuffer());
