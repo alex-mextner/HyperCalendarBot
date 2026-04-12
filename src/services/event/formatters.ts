@@ -14,6 +14,8 @@ import {
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
+import { formatEventWeatherLine } from '../weather/format.ts';
+import type { EventForecast } from '../weather/types.ts';
 
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
@@ -119,9 +121,10 @@ export function formatEventDetail(
   event: CalendarEvent,
   timezone: string,
   lang: string,
-  opts?: { includeTitle?: boolean },
+  opts?: { includeTitle?: boolean; forecast?: EventForecast | null },
 ): string {
   const includeTitle = opts?.includeTitle ?? true;
+  const forecast = opts?.forecast;
   const l = t(lang as Lang).eventCard;
   const lines: string[] = [];
   const isBirthday = event.event_type === 'birthday';
@@ -161,6 +164,9 @@ export function formatEventDetail(
   }
   if (event.recurrence_rule && !isBirthday) {
     lines.push(`🔁 ${formatRecurrenceHuman(event.recurrence_rule, lang)}`);
+  }
+  if (forecast) {
+    lines.push(formatEventWeatherLine(lang as Lang, forecast));
   }
 
   return lines.join('\n');

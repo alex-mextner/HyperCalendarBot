@@ -527,6 +527,7 @@ export const MSG = {
       tempRange: (min: number, max: number) => `${min}..${max}°C`,
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
+      eventForecast: (weather: string) => `Weather: ${weather}`,
     },
     eventCard: {
       allDayInline: 'all day',
@@ -1164,6 +1165,7 @@ export const MSG = {
       tempRange: (min: number, max: number) => `${min}..${max}°C`,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
+      eventForecast: (weather: string) => `Погода: ${weather}`,
     },
     eventCard: {
       allDayInline: 'весь день',

@@ -57,10 +57,10 @@ test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
 
   const result = await svc.synthesize('hello');
 
+  expect(spawnFfmpeg).toHaveBeenCalledTimes(1);
   // OGG Opus magic bytes: OggS
   expect(result.slice(0, 4).toString('ascii')).toBe('OggS');
   expect(result.length).toBeGreaterThan(0);
-  expect(spawnFfmpeg).toHaveBeenCalledTimes(1);
 });
 
 test('synthesize throws if ffmpeg fails', async () => {

@@ -49,7 +49,7 @@ export class KokoroTtsService {
     if (exitCode !== 0) {
       const stderr = proc.stderr ? await new Response(proc.stderr).text() : '';
       await unlink(tmpOgg).catch(() => {});
-      throw new Error(`ffmpeg WAV→OGG failed (exit ${exitCode}): ${stderr.slice(0, 200)}`);
+      throw new Error(`ffmpeg WAV→OGG failed (exit ${exitCode}): ${stderr}`);
     }
 
     const oggBuffer = Buffer.from(await Bun.file(tmpOgg).arrayBuffer());

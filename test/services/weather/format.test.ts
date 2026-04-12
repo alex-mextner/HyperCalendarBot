@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { formatDayWeatherLine, formatWeekWeatherLine } from '../../../src/services/weather/format.ts';
-import type { DayWeather } from '../../../src/services/weather/types.ts';
+import {
+  formatDayWeatherLine,
+  formatEventWeatherLine,
+  formatWeekWeatherLine,
+} from '../../../src/services/weather/format.ts';
+import type { DayWeather, EventForecast } from '../../../src/services/weather/types.ts';
 
 describe('formatDayWeatherLine', () => {
   const baseWeather: DayWeather = {
@@ -65,5 +69,75 @@ describe('formatWeekWeatherLine', () => {
     };
     const result = formatWeekWeatherLine('en', day);
     expect(result).toBe('🌨 -2..5°C');
+  });
+});
+
+describe('formatEventWeatherLine', () => {
+  test('hourly forecast shows single temperature at the event time', () => {
+    const forecast: EventForecast = {
+      kind: 'hour',
+      hour: {
+        dt: 1_700_000_000,
+        temp: 17,
+        conditionCode: 800,
+        description: 'clear sky',
+        windSpeed: 3,
+        pop: 0,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toBe('☀️ 17°C, clear sky');
+    expect(result).not.toContain('..');
+  });
+
+  test('hourly forecast includes wind when >= 10 m/s', () => {
+    const forecast: EventForecast = {
+      kind: 'hour',
+      hour: {
+        dt: 1_700_000_000,
+        temp: 9,
+        conditionCode: 500,
+        description: 'light rain',
+        windSpeed: 14.2,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toContain('💨');
+    expect(result).toContain('14 m/s');
+  });
+
+  test('daily fallback shows min..max range', () => {
+    const forecast: EventForecast = {
+      kind: 'day',
+      day: {
+        date: '2026-04-15',
+        tempMin: 5,
+        tempMax: 18,
+        conditionCode: 801,
+        description: 'few clouds',
+        windSpeed: 4,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toBe('⛅ 5..18°C, few clouds');
+  });
+
+  test('daily fallback renders in Russian', () => {
+    const forecast: EventForecast = {
+      kind: 'day',
+      day: {
+        date: '2026-04-15',
+        tempMin: -3,
+        tempMax: 2,
+        conditionCode: 600,
+        description: 'снег',
+        windSpeed: 12,
+      },
+    };
+    const result = formatEventWeatherLine('ru', forecast);
+    expect(result).toContain('🌨');
+    expect(result).toContain('-3..2°C');
+    expect(result).toContain('снег');
+    expect(result).toContain('12 м/с');
   });
 });

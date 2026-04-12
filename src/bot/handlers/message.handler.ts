@@ -195,6 +195,7 @@ export interface MessageHandlerDeps {
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
   addressCache?: import('../../services/location/address-cache.ts').AddressCache;
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
+  weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -670,6 +671,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       locationVerification: deps.locationVerification,
       addressCache: deps.addressCache,
       pendingGeoStore: deps.pendingGeoStore,
+      weatherService: deps.weatherService,
     };
   };
 }

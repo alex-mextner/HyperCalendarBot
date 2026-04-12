@@ -64,7 +64,7 @@ describe('event tool handlers', () => {
   });
 
   describe('handleGetEvents', () => {
-    test('returns events in range', () => {
+    test('returns events in range', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Test Event',
@@ -72,7 +72,7 @@ describe('event tool handlers', () => {
         end_at: '2026-03-15T11:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -80,8 +80,8 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Test Event');
     });
 
-    test('returns message when no events found', () => {
-      const result = handleGetEvents(ctx, {
+    test('returns message when no events found', async () => {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -89,7 +89,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('No events');
     });
 
-    test('accepts date-only format (YYYY-MM-DD) and finds events on that day', () => {
+    test('accepts date-only format (YYYY-MM-DD) and finds events on that day', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Morning Meeting',
@@ -97,7 +97,7 @@ describe('event tool handlers', () => {
         end_at: '2026-03-15T11:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15',
         end_date: '2026-03-15',
       });
@@ -105,7 +105,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Morning Meeting');
     });
 
-    test('populates data with EventSummary array', () => {
+    test('populates data with EventSummary array', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Standup',
@@ -113,7 +113,7 @@ describe('event tool handlers', () => {
         end_at: '2026-03-15T09:30:00Z',
         timezone: 'UTC',
       });
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -127,8 +127,8 @@ describe('event tool handlers', () => {
       expect(typeof data[0]!.id).toBe('number');
     });
 
-    test('data is empty array when no events found', () => {
-      const result = handleGetEvents(ctx, {
+    test('data is empty array when no events found', async () => {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -294,7 +294,7 @@ describe('event tool handlers', () => {
   });
 
   describe('handleSearchEvents', () => {
-    test('finds events by title', () => {
+    test('finds events by title', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Team Standup',
@@ -307,19 +307,19 @@ describe('event tool handlers', () => {
         start_at: '2026-03-15T12:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleSearchEvents(ctx, { query: 'Standup' });
+      const result = await handleSearchEvents(ctx, { query: 'Standup' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Team Standup');
       expect(result.output).not.toContain('Lunch Break');
     });
 
-    test('returns message when nothing found', () => {
-      const result = handleSearchEvents(ctx, { query: 'nonexistent' });
+    test('returns message when nothing found', async () => {
+      const result = await handleSearchEvents(ctx, { query: 'nonexistent' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No events');
     });
 
-    test('event_type=birthday returns only birthday events', () => {
+    test('event_type=birthday returns only birthday events', async () => {
       const eventRepo = new EventRepository(db);
       eventRepo.create({
         user_id: USER_ID,
@@ -335,13 +335,13 @@ describe('event tool handlers', () => {
         start_at: '2026-05-10T10:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleSearchEvents(ctx, { event_type: 'birthday' });
+      const result = await handleSearchEvents(ctx, { event_type: 'birthday' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Д/р Иван');
       expect(result.output).not.toContain('Team Meeting');
     });
 
-    test('event_type=regular excludes birthday events', () => {
+    test('event_type=regular excludes birthday events', async () => {
       const eventRepo = new EventRepository(db);
       eventRepo.create({
         user_id: USER_ID,
@@ -357,7 +357,7 @@ describe('event tool handlers', () => {
         start_at: '2026-05-10T10:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleSearchEvents(ctx, { event_type: 'regular' });
+      const result = await handleSearchEvents(ctx, { event_type: 'regular' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Team Meeting');
       expect(result.output).not.toContain('Д/р Иван');
@@ -499,7 +499,7 @@ describe('event tool handlers', () => {
       });
     }
 
-    test('handleGetEvents with scope=group queries group calendar', () => {
+    test('handleGetEvents with scope=group queries group calendar', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Event',
@@ -510,7 +510,7 @@ describe('event tool handlers', () => {
       createGroupEvent('Group Event', '2026-03-15T14:00:00Z', '2026-03-15T15:00:00Z');
 
       const gCtx = makeGroupCtx();
-      const result = handleGetEvents(gCtx, {
+      const result = await handleGetEvents(gCtx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
         scope: 'group',
@@ -554,7 +554,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('New Group Title');
     });
 
-    test('handleDeleteEvent with scope=group deletes from group calendar', () => {
+    test('handleDeleteEvent with scope=group deletes from group calendar', async () => {
       const event = createGroupEvent('To Delete Group', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
       const result = handleDeleteEvent(gCtx, { event_id: event.id, scope: 'group' });
@@ -565,7 +565,7 @@ describe('event tool handlers', () => {
       expect(found).toBeNull();
     });
 
-    test('handleSearchEvents with scope=group searches group calendar', () => {
+    test('handleSearchEvents with scope=group searches group calendar', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Standup',
@@ -575,21 +575,21 @@ describe('event tool handlers', () => {
       createGroupEvent('Group Standup', '2026-03-15T10:00:00Z');
 
       const gCtx = makeGroupCtx();
-      const result = handleSearchEvents(gCtx, { query: 'Standup', scope: 'group' });
+      const result = await handleSearchEvents(gCtx, { query: 'Standup', scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Group Standup');
       expect(result.output).not.toContain('Personal Standup');
     });
 
-    test('handleGetEvent with scope=group fetches group event', () => {
+    test('handleGetEvent with scope=group fetches group event', async () => {
       const event = createGroupEvent('Group Detail', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
-      const result = handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
+      const result = await handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Group Detail');
     });
 
-    test('handleGetUpcoming with scope=group returns group events', () => {
+    test('handleGetUpcoming with scope=group returns group events', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Soon',
@@ -599,13 +599,13 @@ describe('event tool handlers', () => {
       createGroupEvent('Group Soon', new Date(Date.now() + 7200_000).toISOString());
 
       const gCtx = makeGroupCtx();
-      const result = handleGetUpcoming(gCtx, { scope: 'group' });
+      const result = await handleGetUpcoming(gCtx, { scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Group Soon');
       expect(result.output).not.toContain('Personal Soon');
     });
 
-    test('handleSnoozeEvent with scope=group snoozes group event', () => {
+    test('handleSnoozeEvent with scope=group snoozes group event', async () => {
       const event = createGroupEvent('Group Snooze', '2026-03-15T10:00:00Z', '2026-03-15T11:00:00Z');
       const gCtx = makeGroupCtx();
       const result = handleSnoozeEvent(gCtx, { event_id: event.id, minutes: 15, scope: 'group' });
@@ -613,7 +613,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('snoozed by 15 min');
     });
 
-    test('scope defaults to group when isGroup=true and scope not specified', () => {
+    test('scope defaults to group when isGroup=true and scope not specified', async () => {
       createGroupEvent('Group Default', '2026-03-15T14:00:00Z', '2026-03-15T15:00:00Z');
       ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -623,7 +623,7 @@ describe('event tool handlers', () => {
       });
 
       const gCtx = makeGroupCtx();
-      const result = handleGetEvents(gCtx, {
+      const result = await handleGetEvents(gCtx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -632,7 +632,7 @@ describe('event tool handlers', () => {
       expect(result.output).not.toContain('Personal Default');
     });
 
-    test('scope defaults to personal when isGroup=false', () => {
+    test('scope defaults to personal when isGroup=false', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Visible',
@@ -641,7 +641,7 @@ describe('event tool handlers', () => {
       });
 
       // isGroup=false, no scope => personal path
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
@@ -649,14 +649,14 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Personal Visible');
     });
 
-    test('handleDeleteEvent with scope=group returns error for non-existent group event', () => {
+    test('handleDeleteEvent with scope=group returns error for non-existent group event', async () => {
       const gCtx = makeGroupCtx();
       const result = handleDeleteEvent(gCtx, { event_id: 9999, scope: 'group' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
 
-    test('handleGetEvents includes group title and created_by in output', () => {
+    test('handleGetEvents includes group title and created_by in output', async () => {
       const groupChatRepo = new GroupChatRepository(db);
       groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
       createGroupEvent('Team Drinks', '2026-03-15T20:00:00Z');
@@ -670,7 +670,7 @@ describe('event tool handlers', () => {
           checkGroupMembership: undefined as never,
         },
       };
-      const result = handleGetEvents(gCtx, {
+      const result = await handleGetEvents(gCtx, {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
         scope: 'group',
@@ -682,7 +682,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('created_by');
     });
 
-    test('handleGetEvent includes group title and created_by in output', () => {
+    test('handleGetEvent includes group title and created_by in output', async () => {
       const groupChatRepo = new GroupChatRepository(db);
       groupChatRepo.upsertGroup({ chat_id: GROUP_CHAT_ID, title: 'Test Group', added_by: USER_ID });
       const event = createGroupEvent('Group Detail Event', '2026-03-15T10:00:00Z');
@@ -696,7 +696,7 @@ describe('event tool handlers', () => {
           checkGroupMembership: undefined as never,
         },
       };
-      const result = handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
+      const result = await handleGetEvent(gCtx, { event_id: event.id, scope: 'group' });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Group Detail Event');
@@ -871,7 +871,7 @@ describe('event tool handlers', () => {
   describe('personal scope isolation from group events', () => {
     const GROUP_ID = -100888;
 
-    test('handleGetEvents (personal) returns group-owned events created by the user', () => {
+    test('handleGetEvents (personal) returns group-owned events created by the user', async () => {
       db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -889,7 +889,7 @@ describe('event tool handlers', () => {
         timezone: 'UTC',
       });
 
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-18T00:00:00Z',
         end_date: '2026-03-18T23:59:59Z',
       });
@@ -899,7 +899,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Group Drinks');
     });
 
-    test('handleGetEvents (personal) does not return group-owned events created by another user', () => {
+    test('handleGetEvents (personal) does not return group-owned events created by another user', async () => {
       const OTHER_USER = 999;
       new UserRepository(db).create({ telegram_id: OTHER_USER });
       ctx.eventService.createEvent({
@@ -912,7 +912,7 @@ describe('event tool handlers', () => {
         created_by: OTHER_USER,
       });
 
-      const result = handleGetEvents(ctx, {
+      const result = await handleGetEvents(ctx, {
         start_date: '2026-03-18T00:00:00Z',
         end_date: '2026-03-18T23:59:59Z',
       });
@@ -957,7 +957,7 @@ describe('event tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('handleSearchEvents (personal) returns group-owned events created by the user', () => {
+    test('handleSearchEvents (personal) returns group-owned events created by the user', async () => {
       db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -975,14 +975,14 @@ describe('event tool handlers', () => {
         timezone: 'UTC',
       });
 
-      const result = handleSearchEvents(ctx, { query: 'Planning' });
+      const result = await handleSearchEvents(ctx, { query: 'Planning' });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Personal Planning');
       expect(result.output).toContain('Group Planning');
     });
 
-    test('handleSearchEvents (personal) does not return group-owned events created by another user', () => {
+    test('handleSearchEvents (personal) does not return group-owned events created by another user', async () => {
       const OTHER_USER = 997;
       new UserRepository(db).create({ telegram_id: OTHER_USER });
       ctx.eventService.createEvent({
@@ -995,7 +995,7 @@ describe('event tool handlers', () => {
         created_by: OTHER_USER,
       });
 
-      const result = handleSearchEvents(ctx, { query: 'Planning' });
+      const result = await handleSearchEvents(ctx, { query: 'Planning' });
 
       expect(result.success).toBe(true);
       expect(result.output).not.toContain('Group Planning By Other');

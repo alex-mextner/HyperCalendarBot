@@ -43,6 +43,7 @@ import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
+import type { WeatherService } from '../weather/weather-service.ts';
 
 // ---------------------------------------------------------------------------
 // Capability group interfaces — each group is optional as a whole;
@@ -219,6 +220,7 @@ export interface AgentContext {
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
+  weatherService?: WeatherService;
   /** Preloaded address context for system prompt (loaded async before agent runs) */
   preloadedAddressContext?: string;
   /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */

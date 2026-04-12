@@ -3,8 +3,8 @@ import { t } from '../../config/constants.ts';
 import { escapeHtml } from '../../utils/telegram.ts';
 import { buildGoogleMapsSearchUrl } from '../location/geocoding-service.ts';
 import { renderReminderForSpeech } from '../voice/tts-renderer.ts';
-import { formatDayWeatherLine } from '../weather/format.ts';
-import type { DayWeather } from '../weather/types.ts';
+import { formatDayWeatherLine, formatEventWeatherLine } from '../weather/format.ts';
+import type { DayWeather, EventForecast } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
 
 /**
@@ -67,6 +67,8 @@ export interface ReminderData {
   venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
+  /** Weather forecast anchored to the event's start time (hourly when possible) */
+  forecast?: EventForecast | null;
 }
 
 export interface BatchReminderItem {
@@ -78,6 +80,8 @@ export interface BatchReminderItem {
   venueName?: string | null;
   intervalLabel: string;
   isAllDay?: boolean;
+  /** Weather forecast anchored to the event's start time (hourly when possible) */
+  forecast?: EventForecast | null;
 }
 
 export interface WeeklyDigestEvent {
@@ -193,7 +197,8 @@ export class NotificationRenderer {
   }
 
   renderEventReminder(lang: string, data: ReminderData): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     const localized = localizeInterval(lang, data.intervalLabel);
     const safeTitle = escapeHtml(data.title);
     const lines: string[] = [];
@@ -215,19 +220,33 @@ export class NotificationRenderer {
     if (data.location) {
       lines.push(`📍 ${locationLink(data.location, data.resolvedAddress, data.googleMapsUrl, data.venueName)}`);
     }
+    if (data.forecast) {
+      lines.push(formatEventWeatherLine(langKey, data.forecast));
+    }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
 
   renderBatchReminder(lang: string, items: BatchReminderItem[]): RenderedNotification {
-    const l = t(lang as Lang).notifications;
+    const langKey = lang as Lang;
+    const l = t(langKey).notifications;
     const lines: string[] = [];
     const first = items[0];
     if (!first) return { channel: 'telegram_text', text: '' };
     const header =
       items.length === 1 ? escapeHtml(first.title) : l.batchHeader(escapeHtml(first.title), items.length - 1);
     lines.push(`⏰ ${header}`);
+
+    // When every item shares the same forecast, show it once at the bottom
+    const formattedForecasts = items.map((item) =>
+      item.forecast ? formatEventWeatherLine(langKey, item.forecast) : null,
+    );
+    const allHaveForecast = formattedForecasts.every(Boolean);
+    const uniqueNonNull = new Set(formattedForecasts.filter(Boolean));
+    const sharedWeather = allHaveForecast && uniqueNonNull.size === 1 ? [...uniqueNonNull][0]! : null;
+
     lines.push('');
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
       const localized = localizeInterval(lang, item.intervalLabel);
       let intervalText: string;
       if (item.intervalLabel === 'at start') {
@@ -243,7 +262,14 @@ export class NotificationRenderer {
       if (item.location) {
         line += `\n  📍 ${locationLink(item.location, item.resolvedAddress, item.googleMapsUrl, item.venueName)}`;
       }
+      // Per-item weather only when forecasts differ across items
+      if (!sharedWeather && formattedForecasts[i]) {
+        line += `\n  ${formattedForecasts[i]}`;
+      }
       lines.push(line);
+    }
+    if (sharedWeather) {
+      lines.push('', sharedWeather);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }
