@@ -152,7 +152,7 @@ describe('Admin reply delivery with group fallback', () => {
     const [groupChatId, groupText] = sendMessageToChat.mock.calls[0]! as unknown as [number, string];
     expect(groupChatId).toBe(GROUP_CHAT_ID);
     expect(groupText).toContain('We fixed your bug!');
-    expect(groupText).toContain('Ответ разработчика');
+    expect(groupText).toContain('Developer reply');
 
     const [reply] = ctx.send.mock.calls[0]! as unknown as [string];
     expect(reply).toContain('group');

@@ -1,5 +1,7 @@
-export function formatAdminReply(adminText: string, threadSubject: string): string {
-  return `💬 Ответ разработчика (${threadSubject}):\n\n${adminText}`;
+import { t, toLang } from '../../config/constants.ts';
+
+export function formatAdminReply(adminText: string, threadSubject: string, lang: string): string {
+  return `${t(toLang(lang)).callbackErrors.adminReplyHeader(threadSubject)}\n\n${adminText}`;
 }
 
 export async function sendAdminReplyToUser(
@@ -7,6 +9,7 @@ export async function sendAdminReplyToUser(
   userId: number,
   adminText: string,
   threadSubject: string,
+  lang: string,
 ): Promise<void> {
-  await sendMessage(userId, formatAdminReply(adminText, threadSubject));
+  await sendMessage(userId, formatAdminReply(adminText, threadSubject, lang));
 }

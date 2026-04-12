@@ -1266,8 +1266,16 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             text: messageText,
           });
           const msgs = t(user.language).callbackErrors;
+          const recipientUser = deps.userRepo.findByTelegramId(session.userId);
+          const recipientLang = recipientUser?.language ?? 'ru';
           try {
-            await sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject);
+            await sendAdminReplyToUser(
+              deps.sendMessageToUser,
+              session.userId,
+              messageText,
+              thread.subject,
+              recipientLang,
+            );
             await ctx.send(msgs.adminReplySent);
           } catch (directErr) {
             cmdLogger.warn(
@@ -1277,7 +1285,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             // Fall back to the group chat where the feedback originated
             if (session.chatId && session.chatId !== session.userId && deps.sendMessageToChat) {
               try {
-                const replyText = formatAdminReply(messageText, thread.subject);
+                const replyText = formatAdminReply(messageText, thread.subject, recipientLang);
                 await deps.sendMessageToChat(session.chatId, replyText, {
                   message_thread_id: session.topicThreadId,
                 });
