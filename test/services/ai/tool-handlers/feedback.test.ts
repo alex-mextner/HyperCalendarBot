@@ -81,13 +81,24 @@ describe('handleSendFeedback', () => {
     expect(messages[0]!.text).toBe('Something is broken');
   });
 
-  test('stores chat_id from agent context on thread', () => {
+  test('stores chat_id from agent context on thread when in group', () => {
     ctx.chatId = -100555;
+    ctx.isGroup = true;
     handleSendFeedback(ctx, { type: 'bug', message: 'Group bug' });
 
     const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
     expect(thread).not.toBeNull();
     expect(thread!.chat_id).toBe(-100555);
+  });
+
+  test('does not store chat_id when in private chat', () => {
+    ctx.chatId = USER_ID;
+    ctx.isGroup = false;
+    handleSendFeedback(ctx, { type: 'bug', message: 'Private bug' });
+
+    const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
+    expect(thread).not.toBeNull();
+    expect(thread!.chat_id).toBeNull();
   });
 
   test('rejects when botAdminId not configured', () => {

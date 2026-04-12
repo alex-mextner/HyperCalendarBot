@@ -39,7 +39,7 @@ import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
+import { formatAdminReply, sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
 import type { GroupMemberService } from '../../services/group/member-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
@@ -1277,7 +1277,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             // Fall back to the group chat where the feedback originated
             if (session.chatId && session.chatId !== session.userId && deps.sendMessageToChat) {
               try {
-                const replyText = `💬 Ответ разработчика (${thread.subject}):\n\n${messageText}`;
+                const replyText = formatAdminReply(messageText, thread.subject);
                 await deps.sendMessageToChat(session.chatId, replyText, {
                   message_thread_id: session.topicThreadId,
                 });
