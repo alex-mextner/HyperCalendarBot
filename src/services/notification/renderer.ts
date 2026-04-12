@@ -231,8 +231,21 @@ export class NotificationRenderer {
     const l = t(langKey).notifications;
     const lines: string[] = [];
     lines.push(`⏰ ${l.reminders}:`);
+
+    // When every item shares the same forecast, show it once after the header
+    const formattedForecasts = items.map((item) =>
+      item.forecast ? formatEventWeatherLine(langKey, item.forecast) : null,
+    );
+    const allHaveForecast = formattedForecasts.every(Boolean);
+    const uniqueNonNull = new Set(formattedForecasts.filter(Boolean));
+    const sharedWeather = allHaveForecast && uniqueNonNull.size === 1 ? [...uniqueNonNull][0]! : null;
+    if (sharedWeather) {
+      lines.push(sharedWeather);
+    }
+
     lines.push('');
-    for (const item of items) {
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]!;
       const localized = localizeInterval(lang, item.intervalLabel);
       let intervalText: string;
       if (item.intervalLabel === 'at start') {
@@ -248,8 +261,9 @@ export class NotificationRenderer {
       if (item.location) {
         line += `\n  📍 ${locationLink(item.location, item.resolvedAddress, item.googleMapsUrl, item.venueName)}`;
       }
-      if (item.forecast) {
-        line += `\n  ${formatEventWeatherLine(langKey, item.forecast)}`;
+      // Per-item weather only when forecasts differ across items
+      if (!sharedWeather && formattedForecasts[i]) {
+        line += `\n  ${formattedForecasts[i]}`;
       }
       lines.push(line);
     }

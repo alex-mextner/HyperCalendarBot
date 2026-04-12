@@ -252,6 +252,60 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('• Праздник — Весь день (сегодня)');
       expect(result.text).not.toContain('03:00');
     });
+
+    test('shows shared weather once at the top when all items have the same forecast', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 12, conditionCode: 800, description: 'clear sky', windSpeed: 3 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Standup', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+        { title: 'Call', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+      ]);
+      // Weather line appears once — right after the header, not per item
+      const weatherLine = '☀️ 12°C, clear sky';
+      const firstIdx = result.text.indexOf(weatherLine);
+      expect(firstIdx).toBeGreaterThan(-1);
+      expect(result.text.indexOf(weatherLine, firstIdx + 1)).toBe(-1);
+      // The weather line is between the header and the first bullet
+      expect(result.text.indexOf('Reminders:')).toBeLessThan(firstIdx);
+      expect(firstIdx).toBeLessThan(result.text.indexOf('• Standup'));
+    });
+
+    test('shows per-item weather when forecasts differ', () => {
+      const sunny: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 20, conditionCode: 800, description: 'clear sky', windSpeed: 2 },
+      };
+      const rainy: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_003_600, temp: 14, conditionCode: 500, description: 'light rain', windSpeed: 5 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Walk', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast: sunny },
+        { title: 'Gym', startTime: '11:00', location: null, intervalLabel: '30 minutes', forecast: rainy },
+      ]);
+      // Both weather lines present, each indented under its item
+      expect(result.text).toContain('  ☀️ 20°C, clear sky');
+      expect(result.text).toContain('  🌧 14°C, light rain');
+    });
+
+    test('shows per-item weather when only some items have forecast', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 15, conditionCode: 800, description: 'clear sky', windSpeed: 1 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Walk', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+        { title: 'Call', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      // One has forecast, one doesn't → can't deduplicate → per-item
+      expect(result.text).toContain('  ☀️ 15°C, clear sky');
+      // Weather line appears only once (only the first item has it)
+      const line = '☀️ 15°C, clear sky';
+      const idx = result.text.indexOf(line);
+      expect(result.text.indexOf(line, idx + 1)).toBe(-1);
+    });
   });
 
   describe('localizeInterval', () => {
