@@ -1263,9 +1263,10 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             sender: 'admin',
             text: messageText,
           });
+          const msgs = t(user.language).callbackErrors;
           try {
             await sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject);
-            await ctx.send('Reply sent.');
+            await ctx.send(msgs.adminReplySent);
           } catch (directErr) {
             cmdLogger.warn(
               { err: directErr, userId: session.userId, threadId: session.threadId },
@@ -1276,13 +1277,13 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
               try {
                 const replyText = `💬 Ответ разработчика (${thread.subject}):\n\n${messageText}`;
                 await deps.sendMessageToChat(session.chatId, replyText);
-                await ctx.send('Delivered to group (user has not started the bot).');
+                await ctx.send(msgs.adminReplyDeliveredToGroup);
               } catch (groupErr) {
                 cmdLogger.error({ err: groupErr, chatId: session.chatId }, 'Group fallback delivery also failed');
-                await ctx.send('⚠️ Delivery failed — user has not started the bot.');
+                await ctx.send(msgs.adminReplyFailed);
               }
             } else {
-              await ctx.send('⚠️ Delivery failed — user has not started the bot.');
+              await ctx.send(msgs.adminReplyFailed);
             }
           }
         }
