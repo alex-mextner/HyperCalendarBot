@@ -200,9 +200,9 @@ export class NotificationRenderer {
     if (data.intervalLabel === 'at start') {
       lines.push(`⏰ ${safeTitle} — ${l.startingNow}`);
     } else if (data.isAllDay) {
-      lines.push(`⏰ ${l.reminder} ${safeTitle} — ${localized}`);
+      lines.push(`⏰ ${safeTitle} — ${localized}`);
     } else {
-      lines.push(`⏰ ${l.reminder} ${safeTitle} ${l.inLabel} ${localized}`);
+      lines.push(`⏰ ${safeTitle} ${l.inLabel} ${localized}`);
     }
     lines.push('');
     if (data.isAllDay) {
@@ -221,7 +221,11 @@ export class NotificationRenderer {
   renderBatchReminder(lang: string, items: BatchReminderItem[]): RenderedNotification {
     const l = t(lang as Lang).notifications;
     const lines: string[] = [];
-    lines.push(`⏰ ${l.reminders}:`);
+    const first = items[0];
+    if (!first) return { channel: 'telegram_text', text: '' };
+    const header =
+      items.length === 1 ? escapeHtml(first.title) : l.batchHeader(escapeHtml(first.title), items.length - 1);
+    lines.push(`⏰ ${header}`);
     lines.push('');
     for (const item of items) {
       const localized = localizeInterval(lang, item.intervalLabel);

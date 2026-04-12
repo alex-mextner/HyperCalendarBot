@@ -45,6 +45,7 @@ export interface CalendarEvent {
   parent_event_id: number | null;
   original_start_at: string | null;
   is_cancelled: number; // 0 | 1
+  is_deleted: number; // 0 | 1 — soft-delete flag
   reminder_overrides: string | null; // JSON array "[5, 30]"
   google_event_id: string | null;
   google_calendar_id: string | null;

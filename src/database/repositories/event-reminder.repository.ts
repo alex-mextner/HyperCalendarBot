@@ -34,7 +34,8 @@ export class EventReminderRepository {
                 e.venue_name AS event_venue_name
          FROM event_reminders er
          JOIN events e ON e.id = er.event_id
-         WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0`,
+         WHERE er.remind_at_utc >= ? AND er.remind_at_utc < ? AND er.sent = 0
+           AND e.is_deleted = 0 AND e.is_cancelled = 0`,
       )
       .all(windowStart, windowEnd) as DueReminderRow[];
   }
