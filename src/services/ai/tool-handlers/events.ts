@@ -19,16 +19,15 @@ const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 /** Fetch event-time weather and return a formatted suffix like `, weather: ☀️ 15°C, clear sky`. */
 async function weatherSuffix(ctx: AgentContext, startAt: string, allDay: boolean): Promise<string> {
   if (!ctx.weatherService) return '';
+  const lang = (ctx.user.language ?? 'en') as Lang;
   try {
-    const forecast = await ctx.weatherService.getForecastAt(
-      ctx.user.timezone,
-      new Date(startAt).getTime(),
-      ctx.user.language,
-      { allDay },
-    );
+    const forecast = await ctx.weatherService.getForecastAt(ctx.user.timezone, new Date(startAt).getTime(), lang, {
+      allDay,
+    });
     if (!forecast) return '';
-    return `, weather: ${formatEventWeatherLine(ctx.user.language as Lang, forecast)}`;
+    return `, ${t(lang).weather.eventForecast(formatEventWeatherLine(lang, forecast))}`;
   } catch {
+    // Weather is non-critical — API failure should not break tool output
     return '';
   }
 }
@@ -618,7 +617,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   };
 }
 
-export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
+export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -652,11 +651,12 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     };
   }
 
-  const lines = events.map((e) => {
+  const weatherSuffixes = await Promise.all(events.map((e) => weatherSuffix(ctx, e.start_at, e.all_day === 1)));
+  const lines = events.map((e, i) => {
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
     if (e.end_at) parts.push(`end: ${e.end_at}`);
     if (e.location) parts.push(`location: ${e.location}`);
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };

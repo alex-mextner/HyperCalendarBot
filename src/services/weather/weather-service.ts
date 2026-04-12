@@ -221,6 +221,7 @@ export function pickForecastAt(
     if (closestHour) return { kind: 'hour', hour: closestHour };
   }
 
+  // NB: uses UTC date — may drift by ±1 day for extreme timezones (UTC±12) with all-day events
   const eventDate = new Date(eventTimeMs).toISOString().slice(0, 10);
   const day = week.days.find((d) => d.date === eventDate);
   if (day) return { kind: 'day', day };
