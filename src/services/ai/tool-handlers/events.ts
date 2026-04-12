@@ -429,28 +429,42 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     ? ctx.participantRepo.getByEvent(event_id).filter((p) => p.status === 'accepted' && p.user_id !== userId)
     : [];
 
-  // Push update to all accepted participants' Google Calendars
+  // Push update to all accepted participants' Google Calendars (parallel).
+  // Concurrency note: SQLite ops inside scheduleParticipantPush are sync
+  // (bun:sqlite), so only the Redis queue.add runs in parallel — bounded
+  // by realistic group sizes (<100 members).
   if (ctx.google?.scheduleParticipantPush && acceptedParticipants.length > 0) {
-    for (const p of acceptedParticipants) {
-      try {
-        await ctx.google.scheduleParticipantPush(p.user_id, updated.id, 'update');
-      } catch (err) {
-        logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed');
+    const pushParticipant = ctx.google.scheduleParticipantPush;
+    const results = await Promise.allSettled(
+      acceptedParticipants.map((p) => pushParticipant(p.user_id, updated.id, 'update')),
+    );
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
+        logger.error(
+          {
+            err: (results[i] as PromiseRejectedResult).reason,
+            participantUserId: acceptedParticipants[i]!.user_id,
+            eventId: updated.id,
+          },
+          'scheduleParticipantPush failed',
+        );
       }
     }
   }
 
-  // Push update to all group members' Google Calendars
+  // Push update to all group members' Google Calendars (parallel)
   if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
     const members = ctx.group.groupMemberRepo
       .getActiveMembers(ctx.groupChatId!)
       .filter((m) => m.user_id !== ctx.user.telegram_id);
-    for (const m of members) {
-      try {
-        await pushParticipant(m.user_id, updated.id, 'update');
-      } catch (err) {
-        logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed');
+    const results = await Promise.allSettled(members.map((m) => pushParticipant(m.user_id, updated.id, 'update')));
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
+        logger.error(
+          { err: (results[i] as PromiseRejectedResult).reason, userId: members[i]!.user_id, eventId: updated.id },
+          'scheduleParticipantPush group failed',
+        );
       }
     }
   }
@@ -570,15 +584,17 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     if (!event) {
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
-    // Remove from all group members' Google Calendars before deleting
+    // Remove from all group members' Google Calendars before deleting (parallel)
     if (ctx.google?.scheduleParticipantPush && ctx.group) {
       const pushParticipant = ctx.google.scheduleParticipantPush;
-      for (const m of ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!)) {
-        try {
-          await pushParticipant(m.user_id, input.event_id, 'delete');
-        } catch (err) {
+      const members = ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!);
+      const results = await Promise.allSettled(
+        members.map((m) => pushParticipant(m.user_id, input.event_id, 'delete')),
+      );
+      for (let i = 0; i < results.length; i++) {
+        if (results[i]!.status === 'rejected') {
           logger.error(
-            { err, userId: m.user_id, eventId: input.event_id },
+            { err: (results[i] as PromiseRejectedResult).reason, userId: members[i]!.user_id, eventId: input.event_id },
             'scheduleParticipantPush group delete failed',
           );
         }
@@ -614,18 +630,23 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  // Remove from all participants' Google Calendars before deleting
+  // Remove from all participants' Google Calendars before deleting (parallel)
   if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
     const participants = ctx.participantRepo
       .getByEvent(input.event_id)
       .filter((p) => p.status === 'accepted' && p.user_id !== userId);
-    for (const p of participants) {
-      try {
-        await pushParticipant(p.user_id, input.event_id, 'delete');
-      } catch (err) {
+    const results = await Promise.allSettled(
+      participants.map((p) => pushParticipant(p.user_id, input.event_id, 'delete')),
+    );
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
         logger.error(
-          { err, participantUserId: p.user_id, eventId: input.event_id },
+          {
+            err: (results[i] as PromiseRejectedResult).reason,
+            participantUserId: participants[i]!.user_id,
+            eventId: input.event_id,
+          },
           'scheduleParticipantPush delete failed',
         );
       }
@@ -864,12 +885,17 @@ export async function handleNotifyParticipants(ctx: AgentContext, input: NotifyP
   }
 
   const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-  const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
-  const jobs = accepted.map((p) => ({
-    recipientId: p.user_id,
-    text,
-    origin: `notify_participants:${input.event_id}`,
-  }));
+  // Per-recipient localization: each recipient gets the notification in their own language
+  const jobs = accepted.map((p) => {
+    const recipientUser = ctx.userRepo.findByTelegramId(p.user_id);
+    const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
+    const text = t(recipientLang).aiTools.events.participantUpdate(event.title, senderName, input.message);
+    return {
+      recipientId: p.user_id,
+      text,
+      origin: `notify_participants:${input.event_id}`,
+    };
+  });
 
   try {
     await ctx.broadcast.enqueueBatch(jobs);
@@ -881,11 +907,7 @@ export async function handleNotifyParticipants(ctx: AgentContext, input: NotifyP
     return { success: false, error: 'NOTIFY_PARTICIPANTS_ENQUEUE_FAILED' };
   }
 
-  const lang = ctx.user.language;
-  const output =
-    lang === 'ru'
-      ? `Уведомление поставлено в очередь для ${jobs.length} ${ruPlural(jobs.length, 'участника', 'участников', 'участников')}.`
-      : `Notification queued for ${jobs.length} participant${jobs.length !== 1 ? 's' : ''}.`;
+  const output = t(ctx.user.language).aiTools.events.notificationQueued(jobs.length);
 
   return {
     success: true,

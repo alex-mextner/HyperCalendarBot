@@ -95,6 +95,7 @@ const botRef: {
   sendVoice: async () => {},
   editMessage: async () => {},
 };
+let botInitialized = false;
 
 let googleDeps: GoogleBotDeps | undefined;
 
@@ -306,8 +307,12 @@ if (config.REDIS_URL) {
   // once the GramIO instance is live. Queue jobs are only enqueued from tool
   // handlers that run AFTER the bot is fully initialized, so by the time the
   // worker dequeues anything, botRef.sendMessage is the real implementation.
+  // Guard: if somehow a job fires before bot init, throw so BullMQ retries.
   const broadcastWorker = createBroadcastWorker(connection, {
-    sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
+    sendMessage: (chatId, text, parseMode) => {
+      if (!botInitialized) throw new Error('Bot not initialized yet — broadcast worker must retry');
+      return botRef.sendMessage(chatId, text, parseMode);
+    },
   });
   broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
 
@@ -881,6 +886,7 @@ botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
+botInitialized = true;
 
 // Scheduled AI calls + trigger system — requires Redis for BullMQ
 if (config.REDIS_URL) {

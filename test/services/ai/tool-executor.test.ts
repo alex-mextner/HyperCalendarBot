@@ -615,79 +615,97 @@ describe('executeTool', () => {
       _resetToolThrottleForTest();
     });
 
-    test('second identical call within 5s window is throttled', async () => {
-      const r1 = await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
+    test('second identical call within 5s window is throttled (side-effect tool)', async () => {
+      // Side-effect tools (not in SKIP_ACTION_LOG) are throttled
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Throttle Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
       });
+      const r1 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
       expect(r1.success).toBe(true);
       expect(r1.output ?? '').not.toContain('THROTTLED');
 
-      const r2 = await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
-      });
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
       expect(r2.success).toBe(true);
       expect(r2.output ?? '').toContain('THROTTLED');
     });
 
-    test('throttle key normalizes argument order', async () => {
-      await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
+    test('throttle key normalizes argument order (side-effect tool)', async () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Order Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
       });
-      const r2 = await executeTool(ctx, 'get_events', {
-        end_date: '2026-03-15T23:59:59Z',
-        start_date: '2026-03-15T00:00:00Z',
-      });
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'B' });
+      const r2 = await executeTool(ctx, 'update_event', { title: 'B', event_id: event.id });
       expect(r2.output ?? '').toContain('THROTTLED');
     });
 
-    test('different args are NOT throttled', async () => {
+    test('read-only tools are NOT throttled (exempt from cross-run throttle)', async () => {
       const r1 = await executeTool(ctx, 'get_events', {
         start_date: '2026-03-15T00:00:00Z',
         end_date: '2026-03-15T23:59:59Z',
       });
       const r2 = await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-16T00:00:00Z',
-        end_date: '2026-03-16T23:59:59Z',
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
       });
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different args are NOT throttled', async () => {
+      const event1 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'E1',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const event2 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'E2',
+        start_at: '2026-03-16T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const r1 = await executeTool(ctx, 'update_event', { event_id: event1.id, title: 'X' });
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event2.id, title: 'X' });
       expect(r1.output ?? '').not.toContain('THROTTLED');
       expect(r2.output ?? '').not.toContain('THROTTLED');
     });
 
     test('different chats do NOT share throttle state', async () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Chat Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
       const otherCtx: AgentContext = { ...ctx, chatId: 999999 };
-      await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
-      });
-      const r2 = await executeTool(otherCtx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
-      });
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Y' });
+      const r2 = await executeTool(otherCtx, 'update_event', { event_id: event.id, title: 'Y' });
       expect(r2.output ?? '').not.toContain('THROTTLED');
     });
 
     test('different tool names are NOT throttled against each other', async () => {
-      await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
-      });
-      const r2 = await executeTool(ctx, 'get_upcoming', { limit: 5 });
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
+      await executeTool(ctx, 'create_event', { title: 'Foo', start_at: `${tomorrow}14:00:00Z` });
+      const r2 = await executeTool(ctx, 'create_event', { title: 'Bar', start_at: `${tomorrow}15:00:00Z` });
       expect(r2.output ?? '').not.toContain('THROTTLED');
     });
 
     test('throttle entry expires after TTL (simulated via reset)', async () => {
-      await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'TTL Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
       });
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Z' });
       _resetToolThrottleForTest();
-      const r2 = await executeTool(ctx, 'get_events', {
-        start_date: '2026-03-15T00:00:00Z',
-        end_date: '2026-03-15T23:59:59Z',
-      });
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Z' });
       expect(r2.output ?? '').not.toContain('THROTTLED');
     });
   });

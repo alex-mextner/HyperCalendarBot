@@ -4,7 +4,7 @@ import type { AgentContext, ToolResult } from '../types.ts';
 
 export { handleCalculate } from './calculate.ts';
 export { handleAddContact, handleFindContact, handleGetContacts, handleUpdateContact } from './contacts.ts';
-export { handleRenderDayImage, handleRenderTable, handleRenderWeekImage } from './render.ts';
+export { handleRenderDayImage, handleRenderMonthImage, handleRenderTable, handleRenderWeekImage } from './render.ts';
 export {
   getTimezoneSuggestions,
   handleConvertToTimezone,

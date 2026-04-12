@@ -371,6 +371,9 @@ export const MSG = {
           `You declined the shared event (id: ${id}). It has been removed from your calendar.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Event "${title}" snoozed by ${minutes} min. New start: ${newStart}`,
+        notificationQueued: (count: number) => `Notification queued for ${count} participant${count !== 1 ? 's' : ''}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Update on "${eventTitle}" from ${senderName}:\n${message}`,
       },
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
@@ -986,6 +989,10 @@ export const MSG = {
         eventDeclined: (id: number) => `Ты отклонил(а) общее событие (id: ${id}). Оно удалено из твоего календаря.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Событие «${title}» отложено на ${minutes} мин. Новое начало: ${newStart}`,
+        notificationQueued: (count: number) =>
+          `Уведомление поставлено в очередь для ${count} ${ruPlural(count, 'участника', 'участников', 'участников')}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Обновление по «${eventTitle}» от ${senderName}:\n${message}`,
       },
       reminders: {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,

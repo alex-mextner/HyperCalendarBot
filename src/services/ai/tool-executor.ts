@@ -239,11 +239,23 @@ function buildThrottleKey(chatId: number, toolName: string, input: unknown): str
 /**
  * Evict stale entries opportunistically when the map grows beyond the soft
  * cap. Called on each insert. O(n) but only triggered at the ceiling.
+ * If stale eviction is insufficient (all entries fresh), force-evict oldest
+ * entries to guarantee the map stays bounded.
  */
 function evictStaleThrottleEntries(now: number): void {
   if (throttleMap.size < THROTTLE_MAX_ENTRIES) return;
   for (const [key, ts] of throttleMap) {
     if (now - ts >= THROTTLE_TTL_MS) throttleMap.delete(key);
+  }
+  // Force-evict oldest entries if still over cap (all entries are fresh)
+  if (throttleMap.size >= THROTTLE_MAX_ENTRIES) {
+    const excess = throttleMap.size - THROTTLE_MAX_ENTRIES + 100; // evict batch of 100
+    let removed = 0;
+    for (const key of throttleMap.keys()) {
+      if (removed >= excess) break;
+      throttleMap.delete(key);
+      removed++;
+    }
   }
 }
 
@@ -255,6 +267,37 @@ export function _resetToolThrottleForTest(): void {
 const THROTTLE_MARKER =
   'THROTTLED: this tool was just called with identical arguments (within the last 5 seconds). ' +
   'Use the previous result. Do NOT call it again — respond to the user or call a different tool.';
+
+/**
+ * Purely read-only tools exempt from cross-run throttle. These have NO Telegram
+ * side effects — they only query data and return it. Tools like ask_user,
+ * pick_users, render_*, set_reaction are NOT exempt because they send messages.
+ */
+const THROTTLE_EXEMPT = new Set<string>([
+  'get_events',
+  'get_event',
+  'get_upcoming',
+  'get_free_slots',
+  'search_events',
+  'get_reminders',
+  'get_contacts',
+  'find_contact',
+  'find_user',
+  'get_history',
+  'get_holidays',
+  'get_invitation_status',
+  'get_google_calendar_status',
+  'list_google_calendars',
+  'list_calendar_access',
+  'get_timezone_info',
+  'convert_to_timezone',
+  'get_bot_info',
+  'calculate',
+  'lookup_stress',
+  'schedule_ai_calls_list',
+  'list_triggers',
+  'get_action_log',
+]);
 
 /** Tools that are read-only or meta — not worth logging as user actions. */
 const SKIP_ACTION_LOG = new Set<string>([
@@ -345,18 +388,22 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
   // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
   // THROTTLED result without invoking the handler. Prevents rapid cross-run
   // repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
-  const now = Date.now();
-  const throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
-  const lastCalledAt = throttleMap.get(throttleKey);
-  if (lastCalledAt !== undefined && now - lastCalledAt < THROTTLE_TTL_MS) {
-    aiLogger.warn(
-      { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
-      'Tool call throttled (identical within 5s)',
-    );
-    return { success: true, output: THROTTLE_MARKER };
+  // Only applied to tools with side-effects — purely read-only tools are exempt
+  // so legitimate repeated queries within 5s don't get stale answers.
+  if (!THROTTLE_EXEMPT.has(toolName)) {
+    const now = Date.now();
+    const throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
+    const lastCalledAt = throttleMap.get(throttleKey);
+    if (lastCalledAt !== undefined && now - lastCalledAt < THROTTLE_TTL_MS) {
+      aiLogger.warn(
+        { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
+        'Tool call throttled (identical within 5s)',
+      );
+      return { success: true, output: THROTTLE_MARKER };
+    }
+    evictStaleThrottleEntries(now);
+    throttleMap.set(throttleKey, now);
   }
-  evictStaleThrottleEntries(now);
-  throttleMap.set(throttleKey, now);
 
   try {
     const result = await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]);
