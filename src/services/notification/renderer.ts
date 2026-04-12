@@ -232,16 +232,13 @@ export class NotificationRenderer {
     const lines: string[] = [];
     lines.push(`⏰ ${l.reminders}:`);
 
-    // When every item shares the same forecast, show it once after the header
+    // When every item shares the same forecast, show it once at the bottom
     const formattedForecasts = items.map((item) =>
       item.forecast ? formatEventWeatherLine(langKey, item.forecast) : null,
     );
     const allHaveForecast = formattedForecasts.every(Boolean);
     const uniqueNonNull = new Set(formattedForecasts.filter(Boolean));
     const sharedWeather = allHaveForecast && uniqueNonNull.size === 1 ? [...uniqueNonNull][0]! : null;
-    if (sharedWeather) {
-      lines.push(sharedWeather);
-    }
 
     lines.push('');
     for (let i = 0; i < items.length; i++) {
@@ -266,6 +263,9 @@ export class NotificationRenderer {
         line += `\n  ${formattedForecasts[i]}`;
       }
       lines.push(line);
+    }
+    if (sharedWeather) {
+      lines.push('', sharedWeather);
     }
     return { channel: 'telegram_text', text: lines.join('\n') };
   }

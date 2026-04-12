@@ -262,14 +262,14 @@ describe('NotificationRenderer', () => {
         { title: 'Standup', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
         { title: 'Call', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
       ]);
-      // Weather line appears once — right after the header, not per item
+      // Weather line appears once — at the bottom, after all bullets
       const weatherLine = '☀️ 12°C, clear sky';
       const firstIdx = result.text.indexOf(weatherLine);
       expect(firstIdx).toBeGreaterThan(-1);
       expect(result.text.indexOf(weatherLine, firstIdx + 1)).toBe(-1);
-      // The weather line is between the header and the first bullet
-      expect(result.text.indexOf('Reminders:')).toBeLessThan(firstIdx);
-      expect(firstIdx).toBeLessThan(result.text.indexOf('• Standup'));
+      // The weather line is after both bullets
+      expect(firstIdx).toBeGreaterThan(result.text.indexOf('• Standup'));
+      expect(firstIdx).toBeGreaterThan(result.text.indexOf('• Call'));
     });
 
     test('shows per-item weather when forecasts differ', () => {

@@ -412,6 +412,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     locationVerification,
     addressCache,
     pendingGeoStore,
+    weatherService,
   };
 
   // AI Assistant commands (not in setMyCommands — internal use only)

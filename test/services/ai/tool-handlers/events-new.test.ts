@@ -53,7 +53,7 @@ describe('handleGetUpcoming', () => {
     };
   });
 
-  test('returns upcoming events', () => {
+  test('returns upcoming events', async () => {
     const futureDate = new Date(Date.now() + 3600_000).toISOString();
     ctx.eventService.createEvent({
       user_id: USER_ID,
@@ -62,19 +62,19 @@ describe('handleGetUpcoming', () => {
       end_at: new Date(Date.now() + 7200_000).toISOString(),
       timezone: 'UTC',
     });
-    const result = handleGetUpcoming(ctx, {});
+    const result = await handleGetUpcoming(ctx, {});
     expect(result.success).toBe(true);
     expect(result.output).toContain('Future Meeting');
     expect(result.output).toContain('Next 1');
   });
 
-  test('returns no events message when empty', () => {
-    const result = handleGetUpcoming(ctx, {});
+  test('returns no events message when empty', async () => {
+    const result = await handleGetUpcoming(ctx, {});
     expect(result.success).toBe(true);
     expect(result.output).toContain('No upcoming events');
   });
 
-  test('respects limit parameter', () => {
+  test('respects limit parameter', async () => {
     for (let i = 1; i <= 3; i++) {
       ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -83,7 +83,7 @@ describe('handleGetUpcoming', () => {
         timezone: 'UTC',
       });
     }
-    const result = handleGetUpcoming(ctx, { limit: 2 });
+    const result = await handleGetUpcoming(ctx, { limit: 2 });
     expect(result.success).toBe(true);
     expect(result.output).toContain('Next 2');
     expect(result.output).toContain('Event 1');
@@ -91,7 +91,7 @@ describe('handleGetUpcoming', () => {
     expect(result.output).not.toContain('Event 3');
   });
 
-  test('defaults to limit 5', () => {
+  test('defaults to limit 5', async () => {
     for (let i = 1; i <= 7; i++) {
       ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -100,13 +100,13 @@ describe('handleGetUpcoming', () => {
         timezone: 'UTC',
       });
     }
-    const result = handleGetUpcoming(ctx, {});
+    const result = await handleGetUpcoming(ctx, {});
     expect(result.success).toBe(true);
     expect(result.output).toContain('Next 5');
     expect(result.output).not.toContain('Event 6');
   });
 
-  test('includes location when present', () => {
+  test('includes location when present', async () => {
     ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Office Meeting',
@@ -114,7 +114,7 @@ describe('handleGetUpcoming', () => {
       location: 'Room 42',
       timezone: 'UTC',
     });
-    const result = handleGetUpcoming(ctx, {});
+    const result = await handleGetUpcoming(ctx, {});
     expect(result.success).toBe(true);
     expect(result.output).toContain('Room 42');
   });
@@ -175,7 +175,7 @@ describe('handleSnoozeEvent', () => {
     expect(result.output).toContain('2026-03-15T10:10:00.000Z');
   });
 
-  test('returns error for non-existent event', () => {
+  test('returns error for non-existent event', async () => {
     const result = handleSnoozeEvent(ctx, { event_id: 9999 });
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
@@ -227,7 +227,7 @@ describe('handleGetEvent', () => {
     };
   });
 
-  test('returns event details', () => {
+  test('returns event details', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Doctor Appointment',
@@ -237,20 +237,20 @@ describe('handleGetEvent', () => {
       location: 'Hospital',
       timezone: 'UTC',
     });
-    const result = handleGetEvent(ctx, { event_id: event.id });
+    const result = await handleGetEvent(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
     expect(result.output).toContain('Doctor Appointment');
     expect(result.output).toContain('Annual checkup');
     expect(result.output).toContain('Hospital');
   });
 
-  test('returns error for non-existent event', () => {
-    const result = handleGetEvent(ctx, { event_id: 9999 });
+  test('returns error for non-existent event', async () => {
+    const result = await handleGetEvent(ctx, { event_id: 9999 });
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
   });
 
-  test('includes reminders when present', () => {
+  test('includes reminders when present', async () => {
     const futureStart = new Date(Date.now() + 86_400_000).toISOString();
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
@@ -259,14 +259,14 @@ describe('handleGetEvent', () => {
       timezone: 'UTC',
       reminder_minutes: [15, 60],
     });
-    const result = handleGetEvent(ctx, { event_id: event.id });
+    const result = await handleGetEvent(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
     expect(result.output).toContain('reminders');
     expect(result.output).toContain('15min');
     expect(result.output).toContain('1h');
   });
 
-  test('includes recurrence rule when present', () => {
+  test('includes recurrence rule when present', async () => {
     const event = ctx.eventService.createEvent({
       user_id: USER_ID,
       title: 'Weekly Sync',
@@ -274,7 +274,7 @@ describe('handleGetEvent', () => {
       timezone: 'UTC',
       recurrence_rule: 'FREQ=WEEKLY',
     });
-    const result = handleGetEvent(ctx, { event_id: event.id });
+    const result = await handleGetEvent(ctx, { event_id: event.id });
     expect(result.success).toBe(true);
     expect(result.output).toContain('FREQ=WEEKLY');
   });

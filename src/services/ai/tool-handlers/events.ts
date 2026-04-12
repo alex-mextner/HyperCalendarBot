@@ -1,5 +1,6 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
+import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
@@ -7,12 +8,30 @@ import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
+import { formatEventWeatherLine } from '../../weather/format.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Fetch event-time weather and return a formatted suffix like `, weather: ☀️ 15°C, clear sky`. */
+async function weatherSuffix(ctx: AgentContext, startAt: string, allDay: boolean): Promise<string> {
+  if (!ctx.weatherService) return '';
+  try {
+    const forecast = await ctx.weatherService.getForecastAt(
+      ctx.user.timezone,
+      new Date(startAt).getTime(),
+      ctx.user.language,
+      { allDay },
+    );
+    if (!forecast) return '';
+    return `, weather: ${formatEventWeatherLine(ctx.user.language as Lang, forecast)}`;
+  } catch {
+    return '';
+  }
+}
 
 function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
   // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
@@ -186,7 +205,7 @@ interface SearchEventsInput {
   event_type?: 'birthday' | 'regular';
 }
 
-export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
+export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -213,7 +232,10 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
     return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange, data };
   }
 
-  const lines = occurrences.map((occ) => {
+  const weatherSuffixes = await Promise.all(
+    occurrences.map((occ) => weatherSuffix(ctx, occ.occurrence_start, occ.event.all_day === 1)),
+  );
+  const lines = occurrences.map((occ, i) => {
     const e = occ.event;
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
@@ -229,7 +251,7 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
       const creatorLabel = creator?.username ? `@${creator.username}` : `id:${e.created_by}`;
       parts.push(`created_by: ${creatorLabel}`);
     }
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return { success: true, output: lines.join('\n'), data };
@@ -640,7 +662,7 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
   return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };
 }
 
-export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
+export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -674,12 +696,15 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
     return { success: true, output: t(ctx.user.language).aiTools.events.noUpcomingEvents, data };
   }
 
-  const lines = upcoming.map((occ) => {
+  const weatherSuffixes = await Promise.all(
+    upcoming.map((occ) => weatherSuffix(ctx, occ.occurrence_start, occ.event.all_day === 1)),
+  );
+  const lines = upcoming.map((occ, i) => {
     const e = occ.event;
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
     if (e.location) parts.push(`location: ${e.location}`);
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return {
@@ -734,7 +759,7 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
   };
 }
 
-export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
+export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -756,6 +781,7 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
+  const weather = await weatherSuffix(ctx, event.start_at, event.all_day === 1);
   const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
   if (event.end_at) parts.push(`end: ${event.end_at}`);
   if (event.description) parts.push(`description: ${event.description}`);
@@ -779,7 +805,7 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     parts.push(`reminders: ${unique.join(', ')}`);
   }
 
-  return { success: true, output: parts.join(', '), data: eventToSummary(event, ctx.user.timezone) };
+  return { success: true, output: parts.join(', ') + weather, data: eventToSummary(event, ctx.user.timezone) };
 }
 
 interface NotifyParticipantsInput {
