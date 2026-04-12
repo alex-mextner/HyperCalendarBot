@@ -229,7 +229,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
-  const adminReplySession = new Map<number, { threadId: number; userId: number }>();
+  const adminReplySession = new Map<
+    number,
+    { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+  >();
   const proposeTimeSessions = new Map<number, { invitationId: number }>();
 
   // Load approved intents into matcher on startup
@@ -360,12 +363,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sendMessageToChat: async (
       chatId: number,
       text: string,
-      options?: { reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup },
+      options?: {
+        reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup;
+        message_thread_id?: number;
+      },
     ) => {
       const result = await bot.api.sendMessage({
         chat_id: chatId,
         text,
         ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
+        ...(options?.message_thread_id ? { message_thread_id: options.message_thread_id } : {}),
       });
       return result;
     },

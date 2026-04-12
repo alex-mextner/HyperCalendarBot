@@ -492,6 +492,10 @@ export const MSG = {
       proposalAcceptedNotification: (title: string) => `✅ «${title}» — edit accepted`,
       proposalRejectedNotification: (title: string) => `❌ «${title}» — edit rejected`,
       feedbackThreadResolved: (subject: string) => `✅ «${subject}» — resolved`,
+      adminReplyHeader: (subject: string) => `💬 Developer reply (${subject}):`,
+      adminReplySent: 'Reply sent.',
+      adminReplyDeliveredToGroup: 'Delivered to group (user has not started the bot).',
+      adminReplyFailed: '⚠️ Delivery failed — user has not started the bot.',
     },
     notifications: {
       morning: "Good morning! Here's your day:",
@@ -1121,6 +1125,10 @@ export const MSG = {
       proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
       proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
       feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
+      adminReplyHeader: (subject: string) => `💬 Ответ разработчика (${subject}):`,
+      adminReplySent: 'Ответ отправлен.',
+      adminReplyDeliveredToGroup: 'Доставлено в группу (пользователь не начал чат с ботом).',
+      adminReplyFailed: '⚠️ Не удалось доставить — пользователь не начал чат с ботом.',
       proposalAlreadyProcessed: (status: string) => {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
         return `Уже ${map[status] ?? status}`;

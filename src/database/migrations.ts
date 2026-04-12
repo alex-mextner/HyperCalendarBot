@@ -1002,4 +1002,11 @@ export const migrations: Migration[] = [
       db.exec('DROP INDEX IF EXISTS idx_events_is_deleted');
     },
   },
+  {
+    name: '056_feedback_threads_chat_id',
+    up: (db) => {
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN chat_id INTEGER DEFAULT NULL');
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN topic_thread_id INTEGER DEFAULT NULL');
+    },
+  },
 ];
