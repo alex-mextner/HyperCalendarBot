@@ -1,4 +1,5 @@
 // src/services/ai/tool-handlers/scenes.ts
+import { t } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import type { ScenePauseService } from '../../scene-pause.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -9,10 +10,7 @@ export async function handleResumeScene(ctx: AgentContext, scenePauseService: Sc
   await scenePauseService.clear(ctx.user.telegram_id);
   return {
     success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? 'Продолжай заполнение с того места, где остановился.'
-        : 'Continue the wizard from where you left off.',
+    output: t(ctx.user.language).aiTools.meta.sceneResumed,
   };
 }
 
@@ -29,6 +27,6 @@ export async function handleCancelScene(ctx: AgentContext, scenePauseService: Sc
   }
   return {
     success: true,
-    output: ctx.user.language === 'ru' ? 'Мастер отменён.' : 'Wizard cancelled.',
+    output: t(ctx.user.language).aiTools.meta.sceneCancelled,
   };
 }

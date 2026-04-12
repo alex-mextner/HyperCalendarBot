@@ -5,7 +5,7 @@ import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts'
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
-import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
+import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
@@ -495,11 +495,7 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
   if (acceptedParticipants.length > 0) {
-    const count = acceptedParticipants.length;
-    output +=
-      ctx.user.language === 'ru'
-        ? `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
-        : `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
+    output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
   // Trigger background location verification if location was updated
@@ -558,10 +554,7 @@ export async function handleAttachPendingLocationToEvent(
 
   return {
     success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? `📍 Локация привязана к событию #${input.event_id}.`
-        : `📍 Location attached to event #${input.event_id}.`,
+    output: t(ctx.user.language).aiTools.events.locationAttached(input.event_id),
   };
 }
 

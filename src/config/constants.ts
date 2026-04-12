@@ -340,6 +340,8 @@ export const MSG = {
         gcalNoCalendars: 'No Google Calendars found. Sync may still be in progress.',
         gcalList: (lines: string) => `Google Calendars:\n${lines}`,
         userPickerSent: 'User picker sent. Waiting for user to select participants.',
+        sceneResumed: 'Continue the wizard from where you left off.',
+        sceneCancelled: 'Wizard cancelled.',
         tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
         tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
@@ -374,6 +376,9 @@ export const MSG = {
         notificationQueued: (count: number) => `Notification queued for ${count} participant${count !== 1 ? 's' : ''}.`,
         participantUpdate: (eventTitle: string, senderName: string, message: string) =>
           `📅 Update on "${eventTitle}" from ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`,
+        locationAttached: (eventId: number) => `📍 Location attached to event #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
@@ -959,6 +964,8 @@ export const MSG = {
         gcalNoCalendars: 'Google-календари не найдены. Возможно, синхронизация ещё идёт.',
         gcalList: (lines: string) => `Google-календари:\n${lines}`,
         userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
+        sceneResumed: 'Продолжай заполнение с того места, где остановился.',
+        sceneCancelled: 'Мастер отменён.',
         tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
         tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
@@ -993,6 +1000,9 @@ export const MSG = {
           `Уведомление поставлено в очередь для ${count} ${ruPlural(count, 'участника', 'участников', 'участников')}.`,
         participantUpdate: (eventTitle: string, senderName: string, message: string) =>
           `📅 Обновление по «${eventTitle}» от ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`,
+        locationAttached: (eventId: number) => `📍 Локация привязана к событию #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
