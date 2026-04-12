@@ -386,6 +386,7 @@ export interface FeedbackThread {
   subject: string;
   created_at: string;
   closed_at: string | null;
+  chat_id: number | null;
 }
 
 export interface FeedbackMessage {
@@ -401,6 +402,7 @@ export interface CreateFeedbackThreadData {
   user_id: number;
   type: FeedbackType;
   subject: string;
+  chat_id?: number;
 }
 
 export interface CreateFeedbackMessageData {

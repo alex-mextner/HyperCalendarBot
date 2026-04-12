@@ -81,6 +81,15 @@ describe('handleSendFeedback', () => {
     expect(messages[0]!.text).toBe('Something is broken');
   });
 
+  test('stores chat_id from agent context on thread', () => {
+    ctx.chatId = -100555;
+    handleSendFeedback(ctx, { type: 'bug', message: 'Group bug' });
+
+    const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
+    expect(thread).not.toBeNull();
+    expect(thread!.chat_id).toBe(-100555);
+  });
+
   test('rejects when botAdminId not configured', () => {
     ctx.feedback = undefined;
     const result = handleSendFeedback(ctx, { type: 'question', message: 'Hello' });

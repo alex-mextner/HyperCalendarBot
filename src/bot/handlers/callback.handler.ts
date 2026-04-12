@@ -120,7 +120,7 @@ export interface CallbackHandlerOpts {
   sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
-    adminReplySession: Map<number, { threadId: number; userId: number }>;
+    adminReplySession: Map<number, { threadId: number; userId: number; chatId?: number }>;
     sendMessage: (chatId: number, text: string) => Promise<void>;
     adminId?: number;
   };
@@ -1351,7 +1351,11 @@ export function createCallbackHandler(
       await ctx.answer({ text: t(lang).callbackErrors.threadNotFound });
       return;
     }
-    feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
+    feedbackDeps.adminReplySession.set(user.telegram_id, {
+      threadId,
+      userId: thread.user_id,
+      chatId: thread.chat_id ?? undefined,
+    });
     await ctx.answer({ text: t(lang).callbackErrors.sendReplyMessage });
   });
 

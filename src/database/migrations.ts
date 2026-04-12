@@ -977,4 +977,10 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
     },
   },
+  {
+    name: '054_feedback_threads_chat_id',
+    up: (db) => {
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN chat_id INTEGER DEFAULT NULL');
+    },
+  },
 ];

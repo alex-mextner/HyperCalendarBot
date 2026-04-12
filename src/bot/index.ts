@@ -229,7 +229,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
-  const adminReplySession = new Map<number, { threadId: number; userId: number }>();
+  const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
   const proposeTimeSessions = new Map<number, { invitationId: number }>();
 
   // Load approved intents into matcher on startup

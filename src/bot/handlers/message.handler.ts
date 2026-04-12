@@ -166,8 +166,8 @@ export interface MessageHandlerDeps {
   nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
-  // Admin reply sessions: adminId → { threadId, userId }
-  adminReplySession?: Map<number, { threadId: number; userId: number }>;
+  // Admin reply sessions: adminId → { threadId, userId, chatId }
+  adminReplySession?: Map<number, { threadId: number; userId: number; chatId?: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   sendMessageToChat?: AgentContext['sendMessageToChat'];
@@ -1263,12 +1263,28 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             sender: 'admin',
             text: messageText,
           });
-          sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject).catch(
-            (e: unknown) => {
-              cmdLogger.error({ err: e }, 'Failed to deliver admin reply to user');
-            },
-          );
-          await ctx.send('Reply sent.');
+          try {
+            await sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject);
+            await ctx.send('Reply sent.');
+          } catch (directErr) {
+            cmdLogger.warn(
+              { err: directErr, userId: session.userId, threadId: session.threadId },
+              'Direct delivery to user failed, trying group fallback',
+            );
+            // Fall back to the group chat where the feedback originated
+            if (session.chatId && session.chatId !== session.userId && deps.sendMessageToChat) {
+              try {
+                const replyText = `💬 Ответ разработчика (${thread.subject}):\n\n${messageText}`;
+                await deps.sendMessageToChat(session.chatId, replyText);
+                await ctx.send('Delivered to group (user has not started the bot).');
+              } catch (groupErr) {
+                cmdLogger.error({ err: groupErr, chatId: session.chatId }, 'Group fallback delivery also failed');
+                await ctx.send('⚠️ Delivery failed — user has not started the bot.');
+              }
+            } else {
+              await ctx.send('⚠️ Delivery failed — user has not started the bot.');
+            }
+          }
         }
         return;
       }

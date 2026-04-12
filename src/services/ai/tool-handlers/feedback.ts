@@ -27,6 +27,7 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
     user_id: ctx.user.telegram_id,
     type: input.type,
     subject,
+    chat_id: ctx.chatId,
   });
 
   feedbackRepo.addMessage({
