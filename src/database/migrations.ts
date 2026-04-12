@@ -981,6 +981,7 @@ export const migrations: Migration[] = [
     name: '054_feedback_threads_chat_id',
     up: (db) => {
       db.exec('ALTER TABLE feedback_threads ADD COLUMN chat_id INTEGER DEFAULT NULL');
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN topic_thread_id INTEGER DEFAULT NULL');
     },
   },
 ];

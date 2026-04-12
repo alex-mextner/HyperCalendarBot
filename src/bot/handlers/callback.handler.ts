@@ -120,7 +120,7 @@ export interface CallbackHandlerOpts {
   sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
-    adminReplySession: Map<number, { threadId: number; userId: number; chatId?: number }>;
+    adminReplySession: Map<number, { threadId: number; userId: number; chatId?: number; topicThreadId?: number }>;
     sendMessage: (chatId: number, text: string) => Promise<void>;
     adminId?: number;
   };
@@ -1355,6 +1355,7 @@ export function createCallbackHandler(
       threadId,
       userId: thread.user_id,
       chatId: thread.chat_id ?? undefined,
+      topicThreadId: thread.topic_thread_id ?? undefined,
     });
     await ctx.answer({ text: t(lang).callbackErrors.sendReplyMessage });
   });

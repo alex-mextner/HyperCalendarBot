@@ -7,10 +7,10 @@ export class FeedbackRepository {
   createThread(data: CreateFeedbackThreadData): number {
     const result = this.db
       .prepare(`
-        INSERT INTO feedback_threads (user_id, status, type, subject, chat_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO feedback_threads (user_id, status, type, subject, chat_id, topic_thread_id)
+        VALUES (?, ?, ?, ?, ?, ?)
       `)
-      .run(data.user_id, 'open', data.type, data.subject, data.chat_id ?? null);
+      .run(data.user_id, 'open', data.type, data.subject, data.chat_id ?? null, data.topic_thread_id ?? null);
 
     return Number(result.lastInsertRowid);
   }

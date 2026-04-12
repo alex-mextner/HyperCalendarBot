@@ -166,8 +166,8 @@ export interface MessageHandlerDeps {
   nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
-  // Admin reply sessions: adminId → { threadId, userId, chatId }
-  adminReplySession?: Map<number, { threadId: number; userId: number; chatId?: number }>;
+  // Admin reply sessions: adminId → { threadId, userId, chatId, topicThreadId }
+  adminReplySession?: Map<number, { threadId: number; userId: number; chatId?: number; topicThreadId?: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   sendMessageToChat?: AgentContext['sendMessageToChat'];
@@ -525,6 +525,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       isGroup: boolean;
       groupChatId?: number;
       groupTitle?: string;
+      topicThreadId?: number;
       onBotResponse?: (messageId: number) => void;
       incomingMessageId?: number;
     },
@@ -550,6 +551,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       isGroup: groupInfo?.isGroup ?? false,
       groupChatId: groupInfo?.groupChatId,
       groupTitle: groupInfo?.groupTitle,
+      topicThreadId: groupInfo?.topicThreadId,
       onBotResponse: groupInfo?.onBotResponse,
       eventService: deps.eventService,
       holidayService: deps.holidayService,
@@ -1276,7 +1278,9 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             if (session.chatId && session.chatId !== session.userId && deps.sendMessageToChat) {
               try {
                 const replyText = `💬 Ответ разработчика (${thread.subject}):\n\n${messageText}`;
-                await deps.sendMessageToChat(session.chatId, replyText);
+                await deps.sendMessageToChat(session.chatId, replyText, {
+                  message_thread_id: session.topicThreadId,
+                });
                 await ctx.send(msgs.adminReplyDeliveredToGroup);
               } catch (groupErr) {
                 cmdLogger.error({ err: groupErr, chatId: session.chatId }, 'Group fallback delivery also failed');
@@ -1354,6 +1358,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           isGroup: true as const,
           groupChatId: Number(chatId),
           groupTitle: chat?.title ?? undefined,
+          topicThreadId: ctx.threadId,
           onBotResponse: deps.groupSessions
             ? (messageId: number) => {
                 if (deps.groupSessions!.hasActiveSession(Number(chatId))) {

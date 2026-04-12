@@ -168,6 +168,8 @@ export interface AgentContext {
   incomingMessageId?: number;
   groupChatId?: number;
   groupTitle?: string;
+  /** Telegram forum topic thread ID. Present when the message is inside a topic. */
+  topicThreadId?: number;
   onBotResponse?: (messageId: number) => void;
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
@@ -180,7 +182,7 @@ export interface AgentContext {
   sendMessageToChat?: (
     chatId: number,
     text: string,
-    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup },
+    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   conflictChecker?: ConflictChecker;

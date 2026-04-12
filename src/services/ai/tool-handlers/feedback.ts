@@ -28,6 +28,7 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
     type: input.type,
     subject,
     chat_id: ctx.chatId,
+    topic_thread_id: ctx.topicThreadId,
   });
 
   feedbackRepo.addMessage({

@@ -88,7 +88,10 @@ describe('Admin reply delivery with group fallback', () => {
     feedbackRepo.addMessage({ thread_id: threadId, sender: 'user', text: 'Something broke' });
 
     const sendMessageToUser = mock(() => Promise.resolve());
-    const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
     adminReplySession.set(ADMIN_ID, { threadId, userId: USER_ID });
 
     const ctx = makeAdminCtx();
@@ -123,7 +126,10 @@ describe('Admin reply delivery with group fallback', () => {
 
     const sendMessageToUser = mock(() => Promise.reject(new Error('Forbidden: bot was blocked by the user')));
     const sendMessageToChat = mock(() => Promise.resolve({ message_id: 1 } as TelegramMessage));
-    const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
     adminReplySession.set(ADMIN_ID, { threadId, userId: USER_ID, chatId: GROUP_CHAT_ID });
 
     const ctx = makeAdminCtx();
@@ -152,6 +158,51 @@ describe('Admin reply delivery with group fallback', () => {
     expect(reply).toContain('group');
   });
 
+  test('passes message_thread_id when group has topics', async () => {
+    const TOPIC_ID = 77;
+    const threadId = feedbackRepo.createThread({
+      user_id: USER_ID,
+      type: 'bug',
+      subject: 'Topic bug',
+      chat_id: GROUP_CHAT_ID,
+      topic_thread_id: TOPIC_ID,
+    });
+    feedbackRepo.addMessage({ thread_id: threadId, sender: 'user', text: 'Bug from topic' });
+
+    const sendMessageToUser = mock(() => Promise.reject(new Error('Forbidden')));
+    const sendMessageToChat = mock(() => Promise.resolve({ message_id: 1 } as TelegramMessage));
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
+    adminReplySession.set(ADMIN_ID, {
+      threadId,
+      userId: USER_ID,
+      chatId: GROUP_CHAT_ID,
+      topicThreadId: TOPIC_ID,
+    });
+
+    const ctx = makeAdminCtx();
+    const deps = makeDeps({
+      feedbackRepo,
+      adminReplySession,
+      botAdminId: ADMIN_ID,
+      sendMessageToUser,
+      sendMessageToChat,
+    });
+
+    const handler = createMessageHandler(deps as never);
+    await handler(ctx as never);
+
+    expect(sendMessageToChat).toHaveBeenCalledTimes(1);
+    const [, , options] = sendMessageToChat.mock.calls[0]! as unknown as [
+      number,
+      string,
+      { message_thread_id?: number },
+    ];
+    expect(options.message_thread_id).toBe(TOPIC_ID);
+  });
+
   test('shows error when direct delivery fails and no group fallback available', async () => {
     const threadId = feedbackRepo.createThread({
       user_id: USER_ID,
@@ -161,7 +212,10 @@ describe('Admin reply delivery with group fallback', () => {
     feedbackRepo.addMessage({ thread_id: threadId, sender: 'user', text: 'Bug from DM' });
 
     const sendMessageToUser = mock(() => Promise.reject(new Error('Forbidden: bot was blocked by the user')));
-    const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
     adminReplySession.set(ADMIN_ID, { threadId, userId: USER_ID });
 
     const ctx = makeAdminCtx();
@@ -192,7 +246,10 @@ describe('Admin reply delivery with group fallback', () => {
 
     const sendMessageToUser = mock(() => Promise.reject(new Error('Forbidden: bot was blocked')));
     const sendMessageToChat = mock(() => Promise.reject(new Error('Forbidden: bot was kicked from the group')));
-    const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
     adminReplySession.set(ADMIN_ID, { threadId, userId: USER_ID, chatId: GROUP_CHAT_ID });
 
     const ctx = makeAdminCtx();
@@ -222,7 +279,10 @@ describe('Admin reply delivery with group fallback', () => {
     });
 
     const sendMessageToUser = mock(() => Promise.reject(new Error('Forbidden')));
-    const adminReplySession = new Map<number, { threadId: number; userId: number; chatId?: number }>();
+    const adminReplySession = new Map<
+      number,
+      { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+    >();
     adminReplySession.set(ADMIN_ID, { threadId, userId: USER_ID });
 
     const ctx = makeAdminCtx();
