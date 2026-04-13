@@ -42,6 +42,21 @@ export class NotificationLogRepository {
     this.db.prepare('UPDATE notification_log SET error = ?, attempts = ? WHERE id = ?').run(error, attempts, id);
   }
 
+  recentByChannel(
+    channel: string,
+    limit: number,
+  ): Pick<NotificationLogRow, 'id' | 'user_id' | 'type' | 'status' | 'created_at' | 'sent_at' | 'error'>[] {
+    return this.db
+      .prepare(
+        `SELECT id, user_id, type, status, created_at, sent_at, error
+         FROM notification_log WHERE channel = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(channel, limit) as Pick<
+      NotificationLogRow,
+      'id' | 'user_id' | 'type' | 'status' | 'created_at' | 'sent_at' | 'error'
+    >[];
+  }
+
   cleanup(olderThanDays: number): number {
     const result = this.db
       .prepare(`DELETE FROM notification_log WHERE created_at < datetime('now', '-' || ? || ' days')`)

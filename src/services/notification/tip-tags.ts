@@ -71,4 +71,6 @@ export const BOT_TIP_FEATURE_MAP: { [tipKey: string]: FeatureKey } = {
   language_switch: K.SETTINGS,
   action_log: K.HISTORY,
   past_events: K.HISTORY,
+  // ── Telegram connect ──
+  connect_telegram: K.TELEGRAM_CONNECT,
 };

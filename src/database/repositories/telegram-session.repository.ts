@@ -63,6 +63,22 @@ export class TelegramSessionRepository {
       .run(at, userId);
   }
 
+  countByStatus(): { active: number; expired: number; revoked: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT status, COUNT(*) as count FROM user_telegram_sessions
+         GROUP BY status`,
+      )
+      .all() as { status: string; count: number }[];
+    const result = { active: 0, expired: 0, revoked: 0 };
+    for (const row of rows) {
+      if (row.status === 'active' || row.status === 'expired' || row.status === 'revoked') {
+        result[row.status] = row.count;
+      }
+    }
+    return result;
+  }
+
   deleteByUserId(userId: number): void {
     this.db.prepare('DELETE FROM user_telegram_sessions WHERE user_id = ?').run(userId);
   }

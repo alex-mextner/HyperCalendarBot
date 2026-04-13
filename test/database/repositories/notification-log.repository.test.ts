@@ -136,4 +136,31 @@ describe('NotificationLogRepository', () => {
     const deleted = repo.cleanup(30);
     expect(deleted).toBe(0);
   });
+
+  test('recentByChannel returns entries for the specified channel', () => {
+    repo.insert({ user_id: 42, type: 'invitation', reference_key: 'inv:1', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'reminder', reference_key: 'rem:1', channel: 'telegram_text', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'invitation', reference_key: 'inv:2', channel: 'mtproto_user', payload: '{}' });
+
+    const rows = repo.recentByChannel('mtproto_user', 10);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.type).toBe('invitation');
+    }
+  });
+
+  test('recentByChannel respects limit', () => {
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:1', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:2', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:3', channel: 'mtproto_user', payload: '{}' });
+
+    const rows = repo.recentByChannel('mtproto_user', 2);
+    expect(rows).toHaveLength(2);
+  });
+
+  test('recentByChannel returns empty array when no matches', () => {
+    repo.insert({ user_id: 42, type: 'reminder', reference_key: 'r:1', channel: 'telegram_text', payload: '{}' });
+    const rows = repo.recentByChannel('mtproto_user', 5);
+    expect(rows).toHaveLength(0);
+  });
 });
