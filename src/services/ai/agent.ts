@@ -280,7 +280,7 @@ function stableStringify(value: unknown): string {
  * injected by the model (e.g. `_nonce`) are stripped to prevent false key
  * divergence.
  */
-function toolCallKey(name: string, input: { [key: string]: unknown }): string {
+export function toolCallKey(name: string, input: { [key: string]: unknown }): string {
   const schema = toolSchemas[name as keyof typeof toolSchemas];
   const knownKeys =
     schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
@@ -289,8 +289,14 @@ function toolCallKey(name: string, input: { [key: string]: unknown }): string {
         .filter((k) => knownKeys.includes(k))
         .sort()
     : Object.keys(input).sort();
+  // Strip null/undefined — optional params absent vs explicitly null must not
+  // break dedup. e.g. {query:"x"} and {query:"x", start_date:null} are the same.
   const canonical: { [key: string]: unknown } = {};
-  for (const k of filteredKeys) canonical[k] = input[k];
+  for (const k of filteredKeys) {
+    if (input[k] !== null && input[k] !== undefined) {
+      canonical[k] = input[k];
+    }
+  }
   return `${name}:${stableStringify(canonical)}`;
 }
 

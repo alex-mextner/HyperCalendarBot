@@ -468,7 +468,7 @@ describe('TelegramStreamWriter', () => {
   // ── Known bugs: these tests document remaining issues ─────────────────
   // Skipped because they FAIL on the current implementation. Un-skip when fixing.
 
-  describe.skip('BUG: execution log cap can break HTML tags', () => {
+  describe('BUG: execution log cap can break HTML tags', () => {
     test('truncated body must have balanced HTML tags', async () => {
       const writer = new TelegramStreamWriter(sender, 123, 'ru');
       await writer.init();
@@ -496,23 +496,19 @@ describe('TelegramStreamWriter', () => {
     });
   });
 
-  describe.skip('BUG: finalize races with in-flight flush in noPlaceholder mode', () => {
+  describe('finalize awaits in-flight flush placeholder', () => {
     test('finalize during pending flush creates only one message', async () => {
       // Scenario: in group chat, flush starts creating placeholder (slow API),
-      // then finalize is called before flush completes. finalize sees
-      // messageId === null → sends a SECOND message. Race condition.
+      // then finalize is called before flush completes. finalize must await
+      // the same placeholder promise and reuse the messageId.
       let flushResolve: ((v: { message_id: number }) => void) | null = null;
-      let sendCount = 0;
       const delayedSend = mock(
-        (_chatId: number, _text: string, _parseMode?: string) =>
+        () =>
           new Promise<{ message_id: number }>((resolve) => {
-            sendCount++;
-            if (sendCount === 1) {
-              // First call (from flush): delay to simulate network
+            if (!flushResolve) {
               flushResolve = resolve;
             } else {
-              // Subsequent calls (from finalize): resolve immediately
-              resolve({ message_id: 200 + sendCount });
+              resolve({ message_id: 200 });
             }
           }),
       );
@@ -534,14 +530,14 @@ describe('TelegramStreamWriter', () => {
       await flushPromise;
       await finalizePromise;
 
-      // BUG: finalize sees messageId===null, sends its OWN message → 2 messages.
-      // Expected: only 1 message total (finalize should await or reuse the placeholder).
+      // Fixed: finalize awaits the same placeholder promise, reuses messageId=100.
+      // Only 1 sendMessage for the placeholder (not 2).
       expect(delayedSend).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe.skip('BUG: sendErrorFallback with no messageId silently fails', () => {
-    test('error is delivered even when placeholder was never created and send fails', async () => {
+  describe('sendErrorFallback retries on failure regardless of messageId', () => {
+    test('error delivery is retried even when placeholder was never created', async () => {
       const failingSend = mock(() => Promise.reject(new Error('network error')));
       sender.sendMessage = failingSend;
 
@@ -549,11 +545,10 @@ describe('TelegramStreamWriter', () => {
       await writer.init(); // no placeholder created
 
       // sendErrorFallback: messageId is null → tries sendMessage → fails →
-      // catch block: messageId is still null → skips last-resort retry → user sees NOTHING
+      // catch block: retries sendMessage regardless of messageId
       await writer.sendErrorFallback('⚠️ Error');
 
-      // The error should have been delivered somehow (at least attempted twice)
-      // BUG: currently only tries once because the retry branch checks this.messageId
+      // Fixed: retries even when messageId is null (2 attempts total)
       expect(failingSend.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
   });

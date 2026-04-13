@@ -57,8 +57,8 @@ export class TelegramStreamWriter {
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
   private typingInterval: ReturnType<typeof setInterval> | null = null;
-  /** Guard against concurrent lazy placeholder creation in noPlaceholder mode */
-  private creatingPlaceholder = false;
+  /** Promise for the in-flight lazy placeholder creation (prevents races between flush/finalize) */
+  private placeholderPromise: Promise<void> | null = null;
 
   constructor(
     private sender: TelegramSender,
@@ -181,17 +181,24 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Guard: another concurrent flush is already creating the placeholder.
-      // Skip this flush — the text will be picked up by the next one.
-      if (this.creatingPlaceholder) return;
-      this.creatingPlaceholder = true;
-      try {
-        // Lazy: materialize the placeholder now that we have substantial content to show
-        const result = await this.sender.sendMessage(this.chatId, '⏳');
-        this.messageId = result.message_id;
-      } finally {
-        this.creatingPlaceholder = false;
+      // Deduplicate: reuse the in-flight promise if another flush is already
+      // creating the placeholder. Without this, concurrent fire-and-forget
+      // flushes each create their own ⏳ message → multiple messages in chat.
+      if (!this.placeholderPromise) {
+        this.placeholderPromise = this.sender
+          .sendMessage(this.chatId, '⏳')
+          .then((result) => {
+            this.messageId = result.message_id;
+          })
+          .catch((err) => {
+            aiLogger.error({ err }, 'Lazy placeholder creation failed');
+          })
+          .finally(() => {
+            this.placeholderPromise = null;
+          });
       }
+      await this.placeholderPromise;
+      if (!this.messageId) return; // placeholder creation failed — skip this flush
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
@@ -226,6 +233,8 @@ export class TelegramStreamWriter {
 
   async finalize(): Promise<void> {
     this.stopTypingLoop();
+    // Wait for any in-flight placeholder creation from a concurrent flush
+    if (this.placeholderPromise) await this.placeholderPromise;
     this.toolLabel = null;
     this.plainResponseText = this.text.trim();
 
@@ -255,7 +264,11 @@ export class TelegramStreamWriter {
         const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
         const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
         if (maxBodyLen > 0 && body.length > maxBodyLen) {
-          body = `${body.slice(0, maxBodyLen - 1)}…`;
+          // Truncate at a line boundary to avoid breaking HTML tags (<i>...</i>).
+          // A naive body.slice() can cut inside a tag, making Telegram reject the message.
+          const truncSlice = body.slice(0, maxBodyLen);
+          const lastNewline = truncSlice.lastIndexOf('\n');
+          body = lastNewline > 0 ? `${body.slice(0, lastNewline)}\n…` : `${truncSlice.slice(0, maxBodyLen - 1)}…`;
         }
         if (maxBodyLen > 0) {
           finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
@@ -314,10 +327,8 @@ export class TelegramStreamWriter {
       // "message is not modified" means the text is already displayed — no action needed
       if (errStr.includes('message is not modified')) return;
       aiLogger.error({ err }, 'Error fallback delivery also failed');
-      // Last attempt: plain send without editing
-      if (this.messageId) {
-        await this.sender.sendMessage(this.chatId, errorText).catch(() => {});
-      }
+      // Last attempt: plain send (works whether messageId is set or not)
+      await this.sender.sendMessage(this.chatId, errorText).catch(() => {});
     }
   }
 
