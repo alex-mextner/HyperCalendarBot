@@ -29,6 +29,10 @@ export class TelegramSessionRepository {
       .get() as TelegramSession | null;
   }
 
+  getAllActive(): TelegramSession[] {
+    return this.db.prepare("SELECT * FROM user_telegram_sessions WHERE status = 'active'").all() as TelegramSession[];
+  }
+
   upsert(userId: number, encryptedSession: Buffer, encryptedPhone: Buffer, phoneHash: string): void {
     this.db.transaction(() => {
       this.db

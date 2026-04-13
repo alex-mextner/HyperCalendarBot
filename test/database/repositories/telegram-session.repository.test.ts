@@ -119,6 +119,29 @@ describe('TelegramSessionRepository', () => {
     expect(repo.getMostRecentActive()).toBeNull();
   });
 
+  test('getAllActive returns all active sessions', () => {
+    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+
+    const active = repo.getAllActive();
+    expect(active.length).toBe(2);
+    expect(active.map((s) => s.user_id).sort()).toEqual([USER_A, USER_B].sort());
+  });
+
+  test('getAllActive excludes expired and revoked sessions', () => {
+    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+    repo.updateStatus(USER_A, 'expired');
+    repo.updateStatus(USER_B, 'revoked');
+
+    const active = repo.getAllActive();
+    expect(active.length).toBe(0);
+  });
+
+  test('getAllActive returns empty array when no sessions exist', () => {
+    expect(repo.getAllActive()).toEqual([]);
+  });
+
   test('countByStatus returns counts grouped by status', () => {
     repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
     repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
