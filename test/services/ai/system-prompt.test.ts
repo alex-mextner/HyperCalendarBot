@@ -106,17 +106,30 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('authoritative clock');
   });
 
-  test('instructs to create events immediately without confirmation', () => {
+  test('event creation prompt covers all three modes: immediate, clarify, wait', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('create immediately');
-    expect(prompt).not.toContain('always confirm the details before creating');
+    expect(prompt).toContain('EVENT CREATION — three modes');
+    expect(prompt).toContain('Create immediately');
+    expect(prompt).toContain('Ask to clarify missing details');
+    expect(prompt).toContain('Do NOT create — wait for consensus');
   });
 
-  test('instructs to detect scheduling discussions and not create events prematurely', () => {
+  test('immediate mode still applies when intent and details are clear', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('SCHEDULING DISCUSSION');
+    expect(prompt).toContain('the intent is explicit, time/purpose are unambiguous');
+  });
+
+  test('clarify mode instructs to ask when key details are ambiguous', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('important details are missing or unclear');
+    expect(prompt).toContain('ask_user to resolve the ambiguity');
+  });
+
+  test('wait mode instructs to detect scheduling discussions and not create events', () => {
+    const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('multiple time options');
     expect(prompt).toContain('wait for the user');
+    expect(prompt).toContain('scheduling discussion');
   });
 
   test('instructs to use pick_users and find_contact for invitations', () => {
