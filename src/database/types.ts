@@ -25,6 +25,7 @@ export interface User {
   default_event_duration_minutes: number;
   assistant_enabled: number; // 0 | 1
   city: string | null;
+  connect_telegram_dismissed_at: string | null;
   created_at: string;
   updated_at: string;
 }

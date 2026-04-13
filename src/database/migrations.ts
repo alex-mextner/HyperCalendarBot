@@ -995,4 +995,10 @@ export const migrations: Migration[] = [
       `);
     },
   },
+  {
+    name: '055_users_connect_telegram_dismissed_at',
+    up: (db) => {
+      db.exec('ALTER TABLE users ADD COLUMN connect_telegram_dismissed_at TEXT DEFAULT NULL');
+    },
+  },
 ];

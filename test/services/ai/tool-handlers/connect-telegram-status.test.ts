@@ -65,15 +65,47 @@ describe('handleConnectTelegramStatus', () => {
     sessionRepo = new TelegramSessionRepository(db);
   });
 
-  test('returns connected: false when no session exists', () => {
+  test('returns connected: false with dismissed_recently: false when no session and never dismissed', () => {
     const ctx = makeCtx(db, {
       telegramSessionRepo: sessionRepo,
       telegramMasterKey: MASTER_KEY,
     });
     const result = handleConnectTelegramStatus(ctx);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({ connected: false });
+    expect(result.data).toEqual({ connected: false, dismissed_recently: false });
     expect(result.output).toContain('not connected');
+  });
+
+  test('returns dismissed_recently: true when dismissed within 30 days', () => {
+    // Create user first via makeCtx, then set dismissed_at, then re-read user
+    const userRepo = new UserRepository(db);
+    makeCtx(db); // ensures user exists
+    const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+    userRepo.setConnectTelegramDismissedAt(USER_ID, fiveDaysAgo);
+
+    const ctx = makeCtx(db, {
+      telegramSessionRepo: sessionRepo,
+      telegramMasterKey: MASTER_KEY,
+    });
+    const result = handleConnectTelegramStatus(ctx);
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ connected: false, dismissed_recently: true });
+  });
+
+  test('returns dismissed_recently: false when dismissed 31 days ago', () => {
+    // Create user first via makeCtx, then set dismissed_at, then re-read user
+    const userRepo = new UserRepository(db);
+    makeCtx(db); // ensures user exists
+    const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    userRepo.setConnectTelegramDismissedAt(USER_ID, thirtyOneDaysAgo);
+
+    const ctx = makeCtx(db, {
+      telegramSessionRepo: sessionRepo,
+      telegramMasterKey: MASTER_KEY,
+    });
+    const result = handleConnectTelegramStatus(ctx);
+    expect(result.success).toBe(true);
+    expect(result.data).toEqual({ connected: false, dismissed_recently: false });
   });
 
   test('returns connected: true with masked phone when active session exists', () => {
@@ -122,7 +154,7 @@ describe('handleConnectTelegramStatus', () => {
     });
     const result = handleConnectTelegramStatus(ctx);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({ connected: false });
+    expect(result.data).toEqual({ connected: false, dismissed_recently: false });
   });
 
   test('RU output contains подключён', () => {
@@ -155,7 +187,7 @@ describe('handleConnectTelegramStatus', () => {
     });
     const result = handleConnectTelegramStatus(ctx);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({ connected: false });
+    expect(result.data).toEqual({ connected: false, dismissed_recently: false });
   });
 
   test('returns not connected when telegramMasterKey is undefined', () => {
@@ -177,6 +209,6 @@ describe('handleConnectTelegramStatus', () => {
     });
     const result = handleConnectTelegramStatus(ctx);
     expect(result.success).toBe(true);
-    expect(result.data).toEqual({ connected: false });
+    expect(result.data).toEqual({ connected: false, dismissed_recently: false });
   });
 });

@@ -62,7 +62,11 @@ import {
 } from './tool-handlers/scheduled.ts';
 import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import type { ManageSettingsInput } from './tool-handlers/settings.ts';
-import { handleConnectTelegramStatus, handleManageSettings } from './tool-handlers/settings.ts';
+import {
+  handleConnectTelegramStatus,
+  handleDismissConnectTelegramPrompt,
+  handleManageSettings,
+} from './tool-handlers/settings.ts';
 import {
   handleCancelInvitation,
   handleGetInvitationStatus,
@@ -197,6 +201,7 @@ export interface ToolInputMap {
   playwright_action: AgentCommand['payload'];
   applescript_run: AgentCommand['payload'];
   connect_telegram_status: Record<never, never>;
+  dismiss_connect_telegram_prompt: Record<never, never>;
   resume_scene: Record<never, never>;
   cancel_scene: Record<never, never>;
 }
@@ -224,6 +229,7 @@ const SKIP_ACTION_LOG = new Set<string>([
   'get_google_calendar_status',
   'list_google_calendars',
   'connect_telegram_status',
+  'dismiss_connect_telegram_prompt',
   'list_calendar_access',
   'get_timezone_info',
   'convert_to_timezone',
@@ -288,6 +294,7 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   render_day_image: 'month_view',
   render_week_image: 'month_view',
   connect_telegram_status: 'telegram_connect',
+  dismiss_connect_telegram_prompt: 'telegram_connect',
 };
 
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
@@ -486,6 +493,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'connect_telegram_status':
         return handleConnectTelegramStatus(ctx);
+
+      case 'dismiss_connect_telegram_prompt':
+        return handleDismissConnectTelegramPrompt(ctx);
 
       case 'share_event':
         return handleShareEvent(ctx, input as ToolInputMap['share_event']);

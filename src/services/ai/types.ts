@@ -226,7 +226,9 @@ export interface AgentContext {
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
 }
 
-export type TelegramSessionData = { connected: false } | { connected: true; phone_masked: string; status: string };
+export type TelegramSessionData =
+  | { connected: false; dismissed_recently: boolean }
+  | { connected: true; phone_masked: string; status: string };
 
 /** Structured data from tool handlers for intent executor consumption. */
 export type ToolResultData =

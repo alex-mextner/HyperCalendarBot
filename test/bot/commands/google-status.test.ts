@@ -24,6 +24,7 @@ function makeUser(overrides: Partial<User> = {}): User {
     default_event_duration_minutes: 30,
     assistant_enabled: 1,
     city: null,
+    connect_telegram_dismissed_at: null,
     created_at: '',
     updated_at: '',
     ...overrides,
