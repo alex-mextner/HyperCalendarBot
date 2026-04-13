@@ -500,6 +500,60 @@ describe('CalendarBotAgent.run()', () => {
     expect(endSession).toHaveBeenCalledWith(USER_ID);
   });
 
+  // ── Regression: removing flush from onToolCallStart must not break normal tools ──
+
+  test('normal tool in group still creates placeholder and shows tool label', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-ev',
+        name: 'get_events',
+        input: { start_date: '2026-04-13', end_date: '2026-04-13' },
+      },
+      { kind: 'text', text: 'You have 0 events today.' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+
+    await agent.run(ctx);
+
+    // Tool loop flush MUST create a placeholder (noPlaceholder lazy create)
+    // and edit it with the tool label.
+    expect(sender.sendMessage).toHaveBeenCalled();
+    expect(sender.editMessageText).toHaveBeenCalled();
+    // Finalize edits the message with the final response
+    const lastEdit = (sender.editMessageText as ReturnType<typeof mock>).mock.calls.at(-1)!;
+    const finalHtml = lastEdit[2] as string;
+    expect(finalHtml).toContain('0 events');
+  });
+
+  test('normal tool in DM shows tool label via edit (no extra messages)', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-ev',
+        name: 'get_events',
+        input: { start_date: '2026-04-13', end_date: '2026-04-13' },
+      },
+      { kind: 'text', text: 'No events.' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    await agent.run(ctx);
+
+    // DM: 1 sendMessage (init placeholder), edits for tool label + finalize
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    expect(sender.editMessageText).toHaveBeenCalled();
+    const firstEdit = (sender.editMessageText as ReturnType<typeof mock>).mock.calls[0]!;
+    const labelHtml = firstEdit[2] as string;
+    // The tool label should contain the human-readable name, not raw "get_events"
+    expect(labelHtml).toContain('📅');
+  });
+
   // ── Regressions for bugs found by code review ─────────────────────────────
 
   test('rejected tool-less answer is NOT persisted to chat_history', async () => {
