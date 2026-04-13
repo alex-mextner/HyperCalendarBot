@@ -20,14 +20,15 @@
 // Batch failure tracking:
 //   When a batch of broadcasts is enqueued, a batch is registered in Redis with
 //   the total job count and fallback metadata. On permanent delivery failures
-//   (403/400), the worker records the failed recipient's mention in a Redis set.
+//   (403), the worker records the failed recipient's mention in a Redis set.
 //   After the last job finishes (success or fail), the worker sends ONE aggregated
 //   fallback message to the source group listing all unreachable users.
 
 import { type ConnectionOptions, Queue, Worker } from 'bullmq';
+import { z } from 'zod';
 import { parseTelegramError } from '../services/notification/worker.ts';
 import { logger } from '../utils/logger.ts';
-import type { ParseMode } from '../utils/telegram.ts';
+import { type ParseMode, splitMessage } from '../utils/telegram.ts';
 
 const broadcastLogger = logger.child({ module: 'broadcast' });
 
@@ -37,8 +38,7 @@ const BATCH_TTL_SECONDS = 3600; // 1 hour — generous ceiling for slow queues
 /** Permanent Telegram errors that will never succeed on retry. */
 export function isPermanentTelegramError(code: number): boolean {
   // 403 = bot blocked / user hasn't started bot / bot kicked from chat
-  // 400 = chat not found / peer_id_invalid / user deactivated
-  return code === 403 || code === 400;
+  return code === 403;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +66,13 @@ export interface BroadcastBatchMeta {
   /** Pre-formatted invite_deep_link text (without user list). */
   fallbackText: string;
 }
+
+const BroadcastBatchMetaSchema = z.object({
+  total: z.number(),
+  groupChatId: z.number(),
+  threadId: z.number().optional(),
+  fallbackText: z.string(),
+});
 
 export interface BroadcastSender {
   sendMessage(chatId: number, text: string, parseMode?: ParseMode, threadId?: number): Promise<{ message_id: number }>;
@@ -186,7 +193,19 @@ export async function completeBatchJob(batchId: string, redis: BroadcastRedis, s
   const metaStr = await redis.get(metaKey);
   if (!metaStr) return;
 
-  const meta: BroadcastBatchMeta = JSON.parse(metaStr);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(metaStr);
+  } catch {
+    broadcastLogger.warn({ batchId }, 'Corrupt batch meta JSON in Redis');
+    return;
+  }
+  const parseResult = BroadcastBatchMetaSchema.safeParse(parsed);
+  if (!parseResult.success) {
+    broadcastLogger.warn({ batchId, err: parseResult.error }, 'Invalid batch meta in Redis');
+    return;
+  }
+  const meta = parseResult.data;
   if (done < meta.total) return;
 
   // All jobs finished — check for failures
@@ -195,7 +214,9 @@ export async function completeBatchJob(batchId: string, redis: BroadcastRedis, s
     if (failedMentions.length > 0) {
       const userList = failedMentions.join(', ');
       const fullMessage = `${userList}\n${meta.fallbackText}`;
-      await sender.sendMessage(meta.groupChatId, fullMessage, 'HTML', meta.threadId);
+      for (const chunk of splitMessage(fullMessage)) {
+        await sender.sendMessage(meta.groupChatId, chunk, 'HTML', meta.threadId);
+      }
       broadcastLogger.info(
         { batchId, failedCount: failedMentions.length, groupChatId: meta.groupChatId },
         'Batch fallback sent to group',
@@ -260,18 +281,18 @@ export function createBroadcastWorker(
         { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin, attempts: job.attemptsMade, err },
         'Broadcast job exhausted retries',
       );
-      if (redis && job.data.batchId) {
-        // Track as failure (transient errors that never recovered)
+      const { batchId, recipientMention } = job.data;
+      if (redis && batchId) {
         const trackAndComplete = async () => {
-          if (job.data.recipientMention) {
-            const failKey = `${BATCH_KEY_PREFIX}${job.data.batchId}:failed`;
-            await redis.sadd(failKey, job.data.recipientMention);
+          if (recipientMention) {
+            const failKey = `${BATCH_KEY_PREFIX}${batchId}:failed`;
+            await redis.sadd(failKey, recipientMention);
             await redis.expire(failKey, BATCH_TTL_SECONDS);
           }
-          await completeBatchJob(job.data.batchId!, redis, sender);
+          await completeBatchJob(batchId, redis, sender);
         };
         trackAndComplete().catch((trackErr) => {
-          broadcastLogger.warn({ err: trackErr, batchId: job.data.batchId }, 'Batch failure tracking failed');
+          broadcastLogger.warn({ err: trackErr, batchId }, 'Batch failure tracking failed');
         });
       }
     } else {

@@ -5,13 +5,7 @@ import type {
   BroadcastRedis,
   BroadcastSender,
 } from '../../src/worker/broadcast-queue.ts';
-import {
-  completeBatchJob,
-  createBroadcastQueue,
-  createBroadcastWorker,
-  isPermanentTelegramError,
-  processBroadcastJob,
-} from '../../src/worker/broadcast-queue.ts';
+import { completeBatchJob, isPermanentTelegramError, processBroadcastJob } from '../../src/worker/broadcast-queue.ts';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -168,8 +162,8 @@ describe('broadcast-queue module', () => {
       expect(isPermanentTelegramError(403)).toBe(true);
     });
 
-    test('classifies 400 as permanent', () => {
-      expect(isPermanentTelegramError(400)).toBe(true);
+    test('classifies 400 as transient (could be formatting bug)', () => {
+      expect(isPermanentTelegramError(400)).toBe(false);
     });
 
     test('classifies 429 as transient', () => {
@@ -424,13 +418,60 @@ describe('broadcast-queue module', () => {
     });
   });
 
-  describe('module exports', () => {
-    test('createBroadcastQueue is a function', () => {
-      expect(typeof createBroadcastQueue).toBe('function');
+  describe('edge cases', () => {
+    test('completeBatchJob with done > total (stalled job recovery) sends fallback once', async () => {
+      const redis = makeFakeRedis();
+      const sender = makeSender();
+
+      const meta: BroadcastBatchMeta = { total: 1, groupChatId: -100, fallbackText: 'link' };
+      await redis.set('broadcast:batch:dup:meta', JSON.stringify(meta), 3600);
+      await redis.set('broadcast:batch:dup:done', '0', 3600);
+      await redis.sadd('broadcast:batch:dup:failed', '@alice');
+
+      // First call: done=1 == total → sends fallback + cleanup
+      await completeBatchJob('dup', redis, sender);
+      expect(sender.calls).toHaveLength(1);
+
+      // Second call (duplicate): meta already cleaned up → no-op
+      await completeBatchJob('dup', redis, sender);
+      expect(sender.calls).toHaveLength(1);
     });
 
-    test('createBroadcastWorker is a function', () => {
-      expect(typeof createBroadcastWorker).toBe('function');
+    test('processBroadcastJob with batchId but no recipientMention does not track failure', async () => {
+      const redis = makeFakeRedis();
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          throw makeTelegramError(403);
+        },
+      };
+
+      await processBroadcastJob({ recipientId: 42, text: 'x', origin: 'test', batchId: 'b5' }, sender, redis);
+
+      // No mention to store — failure set should be empty
+      expect(redis.sets.size).toBe(0);
+    });
+
+    test('completeBatchJob with corrupted meta in Redis logs warning', async () => {
+      const redis = makeFakeRedis();
+      const sender = makeSender();
+
+      await redis.set('broadcast:batch:bad:meta', 'not-json{', 3600);
+      await redis.set('broadcast:batch:bad:done', '0', 3600);
+
+      // Should not throw — handles parse error gracefully
+      await completeBatchJob('bad', redis, sender);
+      expect(sender.calls).toHaveLength(0);
+    });
+
+    test('completeBatchJob with invalid meta schema logs warning', async () => {
+      const redis = makeFakeRedis();
+      const sender = makeSender();
+
+      await redis.set('broadcast:batch:schema:meta', JSON.stringify({ total: 'not-a-number' }), 3600);
+      await redis.set('broadcast:batch:schema:done', '0', 3600);
+
+      await completeBatchJob('schema', redis, sender);
+      expect(sender.calls).toHaveLength(0);
     });
   });
 });

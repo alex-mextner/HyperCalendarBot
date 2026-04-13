@@ -658,6 +658,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
         ? {
             enqueue: deps.broadcastEnqueuer.enqueue.bind(deps.broadcastEnqueuer),
             enqueueBatch: deps.broadcastEnqueuer.enqueueBatch.bind(deps.broadcastEnqueuer),
+            registerBatch: deps.broadcastEnqueuer.registerBatch?.bind(deps.broadcastEnqueuer),
           }
         : undefined,
       feedback:

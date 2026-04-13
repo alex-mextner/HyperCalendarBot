@@ -309,11 +309,11 @@ const broadcastRedis = {
   },
   smembers: async (key: string): Promise<string[]> => {
     const result = await broadcastRedisClient.send('SMEMBERS', [key]);
-    return (result ?? []) as string[];
+    return z.array(z.string()).parse(result ?? []);
   },
   incr: async (key: string): Promise<number> => {
     const result = await broadcastRedisClient.send('INCR', [key]);
-    return result as number;
+    return z.number().parse(result);
   },
   del: async (...keys: string[]) => {
     await broadcastRedisClient.send('DEL', keys);
