@@ -464,4 +464,97 @@ describe('TelegramStreamWriter', () => {
       expect(text).toContain('…');
     });
   });
+
+  // ── Known bugs: these tests document remaining issues ─────────────────
+  // Skipped because they FAIL on the current implementation. Un-skip when fixing.
+
+  describe.skip('BUG: execution log cap can break HTML tags', () => {
+    test('truncated body must have balanced HTML tags', async () => {
+      const writer = new TelegramStreamWriter(sender, 123, 'ru');
+      await writer.init();
+
+      // Create tool lines that contain <i>...</i> tags (from markToolResult).
+      // When the body is sliced at an arbitrary position, the <i> tag can be
+      // left unclosed, making Telegram reject the message.
+      // 80 lines × ~70 chars = ~5600 chars body — guaranteed to exceed budget.
+      for (let i = 0; i < 80; i++) {
+        writer.setToolLabel('search_events', { query: `search query number ${i} with extra padding words` });
+        writer.markToolResult(true);
+      }
+      writer.commitIntermediate();
+
+      // 500-char response leaves ~3400 chars for body → truncation at ~line 48
+      // which almost certainly cuts inside an <i>...</i> tag
+      writer.appendText('R'.repeat(500));
+      await writer.finalize();
+
+      const text = editMock.mock.calls[0]![2] as string;
+      // Count opening and closing <i> tags — they must be balanced
+      const openCount = (text.match(/<i>/g) ?? []).length;
+      const closeCount = (text.match(/<\/i>/g) ?? []).length;
+      expect(openCount).toBe(closeCount);
+    });
+  });
+
+  describe.skip('BUG: finalize races with in-flight flush in noPlaceholder mode', () => {
+    test('finalize during pending flush creates only one message', async () => {
+      // Scenario: in group chat, flush starts creating placeholder (slow API),
+      // then finalize is called before flush completes. finalize sees
+      // messageId === null → sends a SECOND message. Race condition.
+      let flushResolve: ((v: { message_id: number }) => void) | null = null;
+      let sendCount = 0;
+      const delayedSend = mock(
+        (_chatId: number, _text: string, _parseMode?: string) =>
+          new Promise<{ message_id: number }>((resolve) => {
+            sendCount++;
+            if (sendCount === 1) {
+              // First call (from flush): delay to simulate network
+              flushResolve = resolve;
+            } else {
+              // Subsequent calls (from finalize): resolve immediately
+              resolve({ message_id: 200 + sendCount });
+            }
+          }),
+      );
+      sender.sendMessage = delayedSend;
+
+      const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
+      await writer.init();
+
+      // Start a flush (fire-and-forget, like onTextDelta does)
+      writer.appendText('A'.repeat(25));
+      const flushPromise = writer.flush(true);
+
+      // While flush is still waiting for sendMessage, call finalize
+      writer.appendText(' — final answer');
+      const finalizePromise = writer.finalize();
+
+      // Now resolve the flush's sendMessage
+      flushResolve!({ message_id: 100 });
+      await flushPromise;
+      await finalizePromise;
+
+      // BUG: finalize sees messageId===null, sends its OWN message → 2 messages.
+      // Expected: only 1 message total (finalize should await or reuse the placeholder).
+      expect(delayedSend).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe.skip('BUG: sendErrorFallback with no messageId silently fails', () => {
+    test('error is delivered even when placeholder was never created and send fails', async () => {
+      const failingSend = mock(() => Promise.reject(new Error('network error')));
+      sender.sendMessage = failingSend;
+
+      const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
+      await writer.init(); // no placeholder created
+
+      // sendErrorFallback: messageId is null → tries sendMessage → fails →
+      // catch block: messageId is still null → skips last-resort retry → user sees NOTHING
+      await writer.sendErrorFallback('⚠️ Error');
+
+      // The error should have been delivered somehow (at least attempted twice)
+      // BUG: currently only tries once because the retry branch checks this.messageId
+      expect(failingSend.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
 });
