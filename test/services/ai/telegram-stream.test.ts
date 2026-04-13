@@ -195,4 +195,107 @@ describe('TelegramStreamWriter', () => {
     writer.tailText(100);
     expect(writer.getText()).toBe('hello');
   });
+
+  test('finalize caps execution log so total fits in one message', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru');
+    await writer.init();
+    // Simulate many tool calls creating a large execution log
+    for (let i = 0; i < 50; i++) {
+      writer.appendText(`Searching batch ${i}...`);
+      writer.setToolLabel('search_events', { query: `long query text number ${i}` });
+      writer.markToolResult(true);
+    }
+    writer.commitIntermediate();
+    // Final response
+    writer.appendText('Не нашёл событие.');
+    await writer.finalize();
+
+    // Should edit the placeholder once (no extra sendMessage for overflow chunks)
+    expect(editMock).toHaveBeenCalledTimes(1);
+    // Only init + no overflow = 1 sendMessage call
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    // The message should contain the response and a truncated blockquote
+    const text = editMock.mock.calls[0]![2] as string;
+    expect(text).toContain('Не нашёл событие');
+    expect(text).toContain('<blockquote expandable>');
+    expect(text.length).toBeLessThanOrEqual(4000);
+  });
+
+  test('finalize skips blockquote when response alone fills message', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    // Tool calls in execution log
+    writer.setToolLabel('get_events');
+    writer.markToolResult(true);
+    writer.commitIntermediate();
+    // Very long response that fills the whole message
+    writer.appendText('A'.repeat(3950));
+    await writer.finalize();
+
+    const text = editMock.mock.calls[0]![2] as string;
+    // Blockquote is skipped because response alone fills the message
+    expect(text).not.toContain('blockquote');
+    expect(text).toContain('A'.repeat(100));
+  });
+
+  test('sendErrorFallback edits existing message with error text', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    await writer.sendErrorFallback('⚠️ Error occurred');
+
+    // Should edit the placeholder message (messageId=42 from init)
+    expect(editMock).toHaveBeenCalledWith(123, 42, '⚠️ Error occurred');
+  });
+
+  test('sendErrorFallback sends new message when no placeholder exists', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+    await writer.sendErrorFallback('⚠️ Error occurred');
+
+    // No placeholder was created, so it sends a fresh message
+    expect(sendMock).toHaveBeenCalledWith(123, '⚠️ Error occurred');
+  });
+
+  test('concurrent flushes in noPlaceholder mode create only one placeholder', async () => {
+    // Simulate slow sendMessage to trigger the race window
+    let resolveFirst: ((v: { message_id: number }) => void) | null = null;
+    const slowSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          if (!resolveFirst) {
+            resolveFirst = resolve;
+          } else {
+            resolve({ message_id: 99 });
+          }
+        }),
+    );
+    sender.sendMessage = slowSend;
+
+    const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
+    await writer.init(); // does nothing (noPlaceholder)
+
+    // Fire two concurrent flushes
+    writer.appendText('A'.repeat(25));
+    const flush1 = writer.flush(true);
+    const flush2 = writer.flush(true);
+
+    // Resolve the first sendMessage after both flushes have started
+    resolveFirst!({ message_id: 50 });
+    await flush1;
+    await flush2;
+
+    // Only ONE sendMessage call for the placeholder (second flush returns early)
+    expect(slowSend).toHaveBeenCalledTimes(1);
+  });
+
+  test('sendErrorFallback falls back to sendMessage when edit fails', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    editMock.mockImplementationOnce(() => Promise.reject(new Error('edit failed')));
+    await writer.sendErrorFallback('⚠️ Error occurred');
+
+    // Edit failed, so it should try sendMessage as fallback
+    const lastSendCall = sendMock.mock.calls[sendMock.mock.calls.length - 1] as unknown[];
+    expect(lastSendCall[1]).toBe('⚠️ Error occurred');
+  });
 });

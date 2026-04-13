@@ -57,6 +57,8 @@ export class TelegramStreamWriter {
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
   private typingInterval: ReturnType<typeof setInterval> | null = null;
+  /** Guard against concurrent lazy placeholder creation in noPlaceholder mode */
+  private creatingPlaceholder = false;
 
   constructor(
     private sender: TelegramSender,
@@ -74,7 +76,7 @@ export class TelegramStreamWriter {
     this.sender.sendChatAction?.(this.chatId, 'typing').catch(() => {});
     this.typingInterval = setInterval(() => {
       this.sender.sendChatAction?.(this.chatId, 'typing').catch(() => {});
-    }, 5000);
+    }, 4000);
   }
 
   private stopTypingLoop(): void {
@@ -179,9 +181,17 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Lazy: materialize the placeholder now that we have substantial content to show
-      const result = await this.sender.sendMessage(this.chatId, '⏳');
-      this.messageId = result.message_id;
+      // Guard: another concurrent flush is already creating the placeholder.
+      // Skip this flush — the text will be picked up by the next one.
+      if (this.creatingPlaceholder) return;
+      this.creatingPlaceholder = true;
+      try {
+        // Lazy: materialize the placeholder now that we have substantial content to show
+        const result = await this.sender.sendMessage(this.chatId, '⏳');
+        this.messageId = result.message_id;
+      } finally {
+        this.creatingPlaceholder = false;
+      }
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
@@ -234,12 +244,23 @@ export class TelegramStreamWriter {
       const botReply = finalResponse && finalResponse !== '...' ? `\n🤖 ${finalResponse}` : '';
       finalText = `<blockquote>📞\n👤 ${escapeHtml(this.userTranscript || '…')}${toolsBlock}${botReply}</blockquote>`;
     } else {
-      // Build expandable blockquote with ALL intermediate reasoning + tools
+      // Build expandable blockquote with ALL intermediate reasoning + tools.
+      // Cap execution log so the total message fits in one Telegram message —
+      // splitting into multiple messages confuses users and can break HTML tags.
       finalText = finalResponse;
       if (this.intermediateChunks.length > 0) {
         const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
-        const body = this.intermediateChunks.join('\n');
-        finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+        let body = this.intermediateChunks.join('\n');
+        // blockquote wrapper + header + separators ≈ 60 chars overhead
+        const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
+        const maxBodyLen = MAX_MESSAGE_LENGTH - finalResponse.length - overhead;
+        if (maxBodyLen > 0 && body.length > maxBodyLen) {
+          body = `${body.slice(0, maxBodyLen - 1)}…`;
+        }
+        if (maxBodyLen > 0) {
+          finalText = `<blockquote expandable>${header}\n${body}</blockquote>\n\n${finalResponse}`;
+        }
+        // If maxBodyLen <= 0, response alone fills the message — skip blockquote entirely
       }
     }
 
@@ -272,6 +293,27 @@ export class TelegramStreamWriter {
         await this.sender.sendMessage(this.chatId, chunks[i]!, 'HTML');
       } catch {
         await this.sender.sendMessage(this.chatId, chunks[i]!).catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Last-resort error delivery: if finalize() fails or was never called,
+   * send a plain error message directly so the user always sees feedback.
+   */
+  async sendErrorFallback(errorText: string): Promise<void> {
+    this.stopTypingLoop();
+    try {
+      if (this.messageId) {
+        await this.sender.editMessageText(this.chatId, this.messageId, errorText);
+      } else {
+        await this.sender.sendMessage(this.chatId, errorText);
+      }
+    } catch (err) {
+      aiLogger.error({ err }, 'Error fallback delivery also failed');
+      // Last attempt: plain send without editing
+      if (this.messageId) {
+        await this.sender.sendMessage(this.chatId, errorText).catch(() => {});
       }
     }
   }

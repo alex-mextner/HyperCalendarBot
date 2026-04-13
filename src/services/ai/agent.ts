@@ -719,7 +719,17 @@ export class CalendarBotAgent {
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
 
-    await writer.finalize();
+    try {
+      await writer.finalize();
+    } catch (finalizeErr) {
+      aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
+      const lang = ctx.user.language;
+      const fallback =
+        lang === 'ru'
+          ? '⚠️ Произошла ошибка при отправке ответа. Попробуй ещё раз.'
+          : '⚠️ An error occurred while sending the response. Please try again.';
+      await writer.sendErrorFallback(fallback);
+    }
 
     const msgId = writer.getMessageId();
     if (ctx.onBotResponse && msgId !== null) {
