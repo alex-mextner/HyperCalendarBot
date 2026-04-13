@@ -92,6 +92,50 @@ describe('handleWeek', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Labour Day');
   });
+
+  test('includes weather in text when weatherService provided', async () => {
+    const { handleWeek } = await import('../../../src/bot/commands/week.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const weatherService = {
+      getWeekWeather: mock(() =>
+        Promise.resolve({
+          days: [
+            {
+              date: new Date().toISOString().slice(0, 10),
+              tempMin: 3,
+              tempMax: 10,
+              conditionCode: 800,
+              description: 'clear',
+              windSpeed: 2,
+            },
+          ],
+          hours: [],
+        }),
+      ),
+    };
+
+    await handleWeek(ctx as never, svc as never, undefined, undefined, undefined, weatherService as never);
+
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('☀️');
+    expect(text).toContain('3..10°');
+  });
+
+  test('works without weather when weatherService returns null', async () => {
+    const { handleWeek } = await import('../../../src/bot/commands/week.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const weatherService = {
+      getWeekWeather: mock(() => Promise.resolve(null)),
+    };
+
+    await handleWeek(ctx as never, svc as never, undefined, undefined, undefined, weatherService as never);
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).not.toContain('°');
+  });
 });
 
 describe('handleWeek group context', () => {
@@ -168,5 +212,46 @@ describe('handleWeek group context', () => {
     await handleWeek(ctx as never, eventService as never);
     expect(eventService.getEventsInRange).toHaveBeenCalled();
     expect(eventService.getEventsInRangeForGroup).not.toHaveBeenCalled();
+  });
+
+  test('in group includes weather when weatherService provided', async () => {
+    const eventService = {
+      getEventsInRangeForGroup: mock(() => []),
+    };
+    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const weatherService = {
+      getWeekWeather: mock(() =>
+        Promise.resolve({
+          days: [
+            {
+              date: new Date().toISOString().slice(0, 10),
+              tempMin: -5,
+              tempMax: 1,
+              conditionCode: 600,
+              description: 'snow',
+              windSpeed: 4,
+            },
+          ],
+          hours: [],
+        }),
+      ),
+    };
+    const ctx = {
+      chat: { type: 'group', id: -100 },
+      dbUser: { telegram_id: 1, language: 'ru', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve()),
+    };
+    await handleWeek(
+      ctx as never,
+      eventService as never,
+      undefined,
+      undefined,
+      groupRepo as never,
+      weatherService as never,
+    );
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('🌨');
+    expect(text).toContain('-5..1°');
   });
 });

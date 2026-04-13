@@ -14,8 +14,8 @@ import {
 import { escapeHtml } from '../../utils/telegram.ts';
 import type { HolidayEntry } from '../holiday/holiday-service.ts';
 import { formatLocationHtml } from '../location/format-location.ts';
-import { formatEventWeatherLine } from '../weather/format.ts';
-import type { EventForecast } from '../weather/types.ts';
+import { formatDayWeatherLine, formatEventWeatherLine, formatWeekWeatherLine } from '../weather/format.ts';
+import type { DayWeather, EventForecast } from '../weather/types.ts';
 
 function birthdayAge(birthYear: number | null | undefined, occurrenceStart: string): number | null {
   if (birthYear == null) return null;
@@ -29,9 +29,11 @@ export function formatDayAgenda(
   lang: string,
   holidays?: HolidayEntry[],
   calendarColors?: Map<string, string>,
+  dayWeather?: DayWeather | null,
 ): string {
   const l = t(lang as Lang).eventCard;
-  const header = `📅 ${formatDateHeader(dateIso, timezone, lang)}`;
+  const weatherSuffix = dayWeather ? `\n${formatDayWeatherLine(lang as Lang, dayWeather)}` : '';
+  const header = `📅 ${formatDateHeader(dateIso, timezone, lang)}${weatherSuffix}`;
 
   const holidayLines = (holidays ?? []).map((h) => `  🎉 ${escapeHtml(h.name)}`);
 
@@ -67,6 +69,7 @@ export function formatWeekAgenda(
   timezone: string,
   lang: string,
   holidaysByDate?: Map<string, HolidayEntry[]>,
+  weatherByDate?: { [date: string]: DayWeather },
 ): string {
   const l = t(lang as Lang).eventCard;
   const byDay = new Map<string, EventOccurrence[]>();
@@ -84,17 +87,21 @@ export function formatWeekAgenda(
     const dayLabel = formatDateShort(`${dayKey}T12:00:00Z`, timezone, lang);
     const dayEvents = byDay.get(dayKey) ?? [];
     const dayHolidays = holidaysByDate?.get(dayKey) ?? [];
+    const dayW = weatherByDate?.[dayKey];
+    const wSuffix = dayW ? `  ${formatWeekWeatherLine(lang as Lang, dayW)}` : '';
 
     if (dayHolidays.length > 0) {
-      for (const h of dayHolidays) {
-        lines.push(`${dayLabel}  🎉 ${escapeHtml(h.name)}`);
+      for (let hi = 0; hi < dayHolidays.length; hi++) {
+        const h = dayHolidays[hi]!;
+        const suffix = hi === 0 && dayEvents.length === 0 ? wSuffix : '';
+        lines.push(`${dayLabel}${suffix}  🎉 ${escapeHtml(h.name)}`);
       }
     }
 
     if (dayEvents.length === 0 && dayHolidays.length === 0) {
-      lines.push(`${dayLabel}  ${l.weekAgendaDayEmpty}`);
+      lines.push(`${dayLabel}${wSuffix}  ${l.weekAgendaDayEmpty}`);
     } else if (dayEvents.length > 0) {
-      lines.push(`${dayLabel}  ▪ ${dayEvents.length} ${l.eventsWord(dayEvents.length)}`);
+      lines.push(`${dayLabel}${wSuffix}  ▪ ${dayEvents.length} ${l.eventsWord(dayEvents.length)}`);
       for (const occ of dayEvents) {
         const isAllDay = occ.event.all_day === 1;
         const time = isAllDay ? l.allDayInline : formatTime(occ.occurrence_start, timezone);

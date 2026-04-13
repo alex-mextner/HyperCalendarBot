@@ -8,6 +8,8 @@ import { formatWeekAgenda } from '../../services/event/formatters.ts';
 import type { HolidayEntry, HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
 import { renderWeekImage } from '../../services/image/render-week.ts';
+import type { DayWeather } from '../../services/weather/types.ts';
+import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
@@ -19,6 +21,7 @@ export async function handleWeek(
   holidayService?: HolidayService,
   renderService?: RenderService,
   groupRepo?: GroupChatRepository,
+  weatherService?: WeatherService,
 ): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
@@ -51,7 +54,8 @@ export async function handleWeek(
       }
     }
 
-    const text = formatWeekAgenda(occurrences, start, end, timezone, lang, groupHolidaysByDate);
+    const weatherByDate = await fetchWeekWeatherByDate(weatherService, timezone, lang);
+    const text = formatWeekAgenda(occurrences, start, end, timezone, lang, groupHolidaysByDate, weatherByDate);
     await ctx.send(text, { parse_mode: 'HTML' });
     return;
   }
@@ -71,7 +75,8 @@ export async function handleWeek(
     }
   }
 
-  const text = formatWeekAgenda(occurrences, start, end, user.timezone, user.language, holidaysByDate);
+  const weatherByDate = await fetchWeekWeatherByDate(weatherService, user.timezone, lang);
+  const text = formatWeekAgenda(occurrences, start, end, user.timezone, user.language, holidaysByDate, weatherByDate);
   await ctx.send(text, { parse_mode: 'HTML' });
 
   if (renderService) {
@@ -84,11 +89,27 @@ export async function handleWeek(
         user.timezone,
         user.language as 'ru' | 'en',
         user.telegram_id,
+        weatherByDate,
       );
       const file = new File([buffer], 'week.png', { type: 'image/png' });
       await ctx.sendPhoto(file);
     } catch (err) {
-      imageLogger.error({ error: (err as Error).message }, 'Render failed');
+      imageLogger.error({ err }, 'Render failed');
     }
   }
+}
+
+async function fetchWeekWeatherByDate(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+  lang: string,
+): Promise<{ [date: string]: DayWeather } | undefined> {
+  if (!weatherService) return undefined;
+  const week = await weatherService.getWeekWeather(timezone, lang === 'ru' ? 'ru' : 'en');
+  if (!week) return undefined;
+  const map: { [date: string]: DayWeather } = {};
+  for (const day of week.days) {
+    map[day.date] = day;
+  }
+  return map;
 }

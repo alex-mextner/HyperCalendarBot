@@ -582,12 +582,30 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('ping', (ctx) => handlePing(ctx))
     .command('help', (ctx) => handleHelp(ctx))
     .command('today', (ctx) =>
-      handleToday(ctx, eventService, holidayService, renderService, db.groupChats, googleDeps?.calendarRepo),
+      handleToday(
+        ctx,
+        eventService,
+        holidayService,
+        renderService,
+        db.groupChats,
+        googleDeps?.calendarRepo,
+        weatherService,
+      ),
     )
     .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx, eventService, holidayService, renderService, db.groupChats, googleDeps?.calendarRepo),
+      handleTomorrow(
+        ctx,
+        eventService,
+        holidayService,
+        renderService,
+        db.groupChats,
+        googleDeps?.calendarRepo,
+        weatherService,
+      ),
     )
-    .command('week', (ctx) => handleWeek(ctx, eventService, holidayService, renderService, db.groupChats))
+    .command('week', (ctx) =>
+      handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
+    )
     .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
     .command('add', (ctx) => handleAdd(ctx, eventService, scenesSetup.scenes.addEventScene, db.groupChats))
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))

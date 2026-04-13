@@ -78,6 +78,54 @@ describe('handleTomorrow', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Christmas');
   });
+  test('includes weather in text when weatherService provided', async () => {
+    const { handleTomorrow } = await import('../../../src/bot/commands/tomorrow.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const weatherService = {
+      getWeekWeather: mock(() =>
+        Promise.resolve({
+          days: [{ date: tomorrow, tempMin: -2, tempMax: 3, conditionCode: 601, description: 'snow', windSpeed: 5 }],
+          hours: [],
+        }),
+      ),
+    };
+
+    await handleTomorrow(
+      ctx as never,
+      svc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      weatherService as never,
+    );
+
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('🌨');
+  });
+
+  test('works without weather when weatherService returns null', async () => {
+    const { handleTomorrow } = await import('../../../src/bot/commands/tomorrow.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const weatherService = {
+      getWeekWeather: mock(() => Promise.resolve(null)),
+    };
+
+    await handleTomorrow(
+      ctx as never,
+      svc as never,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      weatherService as never,
+    );
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('handleTomorrow group context', () => {
