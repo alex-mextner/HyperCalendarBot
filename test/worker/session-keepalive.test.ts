@@ -2,38 +2,15 @@ import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { TelegramSessionRepository } from '../../src/database/repositories/telegram-session.repository.ts';
 import type { TelegramSession } from '../../src/database/types.ts';
 import type { BridgeResult } from '../../src/services/telegram-session/session-bridge.ts';
+import { processSessionKeepalive } from '../../src/worker/session-keepalive.ts';
 
-// --- Mock crypto ---
-const mockDecryptBlob = mock((_blob: Buffer, _key: Buffer) => Buffer.from('session-data'));
-mock.module('../../src/services/crypto/session-crypto.ts', () => ({
-  decryptBlob: mockDecryptBlob,
-}));
-
-// --- Mock SessionBridge ---
-const mockCreateTempSessionFile = mock(async (userId: number, _data: Buffer) => `/tmp/tgsess_${userId}.session`);
-const mockGetAuthorizations = mock(
-  async (_path: string): Promise<BridgeResult> => ({
-    success: true,
-    data: { authorizations: [] },
-  }),
-);
-const mockCleanupTempFile = mock(async (_path: string) => {});
-
-mock.module('../../src/services/telegram-session/session-bridge.ts', () => ({
-  SessionBridge: {
-    createTempSessionFile: mockCreateTempSessionFile,
-    getAuthorizations: mockGetAuthorizations,
-    cleanupTempFile: mockCleanupTempFile,
-  },
-}));
-
-const { processSessionKeepalive } = await import('../../src/worker/session-keepalive.ts');
+// All dependencies injected via deps — no mock.module needed.
 
 function makeSession(userId: number): TelegramSession {
   return {
     user_id: userId,
     encrypted_session: Buffer.from('enc-session'),
-    encrypted_phone: Buffer.from('enc-phone'),
+    phone_masked: '+7 ••• 0000',
     phone_hash: `hash_${userId}`,
     status: 'active',
     tz_detection_consent_at: null,
@@ -53,37 +30,59 @@ function makeSessionRepo(sessions: TelegramSession[]) {
 
 const MASTER_KEY = Buffer.alloc(32);
 
+const mockDecrypt = mock((_blob: Buffer, _key: Buffer) => Buffer.from('session-data'));
+const mockCreateTemp = mock(async (userId: number, _data: Buffer) => `/tmp/tgsess_${userId}.session`);
+const mockGetAuths = mock(
+  async (_path: string): Promise<BridgeResult> => ({
+    success: true,
+    data: { authorizations: [] },
+  }),
+);
+const mockCleanup = mock(async (_path: string) => {});
+
+function baseDeps(repo: TelegramSessionRepository) {
+  return {
+    sessionRepo: repo,
+    masterKey: MASTER_KEY,
+    rateLimitMs: 0,
+    decrypt: mockDecrypt,
+    createTempFile: mockCreateTemp,
+    getAuthorizations: mockGetAuths,
+    cleanupFile: mockCleanup,
+  };
+}
+
 beforeEach(() => {
-  mockDecryptBlob.mockClear();
-  mockCreateTempSessionFile.mockClear();
-  mockGetAuthorizations.mockClear();
-  mockCleanupTempFile.mockClear();
+  mockDecrypt.mockClear();
+  mockCreateTemp.mockClear();
+  mockGetAuths.mockClear();
+  mockCleanup.mockClear();
+
+  // Reset default implementations
+  mockDecrypt.mockImplementation((_blob: Buffer, _key: Buffer) => Buffer.from('session-data'));
+  mockCreateTemp.mockImplementation(async (userId: number) => `/tmp/tgsess_${userId}.session`);
+  mockGetAuths.mockImplementation(async (): Promise<BridgeResult> => ({ success: true, data: { authorizations: [] } }));
+  mockCleanup.mockImplementation(async () => {});
 });
 
 describe('processSessionKeepalive', () => {
   test('returns zero counts when no active sessions', async () => {
     const { repo } = makeSessionRepo([]);
-    const result = await processSessionKeepalive({ sessionRepo: repo, masterKey: MASTER_KEY });
+    const result = await processSessionKeepalive(baseDeps(repo));
     expect(result.checked).toBe(0);
     expect(result.expired).toBe(0);
-    expect(mockGetAuthorizations).not.toHaveBeenCalled();
+    expect(mockGetAuths).not.toHaveBeenCalled();
   });
 
   test('checks each active session via getAuthorizations', async () => {
     const sessions = [makeSession(1), makeSession(2)];
     const { repo } = makeSessionRepo(sessions);
-    mockGetAuthorizations.mockImplementation(
-      async (): Promise<BridgeResult> => ({
-        success: true,
-        data: { authorizations: [] },
-      }),
-    );
 
-    const result = await processSessionKeepalive({ sessionRepo: repo, masterKey: MASTER_KEY, rateLimitMs: 0 });
+    const result = await processSessionKeepalive(baseDeps(repo));
 
     expect(result.checked).toBe(2);
     expect(result.expired).toBe(0);
-    expect(mockGetAuthorizations).toHaveBeenCalledTimes(2);
+    expect(mockGetAuths).toHaveBeenCalledTimes(2);
   });
 
   test('marks session expired when getAuthorizations returns SESSION_EXPIRED', async () => {
@@ -91,7 +90,7 @@ describe('processSessionKeepalive', () => {
     const { repo, updateStatus } = makeSessionRepo(sessions);
     const onSessionExpired = mock((_userId: number) => {});
 
-    mockGetAuthorizations.mockImplementation(
+    mockGetAuths.mockImplementation(
       async (): Promise<BridgeResult> => ({
         success: false,
         error: 'SESSION_EXPIRED',
@@ -100,8 +99,7 @@ describe('processSessionKeepalive', () => {
     );
 
     const result = await processSessionKeepalive({
-      sessionRepo: repo,
-      masterKey: MASTER_KEY,
+      ...baseDeps(repo),
       onSessionExpired,
     });
 
@@ -120,7 +118,7 @@ describe('processSessionKeepalive', () => {
     const sessions = [makeSession(10)];
     const { repo, updateStatus } = makeSessionRepo(sessions);
 
-    mockGetAuthorizations.mockImplementation(
+    mockGetAuths.mockImplementation(
       async (): Promise<BridgeResult> => ({
         success: false,
         error: 'FLOOD_WAIT',
@@ -128,7 +126,7 @@ describe('processSessionKeepalive', () => {
       }),
     );
 
-    const result = await processSessionKeepalive({ sessionRepo: repo, masterKey: MASTER_KEY });
+    const result = await processSessionKeepalive(baseDeps(repo));
 
     expect(result.checked).toBe(1);
     expect(result.expired).toBe(0);
@@ -140,32 +138,24 @@ describe('processSessionKeepalive', () => {
     const { repo } = makeSessionRepo(sessions);
 
     let callCount = 0;
-    mockCreateTempSessionFile.mockImplementation(async (userId: number, _data: Buffer) => {
+    mockCreateTemp.mockImplementation(async (userId: number) => {
       callCount++;
       if (callCount === 1) throw new Error('decrypt failed');
       return `/tmp/tgsess_${userId}.session`;
     });
 
-    mockGetAuthorizations.mockImplementation(
-      async (): Promise<BridgeResult> => ({
-        success: true,
-        data: { authorizations: [] },
-      }),
-    );
-
-    const result = await processSessionKeepalive({ sessionRepo: repo, masterKey: MASTER_KEY, rateLimitMs: 0 });
+    const result = await processSessionKeepalive(baseDeps(repo));
 
     expect(result.checked).toBe(2);
     expect(result.expired).toBe(0);
-    // Second session was still checked
-    expect(mockGetAuthorizations).toHaveBeenCalledTimes(1);
+    expect(mockGetAuths).toHaveBeenCalledTimes(1);
   });
 
-  test('always cleans up temp file even after getAuthorizations returns expired', async () => {
+  test('always cleans up temp file even after SESSION_EXPIRED', async () => {
     const sessions = [makeSession(5)];
     const { repo } = makeSessionRepo(sessions);
 
-    mockGetAuthorizations.mockImplementation(
+    mockGetAuths.mockImplementation(
       async (): Promise<BridgeResult> => ({
         success: false,
         error: 'SESSION_EXPIRED',
@@ -173,9 +163,9 @@ describe('processSessionKeepalive', () => {
       }),
     );
 
-    await processSessionKeepalive({ sessionRepo: repo, masterKey: MASTER_KEY });
+    await processSessionKeepalive(baseDeps(repo));
 
-    expect(mockCleanupTempFile).toHaveBeenCalledTimes(1);
+    expect(mockCleanup).toHaveBeenCalledTimes(1);
   });
 
   test('decrypts session with the provided masterKey', async () => {
@@ -183,17 +173,10 @@ describe('processSessionKeepalive', () => {
     const { repo } = makeSessionRepo(sessions);
     const customKey = Buffer.alloc(32, 0xab);
 
-    mockGetAuthorizations.mockImplementation(
-      async (): Promise<BridgeResult> => ({
-        success: true,
-        data: { authorizations: [] },
-      }),
-    );
+    await processSessionKeepalive({ ...baseDeps(repo), masterKey: customKey });
 
-    await processSessionKeepalive({ sessionRepo: repo, masterKey: customKey });
-
-    expect(mockDecryptBlob).toHaveBeenCalledTimes(1);
-    const [, usedKey] = mockDecryptBlob.mock.calls[0] as unknown as [Buffer, Buffer];
+    expect(mockDecrypt).toHaveBeenCalledTimes(1);
+    const [, usedKey] = mockDecrypt.mock.calls[0] as unknown as [Buffer, Buffer];
     expect(usedKey).toEqual(customKey);
   });
 });
