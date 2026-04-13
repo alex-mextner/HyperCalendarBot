@@ -1,4 +1,5 @@
 // src/services/telegram-session/timezone-detector.ts
+import ct from 'countries-and-timezones';
 import type { Authorization } from './session-bridge.ts';
 
 export interface DetectionResult {
@@ -7,90 +8,15 @@ export interface DetectionResult {
   region: string;
 }
 
-// Single-timezone countries: ISO 3166-1 alpha-2 → IANA timezone
-const SINGLE_TZ_COUNTRIES: { [key: string]: string } = {
-  AF: 'Asia/Kabul',
-  AL: 'Europe/Tirane',
-  AM: 'Asia/Yerevan',
-  AE: 'Asia/Dubai',
-  AT: 'Europe/Vienna',
-  AZ: 'Asia/Baku',
-  BA: 'Europe/Sarajevo',
-  BE: 'Europe/Brussels',
-  BG: 'Europe/Sofia',
-  BH: 'Asia/Bahrain',
-  BY: 'Europe/Minsk',
-  CH: 'Europe/Zurich',
-  CN: 'Asia/Shanghai',
-  CY: 'Asia/Nicosia',
-  CZ: 'Europe/Prague',
-  DE: 'Europe/Berlin',
-  DK: 'Europe/Copenhagen',
-  EE: 'Europe/Tallinn',
-  EG: 'Africa/Cairo',
-  ES: 'Europe/Madrid',
-  FI: 'Europe/Helsinki',
-  FR: 'Europe/Paris',
-  GB: 'Europe/London',
-  GE: 'Asia/Tbilisi',
-  GR: 'Europe/Athens',
-  HR: 'Europe/Zagreb',
-  HU: 'Europe/Budapest',
-  ID: 'Asia/Jakarta',
-  IL: 'Asia/Jerusalem',
-  IN: 'Asia/Kolkata',
-  IQ: 'Asia/Baghdad',
-  IR: 'Asia/Tehran',
-  IS: 'Atlantic/Reykjavik',
-  IT: 'Europe/Rome',
-  JP: 'Asia/Tokyo',
-  JO: 'Asia/Amman',
-  KE: 'Africa/Nairobi',
-  KG: 'Asia/Bishkek',
-  KR: 'Asia/Seoul',
-  KW: 'Asia/Kuwait',
-  KZ: 'Asia/Almaty',
-  LB: 'Asia/Beirut',
-  LT: 'Europe/Vilnius',
-  LV: 'Europe/Riga',
-  LY: 'Africa/Tripoli',
-  MA: 'Africa/Casablanca',
-  MD: 'Europe/Chisinau',
-  ME: 'Europe/Podgorica',
-  MK: 'Europe/Skopje',
-  MT: 'Europe/Malta',
-  NG: 'Africa/Lagos',
-  NL: 'Europe/Amsterdam',
-  NO: 'Europe/Oslo',
-  NP: 'Asia/Kathmandu',
-  OM: 'Asia/Muscat',
-  PK: 'Asia/Karachi',
-  PL: 'Europe/Warsaw',
-  PT: 'Europe/Lisbon',
-  QA: 'Asia/Qatar',
-  RO: 'Europe/Bucharest',
-  RS: 'Europe/Belgrade',
-  SA: 'Asia/Riyadh',
-  SE: 'Europe/Stockholm',
-  SG: 'Asia/Singapore',
-  SI: 'Europe/Ljubljana',
-  SK: 'Europe/Bratislava',
-  TH: 'Asia/Bangkok',
-  TJ: 'Asia/Dushanbe',
-  TM: 'Asia/Ashgabat',
-  TR: 'Europe/Istanbul',
-  TW: 'Asia/Taipei',
-  TZ: 'Africa/Dar_es_Salaam',
-  UA: 'Europe/Kyiv',
-  UZ: 'Asia/Tashkent',
-  VN: 'Asia/Ho_Chi_Minh',
-  ZA: 'Africa/Johannesburg',
-};
-
-// Multi-timezone countries: region substring → IANA timezone (case-insensitive match)
-// Each entry is [regionSubstring, ianaTimezone]. First match wins.
+/**
+ * Multi-timezone countries where the Telegram `region` field can disambiguate.
+ * Only needed for countries with >1 IANA timezone — single-tz countries are
+ * resolved automatically via `countries-and-timezones`.
+ *
+ * Each entry: [regionSubstring (case-insensitive), ianaTimezone]. First match wins.
+ */
 const MULTI_TZ_REGIONS: {
-  [country: string]: { regions: Array<[string, string]>; default: string };
+  [country: string]: { regions: Array<[string, string]>; fallback: string };
 } = {
   RU: {
     regions: [
@@ -113,7 +39,7 @@ const MULTI_TZ_REGIONS: {
       ['Kamchatka', 'Asia/Kamchatka'],
       ['Anadyr', 'Asia/Anadyr'],
     ],
-    default: 'Europe/Moscow',
+    fallback: 'Europe/Moscow',
   },
   US: {
     regions: [
@@ -130,39 +56,33 @@ const MULTI_TZ_REGIONS: {
       ['Wyoming', 'America/Denver'],
       ['New Mexico', 'America/Denver'],
       ['Idaho', 'America/Denver'],
-      ['North Dakota', 'America/Chicago'],
-      ['South Dakota', 'America/Chicago'],
-      ['Nebraska', 'America/Chicago'],
-      ['Kansas', 'America/Chicago'],
-      ['Oklahoma', 'America/Chicago'],
       ['Texas', 'America/Chicago'],
+      ['Illinois', 'America/Chicago'],
       ['Minnesota', 'America/Chicago'],
+      ['Wisconsin', 'America/Chicago'],
       ['Iowa', 'America/Chicago'],
       ['Missouri', 'America/Chicago'],
-      ['Wisconsin', 'America/Chicago'],
-      ['Illinois', 'America/Chicago'],
+      ['Oklahoma', 'America/Chicago'],
+      ['Kansas', 'America/Chicago'],
+      ['Nebraska', 'America/Chicago'],
+      ['North Dakota', 'America/Chicago'],
+      ['South Dakota', 'America/Chicago'],
       ['Mississippi', 'America/Chicago'],
       ['Louisiana', 'America/Chicago'],
       ['Arkansas', 'America/Chicago'],
       ['Alabama', 'America/Chicago'],
+      ['Tennessee', 'America/Chicago'],
       ['Michigan', 'America/Detroit'],
       ['Indiana', 'America/Indiana/Indianapolis'],
       ['Kentucky', 'America/Kentucky/Louisville'],
-      ['Tennessee', 'America/Chicago'],
-      ['Ohio', 'America/New_York'],
-      ['Pennsylvania', 'America/New_York'],
       ['New York', 'America/New_York'],
+      ['Pennsylvania', 'America/New_York'],
+      ['Ohio', 'America/New_York'],
       ['New Jersey', 'America/New_York'],
       ['Connecticut', 'America/New_York'],
       ['Massachusetts', 'America/New_York'],
-      ['Rhode Island', 'America/New_York'],
-      ['Vermont', 'America/New_York'],
-      ['New Hampshire', 'America/New_York'],
-      ['Maine', 'America/New_York'],
       ['Maryland', 'America/New_York'],
-      ['Delaware', 'America/New_York'],
       ['Virginia', 'America/New_York'],
-      ['West Virginia', 'America/New_York'],
       ['North Carolina', 'America/New_York'],
       ['South Carolina', 'America/New_York'],
       ['Georgia', 'America/New_York'],
@@ -170,7 +90,7 @@ const MULTI_TZ_REGIONS: {
       ['District of Columbia', 'America/New_York'],
       ['Puerto Rico', 'America/Puerto_Rico'],
     ],
-    default: 'America/New_York',
+    fallback: 'America/New_York',
   },
   CA: {
     regions: [
@@ -186,7 +106,7 @@ const MULTI_TZ_REGIONS: {
       ['Prince Edward Island', 'America/Halifax'],
       ['Newfoundland', 'America/St_Johns'],
     ],
-    default: 'America/Toronto',
+    fallback: 'America/Toronto',
   },
   AU: {
     regions: [
@@ -199,7 +119,7 @@ const MULTI_TZ_REGIONS: {
       ['Tasmania', 'Australia/Hobart'],
       ['Australian Capital Territory', 'Australia/Sydney'],
     ],
-    default: 'Australia/Sydney',
+    fallback: 'Australia/Sydney',
   },
   BR: {
     regions: [
@@ -213,9 +133,20 @@ const MULTI_TZ_REGIONS: {
       ['Bahia', 'America/Bahia'],
       ['Fernando de Noronha', 'America/Noronha'],
     ],
-    default: 'America/Sao_Paulo',
+    fallback: 'America/Sao_Paulo',
   },
 };
+
+/**
+ * Resolves a country code to a single IANA timezone using the
+ * `countries-and-timezones` library (backed by IANA tzdata).
+ * Returns the timezone if the country has exactly one, or null if it has multiple.
+ */
+function resolveSingleTzCountry(countryCode: string): string | null {
+  const timezones = ct.getTimezonesForCountry(countryCode);
+  if (!timezones || timezones.length !== 1) return null;
+  return timezones[0]?.name ?? null;
+}
 
 function resolveMultiTz(country: string, region: string): string | null {
   const entry = MULTI_TZ_REGIONS[country];
@@ -227,17 +158,18 @@ function resolveMultiTz(country: string, region: string): string | null {
       return tz;
     }
   }
-  // Fall back to country default when region is not recognized
-  return entry.default;
+  return entry.fallback;
 }
 
 /**
  * Detects the most likely IANA timezone from a list of Telegram Authorization objects.
  *
- * Returns null when:
- * - No mobile sessions are present (platform must be iOS or Android)
- * - Country is not in the lookup table
- * - Detected timezone equals the user's current timezone
+ * Resolution strategy:
+ * 1. Filter for mobile sessions (iOS / Android) — most reliable location signal
+ * 2. Pick the most recently active one
+ * 3. If the country has exactly 1 timezone (via IANA data) → use it
+ * 4. If the country has multiple → use the region hint from the curated map
+ * 5. Return null if timezone matches current or country is unknown
  */
 export function detectTimezoneFromAuthorizations(
   authorizations: Authorization[],
@@ -247,18 +179,17 @@ export function detectTimezoneFromAuthorizations(
 
   if (mobileSessions.length === 0) return null;
 
-  // Most recently active mobile session
   const sorted = [...mobileSessions].sort((a, b) => b.date_active - a.date_active);
   const session = sorted[0];
   if (!session) return null;
 
   const { country, region } = session;
 
-  let detectedTimezone: string | null = null;
+  // Try single-tz country first (covers ~150 countries via IANA data)
+  let detectedTimezone = resolveSingleTzCountry(country);
 
-  if (SINGLE_TZ_COUNTRIES[country] !== undefined) {
-    detectedTimezone = SINGLE_TZ_COUNTRIES[country];
-  } else if (MULTI_TZ_REGIONS[country] !== undefined) {
+  // Multi-tz country — use region map
+  if (detectedTimezone === null) {
     detectedTimezone = resolveMultiTz(country, region);
   }
 
