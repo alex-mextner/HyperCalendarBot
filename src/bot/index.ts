@@ -137,7 +137,12 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'AGENT_DOWNLOAD_URL'
+    | 'INLINE_BOT_TOKEN'
+    | 'TELEGRAM_SESSION_MASTER_KEY'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
 }
@@ -214,6 +219,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     eventService,
     token,
     userComposer,
+    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
     !!googleDeps,
     prefsService,
     holidayService,

@@ -7,6 +7,8 @@ import type { NotificationPreferencesService } from '../../services/notification
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 import { createAddEventScene } from './add-event.scene.ts';
 import { wrapWithChatId } from './chat-scoped-storage.ts';
+import type { ConnectTelegramConfig } from './connect-telegram.scene.ts';
+import { createConnectTelegramScene } from './connect-telegram.scene.ts';
 import { createEditValueScene } from './edit-value.scene.ts';
 import { createImportScene } from './import.scene.ts';
 import { createOnboardingScene } from './onboarding.scene.ts';
@@ -18,6 +20,7 @@ export function createScenesPlugin(
   eventService: EventService,
   botToken: string,
   userComposer: UserResolverComposer,
+  config: ConnectTelegramConfig,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
@@ -33,11 +36,12 @@ export function createScenesPlugin(
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer);
   const onboardingScene = createOnboardingScene(db, userComposer, gcalConfigured, prefsService, holidayService);
-  const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene];
+  const connectTelegramScene = createConnectTelegramScene(db.telegramSessions, config, userComposer);
+  const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene, connectTelegramScene];
 
   return {
     plugin: scenes(allScenes, { storage: scopedStorage }),
     storage: scopedStorage,
-    scenes: { addEventScene, editValueScene, importScene, timezoneScene, onboardingScene },
+    scenes: { addEventScene, editValueScene, importScene, timezoneScene, onboardingScene, connectTelegramScene },
   };
 }
