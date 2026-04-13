@@ -77,6 +77,11 @@ const toolDefinitions: ToolDefinition[] = [
         },
         description: { type: 'string', description: 'Event description. Optional.' },
         location: { type: 'string', description: 'Event location. Optional.' },
+        location_abstract: {
+          type: 'boolean',
+          description:
+            'Set to true when the location is abstract or relative — not a concrete venue or street address. Examples of abstract: "У Иры", "дома", "на работе", "у метро", "у нас", "на районе". Examples of concrete (leave false): "Кофемания", "ул. Ленина 10", "ТЦ Мега", "Парк Горького". When true, the location is stored as plain text without geocoding or Google Maps links. Defaults to false.',
+        },
         all_day: {
           type: 'boolean',
           description: 'Whether this is an all-day event. Optional.',
@@ -128,9 +133,11 @@ const toolDefinitions: ToolDefinition[] = [
           type: 'string',
           description: 'New description. Pass null to remove. Optional.',
         },
-        location: {
-          type: 'string',
-          description: 'New location. Pass null to remove. Optional.',
+        location: { type: 'string', description: 'New location. Pass null to remove. Optional.' },
+        location_abstract: {
+          type: 'boolean',
+          description:
+            'Set to true when the new location is abstract/relative (see create_event for examples). Skips geocoding. Defaults to false.',
         },
         recurrence_rule: {
           type: 'string',
