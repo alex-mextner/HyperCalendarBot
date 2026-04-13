@@ -48,7 +48,7 @@ import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
-import type { ParseMode } from '../utils/telegram.ts';
+import { escapeHtml, type ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -149,6 +149,7 @@ export interface CreateBotOpts {
     | 'TELEGRAM_SESSION_MASTER_KEY'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
+  broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -171,6 +172,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     addressCache,
     pendingGeoStore,
     weatherService,
+    broadcastEnqueuer,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -260,7 +262,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
   const adminEditSessions = new Map<number, import('../services/intent/admin-edit-session.ts').AdminEditSession>();
-  const adminReplySession = new Map<number, { threadId: number; userId: number }>();
+  const adminReplySession = new Map<
+    number,
+    { threadId: number; userId: number; chatId?: number; topicThreadId?: number }
+  >();
   const proposeTimeSessions = new Map<number, { invitationId: number }>();
 
   // Load approved intents into matcher on startup
@@ -441,18 +446,23 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sendMessageToChat: async (
       chatId: number,
       text: string,
-      options?: { reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup },
+      options?: {
+        reply_markup?: InlineKeyboard | import('gramio').TelegramInlineKeyboardMarkup;
+        message_thread_id?: number;
+      },
     ) => {
       const result = await bot.api.sendMessage({
         chat_id: chatId,
         text,
         ...(options?.reply_markup ? { reply_markup: options.reply_markup } : {}),
+        ...(options?.message_thread_id ? { message_thread_id: options.message_thread_id } : {}),
       });
       return result;
     },
     proposeTimeSessions,
     birthdayService,
     userMemoryRepo: db.userMemory,
+    broadcastEnqueuer,
     actionLogRepo: db.actionLog,
     telegramSessionRepo: db.telegramSessions,
     telegramMasterKey: telegramMasterKey ?? undefined,
@@ -495,6 +505,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     locationVerification,
     addressCache,
     pendingGeoStore,
+    weatherService,
   };
 
   // AI Assistant commands (not in setMyCommands — internal use only)
@@ -657,12 +668,30 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('ping', (ctx) => handlePing(ctx))
     .command('help', (ctx) => handleHelp(ctx))
     .command('today', (ctx) =>
-      handleToday(ctx, eventService, holidayService, renderService, db.groupChats, googleDeps?.calendarRepo),
+      handleToday(
+        ctx,
+        eventService,
+        holidayService,
+        renderService,
+        db.groupChats,
+        googleDeps?.calendarRepo,
+        weatherService,
+      ),
     )
     .command('tomorrow', (ctx) =>
-      handleTomorrow(ctx, eventService, holidayService, renderService, db.groupChats, googleDeps?.calendarRepo),
+      handleTomorrow(
+        ctx,
+        eventService,
+        holidayService,
+        renderService,
+        db.groupChats,
+        googleDeps?.calendarRepo,
+        weatherService,
+      ),
     )
-    .command('week', (ctx) => handleWeek(ctx, eventService, holidayService, renderService, db.groupChats))
+    .command('week', (ctx) =>
+      handleWeek(ctx, eventService, holidayService, renderService, db.groupChats, weatherService),
+    )
     .command('month', (ctx) => handleMonth(ctx, eventService, undefined, renderService, db.groupChats))
     .command('add', (ctx) => handleAdd(ctx, eventService, scenesSetup.scenes.addEventScene, db.groupChats))
     .command('edit', (ctx) => handleEdit(ctx, eventService, db.groupChats))
@@ -796,6 +825,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             await bot.api.sendMessage({ chat_id: chatId, text });
           },
           adminId: botAdminId,
+        },
+        editProposalDeps: {
+          editProposalRepo: db.editProposals,
+          sendMessage: async (chatId: number, text: string, options?: { parse_mode: ParseMode }) => {
+            await bot.api.sendMessage({
+              chat_id: chatId,
+              text,
+              ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
+            });
+          },
         },
         userRepo: db.users,
         intentDeps: {
@@ -958,7 +997,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                   inviteeUser?.timezone ?? null,
                   !!inviteeUser?.onboarding_completed,
                 )
-              : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
+              : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
             telegramSender.sendInvitation!(shared.userId, invText, inv.invitation.id)
               .then((sent) => {
                 if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, shared.userId);
@@ -1020,7 +1059,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
               )
-            : t(inviteeLang).invitation_received(`Event #${eventId}`, inviterName);
+            : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
           telegramSender.sendInvitation!(inviteeId, invText, inv.invitation.id)
             .then((sent) => {
               if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);

@@ -33,6 +33,7 @@ describe('loadConfig', () => {
   beforeEach(() => {
     process.env = { ...originalEnv };
     process.env.BOT_TOKEN = 'test-token';
+    process.env.REDIS_URL = 'redis://localhost:6379';
     setAiVars();
   });
 
@@ -149,18 +150,9 @@ describe('loadConfig', () => {
     expect(config.DATABASE_PATH).toBe('/tmp/test.db');
   });
 
-  test('REDIS_URL is optional (bot works without it)', () => {
-    setAgentVars();
+  test('throws if REDIS_URL is missing', () => {
     delete process.env.REDIS_URL;
-    delete process.env.GOOGLE_CLIENT_ID;
-    const config = loadConfig();
-    expect(config.REDIS_URL).toBeUndefined();
-  });
-
-  test('throws when GOOGLE_CLIENT_ID set but REDIS_URL missing', () => {
-    delete process.env.REDIS_URL;
-    process.env.GOOGLE_CLIENT_ID = 'cid';
-    expect(() => loadConfig()).toThrow('REDIS_URL is required when GOOGLE_CLIENT_ID is set');
+    expect(() => loadConfig()).toThrow('REDIS_URL');
   });
 
   test('throws when GOOGLE_CLIENT_ID set but ENCRYPTION_KEY missing', () => {

@@ -2,6 +2,7 @@
 
 import { parsePhoneNumber } from 'libphonenumber-js';
 import { ruPlural } from '../services/event/formatters.ts';
+import { formatTempCurrent, formatTempRange } from '../services/weather/format.ts';
 
 export function maskPhone(phoneE164: string): string {
   try {
@@ -195,8 +196,12 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `The user hasn't started the bot yet. Forward this link so they can accept:\n\n${url}\n\n(Invitation to "<b>${title}</b>")`,
     invitation_sent: 'Invitation sent',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Invitation</b>\n${from} invites you to: <b>${title}</b>`,
+    // SAFETY: both arguments must be HTML-safe when passed — either escaped
+    // plain text via `escapeHtml(...)` or a pre-built HTML fragment like
+    // `<a href="tg://user?id=...">name</a>`. The template wraps `titleHtml`
+    // in `<b>...</b>` and concatenates `fromHtml` verbatim.
+    invitation_received: (titleHtml: string, fromHtml: string) =>
+      `📨 <b>${titleHtml}</b> — invitation from ${fromHtml}`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -348,11 +353,12 @@ export const MSG = {
         contactFound: (data: string) => `Contact found: ${data}`,
         contactUpdated: (label: string) => `Contact updated: ${label}`,
         questionSent: 'Question sent. Waiting for user response.',
-        dayImageRendering: (date: string) => `Image for ${date} is being rendered and will be sent as a photo.`,
-        weekImageRendering: (weekStart: string) =>
-          `Weekly calendar starting ${weekStart} is being rendered and will be sent as a photo.`,
-        monthImageRendering: (month: string) =>
-          `Monthly calendar for ${month} is being rendered and will be sent as a photo.`,
+        dayImageSent: (date: string) => `Day calendar image for ${date} has been sent to the chat.`,
+        weekImageSent: (weekStart: string) => `Weekly calendar image starting ${weekStart} has been sent to the chat.`,
+        monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
+        dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
+        weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
+        monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
         callFailed: (text: string) => `📞 Couldn't reach you by call.\n\n${text}`,
         gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
@@ -362,7 +368,10 @@ export const MSG = {
         gcalNoCalendars: 'No Google Calendars found. Sync may still be in progress.',
         gcalList: (lines: string) => `Google Calendars:\n${lines}`,
         userPickerSent: 'User picker sent. Waiting for user to select participants.',
-        tableRendering: (title: string) => `Table "${title}" is rendering and will appear in the chat shortly.`,
+        sceneResumed: 'Continue the wizard from where you left off.',
+        sceneCancelled: 'Wizard cancelled.',
+        tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
+        tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
         telegramConnectedStatus: (masked: string) => `Telegram account connected (${masked})`,
         telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
@@ -394,6 +403,12 @@ export const MSG = {
           `You declined the shared event (id: ${id}). It has been removed from your calendar.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Event "${title}" snoozed by ${minutes} min. New start: ${newStart}`,
+        notificationQueued: (count: number) => `Notification queued for ${count} participant${count !== 1 ? 's' : ''}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Update on "${eventTitle}" from ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`,
+        locationAttached: (eventId: number) => `📍 Location attached to event #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
@@ -425,6 +440,11 @@ export const MSG = {
           `Visibility for "${title}" (id: ${id}) set to "${visibility}".`,
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
+        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
+          `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string) => `⚠️ Could not deliver invitation for "${eventTitle}" directly.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;
@@ -583,24 +603,26 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Proposal accepted. Event "${title}" updated.`,
       proposalAcceptedNoEvent: '✅ Proposal accepted.',
       proposalRejected: '❌ Proposal rejected.',
-      proposalAcceptedNotification: '✅ Your edit proposal was accepted.',
-      proposalRejectedNotification: '❌ Your edit proposal was rejected.',
-      feedbackThreadResolved: 'Your feedback thread has been resolved.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — edit accepted`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — edit rejected`,
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — resolved`,
+      adminReplyHeader: (subject: string) => `💬 Developer reply (${subject}):`,
+      adminReplySent: 'Reply sent.',
+      adminReplyDeliveredToGroup: 'Delivered to group (user has not started the bot).',
+      adminReplyFailed: '⚠️ Delivery failed — user has not started the bot.',
     },
     notifications: {
       morning: "Good morning! Here's your day:",
       morningFree: 'Good morning!',
       evening: "Tomorrow's schedule:",
       eveningFree: 'Good evening!',
-      reminder: 'Reminder:',
-      reminders: 'Reminders',
       inLabel: 'in',
       startingNow: 'starting now!',
       eventsCount: (n: number) => `${n} event${n === 1 ? '' : 's'}`,
       goodNight: 'Good night!',
       tomorrow: 'tomorrow',
       haveADay: 'Have a productive day!',
-      eveHoliday: (name: string) => `🎉 Tomorrow is a holiday: ${name}`,
+      eveHoliday: (name: string) => `🎉 ${name} tomorrow`,
       weeklyDigest: (range: string) => `📅 Week ${range}:`,
       noEvents: 'no events',
       allDay: 'All day',
@@ -610,16 +632,36 @@ export const MSG = {
         'No events tomorrow — the day is free!\nWant to plan ahead? Just describe it in a message, or use /add.',
       durationHours: (h: number) => `${h}h`,
       durationMinutes: (m: number) => `${m} min`,
-      clockChangeForward: (duration: string) =>
-        `🕐 Clocks moved ${duration} forward last night. Double-check your alarms and meetings!`,
-      clockChangeBack: (duration: string) =>
-        `🕐 Clocks moved ${duration} back last night. Double-check your alarms and meetings!`,
+      batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} +${restCount} more`,
+      clockChangeForward: (duration: string) => `🕐 Clocks shifted by +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Clocks shifted by -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      tempCurrent: formatTempCurrent,
+      tempRange: formatTempRange,
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
+      eventForecast: (weather: string) => `Weather: ${weather}`,
+    },
+    eventCard: {
+      allDayInline: 'all day',
+      birthdayAgeSuffix: (age: number) => ` — turns ${age}`,
+      dayAgendaEmpty: 'No events. Use /add to create one.',
+      weekAgendaDayEmpty: '— no events',
+      weekHeader: 'Week',
+      eventsWord: (n: number) => (n === 1 ? 'event' : 'events'),
+      recurrenceEvery: (interval: number, unit: string) => `Every ${interval} ${unit}`,
+      recurrenceCountSuffix: (count: string) => `, ${count} times`,
+      recurrenceMonthShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      recurrenceUntilSuffix: (day: number, monthShort: string) => ` until ${monthShort} ${day}`,
+      recurrenceUnitDays: (n: number) => (n === 1 ? 'day' : 'days'),
+      recurrenceUnitWeeks: (n: number) => (n === 1 ? 'week' : 'weeks'),
+      recurrenceUnitMonths: (n: number) => (n === 1 ? 'month' : 'months'),
+      recurrenceUnitYears: (n: number) => (n === 1 ? 'year' : 'years'),
+      recurrenceFreqDaily: 'Daily',
+      recurrenceFreqWeekly: 'Weekly',
+      recurrenceFreqMonthly: 'Monthly',
+      recurrenceFreqYearly: 'Yearly',
     },
     botTips: {
       // ── Creating events ──
@@ -892,8 +934,9 @@ export const MSG = {
     invite_deep_link: (title: string, url: string) =>
       `Пользователь ещё не запустил бота. Перешлите ссылку для принятия:\n\n${url}\n\n(Приглашение на "<b>${title}</b>")`,
     invitation_sent: 'Приглашение отправлено',
-    invitation_received: (title: string, from: string) =>
-      `📨 <b>Приглашение</b>\n${from} приглашает вас: <b>${title}</b>`,
+    // SAFETY: see en.invitation_received — both args must be HTML-safe before
+    // being passed; template wraps `titleHtml` in <b> and concatenates `fromHtml`.
+    invitation_received: (titleHtml: string, fromHtml: string) => `📨 <b>${titleHtml}</b> — приглашение от ${fromHtml}`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',
@@ -1045,10 +1088,13 @@ export const MSG = {
         contactFound: (data: string) => `Контакт найден: ${data}`,
         contactUpdated: (label: string) => `Контакт обновлён: ${label}`,
         questionSent: 'Вопрос отправлен. Ожидаю ответа.',
-        dayImageRendering: (date: string) => `Изображение за ${date} формируется и будет отправлено фото.`,
-        weekImageRendering: (weekStart: string) =>
-          `Недельный календарь с ${weekStart} формируется и будет отправлен фото.`,
-        monthImageRendering: (month: string) => `Месячный календарь за ${month} формируется и будет отправлен фото.`,
+        dayImageSent: (date: string) => `Картинка календаря за ${date} отправлена в чат.`,
+        weekImageSent: (weekStart: string) => `Картинка недельного календаря с ${weekStart} отправлена в чат.`,
+        monthImageSent: (month: string) => `Картинка месячного календаря за ${month} отправлена в чат.`,
+        dayImageFailed: (date: string) => `Не удалось отрендерить или отправить картинку за ${date}.`,
+        weekImageFailed: (weekStart: string) =>
+          `Не удалось отрендерить или отправить недельную картинку с ${weekStart}.`,
+        monthImageFailed: (month: string) => `Не удалось отрендерить или отправить месячную картинку за ${month}.`,
         callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
         callFailed: (text: string) => `📞 Не удалось дозвониться.\n\n${text}`,
         gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',
@@ -1059,7 +1105,10 @@ export const MSG = {
         gcalNoCalendars: 'Google-календари не найдены. Возможно, синхронизация ещё идёт.',
         gcalList: (lines: string) => `Google-календари:\n${lines}`,
         userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
-        tableRendering: (title: string) => `Таблица «${title}» рендерится и скоро появится в чате.`,
+        sceneResumed: 'Продолжай заполнение с того места, где остановился.',
+        sceneCancelled: 'Заполнение отменено.',
+        tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
+        tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
         telegramConnectedStatus: (masked: string) => `Telegram-аккаунт подключён (${masked})`,
         telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
@@ -1090,6 +1139,13 @@ export const MSG = {
         eventDeclined: (id: number) => `Ты отклонил(а) общее событие (id: ${id}). Оно удалено из твоего календаря.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Событие «${title}» отложено на ${minutes} мин. Новое начало: ${newStart}`,
+        notificationQueued: (count: number) =>
+          `Уведомление поставлено в очередь для ${count} ${ruPlural(count, 'участника', 'участников', 'участников')}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Обновление по «${eventTitle}» от ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`,
+        locationAttached: (eventId: number) => `📍 Локация привязана к событию #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
@@ -1122,6 +1178,12 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
+          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string) =>
+          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
         userSessionInvitation: (args: {
           title: string;
           dateLine: string;
@@ -1278,28 +1340,30 @@ export const MSG = {
       proposalAccepted: (title: string) => `✅ Предложение принято. Событие «${title}» обновлено.`,
       proposalAcceptedNoEvent: '✅ Предложение принято.',
       proposalRejected: '❌ Предложение отклонено.',
-      proposalAcceptedNotification: '✅ Твоё предложение по редактированию принято.',
-      proposalRejectedNotification: '❌ Твоё предложение по редактированию отклонено.',
-      feedbackThreadResolved: 'Твой вопрос помечен как решённый.',
+      proposalAcceptedNotification: (title: string) => `✅ «${title}» — правка принята`,
+      proposalRejectedNotification: (title: string) => `❌ «${title}» — правка отклонена`,
+      feedbackThreadResolved: (subject: string) => `✅ «${subject}» — решено`,
+      adminReplyHeader: (subject: string) => `💬 Ответ разработчика (${subject}):`,
+      adminReplySent: 'Ответ отправлен.',
+      adminReplyDeliveredToGroup: 'Доставлено в группу (пользователь не начал чат с ботом).',
+      adminReplyFailed: '⚠️ Не удалось доставить — пользователь не начал чат с ботом.',
       proposalAlreadyProcessed: (status: string) => {
         const map: Record<string, string> = { pending: 'в ожидании', accepted: 'принято', rejected: 'отклонено' };
         return `Уже ${map[status] ?? status}`;
       },
     },
     notifications: {
-      morning: 'Доброе утро! Ваш день:',
+      morning: 'Доброе утро! Твой день:',
       morningFree: 'Доброе утро!',
       evening: 'Расписание на завтра:',
       eveningFree: 'Добрый вечер!',
-      reminder: 'Напоминание:',
-      reminders: 'Напоминания',
       inLabel: 'через',
       startingNow: 'начинается!',
       eventsCount: (n: number) => `${n} ${ruPlural(n, 'событие', 'события', 'событий')}`,
       goodNight: 'Спокойной ночи!',
       tomorrow: 'завтра',
       haveADay: 'Продуктивного дня!',
-      eveHoliday: (name: string) => `🎉 Завтра праздник: ${name}`,
+      eveHoliday: (name: string) => `🎉 ${name} завтра`,
       weeklyDigest: (range: string) => `📅 Неделя ${range}:`,
       noEvents: 'нет событий',
       allDay: 'Весь день',
@@ -1309,16 +1373,36 @@ export const MSG = {
         'Завтра нет событий — день свободен!\nХочешь запланировать что-то заранее? Просто напиши сообщение, или используй /add.',
       durationHours: (h: number) => `${h} ${ruPlural(h, 'час', 'часа', 'часов')}`,
       durationMinutes: (m: number) => `${m} ${ruPlural(m, 'минуту', 'минуты', 'минут')}`,
-      clockChangeForward: (duration: string) =>
-        `🕐 Сегодня ночью часы перевели на ${duration} вперёд. Проверь, что будильник и встречи правильно настроены!`,
-      clockChangeBack: (duration: string) =>
-        `🕐 Сегодня ночью часы перевели на ${duration} назад. Проверь, что будильник и встречи правильно настроены!`,
+      batchHeader: (firstTitle: string, restCount: number) => `${firstTitle} + ещё ${restCount}`,
+      clockChangeForward: (duration: string) => `🕐 Часы переведены на +${duration}`,
+      clockChangeBack: (duration: string) => `🕐 Часы переведены на -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      tempCurrent: formatTempCurrent,
+      tempRange: formatTempRange,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
+      eventForecast: (weather: string) => `Погода: ${weather}`,
+    },
+    eventCard: {
+      allDayInline: 'весь день',
+      birthdayAgeSuffix: (age: number) => ` — ${age} ${ruPlural(age, 'год', 'года', 'лет')}`,
+      dayAgendaEmpty: 'Нет событий. /add для создания.',
+      weekAgendaDayEmpty: '— нет событий',
+      weekHeader: 'Неделя',
+      eventsWord: (n: number) => ruPlural(n, 'событие', 'события', 'событий'),
+      recurrenceEvery: (interval: number, unit: string) => `Каждые ${interval} ${unit}`,
+      recurrenceCountSuffix: (count: string) => `, ${count} раз`,
+      recurrenceMonthShort: ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'],
+      recurrenceUntilSuffix: (day: number, monthShort: string) => ` до ${day} ${monthShort}`,
+      recurrenceUnitDays: (n: number) => ruPlural(n, 'день', 'дня', 'дней'),
+      recurrenceUnitWeeks: (n: number) => ruPlural(n, 'неделю', 'недели', 'недель'),
+      recurrenceUnitMonths: (n: number) => ruPlural(n, 'месяц', 'месяца', 'месяцев'),
+      recurrenceUnitYears: (n: number) => ruPlural(n, 'год', 'года', 'лет'),
+      recurrenceFreqDaily: 'Ежедневно',
+      recurrenceFreqWeekly: 'Еженедельно',
+      recurrenceFreqMonthly: 'Ежемесячно',
+      recurrenceFreqYearly: 'Ежегодно',
     },
     botTips: {
       // ── Создание событий ──

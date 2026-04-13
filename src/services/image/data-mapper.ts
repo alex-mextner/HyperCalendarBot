@@ -14,6 +14,9 @@ import type {
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
 import { ruPlural } from '../event/formatters.ts';
+import { formatTempRange } from '../weather/format.ts';
+import type { DayWeather } from '../weather/types.ts';
+import { weatherEmoji } from '../weather/weather-service.ts';
 
 const BIRTHDAY_COLOR = '#EC4899';
 
@@ -123,6 +126,7 @@ export function mapWeeklyOverviewData(params: {
   locale: 'ru' | 'en';
   theme: Theme;
   todayIso?: string;
+  weatherByDate?: { [date: string]: DayWeather };
 }): WeeklyOverviewData {
   const { weekStartIso, timezone, locale, theme, occurrencesByDay } = params;
   const labels = getLabels(locale);
@@ -132,11 +136,14 @@ export function mapWeeklyOverviewData(params: {
     const dayDate = addDays(start, i);
     const iso = dayDate.toISOString().slice(0, 10);
     const occs = occurrencesByDay.get(iso) ?? [];
+    const dayW = params.weatherByDate?.[iso];
     return {
       dayNumber: dayDate.getUTCDate(),
       dayName: labels.weekDaysShort[i]!,
       eventCount: occs.length,
       isWeekend: i >= 5,
+      weatherEmoji: dayW ? weatherEmoji(dayW.conditionCode) : undefined,
+      weatherTemp: dayW ? formatTempRange(dayW.tempMin, dayW.tempMax, '°') : undefined,
       events: occs.map(
         (o): MiniEvent => ({
           title: eventTitle(o, locale),

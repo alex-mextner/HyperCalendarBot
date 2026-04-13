@@ -978,7 +978,27 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '054_create_user_telegram_sessions',
+    name: '054_event_soft_delete',
+    up: (db) => {
+      db.exec('ALTER TABLE events ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
+      db.exec('CREATE INDEX idx_events_is_deleted ON events(is_deleted) WHERE is_deleted = 1');
+    },
+  },
+  {
+    name: '055_drop_is_deleted_partial_index',
+    up: (db) => {
+      db.exec('DROP INDEX IF EXISTS idx_events_is_deleted');
+    },
+  },
+  {
+    name: '056_feedback_threads_chat_id',
+    up: (db) => {
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN chat_id INTEGER DEFAULT NULL');
+      db.exec('ALTER TABLE feedback_threads ADD COLUMN topic_thread_id INTEGER DEFAULT NULL');
+    },
+  },
+  {
+    name: '057_create_user_telegram_sessions',
     up: (db) => {
       db.exec(`
         CREATE TABLE user_telegram_sessions (
@@ -996,13 +1016,13 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '055_users_connect_telegram_dismissed_at',
+    name: '058_users_connect_telegram_dismissed_at',
     up: (db) => {
       db.exec('ALTER TABLE users ADD COLUMN connect_telegram_dismissed_at TEXT DEFAULT NULL');
     },
   },
   {
-    name: '056_user_telegram_sessions_tz_consent',
+    name: '059_user_telegram_sessions_tz_consent',
     up: (db) => {
       db.exec('ALTER TABLE user_telegram_sessions ADD COLUMN tz_detection_consent_at TEXT DEFAULT NULL');
     },

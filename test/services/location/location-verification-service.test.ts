@@ -44,6 +44,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,
@@ -413,8 +414,9 @@ describe('LocationVerificationService', () => {
 
       const call = deps.editMessage.mock.calls[0] as unknown[];
       const text = call[2] as string;
-      // Russian invitation header
-      expect(text).toContain('Приглашение');
+      // Russian invitation header with front-loaded event title
+      expect(text).toContain('приглашение от');
+      expect(text).toContain('Встреча');
     });
 
     test('updated event passed to formatter has the new resolved address', async () => {

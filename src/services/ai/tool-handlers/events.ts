@@ -1,18 +1,36 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
+import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
-import { formatEventDetail, ruPlural } from '../../event/formatters.ts';
+import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import { formatEventWeatherLine } from '../../weather/format.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
 const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Fetch event-time weather and return a formatted suffix like `, weather: ☀️ 15°C, clear sky`. */
+async function weatherSuffix(ctx: AgentContext, startAt: string, allDay: boolean): Promise<string> {
+  if (!ctx.weatherService) return '';
+  const lang = (ctx.user.language ?? 'en') as Lang;
+  try {
+    const forecast = await ctx.weatherService.getForecastAt(ctx.user.timezone, new Date(startAt).getTime(), lang, {
+      allDay,
+    });
+    if (!forecast) return '';
+    return `, ${t(lang).weather.eventForecast(formatEventWeatherLine(lang, forecast))}`;
+  } catch {
+    // Weather is non-critical — API failure should not break tool output
+    return '';
+  }
+}
 
 function expandDateOnly(dateStr: string, timezone: string): { start: string; end: string } {
   // Interpret dateStr as noon in the user's local timezone (not UTC noon) to avoid
@@ -82,39 +100,65 @@ function buildGroupEventNotification(
   return `${header}\n\n${body}`;
 }
 
-function sendGroupNotifications(ctx: AgentContext, event: CalendarEvent, action: 'created' | 'updated'): void {
-  if (!ctx.groupChatId || !ctx.group?.groupMemberService || !ctx.sender) return;
-  const groupChat = ctx.group?.groupChatRepo.findByChatId(ctx.groupChatId);
+/**
+ * Enqueue per-recipient broadcast jobs for a group event create/update.
+ *
+ * Returns the number of enqueued recipients (0 if unavailable). The caller
+ * should await this so the tool result honestly reflects "notifications
+ * queued for N members" instead of a fire-and-forget lie.
+ *
+ * Each recipient gets a language- and timezone-localized message formatted
+ * at enqueue time; the worker just dispatches the pre-formatted text.
+ */
+async function enqueueGroupNotifications(
+  ctx: AgentContext,
+  event: CalendarEvent,
+  action: 'created' | 'updated',
+): Promise<number> {
+  if (!ctx.groupChatId || !ctx.group?.groupMemberService || !ctx.broadcast) return 0;
+  const groupChat = ctx.group.groupChatRepo.findByChatId(ctx.groupChatId);
   const groupLabel = ctx.groupTitle ?? groupChat?.title ?? String(ctx.groupChatId);
   const inviteLink = groupChat?.invite_link ?? null;
   const organizerLink = buildOrganizerLink(ctx.user);
-  const sender = ctx.sender;
-  const errorLabel =
-    action === 'created' ? 'Group event notification failed' : 'Group event update notification failed';
-  ctx
-    .group!.groupMemberService.getRegisteredMembers(ctx.groupChatId)
-    .then((memberIds) => {
-      for (const userId of memberIds) {
-        const recipientUser = ctx.userRepo.findByTelegramId(userId);
-        const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
-        const recipientTimezone = recipientUser?.timezone ?? ctx.user.timezone;
-        const message = buildGroupEventNotification(
-          event,
-          recipientLang,
-          recipientTimezone,
-          groupLabel,
-          inviteLink,
-          organizerLink,
-          action,
-        );
-        sender.sendMessage(userId, message, 'HTML').catch((err) => {
-          eventsLogger.error({ err: err, userId }, errorLabel);
-        });
-      }
-    })
-    .catch((err) => {
-      eventsLogger.error({ err: err, groupChatId: ctx.groupChatId }, 'Group member fetch failed');
-    });
+
+  let memberIds: number[];
+  try {
+    memberIds = await ctx.group.groupMemberService.getRegisteredMembers(ctx.groupChatId);
+  } catch (err) {
+    eventsLogger.error({ err, groupChatId: ctx.groupChatId }, 'Group member fetch failed');
+    return 0;
+  }
+
+  if (memberIds.length === 0) return 0;
+
+  const jobs = memberIds.map((userId) => {
+    const recipientUser = ctx.userRepo.findByTelegramId(userId);
+    const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
+    const recipientTimezone = recipientUser?.timezone ?? ctx.user.timezone;
+    const text = buildGroupEventNotification(
+      event,
+      recipientLang,
+      recipientTimezone,
+      groupLabel,
+      inviteLink,
+      organizerLink,
+      action,
+    );
+    return {
+      recipientId: userId,
+      text,
+      parseMode: 'HTML' as const,
+      origin: `group_event_${action}:${event.id}`,
+    };
+  });
+
+  try {
+    await ctx.broadcast.enqueueBatch(jobs);
+    return jobs.length;
+  } catch (err) {
+    eventsLogger.error({ err, eventId: event.id, count: jobs.length }, 'Failed to enqueue group notifications');
+    return 0;
+  }
 }
 
 const eventsLogger = logger.child({ module: 'ai-tools' });
@@ -186,7 +230,7 @@ interface SearchEventsInput {
   event_type?: 'birthday' | 'regular';
 }
 
-export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolResult {
+export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -213,7 +257,10 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
     return { success: true, output: t(ctx.user.language).aiTools.events.noEventsInRange, data };
   }
 
-  const lines = occurrences.map((occ) => {
+  const weatherSuffixes = await Promise.all(
+    occurrences.map((occ) => weatherSuffix(ctx, occ.occurrence_start, occ.event.all_day === 1)),
+  );
+  const lines = occurrences.map((occ, i) => {
     const e = occ.event;
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
@@ -229,13 +276,14 @@ export function handleGetEvents(ctx: AgentContext, input: GetEventsInput): ToolR
       const creatorLabel = creator?.username ? `@${creator.username}` : `id:${e.created_by}`;
       parts.push(`created_by: ${creatorLabel}`);
     }
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return { success: true, output: lines.join('\n'), data };
 }
+handleGetEvents.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): ToolResult {
+export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -268,7 +316,7 @@ export function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): T
   return executeCreateEvent(ctx, input, userId);
 }
 
-function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: number): ToolResult {
+async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: number): Promise<ToolResult> {
   try {
     const scope = resolveScope(input, ctx);
     if (scope === 'group' && ctx.groupChatId === undefined) {
@@ -297,12 +345,14 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
     if (event.description) parts.push(`description: ${event.description}`);
     if (event.location) parts.push(`location: ${event.location}`);
 
-    if (scope === 'group') sendGroupNotifications(ctx, event, 'created');
+    const groupNotificationsQueued = scope === 'group' ? await enqueueGroupNotifications(ctx, event, 'created') : 0;
 
-    if (scope !== 'group') {
-      ctx.google
-        ?.schedulePush?.(userId, event.id, 'create')
-        .catch((err) => logger.error({ err }, 'schedulePush failed'));
+    if (scope !== 'group' && ctx.google?.schedulePush) {
+      try {
+        await ctx.google.schedulePush(userId, event.id, 'create');
+      } catch (err) {
+        logger.error({ err }, 'schedulePush failed');
+      }
     }
 
     // Trigger background location verification if event has a location
@@ -340,17 +390,25 @@ function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, userId: 
       }
     }
 
+    const groupHint =
+      scope === 'group'
+        ? groupNotificationsQueued > 0
+          ? `The group event is saved and ${groupNotificationsQueued} member notification(s) have been queued for delivery. Do NOT call create_event again for this event.`
+          : 'The group event is saved but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call create_event again for this event.'
+        : undefined;
+
     return {
       success: true,
       output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
       data: eventToSummary(event, ctx.user.timezone),
+      agentHint: groupHint,
     };
   } catch (error) {
     return { success: false, error: `Failed to create event: ${String(error)}` };
   }
 }
 
-export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): ToolResult {
+export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -378,12 +436,14 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   if (updated.description) parts.push(`description: ${updated.description}`);
   if (updated.location) parts.push(`location: ${updated.location}`);
 
-  if (scope === 'group') sendGroupNotifications(ctx, updated, 'updated');
+  const groupNotificationsQueued = scope === 'group' ? await enqueueGroupNotifications(ctx, updated, 'updated') : 0;
 
-  if (scope !== 'group') {
-    ctx.google
-      ?.schedulePush?.(userId, updated.id, 'update')
-      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+  if (scope !== 'group' && ctx.google?.schedulePush) {
+    try {
+      await ctx.google.schedulePush(userId, updated.id, 'update');
+    } catch (err) {
+      logger.error({ err }, 'schedulePush failed');
+    }
   }
 
   // Fetch accepted participants once — used for both Google sync and the hint
@@ -391,27 +451,43 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
     ? ctx.participantRepo.getByEvent(event_id).filter((p) => p.status === 'accepted' && p.user_id !== userId)
     : [];
 
-  // Push update to all accepted participants' Google Calendars
+  // Push update to all accepted participants' Google Calendars (parallel).
+  // Concurrency note: SQLite ops inside scheduleParticipantPush are sync
+  // (bun:sqlite), so only the Redis queue.add runs in parallel — bounded
+  // by realistic group sizes (<100 members).
   if (ctx.google?.scheduleParticipantPush && acceptedParticipants.length > 0) {
-    for (const p of acceptedParticipants) {
-      ctx.google
-        .scheduleParticipantPush(p.user_id, updated.id, 'update')
-        .catch((err) =>
-          logger.error({ err, participantUserId: p.user_id, eventId: updated.id }, 'scheduleParticipantPush failed'),
+    const pushParticipant = ctx.google.scheduleParticipantPush;
+    const results = await Promise.allSettled(
+      acceptedParticipants.map((p) => pushParticipant(p.user_id, updated.id, 'update')),
+    );
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
+        logger.error(
+          {
+            err: (results[i] as PromiseRejectedResult).reason,
+            participantUserId: acceptedParticipants[i]!.user_id,
+            eventId: updated.id,
+          },
+          'scheduleParticipantPush failed',
         );
+      }
     }
   }
 
-  // Push update to all group members' Google Calendars
+  // Push update to all group members' Google Calendars (parallel)
   if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
     const members = ctx.group.groupMemberRepo
       .getActiveMembers(ctx.groupChatId!)
       .filter((m) => m.user_id !== ctx.user.telegram_id);
-    for (const m of members) {
-      pushParticipant(m.user_id, updated.id, 'update').catch((err) =>
-        logger.error({ err, userId: m.user_id, eventId: updated.id }, 'scheduleParticipantPush group failed'),
-      );
+    const results = await Promise.allSettled(members.map((m) => pushParticipant(m.user_id, updated.id, 'update')));
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
+        logger.error(
+          { err: (results[i] as PromiseRejectedResult).reason, userId: members[i]!.user_id, eventId: updated.id },
+          'scheduleParticipantPush group failed',
+        );
+      }
     }
   }
 
@@ -441,11 +517,7 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
   let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
   if (acceptedParticipants.length > 0) {
-    const count = acceptedParticipants.length;
-    output +=
-      ctx.user.language === 'ru'
-        ? `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`
-        : `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`;
+    output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
   // Trigger background location verification if location was updated
@@ -455,7 +527,15 @@ export function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInput): T
       .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));
   }
 
-  return { success: true, output, agentHint: conflictHint, data: eventToSummary(updated, ctx.user.timezone) };
+  const groupHint =
+    scope === 'group'
+      ? groupNotificationsQueued > 0
+        ? `The group event is updated and ${groupNotificationsQueued} member notification(s) have been queued for delivery. Do NOT call update_event again with identical arguments.`
+        : 'The group event is updated but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call update_event again with identical arguments.'
+      : undefined;
+  const mergedHint = [conflictHint, groupHint].filter(Boolean).join(' ') || undefined;
+
+  return { success: true, output, agentHint: mergedHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
 export interface AttachPendingLocationInput {
@@ -496,14 +576,11 @@ export async function handleAttachPendingLocationToEvent(
 
   return {
     success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? `📍 Локация привязана к событию #${input.event_id}.`
-        : `📍 Location attached to event #${input.event_id}.`,
+    output: t(ctx.user.language).aiTools.events.locationAttached(input.event_id),
   };
 }
 
-export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): ToolResult {
+export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -522,17 +599,20 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     if (!event) {
       return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
     }
-    // Remove from all group members' Google Calendars before deleting
+    // Remove from all group members' Google Calendars before deleting (parallel)
     if (ctx.google?.scheduleParticipantPush && ctx.group) {
-      for (const m of ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!)) {
-        ctx.google
-          .scheduleParticipantPush(m.user_id, input.event_id, 'delete')
-          .catch((err) =>
-            logger.error(
-              { err, userId: m.user_id, eventId: input.event_id },
-              'scheduleParticipantPush group delete failed',
-            ),
+      const pushParticipant = ctx.google.scheduleParticipantPush;
+      const members = ctx.group.groupMemberRepo.getActiveMembers(ctx.groupChatId!);
+      const results = await Promise.allSettled(
+        members.map((m) => pushParticipant(m.user_id, input.event_id, 'delete')),
+      );
+      for (let i = 0; i < results.length; i++) {
+        if (results[i]!.status === 'rejected') {
+          logger.error(
+            { err: (results[i] as PromiseRejectedResult).reason, userId: members[i]!.user_id, eventId: input.event_id },
+            'scheduleParticipantPush group delete failed',
           );
+        }
       }
     }
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
@@ -550,11 +630,13 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     if (participant && participant.status === 'accepted') {
       ctx.participantRepo.updateStatus(input.event_id, userId, 'declined');
       // Remove from this participant's Google Calendar
-      ctx.google
-        ?.scheduleParticipantPush?.(userId, input.event_id, 'delete')
-        .catch((err) =>
-          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed'),
-        );
+      if (ctx.google?.scheduleParticipantPush) {
+        try {
+          await ctx.google.scheduleParticipantPush(userId, input.event_id, 'delete');
+        } catch (err) {
+          logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed');
+        }
+      }
       return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
     }
   }
@@ -563,20 +645,26 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
-  // Remove from all participants' Google Calendars before deleting
+  // Remove from all participants' Google Calendars before deleting (parallel)
   if (ctx.google?.scheduleParticipantPush && ctx.participantRepo) {
+    const pushParticipant = ctx.google.scheduleParticipantPush;
     const participants = ctx.participantRepo
       .getByEvent(input.event_id)
       .filter((p) => p.status === 'accepted' && p.user_id !== userId);
-    for (const p of participants) {
-      ctx.google
-        .scheduleParticipantPush(p.user_id, input.event_id, 'delete')
-        .catch((err) =>
-          logger.error(
-            { err, participantUserId: p.user_id, eventId: input.event_id },
-            'scheduleParticipantPush delete failed',
-          ),
+    const results = await Promise.allSettled(
+      participants.map((p) => pushParticipant(p.user_id, input.event_id, 'delete')),
+    );
+    for (let i = 0; i < results.length; i++) {
+      if (results[i]!.status === 'rejected') {
+        logger.error(
+          {
+            err: (results[i] as PromiseRejectedResult).reason,
+            participantUserId: participants[i]!.user_id,
+            eventId: input.event_id,
+          },
+          'scheduleParticipantPush delete failed',
         );
+      }
     }
   }
 
@@ -584,9 +672,11 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   ctx.eventService.deleteEvent(input.event_id, userId);
 
   if (ctx.google?.schedulePush && googleEventId) {
-    ctx.google
-      .schedulePush(userId, input.event_id, 'delete', { googleEventId })
-      .catch((err) => logger.error({ err }, 'schedulePush failed'));
+    try {
+      await ctx.google.schedulePush(userId, input.event_id, 'delete', { googleEventId });
+    } catch (err) {
+      logger.error({ err }, 'schedulePush failed');
+    }
   }
 
   return {
@@ -596,7 +686,7 @@ export function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInput): T
   };
 }
 
-export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): ToolResult {
+export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -630,17 +720,19 @@ export function handleSearchEvents(ctx: AgentContext, input: SearchEventsInput):
     };
   }
 
-  const lines = events.map((e) => {
+  const weatherSuffixes = await Promise.all(events.map((e) => weatherSuffix(ctx, e.start_at, e.all_day === 1)));
+  const lines = events.map((e, i) => {
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${e.start_at}`];
     if (e.end_at) parts.push(`end: ${e.end_at}`);
     if (e.location) parts.push(`location: ${e.location}`);
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };
 }
+handleSearchEvents.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
-export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): ToolResult {
+export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -674,12 +766,15 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
     return { success: true, output: t(ctx.user.language).aiTools.events.noUpcomingEvents, data };
   }
 
-  const lines = upcoming.map((occ) => {
+  const weatherSuffixes = await Promise.all(
+    upcoming.map((occ) => weatherSuffix(ctx, occ.occurrence_start, occ.event.all_day === 1)),
+  );
+  const lines = upcoming.map((occ, i) => {
     const e = occ.event;
     const parts = [`id: ${e.id}`, `title: ${e.title}`, `start: ${occ.occurrence_start}`];
     if (occ.occurrence_end) parts.push(`end: ${occ.occurrence_end}`);
     if (e.location) parts.push(`location: ${e.location}`);
-    return parts.join(', ');
+    return parts.join(', ') + weatherSuffixes[i]!;
   });
 
   return {
@@ -688,6 +783,7 @@ export function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): T
     data,
   };
 }
+handleGetUpcoming.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
   const access = checkSecretaryAccess(
@@ -734,7 +830,7 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
   };
 }
 
-export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolResult {
+export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
     ctx.user.telegram_id,
     input.owner_id,
@@ -756,6 +852,7 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
   }
 
+  const weather = await weatherSuffix(ctx, event.start_at, event.all_day === 1);
   const parts = [`id: ${event.id}`, `title: ${event.title}`, `start: ${event.start_at}`];
   if (event.end_at) parts.push(`end: ${event.end_at}`);
   if (event.description) parts.push(`description: ${event.description}`);
@@ -779,15 +876,16 @@ export function handleGetEvent(ctx: AgentContext, input: GetEventInput): ToolRes
     parts.push(`reminders: ${unique.join(', ')}`);
   }
 
-  return { success: true, output: parts.join(', '), data: eventToSummary(event, ctx.user.timezone) };
+  return { success: true, output: parts.join(', ') + weather, data: eventToSummary(event, ctx.user.timezone) };
 }
+handleGetEvent.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 interface NotifyParticipantsInput {
   event_id: number;
   message: string;
 }
 
-export function handleNotifyParticipants(ctx: AgentContext, input: NotifyParticipantsInput): ToolResult {
+export async function handleNotifyParticipants(ctx: AgentContext, input: NotifyParticipantsInput): Promise<ToolResult> {
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
   if (!event) {
     return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
@@ -795,6 +893,10 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
 
   if (!ctx.participantRepo) {
     return { success: false, error: 'Participants feature is not configured.' };
+  }
+
+  if (!ctx.broadcast) {
+    return { success: false, error: 'Broadcast queue is not configured; cannot notify participants.' };
   }
 
   const accepted = ctx.participantRepo
@@ -805,21 +907,34 @@ export function handleNotifyParticipants(ctx: AgentContext, input: NotifyPartici
     return { success: false, error: 'This event has no accepted participants to notify.' };
   }
 
-  if (ctx.sender) {
-    const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
-    const text = `📅 Update on "${event.title}" from ${senderName}:\n${input.message}`;
-    for (const p of accepted) {
-      ctx.sender.sendMessage(p.user_id, text).catch((err) => {
-        eventsLogger.error({ err: err, userId: p.user_id }, 'Participant notification failed');
-      });
-    }
+  const senderName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
+  // Per-recipient localization: each recipient gets the notification in their own language
+  const jobs = accepted.map((p) => {
+    const recipientUser = ctx.userRepo.findByTelegramId(p.user_id);
+    const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
+    const text = t(recipientLang).aiTools.events.participantUpdate(event.title, senderName, input.message);
+    return {
+      recipientId: p.user_id,
+      text,
+      origin: `notify_participants:${input.event_id}`,
+    };
+  });
+
+  try {
+    await ctx.broadcast.enqueueBatch(jobs);
+  } catch (err) {
+    eventsLogger.error(
+      { err, eventId: input.event_id, count: jobs.length },
+      'Failed to enqueue participant notifications',
+    );
+    return { success: false, error: 'NOTIFY_PARTICIPANTS_ENQUEUE_FAILED' };
   }
+
+  const output = t(ctx.user.language).aiTools.events.notificationQueued(jobs.length);
 
   return {
     success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? `Уведомление отправлено ${accepted.length} ${ruPlural(accepted.length, 'участнику', 'участникам', 'участникам')}.`
-        : `Notification sent to ${accepted.length} participant${accepted.length > 1 ? 's' : ''}.`,
+    output,
+    agentHint: `${jobs.length} notifications queued for delivery via the broadcast worker. Do NOT call notify_participants again for this event with the same message.`,
   };
 }

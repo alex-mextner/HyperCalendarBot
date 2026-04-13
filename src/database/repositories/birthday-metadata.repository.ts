@@ -44,7 +44,7 @@ export class BirthdayMetadataRepository {
          WHERE m.celebrant_id = ?
            AND e.user_id = ?
            AND (e.owner_type IS NULL OR e.owner_type = 'user')
-           AND e.is_cancelled = 0`,
+           AND e.is_cancelled = 0 AND e.is_deleted = 0`,
       )
       .get(celebrantId, ownerId) as (BirthEventMetadata & { start_at: string; title: string }) | null;
   }
@@ -61,7 +61,7 @@ export class BirthdayMetadataRepository {
          WHERE m.celebrant_id = ?
            AND e.group_id = ?
            AND e.owner_type = 'group'
-           AND e.is_cancelled = 0`,
+           AND e.is_cancelled = 0 AND e.is_deleted = 0`,
       )
       .get(celebrantId, groupId) as (BirthEventMetadata & { start_at: string; title: string }) | null;
   }

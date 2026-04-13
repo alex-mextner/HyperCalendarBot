@@ -104,7 +104,7 @@ describe('sharing tool handlers', () => {
   // ── handleShareEvent ──
 
   describe('handleShareEvent', () => {
-    test('returns error when sharedEventRepo is missing', () => {
+    test('returns error when sharedEventRepo is missing', async () => {
       const ctx = makeCtx({
         sharing: {
           sharedEventRepo: undefined as never,
@@ -121,7 +121,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Sharing is not configured.');
     });
 
-    test('returns error when event not found', () => {
+    test('returns error when event not found', async () => {
       const ctx = makeCtx();
       const result = handleShareEvent(ctx, { event_id: 9999, target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
@@ -129,7 +129,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('returns error when event belongs to another user', () => {
+    test('returns error when event belongs to another user', async () => {
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
         title: 'Not Mine',
@@ -142,7 +142,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('shares event to user successfully', () => {
+    test('shares event to user successfully', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Team Meeting',
@@ -157,7 +157,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
 
-    test('shares event to group successfully', () => {
+    test('shares event to group successfully', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Group Sync',
@@ -176,7 +176,7 @@ describe('sharing tool handlers', () => {
   // ── handleSendInvitation ──
 
   describe('handleSendInvitation', () => {
-    test('returns error when invitationService is missing', () => {
+    test('returns error when invitationService is missing', async () => {
       const ctx = makeCtx({
         sharing: {
           sharedEventRepo,
@@ -188,19 +188,19 @@ describe('sharing tool handlers', () => {
           editProposalRepo: undefined as never,
         },
       });
-      const result = handleSendInvitation(ctx, { event_id: 1, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: 1, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invitations are not configured.');
     });
 
-    test('returns error when event not found (via invitation service)', () => {
+    test('returns error when event not found (via invitation service)', async () => {
       const ctx = makeCtx();
-      const result = handleSendInvitation(ctx, { event_id: 9999, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: 9999, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Event not found');
     });
 
-    test('returns error when inviting yourself', () => {
+    test('returns error when inviting yourself', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Solo',
@@ -208,12 +208,12 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx();
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Cannot invite yourself');
     });
 
-    test('sends invitation successfully', () => {
+    test('sends invitation successfully', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Party',
@@ -221,7 +221,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx();
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Invitation');
       expect(result.output).toContain(`${event.id}`);
@@ -250,7 +250,7 @@ describe('sharing tool handlers', () => {
           },
         },
       });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
       // Wait for async delivery
@@ -287,7 +287,7 @@ describe('sharing tool handlers', () => {
         deepLinkService,
         botUsername: 'TestBot',
       });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
       await flushPromises();
@@ -318,7 +318,7 @@ describe('sharing tool handlers', () => {
         deepLinkService,
         botUsername: 'TestBot',
       });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
       await flushPromises();
@@ -347,7 +347,7 @@ describe('sharing tool handlers', () => {
         deepLinkService,
         botUsername: 'TestBot',
       });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
       await flushPromises();
@@ -370,7 +370,7 @@ describe('sharing tool handlers', () => {
           sendInvitation: async () => null,
         },
       });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
 
       await flushPromises();
@@ -381,7 +381,7 @@ describe('sharing tool handlers', () => {
       expect(inv!.message_id).toBeNull();
     });
 
-    test('still succeeds when sender is not available (no delivery)', () => {
+    test('still succeeds when sender is not available (no delivery)', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'No Sender Party',
@@ -389,12 +389,12 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({ sender: undefined });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Invitation');
     });
 
-    test('returns error for duplicate invitation', () => {
+    test('returns error for duplicate invitation', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Dup Test',
@@ -403,12 +403,12 @@ describe('sharing tool handlers', () => {
       });
       const ctx = makeCtx();
       handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Invitation already sent');
     });
 
-    test('returns error when invitee disabled invitations', () => {
+    test('returns error when invitee disabled invitations', async () => {
       sharingSettingsRepo.ensureDefaults(OTHER_USER_ID);
       sharingSettingsRepo.update(OTHER_USER_ID, { allow_invitations: 0 });
       const event = eventService.createEvent({
@@ -418,7 +418,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx();
-      const result = handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('User has disabled invitations');
     });
@@ -427,7 +427,7 @@ describe('sharing tool handlers', () => {
   // ── handleGetInvitationStatus ──
 
   describe('handleGetInvitationStatus', () => {
-    test('returns error when invitationRepo is missing', () => {
+    test('returns error when invitationRepo is missing', async () => {
       const ctx = makeCtx({
         sharing: {
           sharedEventRepo,
@@ -444,7 +444,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Invitations are not configured.');
     });
 
-    test('returns error when event not found', () => {
+    test('returns error when event not found', async () => {
       const ctx = makeCtx();
       const result = handleGetInvitationStatus(ctx, { event_id: 9999 });
       expect(result.success).toBe(false);
@@ -452,7 +452,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('returns error when event belongs to another user', () => {
+    test('returns error when event belongs to another user', async () => {
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
         title: 'Not Mine',
@@ -465,7 +465,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('returns no invitations when none exist', () => {
+    test('returns no invitations when none exist', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Lonely Event',
@@ -479,7 +479,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('Lonely Event');
     });
 
-    test('returns pending invitations', () => {
+    test('returns pending invitations', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'With Guests',
@@ -495,7 +495,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('pending');
     });
 
-    test('returns accepted invitations', () => {
+    test('returns accepted invitations', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Confirmed',
@@ -511,7 +511,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
 
-    test('returns mixed pending and accepted', () => {
+    test('returns mixed pending and accepted', async () => {
       const thirdUser = 300;
       userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });
       const event = eventService.createEvent({
@@ -534,7 +534,7 @@ describe('sharing tool handlers', () => {
   // ── privacy settings via manage_settings ──
 
   describe('manage_settings privacy category', () => {
-    test('returns error when sharingSettingsRepo is missing', () => {
+    test('returns error when sharingSettingsRepo is missing', async () => {
       const ctx = makeCtx({
         sharing: {
           sharedEventRepo,
@@ -555,7 +555,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Sharing settings are not configured.');
     });
 
-    test('returns error when no settings provided', () => {
+    test('returns error when no settings provided', async () => {
       const ctx = makeCtx();
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -566,7 +566,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('updates');
     });
 
-    test('updates default_visibility', () => {
+    test('updates default_visibility', async () => {
       const ctx = makeCtx();
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -582,7 +582,7 @@ describe('sharing tool handlers', () => {
       expect(settings!.default_visibility).toBe('full');
     });
 
-    test('updates inline_mode_enabled as integer', () => {
+    test('updates inline_mode_enabled as integer', async () => {
       const ctx = makeCtx();
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -597,7 +597,7 @@ describe('sharing tool handlers', () => {
       expect(settings!.inline_mode_enabled).toBe(0);
     });
 
-    test('updates allow_invitations as integer', () => {
+    test('updates allow_invitations as integer', async () => {
       const ctx = makeCtx();
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -609,7 +609,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('1');
     });
 
-    test('updates multiple settings at once', () => {
+    test('updates multiple settings at once', async () => {
       const ctx = makeCtx();
       const result = handleManageSettings(ctx, {
         action: 'update',
@@ -631,28 +631,28 @@ describe('sharing tool handlers', () => {
   // ── handleShareAgenda ──
 
   describe('handleShareAgenda', () => {
-    test('returns error when sharingService is missing', () => {
+    test('returns error when sharingService is missing', async () => {
       const ctx = makeCtx({ sharing: undefined });
       const result = handleShareAgenda(ctx, { period: 'today', target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing is not configured.');
     });
 
-    test('returns error when sharedEventRepo is missing', () => {
+    test('returns error when sharedEventRepo is missing', async () => {
       const ctx = makeCtx({ sharing: undefined });
       const result = handleShareAgenda(ctx, { period: 'today', target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('Sharing is not configured.');
     });
 
-    test('returns no events when agenda is empty', () => {
+    test('returns no events when agenda is empty', async () => {
       const ctx = makeCtx();
       const result = handleShareAgenda(ctx, { period: 'today', target_type: 'user', target_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
       expect(result.output).toContain('No visible events');
     });
 
-    test('returns no events when all events are explicitly private', () => {
+    test('returns no events when all events are explicitly private', async () => {
       // Must explicitly set visibility to private — default is now 'full'
       sharingSettingsRepo.ensureDefaults(USER_ID);
       sharingSettingsRepo.update(USER_ID, { default_visibility: 'private' });
@@ -670,7 +670,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('No visible events');
     });
 
-    test('shares today agenda with visible events', () => {
+    test('shares today agenda with visible events', async () => {
       const todayAt14 = new Date();
       todayAt14.setUTCHours(14, 0, 0, 0);
       const event = eventService.createEvent({
@@ -689,7 +689,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
 
-    test('shares tomorrow agenda', () => {
+    test('shares tomorrow agenda', async () => {
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
       tomorrow.setHours(14, 0, 0, 0);
@@ -708,7 +708,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('group');
     });
 
-    test('shares week agenda across multiple days', () => {
+    test('shares week agenda across multiple days', async () => {
       // Create events on day+1 and day+3
       const day1 = new Date();
       day1.setDate(day1.getDate() + 1);
@@ -738,7 +738,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('2 events');
     });
 
-    test('creates shared_event records for each event in agenda', () => {
+    test('creates shared_event records for each event in agenda', async () => {
       const todayAt14 = new Date();
       todayAt14.setUTCHours(14, 0, 0, 0);
       const event = eventService.createEvent({
@@ -762,7 +762,7 @@ describe('sharing tool handlers', () => {
   // ── handleSetEventVisibility ──
 
   describe('handleSetEventVisibility', () => {
-    test('returns error when sharingSettingsRepo is missing', () => {
+    test('returns error when sharingSettingsRepo is missing', async () => {
       const ctx = makeCtx({
         sharing: {
           sharedEventRepo,
@@ -779,7 +779,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Sharing settings are not configured.');
     });
 
-    test('returns error when event not found', () => {
+    test('returns error when event not found', async () => {
       const ctx = makeCtx();
       const result = handleSetEventVisibility(ctx, { event_id: 9999, visibility: 'full' });
       expect(result.success).toBe(false);
@@ -787,7 +787,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('returns error when event belongs to another user', () => {
+    test('returns error when event belongs to another user', async () => {
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
         title: 'Not Mine',
@@ -800,7 +800,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('sets visibility to full', () => {
+    test('sets visibility to full', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Visible Event',
@@ -817,7 +817,7 @@ describe('sharing tool handlers', () => {
       expect(stored).toBe('full');
     });
 
-    test('sets visibility to free_busy', () => {
+    test('sets visibility to free_busy', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Busy Event',
@@ -830,7 +830,7 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('"free_busy"');
     });
 
-    test('sets visibility to private', () => {
+    test('sets visibility to private', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'Private Event',
@@ -848,7 +848,7 @@ describe('sharing tool handlers', () => {
       expect(stored).toBe('private');
     });
 
-    test('output includes event id', () => {
+    test('output includes event id', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'ID Check',
@@ -865,14 +865,14 @@ describe('sharing tool handlers', () => {
   // ── handleProposeEdit ──
 
   describe('handleProposeEdit', () => {
-    test('returns error when participantRepo is missing', () => {
+    test('returns error when participantRepo is missing', async () => {
       const ctx = makeCtx({ participantRepo: undefined });
-      const result = handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
+      const result = await handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
     });
 
-    test('returns error when editProposalRepo is missing', () => {
+    test('returns error when editProposalRepo is missing', async () => {
       const participantRepo = new ParticipantRepository(db);
       const ctx = makeCtx({
         participantRepo,
@@ -886,12 +886,12 @@ describe('sharing tool handlers', () => {
           editProposalRepo: undefined as never,
         },
       });
-      const result = handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
+      const result = await handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not configured');
     });
 
-    test('returns error when user is not a participant', () => {
+    test('returns error when user is not a participant', async () => {
       const participantRepo = new ParticipantRepository(db);
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
@@ -913,12 +913,12 @@ describe('sharing tool handlers', () => {
           editProposalRepo,
         },
       });
-      const result = handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not an accepted participant');
     });
 
-    test('stores proposal and returns success', () => {
+    test('stores proposal and returns success', async () => {
       const participantRepo = new ParticipantRepository(db);
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
@@ -941,7 +941,7 @@ describe('sharing tool handlers', () => {
           editProposalRepo,
         },
       });
-      const result = handleProposeEdit(ctx, {
+      const result = await handleProposeEdit(ctx, {
         event_id: event.id,
         changes: { start_at: '2026-03-20T11:00:00Z' },
         reason: 'Conflict with another meeting',
@@ -956,7 +956,7 @@ describe('sharing tool handlers', () => {
       expect(pending[0]!.reason).toBe('Conflict with another meeting');
     });
 
-    test('sends notification to event creator when sender available', () => {
+    test('sends notification to event creator when sender available', async () => {
       const participantRepo = new ParticipantRepository(db);
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({

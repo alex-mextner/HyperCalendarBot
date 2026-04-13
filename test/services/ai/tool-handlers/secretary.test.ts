@@ -28,13 +28,13 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   } as AgentContext;
 }
 
-test('list_calendar_access: returns error when no secretary repo', () => {
+test('list_calendar_access: returns error when no secretary repo', async () => {
   const ctx = makeCtx();
   const result = handleListCalendarAccess(ctx);
   expect(result.success).toBe(false);
 });
 
-test('list_calendar_access: returns own info + empty lists when no relations', () => {
+test('list_calendar_access: returns own info + empty lists when no relations', async () => {
   const mockRepo = {
     getActiveSecretaryFor: () => [],
     getSecretariesForOwner: () => [],
@@ -62,7 +62,7 @@ test('list_calendar_access: returns own info + empty lists when no relations', (
   expect(out.secretary_for).toHaveLength(0);
 });
 
-test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing', () => {
+test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing', async () => {
   const ctx = makeCtx({
     secretary: {
       secretaryRepo: { upsert: () => ({}) } as never,
@@ -71,12 +71,16 @@ test('manage_secretaries invite: returns SECRETARY_NOT_FOUND when user missing',
     },
     userRepo: { findByTelegramId: () => null } as never,
   });
-  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  const result = await handleManageSecretaries(ctx, {
+    action: 'invite',
+    secretary_telegram_id: 999,
+    permission: 'read',
+  });
   expect(result.success).toBe(false);
   expect(result.error).toContain('SECRETARY_NOT_FOUND');
 });
 
-test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', () => {
+test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', async () => {
   const ctx = makeCtx({
     secretary: {
       secretaryRepo: { countActive: () => 10, upsert: () => ({}) } as never,
@@ -85,30 +89,45 @@ test('manage_secretaries invite: returns SECRETARY_LIMIT_REACHED when at 10', ()
     },
     userRepo: { findByTelegramId: () => ({ telegram_id: 999 }) } as never,
   });
-  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  const result = await handleManageSecretaries(ctx, {
+    action: 'invite',
+    secretary_telegram_id: 999,
+    permission: 'read',
+  });
   expect(result.error).toContain('SECRETARY_LIMIT_REACHED');
 });
 
-test('manage_secretaries invite: success returns awaiting_confirmation', () => {
+test('manage_secretaries invite: success returns awaiting_confirmation', async () => {
+  const setDmMessageId = mock(() => undefined);
   const ctx = makeCtx({
     secretary: {
       secretaryRepo: {
         countActive: () => 0,
         upsert: () => ({ id: 7, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+        setDmMessageId,
       } as never,
       secretaryForLine: undefined,
       calendarProposalRepo: undefined as never,
     },
     userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
-    sender: { sendMessage: mock(async () => ({ message_id: 1 })) } as never,
+    sender: {
+      sendMessage: mock(async () => ({ message_id: 1 })),
+      sendMessageWithKeyboard: mock(async () => ({ message_id: 1 })),
+    } as never,
   });
-  const result = handleManageSecretaries(ctx, { action: 'invite', secretary_telegram_id: 999, permission: 'read' });
+  const result = await handleManageSecretaries(ctx, {
+    action: 'invite',
+    secretary_telegram_id: 999,
+    permission: 'read',
+  });
   expect(result.success).toBe(true);
   const out = JSON.parse(result.output!) as { status: string };
   expect(out.status).toBe('awaiting_confirmation');
+  // Now that the handler awaits delivery, the DM message_id should land in the DB.
+  expect(setDmMessageId).toHaveBeenCalledWith(7, 1);
 });
 
-test('manage_secretaries revoke: updates status to revoked', () => {
+test('manage_secretaries revoke: updates status to revoked', async () => {
   const mockUpdate = mock(() => true);
   const ctx = makeCtx({
     secretary: {
@@ -122,12 +141,12 @@ test('manage_secretaries revoke: updates status to revoked', () => {
     userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) } as never,
     sender: {} as never,
   });
-  const result = handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
+  const result = await handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
   expect(result.success).toBe(true);
   expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
 });
 
-test('manage_secretaries self_remove: fails if caller is not the secretary', () => {
+test('manage_secretaries self_remove: fails if caller is not the secretary', async () => {
   const ctx = makeCtx({
     secretary: {
       secretaryRepo: {
@@ -138,12 +157,12 @@ test('manage_secretaries self_remove: fails if caller is not the secretary', () 
       calendarProposalRepo: undefined as never,
     },
   });
-  const result = handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
+  const result = await handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
   expect(result.success).toBe(false);
   expect(result.error).toContain('SECRETARY_ACCESS_DENIED');
 });
 
-test('manage_secretaries self_remove: succeeds when caller matches secretary_id', () => {
+test('manage_secretaries self_remove: succeeds when caller matches secretary_id', async () => {
   const mockUpdate = mock(() => true);
   const ctx = makeCtx({
     secretary: {
@@ -157,7 +176,7 @@ test('manage_secretaries self_remove: succeeds when caller matches secretary_id'
     userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) } as never,
     sender: {} as never,
   });
-  const result = handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
+  const result = await handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
   expect(result.success).toBe(true);
   expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
 });

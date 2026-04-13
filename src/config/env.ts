@@ -24,7 +24,7 @@ export interface EnvConfig {
   GEMINI_MODEL: string;
   GEMINI_FAST_MODEL: string;
 
-  REDIS_URL?: string;
+  REDIS_URL: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   GOOGLE_REDIRECT_URI?: string;
@@ -61,14 +61,11 @@ export function loadConfig(): EnvConfig {
   const BOT_TOKEN = requireEnv('BOT_TOKEN');
 
   const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || undefined;
-  const REDIS_URL = process.env.REDIS_URL || undefined;
+  const REDIS_URL = requireEnv('REDIS_URL');
   const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || undefined;
   const PUBLIC_DOMAIN = process.env.PUBLIC_DOMAIN || undefined;
 
   if (GOOGLE_CLIENT_ID) {
-    if (!REDIS_URL) {
-      throw new Error('REDIS_URL is required when GOOGLE_CLIENT_ID is set');
-    }
     if (!ENCRYPTION_KEY) {
       throw new Error('ENCRYPTION_KEY is required when GOOGLE_CLIENT_ID is set');
     }

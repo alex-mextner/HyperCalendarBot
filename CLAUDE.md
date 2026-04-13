@@ -441,6 +441,34 @@ All user-facing bot messages must follow these rules:
   vs "отслеживать кто присоединился или вышел" (creepy).
   Same in English: "keep the group calendar up to date" (benefit)
   vs "track who joins or leaves" (surveillance).
+- **Front-load the essence — first two words must be the most informative.** Phone notification
+  previews show only the first few words before the user taps. Never waste them on generic labels
+  like "Напоминание:", "Reminder:", "Напоминания:", "Reminders:", "Сегодня ночью", "Tomorrow is a".
+  Lead with the specific content: event title, holiday name, clock direction, count. The ⏰/🎉/🕐
+  emoji is fine at the start — it's a glyph, not a word — but the FIRST real token after it must
+  carry information.
+  ```
+  Bad:  ⏰ Напоминание: Лазер — завтра
+  Good: ⏰ Лазер — завтра
+
+  Bad:  🎉 Завтра праздник: День Конституции
+  Good: 🎉 День Конституции завтра
+
+  Bad:  ⏰ Напоминания:            (batch header is generic)
+  Good: ⏰ Лазер + ещё 2           (first title front-loaded)
+
+  Bad:  🕐 Сегодня ночью часы перевели на 1 час вперёд. Double-check your alarms…
+  Good: 🕐 Часы переведены на +1 час
+  ```
+  Drop filler words ("is a", "moved", "Сегодня ночью", "Напоминание:") — they push the real
+  content out of the preview. Prefer short dashes/separators over prepositions when they convey
+  the same meaning. This applies to every push-style message: reminders, agenda headers, holiday
+  notices, clock-change notices, birthday reminders, proposal/invitation notifications.
+- **Don't instruct the user to do what the system does automatically.** Phones and OS auto-adjust
+  alarms for DST; calendars auto-recalculate event times. Informational notifications should
+  inform, not nag. Don't tack on "проверь будильник", "double-check your meetings", "не забудь"
+  unless the user genuinely must take manual action. Shorter is better: the fewer words, the
+  higher the chance the whole message is visible in the preview.
 
 ## Telegram Bot API Limits
 

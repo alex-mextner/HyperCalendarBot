@@ -9,6 +9,7 @@ import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
@@ -21,6 +22,7 @@ export async function handleToday(
   renderService?: RenderService,
   groupRepo?: GroupChatRepository,
   googleCalendarRepo?: GoogleCalendarRepository,
+  weatherService?: WeatherService,
 ): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
@@ -47,7 +49,10 @@ export async function handleToday(
     );
     const occurrences = eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString());
     const holidays = holidayService?.getHolidaysForDate(user.telegram_id, tzNow.toISOString().slice(0, 10)) ?? [];
-    const text = formatDayAgenda(occurrences, now.toISOString(), timezone, lang, holidays);
+    const dayWeather = weatherService
+      ? await weatherService.getDayWeather(timezone, lang === 'ru' ? 'ru' : 'en')
+      : null;
+    const text = formatDayAgenda(occurrences, now.toISOString(), timezone, lang, holidays, undefined, dayWeather);
     await ctx.send(text, { parse_mode: 'HTML' });
     return;
   }
@@ -57,7 +62,18 @@ export async function handleToday(
   const dateIso = new TZDate(now, user.timezone).toISOString().slice(0, 10);
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
   const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
-  const text = formatDayAgenda(occurrences, now.toISOString(), user.timezone, user.language, holidays, calendarColors);
+  const dayWeather = weatherService
+    ? await weatherService.getDayWeather(user.timezone, lang === 'ru' ? 'ru' : 'en')
+    : null;
+  const text = formatDayAgenda(
+    occurrences,
+    now.toISOString(),
+    user.timezone,
+    user.language,
+    holidays,
+    calendarColors,
+    dayWeather,
+  );
 
   await ctx.send(text, { parse_mode: 'HTML' });
 

@@ -56,6 +56,8 @@ const deleteEventSchema = z
   })
   .passthrough();
 
+const attachPendingLocationSchema = z.object({ event_id: z.number() }).passthrough();
+
 const getFreeSlotsSchema = z
   .object({
     date: z.string(),
@@ -186,6 +188,14 @@ const renderDayImageSchema = z
 const renderWeekImageSchema = z
   .object({
     week_start: z.string(),
+    scope: scopeField,
+    owner_id: z.number().optional(),
+  })
+  .passthrough();
+
+const renderMonthImageSchema = z
+  .object({
+    month: z.string(),
     scope: scopeField,
     owner_id: z.number().optional(),
   })
@@ -385,8 +395,8 @@ const assistantPayloadSchema = z.record(z.string(), z.unknown());
 
 // ── Schema map ──
 
-export const toolSchemas: Partial<Record<ToolName, z.ZodType>> = {
-  // No-input tools don't need validation
+export const toolSchemas: Record<ToolName, z.ZodType> = {
+  // No-input tools
   supplement_skip: emptyObject,
   end_conversation: emptyObject,
   end_call: emptyObject,
@@ -398,11 +408,14 @@ export const toolSchemas: Partial<Record<ToolName, z.ZodType>> = {
   list_triggers: emptyObject,
   resume_scene: emptyObject,
   cancel_scene: emptyObject,
+  connect_telegram_status: emptyObject,
+  dismiss_connect_telegram_prompt: emptyObject,
 
   // Event tools
   get_events: getEventsSchema,
   create_event: createEventSchema,
   update_event: updateEventSchema,
+  attach_pending_location_to_event: attachPendingLocationSchema,
   delete_event: deleteEventSchema,
   get_free_slots: getFreeSlotsSchema,
   search_events: searchEventsSchema,
@@ -428,6 +441,7 @@ export const toolSchemas: Partial<Record<ToolName, z.ZodType>> = {
   // Render tools
   render_day_image: renderDayImageSchema,
   render_week_image: renderWeekImageSchema,
+  render_month_image: renderMonthImageSchema,
   render_table: renderTableSchema,
 
   // Call tools

@@ -23,6 +23,15 @@ export interface CallManagerDeps {
   pyBridgePath: string;
   registerSession?: (sessionId: string, userId: number, language: string) => void;
   spawnProcess?: (cmd: string[], opts: { env: NodeJS.ProcessEnv; stdout: 'pipe'; stderr: 'pipe' }) => SpawnResult;
+  /** Optional override for the ffmpeg mp3→ogg fallback-TTS conversion — tests
+   *  stub this out so they don't need a system ffmpeg binary. */
+  spawnFfmpeg?: (
+    cmd: string[],
+    opts: { stderr: 'pipe' },
+  ) => {
+    stderr: ReadableStream<Uint8Array> | null;
+    exited: Promise<number>;
+  };
   notifyUser?: (userId: number, msg: string) => void;
 }
 
@@ -61,13 +70,14 @@ export class CallManager {
         // TtsService returns MP3 — convert to OGG Opus for pytgcalls
         const mp3File = `/tmp/call-${job.callLogId}-raw.mp3`;
         await Bun.write(mp3File, audioBuffer);
-        const ffmpeg = Bun.spawn(
+        const spawnFfmpeg = this.deps.spawnFfmpeg ?? ((cmd, opts) => Bun.spawn(cmd, opts));
+        const ffmpeg = spawnFfmpeg(
           ['ffmpeg', '-y', '-i', mp3File, '-c:a', 'libopus', '-ar', '48000', '-ac', '1', oggFile],
           { stderr: 'pipe' },
         );
         const ffmpegExit = await ffmpeg.exited;
         if (ffmpegExit !== 0) {
-          const ffmpegErr = await new Response(ffmpeg.stderr).text();
+          const ffmpegErr = ffmpeg.stderr ? await new Response(ffmpeg.stderr).text() : '';
           voiceLogger.warn({ exitCode: ffmpegExit, stderr: ffmpegErr.slice(0, 200) }, 'ffmpeg conversion failed');
         }
         try {

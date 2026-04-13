@@ -1,0 +1,28 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "src/index.ts",
+    "scripts/*.ts",
+    "test/**/*.test.ts",
+    "packages/agent-macos/src/main.ts",
+    "packages/agent-macos/src/preload.ts",
+    "packages/agent-macos/src/renderer.ts"
+  ],
+  "project": ["src/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "test/**/*.ts"],
+  "ignore": [
+    "docs/**",
+    "src/services/image/templates/**",
+    "packages/agent-macos/dist/**",
+    "packages/agent-macos/out/**"
+  ],
+  "ignoreDependencies": ["lefthook", "@biomejs/biome", "electron", "electron-builder"],
+  "ignoreExportsUsedInFile": true,
+  "rules": {
+    "types": "off",
+    "duplicates": "off",
+    "enumMembers": "off",
+    "classMembers": "off",
+    "nsTypes": "off",
+    "nsExports": "off"
+  }
+}

@@ -315,7 +315,8 @@ describe('NotificationScheduler', () => {
     const log = logRepo.getById(capturedLogId) as NotificationLogRow;
     const parsed = JSON.parse(log.payload!) as { text: string; event_ids: number[] };
     expect(parsed.event_ids).toEqual([1, 2]);
-    expect(parsed.text).toContain('Reminders:');
+    expect(parsed.text).toContain('⏰ Standup +1 more');
+    expect(parsed.text).not.toContain('Reminders:');
     expect(parsed.text).toContain('Standup');
     expect(parsed.text).toContain('Call');
     expect(parsed.text).not.toContain('"event_title"');
@@ -441,7 +442,7 @@ describe('NotificationScheduler', () => {
     await captureScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedPayload).toContain('Standup');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('forward');
+    expect(capturedPayload).toContain('shifted by +');
   });
 
   test('morning agenda does NOT include clock-change notice on non-DST day', async () => {
@@ -488,7 +489,7 @@ describe('NotificationScheduler', () => {
     await standaloneScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedTypes).toContain('clock_change');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('вперёд');
+    expect(capturedPayload).toContain('переведены на +');
   });
 
   test('standalone clock-change NOT sent at wrong time', async () => {
@@ -530,7 +531,7 @@ describe('NotificationScheduler', () => {
     await noEventsScheduler.tick(new Date('2026-03-29T06:00:30Z'));
     expect(capturedType).toBe('morning_agenda');
     expect(capturedPayload).toContain('🕐');
-    expect(capturedPayload).toContain('forward');
+    expect(capturedPayload).toContain('shifted by +');
   });
 
   test('evening review includes event at 00:30 local tomorrow (22:30 UTC today) for UTC+2 user', async () => {
@@ -614,6 +615,113 @@ describe('NotificationScheduler', () => {
     await weatherScheduler.tick(new Date('2026-03-15T08:00:30Z'));
     expect(capturedPayload).toContain('clear sky');
     expect(capturedPayload).toContain('10°C');
+  });
+
+  test('event reminder payload includes hourly weather at event time', async () => {
+    const weatherDb = setupDb();
+    weatherDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    weatherDb.run(
+      "INSERT INTO events (id, user_id, title, start_at, end_at, timezone) VALUES (1, 42, 'Run', '2026-03-15T18:00:00Z', '2026-03-15T18:30:00Z', 'UTC')",
+    );
+    weatherDb.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-15T17:45:00Z', 15, '15 minutes')",
+    );
+    const logRepo = new NotificationLogRepository(weatherDb);
+    const getForecastAt = mock(() =>
+      Promise.resolve({
+        kind: 'hour' as const,
+        hour: {
+          dt: 1_700_000_000,
+          temp: 14,
+          conditionCode: 500,
+          description: 'light rain',
+          windSpeed: 3,
+        },
+      }),
+    );
+    let capturedLogId = 0;
+    const weatherScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(weatherDb),
+      reminderRepo: new EventReminderRepository(weatherDb),
+      logRepo,
+      userRepo: new UserRepository(weatherDb),
+      getEventsInRange: makeGetEventsInRange(weatherDb),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'event_reminder') capturedLogId = logId;
+      }),
+      weatherService: {
+        getDayWeather: mock(() => Promise.resolve(null)),
+        getWeekWeather: mock(() => Promise.resolve(null)),
+        getForecastAt,
+      } as never,
+    });
+
+    await weatherScheduler.tick(new Date('2026-03-15T17:45:30Z'));
+    expect(getForecastAt).toHaveBeenCalledTimes(1);
+    expect(capturedLogId).toBeGreaterThan(0);
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    const parsed = JSON.parse(log.payload!) as { text: string; event_id: number };
+    expect(parsed.text).toContain('🌧');
+    expect(parsed.text).toContain('14°C');
+    expect(parsed.text).toContain('light rain');
+    // Hourly weather must NOT use daily min..max range
+    expect(parsed.text).not.toContain('..');
+  });
+
+  test('all-day event reminder uses daily forecast (not hourly)', async () => {
+    const weatherDb = setupDb();
+    weatherDb.run("INSERT INTO users (telegram_id, timezone, language) VALUES (42, 'UTC', 'en')");
+    weatherDb.run(
+      "INSERT INTO events (id, user_id, title, start_at, all_day, timezone) VALUES (1, 42, 'Holiday', '2026-03-15T00:00:00Z', 1, 'UTC')",
+    );
+    weatherDb.run(
+      "INSERT INTO event_reminders (event_id, user_id, remind_at_utc, interval_minutes, interval_label) VALUES (1, 42, '2026-03-14T09:00:00Z', -1, 'day before')",
+    );
+    const getForecastAt = mock(() =>
+      Promise.resolve({
+        kind: 'day' as const,
+        day: {
+          date: '2026-03-15',
+          tempMin: 4,
+          tempMax: 11,
+          conditionCode: 801,
+          description: 'few clouds',
+          windSpeed: 3,
+        },
+      }),
+    );
+    const logRepo = new NotificationLogRepository(weatherDb);
+    let capturedLogId = 0;
+    const weatherScheduler = new NotificationScheduler({
+      prefsRepo: new NotificationPreferencesRepository(weatherDb),
+      reminderRepo: new EventReminderRepository(weatherDb),
+      logRepo,
+      userRepo: new UserRepository(weatherDb),
+      getEventsInRange: makeGetEventsInRange(weatherDb),
+      enqueue: mock((type: string, _userId: number, logId: number) => {
+        if (type === 'event_reminder') capturedLogId = logId;
+      }),
+      weatherService: {
+        getDayWeather: mock(() => Promise.resolve(null)),
+        getWeekWeather: mock(() => Promise.resolve(null)),
+        getForecastAt,
+      } as never,
+    });
+
+    await weatherScheduler.tick(new Date('2026-03-14T09:00:30Z'));
+    expect(getForecastAt).toHaveBeenCalledTimes(1);
+    // Must be called with allDay flag so hourly is skipped for whole-day events
+    const firstCall = getForecastAt.mock.calls[0] as unknown as [
+      string,
+      number,
+      string,
+      { allDay?: boolean } | undefined,
+    ];
+    expect(firstCall[3]).toEqual({ allDay: true });
+    const log = logRepo.getById(capturedLogId) as NotificationLogRow;
+    const parsed = JSON.parse(log.payload!) as { text: string };
+    expect(parsed.text).toContain('4..11°C');
+    expect(parsed.text).toContain('few clouds');
   });
 
   test('morning agenda works gracefully when weather fetch fails', async () => {

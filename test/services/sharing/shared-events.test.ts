@@ -41,7 +41,7 @@ describe('visible events (owned + participated)', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('getVisibleInRange returns own events', () => {
+  test('getVisibleInRange returns own events', async () => {
     eventRepo.create({
       user_id: INVITEE,
       title: 'My Event',
@@ -53,7 +53,7 @@ describe('visible events (owned + participated)', () => {
     expect(events[0]!.title).toBe('My Event');
   });
 
-  test('getVisibleInRange returns accepted participated events', () => {
+  test('getVisibleInRange returns accepted participated events', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Shared Meeting',
@@ -67,7 +67,7 @@ describe('visible events (owned + participated)', () => {
     expect(events[0]!.title).toBe('Shared Meeting');
   });
 
-  test('getVisibleInRange excludes declined participated events', () => {
+  test('getVisibleInRange excludes declined participated events', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Declined',
@@ -80,7 +80,7 @@ describe('visible events (owned + participated)', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('getVisibleInRange does not duplicate if user is both owner and participant', () => {
+  test('getVisibleInRange does not duplicate if user is both owner and participant', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Own',
@@ -93,7 +93,7 @@ describe('visible events (owned + participated)', () => {
     expect(events).toHaveLength(1);
   });
 
-  test('getVisibleInRange shows mix of own and shared events sorted by time', () => {
+  test('getVisibleInRange shows mix of own and shared events sorted by time', async () => {
     eventRepo.create({
       user_id: INVITEE,
       title: 'Own Event',
@@ -114,7 +114,7 @@ describe('visible events (owned + participated)', () => {
     expect(events[1]!.title).toBe('Shared Event');
   });
 
-  test('getVisibleInRange excludes maybe status', () => {
+  test('getVisibleInRange excludes maybe status', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Maybe Event',
@@ -127,7 +127,7 @@ describe('visible events (owned + participated)', () => {
     expect(events).toHaveLength(0);
   });
 
-  test('isParticipant returns true for accepted participant', () => {
+  test('isParticipant returns true for accepted participant', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Shared',
@@ -138,7 +138,7 @@ describe('visible events (owned + participated)', () => {
     expect(eventRepo.isParticipant(event.id, INVITEE)).toBe(true);
   });
 
-  test('isParticipant returns false for non-participant', () => {
+  test('isParticipant returns false for non-participant', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Private',
@@ -148,7 +148,7 @@ describe('visible events (owned + participated)', () => {
     expect(eventRepo.isParticipant(event.id, INVITEE)).toBe(false);
   });
 
-  test('isParticipant returns false for declined', () => {
+  test('isParticipant returns false for declined', async () => {
     const event = eventRepo.create({
       user_id: CREATOR,
       title: 'Declined',
@@ -181,7 +181,7 @@ describe('acceptInvitation — adds participant', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('accepting adds participant with accepted status', () => {
+  test('accepting adds participant with accepted status', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Party',
@@ -197,7 +197,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(participant!.role).toBe('attendee');
   });
 
-  test('accepting twice does not create duplicate', () => {
+  test('accepting twice does not create duplicate', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Party',
@@ -210,7 +210,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(participants).toHaveLength(1);
   });
 
-  test('declining does not add participant', () => {
+  test('declining does not add participant', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Skip',
@@ -222,7 +222,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(participantRepo.findByEventAndUser(event.id, INVITEE)).toBeNull();
   });
 
-  test('maybe adds participant with maybe status', () => {
+  test('maybe adds participant with maybe status', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Maybe',
@@ -237,7 +237,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(participant!.status).toBe('maybe');
   });
 
-  test('accepted event appears in invitee calendar via getVisibleInRange', () => {
+  test('accepted event appears in invitee calendar via getVisibleInRange', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Visible Meeting',
@@ -253,7 +253,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(visible[0]!.user_id).toBe(CREATOR);
   });
 
-  test('maybe → accept upgrades participant status', () => {
+  test('maybe → accept upgrades participant status', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Evolving',
@@ -274,7 +274,7 @@ describe('acceptInvitation — adds participant', () => {
     expect(participant!.status).toBe('accepted');
   });
 
-  test('decline after accept removes participant from visible events', () => {
+  test('decline after accept removes participant from visible events', async () => {
     const event = eventService.createEvent({
       user_id: CREATOR,
       title: 'Revoke',
@@ -323,7 +323,7 @@ describe('acceptInvitation — conflict warnings', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('returns conflicts when accepted event overlaps with existing', () => {
+  test('returns conflicts when accepted event overlaps with existing', async () => {
     // Invitee has an existing event
     eventService.createEvent({
       user_id: INVITEE,
@@ -349,7 +349,7 @@ describe('acceptInvitation — conflict warnings', () => {
     expect(result.conflicts![0]!.title).toBe('Existing Meeting');
   });
 
-  test('returns no conflicts when no overlap', () => {
+  test('returns no conflicts when no overlap', async () => {
     eventService.createEvent({
       user_id: INVITEE,
       title: 'Morning',
@@ -371,7 +371,7 @@ describe('acceptInvitation — conflict warnings', () => {
     expect(result.conflicts ?? []).toHaveLength(0);
   });
 
-  test('conflicts exclude the accepted event itself', () => {
+  test('conflicts exclude the accepted event itself', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Accepted Event',
@@ -387,7 +387,7 @@ describe('acceptInvitation — conflict warnings', () => {
     expect(result.conflicts ?? []).toHaveLength(0);
   });
 
-  test('still accepts invitation even with conflicts', () => {
+  test('still accepts invitation even with conflicts', async () => {
     eventService.createEvent({
       user_id: INVITEE,
       title: 'Blocking',
@@ -430,7 +430,7 @@ describe('calendar views show participated events', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('getEventsInRange includes participated events', () => {
+  test('getEventsInRange includes participated events', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Team Standup',
@@ -453,7 +453,7 @@ describe('calendar views show participated events', () => {
     expect(events[1]!.event.title).toBe('My Lunch');
   });
 
-  test('getEventsForDay includes participated events', () => {
+  test('getEventsForDay includes participated events', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Daily',
@@ -468,7 +468,7 @@ describe('calendar views show participated events', () => {
     expect(titles).toContain('Daily');
   });
 
-  test('getEventsForWeek includes participated events', () => {
+  test('getEventsForWeek includes participated events', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Weekly Sync',
@@ -483,7 +483,7 @@ describe('calendar views show participated events', () => {
     expect(titles).toContain('Weekly Sync');
   });
 
-  test('getUpcoming includes participated events', () => {
+  test('getUpcoming includes participated events', async () => {
     const futureStart = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     const futureEnd = new Date(Date.now() + 25 * 60 * 60 * 1000).toISOString();
     const shared = eventService.createEvent({
@@ -500,7 +500,7 @@ describe('calendar views show participated events', () => {
     expect(titles).toContain('Future Shared');
   });
 
-  test('declined participated events do not appear in views', () => {
+  test('declined participated events do not appear in views', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Declined',
@@ -554,7 +554,7 @@ describe('invitee deletes shared event = decline', () => {
     inviteeUser = userRepo.findByTelegramId(INVITEE)!;
   });
 
-  test('participant deleting shared event declines instead of deleting', () => {
+  test('participant deleting shared event declines instead of deleting', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Team Meeting',
@@ -565,7 +565,7 @@ describe('invitee deletes shared event = decline', () => {
     participantRepo.add(shared.id, INVITEE, 'accepted');
 
     const ctx = makeCtx(inviteeUser);
-    const result = handleDeleteEvent(ctx, { event_id: shared.id });
+    const result = await handleDeleteEvent(ctx, { event_id: shared.id });
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('declined');
@@ -579,7 +579,7 @@ describe('invitee deletes shared event = decline', () => {
     expect(participant!.status).toBe('declined');
   });
 
-  test('owner can still delete their own event normally', () => {
+  test('owner can still delete their own event normally', async () => {
     const creatorUser = userRepo.findByTelegramId(CREATOR)!;
     const event = eventService.createEvent({
       user_id: CREATOR,
@@ -590,14 +590,14 @@ describe('invitee deletes shared event = decline', () => {
     });
 
     const ctx = makeCtx(creatorUser);
-    const result = handleDeleteEvent(ctx, { event_id: event.id });
+    const result = await handleDeleteEvent(ctx, { event_id: event.id });
 
     expect(result.success).toBe(true);
     expect(result.output).toContain('deleted');
     expect(eventRepo.findById(event.id, CREATOR)).toBeNull();
   });
 
-  test('non-participant non-owner gets not found error', () => {
+  test('non-participant non-owner gets not found error', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Private',
@@ -606,13 +606,13 @@ describe('invitee deletes shared event = decline', () => {
     });
 
     const ctx = makeCtx(inviteeUser);
-    const result = handleDeleteEvent(ctx, { event_id: shared.id });
+    const result = await handleDeleteEvent(ctx, { event_id: shared.id });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('not found');
   });
 
-  test('declined event disappears from invitee calendar', () => {
+  test('declined event disappears from invitee calendar', async () => {
     const shared = eventService.createEvent({
       user_id: CREATOR,
       title: 'Vanishing',
@@ -646,7 +646,7 @@ describe('creator delete notifies participants', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('deleteEvent fires onParticipantsNotify for accepted participants', () => {
+  test('deleteEvent fires onParticipantsNotify for accepted participants', async () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
@@ -671,7 +671,7 @@ describe('creator delete notifies participants', () => {
     expect(notified[0]!.text).toContain('Team Meeting');
   });
 
-  test('deleteEvent does not fire callback when no accepted participants', () => {
+  test('deleteEvent does not fire callback when no accepted participants', async () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
@@ -693,7 +693,7 @@ describe('creator delete notifies participants', () => {
     expect(notified).toHaveLength(0);
   });
 
-  test('deleteEvent does not notify declined participants', () => {
+  test('deleteEvent does not notify declined participants', async () => {
     const notified: { userIds: number[]; text: string }[] = [];
     eventService = new EventService({
       eventRepo,
@@ -753,7 +753,7 @@ describe('full shared event lifecycle', () => {
     userRepo.create({ telegram_id: BOB, timezone: 'UTC', first_name: 'Bob' });
   });
 
-  test('create -> invite -> accept -> visible -> edit -> invitee sees -> decline -> gone', () => {
+  test('create -> invite -> accept -> visible -> edit -> invitee sees -> decline -> gone', async () => {
     // 1. Alice creates an event
     const event = eventService.createEvent({
       user_id: ALICE,
@@ -808,7 +808,7 @@ describe('full shared event lifecycle', () => {
       participantRepo,
       conversationLogger: null as never,
     };
-    const deleteResult = handleDeleteEvent(ctx, { event_id: event.id });
+    const deleteResult = await handleDeleteEvent(ctx, { event_id: event.id });
     expect(deleteResult.success).toBe(true);
     expect(deleteResult.output).toContain('declined');
 

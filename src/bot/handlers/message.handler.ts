@@ -39,7 +39,7 @@ import type { AgentContext } from '../../services/ai/types.ts';
 import type { BirthdayService } from '../../services/birthday/birthday-service.ts';
 import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { EventService } from '../../services/event/event-service.ts';
-import { sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
+import { formatAdminReply, sendAdminReplyToUser } from '../../services/feedback/admin-messenger.ts';
 import type { GroupSessionManager } from '../../services/group/group-session.ts';
 import type { GroupMemberService } from '../../services/group/member-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
@@ -166,8 +166,8 @@ export interface MessageHandlerDeps {
   nliClassifier?: NliClassifier;
   // Pipeline: feedback routing
   feedbackRepo?: FeedbackRepository;
-  // Admin reply sessions: adminId → { threadId, userId }
-  adminReplySession?: Map<number, { threadId: number; userId: number }>;
+  // Admin reply sessions: adminId → { threadId, userId, chatId, topicThreadId }
+  adminReplySession?: Map<number, { threadId: number; userId: number; chatId?: number; topicThreadId?: number }>;
   botAdminId?: number;
   sendMessageToUser?: (chatId: number, text: string) => Promise<void>;
   sendMessageToChat?: AgentContext['sendMessageToChat'];
@@ -183,6 +183,7 @@ export interface MessageHandlerDeps {
   ) => Promise<void>;
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
+  broadcastEnqueuer?: import('../../worker/broadcast-queue.ts').BroadcastEnqueuer;
   actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
   telegramSessionRepo?: import('../../database/repositories/telegram-session.repository.ts').TelegramSessionRepository;
   telegramMasterKey?: Buffer;
@@ -197,6 +198,7 @@ export interface MessageHandlerDeps {
   locationVerification?: import('../../services/location/location-verification-service.ts').LocationVerificationService;
   addressCache?: import('../../services/location/address-cache.ts').AddressCache;
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
+  weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -527,6 +529,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       isGroup: boolean;
       groupChatId?: number;
       groupTitle?: string;
+      topicThreadId?: number;
       onBotResponse?: (messageId: number) => void;
       incomingMessageId?: number;
     },
@@ -552,6 +555,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       isGroup: groupInfo?.isGroup ?? false,
       groupChatId: groupInfo?.groupChatId,
       groupTitle: groupInfo?.groupTitle,
+      topicThreadId: groupInfo?.topicThreadId,
       onBotResponse: groupInfo?.onBotResponse,
       eventService: deps.eventService,
       holidayService: deps.holidayService,
@@ -654,6 +658,12 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
               userMemoryRepo: deps.userMemoryRepo,
             }
           : undefined,
+      broadcast: deps.broadcastEnqueuer
+        ? {
+            enqueue: deps.broadcastEnqueuer.enqueue.bind(deps.broadcastEnqueuer),
+            enqueueBatch: deps.broadcastEnqueuer.enqueueBatch.bind(deps.broadcastEnqueuer),
+          }
+        : undefined,
       feedback:
         deps.feedbackRepo && deps.botAdminId !== undefined
           ? {
@@ -672,6 +682,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       locationVerification: deps.locationVerification,
       addressCache: deps.addressCache,
       pendingGeoStore: deps.pendingGeoStore,
+      weatherService: deps.weatherService,
     };
   };
 }
@@ -1267,12 +1278,39 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
             sender: 'admin',
             text: messageText,
           });
-          sendAdminReplyToUser(deps.sendMessageToUser, session.userId, messageText, thread.subject).catch(
-            (e: unknown) => {
-              cmdLogger.error({ err: e }, 'Failed to deliver admin reply to user');
-            },
-          );
-          await ctx.send('Reply sent.');
+          const msgs = t(user.language).callbackErrors;
+          const recipientUser = deps.userRepo.findByTelegramId(session.userId);
+          const recipientLang = recipientUser?.language ?? 'ru';
+          try {
+            await sendAdminReplyToUser(
+              deps.sendMessageToUser,
+              session.userId,
+              messageText,
+              thread.subject,
+              recipientLang,
+            );
+            await ctx.send(msgs.adminReplySent);
+          } catch (directErr) {
+            cmdLogger.warn(
+              { err: directErr, userId: session.userId, threadId: session.threadId },
+              'Direct delivery to user failed, trying group fallback',
+            );
+            // Fall back to the group chat where the feedback originated
+            if (session.chatId && session.chatId !== session.userId && deps.sendMessageToChat) {
+              try {
+                const replyText = formatAdminReply(messageText, thread.subject, recipientLang);
+                await deps.sendMessageToChat(session.chatId, replyText, {
+                  message_thread_id: session.topicThreadId,
+                });
+                await ctx.send(msgs.adminReplyDeliveredToGroup);
+              } catch (groupErr) {
+                cmdLogger.error({ err: groupErr, chatId: session.chatId }, 'Group fallback delivery also failed');
+                await ctx.send(msgs.adminReplyFailed);
+              }
+            } else {
+              await ctx.send(msgs.adminReplyFailed);
+            }
+          }
         }
         return;
       }
@@ -1341,6 +1379,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           isGroup: true as const,
           groupChatId: Number(chatId),
           groupTitle: chat?.title ?? undefined,
+          topicThreadId: ctx.threadId,
           onBotResponse: deps.groupSessions
             ? (messageId: number) => {
                 if (deps.groupSessions!.hasActiveSession(Number(chatId))) {

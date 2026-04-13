@@ -18,6 +18,11 @@ function renderDayColumn(day: WeeklyOverviewData['days'][number], isToday: boole
     ? `<div class="day-column__number"><span class="today-highlight">${day.dayNumber}</span></div>`
     : `<div class="day-column__number">${day.dayNumber}</div>`;
 
+  const weatherHtml =
+    day.weatherEmoji && day.weatherTemp
+      ? `<div class="day-column__weather">${day.weatherEmoji} ${escapeHtml(day.weatherTemp)}</div>`
+      : '';
+
   const eventsHtml =
     day.events.length > 0 ? day.events.map(renderEvent).join('') : `<div class="day-column__empty"></div>`;
 
@@ -25,6 +30,7 @@ function renderDayColumn(day: WeeklyOverviewData['days'][number], isToday: boole
     <div class="${columnClass}">
       <div class="day-column__name">${escapeHtml(day.dayName)}</div>
       ${numberHtml}
+      ${weatherHtml}
       <div class="day-column__events">${eventsHtml}</div>
     </div>`;
 }
@@ -70,9 +76,15 @@ function css(data: WeeklyOverviewData): string {
       font-size: 22px;
       font-weight: 700;
       text-align: center;
-      margin-bottom: 12px;
+      margin-bottom: 4px;
       display: flex;
       justify-content: center;
+    }
+    .day-column__weather {
+      font-size: 12px;
+      text-align: center;
+      color: ${t.textSecondary};
+      margin-bottom: 10px;
     }
     .today-highlight {
       display: inline-flex;

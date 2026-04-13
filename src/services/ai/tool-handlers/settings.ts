@@ -315,6 +315,7 @@ export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResul
   ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, new Date().toISOString());
   return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
 }
+handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
 
 export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
   const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
@@ -346,3 +347,7 @@ export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
     data: { connected: true, phone_masked: masked, status: session.status },
   };
 }
+handleConnectTelegramStatus.meta = {
+  readonly: true,
+  skipActionLog: true,
+} satisfies import('../types.ts').ToolHandlerMeta;

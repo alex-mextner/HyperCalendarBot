@@ -28,6 +28,7 @@ function setupDb(): Database {
     timezone TEXT NOT NULL DEFAULT 'UTC', location TEXT,
     recurrence_rule TEXT, recurrence_end_at TEXT, parent_event_id INTEGER,
     original_start_at TEXT, is_cancelled INTEGER NOT NULL DEFAULT 0,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
     owner_type TEXT NOT NULL DEFAULT 'user', group_id INTEGER, created_by INTEGER,
     reminder_overrides TEXT, google_event_id TEXT, google_calendar_id TEXT,
     resolved_address TEXT, latitude REAL, longitude REAL,

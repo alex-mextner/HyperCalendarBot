@@ -22,11 +22,34 @@ function makeWavBuffer(): Buffer {
   return buf;
 }
 
+// OGG Opus magic-bytes stub — a minimal buffer that satisfies the
+// "result starts with OggS" assertion without actually running ffmpeg.
+function makeOggStub(): Buffer {
+  const buf = Buffer.alloc(32);
+  buf.write('OggS', 0);
+  return buf;
+}
+
 test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
   const wavBuffer = makeWavBuffer();
   const fakeBlob = new Blob([wavBuffer], { type: 'audio/wav' });
 
-  const svc = new KokoroTtsService('fake-token');
+  const spawnFfmpeg = mock((cmd: string[], _opts: { stderr: 'pipe' }) => {
+    // Stub: pretend ffmpeg succeeded. The service then reads tmpOgg
+    // from disk, so pre-populate it with a minimal OGG-magic buffer.
+    const tmpOgg = cmd[cmd.length - 1]!;
+    Bun.write(tmpOgg, makeOggStub());
+    return {
+      stderr: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.close();
+        },
+      }),
+      exited: Promise.resolve(0),
+    };
+  });
+
+  const svc = new KokoroTtsService('fake-token', { spawnFfmpeg });
   // biome-ignore lint/suspicious/noExplicitAny: test mock
   (svc as any).client = {
     textToSpeech: mock(async () => fakeBlob),
@@ -34,6 +57,7 @@ test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
 
   const result = await svc.synthesize('hello');
 
+  expect(spawnFfmpeg).toHaveBeenCalledTimes(1);
   // OGG Opus magic bytes: OggS
   expect(result.slice(0, 4).toString('ascii')).toBe('OggS');
   expect(result.length).toBeGreaterThan(0);
@@ -42,7 +66,17 @@ test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
 test('synthesize throws if ffmpeg fails', async () => {
   const fakeBlob = new Blob([Buffer.from('not-a-wav')], { type: 'audio/wav' });
 
-  const svc = new KokoroTtsService('fake-token');
+  const spawnFfmpeg = mock(() => ({
+    stderr: new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('Invalid data found when processing input'));
+        c.close();
+      },
+    }),
+    exited: Promise.resolve(1),
+  }));
+
+  const svc = new KokoroTtsService('fake-token', { spawnFfmpeg });
   // biome-ignore lint/suspicious/noExplicitAny: test mock
   (svc as any).client = {
     textToSpeech: mock(async () => fakeBlob),

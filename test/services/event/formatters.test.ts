@@ -29,6 +29,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,
@@ -137,6 +138,76 @@ describe('formatDayAgenda', () => {
     // no emoji dot prefixes (only 📅 header and possible 🔁 for recurring)
     expect(result).not.toMatch(/🔴|🔵|🟢|🟡|🟠|🟣|💙|💜|⚫|🩷|🟩/);
   });
+
+  test('includes weather line in header when dayWeather provided', () => {
+    const weather = {
+      tempMin: 5,
+      tempMax: 12,
+      conditionCode: 800,
+      description: 'clear sky',
+      windSpeed: 3,
+    };
+    const result = formatDayAgenda([], '2026-03-11T12:00:00Z', 'UTC', 'en', [], undefined, weather);
+    expect(result).toContain('☀️');
+    expect(result).toContain('12');
+    expect(result).toContain('clear sky');
+  });
+
+  test('omits weather line when dayWeather is null', () => {
+    const result = formatDayAgenda([], '2026-03-11T12:00:00Z', 'UTC', 'en', [], undefined, null);
+    expect(result).not.toContain('°C');
+  });
+});
+
+describe('formatWeekAgenda weather', () => {
+  test('appends weather emoji+temp to each day line', () => {
+    const weatherByDate: { [date: string]: import('../../../src/services/weather/types.ts').DayWeather } = {
+      '2026-03-09': { tempMin: 2, tempMax: 8, conditionCode: 800, description: 'clear', windSpeed: 3 },
+      '2026-03-10': { tempMin: -1, tempMax: 4, conditionCode: 601, description: 'snow', windSpeed: 5 },
+    };
+    const result = formatWeekAgenda(
+      [],
+      '2026-03-09T00:00:00Z',
+      '2026-03-15T23:59:59Z',
+      'UTC',
+      'en',
+      undefined,
+      weatherByDate,
+    );
+    expect(result).toContain('☀️');
+    expect(result).toContain('2..8°');
+    expect(result).toContain('🌨');
+    expect(result).toContain('-1..4°');
+  });
+
+  test('omits weather when weatherByDate is undefined', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).not.toContain('°');
+  });
+
+  test('shows weather on holiday-only days', () => {
+    const holidaysByDate = new Map([
+      [
+        '2026-03-09',
+        [{ name: 'May Day', date: '2026-03-09', type: 'public', countryCode: 'US', countryName: 'United States' }],
+      ],
+    ]);
+    const weatherByDate: { [date: string]: import('../../../src/services/weather/types.ts').DayWeather } = {
+      '2026-03-09': { tempMin: 10, tempMax: 20, conditionCode: 800, description: 'clear', windSpeed: 2 },
+    };
+    const result = formatWeekAgenda(
+      [],
+      '2026-03-09T00:00:00Z',
+      '2026-03-15T23:59:59Z',
+      'UTC',
+      'en',
+      holidaysByDate,
+      weatherByDate,
+    );
+    expect(result).toContain('May Day');
+    expect(result).toContain('☀️');
+    expect(result).toContain('10..20°');
+  });
 });
 
 describe('formatEventDetail', () => {
@@ -157,6 +228,7 @@ describe('formatEventDetail', () => {
       parent_event_id: null,
       original_start_at: null,
       is_cancelled: 0,
+      is_deleted: 0,
       reminder_overrides: null,
       google_event_id: null,
       google_calendar_id: null,
@@ -508,6 +580,54 @@ describe('formatEventDetail — edge cases', () => {
     expect(result).not.toContain('turns');
     expect(result).not.toContain('лет');
   });
+
+  test('hourly forecast adds event-time weather line (no day range)', () => {
+    const event = makeEvent({ title: 'Run', start_at: '2026-03-12T18:00:00Z' });
+    const result = formatEventDetail(event, 'UTC', 'en', {
+      forecast: {
+        kind: 'hour',
+        hour: {
+          dt: new Date('2026-03-12T18:00:00Z').getTime() / 1000,
+          temp: 8,
+          conditionCode: 500,
+          description: 'light rain',
+          windSpeed: 4,
+        },
+      },
+    });
+    expect(result).toContain('🌧');
+    expect(result).toContain('8°C');
+    expect(result).toContain('light rain');
+    // Must NOT fall back to a day range when we have hourly data
+    expect(result).not.toContain('..');
+  });
+
+  test('daily forecast falls back to min..max range when no hourly available', () => {
+    const event = makeEvent({ title: 'Conference', start_at: '2026-03-15T09:00:00Z' });
+    const result = formatEventDetail(event, 'UTC', 'en', {
+      forecast: {
+        kind: 'day',
+        day: {
+          date: '2026-03-15',
+          tempMin: 2,
+          tempMax: 11,
+          conditionCode: 801,
+          description: 'few clouds',
+          windSpeed: 3,
+        },
+      },
+    });
+    expect(result).toContain('⛅');
+    expect(result).toContain('2..11°C');
+  });
+
+  test('omits weather line when forecast is undefined or null', () => {
+    const event = makeEvent({ title: 'Run' });
+    const noForecast = formatEventDetail(event, 'UTC', 'en');
+    const nullForecast = formatEventDetail(event, 'UTC', 'en', { forecast: null });
+    expect(noForecast).not.toContain('°C');
+    expect(nullForecast).not.toContain('°C');
+  });
 });
 
 // ── formatInvitation ──
@@ -560,6 +680,65 @@ describe('formatInvitation', () => {
   test('includes inviter username link when provided', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg', 'Europe/Kyiv', true);
     expect(result).toContain('@alice_tg');
+  });
+
+  test('English header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    // Title must appear in the first line so phone notification previews
+    // show the specific event, not a generic "Invitation" label.
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('invitation from');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('Russian header front-loads event title (phone preview)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алиса', 1, 'alice_tg');
+    const firstLine = result.split('\n')[0]!;
+    expect(firstLine).toContain('Team Meeting');
+    expect(firstLine).toContain('приглашение от');
+    expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('header escapes HTML special chars in event title', () => {
+    const tricky = makeEvent({
+      title: 'A & B <foo>',
+      start_at: '2026-03-11T12:00:00Z',
+      end_at: '2026-03-11T13:00:00Z',
+      timezone: 'Europe/Moscow',
+    });
+    const result = formatInvitation(tricky, 'Europe/Moscow', 'en', 'Alice', 1);
+    const firstLine = result.split('\n')[0]!;
+    // HTML specials must be escaped — otherwise Telegram parser rejects the message.
+    expect(firstLine).toContain('A &amp; B &lt;foo&gt;');
+    expect(firstLine).not.toContain('A & B <foo>');
+  });
+
+  test('body does NOT repeat the title (header already front-loads it)', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
+    // Title appears exactly once — in the header line. The event detail
+    // block below the header skips the 📌 <title> line to avoid duplication.
+    const occurrences = result.match(/Team Meeting/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    // The 📌 pinned-event marker (which would carry the duplicated title)
+    // must not appear at all.
+    expect(result).not.toContain('📌');
+  });
+
+  test('all-day invitation body also does NOT repeat title', () => {
+    const allDay = makeEvent({ title: 'Holiday', all_day: 1, timezone: 'Europe/Moscow' });
+    const result = formatInvitation(allDay, 'Europe/Moscow', 'en', 'Alice', 1);
+    const occurrences = result.match(/Holiday/g) ?? [];
+    expect(occurrences).toHaveLength(1);
+    expect(result).not.toContain('📌');
+  });
+
+  test('full invitation output snapshot — locks layout against regression', () => {
+    // Locks the entire formatted output so any future change to
+    // formatEventDetail or the invitation header that reintroduces the
+    // duplicated title (or shifts the overall layout) trips this test.
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
+    expect(result).toBe(`📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)`);
   });
 });
 

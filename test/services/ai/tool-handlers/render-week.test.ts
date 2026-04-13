@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleRenderWeekImage } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
-import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -10,7 +9,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     isGroup: false,
     sender: {
       sendPhoto: mock(() => Promise.resolve({ message_id: 42 })),
-      sendMessage: mock(() => Promise.resolve()),
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
     renderService: {
       renderDirect: mock(() => Promise.resolve(Buffer.from('png'))),
@@ -26,34 +25,54 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
 }
 
 describe('handleRenderWeekImage', () => {
-  test('returns success with rendering message', () => {
+  test('returns success after render + send photo', async () => {
     const ctx = makeCtx();
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(true);
     expect(result.output).toBeTruthy();
   });
 
-  test('output contains week start date', () => {
+  test('output contains week start date and past-tense marker', async () => {
     const ctx = makeCtx();
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.output).toContain('2026-04-07');
+    expect(result.output).toContain('отправлена');
   });
 
-  test('fails when renderService missing', () => {
+  test('sendPhoto is awaited before handler returns', async () => {
+    const sendPhoto = mock(() => Promise.resolve({ message_id: 42 }));
+    const ctx = makeCtx({
+      sender: {
+        sendPhoto,
+        sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+      } as never,
+    });
+    await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  test('agentHint instructs the model not to retry', async () => {
+    const ctx = makeCtx();
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    expect(result.agentHint).toBeDefined();
+    expect(result.agentHint!).toContain('Do NOT call render_week_image again');
+  });
+
+  test('fails when renderService missing', async () => {
     const ctx = makeCtx({ renderService: undefined });
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(false);
   });
 
-  test('fails when sendPhoto missing', () => {
+  test('fails when sendPhoto missing', async () => {
     const ctx = makeCtx({ sender: {} as never });
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(false);
   });
 
-  test('fails when group scope but no groupChatId', () => {
+  test('fails when group scope but no groupChatId', async () => {
     const ctx = makeCtx({ groupChatId: undefined, isGroup: false });
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07', scope: 'group' });
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07', scope: 'group' });
     expect(result.success).toBe(false);
   });
 
@@ -64,19 +83,18 @@ describe('handleRenderWeekImage', () => {
       groupChatId: 100,
       eventService: { getEventsInRange: mock(() => []), getEventsInRangeForGroup } as never,
     });
-    handleRenderWeekImage(ctx, { week_start: '2026-04-07', scope: 'group' });
-    await flushPromises();
+    await handleRenderWeekImage(ctx, { week_start: '2026-04-07', scope: 'group' });
     expect(getEventsInRangeForGroup).toHaveBeenCalled();
   });
 
-  test('render failure is caught and does not throw', async () => {
+  test('render failure returns success:false with error message', async () => {
     const ctx = makeCtx({
       renderService: {
         renderDirect: mock(() => Promise.reject(new Error('playwright down'))),
       },
     });
-    const result = handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
-    expect(result.success).toBe(true);
-    await flushPromises();
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
   });
 });

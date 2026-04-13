@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { t } from '../../../config/constants.ts';
 import { jsonCodec } from '../../../utils/json-codec.ts';
 import { type ActivityEvent, formatActivityEvent } from '../activity-event.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 interface GetHistoryInput {
   limit?: number;
@@ -95,3 +95,4 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
 
   return { success: true, output: lines.join('\n') };
 }
+handleGetHistory.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

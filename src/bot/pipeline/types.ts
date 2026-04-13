@@ -37,6 +37,7 @@ export interface GroupContext {
   isGroup: boolean;
   groupChatId?: number;
   groupTitle?: string;
+  topicThreadId?: number;
   onBotResponse?: (messageId: number) => void;
 }
 

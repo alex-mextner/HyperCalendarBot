@@ -46,6 +46,7 @@ export interface CalendarEvent {
   parent_event_id: number | null;
   original_start_at: string | null;
   is_cancelled: number; // 0 | 1
+  is_deleted: number; // 0 | 1 — soft-delete flag
   reminder_overrides: string | null; // JSON array "[5, 30]"
   google_event_id: string | null;
   google_calendar_id: string | null;
@@ -387,6 +388,8 @@ export interface FeedbackThread {
   subject: string;
   created_at: string;
   closed_at: string | null;
+  chat_id: number | null;
+  topic_thread_id: number | null;
 }
 
 export interface FeedbackMessage {
@@ -402,6 +405,8 @@ export interface CreateFeedbackThreadData {
   user_id: number;
   type: FeedbackType;
   subject: string;
+  chat_id?: number;
+  topic_thread_id?: number;
 }
 
 export interface CreateFeedbackMessageData {
