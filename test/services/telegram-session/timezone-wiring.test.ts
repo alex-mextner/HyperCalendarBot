@@ -20,7 +20,7 @@ function makeMockSessionRepo(
       return {
         user_id: 100,
         encrypted_session: Buffer.from('enc'),
-        encrypted_phone: Buffer.from('phone'),
+        phone_masked: '+7 ••• 0000',
         phone_hash: 'abc',
         status: 'active' as const,
         tz_detection_consent_at: null,

@@ -32,12 +32,9 @@ db.exec('PRAGMA journal_mode=WAL');
 interface Row {
   user_id: number;
   encrypted_session: Buffer;
-  encrypted_phone: Buffer;
 }
 
-const rows = db
-  .prepare('SELECT user_id, encrypted_session, encrypted_phone FROM user_telegram_sessions')
-  .all() as Row[];
+const rows = db.prepare('SELECT user_id, encrypted_session FROM user_telegram_sessions').all() as Row[];
 
 if (rows.length === 0) {
   console.log('No sessions to rotate.');
@@ -47,12 +44,11 @@ if (rows.length === 0) {
 console.log(`Found ${rows.length} session(s). Verifying OLD_KEY can decrypt all...`);
 
 // Phase 1: verify all decrypt with old key (abort if any fail)
-const decrypted: Array<{ userId: number; session: Buffer; phone: Buffer }> = [];
+const decrypted: Array<{ userId: number; session: Buffer }> = [];
 for (const row of rows) {
   try {
     const session = decryptBlob(Buffer.from(row.encrypted_session), oldKey);
-    const phone = decryptBlob(Buffer.from(row.encrypted_phone), oldKey);
-    decrypted.push({ userId: row.user_id, session, phone });
+    decrypted.push({ userId: row.user_id, session });
   } catch {
     console.error(`Failed to decrypt session for user ${row.user_id} — aborting. Is OLD_KEY correct?`);
     process.exit(1);
@@ -63,14 +59,13 @@ for (const row of rows) {
 console.log('All sessions decrypted successfully. Re-encrypting with NEW_KEY...');
 
 const update = db.prepare(
-  `UPDATE user_telegram_sessions SET encrypted_session = ?, encrypted_phone = ?, updated_at = datetime('now') WHERE user_id = ?`,
+  `UPDATE user_telegram_sessions SET encrypted_session = ?, updated_at = datetime('now') WHERE user_id = ?`,
 );
 
 db.transaction(() => {
-  for (const { userId, session, phone } of decrypted) {
+  for (const { userId, session } of decrypted) {
     const newSession = encryptBlob(session, newKey);
-    const newPhone = encryptBlob(phone, newKey);
-    update.run(newSession, newPhone, userId);
+    update.run(newSession, userId);
   }
 })();
 

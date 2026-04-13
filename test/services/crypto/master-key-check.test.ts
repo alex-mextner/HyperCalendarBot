@@ -27,8 +27,7 @@ describe('verifyMasterKey', () => {
   test('passes when key matches existing session', () => {
     const key = randomBytes(32);
     const blob = encryptBlob(Buffer.from('some-pyrogram-session-bytes'), key);
-    const phone = encryptBlob(Buffer.from('+79001234567'), key);
-    repo.upsert(100, blob, phone, 'hash');
+    repo.upsert(100, blob, '+7 ••• 4567', 'hash');
     const result = verifyMasterKey(repo, key);
     expect(result).toEqual({ ok: true, reason: 'verified' });
   });
@@ -36,12 +35,7 @@ describe('verifyMasterKey', () => {
   test('fails when key does not match existing session', () => {
     const correctKey = randomBytes(32);
     const wrongKey = randomBytes(32);
-    repo.upsert(
-      100,
-      encryptBlob(Buffer.from('session'), correctKey),
-      encryptBlob(Buffer.from('+79001234567'), correctKey),
-      'hash',
-    );
+    repo.upsert(100, encryptBlob(Buffer.from('session'), correctKey), '+7 ••• 4567', 'hash');
     const result = verifyMasterKey(repo, wrongKey);
     expect(result.ok).toBe(false);
     if (!result.ok) {

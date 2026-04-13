@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
+import { maskPhone } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
@@ -10,7 +11,6 @@ import { UserRepository } from '../../../../src/database/repositories/user.repos
 import { runMigrations } from '../../../../src/database/schema.ts';
 import { handleConnectTelegramStatus } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
-import { encryptString } from '../../../../src/services/crypto/session-crypto.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 
@@ -117,9 +117,9 @@ describe('handleConnectTelegramStatus', () => {
       username: 'tester',
     });
 
-    const encryptedSession = encryptString('session-data', MASTER_KEY);
-    const encryptedPhone = encryptString('+79001234567', MASTER_KEY);
-    sessionRepo.upsert(USER_ID, encryptedSession, encryptedPhone, 'hash123');
+    const encryptedSession = Buffer.from('session-data');
+    const phoneMasked = maskPhone('+79001234567');
+    sessionRepo.upsert(USER_ID, encryptedSession, phoneMasked, 'hash123');
 
     const ctx = makeCtx(db, {
       telegramSessionRepo: sessionRepo,
@@ -143,9 +143,9 @@ describe('handleConnectTelegramStatus', () => {
       username: 'tester',
     });
 
-    const encryptedSession = encryptString('session-data', MASTER_KEY);
-    const encryptedPhone = encryptString('+79001234567', MASTER_KEY);
-    sessionRepo.upsert(USER_ID, encryptedSession, encryptedPhone, 'hash123');
+    const encryptedSession = Buffer.from('session-data');
+    const phoneMasked = maskPhone('+79001234567');
+    sessionRepo.upsert(USER_ID, encryptedSession, phoneMasked, 'hash123');
     sessionRepo.updateStatus(USER_ID, 'expired');
 
     const ctx = makeCtx(db, {
@@ -166,9 +166,9 @@ describe('handleConnectTelegramStatus', () => {
       username: 'tester',
     });
 
-    const encryptedSession = encryptString('session-data', MASTER_KEY);
-    const encryptedPhone = encryptString('+79001234567', MASTER_KEY);
-    sessionRepo.upsert(USER_ID, encryptedSession, encryptedPhone, 'hash123');
+    const encryptedSession = Buffer.from('session-data');
+    const phoneMasked = maskPhone('+79001234567');
+    sessionRepo.upsert(USER_ID, encryptedSession, phoneMasked, 'hash123');
 
     const ctx = makeCtx(db, {
       telegramSessionRepo: sessionRepo,
@@ -199,9 +199,9 @@ describe('handleConnectTelegramStatus', () => {
       username: 'tester',
     });
 
-    const encryptedSession = encryptString('session-data', MASTER_KEY);
-    const encryptedPhone = encryptString('+79001234567', MASTER_KEY);
-    sessionRepo.upsert(USER_ID, encryptedSession, encryptedPhone, 'hash123');
+    const encryptedSession = Buffer.from('session-data');
+    const phoneMasked = maskPhone('+79001234567');
+    sessionRepo.upsert(USER_ID, encryptedSession, phoneMasked, 'hash123');
 
     const ctx = makeCtx(db, {
       telegramSessionRepo: sessionRepo,

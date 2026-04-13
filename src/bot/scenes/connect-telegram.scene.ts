@@ -133,17 +133,8 @@ export function createConnectTelegramScene(
           // Check if already connected — show masked phone and reconnect option
           const existing = sessionRepo.findByUserId(userId);
           if (existing?.status === 'active') {
-            const masterKey = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
-            try {
-              const phone = decryptString(existing.encrypted_phone, masterKey);
-              const masked = maskPhone(phone);
-              const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
-              await context.send(ct.alreadyConnected(masked), { reply_markup: kb });
-            } catch (err) {
-              sceneLogger.warn({ err, userId }, 'Failed to decrypt existing phone for display');
-              const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
-              await context.send(ct.alreadyConnected('+••• ••••'), { reply_markup: kb });
-            }
+            const kb = new InlineKeyboard().text(ct.btnReconnect, CB_RECONNECT).text(ct.btnCancel, CB_CANCEL);
+            await context.send(ct.alreadyConnected(existing.phone_masked), { reply_markup: kb });
             return;
           }
 
@@ -559,15 +550,14 @@ async function finalizeSession(
     const sessionFile = Bun.file(sessionPath);
     const sessionData = Buffer.from(await sessionFile.arrayBuffer());
 
-    // Encrypt session and phone
+    // Encrypt session; store only the masked phone
     const encryptedSession = encryptBlob(sessionData, masterKey);
-    const encryptedPhone = encryptString(phone, masterKey);
+    const phoneMasked = maskPhone(phone);
     const hash = SessionBridge.phoneHash(phone);
 
     // Persist
-    sessionRepo.upsert(userId, encryptedSession, encryptedPhone, hash);
+    sessionRepo.upsert(userId, encryptedSession, phoneMasked, hash);
 
-    const masked = maskPhone(phone);
     sceneLogger.info({ userId, phoneHash: hash }, 'Telegram account connected');
 
     // Check for pending invitation offer (batch — all external invitees)
@@ -594,7 +584,7 @@ async function finalizeSession(
           .row()
           .text(ct.skipPendingBtn, CB_SKIP_PENDING);
 
-        await context.send(ct.successWithPending(masked, event.title, dateLine, inviteeList, count), {
+        await context.send(ct.successWithPending(phoneMasked, event.title, dateLine, inviteeList, count), {
           reply_markup: kb,
           parse_mode: 'HTML',
         });
@@ -603,7 +593,7 @@ async function finalizeSession(
     }
 
     // Generic success — no pending invitation
-    await context.send(ct.success(masked));
+    await context.send(ct.success(phoneMasked));
     await context.scene.exit();
     return false;
   } catch (err) {

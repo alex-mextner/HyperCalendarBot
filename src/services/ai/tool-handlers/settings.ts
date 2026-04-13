@@ -1,4 +1,4 @@
-import { maskPhone, t } from '../../../config/constants.ts';
+import { t } from '../../../config/constants.ts';
 import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
@@ -7,8 +7,6 @@ import type {
   UserCallSettings,
   Visibility,
 } from '../../../database/types.ts';
-import { logger } from '../../../utils/logger.ts';
-import { decryptString } from '../../crypto/session-crypto.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 // ── Update interfaces (match AI tool schema in tools.ts) ──
@@ -334,17 +332,10 @@ export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
     };
   }
 
-  let masked = '+••• ••••';
-  try {
-    masked = maskPhone(decryptString(Buffer.from(session.encrypted_phone), ctx.telegramMasterKey));
-  } catch (err) {
-    logger.warn({ err, userId: ctx.user.telegram_id }, 'Phone decrypt failed in AI tool');
-  }
-
   return {
     success: true,
-    output: t(lang).aiTools.meta.telegramConnectedStatus(masked),
-    data: { connected: true, phone_masked: masked, status: session.status },
+    output: t(lang).aiTools.meta.telegramConnectedStatus(session.phone_masked),
+    data: { connected: true, phone_masked: session.phone_masked, status: session.status },
   };
 }
 handleConnectTelegramStatus.meta = {

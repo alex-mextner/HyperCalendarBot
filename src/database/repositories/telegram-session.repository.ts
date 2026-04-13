@@ -33,23 +33,23 @@ export class TelegramSessionRepository {
     return this.db.prepare("SELECT * FROM user_telegram_sessions WHERE status = 'active'").all() as TelegramSession[];
   }
 
-  upsert(userId: number, encryptedSession: Buffer, encryptedPhone: Buffer, phoneHash: string): void {
+  upsert(userId: number, encryptedSession: Buffer, phoneMasked: string, phoneHash: string): void {
     this.db.transaction(() => {
       this.db
         .prepare('DELETE FROM user_telegram_sessions WHERE phone_hash = ? AND user_id <> ?')
         .run(phoneHash, userId);
       this.db
         .prepare(
-          `INSERT INTO user_telegram_sessions (user_id, encrypted_session, encrypted_phone, phone_hash)
+          `INSERT INTO user_telegram_sessions (user_id, encrypted_session, phone_masked, phone_hash)
            VALUES (?, ?, ?, ?)
            ON CONFLICT(user_id) DO UPDATE SET
              encrypted_session = excluded.encrypted_session,
-             encrypted_phone = excluded.encrypted_phone,
+             phone_masked = excluded.phone_masked,
              phone_hash = excluded.phone_hash,
              status = 'active',
              updated_at = datetime('now')`,
         )
-        .run(userId, encryptedSession, encryptedPhone, phoneHash);
+        .run(userId, encryptedSession, phoneMasked, phoneHash);
     })();
   }
 

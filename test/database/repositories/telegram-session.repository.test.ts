@@ -17,7 +17,7 @@ const USER_A = 100;
 const USER_B = 200;
 
 const SESSION_BUF = Buffer.from('encrypted-session-data');
-const PHONE_BUF = Buffer.from('encrypted-phone-data');
+const PHONE_MASKED = '+7 ••• 4567';
 const PHONE_HASH = 'abc123def456';
 
 describe('TelegramSessionRepository', () => {
@@ -33,27 +33,27 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('upsert creates a new session', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     const session = repo.findByUserId(USER_A);
     expect(session).not.toBeNull();
     expect(session!.user_id).toBe(USER_A);
     expect(Buffer.from(session!.encrypted_session).toString()).toBe('encrypted-session-data');
-    expect(Buffer.from(session!.encrypted_phone).toString()).toBe('encrypted-phone-data');
+    expect(session!.phone_masked).toBe('+7 ••• 4567');
     expect(session!.phone_hash).toBe(PHONE_HASH);
     expect(session!.status).toBe('active');
   });
 
   test('upsert replaces existing session for the same user', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     const newSession = Buffer.from('new-session-data');
-    const newPhone = Buffer.from('new-phone-data');
+    const newPhoneMasked = '+1 ••• 9999';
     const newHash = 'newhash789';
-    repo.upsert(USER_A, newSession, newPhone, newHash);
+    repo.upsert(USER_A, newSession, newPhoneMasked, newHash);
 
     const session = repo.findByUserId(USER_A);
     expect(session).not.toBeNull();
     expect(Buffer.from(session!.encrypted_session).toString()).toBe('new-session-data');
-    expect(Buffer.from(session!.encrypted_phone).toString()).toBe('new-phone-data');
+    expect(session!.phone_masked).toBe('+1 ••• 9999');
     expect(session!.phone_hash).toBe(newHash);
     expect(session!.status).toBe('active');
   });
@@ -63,7 +63,7 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('getActive returns only active sessions', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     expect(repo.getActive(USER_A)).not.toBeNull();
 
     repo.updateStatus(USER_A, 'expired');
@@ -71,7 +71,7 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('updateStatus changes status', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     repo.updateStatus(USER_A, 'revoked');
 
     const session = repo.findByUserId(USER_A);
@@ -79,20 +79,20 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('findByPhoneHash finds session', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     const session = repo.findByPhoneHash(PHONE_HASH);
     expect(session).not.toBeNull();
     expect(session!.user_id).toBe(USER_A);
   });
 
   test('upsert claims phone from a different user (soft takeover)', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     expect(repo.findByUserId(USER_A)).not.toBeNull();
 
     // USER_B connects with the same phone — should delete USER_A's row
     const newSession = Buffer.from('user-b-session');
-    const newPhone = Buffer.from('user-b-phone');
-    repo.upsert(USER_B, newSession, newPhone, PHONE_HASH);
+    const newPhoneMasked = '+7 ••• 9999';
+    repo.upsert(USER_B, newSession, newPhoneMasked, PHONE_HASH);
 
     expect(repo.findByUserId(USER_A)).toBeNull();
     const session = repo.findByUserId(USER_B);
@@ -102,8 +102,8 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('getMostRecentActive returns latest active session', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
-    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), '+1 ••• 0000', 'hash_b');
 
     // Expire USER_A, so only USER_B is active
     repo.updateStatus(USER_A, 'expired');
@@ -114,14 +114,14 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('getMostRecentActive returns null when no active sessions', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     repo.updateStatus(USER_A, 'revoked');
     expect(repo.getMostRecentActive()).toBeNull();
   });
 
   test('getAllActive returns all active sessions', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
-    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), '+1 ••• 0000', 'hash_b');
 
     const active = repo.getAllActive();
     expect(active.length).toBe(2);
@@ -129,8 +129,8 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('getAllActive excludes expired and revoked sessions', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
-    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), '+1 ••• 0000', 'hash_b');
     repo.updateStatus(USER_A, 'expired');
     repo.updateStatus(USER_B, 'revoked');
 
@@ -143,8 +143,8 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('countByStatus returns counts grouped by status', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, 'hash_a');
-    repo.upsert(USER_B, Buffer.from('b-session'), Buffer.from('b-phone'), 'hash_b');
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, 'hash_a');
+    repo.upsert(USER_B, Buffer.from('b-session'), '+1 ••• 0000', 'hash_b');
     repo.updateStatus(USER_B, 'expired');
 
     const counts = repo.countByStatus();
@@ -161,7 +161,7 @@ describe('TelegramSessionRepository', () => {
   });
 
   test('deleteByUserId removes session', () => {
-    repo.upsert(USER_A, SESSION_BUF, PHONE_BUF, PHONE_HASH);
+    repo.upsert(USER_A, SESSION_BUF, PHONE_MASKED, PHONE_HASH);
     expect(repo.findByUserId(USER_A)).not.toBeNull();
 
     repo.deleteByUserId(USER_A);

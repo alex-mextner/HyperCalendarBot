@@ -18,7 +18,7 @@ function makeMockSessionRepo(activeSession?: { encrypted_session: Buffer }) {
         return {
           user_id: userId,
           encrypted_session: activeSession.encrypted_session,
-          encrypted_phone: Buffer.from('phone'),
+          phone_masked: '+7 ••• 0000',
           phone_hash: 'abc',
           status: 'active' as const,
           created_at: '2026-01-01',

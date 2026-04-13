@@ -659,7 +659,7 @@ export interface InsertHolidayData {
 export interface TelegramSession {
   user_id: number;
   encrypted_session: Buffer;
-  encrypted_phone: Buffer;
+  phone_masked: string;
   phone_hash: string;
   status: 'active' | 'expired' | 'revoked';
   tz_detection_consent_at: string | null;

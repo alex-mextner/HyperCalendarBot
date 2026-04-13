@@ -1004,7 +1004,7 @@ export const migrations: Migration[] = [
         CREATE TABLE user_telegram_sessions (
           user_id          INTEGER PRIMARY KEY,
           encrypted_session BLOB NOT NULL,
-          encrypted_phone   BLOB NOT NULL,
+          phone_masked     TEXT NOT NULL,
           phone_hash       TEXT NOT NULL,
           status           TEXT NOT NULL DEFAULT 'active',
           created_at       TEXT NOT NULL DEFAULT (datetime('now')),

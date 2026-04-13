@@ -1,18 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { randomBytes } from 'node:crypto';
 import type { TelegramSession } from '../../../src/database/types.ts';
-import { encryptString } from '../../../src/services/crypto/session-crypto.ts';
 
-function makeMasterKey(): Buffer {
-  return randomBytes(32);
-}
-
-function makeSession(masterKey: Buffer, overrides: Partial<TelegramSession> = {}): TelegramSession {
-  const phone = '+79001234567';
+function makeSession(overrides: Partial<TelegramSession> = {}): TelegramSession {
   return {
     user_id: 100,
     encrypted_session: Buffer.from('fake-session-data'),
-    encrypted_phone: encryptString(phone, masterKey),
+    phone_masked: '+7 ••• 4567',
     phone_hash: 'abc123',
     status: 'active',
     tz_detection_consent_at: null,
@@ -25,9 +18,8 @@ function makeSession(masterKey: Buffer, overrides: Partial<TelegramSession> = {}
 describe('buildTelegramView', () => {
   test('shows "not connected" when no session', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
 
-    const { text, kb } = buildTelegramView(null, masterKey, 'en');
+    const { text, kb } = buildTelegramView(null, 'en');
 
     expect(text).toContain('not connected');
     const kbJson = JSON.stringify(kb);
@@ -37,10 +29,9 @@ describe('buildTelegramView', () => {
 
   test('shows connected with masked phone in RU', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const session = makeSession(masterKey);
+    const session = makeSession();
 
-    const { text, kb } = buildTelegramView(session, masterKey, 'ru');
+    const { text, kb } = buildTelegramView(session, 'ru');
 
     expect(text).toContain('подключён');
     // Masked phone should show last 4 digits
@@ -52,10 +43,9 @@ describe('buildTelegramView', () => {
 
   test('shows connected with masked phone in EN', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const session = makeSession(masterKey);
+    const session = makeSession();
 
-    const { text } = buildTelegramView(session, masterKey, 'en');
+    const { text } = buildTelegramView(session, 'en');
 
     expect(text).toContain('connected');
     expect(text).toContain('4567');
@@ -63,10 +53,9 @@ describe('buildTelegramView', () => {
 
   test('shows not connected for expired session', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const session = makeSession(masterKey, { status: 'expired' });
+    const session = makeSession({ status: 'expired' });
 
-    const { text, kb } = buildTelegramView(session, masterKey, 'en');
+    const { text, kb } = buildTelegramView(session, 'en');
 
     expect(text).toContain('not connected');
     const kbJson = JSON.stringify(kb);
@@ -75,49 +64,34 @@ describe('buildTelegramView', () => {
 
   test('shows not connected for revoked session', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const session = makeSession(masterKey, { status: 'revoked' });
+    const session = makeSession({ status: 'revoked' });
 
-    const { text } = buildTelegramView(session, masterKey, 'ru');
+    const { text } = buildTelegramView(session, 'ru');
 
     expect(text).toContain('не подключён');
   });
 
-  test('shows fallback masked phone on decryption failure', async () => {
+  test('shows phone_masked directly without decryption', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const wrongKey = makeMasterKey();
-    const session = makeSession(masterKey);
+    const session = makeSession({ phone_masked: '+1 ••• 9999' });
 
-    // Use wrong key to trigger decryption failure
-    const { text } = buildTelegramView(session, wrongKey, 'en');
+    const { text } = buildTelegramView(session, 'en');
 
     expect(text).toContain('connected');
-    expect(text).toContain('••••');
-  });
-
-  test('shows not connected when masterKey is null', async () => {
-    const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
-    const session = makeSession(masterKey);
-
-    const { text } = buildTelegramView(session, null, 'en');
-
-    expect(text).toContain('not connected');
+    expect(text).toContain('+1 ••• 9999');
   });
 
   test('reconnect after revoke: new session shows active status', async () => {
     const { buildTelegramView } = await import('../../../src/bot/commands/settings.ts');
-    const masterKey = makeMasterKey();
 
     // First: revoked session
-    const revokedSession = makeSession(masterKey, { status: 'revoked' });
-    const revokedResult = buildTelegramView(revokedSession, masterKey, 'en');
+    const revokedSession = makeSession({ status: 'revoked' });
+    const revokedResult = buildTelegramView(revokedSession, 'en');
     expect(revokedResult.text).toContain('not connected');
 
     // Then: new active session after reconnect
-    const newSession = makeSession(masterKey, { status: 'active' });
-    const activeResult = buildTelegramView(newSession, masterKey, 'en');
+    const newSession = makeSession({ status: 'active' });
+    const activeResult = buildTelegramView(newSession, 'en');
     expect(activeResult.text).toContain('connected');
     expect(activeResult.text).toContain('4567');
   });

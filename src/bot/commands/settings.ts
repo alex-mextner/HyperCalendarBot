@@ -1,14 +1,14 @@
 // src/bot/commands/settings.ts
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
-import { CB, maskPhone, t } from '../../config/constants.ts';
+import { CB, t } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { TelegramSession, User } from '../../database/types.ts';
-import { decryptBlob, decryptString } from '../../services/crypto/session-crypto.ts';
+import { decryptBlob } from '../../services/crypto/session-crypto.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
@@ -242,23 +242,11 @@ function buildPrivacyView(
 
 export function buildTelegramView(
   session: TelegramSession | null,
-  masterKey: Buffer | null,
   lang: 'en' | 'ru',
 ): { text: string; kb: InlineKeyboard } {
   const s = t(lang).settings;
 
-  let statusLine: string;
-  if (session?.status === 'active' && masterKey) {
-    try {
-      const phone = decryptString(session.encrypted_phone, masterKey);
-      const masked = maskPhone(phone);
-      statusLine = s.telegramConnected(masked);
-    } catch {
-      statusLine = s.telegramConnected('+••• ••••');
-    }
-  } else {
-    statusLine = s.telegramNotConnected;
-  }
+  const statusLine = session?.status === 'active' ? s.telegramConnected(session.phone_masked) : s.telegramNotConnected;
 
   const text = statusLine;
   const kb =
@@ -546,7 +534,7 @@ export async function handleSettingsCallback(
 
   if (subAction === 'telegram' && telegramDeps) {
     const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
-    const { text, kb } = buildTelegramView(session, telegramDeps.masterKey, lang);
+    const { text, kb } = buildTelegramView(session, lang);
     await ctx.answer();
     await ctx.editText(text, { reply_markup: kb });
     return;
