@@ -9,7 +9,7 @@ import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail } from '../../event/formatters.ts';
 import type { EventSummary } from '../../intent/variable-resolver.ts';
 import { formatEventWeatherLine } from '../../weather/format.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { formatReminderDuration } from './reminders.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
@@ -281,6 +281,7 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
 
   return { success: true, output: lines.join('\n'), data };
 }
+handleGetEvents.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
@@ -729,6 +730,7 @@ export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsI
 
   return { success: true, output: lines.join('\n'), data, agentHint: `searched ${scope} calendar` };
 }
+handleSearchEvents.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInput): Promise<ToolResult> {
   const access = checkSecretaryAccess(
@@ -781,6 +783,7 @@ export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInp
     data,
   };
 }
+handleGetUpcoming.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): ToolResult {
   const access = checkSecretaryAccess(
@@ -875,6 +878,7 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
 
   return { success: true, output: parts.join(', ') + weather, data: eventToSummary(event, ctx.user.timezone) };
 }
+handleGetEvent.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 interface NotifyParticipantsInput {
   event_id: number;

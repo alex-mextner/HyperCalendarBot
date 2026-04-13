@@ -12,6 +12,7 @@ import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool } from './tool-executor.ts';
+import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
@@ -263,17 +264,33 @@ function isSkipText(text: string): boolean {
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
+/** Recursively sort object keys for stable serialization. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const sorted = Object.keys(value as { [key: string]: unknown }).sort();
+  const parts = sorted.map((k) => `${JSON.stringify(k)}:${stableStringify((value as { [key: string]: unknown })[k])}`);
+  return `{${parts.join(',')}}`;
+}
+
 /**
- * Canonical dedup key for (tool name, input). Keys are sorted so that two
- * inputs differing only in property order collide as expected. Values are
- * JSON-stringified recursively, which is fine because tool inputs are flat
- * primitives / small arrays per the tool schemas.
+ * Canonical dedup key for (tool name, input). Keys known to the tool schema
+ * are extracted and sorted so `{a,b}` and `{b,a}` collide. Extra keys
+ * injected by the model (e.g. `_nonce`) are stripped to prevent false key
+ * divergence.
  */
 function toolCallKey(name: string, input: { [key: string]: unknown }): string {
-  const sortedKeys = Object.keys(input).sort();
+  const schema = toolSchemas[name as keyof typeof toolSchemas];
+  const knownKeys =
+    schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
+  const filteredKeys = knownKeys
+    ? Object.keys(input)
+        .filter((k) => knownKeys.includes(k))
+        .sort()
+    : Object.keys(input).sort();
   const canonical: { [key: string]: unknown } = {};
-  for (const k of sortedKeys) canonical[k] = input[k];
-  return `${name}:${JSON.stringify(canonical)}`;
+  for (const k of filteredKeys) canonical[k] = input[k];
+  return `${name}:${stableStringify(canonical)}`;
 }
 
 const DUPLICATE_MARKER =
@@ -534,12 +551,16 @@ export class CalendarBotAgent {
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
             continue;
           }
-          seenToolCallKeys.add(dedupKey);
-
           writer.setToolLabel(tc.name, input);
           await writer.flush(true);
 
           const toolResult = await executeTool(ctx, tc.name, input);
+
+          // Record dedup key only after a successful execution — failed calls
+          // must not block retries with a synthetic DUPLICATE result.
+          if (toolResult.success) {
+            seenToolCallKeys.add(dedupKey);
+          }
 
           writer.markToolResult(toolResult.success);
           dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
@@ -829,12 +850,16 @@ export class CalendarBotAgent {
           toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
           continue;
         }
-        seenToolCallKeys.add(dedupKey);
-
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
         const toolResult = await executeTool(ctx, tc.name, input);
+
+        // Record dedup key only on success — failed calls must not block retries.
+        if (toolResult.success) {
+          seenToolCallKeys.add(dedupKey);
+        }
+
         writer.markToolResult(toolResult.success);
         dbg?.logToolResult(tc.name, toolResult.success, toolResult.output, toolResult.error);
 

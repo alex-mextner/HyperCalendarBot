@@ -1,6 +1,6 @@
 import cityTimezones from 'city-timezones';
 import { resolveCity } from '../../timezone/city-resolver.ts';
-import type { ToolResult } from '../types.ts';
+import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 function getOffsetMinutes(timezone: string, dt: Date): number {
   try {
@@ -168,6 +168,7 @@ export async function handleGetTimezoneInfoWithCityFallback(input: {
 
   return handleGetTimezoneInfo({ timezone: resolved, at: input.at });
 }
+handleGetTimezoneInfoWithCityFallback.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleConvertToTimezone(input: { datetime: string; timezone: string }): ToolResult {
   const dt = new Date(input.datetime);
@@ -207,3 +208,4 @@ export function handleConvertToTimezone(input: { datetime: string; timezone: str
     }),
   };
 }
+handleConvertToTimezone.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

@@ -1,5 +1,5 @@
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
-import type { ToolResult } from '../types.ts';
+import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?';
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
@@ -192,3 +192,4 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     error: `Cannot parse: "${expr}". Supported: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime`,
   };
 }
+handleCalculate.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

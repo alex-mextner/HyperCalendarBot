@@ -4,7 +4,7 @@ import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatInvitation } from '../../event/formatters.ts';
 import { deliverMessage } from '../deliver-message.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
@@ -346,6 +346,7 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
     output: t(lang).aiTools.sharing.invitationsFor(event.title, event.id, lines.join('\n')),
   };
 }
+handleGetInvitationStatus.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleShareAgenda(ctx: AgentContext, input: ShareAgendaInput): ToolResult {
   if (!ctx.sharing) {

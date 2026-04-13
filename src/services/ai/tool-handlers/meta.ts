@@ -1,6 +1,6 @@
 import { t } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 export { handleCalculate } from './calculate.ts';
 export { handleAddContact, handleFindContact, handleGetContacts, handleUpdateContact } from './contacts.ts';
@@ -33,6 +33,7 @@ export function handleGetHolidays(ctx: AgentContext, input: GetHolidaysInput): T
 
   return { success: true, output: t(ctx.user.language).aiTools.meta.holidaysList(lines.join('\n')) };
 }
+handleGetHolidays.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleFindUser(ctx: AgentContext, input: FindUserInput): Promise<ToolResult> {
   const username = input.username.replace(/^@/, '');
@@ -65,6 +66,7 @@ export async function handleFindUser(ctx: AgentContext, input: FindUserInput): P
     error: `User @${username} not found. They may not have used this bot yet.`,
   };
 }
+handleFindUser.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleAskUser(
   ctx: AgentContext,
@@ -97,6 +99,7 @@ export async function handleAskUser(
     stopLoop: true,
   };
 }
+handleAskUser.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handlePickUsers(
   ctx: AgentContext,
@@ -114,6 +117,7 @@ export async function handlePickUsers(
   }
   return { success: true, output: t(ctx.user.language).aiTools.meta.userPickerSent, stopLoop: true };
 }
+handlePickUsers.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleEndConversation(): ToolResult {
   return {
@@ -122,6 +126,7 @@ export function handleEndConversation(): ToolResult {
     output: 'Conversation marked as complete. The next message will start a fresh context.',
   };
 }
+handleEndConversation.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleEndCall(ctx: AgentContext): ToolResult {
   if (ctx.inputMode !== 'live_call') {
@@ -171,6 +176,7 @@ export function handleGetGoogleCalendarStatus(ctx: AgentContext): ToolResult {
   }
   return { success: true, output: lines.join('\n') };
 }
+handleGetGoogleCalendarStatus.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
   if (!ctx.user.google_refresh_token_enc) {
@@ -192,6 +198,7 @@ export function handleListGoogleCalendars(ctx: AgentContext): ToolResult {
   const lines = calendars.map((c) => `${c.sync_enabled ? '✅' : '⬜'} ${c.calendar_name} (${c.google_calendar_id})`);
   return { success: true, output: t(lang).aiTools.meta.gcalList(lines.join('\n')) };
 }
+handleListGoogleCalendars.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleLookupStress(ctx: AgentContext, input: { words: string[] }): ToolResult {
   if (!ctx.voice?.stressDictionary) {
@@ -215,6 +222,7 @@ export function handleLookupStress(ctx: AgentContext, input: { words: string[] }
 
   return { success: true, output: lines.join('\n') };
 }
+handleLookupStress.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleGetBotInfo(): ToolResult {
   return {
@@ -229,3 +237,4 @@ export function handleGetBotInfo(): ToolResult {
     ].join('\n'),
   };
 }
+handleGetBotInfo.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

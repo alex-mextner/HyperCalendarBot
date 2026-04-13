@@ -57,7 +57,7 @@ export function createBroadcastQueue(connection: ConnectionOptions): {
     defaultJobOptions: {
       attempts: 3,
       backoff: { type: 'exponential', delay: 2_000 },
-      removeOnComplete: { count: 100 },
+      removeOnComplete: { count: 10 },
       removeOnFail: { count: 500 },
     },
   });

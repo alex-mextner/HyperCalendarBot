@@ -273,6 +273,21 @@ export interface ToolResult {
   data?: ToolResultData;
 }
 
+/**
+ * Behavioral metadata attached directly to tool handler functions via
+ * `handlerFn.meta = { ... }`. Read at runtime by the tool executor to
+ * derive throttle exemption, action-log skipping, etc.
+ *
+ * When adding a new tool handler, set `.meta` right after the function
+ * declaration — don't maintain separate lists.
+ */
+export interface ToolHandlerMeta {
+  /** No side effects — exempt from cross-run throttle. */
+  readonly?: boolean;
+  /** Not worth logging as a user action (all readonly tools + UI/meta tools). */
+  skipActionLog?: boolean;
+}
+
 export interface AgentConfig {
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
 }

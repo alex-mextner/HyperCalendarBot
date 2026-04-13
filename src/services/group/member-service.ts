@@ -34,7 +34,7 @@ export class GroupMemberService {
     }
 
     // Fallback: use tracked members from group_members table
-    const tracked = this.groupMemberRepo.getMembers(chatId);
+    const tracked = this.groupMemberRepo.getActiveMembers(chatId);
     return tracked.map((m) => m.user_id).filter((id) => this.userRepo.findByTelegramId(id) !== null);
   }
 }

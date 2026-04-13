@@ -2,7 +2,7 @@
 import { t } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import type { ScenePauseService } from '../../scene-pause.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const toolLogger = logger.child({ module: 'scene-tools' });
 
@@ -13,6 +13,7 @@ export async function handleResumeScene(ctx: AgentContext, scenePauseService: Sc
     output: t(ctx.user.language).aiTools.meta.sceneResumed,
   };
 }
+handleResumeScene.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleCancelScene(ctx: AgentContext, scenePauseService: ScenePauseService): Promise<ToolResult> {
   await scenePauseService.clear(ctx.user.telegram_id);
@@ -30,3 +31,4 @@ export async function handleCancelScene(ctx: AgentContext, scenePauseService: Sc
     output: t(ctx.user.language).aiTools.meta.sceneCancelled,
   };
 }
+handleCancelScene.meta = { skipActionLog: true } satisfies ToolHandlerMeta;

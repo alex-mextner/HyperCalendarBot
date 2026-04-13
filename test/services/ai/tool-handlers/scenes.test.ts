@@ -118,6 +118,6 @@ describe('handleCancelScene', () => {
       scene: { scenePauseState: undefined, scenePauseService: service },
     });
     const result = await handleCancelScene(ruCtx, service);
-    expect(result.output).toContain('отменён');
+    expect(result.output).toContain('отменено');
   });
 });

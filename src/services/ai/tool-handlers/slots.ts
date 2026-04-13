@@ -1,6 +1,6 @@
 import { t } from '../../../config/constants.ts';
 import type { FreeSlot } from '../../event/event-service.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
@@ -49,3 +49,4 @@ export function handleGetFreeSlots(ctx: AgentContext, input: GetFreeSlotsInput):
 
   return { success: true, output: t(lang).aiTools.slots.freeSlots(lines.join('\n')) };
 }
+handleGetFreeSlots.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

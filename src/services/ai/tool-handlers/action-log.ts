@@ -3,7 +3,7 @@
 import { isValid, parseISO } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { telegramMessageLink } from '../../../database/repositories/action-log.repository.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 interface GetActionLogInput {
   event_id?: number;
@@ -65,3 +65,4 @@ export function handleGetActionLog(ctx: AgentContext, input: GetActionLogInput):
 
   return { success: true, output: lines.join('\n\n') };
 }
+handleGetActionLog.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

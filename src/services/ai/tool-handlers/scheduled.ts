@@ -1,7 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import { evaluate } from '../../intent/expression-evaluator.ts';
 import { ALL_TOPICS } from '../../scheduled/domain-event-bus.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 function requireScheduledCallService(ctx: AgentContext): ToolResult | null {
   if (!ctx.scheduled?.scheduledCallService) return { success: false, error: 'Scheduled calls not available.' };
@@ -61,6 +61,7 @@ export function handleScheduleAiCallsList(ctx: AgentContext): ToolResult {
   );
   return { success: true, output: lines.join('\n'), data: schedules };
 }
+handleScheduleAiCallsList.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export async function handleScheduleAiCallCancel(ctx: AgentContext, input: TriggerIdInput): Promise<ToolResult> {
   const err = requireScheduledCallService(ctx);
@@ -121,6 +122,7 @@ export function handleListTriggers(ctx: AgentContext): ToolResult {
   );
   return { success: true, output: lines.join('\n'), data: triggers };
 }
+handleListTriggers.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleRemoveTrigger(ctx: AgentContext, input: TriggerIdInput): ToolResult {
   const err = requireTriggerRepo(ctx);

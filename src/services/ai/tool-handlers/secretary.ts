@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'gramio';
 import type { CalendarSecretary } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { deliverMessage } from '../deliver-message.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const secretaryLogger = botLogger.child({ module: 'secretary' });
 
@@ -194,3 +194,4 @@ export function handleListCalendarAccess(ctx: AgentContext): ToolResult {
     }),
   };
 }
+handleListCalendarAccess.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
