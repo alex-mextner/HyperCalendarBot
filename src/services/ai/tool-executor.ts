@@ -269,73 +269,67 @@ const THROTTLE_MARKER =
   'Use the previous result. Do NOT call it again — respond to the user or call a different tool.';
 
 /**
- * Purely read-only tools exempt from cross-run throttle. These have NO Telegram
- * side effects — they only query data and return it. Tools like ask_user,
- * pick_users, render_*, set_reaction are NOT exempt because they send messages.
+ * Per-tool metadata — single source of truth for behavioral attributes.
+ *
+ * - `readonly`: no side effects (no Telegram sends, no DB writes). Exempt from
+ *   cross-run throttle so legitimate repeated queries get fresh answers.
+ * - `skipActionLog`: not worth logging as a user action (includes all readonly
+ *   tools plus UI/meta tools like ask_user, render_*, set_reaction).
+ *
+ * When adding a new tool, set these flags here — don't maintain separate lists.
  */
-const THROTTLE_EXEMPT = new Set<string>([
-  'get_events',
-  'get_event',
-  'get_upcoming',
-  'get_free_slots',
-  'search_events',
-  'get_reminders',
-  'get_contacts',
-  'find_contact',
-  'find_user',
-  'get_history',
-  'get_holidays',
-  'get_invitation_status',
-  'get_google_calendar_status',
-  'list_google_calendars',
-  'list_calendar_access',
-  'get_timezone_info',
-  'convert_to_timezone',
-  'get_bot_info',
-  'calculate',
-  'lookup_stress',
-  'schedule_ai_calls_list',
-  'list_triggers',
-  'get_action_log',
-]);
+const TOOL_META: { [tool: string]: { readonly?: boolean; skipActionLog?: boolean } } = {
+  // Pure reads — no side effects at all
+  get_events: { readonly: true, skipActionLog: true },
+  get_event: { readonly: true, skipActionLog: true },
+  get_upcoming: { readonly: true, skipActionLog: true },
+  get_free_slots: { readonly: true, skipActionLog: true },
+  search_events: { readonly: true, skipActionLog: true },
+  get_reminders: { readonly: true, skipActionLog: true },
+  get_contacts: { readonly: true, skipActionLog: true },
+  find_contact: { readonly: true, skipActionLog: true },
+  find_user: { readonly: true, skipActionLog: true },
+  get_history: { readonly: true, skipActionLog: true },
+  get_holidays: { readonly: true, skipActionLog: true },
+  get_invitation_status: { readonly: true, skipActionLog: true },
+  get_google_calendar_status: { readonly: true, skipActionLog: true },
+  list_google_calendars: { readonly: true, skipActionLog: true },
+  list_calendar_access: { readonly: true, skipActionLog: true },
+  get_timezone_info: { readonly: true, skipActionLog: true },
+  convert_to_timezone: { readonly: true, skipActionLog: true },
+  get_bot_info: { readonly: true, skipActionLog: true },
+  calculate: { readonly: true, skipActionLog: true },
+  lookup_stress: { readonly: true, skipActionLog: true },
+  schedule_ai_calls_list: { readonly: true, skipActionLog: true },
+  list_triggers: { readonly: true, skipActionLog: true },
+  get_action_log: { readonly: true, skipActionLog: true },
+  // Side-effect tools that are still not worth action-logging
+  supplement_skip: { skipActionLog: true },
+  end_conversation: { skipActionLog: true },
+  set_reaction: { skipActionLog: true },
+  ask_user: { skipActionLog: true },
+  pick_users: { skipActionLog: true },
+  render_day_image: { skipActionLog: true },
+  render_week_image: { skipActionLog: true },
+  render_month_image: { skipActionLog: true },
+  render_table: { skipActionLog: true },
+  resume_scene: { skipActionLog: true },
+  cancel_scene: { skipActionLog: true },
+};
 
-/** Tools that are read-only or meta — not worth logging as user actions. */
-const SKIP_ACTION_LOG = new Set<string>([
-  'supplement_skip',
-  'end_conversation',
-  'get_events',
-  'get_event',
-  'get_upcoming',
-  'get_free_slots',
-  'search_events',
-  'get_reminders',
-  'get_contacts',
-  'find_contact',
-  'find_user',
-  'get_history',
-  'get_holidays',
-  'get_invitation_status',
-  'get_google_calendar_status',
-  'list_google_calendars',
-  'list_calendar_access',
-  'get_timezone_info',
-  'convert_to_timezone',
-  'get_bot_info',
-  'calculate',
-  'lookup_stress',
-  'schedule_ai_calls_list',
-  'list_triggers',
-  'set_reaction',
-  'ask_user',
-  'pick_users',
-  'render_day_image',
-  'render_week_image',
-  'render_month_image',
-  'render_table',
-  'resume_scene',
-  'cancel_scene',
-  'get_action_log',
-]);
+/** Derived: readonly tools are exempt from cross-run throttle. */
+const THROTTLE_EXEMPT = new Set(
+  Object.entries(TOOL_META)
+    .filter(([, m]) => m.readonly)
+    .map(([k]) => k),
+);
+
+/** Derived: tools not worth logging as user actions. */
+const SKIP_ACTION_LOG = new Set(
+  Object.entries(TOOL_META)
+    .filter(([, m]) => m.skipActionLog)
+    .map(([k]) => k),
+);
 
 /** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
 const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
