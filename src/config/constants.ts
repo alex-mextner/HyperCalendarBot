@@ -241,6 +241,8 @@ export const MSG = {
       `📅 New event in ${groupRef}\n👤 Organizer: ${organizerLink}`,
     group_event_updated: (groupRef: string, organizerLink: string) =>
       `✏️ Event updated in ${groupRef}\n👤 Updated by: ${organizerLink}`,
+    broadcast_unreachable: (userMention: string, botUrl: string) =>
+      `${userMention}, start a private chat with the bot to receive event notifications:\n${botUrl}`,
     feature_tour_btn: '📖 All Features',
     feature_tour: [
       '<b>🤖 AI Assistant</b>\nJust text or voice-message me: "schedule a meeting tomorrow at 3pm", "what do I have next week?", "move my standup to 11:00". All bot features are available through chat — I understand context and execute commands.',
@@ -891,6 +893,8 @@ export const MSG = {
       `📅 Новое событие в ${groupRef}\n👤 Организатор: ${organizerLink}`,
     group_event_updated: (groupRef: string, organizerLink: string) =>
       `✏️ Событие обновлено в ${groupRef}\n👤 Изменил: ${organizerLink}`,
+    broadcast_unreachable: (userMention: string, botUrl: string) =>
+      `${userMention}, начни личный чат с ботом, чтобы получать уведомления о событиях:\n${botUrl}`,
     feature_tour_btn: '📖 Все функции',
     feature_tour: [
       '<b>🤖 AI-ассистент</b>\nПросто напишите или отправьте голосовое: "запланируй встречу завтра в 15:00", "что у меня на неделе?", "перенеси стендап на 11:00". Все функции бота доступны через чат — я понимаю контекст и выполняю команды.',

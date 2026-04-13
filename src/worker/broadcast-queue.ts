@@ -17,30 +17,18 @@
 //   * attempts: 3 with exponential backoff — survives transient 429s
 //   * failed jobs retained for 500 runs so admin can inspect via BullMQ UI
 
-import { type ConnectionOptions, Queue, UnrecoverableError, Worker } from 'bullmq';
+import { type ConnectionOptions, Queue, Worker } from 'bullmq';
+import { parseTelegramError } from '../services/notification/worker.ts';
 import { logger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
 
 const broadcastLogger = logger.child({ module: 'broadcast' });
 
-const PERMANENT_TG_CODES = new Set([403, 404]);
-const PERMANENT_TG_PATTERNS = [
-  "bot can't initiate",
-  'bot was blocked',
-  'user is deactivated',
-  'chat not found',
-  'PEER_ID_INVALID',
-];
-
-function hasNumericCode(err: Error): err is Error & { code: number } {
-  return 'code' in err && typeof err.code === 'number';
-}
-
-export function isTelegramPermanentError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (hasNumericCode(err) && PERMANENT_TG_CODES.has(err.code)) return true;
-  const msg = err.message.toLowerCase();
-  return PERMANENT_TG_PATTERNS.some((p) => msg.includes(p.toLowerCase()));
+/** Permanent Telegram errors that will never succeed on retry. */
+export function isPermanentTelegramError(code: number): boolean {
+  // 403 = bot blocked / user hasn't started bot / bot kicked from chat
+  // 400 = chat not found / peer_id_invalid / user deactivated
+  return code === 403 || code === 400;
 }
 
 export interface BroadcastJobData {
@@ -51,10 +39,16 @@ export interface BroadcastJobData {
   parseMode?: ParseMode;
   /** Free-form origin tag for audit/debugging, e.g. "group_event_created:42". */
   origin: string;
+  /** Group/topic chat ID to send fallback message when recipient is unreachable. */
+  fallbackChatId?: number;
+  /** Topic thread ID inside the fallback group chat. */
+  fallbackThreadId?: number;
+  /** Pre-formatted fallback text (HTML) sent to the group when the recipient can't be reached. */
+  fallbackText?: string;
 }
 
 export interface BroadcastSender {
-  sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
+  sendMessage(chatId: number, text: string, parseMode?: ParseMode, threadId?: number): Promise<{ message_id: number }>;
 }
 
 export interface BroadcastEnqueuer {
@@ -95,6 +89,37 @@ export function createBroadcastQueue(connection: ConnectionOptions): {
   return { queue, enqueuer };
 }
 
+/**
+ * Process a single broadcast job: deliver the message, handle permanent
+ * Telegram errors (403/400) by sending a fallback to the source group,
+ * and re-throw transient errors for BullMQ retry.
+ *
+ * Exported for testability — the worker wraps this in `createBroadcastWorker`.
+ */
+export async function processBroadcastJob(data: BroadcastJobData, sender: BroadcastSender): Promise<void> {
+  const { recipientId, text, parseMode, fallbackChatId, fallbackThreadId, fallbackText } = data;
+  try {
+    await sender.sendMessage(recipientId, text, parseMode);
+  } catch (err) {
+    const tgErr = parseTelegramError(err);
+    if (tgErr && isPermanentTelegramError(tgErr.code)) {
+      broadcastLogger.warn(
+        { recipientId, origin: data.origin, code: tgErr.code },
+        'Recipient unreachable (permanent), skipping retries',
+      );
+      if (fallbackChatId && fallbackText) {
+        try {
+          await sender.sendMessage(fallbackChatId, fallbackText, 'HTML', fallbackThreadId);
+        } catch (fallbackErr) {
+          broadcastLogger.warn({ err: fallbackErr, fallbackChatId }, 'Broadcast fallback delivery failed');
+        }
+      }
+      return;
+    }
+    throw err;
+  }
+}
+
 export function createBroadcastWorker(
   connection: ConnectionOptions,
   sender: BroadcastSender,
@@ -102,17 +127,11 @@ export function createBroadcastWorker(
   const worker = new Worker<BroadcastJobData>(
     'broadcast-notification',
     async (job) => {
-      const { recipientId, text, parseMode, origin } = job.data;
-      broadcastLogger.debug({ jobId: job.id, recipientId, origin }, 'Dispatching broadcast');
-      try {
-        await sender.sendMessage(recipientId, text, parseMode);
-      } catch (err) {
-        if (isTelegramPermanentError(err)) {
-          broadcastLogger.warn({ jobId: job.id, recipientId, origin, err }, 'Recipient unreachable — skipping retries');
-          throw new UnrecoverableError(err instanceof Error ? err.message : String(err));
-        }
-        throw err;
-      }
+      broadcastLogger.debug(
+        { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin },
+        'Dispatching broadcast',
+      );
+      await processBroadcastJob(job.data, sender);
     },
     {
       connection,

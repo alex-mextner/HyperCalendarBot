@@ -110,6 +110,15 @@ function buildGroupEventNotification(
  * Each recipient gets a language- and timezone-localized message formatted
  * at enqueue time; the worker just dispatches the pre-formatted text.
  */
+function buildRecipientMention(
+  recipientUser: { first_name?: string | null; username?: string | null; telegram_id: number } | null,
+  userId: number,
+): string {
+  if (recipientUser?.username) return `@${escapeHtml(recipientUser.username)}`;
+  const name = recipientUser?.first_name ?? String(userId);
+  return `<a href="tg://user?id=${userId}">${escapeHtml(name)}</a>`;
+}
+
 async function enqueueGroupNotifications(
   ctx: AgentContext,
   event: CalendarEvent,
@@ -131,6 +140,8 @@ async function enqueueGroupNotifications(
 
   if (memberIds.length === 0) return 0;
 
+  const botUrl = ctx.botUsername ? `https://t.me/${ctx.botUsername}` : null;
+
   const jobs = memberIds.map((userId) => {
     const recipientUser = ctx.userRepo.findByTelegramId(userId);
     const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
@@ -144,11 +155,19 @@ async function enqueueGroupNotifications(
       organizerLink,
       action,
     );
+
+    const fallbackText = botUrl
+      ? t(recipientLang).broadcast_unreachable(buildRecipientMention(recipientUser, userId), botUrl)
+      : undefined;
+
     return {
       recipientId: userId,
       text,
       parseMode: 'HTML' as const,
       origin: `group_event_${action}:${event.id}`,
+      fallbackChatId: ctx.groupChatId,
+      fallbackThreadId: ctx.topicThreadId,
+      fallbackText,
     };
   });
 

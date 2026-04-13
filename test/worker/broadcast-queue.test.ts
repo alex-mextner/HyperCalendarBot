@@ -3,7 +3,8 @@ import type { BroadcastJobData, BroadcastSender } from '../../src/worker/broadca
 import {
   createBroadcastQueue,
   createBroadcastWorker,
-  isTelegramPermanentError,
+  isPermanentTelegramError,
+  processBroadcastJob,
 } from '../../src/worker/broadcast-queue.ts';
 
 // Mock Redis connection — BullMQ Queue/Worker constructors accept connection
@@ -137,56 +138,216 @@ describe('broadcast-queue module', () => {
     });
   });
 
-  describe('isTelegramPermanentError', () => {
-    test("returns true for 403 Forbidden (bot can't initiate)", () => {
-      const err = new Error("sendMessage: Forbidden: bot can't initiate conversation with a user");
-      expect(isTelegramPermanentError(err)).toBe(true);
+  describe('isPermanentTelegramError', () => {
+    test('classifies 403 as permanent', () => {
+      expect(isPermanentTelegramError(403)).toBe(true);
     });
 
-    test('returns true for "bot was blocked" message', () => {
-      const err = new Error('Forbidden: bot was blocked by the user');
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('classifies 400 as permanent', () => {
+      expect(isPermanentTelegramError(400)).toBe(true);
     });
 
-    test('returns true for "user is deactivated" message', () => {
-      const err = new Error('Forbidden: user is deactivated');
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('classifies 429 as transient', () => {
+      expect(isPermanentTelegramError(429)).toBe(false);
     });
 
-    test('returns true for "chat not found" message', () => {
-      const err = new Error('Bad Request: chat not found');
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('classifies 500 as transient', () => {
+      expect(isPermanentTelegramError(500)).toBe(false);
     });
 
-    test('returns true for PEER_ID_INVALID message', () => {
-      const err = new Error('PEER_ID_INVALID');
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('classifies 200 as non-error', () => {
+      expect(isPermanentTelegramError(200)).toBe(false);
+    });
+  });
+
+  describe('processBroadcastJob', () => {
+    function makeTelegramError(code: number): { code: number; payload: { description: string } } {
+      return { code, payload: { description: `Error ${code}` } };
+    }
+
+    test('delivers message to recipient on success', async () => {
+      const calls: { chatId: number; text: string; parseMode?: string; threadId?: number }[] = [];
+      const sender: BroadcastSender = {
+        sendMessage: async (chatId, text, parseMode, threadId) => {
+          calls.push({ chatId, text, parseMode, threadId });
+          return { message_id: 1 };
+        },
+      };
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        parseMode: 'HTML',
+        origin: 'test:1',
+      };
+
+      await processBroadcastJob(data, sender);
+
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.chatId).toBe(42);
+      expect(calls[0]!.text).toBe('Hello');
+      expect(calls[0]!.parseMode).toBe('HTML');
     });
 
-    test('returns true for error with numeric code 403', () => {
-      const err = Object.assign(new Error('Forbidden'), { code: 403 });
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('on 403 sends fallback to group and does not throw', async () => {
+      const fallbackCalls: { chatId: number; text: string; parseMode?: string; threadId?: number }[] = [];
+      let firstCall = true;
+      const sender: BroadcastSender = {
+        sendMessage: async (chatId, text, parseMode, threadId) => {
+          if (firstCall) {
+            firstCall = false;
+            throw makeTelegramError(403);
+          }
+          fallbackCalls.push({ chatId, text, parseMode, threadId });
+          return { message_id: 2 };
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        parseMode: 'HTML',
+        origin: 'group_event_created:1',
+        fallbackChatId: -100123,
+        fallbackText: '@user, начни чат с ботом: https://t.me/TestBot',
+      };
+
+      await processBroadcastJob(data, sender);
+
+      expect(fallbackCalls).toHaveLength(1);
+      expect(fallbackCalls[0]!.chatId).toBe(-100123);
+      expect(fallbackCalls[0]!.text).toBe('@user, начни чат с ботом: https://t.me/TestBot');
+      expect(fallbackCalls[0]!.parseMode).toBe('HTML');
     });
 
-    test('returns true for error with numeric code 404', () => {
-      const err = Object.assign(new Error('Not Found'), { code: 404 });
-      expect(isTelegramPermanentError(err)).toBe(true);
+    test('on 403 sends fallback with thread_id for forum topics', async () => {
+      const fallbackCalls: { chatId: number; threadId?: number }[] = [];
+      let firstCall = true;
+      const sender: BroadcastSender = {
+        sendMessage: async (chatId, _text, _parseMode, threadId) => {
+          if (firstCall) {
+            firstCall = false;
+            throw makeTelegramError(403);
+          }
+          fallbackCalls.push({ chatId, threadId });
+          return { message_id: 3 };
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'group_event_created:1',
+        fallbackChatId: -100123,
+        fallbackThreadId: 77,
+        fallbackText: 'Fallback msg',
+      };
+
+      await processBroadcastJob(data, sender);
+
+      expect(fallbackCalls).toHaveLength(1);
+      expect(fallbackCalls[0]!.threadId).toBe(77);
     });
 
-    test('returns false for transient 429 rate limit', () => {
-      const err = Object.assign(new Error('Too Many Requests: retry after 5'), { code: 429 });
-      expect(isTelegramPermanentError(err)).toBe(false);
+    test('on 400 sends fallback (peer_id_invalid, deactivated)', async () => {
+      let firstCall = true;
+      const fallbackChatIds: number[] = [];
+      const sender: BroadcastSender = {
+        sendMessage: async (chatId) => {
+          if (firstCall) {
+            firstCall = false;
+            throw makeTelegramError(400);
+          }
+          fallbackChatIds.push(chatId);
+          return { message_id: 4 };
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+        fallbackChatId: -100123,
+        fallbackText: 'Fallback',
+      };
+
+      await processBroadcastJob(data, sender);
+      expect(fallbackChatIds).toEqual([-100123]);
     });
 
-    test('returns false for generic network error', () => {
-      const err = new Error('ECONNREFUSED');
-      expect(isTelegramPermanentError(err)).toBe(false);
+    test('on 403 without fallback data, completes silently', async () => {
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          throw makeTelegramError(403);
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+      };
+
+      // Should not throw — permanent error handled internally
+      await processBroadcastJob(data, sender);
     });
 
-    test('returns false for non-Error values', () => {
-      expect(isTelegramPermanentError('string error')).toBe(false);
-      expect(isTelegramPermanentError(null)).toBe(false);
-      expect(isTelegramPermanentError(undefined)).toBe(false);
+    test('on 429 (transient), re-throws for BullMQ retry', async () => {
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          throw makeTelegramError(429);
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+        fallbackChatId: -100123,
+        fallbackText: 'Should not be sent',
+      };
+
+      await expect(processBroadcastJob(data, sender)).rejects.toMatchObject({ code: 429 });
+    });
+
+    test('on non-Telegram error, re-throws for BullMQ retry', async () => {
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          throw new Error('Network error');
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+        fallbackChatId: -100123,
+        fallbackText: 'Should not be sent',
+      };
+
+      await expect(processBroadcastJob(data, sender)).rejects.toThrow('Network error');
+    });
+
+    test('fallback delivery failure does not propagate', async () => {
+      let callCount = 0;
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          callCount++;
+          if (callCount === 1) throw makeTelegramError(403);
+          throw new Error('Group send failed too');
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+        fallbackChatId: -100123,
+        fallbackText: 'Fallback',
+      };
+
+      // Should not throw even if fallback delivery fails
+      await processBroadcastJob(data, sender);
+      expect(callCount).toBe(2);
     });
   });
 
