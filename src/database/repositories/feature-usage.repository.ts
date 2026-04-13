@@ -22,6 +22,7 @@ export const FEATURE_KEYS = {
   SETTINGS: 'settings',
   RECURRENCE: 'recurrence',
   GEOLOCATION: 'geolocation',
+  TELEGRAM_CONNECT: 'telegram_connect',
 } as const;
 
 export type FeatureKey = (typeof FEATURE_KEYS)[keyof typeof FEATURE_KEYS];

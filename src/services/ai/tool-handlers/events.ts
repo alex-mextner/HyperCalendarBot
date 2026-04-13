@@ -209,6 +209,7 @@ interface CreateEventInput {
   end_at?: string;
   description?: string;
   location?: string;
+  location_abstract?: boolean;
   all_day?: boolean;
   recurrence_rule?: string;
   reminder_minutes?: number[];
@@ -224,6 +225,7 @@ interface UpdateEventInput {
   end_at?: string | null;
   description?: string | null;
   location?: string | null;
+  location_abstract?: boolean;
   recurrence_rule?: string | null;
   scope?: Scope;
   owner_id?: number;
@@ -386,8 +388,8 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
       }
     }
 
-    // Trigger background location verification if event has a location
-    if (event.location && ctx.locationVerification) {
+    // Trigger background location verification if event has a concrete location
+    if (event.location && ctx.locationVerification && !input.location_abstract) {
       ctx.locationVerification
         .verifyEventLocation(event, ctx.user)
         .catch((err) => logger.error({ err, eventId: event.id }, 'Background location verification failed'));
@@ -551,8 +553,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
-  // Trigger background location verification if location was updated
-  if (input.location && ctx.locationVerification) {
+  // Trigger background location verification if location was updated with a concrete location
+  if (input.location && ctx.locationVerification && !input.location_abstract) {
     ctx.locationVerification
       .verifyEventLocation(updated, ctx.user)
       .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));

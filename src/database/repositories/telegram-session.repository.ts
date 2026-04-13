@@ -1,0 +1,89 @@
+// src/database/repositories/telegram-session.repository.ts
+import type { Database } from 'bun:sqlite';
+import type { TelegramSession } from '../types.ts';
+
+export class TelegramSessionRepository {
+  constructor(private db: Database) {}
+
+  findByUserId(userId: number): TelegramSession | null {
+    return this.db
+      .prepare('SELECT * FROM user_telegram_sessions WHERE user_id = ?')
+      .get(userId) as TelegramSession | null;
+  }
+
+  getActive(userId: number): TelegramSession | null {
+    return this.db
+      .prepare("SELECT * FROM user_telegram_sessions WHERE user_id = ? AND status = 'active'")
+      .get(userId) as TelegramSession | null;
+  }
+
+  findByPhoneHash(phoneHash: string): TelegramSession | null {
+    return this.db
+      .prepare('SELECT * FROM user_telegram_sessions WHERE phone_hash = ?')
+      .get(phoneHash) as TelegramSession | null;
+  }
+
+  getMostRecentActive(): TelegramSession | null {
+    return this.db
+      .prepare("SELECT * FROM user_telegram_sessions WHERE status = 'active' ORDER BY updated_at DESC LIMIT 1")
+      .get() as TelegramSession | null;
+  }
+
+  getAllActive(): TelegramSession[] {
+    return this.db.prepare("SELECT * FROM user_telegram_sessions WHERE status = 'active'").all() as TelegramSession[];
+  }
+
+  upsert(userId: number, encryptedSession: Buffer, phoneMasked: string, phoneHash: string): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare('DELETE FROM user_telegram_sessions WHERE phone_hash = ? AND user_id <> ?')
+        .run(phoneHash, userId);
+      this.db
+        .prepare(
+          `INSERT INTO user_telegram_sessions (user_id, encrypted_session, phone_masked, phone_hash)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(user_id) DO UPDATE SET
+             encrypted_session = excluded.encrypted_session,
+             phone_masked = excluded.phone_masked,
+             phone_hash = excluded.phone_hash,
+             status = 'active',
+             updated_at = datetime('now')`,
+        )
+        .run(userId, encryptedSession, phoneMasked, phoneHash);
+    })();
+  }
+
+  updateStatus(userId: number, status: 'active' | 'expired' | 'revoked'): void {
+    this.db
+      .prepare("UPDATE user_telegram_sessions SET status = ?, updated_at = datetime('now') WHERE user_id = ?")
+      .run(status, userId);
+  }
+
+  setTzConsentAt(userId: number, at: string | null): void {
+    this.db
+      .prepare(
+        "UPDATE user_telegram_sessions SET tz_detection_consent_at = ?, updated_at = datetime('now') WHERE user_id = ?",
+      )
+      .run(at, userId);
+  }
+
+  countByStatus(): { active: number; expired: number; revoked: number } {
+    const rows = this.db
+      .prepare(
+        `SELECT status, COUNT(*) as count FROM user_telegram_sessions
+         GROUP BY status`,
+      )
+      .all() as { status: string; count: number }[];
+    const result = { active: 0, expired: 0, revoked: 0 };
+    for (const row of rows) {
+      if (row.status === 'active' || row.status === 'expired' || row.status === 'revoked') {
+        result[row.status] = row.count;
+      }
+    }
+    return result;
+  }
+
+  deleteByUserId(userId: number): void {
+    this.db.prepare('DELETE FROM user_telegram_sessions WHERE user_id = ?').run(userId);
+  }
+}

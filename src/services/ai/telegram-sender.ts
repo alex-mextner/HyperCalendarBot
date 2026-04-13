@@ -6,6 +6,13 @@ import type { TelegramSender } from './types.ts';
 
 interface TelegramSenderOptions {
   sendAsUser?: (userId: number, text: string, username?: string) => Promise<boolean>;
+  sendAsConnectedUser?: (
+    inviterId: number,
+    targetId: number,
+    text: string,
+    username?: string,
+    meta?: { invitationId?: number },
+  ) => Promise<boolean>;
 }
 
 export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions): TelegramSender {
@@ -115,6 +122,7 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
     sendAsUser: options?.sendAsUser
       ? async (userId: number, text: string, username?: string) => options.sendAsUser!(userId, text, username)
       : undefined,
+    sendAsConnectedUser: options?.sendAsConnectedUser,
     async deleteMessage(chatId: number, messageId: number) {
       await bot.api.deleteMessage({ chat_id: chatId, message_id: messageId });
     },

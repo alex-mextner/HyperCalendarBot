@@ -136,4 +136,72 @@ describe('NotificationLogRepository', () => {
     const deleted = repo.cleanup(30);
     expect(deleted).toBe(0);
   });
+
+  test('recentByChannel returns entries for the specified channel', () => {
+    repo.insert({ user_id: 42, type: 'invitation', reference_key: 'inv:1', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'reminder', reference_key: 'rem:1', channel: 'telegram_text', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'invitation', reference_key: 'inv:2', channel: 'mtproto_user', payload: '{}' });
+
+    const rows = repo.recentByChannel('mtproto_user', 10);
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.type).toBe('invitation');
+    }
+  });
+
+  test('recentByChannel respects limit', () => {
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:1', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:2', channel: 'mtproto_user', payload: '{}' });
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'a:3', channel: 'mtproto_user', payload: '{}' });
+
+    const rows = repo.recentByChannel('mtproto_user', 2);
+    expect(rows).toHaveLength(2);
+  });
+
+  test('recentByChannel returns empty array when no matches', () => {
+    repo.insert({ user_id: 42, type: 'reminder', reference_key: 'r:1', channel: 'telegram_text', payload: '{}' });
+    const rows = repo.recentByChannel('mtproto_user', 5);
+    expect(rows).toHaveLength(0);
+  });
+
+  test('getDeliveryStats returns total count and last error for mtproto_user channel', () => {
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'ds:1', channel: 'mtproto_user', payload: '{}' });
+    const id2 = repo.insert({
+      user_id: 42,
+      type: 'inv',
+      reference_key: 'ds:2',
+      channel: 'mtproto_user',
+      payload: '{}',
+    })!;
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'ds:3', channel: 'mtproto_user', payload: '{}' });
+    // One on a different channel — should not count
+    repo.insert({ user_id: 42, type: 'rem', reference_key: 'ds:4', channel: 'telegram_text', payload: '{}' });
+
+    repo.markFailed(id2, 'FloodWait: 30', 1);
+
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(3);
+    expect(stats.lastError).toBe('FloodWait: 30');
+  });
+
+  test('getDeliveryStats returns zero and null when no deliveries', () => {
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(0);
+    expect(stats.lastError).toBeNull();
+  });
+
+  test('getDeliveryStats returns null lastError when all succeeded', () => {
+    const id = repo.insert({
+      user_id: 42,
+      type: 'inv',
+      reference_key: 'ds:ok',
+      channel: 'mtproto_user',
+      payload: '{}',
+    })!;
+    repo.markSent(id);
+
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(1);
+    expect(stats.lastError).toBeNull();
+  });
 });

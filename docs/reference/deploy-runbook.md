@@ -113,6 +113,18 @@ db.close();
 "
 ```
 
+## Connect Telegram (session-based delivery)
+
+Requires:
+- `TELEGRAM_SESSION_MASTER_KEY` env var — 32-byte hex key for AES-256-GCM encryption of stored Telegram sessions.
+  Generate: `openssl rand -hex 32`. Add to `/opt/hypercal/.env`.
+- `tzdata` package in Docker image — provides `/usr/share/zoneinfo/zone.tab` for timezone detection
+  from Telegram authorizations. Already added to Dockerfile runner stage.
+- Python venv with pyrogram — `send-as-user.py` and `connect-session.py` use the venv at `/app/venv/`.
+  Docker builds this from `requirements.docker.txt`.
+- Key rotation: `OLD_KEY=<hex> NEW_KEY=<hex> bun scripts/rotate-session-master-key.ts` —
+  re-encrypts all sessions atomically.
+
 ## ntgcalls — Build from Source
 
 ntgcalls v2.1.0 has a bug: P2P calls connect but audio is silent.

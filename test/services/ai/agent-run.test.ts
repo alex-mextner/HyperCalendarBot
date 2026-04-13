@@ -321,14 +321,18 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] response in DM is NOT discarded', async () => {
+  test('[SKIP] response in DM is discarded (placeholder deleted)', async () => {
     const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
 
     ctx.isGroup = false;
-    await agent.run(ctx);
+    const result = await agent.run(ctx);
 
-    expect(sender.editMessageText).toHaveBeenCalled();
+    expect(result.responseText).toBe('');
+    expect(deleteMessage).toHaveBeenCalledTimes(1);
+    expect(sender.editMessageText).not.toHaveBeenCalled();
   });
 
   test('[SKIP] with trailing whitespace is still discarded in group', async () => {
@@ -409,6 +413,57 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
+  test('set_reaction tool does not create a status message in group (silent tool)', async () => {
+    const setReaction = mock(() => Promise.resolve());
+    (sender as TelegramSender).setReaction = setReaction;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'call-react', name: 'set_reaction', input: { emoji: '👌' } },
+      { kind: 'text', text: '[SKIP]' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    ctx.incomingMessageId = 777;
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    // Silent tool must not create any placeholder message
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+    // Reaction itself was executed
+    expect(setReaction).toHaveBeenCalledTimes(1);
+  });
+
+  test('set_reaction tool in DM discards placeholder after [SKIP]', async () => {
+    const setReaction = mock(() => Promise.resolve());
+    (sender as TelegramSender).setReaction = setReaction;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'call-react', name: 'set_reaction', input: { emoji: '👍' } },
+      { kind: 'text', text: '[SKIP]' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = false;
+    ctx.incomingMessageId = 888;
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    // Placeholder ⏳ was created in init, then deleted by [SKIP] discard
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    expect(deleteMessage).toHaveBeenCalledTimes(1);
+    // No tool label should have been shown
+    expect(sender.editMessageText).not.toHaveBeenCalled();
+  });
+
   test('logAiTurn via ConversationLogger saves the assistant message with chatId in group context', () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.isGroup = true;
@@ -443,6 +498,60 @@ describe('CalendarBotAgent.run()', () => {
     expect(calls.length).toBe(1);
     expect(result.toolCalls.some((tc) => tc.name === 'end_conversation')).toBe(true);
     expect(endSession).toHaveBeenCalledWith(USER_ID);
+  });
+
+  // ── Regression: removing flush from onToolCallStart must not break normal tools ──
+
+  test('normal tool in group still creates placeholder and shows tool label', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-ev',
+        name: 'get_events',
+        input: { start_date: '2026-04-13', end_date: '2026-04-13' },
+      },
+      { kind: 'text', text: 'You have 0 events today.' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+
+    await agent.run(ctx);
+
+    // Tool loop flush MUST create a placeholder (noPlaceholder lazy create)
+    // and edit it with the tool label.
+    expect(sender.sendMessage).toHaveBeenCalled();
+    expect(sender.editMessageText).toHaveBeenCalled();
+    // Finalize edits the message with the final response
+    const lastEdit = (sender.editMessageText as ReturnType<typeof mock>).mock.calls.at(-1)!;
+    const finalHtml = lastEdit[2] as string;
+    expect(finalHtml).toContain('0 events');
+  });
+
+  test('normal tool in DM shows tool label via edit (no extra messages)', async () => {
+    const { impl } = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'call-ev',
+        name: 'get_events',
+        input: { start_date: '2026-04-13', end_date: '2026-04-13' },
+      },
+      { kind: 'text', text: 'No events.' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    await agent.run(ctx);
+
+    // DM: 1 sendMessage (init placeholder), edits for tool label + finalize
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    expect(sender.editMessageText).toHaveBeenCalled();
+    const firstEdit = (sender.editMessageText as ReturnType<typeof mock>).mock.calls[0]!;
+    const labelHtml = firstEdit[2] as string;
+    // The tool label should contain the human-readable name, not raw "get_events"
+    expect(labelHtml).toContain('📅');
   });
 
   // ── Regressions for bugs found by code review ─────────────────────────────
@@ -682,5 +791,64 @@ describe('CalendarBotAgent.run()', () => {
     expect(call2Result).toBeDefined();
     const content = (call2Result as { content: string }).content;
     expect(content).toContain('DUPLICATE');
+  });
+
+  // ── Regression: error delivery guarantee ────────────────────────────────
+
+  test('run() catches stream error and delivers error message to user', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    const result = await agent.run(ctx);
+
+    // REGRESSION: before the fix, an unhandled error could leave the user
+    // with just ⏳ and no response. Now the error message is appended.
+    const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
+    const finalEdit = editCalls[editCalls.length - 1] as unknown[];
+    const finalText = finalEdit[2] as string;
+    expect(finalText).toContain('⚠️');
+    expect(result.responseText).toContain('⚠️');
+  });
+
+  test('run() in group mode (noPlaceholder) handles error without leaving orphan messages', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('Provider timeout') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.isGroup = true;
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    const result = await agent.run(ctx);
+
+    // In group mode (noPlaceholder), no ⏳ is sent. On error, the response
+    // should be delivered as a single message, not left unfinished.
+    const sendCalls = (sender.sendMessage as ReturnType<typeof mock>).mock.calls;
+    // Should have sent exactly 1 message with the error
+    const sentTexts = sendCalls.map((c) => (c as unknown[])[1] as string);
+    const errorMessages = sentTexts.filter((t) => t.includes('⚠️'));
+    expect(errorMessages.length).toBe(1);
+    expect(result.responseText).toContain('⚠️');
+  });
+
+  test('agent catch block error message uses t() for both languages', async () => {
+    // Verify English error
+    const { impl: implEn } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentEn = new CalendarBotAgent(config, sender, { streamImpl: implEn });
+    ctx.user = { ...ctx.user, language: 'en' };
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const resultEn = await agentEn.run(ctx);
+    expect(resultEn.responseText).toContain('⚠️');
+
+    // Verify Russian error uses the same ⚠️ prefix (from t())
+    const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
+    ctx.user = { ...ctx.user, language: 'ru' };
+    const resultRu = await agentRu.run(ctx);
+    expect(resultRu.responseText).toContain('⚠️');
+
+    // Both must be different (localized), not the same hardcoded string
+    // Extract just the error part (after the ⚠️)
+    const enError = resultEn.responseText.split('⚠️')[1]!.trim();
+    const ruError = resultRu.responseText.split('⚠️')[1]!.trim();
+    expect(enError).not.toBe(ruError);
   });
 });

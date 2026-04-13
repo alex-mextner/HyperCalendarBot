@@ -25,6 +25,7 @@ const createEventSchema = z
     end_at: z.string().optional(),
     description: z.string().optional(),
     location: z.string().optional(),
+    location_abstract: z.boolean().optional(),
     all_day: z.boolean().optional(),
     recurrence_rule: z.string().optional(),
     reminder_minutes: z.array(z.number()).optional(),
@@ -42,6 +43,7 @@ const updateEventSchema = z
     end_at: z.string().nullable().optional(),
     description: z.string().nullable().optional(),
     location: z.string().nullable().optional(),
+    location_abstract: z.boolean().optional(),
     recurrence_rule: z.string().nullable().optional(),
     scope: scopeField,
     owner_id: z.number().optional(),
@@ -408,6 +410,8 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   list_triggers: emptyObject,
   resume_scene: emptyObject,
   cancel_scene: emptyObject,
+  connect_telegram_status: emptyObject,
+  dismiss_connect_telegram_prompt: emptyObject,
 
   // Event tools
   get_events: getEventsSchema,

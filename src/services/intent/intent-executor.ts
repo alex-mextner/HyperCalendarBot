@@ -164,7 +164,8 @@ type ToolResultElement =
   | EventSummary
   | { telegram_id: number; name: string }
   | import('../scheduled/types.ts').ScheduledAiCall
-  | import('../scheduled/types.ts').Trigger;
+  | import('../scheduled/types.ts').Trigger
+  | import('../ai/types.ts').TelegramSessionData;
 
 function isEventSummary(obj: ToolResultElement): obj is EventSummary {
   // All ToolResultData element types have 'id', but only EventSummary has 'date' and 'all_day'
