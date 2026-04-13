@@ -125,7 +125,8 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
     if (parsed.success) {
       return { success: true, data: parsed.data };
     }
-    return { success: false, error: 'UNEXPECTED', message: `Invalid success response: ${trimmedStdout}` };
+    bridgeLogger.debug({ stdout: trimmedStdout }, 'Unexpected success output from Python bridge');
+    return { success: false, error: 'UNEXPECTED', message: 'Bridge returned unparseable success output' };
   }
 
   if (exitCode === 1) {
@@ -140,11 +141,12 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
     }
   }
 
-  // exit >= 2 or unparseable exit-1 output
+  // exit >= 2 or unparseable exit-1 output — log raw output, return sanitized message
+  bridgeLogger.debug({ stdout: trimmedStdout, stderr: stderr.trim(), exitCode }, 'Unexpected bridge error');
   return {
     success: false,
     error: 'UNEXPECTED',
-    message: stderr.trim() || trimmedStdout || `Process exited with code ${exitCode}`,
+    message: `Bridge process failed (exit ${exitCode})`,
   };
 }
 
@@ -155,12 +157,15 @@ function phoneHash(phone: string): string {
 
 /**
  * Create a temp session file with strict permissions (0o600).
- * Uses O_CREAT|O_EXCL|O_WRONLY to prevent symlink-race attacks.
+ * O_CREAT|O_EXCL: fail if path exists (collision/preemptive attack).
+ * O_NOFOLLOW: refuse to follow symlinks (symlink-race protection).
+ * O_WRONLY: write-only (no read-back through this fd).
  */
 async function createTempSessionFile(userId: number, contents: Buffer): Promise<string> {
   const rand = randomBytes(8).toString('hex');
   const path = `/tmp/tgsess_${userId}_${rand}.session`;
-  const fh = await open(path, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY, 0o600);
+  const flags = fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW;
+  const fh = await open(path, flags, 0o600);
   try {
     await fh.writeFile(contents);
   } finally {
@@ -169,9 +174,13 @@ async function createTempSessionFile(userId: number, contents: Buffer): Promise<
   return path;
 }
 
-/** Generate a random temp session path without creating the file. */
+/**
+ * Generate a random temp session path without creating the file.
+ * 16 random bytes (128-bit) make brute-force path prediction infeasible.
+ * The file is created by the Python Pyrogram process; we only generate the path.
+ */
 function reserveEmptySessionPath(userId: number): string {
-  const rand = randomBytes(8).toString('hex');
+  const rand = randomBytes(16).toString('hex');
   return `/tmp/tgsess_${userId}_${rand}.session`;
 }
 

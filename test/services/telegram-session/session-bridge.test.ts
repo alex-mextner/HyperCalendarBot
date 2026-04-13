@@ -56,9 +56,9 @@ describe('SessionBridge.parseResult', () => {
     });
   });
 
-  test('unexpected: exit 2 + stderr traceback', () => {
+  test('unexpected: exit 2 + stderr traceback (sanitized, raw not exposed)', () => {
     const result = SessionBridge.parseResult('', 'Traceback...', 2);
-    expect(result).toEqual({ success: false, error: 'UNEXPECTED', message: 'Traceback...' });
+    expect(result).toEqual({ success: false, error: 'UNEXPECTED', message: 'Bridge process failed (exit 2)' });
   });
 
   test('flood wait: retry_after surfaced', () => {
@@ -101,9 +101,9 @@ describe('SessionBridge.parseResult', () => {
     if (!result.success) expect(result.error).toBe('UNEXPECTED');
   });
 
-  test('exit code > 2 treated as unexpected', () => {
+  test('exit code > 2 treated as unexpected (sanitized)', () => {
     const result = SessionBridge.parseResult('', 'segfault', 139);
-    expect(result).toEqual({ success: false, error: 'UNEXPECTED', message: 'segfault' });
+    expect(result).toEqual({ success: false, error: 'UNEXPECTED', message: 'Bridge process failed (exit 139)' });
   });
 
   test('stdout with trailing newline is trimmed', () => {
