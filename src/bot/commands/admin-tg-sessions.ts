@@ -6,6 +6,7 @@ import type { BotCommandContext } from '../types.ts';
 
 /**
  * /admin_tg_sessions — admin-only: shows telegram session stats and recent deliveries.
+ * /admin_tg_sessions <userId> — detail view for a specific user.
  */
 export async function handleAdminTgSessions(
   ctx: BotCommandContext,
@@ -21,6 +22,22 @@ export async function handleAdminTgSessions(
     return;
   }
 
+  const args = (ctx.args ?? '').trim();
+  const targetUserId = args ? Number.parseInt(args, 10) : null;
+
+  if (targetUserId !== null && !Number.isNaN(targetUserId)) {
+    await showUserDetail(ctx, sessionRepo, notifLogRepo, targetUserId);
+    return;
+  }
+
+  await showOverview(ctx, sessionRepo, notifLogRepo);
+}
+
+async function showOverview(
+  ctx: BotCommandContext,
+  sessionRepo: TelegramSessionRepository,
+  notifLogRepo: NotificationLogRepository,
+): Promise<void> {
   const counts = sessionRepo.countByStatus();
   const total = counts.active + counts.expired + counts.revoked;
   const recentDeliveries = notifLogRepo.recentByChannel('mtproto_user', 5);
@@ -44,6 +61,36 @@ export async function handleAdminTgSessions(
     }
   } else {
     lines.push('', 'No mtproto_user deliveries yet.');
+  }
+
+  await ctx.send(lines.join('\n'), { parse_mode: 'HTML' });
+}
+
+async function showUserDetail(
+  ctx: BotCommandContext,
+  sessionRepo: TelegramSessionRepository,
+  notifLogRepo: NotificationLogRepository,
+  targetUserId: number,
+): Promise<void> {
+  const session = sessionRepo.findByUserId(targetUserId);
+  const stats = notifLogRepo.getDeliveryStats(targetUserId);
+
+  const lines: string[] = [`<b>Session detail: user ${targetUserId}</b>`, ''];
+
+  if (session) {
+    lines.push(
+      `Status: ${session.status}`,
+      `Created: ${session.created_at}`,
+      `Updated: ${session.updated_at}`,
+      `TZ consent: ${session.tz_detection_consent_at ?? 'not asked'}`,
+    );
+  } else {
+    lines.push('No session found.');
+  }
+
+  lines.push('', `Deliveries (mtproto_user): ${stats.total}`);
+  if (stats.lastError) {
+    lines.push(`Last error: ${stats.lastError.slice(0, 200)}`);
   }
 
   await ctx.send(lines.join('\n'), { parse_mode: 'HTML' });

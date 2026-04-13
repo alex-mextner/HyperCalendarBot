@@ -163,4 +163,45 @@ describe('NotificationLogRepository', () => {
     const rows = repo.recentByChannel('mtproto_user', 5);
     expect(rows).toHaveLength(0);
   });
+
+  test('getDeliveryStats returns total count and last error for mtproto_user channel', () => {
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'ds:1', channel: 'mtproto_user', payload: '{}' });
+    const id2 = repo.insert({
+      user_id: 42,
+      type: 'inv',
+      reference_key: 'ds:2',
+      channel: 'mtproto_user',
+      payload: '{}',
+    })!;
+    repo.insert({ user_id: 42, type: 'inv', reference_key: 'ds:3', channel: 'mtproto_user', payload: '{}' });
+    // One on a different channel — should not count
+    repo.insert({ user_id: 42, type: 'rem', reference_key: 'ds:4', channel: 'telegram_text', payload: '{}' });
+
+    repo.markFailed(id2, 'FloodWait: 30', 1);
+
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(3);
+    expect(stats.lastError).toBe('FloodWait: 30');
+  });
+
+  test('getDeliveryStats returns zero and null when no deliveries', () => {
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(0);
+    expect(stats.lastError).toBeNull();
+  });
+
+  test('getDeliveryStats returns null lastError when all succeeded', () => {
+    const id = repo.insert({
+      user_id: 42,
+      type: 'inv',
+      reference_key: 'ds:ok',
+      channel: 'mtproto_user',
+      payload: '{}',
+    })!;
+    repo.markSent(id);
+
+    const stats = repo.getDeliveryStats(42);
+    expect(stats.total).toBe(1);
+    expect(stats.lastError).toBeNull();
+  });
 });

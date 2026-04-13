@@ -4,15 +4,28 @@ import { handleAdminTgSessions } from '../../../src/bot/commands/admin-tg-sessio
 
 const ADMIN_ID = 42;
 
-function makeCtx(overrides: { telegram_id?: number } = {}) {
+function makeCtx(overrides: { telegram_id?: number; args?: string | null } = {}) {
   return {
     dbUser: { telegram_id: overrides.telegram_id ?? ADMIN_ID, language: 'en' as const },
     send: mock(() => Promise.resolve()),
+    args: overrides.args ?? null,
   };
 }
 
-function makeSessionRepo(counts = { active: 3, expired: 1, revoked: 0 }) {
-  return { countByStatus: () => counts };
+function makeSessionRepo(
+  counts = { active: 3, expired: 1, revoked: 0 },
+  userSession?: {
+    user_id: number;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    tz_detection_consent_at: string | null;
+  } | null,
+) {
+  return {
+    countByStatus: () => counts,
+    findByUserId: (_userId: number) => userSession ?? null,
+  };
 }
 
 function makeNotifRepo(
@@ -25,8 +38,12 @@ function makeNotifRepo(
     sent_at: string | null;
     error: string | null;
   }[] = [],
+  deliveryStats: { total: number; lastError: string | null } = { total: 0, lastError: null },
 ) {
-  return { recentByChannel: (_channel: string, _limit: number) => deliveries };
+  return {
+    recentByChannel: (_channel: string, _limit: number) => deliveries,
+    getDeliveryStats: (_userId: number) => deliveryStats,
+  };
 }
 
 describe('handleAdminTgSessions', () => {
@@ -97,8 +114,75 @@ describe('handleAdminTgSessions', () => {
   });
 
   test('returns early when dbUser is null', async () => {
-    const ctx = { dbUser: undefined, send: mock(() => Promise.resolve()) };
+    const ctx = { dbUser: undefined, send: mock(() => Promise.resolve()), args: null };
     await handleAdminTgSessions(ctx as never, makeSessionRepo() as never, makeNotifRepo() as never, ADMIN_ID);
     expect(ctx.send).not.toHaveBeenCalled();
+  });
+
+  test('shows user detail when userId arg provided', async () => {
+    const ctx = makeCtx({ args: '12345' });
+    const session = {
+      user_id: 12345,
+      status: 'active',
+      created_at: '2026-04-01 10:00:00',
+      updated_at: '2026-04-10 15:30:00',
+      tz_detection_consent_at: '2026-04-05 12:00:00',
+    };
+    const stats = { total: 7, lastError: 'FloodWait: 30 seconds' };
+    await handleAdminTgSessions(
+      ctx as never,
+      makeSessionRepo(undefined, session) as never,
+      makeNotifRepo([], stats) as never,
+      ADMIN_ID,
+    );
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('user 12345');
+    expect(msg).toContain('Status: active');
+    expect(msg).toContain('Created: 2026-04-01 10:00:00');
+    expect(msg).toContain('Updated: 2026-04-10 15:30:00');
+    expect(msg).toContain('TZ consent: 2026-04-05 12:00:00');
+    expect(msg).toContain('Deliveries (mtproto_user): 7');
+    expect(msg).toContain('FloodWait: 30 seconds');
+  });
+
+  test('shows no session found for unknown user', async () => {
+    const ctx = makeCtx({ args: '99999' });
+    await handleAdminTgSessions(
+      ctx as never,
+      makeSessionRepo(undefined, null) as never,
+      makeNotifRepo() as never,
+      ADMIN_ID,
+    );
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('user 99999');
+    expect(msg).toContain('No session found');
+  });
+
+  test('shows tz consent as not asked when null', async () => {
+    const ctx = makeCtx({ args: '555' });
+    const session = {
+      user_id: 555,
+      status: 'expired',
+      created_at: '2026-03-01',
+      updated_at: '2026-04-01',
+      tz_detection_consent_at: null,
+    };
+    await handleAdminTgSessions(
+      ctx as never,
+      makeSessionRepo(undefined, session) as never,
+      makeNotifRepo() as never,
+      ADMIN_ID,
+    );
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(msg).toContain('TZ consent: not asked');
+  });
+
+  test('falls back to overview for non-numeric args', async () => {
+    const ctx = makeCtx({ args: 'notanumber' });
+    await handleAdminTgSessions(ctx as never, makeSessionRepo() as never, makeNotifRepo() as never, ADMIN_ID);
+    const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    // Should show overview, not detail
+    expect(msg).toContain('Telegram Sessions');
+    expect(msg).toContain('Total:');
   });
 });
