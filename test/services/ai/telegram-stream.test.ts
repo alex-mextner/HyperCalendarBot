@@ -198,17 +198,11 @@ describe('TelegramStreamWriter', () => {
 
   test('concurrent flush calls in noPlaceholder mode create only one message', async () => {
     let resolveFirst: ((v: { message_id: number }) => void) | null = null;
-    let callCount = 0;
     const slowSend = mock(
       () =>
         new Promise<{ message_id: number }>((resolve) => {
-          callCount++;
-          if (callCount === 1) {
-            // First call: delay resolution so second call arrives while pending
-            resolveFirst = resolve;
-          } else {
-            resolve({ message_id: 99 });
-          }
+          // Delay resolution so second call arrives while first is pending
+          resolveFirst = resolve;
         }),
     );
     const testSender: TelegramSender = {
@@ -221,16 +215,16 @@ describe('TelegramStreamWriter', () => {
 
     writer.setToolLabel('get_events');
 
-    // Fire two flush calls concurrently (simulates onToolCallStart + tool loop)
+    // Fire two flush calls concurrently (simulates onTextDelta + tool loop)
     const p1 = writer.flush(true);
-    const p2 = writer.flush(true);
+    const p2 = writer.flush(true); // creatingMessage=true → returns immediately
 
     // Resolve the first send
     resolveFirst!({ message_id: 50 });
     await p1;
     await p2;
 
-    // Only one sendMessage call — second flush reused the pending promise
+    // Only one sendMessage call — second flush skipped because creation was in progress
     expect(slowSend).toHaveBeenCalledTimes(1);
     expect(writer.getMessageId()).toBe(50);
   });

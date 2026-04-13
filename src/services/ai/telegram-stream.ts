@@ -57,8 +57,8 @@ export class TelegramStreamWriter {
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
   private typingInterval: ReturnType<typeof setInterval> | null = null;
-  /** Guards against concurrent message creation in noPlaceholder mode. */
-  private pendingCreate: Promise<void> | null = null;
+  /** Prevents concurrent message creation in noPlaceholder mode. */
+  private creatingMessage = false;
 
   constructor(
     private sender: TelegramSender,
@@ -181,15 +181,16 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Lazy: materialize the placeholder now that we have substantial content to show.
-      // Guard with pendingCreate so concurrent flush calls don't create two messages.
-      if (!this.pendingCreate) {
-        this.pendingCreate = this.sender.sendMessage(this.chatId, '⏳').then((result) => {
-          this.messageId = result.message_id;
-        });
+      if (this.creatingMessage) return; // Another flush is creating — skip, next flush will edit
+      this.creatingMessage = true;
+      try {
+        const result = await this.sender.sendMessage(this.chatId, '⏳');
+        this.messageId = result.message_id;
+      } catch {
+        return; // Failed to create — skip this flush
+      } finally {
+        this.creatingMessage = false;
       }
-      await this.pendingCreate;
-      if (!this.messageId) return; // sendMessage failed — nothing to edit
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';

@@ -486,8 +486,11 @@ export class CalendarBotAgent {
           },
           onToolCallStart: (name) => {
             if (SILENT_TOOLS.has(name)) return;
+            // Only set the label — don't flush. The tool loop flushes
+            // sequentially with full input details. Fire-and-forget flush
+            // here raced with the tool loop in noPlaceholder (group) mode,
+            // creating orphaned messages.
             writer.setToolLabel(name);
-            writer.flush(true).catch(() => {});
           },
         };
 
