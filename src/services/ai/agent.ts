@@ -700,13 +700,7 @@ export class CalendarBotAgent {
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
-
-      const lang = ctx.user.language;
-      const errorMsg =
-        lang === 'ru'
-          ? '\n\n⚠️ Произошла ошибка при обработке запроса.'
-          : '\n\n⚠️ An error occurred while processing your request.';
-      writer.appendText(errorMsg);
+      writer.appendText(`\n\n${t(ctx.user.language).ai_processing_error}`);
     }
 
     const finalText = writer.getText().trim();

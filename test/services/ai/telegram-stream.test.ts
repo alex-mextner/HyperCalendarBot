@@ -514,4 +514,55 @@ describe('TelegramStreamWriter', () => {
     expect(sentText).toContain('blockquote');
     expect(sentText.length).toBeLessThanOrEqual(4000);
   });
+
+  // ── RED: bugs that exist right now ──────────────────────────────────────
+
+  test('BUG: line-boundary truncation off-by-one — total can exceed 4000', async () => {
+    // body.slice(0, lastNewline) + '\n…' adds 2 chars. When lastNewline
+    // equals maxBodyLen-1, the result is maxBodyLen+1 → total exceeds 4000.
+    //
+    // We can't easily control intermediateChunks content via public API
+    // (tool lines have HTML wrappers), so we simulate via commitIntermediate
+    // with controlled text. The text path in commitIntermediate uses escapeHtml
+    // which doesn't change plain ASCII.
+
+    const header = '⚙️ <b>Execution log</b>';
+    const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
+    const responseLen = 200;
+    const maxBodyLen = 4000 - responseLen - overhead;
+
+    const writer = new TelegramStreamWriter(sender, 123, 'en');
+    await writer.init();
+
+    // Feed text that will become intermediateChunks via commitIntermediate.
+    // Place \n exactly at maxBodyLen-1 position in the joined body.
+    // First chunk: exactly maxBodyLen-1 chars (fills up to the \n position)
+    writer.appendText('X'.repeat(maxBodyLen - 1));
+    writer.commitIntermediate();
+    // Second chunk: 100 chars (will be after the \n, gets truncated)
+    writer.appendText('Y'.repeat(100));
+    writer.commitIntermediate();
+
+    writer.appendText('R'.repeat(responseLen));
+    await writer.finalize();
+
+    const text = editMock.mock.calls[editMock.mock.calls.length - 1]![2] as string;
+    expect(text.length).toBeLessThanOrEqual(4000);
+  });
+
+  test('BUG: flush displayText truncation can break HTML tags', async () => {
+    // flush() does: displayText.slice(0, MAX_MESSAGE_LENGTH - 3) + '...'
+    // This can cut inside <i>tool label</i>, leaving a broken partial tag like '<i...'
+    const writer = new TelegramStreamWriter(sender, 123, 'ru');
+    await writer.init();
+
+    // Build text + tool label that together exceed 4000 chars
+    writer.appendText('A'.repeat(3990));
+    writer.setToolLabel('search_events', { query: 'длинный поисковый запрос для тестирования' });
+    await writer.flush(true);
+
+    const text = editMock.mock.calls[0]![2] as string;
+    // Must not have broken partial HTML tags (e.g. '<i...' without closing '>')
+    expect(text).not.toMatch(/<[^>]*$/);
+  });
 });

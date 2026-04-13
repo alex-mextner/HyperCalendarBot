@@ -828,4 +828,27 @@ describe('CalendarBotAgent.run()', () => {
     expect(errorMessages.length).toBe(1);
     expect(result.responseText).toContain('⚠️');
   });
+
+  test('agent catch block error message uses t() for both languages', async () => {
+    // Verify English error
+    const { impl: implEn } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentEn = new CalendarBotAgent(config, sender, { streamImpl: implEn });
+    ctx.user = { ...ctx.user, language: 'en' };
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const resultEn = await agentEn.run(ctx);
+    expect(resultEn.responseText).toContain('⚠️');
+
+    // Verify Russian error uses the same ⚠️ prefix (from t())
+    const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
+    ctx.user = { ...ctx.user, language: 'ru' };
+    const resultRu = await agentRu.run(ctx);
+    expect(resultRu.responseText).toContain('⚠️');
+
+    // Both must be different (localized), not the same hardcoded string
+    // Extract just the error part (after the ⚠️)
+    const enError = resultEn.responseText.split('⚠️')[1]!.trim();
+    const ruError = resultRu.responseText.split('⚠️')[1]!.trim();
+    expect(enError).not.toBe(ruError);
+  });
 });

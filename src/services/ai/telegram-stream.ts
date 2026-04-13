@@ -220,7 +220,11 @@ export class TelegramStreamWriter {
     }
 
     if (displayText.length > MAX_MESSAGE_LENGTH) {
-      displayText = `${displayText.slice(0, MAX_MESSAGE_LENGTH - 3)}...`;
+      // Truncate at the last safe boundary (newline or space) to avoid slicing
+      // inside HTML tags like <i>...</i> — a broken tag makes Telegram reject the edit.
+      const slice = displayText.slice(0, MAX_MESSAGE_LENGTH - 3);
+      const safeCut = Math.max(slice.lastIndexOf('\n'), slice.lastIndexOf('>'));
+      displayText = safeCut > 0 ? `${displayText.slice(0, safeCut + 1)}...` : `${slice}...`;
     }
 
     try {
