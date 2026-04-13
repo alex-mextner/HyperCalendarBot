@@ -321,14 +321,18 @@ describe('CalendarBotAgent.run()', () => {
     expect(deleteMessage).toHaveBeenCalledTimes(0);
   });
 
-  test('[SKIP] response in DM is NOT discarded', async () => {
+  test('[SKIP] response in DM is discarded (placeholder deleted)', async () => {
     const { impl } = makeStreamImpl([{ kind: 'text', text: '[SKIP]' }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
 
     ctx.isGroup = false;
-    await agent.run(ctx);
+    const result = await agent.run(ctx);
 
-    expect(sender.editMessageText).toHaveBeenCalled();
+    expect(result.responseText).toBe('');
+    expect(deleteMessage).toHaveBeenCalledTimes(1);
+    expect(sender.editMessageText).not.toHaveBeenCalled();
   });
 
   test('[SKIP] with trailing whitespace is still discarded in group', async () => {
@@ -407,6 +411,57 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).toBe('');
     expect(sender.sendMessage).toHaveBeenCalledTimes(0);
     expect(deleteMessage).toHaveBeenCalledTimes(0);
+  });
+
+  test('set_reaction tool does not create a status message in group (silent tool)', async () => {
+    const setReaction = mock(() => Promise.resolve());
+    (sender as TelegramSender).setReaction = setReaction;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'call-react', name: 'set_reaction', input: { emoji: '👌' } },
+      { kind: 'text', text: '[SKIP]' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = true;
+    ctx.groupChatId = -100999;
+    ctx.groupTitle = 'Test Group';
+    ctx.incomingMessageId = 777;
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    // Silent tool must not create any placeholder message
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+    // Reaction itself was executed
+    expect(setReaction).toHaveBeenCalledTimes(1);
+  });
+
+  test('set_reaction tool in DM discards placeholder after [SKIP]', async () => {
+    const setReaction = mock(() => Promise.resolve());
+    (sender as TelegramSender).setReaction = setReaction;
+    const deleteMessage = mock(() => Promise.resolve());
+    (sender as TelegramSender).deleteMessage = deleteMessage;
+
+    const { impl } = makeStreamImpl([
+      { kind: 'tool', callId: 'call-react', name: 'set_reaction', input: { emoji: '👍' } },
+      { kind: 'text', text: '[SKIP]' },
+    ]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    ctx.isGroup = false;
+    ctx.incomingMessageId = 888;
+
+    const result = await agent.run(ctx);
+
+    expect(result.responseText).toBe('');
+    // Placeholder ⏳ was created in init, then deleted by [SKIP] discard
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    expect(deleteMessage).toHaveBeenCalledTimes(1);
+    // No tool label should have been shown
+    expect(sender.editMessageText).not.toHaveBeenCalled();
   });
 
   test('logAiTurn via ConversationLogger saves the assistant message with chatId in group context', () => {

@@ -264,6 +264,14 @@ function isSkipText(text: string): boolean {
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
 
+/**
+ * Tools whose execution should never create or update a status message.
+ * They always result in [SKIP] — showing a label is pointless visual noise
+ * and in noPlaceholder (group) mode it creates a message that must be
+ * immediately deleted, often failing or leaving orphans.
+ */
+const SILENT_TOOLS = new Set(['set_reaction']);
+
 /** Recursively sort object keys for stable serialization. */
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -477,6 +485,7 @@ export class CalendarBotAgent {
             writer.flush(false).catch(() => {});
           },
           onToolCallStart: (name) => {
+            if (SILENT_TOOLS.has(name)) return;
             writer.setToolLabel(name);
             writer.flush(true).catch(() => {});
           },
@@ -551,8 +560,10 @@ export class CalendarBotAgent {
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
             continue;
           }
-          writer.setToolLabel(tc.name, input);
-          await writer.flush(true);
+          if (!SILENT_TOOLS.has(tc.name)) {
+            writer.setToolLabel(tc.name, input);
+            await writer.flush(true);
+          }
 
           const toolResult = await executeTool(ctx, tc.name, input);
 
@@ -714,7 +725,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && isSkipText(finalText)) {
+    if (isSkipText(finalText)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

@@ -195,4 +195,62 @@ describe('TelegramStreamWriter', () => {
     writer.tailText(100);
     expect(writer.getText()).toBe('hello');
   });
+
+  test('concurrent flush calls in noPlaceholder mode create only one message', async () => {
+    let resolveFirst: ((v: { message_id: number }) => void) | null = null;
+    let callCount = 0;
+    const slowSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          callCount++;
+          if (callCount === 1) {
+            // First call: delay resolution so second call arrives while pending
+            resolveFirst = resolve;
+          } else {
+            resolve({ message_id: 99 });
+          }
+        }),
+    );
+    const testSender: TelegramSender = {
+      sendMessage: slowSend,
+      editMessageText: editMock,
+    };
+
+    const writer = new TelegramStreamWriter(testSender, 123, 'en', { noPlaceholder: true });
+    await writer.init(); // no message created (noPlaceholder)
+
+    writer.setToolLabel('get_events');
+
+    // Fire two flush calls concurrently (simulates onToolCallStart + tool loop)
+    const p1 = writer.flush(true);
+    const p2 = writer.flush(true);
+
+    // Resolve the first send
+    resolveFirst!({ message_id: 50 });
+    await p1;
+    await p2;
+
+    // Only one sendMessage call — second flush reused the pending promise
+    expect(slowSend).toHaveBeenCalledTimes(1);
+    expect(writer.getMessageId()).toBe(50);
+  });
+
+  test('discard deletes message created by flush in noPlaceholder mode', async () => {
+    const deleteMock = mock(() => Promise.resolve());
+    const testSender: TelegramSender = {
+      sendMessage: sendMock,
+      editMessageText: editMock,
+      deleteMessage: deleteMock,
+    };
+
+    const writer = new TelegramStreamWriter(testSender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+
+    writer.setToolLabel('get_events');
+    await writer.flush(true);
+    await writer.discard();
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(deleteMock).toHaveBeenCalledWith(123, 42);
+  });
 });
