@@ -684,7 +684,7 @@ export interface InsertNotificationLogData {
   user_id: number;
   type: string;
   reference_key: string;
-  channel: string;
+  channel: NotificationLogChannel;
   payload: string;
 }
 
