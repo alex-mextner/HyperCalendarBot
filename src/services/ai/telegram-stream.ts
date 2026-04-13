@@ -57,6 +57,10 @@ export class TelegramStreamWriter {
   private userTranscript: string | undefined;
   private noPlaceholder: boolean;
   private typingInterval: ReturnType<typeof setInterval> | null = null;
+  /** Prevents concurrent message creation in noPlaceholder mode. */
+  private creatingMessage = false;
+  /** Set by discard() so a pending flush knows to delete the message after creation. */
+  private discarded = false;
 
   constructor(
     private sender: TelegramSender,
@@ -106,6 +110,7 @@ export class TelegramStreamWriter {
 
   /** Clear all accumulated state for retry after validation rejection */
   reset(): void {
+    this.discarded = false;
     this.text = '';
     this.plainResponseText = '';
     this.intermediateChunks = [];
@@ -179,9 +184,24 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Lazy: materialize the placeholder now that we have substantial content to show
-      const result = await this.sender.sendMessage(this.chatId, '⏳');
-      this.messageId = result.message_id;
+      if (this.creatingMessage) return; // Another flush is creating — skip, next flush will edit
+      this.creatingMessage = true;
+      try {
+        const result = await this.sender.sendMessage(this.chatId, '⏳');
+        this.messageId = result.message_id;
+      } catch (err) {
+        aiLogger.warn({ err, chatId: this.chatId }, 'Failed to create placeholder message');
+        return;
+      } finally {
+        this.creatingMessage = false;
+      }
+      // discard() ran while we were creating — delete the message and bail
+      if (this.discarded) {
+        this.sender.deleteMessage?.(this.chatId, this.messageId).catch((err) => {
+          aiLogger.warn({ err, chatId: this.chatId, messageId: this.messageId }, 'Post-discard cleanup failed');
+        });
+        return;
+      }
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
@@ -278,6 +298,7 @@ export class TelegramStreamWriter {
 
   async discard(): Promise<void> {
     this.stopTypingLoop();
+    this.discarded = true;
     if (this.messageId) {
       try {
         await this.sender.deleteMessage?.(this.chatId, this.messageId);
@@ -285,6 +306,8 @@ export class TelegramStreamWriter {
         /* ignore — message may already be gone */
       }
     }
+    // If messageId is null but creatingMessage is true, the pending flush
+    // will check the discarded flag after creation and delete the message.
   }
 
   /**
@@ -301,6 +324,7 @@ export class TelegramStreamWriter {
     this.pendingIndicators = [];
     this.intermediateChunks = [];
     this.plainResponseText = '';
+    this.discarded = false;
   }
 
   getMessageId(): number | null {

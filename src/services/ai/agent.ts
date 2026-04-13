@@ -11,7 +11,7 @@ import { validateResponse } from './response-validator.ts';
 import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -477,8 +477,12 @@ export class CalendarBotAgent {
             writer.flush(false).catch(() => {});
           },
           onToolCallStart: (name) => {
+            if (SILENT_TOOLS.has(name)) return;
+            // Only set the label — don't flush. The tool loop flushes
+            // sequentially with full input details. Fire-and-forget flush
+            // here raced with the tool loop in noPlaceholder (group) mode,
+            // creating orphaned messages.
             writer.setToolLabel(name);
-            writer.flush(true).catch(() => {});
           },
         };
 
@@ -551,8 +555,10 @@ export class CalendarBotAgent {
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
             continue;
           }
-          writer.setToolLabel(tc.name, input);
-          await writer.flush(true);
+          if (!SILENT_TOOLS.has(tc.name)) {
+            writer.setToolLabel(tc.name, input);
+            await writer.flush(true);
+          }
 
           const toolResult = await executeTool(ctx, tc.name, input);
 
@@ -714,7 +720,7 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (ctx.isGroup && isSkipText(finalText)) {
+    if (isSkipText(finalText)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
