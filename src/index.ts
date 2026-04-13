@@ -874,7 +874,10 @@ botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
     ...(parseMode ? { parse_mode: parseMode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
+  if (!('message_id' in msg)) {
+    throw new Error(`sendMessage returned no message_id for chat ${telegramId}`);
+  }
+  return { message_id: msg.message_id };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
@@ -900,7 +903,10 @@ const broadcastWorker = createBroadcastWorker(
         ...(parseMode ? { parse_mode: parseMode } : {}),
         ...(threadId ? { message_thread_id: threadId } : {}),
       });
-      return { message_id: 'message_id' in msg ? msg.message_id : 0 };
+      if (!('message_id' in msg)) {
+        throw new Error(`sendMessage returned no message_id for chat ${chatId}`);
+      }
+      return { message_id: msg.message_id };
     },
   },
   broadcastRedis,
