@@ -208,14 +208,16 @@ describe('broadcast-queue module', () => {
         parseMode: 'HTML',
         origin: 'group_event_created:1',
         fallbackChatId: -100123,
-        fallbackText: '@user, начни чат с ботом: https://t.me/TestBot',
+        fallbackText: '@user ещё не запустил бота. Перешлите ссылку:\n\nhttps://t.me/TestBot?start=s_abc123',
       };
 
       await processBroadcastJob(data, sender);
 
       expect(fallbackCalls).toHaveLength(1);
       expect(fallbackCalls[0]!.chatId).toBe(-100123);
-      expect(fallbackCalls[0]!.text).toBe('@user, начни чат с ботом: https://t.me/TestBot');
+      expect(fallbackCalls[0]!.text).toBe(
+        '@user ещё не запустил бота. Перешлите ссылку:\n\nhttps://t.me/TestBot?start=s_abc123',
+      );
       expect(fallbackCalls[0]!.parseMode).toBe('HTML');
     });
 

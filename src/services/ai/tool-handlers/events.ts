@@ -140,7 +140,16 @@ async function enqueueGroupNotifications(
 
   if (memberIds.length === 0) return 0;
 
-  const botUrl = ctx.botUsername ? `https://t.me/${ctx.botUsername}` : null;
+  // Generate ONE share link per event for all fallbacks (avoids per-recipient DB inserts)
+  let shareUrl: string | null = null;
+  if (ctx.deepLinkService && ctx.botUsername) {
+    try {
+      const link = ctx.deepLinkService.createShareLink(event.id, ctx.user.telegram_id);
+      shareUrl = ctx.deepLinkService.generateUrl(link.code, ctx.botUsername);
+    } catch (err) {
+      eventsLogger.warn({ err, eventId: event.id }, 'Failed to create share link for broadcast fallback');
+    }
+  }
 
   const jobs = memberIds.map((userId) => {
     const recipientUser = ctx.userRepo.findByTelegramId(userId);
@@ -156,8 +165,12 @@ async function enqueueGroupNotifications(
       action,
     );
 
-    const fallbackText = botUrl
-      ? t(recipientLang).broadcast_unreachable(buildRecipientMention(recipientUser, userId), botUrl)
+    const fallbackText = shareUrl
+      ? t(recipientLang).broadcast_unreachable(
+          buildRecipientMention(recipientUser, userId),
+          escapeHtml(event.title),
+          shareUrl,
+        )
       : undefined;
 
     return {
