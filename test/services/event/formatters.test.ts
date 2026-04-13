@@ -138,6 +138,52 @@ describe('formatDayAgenda', () => {
     // no emoji dot prefixes (only 📅 header and possible 🔁 for recurring)
     expect(result).not.toMatch(/🔴|🔵|🟢|🟡|🟠|🟣|💙|💜|⚫|🩷|🟩/);
   });
+
+  test('includes weather line in header when dayWeather provided', () => {
+    const weather = {
+      tempMin: 5,
+      tempMax: 12,
+      conditionCode: 800,
+      description: 'clear sky',
+      windSpeed: 3,
+    };
+    const result = formatDayAgenda([], '2026-03-11T12:00:00Z', 'UTC', 'en', [], undefined, weather);
+    expect(result).toContain('☀️');
+    expect(result).toContain('12');
+    expect(result).toContain('clear sky');
+  });
+
+  test('omits weather line when dayWeather is null', () => {
+    const result = formatDayAgenda([], '2026-03-11T12:00:00Z', 'UTC', 'en', [], undefined, null);
+    expect(result).not.toContain('°C');
+  });
+});
+
+describe('formatWeekAgenda weather', () => {
+  test('appends weather emoji+temp to each day line', () => {
+    const weatherByDate: { [date: string]: import('../../../src/services/weather/types.ts').DayWeather } = {
+      '2026-03-09': { tempMin: 2, tempMax: 8, conditionCode: 800, description: 'clear', windSpeed: 3 },
+      '2026-03-10': { tempMin: -1, tempMax: 4, conditionCode: 601, description: 'snow', windSpeed: 5 },
+    };
+    const result = formatWeekAgenda(
+      [],
+      '2026-03-09T00:00:00Z',
+      '2026-03-15T23:59:59Z',
+      'UTC',
+      'en',
+      undefined,
+      weatherByDate,
+    );
+    expect(result).toContain('☀️');
+    expect(result).toContain('2..8°');
+    expect(result).toContain('🌨');
+    expect(result).toContain('-1..4°');
+  });
+
+  test('omits weather when weatherByDate is undefined', () => {
+    const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
+    expect(result).not.toContain('°');
+  });
 });
 
 describe('formatEventDetail', () => {

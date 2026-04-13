@@ -10,6 +10,8 @@ import { googleCalendarColorEmoji } from '../../services/google/calendar-colors.
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import { renderDayImage } from '../../services/image/render-day.ts';
 import type { RenderService } from '../../services/image/render-service.ts';
+import type { DayWeather } from '../../services/weather/types.ts';
+import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { imageLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -21,6 +23,7 @@ export async function handleTomorrow(
   renderService?: RenderService,
   groupRepo?: GroupChatRepository,
   googleCalendarRepo?: GoogleCalendarRepository,
+  weatherService?: WeatherService,
 ): Promise<void> {
   const user = ctx.dbUser;
   if (!user) return;
@@ -50,7 +53,8 @@ export async function handleTomorrow(
     );
     const occurrences = eventService.getEventsInRangeForGroup(groupId, dayStart.toISOString(), dayEnd.toISOString());
     const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dayStart.toISOString().slice(0, 10)) ?? [];
-    const text = formatDayAgenda(occurrences, dayStart.toISOString(), timezone, lang, holidays);
+    const dayWeather = await fetchDayForecast(weatherService, timezone, dayStart.toISOString().slice(0, 10), lang);
+    const text = formatDayAgenda(occurrences, dayStart.toISOString(), timezone, lang, holidays, undefined, dayWeather);
     await ctx.send(text, { parse_mode: 'HTML' });
     return;
   }
@@ -60,6 +64,7 @@ export async function handleTomorrow(
   const dateIso = new TZDate(tomorrow, user.timezone).toISOString().slice(0, 10);
   const holidays = holidayService?.getHolidaysForDate(user.telegram_id, dateIso) ?? [];
   const calendarColors = buildCalendarColorMap(googleCalendarRepo, user.telegram_id);
+  const dayWeather = await fetchDayForecast(weatherService, user.timezone, dateIso, lang);
   const text = formatDayAgenda(
     occurrences,
     tomorrow.toISOString(),
@@ -67,6 +72,7 @@ export async function handleTomorrow(
     user.language,
     holidays,
     calendarColors,
+    dayWeather,
   );
 
   await ctx.send(text, { parse_mode: 'HTML' });
@@ -88,6 +94,18 @@ export async function handleTomorrow(
       imageLogger.error({ error: (err as Error).message }, 'Render failed');
     }
   }
+}
+
+async function fetchDayForecast(
+  weatherService: WeatherService | undefined,
+  timezone: string,
+  dateIso: string,
+  lang: string,
+): Promise<DayWeather | null> {
+  if (!weatherService) return null;
+  const week = await weatherService.getWeekWeather(timezone, lang === 'ru' ? 'ru' : 'en');
+  if (!week) return null;
+  return week.days.find((d) => d.date === dateIso) ?? null;
 }
 
 function buildCalendarColorMap(
