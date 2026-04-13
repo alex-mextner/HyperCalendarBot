@@ -140,13 +140,17 @@ describe('buildSystemPrompt', () => {
     ctx.groupTitle = 'Friends';
     ctx.groupChatId = -100;
     const prompt = buildSystemPrompt(ctx);
-    // Proposal → wait → agreement → create
+    // Proposal → [SKIP] → agreement → create
     expect(prompt).toContain('Давай в 7 на пейнтбол');
+    expect(prompt).toContain('[SKIP], no consensus yet');
     expect(prompt).toContain('Давай!');
     expect(prompt).toContain('create');
-    // Objection blocks creation
+    // Objection → [SKIP]
     expect(prompt).toContain('do NOT create, discussion continues');
-    // Availability discussion
+    // No consensus → [SKIP]
+    expect(prompt).toContain('Skip — no consensus yet');
+    expect(prompt).toContain('output [SKIP] and do not reply');
+    // Availability discussion → [SKIP]
     expect(prompt).toContain('listing her availability');
   });
 
