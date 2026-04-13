@@ -300,7 +300,7 @@ export class NotificationRenderer {
     lines.push('');
     for (const day of days) {
       const dayW = weatherMap?.[day.date];
-      const weatherSuffix = dayW ? ` ${weatherEmoji(dayW.conditionCode)} ${dayW.tempMin}–${dayW.tempMax}°` : '';
+      const weatherSuffix = dayW ? ` ${weatherEmoji(dayW.conditionCode)} ${dayW.tempMin}..${dayW.tempMax}°` : '';
       if (day.events.length === 0) {
         lines.push(`${day.dayLabel}: (${l.noEvents})${weatherSuffix}`);
       } else {

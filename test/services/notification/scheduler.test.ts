@@ -720,7 +720,7 @@ describe('NotificationScheduler', () => {
     expect(firstCall[3]).toEqual({ allDay: true });
     const log = logRepo.getById(capturedLogId) as NotificationLogRow;
     const parsed = JSON.parse(log.payload!) as { text: string };
-    expect(parsed.text).toContain('4–11°C');
+    expect(parsed.text).toContain('4..11°C');
     expect(parsed.text).toContain('few clouds');
   });
 

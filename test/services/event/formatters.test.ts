@@ -175,9 +175,9 @@ describe('formatWeekAgenda weather', () => {
       weatherByDate,
     );
     expect(result).toContain('☀️');
-    expect(result).toContain('2–8°');
+    expect(result).toContain('2..8°');
     expect(result).toContain('🌨');
-    expect(result).toContain('-1–4°');
+    expect(result).toContain('-1..4°');
   });
 
   test('omits weather when weatherByDate is undefined', () => {
@@ -206,7 +206,7 @@ describe('formatWeekAgenda weather', () => {
     );
     expect(result).toContain('May Day');
     expect(result).toContain('☀️');
-    expect(result).toContain('10–20°');
+    expect(result).toContain('10..20°');
   });
 });
 
@@ -618,7 +618,7 @@ describe('formatEventDetail — edge cases', () => {
       },
     });
     expect(result).toContain('⛅');
-    expect(result).toContain('2–11°C');
+    expect(result).toContain('2..11°C');
   });
 
   test('omits weather line when forecast is undefined or null', () => {

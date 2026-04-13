@@ -119,7 +119,7 @@ describe('handleWeek', () => {
 
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('☀️');
-    expect(text).toContain('3–10°');
+    expect(text).toContain('3..10°');
   });
 
   test('works without weather when weatherService returns null', async () => {
@@ -252,6 +252,6 @@ describe('handleWeek group context', () => {
     );
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('🌨');
-    expect(text).toContain('-5–1°');
+    expect(text).toContain('-5..1°');
   });
 });

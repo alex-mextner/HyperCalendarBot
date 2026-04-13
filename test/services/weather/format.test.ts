@@ -18,13 +18,13 @@ describe('formatDayWeatherLine', () => {
 
   test('formats current weather in English', () => {
     const result = formatDayWeatherLine('en', baseWeather);
-    expect(result).toBe('☀️ 10°C (5–15°C), clear sky');
+    expect(result).toBe('☀️ 10°C (5..15°C), clear sky');
   });
 
   test('formats current weather in Russian', () => {
     const ruWeather: DayWeather = { ...baseWeather, description: 'ясно' };
     const result = formatDayWeatherLine('ru', ruWeather);
-    expect(result).toBe('☀️ 10°C (5–15°C), ясно');
+    expect(result).toBe('☀️ 10°C (5..15°C), ясно');
   });
 
   test('shows wind when >= 10 m/s', () => {
@@ -48,7 +48,7 @@ describe('formatDayWeatherLine', () => {
   test('shows range when no current temp', () => {
     const forecast: DayWeather = { ...baseWeather, tempCurrent: undefined };
     const result = formatDayWeatherLine('en', forecast);
-    expect(result).toBe('☀️ 5–15°C, clear sky');
+    expect(result).toBe('☀️ 5..15°C, clear sky');
   });
 
   test('shows rain emoji for 500 code', () => {
@@ -68,7 +68,7 @@ describe('formatWeekWeatherLine', () => {
       windSpeed: 8,
     };
     const result = formatWeekWeatherLine('en', day);
-    expect(result).toBe('🌨 -2–5°C');
+    expect(result).toBe('🌨 -2..5°C');
   });
 });
 
@@ -87,7 +87,7 @@ describe('formatEventWeatherLine', () => {
     };
     const result = formatEventWeatherLine('en', forecast);
     expect(result).toBe('☀️ 17°C, clear sky');
-    expect(result).not.toContain('–');
+    expect(result).not.toContain('..');
   });
 
   test('hourly forecast includes wind when >= 10 m/s', () => {
@@ -106,7 +106,7 @@ describe('formatEventWeatherLine', () => {
     expect(result).toContain('14 m/s');
   });
 
-  test('daily fallback shows min–max range', () => {
+  test('daily fallback shows min..max range', () => {
     const forecast: EventForecast = {
       kind: 'day',
       day: {
@@ -119,7 +119,7 @@ describe('formatEventWeatherLine', () => {
       },
     };
     const result = formatEventWeatherLine('en', forecast);
-    expect(result).toBe('⛅ 5–18°C, few clouds');
+    expect(result).toBe('⛅ 5..18°C, few clouds');
   });
 
   test('daily fallback renders in Russian', () => {
@@ -136,7 +136,7 @@ describe('formatEventWeatherLine', () => {
     };
     const result = formatEventWeatherLine('ru', forecast);
     expect(result).toContain('🌨');
-    expect(result).toContain('-3–2°C');
+    expect(result).toContain('-3..2°C');
     expect(result).toContain('снег');
     expect(result).toContain('12 м/с');
   });

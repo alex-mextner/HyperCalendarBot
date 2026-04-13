@@ -229,7 +229,7 @@ describe('NotificationRenderer', () => {
         forecast,
       });
       expect(result.text).toContain('⛅');
-      expect(result.text).toContain('5–12°C');
+      expect(result.text).toContain('5..12°C');
     });
 
     test('omits weather line when forecast is null', () => {
@@ -519,7 +519,7 @@ describe('NotificationRenderer', () => {
         [{ title: 'Meeting', startTime: '10:00', endTime: '11:00', location: null, duration: '1h' }],
         { weather: clearWeather },
       );
-      expect(result.text).toContain('☀️ 10°C (5–15°C), clear sky');
+      expect(result.text).toContain('☀️ 10°C (5..15°C), clear sky');
       expect(result.text).toContain('Meeting');
     });
 
@@ -527,7 +527,7 @@ describe('NotificationRenderer', () => {
       const result = renderer.renderMorningAgenda('ru', 'понедельник, 3 апреля', [], {
         weather: clearWeather,
       });
-      expect(result.text).toContain('☀️ 10°C (5–15°C), clear sky');
+      expect(result.text).toContain('☀️ 10°C (5..15°C), clear sky');
       expect(result.text).toContain('Сегодня нет событий');
     });
 
@@ -561,7 +561,7 @@ describe('NotificationRenderer', () => {
       const result = renderer.renderEveningReview('ru', 'вторник, 4 апреля', [], {
         weather: tomorrowWeather,
       });
-      expect(result.text).toContain('🌨 -3–2°C, snow');
+      expect(result.text).toContain('🌨 -3..2°C, snow');
     });
 
     test('weekly digest includes weather per day', () => {
@@ -574,8 +574,8 @@ describe('NotificationRenderer', () => {
         '2026-04-07': { tempMin: 5, tempMax: 12, conditionCode: 500, description: 'rain', windSpeed: 6 },
       };
       const result = renderer.renderWeeklyDigest('en', '6–12 Apr', days, { weatherByDate });
-      expect(result.text).toContain('Mon 6: 10:00 Meeting ☀️ 10–18°');
-      expect(result.text).toContain('Tue 7: (no events) 🌧 5–12°');
+      expect(result.text).toContain('Mon 6: 10:00 Meeting ☀️ 10..18°');
+      expect(result.text).toContain('Tue 7: (no events) 🌧 5..12°');
     });
 
     test('weekly digest works without weather', () => {

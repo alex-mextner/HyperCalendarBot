@@ -284,9 +284,9 @@ describe('mapWeeklyOverviewData', () => {
       weatherByDate,
     });
     expect(result.days[0]!.weatherEmoji).toBe('☀️');
-    expect(result.days[0]!.weatherTemp).toBe('2–8°');
+    expect(result.days[0]!.weatherTemp).toBe('2..8°');
     expect(result.days[1]!.weatherEmoji).toBe('🌨');
-    expect(result.days[1]!.weatherTemp).toBe('-1–4°');
+    expect(result.days[1]!.weatherTemp).toBe('-1..4°');
     expect(result.days[2]!.weatherEmoji).toBeUndefined();
     expect(result.days[2]!.weatherTemp).toBeUndefined();
   });

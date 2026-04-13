@@ -142,7 +142,7 @@ export function mapWeeklyOverviewData(params: {
       eventCount: occs.length,
       isWeekend: i >= 5,
       weatherEmoji: dayW ? weatherEmoji(dayW.conditionCode) : undefined,
-      weatherTemp: dayW ? `${dayW.tempMin}–${dayW.tempMax}°` : undefined,
+      weatherTemp: dayW ? `${dayW.tempMin}..${dayW.tempMax}°` : undefined,
       events: occs.map(
         (o): MiniEvent => ({
           title: eventTitle(o, locale),
