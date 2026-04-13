@@ -14,6 +14,7 @@ import type {
   WeeklyOverviewData,
 } from '../../worker/templates/types.ts';
 import { ruPlural } from '../event/formatters.ts';
+import { formatTempRange } from '../weather/format.ts';
 import type { DayWeather } from '../weather/types.ts';
 import { weatherEmoji } from '../weather/weather-service.ts';
 
@@ -142,11 +143,7 @@ export function mapWeeklyOverviewData(params: {
       eventCount: occs.length,
       isWeekend: i >= 5,
       weatherEmoji: dayW ? weatherEmoji(dayW.conditionCode) : undefined,
-      weatherTemp: dayW
-        ? dayW.tempMin === dayW.tempMax
-          ? `${dayW.tempMin}°`
-          : `${dayW.tempMin}..${dayW.tempMax}°`
-        : undefined,
+      weatherTemp: dayW ? formatTempRange(dayW.tempMin, dayW.tempMax, '°') : undefined,
       events: occs.map(
         (o): MiniEvent => ({
           title: eventTitle(o, locale),

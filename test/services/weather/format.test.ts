@@ -2,9 +2,45 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatDayWeatherLine,
   formatEventWeatherLine,
+  formatTempCurrent,
+  formatTempRange,
   formatWeekWeatherLine,
 } from '../../../src/services/weather/format.ts';
 import type { DayWeather, EventForecast } from '../../../src/services/weather/types.ts';
+
+describe('formatTempRange', () => {
+  test('shows range when min differs from max', () => {
+    expect(formatTempRange(5, 15)).toBe('5..15°C');
+  });
+
+  test('collapses to single value when min equals max', () => {
+    expect(formatTempRange(13, 13)).toBe('13°C');
+  });
+
+  test('uses custom suffix', () => {
+    expect(formatTempRange(5, 15, '°')).toBe('5..15°');
+    expect(formatTempRange(10, 10, '°')).toBe('10°');
+  });
+});
+
+describe('formatTempCurrent', () => {
+  test('shows current with range when min differs from max', () => {
+    expect(formatTempCurrent(10, 5, 15)).toBe('10°C (5..15°C)');
+  });
+
+  test('shows only current when min equals max', () => {
+    expect(formatTempCurrent(13, 13, 13)).toBe('13°C');
+  });
+
+  test('shows only current when range is equal even if current differs', () => {
+    expect(formatTempCurrent(14, 13, 13)).toBe('14°C');
+  });
+
+  test('uses custom suffix', () => {
+    expect(formatTempCurrent(10, 5, 15, '°')).toBe('10° (5..15°)');
+    expect(formatTempCurrent(10, 10, 10, '°')).toBe('10°');
+  });
+});
 
 describe('formatDayWeatherLine', () => {
   const baseWeather: DayWeather = {

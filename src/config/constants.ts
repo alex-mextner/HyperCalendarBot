@@ -1,6 +1,7 @@
 // src/config/constants.ts
 
 import { ruPlural } from '../services/event/formatters.ts';
+import { formatTempCurrent, formatTempRange } from '../services/weather/format.ts';
 
 // Rate limits
 export const RATE_LIMIT = {
@@ -523,9 +524,8 @@ export const MSG = {
       clockChangeBack: (duration: string) => `🕐 Clocks shifted by -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) =>
-        min === max ? `${current}°C` : `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => (min === max ? `${min}°C` : `${min}..${max}°C`),
+      tempCurrent: formatTempCurrent,
+      tempRange: formatTempRange,
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
       eventForecast: (weather: string) => `Weather: ${weather}`,
@@ -1162,9 +1162,8 @@ export const MSG = {
       clockChangeBack: (duration: string) => `🕐 Часы переведены на -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) =>
-        min === max ? `${current}°C` : `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => (min === max ? `${min}°C` : `${min}..${max}°C`),
+      tempCurrent: formatTempCurrent,
+      tempRange: formatTempRange,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
       eventForecast: (weather: string) => `Погода: ${weather}`,

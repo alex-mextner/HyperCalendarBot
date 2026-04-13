@@ -4,6 +4,16 @@ import { t } from '../../config/constants.ts';
 import type { DayWeather, EventForecast } from './types.ts';
 import { weatherEmoji } from './weather-service.ts';
 
+/** Format a min..max temperature range, collapsing to a single value when equal */
+export function formatTempRange(min: number, max: number, suffix = '°C'): string {
+  return min === max ? `${min}${suffix}` : `${min}..${max}${suffix}`;
+}
+
+/** Format current temperature with optional min..max range (omitted when equal) */
+export function formatTempCurrent(current: number, min: number, max: number, suffix = '°C'): string {
+  return min === max ? `${current}${suffix}` : `${current}${suffix} (${min}..${max}${suffix})`;
+}
+
 /** Format a single day's weather as a compact one-liner for agenda messages */
 export function formatDayWeatherLine(lang: Lang, weather: DayWeather): string {
   const l = t(lang).weather;
