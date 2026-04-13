@@ -114,9 +114,20 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Do NOT create — wait for consensus');
   });
 
-  test('immediate mode still applies when intent and details are clear', () => {
+  test('immediate mode requires group consensus before creating in group chats', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('the intent is explicit, time/purpose are unambiguous');
+    expect(prompt).toContain('a proposal alone is NOT enough');
+    expect(prompt).toContain('at least one other person agrees');
+  });
+
+  test('each creation mode has separate DM and Group examples', () => {
+    const prompt = buildSystemPrompt(ctx);
+    // All three modes should have DM: and Group: example lines
+    const dmCount = (prompt.match(/- DM:/g) ?? []).length;
+    const groupCount = (prompt.match(/- Group:/g) ?? []).length;
+    expect(dmCount).toBe(3);
+    expect(groupCount).toBe(3);
   });
 
   test('clarify mode instructs to ask when key details are ambiguous', () => {
@@ -130,6 +141,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('multiple time options');
     expect(prompt).toContain('wait for the user');
     expect(prompt).toContain('scheduling discussion');
+  });
+
+  test('group examples cover objection scenario', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('do NOT create, discussion continues');
   });
 
   test('instructs to use pick_users and find_contact for invitations', () => {
