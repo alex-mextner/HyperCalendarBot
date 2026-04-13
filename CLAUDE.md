@@ -356,6 +356,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. Run `codex exec review --uncommitted` — address every issue it finds that isn't a false positive.
   4. Run `codex exec "security review --uncommitted"` — address every security issue it finds that
      isn't a false positive.
+  `codex` is the Codex CLI (Google DeepMind) — an AI code review tool installed globally.
+  If `codex` is not found, skip steps 3-4 but do NOT skip the self-review in step 2.
 - **Commits must NEVER break the tree**: before `git commit`, all of the following must pass clean:
   - `tsc --noEmit` — zero type errors
   - `bun run lint` — zero lint errors AND zero warnings
