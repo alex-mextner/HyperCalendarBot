@@ -290,6 +290,21 @@ describe('mapWeeklyOverviewData', () => {
     expect(result.days[2]!.weatherEmoji).toBeUndefined();
     expect(result.days[2]!.weatherTemp).toBeUndefined();
   });
+
+  test('weatherTemp shows single value when min equals max', () => {
+    const weatherByDate = {
+      '2026-03-09': { tempMin: 5, tempMax: 5, conditionCode: 800, description: 'clear', windSpeed: 2 },
+    };
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: new Map(),
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+      weatherByDate,
+    });
+    expect(result.days[0]!.weatherTemp).toBe('5°');
+  });
 });
 
 describe('mapMonthlyCalendarData (makeDay)', () => {
