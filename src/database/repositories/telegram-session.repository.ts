@@ -55,6 +55,14 @@ export class TelegramSessionRepository {
       .run(status, userId);
   }
 
+  setTzConsentAt(userId: number, at: string | null): void {
+    this.db
+      .prepare(
+        "UPDATE user_telegram_sessions SET tz_detection_consent_at = ?, updated_at = datetime('now') WHERE user_id = ?",
+      )
+      .run(at, userId);
+  }
+
   deleteByUserId(userId: number): void {
     this.db.prepare('DELETE FROM user_telegram_sessions WHERE user_id = ?').run(userId);
   }

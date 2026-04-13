@@ -3,17 +3,44 @@ import type { TelegramSessionRepository } from '../../database/repositories/tele
 import { logger } from '../../utils/logger.ts';
 import { decryptBlob } from '../crypto/session-crypto.ts';
 import { SessionBridge } from './session-bridge.ts';
+import type { DetectionResult } from './timezone-detector.ts';
 
 const senderLogger = logger.child({ module: 'connected-user-sender' });
 
-interface ConnectedUserSenderDeps {
+export interface ConnectedUserSenderDeps {
   sessionRepo: TelegramSessionRepository;
   masterKey: Buffer;
   notifLogRepo?: NotificationLogRepository;
+  getUserTimezone?: (userId: number) => string;
+  onTimezoneDetected?: (userId: number, detection: DetectionResult) => void;
 }
 
 interface SendMeta {
   invitationId?: number;
+}
+
+export async function checkTimezoneOpportunistically(
+  deps: ConnectedUserSenderDeps,
+  userId: number,
+  sessionData: Buffer,
+): Promise<void> {
+  const session = deps.sessionRepo.getActive(userId);
+  if (!session?.tz_detection_consent_at || session.tz_detection_consent_at === 'never') return;
+
+  const tzTempPath = await SessionBridge.createTempSessionFile(userId, sessionData);
+  try {
+    const authResult = await SessionBridge.getAuthorizations(tzTempPath);
+    if (!authResult.success || !('authorizations' in authResult.data)) return;
+
+    const { detectTimezoneFromAuthorizations } = await import('./timezone-detector.ts');
+    const currentTz = deps.getUserTimezone?.(userId) ?? 'UTC';
+    const detection = detectTimezoneFromAuthorizations(authResult.data.authorizations, currentTz);
+    if (!detection) return;
+
+    deps.onTimezoneDetected?.(userId, detection);
+  } finally {
+    await SessionBridge.cleanupTempFile(tzTempPath);
+  }
 }
 
 export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
@@ -52,6 +79,13 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
             payload: text,
           });
         }
+
+        if (deps.onTimezoneDetected) {
+          checkTimezoneOpportunistically(deps, inviterId, sessionData).catch((err) =>
+            senderLogger.warn({ err, inviterId }, 'Opportunistic timezone check failed'),
+          );
+        }
+
         return true;
       }
 

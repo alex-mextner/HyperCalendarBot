@@ -1544,6 +1544,37 @@ export function createCallbackHandler(
     await handleSnoozeCallback(ctx, user.telegram_id, eventId, minutes, snoozeDeps.reminderRepo, snoozeDeps.eventRepo);
   });
 
+  // Connected-Telegram timezone detection: user confirms update
+  dispatch.set(CB.CT_TZ_UPDATE, async (ctx, payload, _parts, user) => {
+    const iana = payload;
+    const lang = (user.language ?? 'en') as Lang;
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: iana });
+    } catch {
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    if (!userRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_UPDATE: userRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    const countryCode = guessCountryFromTimezone(iana);
+    userRepo.update(user.telegram_id, {
+      timezone: iana,
+      ...(countryCode ? { country_code: countryCode } : {}),
+    });
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzUpdated(iana), { reply_markup: undefined });
+  });
+
+  // Connected-Telegram timezone detection: user skips
+  dispatch.set(CB.CT_TZ_SKIP, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzSkipped, { reply_markup: undefined });
+  });
+
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
     if (!data) return;

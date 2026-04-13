@@ -80,6 +80,8 @@ export const CB = {
   ADD_CANCEL: 'add:cancel',
   LOCATION_GEO: 'loc_geo',
   LOCATION_CANDIDATE: 'loc_cand',
+  CT_TZ_UPDATE: 'ct_tzu',
+  CT_TZ_SKIP: 'ct_tzs',
 } as const;
 
 // i18n messages
@@ -520,6 +522,15 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
       btnReconnect: 'Reconnect',
       cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
+        `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine}) — ${inviteeName} has not been invited yet.\nSend the invitation from your account?`,
+      sendPendingBtn: 'Send',
+      skipPendingBtn: 'Not now',
+      pendingSent: '✅ Invitation sent.',
+      tzDetected: (region: string, iana: string) =>
+        `It looks like you're now in ${region}.\nUpdate timezone to ${iana}?`,
+      tzUpdated: (iana: string) => `✅ Timezone updated to ${iana}`,
+      tzSkipped: 'Timezone not changed.',
     },
     callbackErrors: {
       notFound: 'Not found',
@@ -1191,6 +1202,14 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
       btnReconnect: 'Переподключить',
       cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
+        `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine}) — ${inviteeName} ещё не приглашён.\nОтправить приглашение от твоего имени?`,
+      sendPendingBtn: 'Отправить',
+      skipPendingBtn: 'Не сейчас',
+      pendingSent: '✅ Приглашение отправлено.',
+      tzDetected: (region: string, iana: string) => `Похоже, ты сейчас в ${region}.\nОбновить таймзону на ${iana}?`,
+      tzUpdated: (iana: string) => `✅ Таймзона обновлена: ${iana}`,
+      tzSkipped: 'Таймзона не изменена.',
     },
     callbackErrors: {
       notFound: 'Не найдено',

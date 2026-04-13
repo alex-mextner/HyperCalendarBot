@@ -262,6 +262,21 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         sessionRepo: db.telegramSessions,
         masterKey: telegramMasterKey,
         notifLogRepo: db.notificationLog,
+        getUserTimezone: (userId) => db.users.findByTelegramId(userId)?.timezone ?? 'UTC',
+        onTimezoneDetected: (userId, detection) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const s = t(lang).connectTelegram;
+          const kb = new InlineKeyboard()
+            .text('\u2705', `${CB.CT_TZ_UPDATE}:${detection.detectedTimezone}`)
+            .text('\u274c', CB.CT_TZ_SKIP);
+          bot.api
+            .sendMessage({
+              chat_id: userId,
+              text: s.tzDetected(detection.region, detection.detectedTimezone),
+              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
+            })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz update prompt'));
+        },
       })
     : undefined;
 
