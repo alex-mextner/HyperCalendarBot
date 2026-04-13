@@ -4,6 +4,7 @@ import type { DatabaseService } from '../../database/index.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 import { createAddEventScene } from './add-event.scene.ts';
 import { wrapWithChatId } from './chat-scoped-storage.ts';
@@ -25,6 +26,7 @@ export function createScenesPlugin(
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
+  invitationService?: InvitationService,
 ) {
   const storage = createSceneStorage(db.db);
   // Cast satisfies GramIO's generic Storage<Data> structural contract:
@@ -36,7 +38,20 @@ export function createScenesPlugin(
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer);
   const onboardingScene = createOnboardingScene(db, userComposer, gcalConfigured, prefsService, holidayService);
-  const connectTelegramScene = createConnectTelegramScene(db.telegramSessions, config, userComposer);
+  const connectTelegramDeps = invitationService
+    ? {
+        eventRepo: db.events,
+        userRepo: db.users,
+        contactRepo: db.contacts,
+        invitationService,
+      }
+    : undefined;
+  const connectTelegramScene = createConnectTelegramScene(
+    db.telegramSessions,
+    config,
+    userComposer,
+    connectTelegramDeps,
+  );
   const allScenes = [addEventScene, editValueScene, importScene, timezoneScene, onboardingScene, connectTelegramScene];
 
   return {

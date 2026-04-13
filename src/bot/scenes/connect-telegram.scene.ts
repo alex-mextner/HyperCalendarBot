@@ -3,9 +3,14 @@
 import { Scene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import { maskPhone, t } from '../../config/constants.ts';
+import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
+import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
+import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { decryptString, encryptBlob, encryptString } from '../../services/crypto/session-crypto.ts';
+import type { InvitationService } from '../../services/sharing/invitation-service.ts';
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
+import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
 
@@ -32,7 +37,7 @@ export function isConnectCooldownActive(userId: number): boolean {
   return last !== undefined && Date.now() - last < CONNECT_COOLDOWN_MS;
 }
 
-// --- State ---
+// --- State & Params ---
 
 export interface ConnectTelegramState {
   phone?: string;
@@ -40,6 +45,11 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+}
+
+export interface ConnectTelegramParams {
+  pendingEventId?: number;
+  pendingInviteeIds?: number[];
 }
 
 // --- Constants ---
@@ -50,6 +60,14 @@ const CB_PREFIX = 'ct';
 const CB_CONNECT = `${CB_PREFIX}:connect`;
 const CB_CANCEL = `${CB_PREFIX}:cancel`;
 const CB_RECONNECT = `${CB_PREFIX}:reconnect`;
+const CB_SKIP_PENDING = `${CB_PREFIX}:skip_pending`;
+
+export interface ConnectTelegramDeps {
+  eventRepo: EventRepository;
+  userRepo: UserRepository;
+  contactRepo: ContactRepository;
+  invitationService: InvitationService;
+}
 
 // --- Scene factory ---
 
@@ -57,10 +75,13 @@ export function createConnectTelegramScene(
   sessionRepo: TelegramSessionRepository,
   config: ConnectTelegramConfig,
   userComposer: UserResolverComposer,
+  deps?: ConnectTelegramDeps,
 ) {
   return (
     new Scene('connect-telegram')
       .state<ConnectTelegramState>()
+      .params<ConnectTelegramParams>()
+      // extend() AFTER params() — params() uses Modify which replaces Derives.global
       .extend(userComposer)
 
       // Step 0: Consent
@@ -260,7 +281,10 @@ export function createConnectTelegramScene(
         }
 
         // status === 'ok' — finalize
-        await finalizeSession(context, sessionRepo, config, phone, sessionPath, l);
+        const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
+        if (hasPending) {
+          await context.scene.step.go(4); // Jump to pending invitation step
+        }
       })
 
       // Step 3: 2FA password
@@ -309,19 +333,109 @@ export function createConnectTelegramScene(
           return;
         }
 
-        await finalizeSession(context, sessionRepo, config, phone, sessionPath, l);
+        const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
+        if (hasPending) {
+          await context.scene.step.go(4); // Jump to pending invitation step
+        }
+      })
+
+      // Step 4: Pending invitation callback
+      .step('callback_query', async (context) => {
+        const { lang } = context;
+        const l = lang ?? 'en';
+        const userId = context.from.id;
+        const ct = t(l).connectTelegram;
+
+        if (!context.is('callback_query')) return;
+        const data = context.data;
+        if (!data) return;
+
+        if (data === CB_SKIP_PENDING) {
+          await context.answer();
+          await context.scene.exit();
+          return;
+        }
+
+        // ct:send_pending:{eventId}:{inviteeId}
+        if (data.startsWith(`${CB_PREFIX}:send_pending:`)) {
+          await context.answer();
+
+          if (!deps) {
+            sceneLogger.warn({ userId }, 'Post-connect deps not available');
+            await context.send(ct.featureUnavailable);
+            await context.scene.exit();
+            return;
+          }
+
+          const parts = data.split(':');
+          const eventId = Number.parseInt(parts[2]!, 10);
+          const inviteeId = Number.parseInt(parts[3]!, 10);
+
+          if (Number.isNaN(eventId) || Number.isNaN(inviteeId)) {
+            sceneLogger.warn({ userId, data }, 'Invalid pending callback data');
+            await context.scene.exit();
+            return;
+          }
+
+          const inviteeUsername = resolveInviteeUsername(deps, userId, inviteeId);
+          const result = deps.invitationService.sendInvitation(eventId, userId, inviteeId, inviteeUsername);
+
+          if (result.success) {
+            sceneLogger.info({ userId, eventId, inviteeId }, 'Post-connect invitation created');
+            await context.send(ct.pendingSent);
+          } else {
+            sceneLogger.warn({ userId, eventId, inviteeId, error: result.error }, 'Post-connect invitation failed');
+            // Still show success message — the invitation might already exist
+            await context.send(ct.pendingSent);
+          }
+
+          await context.scene.exit();
+          return;
+        }
       })
   );
+}
+
+// --- Helpers ---
+
+function resolveInviteeUsername(deps: ConnectTelegramDeps, ownerUserId: number, inviteeId: number): string | undefined {
+  const user = deps.userRepo.findByTelegramId(inviteeId);
+  if (user?.username) return user.username;
+
+  const contact = deps.contactRepo.findByTelegramId(ownerUserId, inviteeId);
+  if (contact?.username) return contact.username;
+
+  return undefined;
+}
+
+function resolveInviteeName(deps: ConnectTelegramDeps, ownerUserId: number, inviteeId: number): string {
+  const user = deps.userRepo.findByTelegramId(inviteeId);
+  if (user?.first_name) return user.first_name;
+  if (user?.username) return `@${user.username}`;
+
+  const contact = deps.contactRepo.findByTelegramId(ownerUserId, inviteeId);
+  if (contact?.preferred_name) return contact.preferred_name;
+  if (contact?.name) return contact.name;
+  if (contact?.username) return `@${contact.username}`;
+
+  return `User ${inviteeId}`;
 }
 
 // --- Finalize helper ---
 
 interface FinalizeContext {
   from: { id: number };
-  send: (text: string) => Promise<unknown>;
-  scene: { exit: () => Promise<boolean> | boolean };
+  send: (text: string, options?: { reply_markup?: InlineKeyboard }) => Promise<unknown>;
+  scene: {
+    exit: () => Promise<boolean> | boolean;
+    params: ConnectTelegramParams;
+  };
 }
 
+/**
+ * Encrypts and persists the session. Returns true if a pending invitation offer was shown
+ * (caller should advance to step 4 instead of exiting).
+ */
 async function finalizeSession(
   context: FinalizeContext,
   sessionRepo: TelegramSessionRepository,
@@ -329,14 +443,15 @@ async function finalizeSession(
   phone: string,
   sessionPath: string,
   lang: 'en' | 'ru',
-): Promise<void> {
+  deps?: ConnectTelegramDeps,
+): Promise<boolean> {
   const userId = context.from.id;
   const ct = t(lang).connectTelegram;
 
   try {
     if (!config.TELEGRAM_SESSION_MASTER_KEY) {
       await context.send(ct.featureUnavailable);
-      return;
+      return false;
     }
     const masterKey = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
 
@@ -353,14 +468,36 @@ async function finalizeSession(
     sessionRepo.upsert(userId, encryptedSession, encryptedPhone, hash);
 
     const masked = maskPhone(phone);
-    await context.send(ct.success(masked));
-
     sceneLogger.info({ userId, phoneHash: hash }, 'Telegram account connected');
+
+    // Check for pending invitation offer
+    const pending = context.scene.params;
+    if (deps && pending?.pendingEventId && pending.pendingInviteeIds?.length) {
+      const event = deps.eventRepo.findById(pending.pendingEventId, userId);
+      if (event) {
+        const firstInviteeId = pending.pendingInviteeIds[0]!;
+        const inviteeName = resolveInviteeName(deps, userId, firstInviteeId);
+        const dateLine = `${formatDateShort(event.start_at, event.timezone, lang)} ${formatTime(event.start_at, event.timezone)}`;
+
+        const kb = new InlineKeyboard()
+          .text(ct.sendPendingBtn, `${CB_PREFIX}:send_pending:${event.id}:${firstInviteeId}`)
+          .text(ct.skipPendingBtn, CB_SKIP_PENDING);
+
+        await context.send(ct.successWithPending(masked, event.title, dateLine, inviteeName), { reply_markup: kb });
+        return true; // Don't exit — wait for callback
+      }
+    }
+
+    // Generic success — no pending invitation
+    await context.send(ct.success(masked));
+    await context.scene.exit();
+    return false;
   } catch (err) {
     sceneLogger.error({ err, userId }, 'Failed to finalize session');
     await context.send(ct.featureUnavailable);
+    await context.scene.exit();
+    return false;
   } finally {
     await SessionBridge.cleanupTempFile(sessionPath);
-    await context.scene.exit();
   }
 }

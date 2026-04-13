@@ -19,6 +19,7 @@ import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { formatInvitation } from '../services/event/formatters.ts';
+import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
@@ -225,6 +226,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     prefsService,
     holidayService,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
+    invitationService,
   );
 
   const intentRepo = new IntentRepository(db.db);
@@ -1034,6 +1036,22 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     )
     // Telegram account connection commands
     .command('connect_telegram', async (ctx) => {
+      const userId = ctx.dbUser?.telegram_id;
+      if (userId) {
+        const recentEvent = findMostRecentEventWithExternalParticipants(
+          userId,
+          db.actionLog,
+          db.participants,
+          db.users,
+        );
+        if (recentEvent) {
+          await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene, {
+            pendingEventId: recentEvent.eventId,
+            pendingInviteeIds: recentEvent.externalInviteeIds,
+          });
+          return;
+        }
+      }
       await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene);
     })
     .command('disconnect_telegram', async (ctx) => {
