@@ -25,7 +25,8 @@ if (OLD_KEY_HEX === NEW_KEY_HEX) {
 const oldKey = Buffer.from(OLD_KEY_HEX, 'hex');
 const newKey = Buffer.from(NEW_KEY_HEX, 'hex');
 
-const db = new Database('data/bot.db');
+const dbPath = process.env.DATABASE_PATH || './data/calendar.db';
+const db = new Database(dbPath);
 db.exec('PRAGMA journal_mode=WAL');
 
 interface Row {

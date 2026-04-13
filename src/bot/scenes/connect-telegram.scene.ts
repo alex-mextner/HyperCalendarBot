@@ -42,11 +42,22 @@ export function isConnectCooldownActive(userId: number): boolean {
 // --- State & Params ---
 
 export interface ConnectTelegramState {
-  phone?: string;
+  /** Phone number encrypted with master key, stored as hex. Never plain text in scene storage (SQLite). */
+  encryptedPhoneHex?: string;
   phoneCodeHash?: string;
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+}
+
+/** Encrypt phone for safe storage in scene state (SQLite). */
+function encryptPhoneForState(phone: string, masterKeyHex: string): string {
+  return encryptString(phone, Buffer.from(masterKeyHex, 'hex')).toString('hex');
+}
+
+/** Decrypt phone from scene state. */
+function decryptPhoneFromState(hex: string, masterKeyHex: string): string {
+  return decryptString(Buffer.from(hex, 'hex'), Buffer.from(masterKeyHex, 'hex'));
 }
 
 export interface ConnectTelegramParams {
@@ -171,6 +182,12 @@ export function createConnectTelegramScene(
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
         const text = context.text?.trim();
+        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
+        if (!masterKeyHex) {
+          await context.send(ct.featureUnavailable);
+          await context.scene.exit();
+          return;
+        }
 
         if (!text || !PHONE_REGEX.test(text)) {
           await context.send(ct.invalidPhone);
@@ -214,7 +231,7 @@ export function createConnectTelegramScene(
         }
 
         await context.scene.update({
-          phone,
+          encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
           phoneCodeHash: result.data.phone_code_hash,
           sessionPath,
           codeAttempts: 0,
@@ -230,10 +247,11 @@ export function createConnectTelegramScene(
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
         const text = context.text?.trim();
-        const { phone, phoneCodeHash, sessionPath, codeAttempts } = context.scene.state;
+        const { encryptedPhoneHex, phoneCodeHash, sessionPath, codeAttempts } = context.scene.state;
 
-        if (!phone || !phoneCodeHash || !sessionPath) {
-          sceneLogger.warn({ userId }, 'OTP step missing state');
+        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
+        if (!encryptedPhoneHex || !phoneCodeHash || !sessionPath || !masterKeyHex) {
+          sceneLogger.warn({ userId }, 'OTP step missing state or master key');
           await context.send(ct.featureUnavailable);
           await context.scene.exit();
           return;
@@ -247,6 +265,7 @@ export function createConnectTelegramScene(
         const attempts = (codeAttempts ?? 0) + 1;
         await context.scene.update({ codeAttempts: attempts });
 
+        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
         const result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
 
         if (!result.success) {
@@ -305,10 +324,11 @@ export function createConnectTelegramScene(
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
         const text = context.text?.trim();
-        const { phone, sessionPath, passwordAttempts } = context.scene.state;
+        const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
 
-        if (!phone || !sessionPath) {
-          sceneLogger.warn({ userId }, '2FA step missing state');
+        const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
+        if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
+          sceneLogger.warn({ userId }, '2FA step missing state or master key');
           await context.send(ct.featureUnavailable);
           await context.scene.exit();
           return;
@@ -344,6 +364,7 @@ export function createConnectTelegramScene(
           return;
         }
 
+        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
         const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
         if (hasPending) {
           await context.scene.step.go(4); // Jump to pending invitation step
