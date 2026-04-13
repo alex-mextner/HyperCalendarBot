@@ -94,7 +94,7 @@ export async function handleWeek(
       const file = new File([buffer], 'week.png', { type: 'image/png' });
       await ctx.sendPhoto(file);
     } catch (err) {
-      imageLogger.error({ error: (err as Error).message }, 'Render failed');
+      imageLogger.error({ err }, 'Render failed');
     }
   }
 }

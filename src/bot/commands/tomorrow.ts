@@ -91,7 +91,7 @@ export async function handleTomorrow(
       const file = new File([buffer], 'tomorrow.png', { type: 'image/png' });
       await ctx.sendPhoto(file);
     } catch (err) {
-      imageLogger.error({ error: (err as Error).message }, 'Render failed');
+      imageLogger.error({ err }, 'Render failed');
     }
   }
 }
