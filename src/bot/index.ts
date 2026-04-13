@@ -42,6 +42,7 @@ import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
+import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
@@ -252,8 +253,21 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     }
   };
 
+  const telegramMasterKey = envConfig?.TELEGRAM_SESSION_MASTER_KEY
+    ? Buffer.from(envConfig.TELEGRAM_SESSION_MASTER_KEY, 'hex')
+    : null;
+
+  const sendAsConnectedUser = telegramMasterKey
+    ? createConnectedUserSender({
+        sessionRepo: db.telegramSessions,
+        masterKey: telegramMasterKey,
+        notifLogRepo: db.notificationLog,
+      })
+    : undefined;
+
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
+    sendAsConnectedUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
   const triggerRepo = new TriggerRepository(db.db);

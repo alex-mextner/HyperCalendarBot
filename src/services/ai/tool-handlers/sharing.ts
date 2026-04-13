@@ -2,6 +2,7 @@ import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, Visibility } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { formatInvitation } from '../../event/formatters.ts';
+import { buildUserSessionInvitationText } from '../../telegram-session/invitation-text.ts';
 import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -79,6 +80,29 @@ function deliverInvitationAsync(params: DeliveryParams): void {
         ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`
         : `⚠️ Could not deliver invitation for "${eventTitle}" directly.`;
 
+  // User-session MTProto: first-person text via user's own connected session
+  const userFirstPersonText =
+    event && url && sender.sendAsConnectedUser
+      ? buildUserSessionInvitationText({
+          event: {
+            title: event.title,
+            start_utc: event.start_at,
+            location: event.location,
+            description: event.description,
+          },
+          inviterTimezone: ctx.user.timezone,
+          deepLink: url,
+          lang,
+        })
+      : null;
+
+  const userMtprotoSend =
+    userFirstPersonText && sender.sendAsConnectedUser
+      ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
+          sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
+      : undefined;
+
+  // Admin MTProto: third-person text via admin session (existing fallback)
   const mtprotoSend =
     sender.sendAsUser && url !== null
       ? (userId: number, _text: string, username?: string): Promise<boolean> => {
@@ -87,6 +111,18 @@ function deliverInvitationAsync(params: DeliveryParams): void {
               ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
               : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
           return sender.sendAsUser!(userId, mtprotoText, username);
+        }
+      : undefined;
+
+  // Combined: try user session first, fall back to admin session
+  const combinedMtprotoSend =
+    userMtprotoSend || mtprotoSend
+      ? async (targetId: number, text: string, username?: string): Promise<boolean> => {
+          if (userMtprotoSend) {
+            const ok = await userMtprotoSend(targetId, text, username);
+            if (ok) return true;
+          }
+          return mtprotoSend ? mtprotoSend(targetId, text, username) : false;
         }
       : undefined;
 
@@ -105,7 +141,7 @@ function deliverInvitationAsync(params: DeliveryParams): void {
       }
       return sender.sendMessage(recipientId, msgText);
     },
-    mtprotoSend,
+    mtprotoSend: combinedMtprotoSend,
   })
     .then((result) => {
       if (result.delivered && result.messageId !== undefined) {

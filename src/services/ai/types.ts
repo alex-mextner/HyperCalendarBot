@@ -291,6 +291,13 @@ export interface TelegramSender {
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
+  sendAsConnectedUser?(
+    inviterId: number,
+    targetId: number,
+    text: string,
+    username?: string,
+    meta?: { invitationId?: number },
+  ): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
   sendChatAction?(chatId: number, action: 'typing'): Promise<void>;
