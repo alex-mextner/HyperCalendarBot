@@ -128,11 +128,19 @@ describe('buildSystemPrompt', () => {
     ctx.groupChatId = -100;
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('clear intent + consensus required');
-    // Two conditions
     expect(prompt).toContain('Clear intent to create');
     expect(prompt).toContain('Consensus');
-    // Availability sharing is not intent
     expect(prompt).toContain('is NOT intent to create an event');
+  });
+
+  test('group consensus applies to event details (location, time), not only creation', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Friends';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('same consensus logic applies to');
+    expect(prompt).toContain('event details');
+    expect(prompt).toContain('У Иры');
   });
 
   test('group prompt has three creation modes with group-specific examples', () => {
@@ -152,6 +160,14 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('output [SKIP] and do not reply');
     // Availability discussion → [SKIP]
     expect(prompt).toContain('listing her availability');
+  });
+
+  test('abstract locations must stay as plain text, not geocoded', () => {
+    ctx.preloadedAddressContext = 'Gym: ул. Ленина 10, Москва (https://maps.google.com/...)';
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('Abstract or relative locations');
+    expect(prompt).toContain('must stay as plain text');
+    expect(prompt).toContain('do NOT try to geocode');
   });
 
   test('instructs to use pick_users and find_contact for invitations', () => {

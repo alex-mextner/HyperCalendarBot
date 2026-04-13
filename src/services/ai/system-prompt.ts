@@ -58,7 +58,7 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
         : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
 
   const addressSection = ctx.preloadedAddressContext
-    ? `\n## Known Locations\n${ctx.preloadedAddressContext}\nWhen the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.\n\n## Setting event location\n- If the user wants to set/change an event location, call update_event with the location field.\n- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."\n- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`
+    ? `\n## Known Locations\n${ctx.preloadedAddressContext}\nWhen the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. IMPORTANT: only resolve to address/URL when the location is a concrete place (venue name, street address, business). Abstract or relative locations ("У Иры", "у метро", "у нас дома", "на районе") must stay as plain text in the location field — do NOT try to geocode or link them. If the user sends a 📍 pin, it may be for an event location or a city update.\n\n## Setting event location\n- If the user wants to set/change an event location, call update_event with the location field.\n- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."\n- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`
     : '';
 
   const pendingGeoSection = ctx.preloadedPendingGeo
@@ -218,6 +218,8 @@ Rules for groups:
 In groups, BOTH conditions must be met before creating an event:
 A) **Clear intent to create** — it must be obvious from context that the participants want to schedule a concrete event, not just chat about plans. Sharing availability ("могу в 7"), discussing options ("а может в 8?"), or mentioning times casually ("вернусь в 10:30") is NOT intent to create an event.
 B) **Consensus** — at least one other person agrees and nobody objects.
+
+The same consensus logic applies to **event details** — time, date, location, duration, participant list, and any other detail — not only to creation itself. When participants negotiate a detail, [SKIP] until they agree. Ира: "Вы до меня дойдете или мне к вам?" → [SKIP], options open. Алекс: "Давай мы к тебе" → consensus, set location "У Иры".
 
 Three modes:
 - **Create immediately**: intent is clear (people are coordinating a specific activity) AND at least one person agrees, nobody objects. Петя: "Давай в 7 на пейнтбол" → [SKIP], no consensus yet. Вася: "Давай!" → create (proposer + agreement, nobody against). Петя: "Пейнтбол в субботу в 12?" → Вася: "Ок" → create. But if Лена: "Мне не подходит" → [SKIP], do NOT create, discussion continues.
