@@ -72,22 +72,14 @@ async function deliverInvitation(params: DeliveryParams): Promise<{ delivered: b
 
   const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
   const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
+  const tr = t(lang).aiTools.sharing;
   const fallbackMsg =
-    url !== null
-      ? lang === 'ru'
-        ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`
-        : `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`
-      : lang === 'ru'
-        ? `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`
-        : `⚠️ Could not deliver invitation for "${eventTitle}" directly.`;
+    url !== null ? tr.deliveryFallbackWithLink(eventTitle, url) : tr.deliveryFallbackNoLink(eventTitle);
 
   const mtprotoSend =
     sender.sendAsUser && url !== null
       ? (userId: number, _text: string, username?: string): Promise<boolean> => {
-          const mtprotoText =
-            lang === 'ru'
-              ? `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`
-              : `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`;
+          const mtprotoText = tr.mtprotoInvite(inviterName, eventTitle, url);
           return sender.sendAsUser!(userId, mtprotoText, username);
         }
       : undefined;
