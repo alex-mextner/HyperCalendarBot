@@ -139,6 +139,17 @@ export class EventService {
     return this.eventRepo.findById(id, userId);
   }
 
+  /**
+   * Fetch an event by id, bypassing ONLY the soft-delete filter. Ownership
+   * and group-visibility checks still apply — the caller must have had
+   * access to the event before it was soft-deleted. Used by downstream
+   * systems that need the title of a removed event (e.g. proposal accept/
+   * reject notifications to the proposer).
+   */
+  getEventIncludingSoftDeleted(id: number, userId: number): CalendarEvent | null {
+    return this.eventRepo.findByIdIncludingSoftDeleted(id, userId);
+  }
+
   getLatestCreated(userId: number): CalendarEvent | null {
     return this.eventRepo.findLatestCreatedByUser(userId);
   }

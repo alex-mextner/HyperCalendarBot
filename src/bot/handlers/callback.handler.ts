@@ -44,14 +44,13 @@ import {
   stripMarkdown,
   transliterateEnglish,
 } from '../../services/voice/stress-marker.ts';
-import { formatDayWeatherLine } from '../../services/weather/format.ts';
 import type { WeatherService } from '../../services/weather/weather-service.ts';
 import { autoPin } from '../../utils/auto-pin.ts';
 import { getWeekRangeUtc, localCalendarWeekDays } from '../../utils/date.ts';
 import { formatProposedTime } from '../../utils/invite-time-format.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger, imageLogger } from '../../utils/logger.ts';
-import { formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
+import { escapeHtml, formatUtcOffset, type ParseMode } from '../../utils/telegram.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
 import { buildCalendarPickerKeyboard, handleCalendarPickerCallback } from '../commands/calendars.ts';
 import { handleDeleteCallback, handleDeleteConfirmCallback } from '../commands/delete.ts';
@@ -114,13 +113,13 @@ export interface CallbackHandlerOpts {
   onboardingScene?: AnyScene;
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
-    sendMessage: (chatId: number, text: string, options: { parse_mode: ParseMode }) => Promise<void>;
+    sendMessage: (chatId: number, text: string, options?: { parse_mode: ParseMode }) => Promise<void>;
   };
   callSettingsRepo?: CallSettingsRepository;
   sharingSettingsRepo?: SharingSettingsRepository;
   feedbackDeps?: {
     feedbackRepo: FeedbackRepository;
-    adminReplySession: Map<number, { threadId: number; userId: number }>;
+    adminReplySession: Map<number, { threadId: number; userId: number; chatId?: number; topicThreadId?: number }>;
     sendMessage: (chatId: number, text: string) => Promise<void>;
     adminId?: number;
   };
@@ -699,7 +698,7 @@ export function createCallbackHandler(
                 inviteeUser?.timezone ?? null,
                 !!inviteeUser?.onboarding_completed,
               )
-            : t(inviteeLang).invitation_received(eventTitle, inviterName);
+            : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
           const keyboard = new InlineKeyboard()
             .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
             .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -740,26 +739,19 @@ export function createCallbackHandler(
       await ctx.answer(statusLabel);
 
       const event = eventRepo?.findById(result.invitation?.event_id ?? 0, result.invitation?.inviter_id ?? 0);
-      const eventCard = event ? formatEventDetail(event, event.timezone, lang) : '';
+      // Fetch forecast anchored to event start (hourly when within 48h, daily within 7 days).
+      // For all-day events the daily forecast is used regardless — no midnight temperature.
+      const forecast =
+        weatherService && event && subAction === 'accept'
+          ? await weatherService
+              .getForecastAt(user.timezone, new Date(event.start_at).getTime(), lang, {
+                allDay: event.all_day === 1,
+              })
+              .catch(() => null)
+          : null;
+      const eventCard = event ? formatEventDetail(event, event.timezone, lang, { forecast }) : '';
 
-      // Append weather forecast if available and event is within 7 days
-      let weatherLine = '';
-      if (weatherService && event && subAction === 'accept') {
-        const eventMs = new Date(event.start_at).getTime();
-        const daysAhead = (eventMs - Date.now()) / (24 * 60 * 60 * 1000);
-        if (daysAhead >= 0 && daysAhead <= 7) {
-          const forecast = await weatherService.getWeekWeather(user.timezone, lang).catch(() => null);
-          if (forecast) {
-            const eventDate = event.start_at.slice(0, 10);
-            const dayForecast = forecast.days.find((d) => d.date === eventDate);
-            if (dayForecast) {
-              weatherLine = `\n${formatDayWeatherLine(lang, dayForecast)}`;
-            }
-          }
-        }
-      }
-
-      const editText = eventCard ? `${statusLabel}\n\n${eventCard}${weatherLine}` : statusLabel;
+      const editText = eventCard ? `${statusLabel}\n\n${eventCard}` : statusLabel;
       await ctx.editText(editText, { parse_mode: 'HTML' }).catch(() => {});
 
       // Notify inviter about the response
@@ -811,6 +803,14 @@ export function createCallbackHandler(
       return;
     }
 
+    // Resolve the event title up front — bypass soft-delete so the
+    // proposer's notification always shows which event their proposal
+    // referenced, even if the owner has since removed it. The lookup
+    // still enforces ownership via the user.telegram_id check, so this
+    // is not an IDOR (we already verified `ownerId === user.telegram_id`).
+    const eventForTitle = eventService.getEventIncludingSoftDeleted(proposal.event_id, user.telegram_id);
+    const eventTitle = eventForTitle?.title ?? `#${proposal.event_id}`;
+
     if (subAction === 'accept') {
       const changes = JSON.parse(proposal.changes) as UpdateEventData;
       const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
@@ -825,9 +825,7 @@ export function createCallbackHandler(
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
       editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification, {
-          parse_mode: 'HTML',
-        })
+        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification(eventTitle))
         .catch(() => {});
     } else if (subAction === 'reject') {
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
@@ -837,9 +835,7 @@ export function createCallbackHandler(
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
       editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification, {
-          parse_mode: 'HTML',
-        })
+        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification(eventTitle))
         .catch(() => {});
     }
   });
@@ -1013,7 +1009,7 @@ export function createCallbackHandler(
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
           )
-        : t(inviteeLang).invitation_received(eventTitle, inviterName);
+        : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -1082,7 +1078,7 @@ export function createCallbackHandler(
             inviteeUser?.timezone ?? null,
             !!inviteeUser?.onboarding_completed,
           )
-        : t(inviteeLang).invitation_received(eventTitle, inviterName);
+        : t(inviteeLang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
       const kb = new InlineKeyboard()
         .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
         .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
@@ -1331,7 +1327,7 @@ export function createCallbackHandler(
     const threadUser = userRepo?.findByTelegramId(thread.user_id);
     const threadUserLang = (threadUser?.language ?? lang) as Lang;
     feedbackDeps
-      .sendMessage(thread.user_id, t(threadUserLang).callbackErrors.feedbackThreadResolved)
+      .sendMessage(thread.user_id, t(threadUserLang).callbackErrors.feedbackThreadResolved(thread.subject))
       .catch((e: unknown) => {
         cmdLogger.error({ err: e }, 'Failed to notify user of thread close');
       });
@@ -1351,7 +1347,12 @@ export function createCallbackHandler(
       await ctx.answer({ text: t(lang).callbackErrors.threadNotFound });
       return;
     }
-    feedbackDeps.adminReplySession.set(user.telegram_id, { threadId, userId: thread.user_id });
+    feedbackDeps.adminReplySession.set(user.telegram_id, {
+      threadId,
+      userId: thread.user_id,
+      chatId: thread.chat_id ?? undefined,
+      topicThreadId: thread.topic_thread_id ?? undefined,
+    });
     await ctx.answer({ text: t(lang).callbackErrors.sendReplyMessage });
   });
 

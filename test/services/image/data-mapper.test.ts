@@ -27,6 +27,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     parent_event_id: null,
     original_start_at: null,
     is_cancelled: 0,
+    is_deleted: 0,
     reminder_overrides: null,
     google_event_id: null,
     google_calendar_id: null,
@@ -267,6 +268,42 @@ describe('mapWeeklyOverviewData', () => {
     });
     expect(result.days[0]!.events[0]!.title).toContain('🔁');
     expect(result.days[0]!.events[0]!.color).not.toBe(BIRTHDAY_COLOR);
+  });
+
+  test('maps weatherByDate to weatherEmoji and weatherTemp', () => {
+    const weatherByDate = {
+      '2026-03-09': { tempMin: 2, tempMax: 8, conditionCode: 800, description: 'clear', windSpeed: 3 },
+      '2026-03-10': { tempMin: -1, tempMax: 4, conditionCode: 601, description: 'snow', windSpeed: 5 },
+    };
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: new Map(),
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+      weatherByDate,
+    });
+    expect(result.days[0]!.weatherEmoji).toBe('☀️');
+    expect(result.days[0]!.weatherTemp).toBe('2..8°');
+    expect(result.days[1]!.weatherEmoji).toBe('🌨');
+    expect(result.days[1]!.weatherTemp).toBe('-1..4°');
+    expect(result.days[2]!.weatherEmoji).toBeUndefined();
+    expect(result.days[2]!.weatherTemp).toBeUndefined();
+  });
+
+  test('weatherTemp shows single value when min equals max', () => {
+    const weatherByDate = {
+      '2026-03-09': { tempMin: 5, tempMax: 5, conditionCode: 800, description: 'clear', windSpeed: 2 },
+    };
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: new Map(),
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+      weatherByDate,
+    });
+    expect(result.days[0]!.weatherTemp).toBe('5°');
   });
 });
 

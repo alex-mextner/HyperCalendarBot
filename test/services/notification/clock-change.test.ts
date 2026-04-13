@@ -177,40 +177,41 @@ describe('detectClockChange', () => {
 describe('formatClockChangeNotice', () => {
   test('formats spring forward in Russian', () => {
     const text = formatClockChangeNotice('ru', { direction: 'forward', minutes: 60 });
-    expect(text).toContain('🕐');
-    expect(text).toContain('вперёд');
-    expect(text).toContain('1');
+    expect(text).toBe('🕐 Часы переведены на +1 час');
   });
 
   test('formats fall back in Russian', () => {
     const text = formatClockChangeNotice('ru', { direction: 'back', minutes: 60 });
-    expect(text).toContain('🕐');
-    expect(text).toContain('назад');
+    expect(text).toBe('🕐 Часы переведены на -1 час');
   });
 
   test('formats spring forward in English', () => {
     const text = formatClockChangeNotice('en', { direction: 'forward', minutes: 60 });
-    expect(text).toContain('🕐');
-    expect(text).toContain('forward');
-    expect(text).toContain('1h');
+    expect(text).toBe('🕐 Clocks shifted by +1h');
   });
 
   test('formats fall back in English', () => {
     const text = formatClockChangeNotice('en', { direction: 'back', minutes: 60 });
-    expect(text).toContain('🕐');
-    expect(text).toContain('back');
+    expect(text).toBe('🕐 Clocks shifted by -1h');
+  });
+
+  test('does not include noisy "check your alarms" reassurance (devices auto-adjust)', () => {
+    const ru = formatClockChangeNotice('ru', { direction: 'forward', minutes: 60 });
+    expect(ru).not.toContain('проверь');
+    expect(ru).not.toContain('будильник');
+    const en = formatClockChangeNotice('en', { direction: 'forward', minutes: 60 });
+    expect(en).not.toContain('check');
+    expect(en).not.toContain('alarms');
   });
 
   test('formats 30-minute shift as "30 min" not "0.5h" (Lord Howe Island case)', () => {
     // 30 min should display as "30 min" / "30 минут", not "0.5h" / "0.5 часов"
     const textEn = formatClockChangeNotice('en', { direction: 'forward', minutes: 30 });
-    expect(textEn).toContain('30');
-    expect(textEn).toContain('min');
+    expect(textEn).toBe('🕐 Clocks shifted by +30 min');
     expect(textEn).not.toContain('0.5');
 
-    const textRu = formatClockChangeNotice('ru', { direction: 'forward', minutes: 30 });
-    expect(textRu).toContain('30');
-    expect(textRu).toContain('минут');
+    const textRu = formatClockChangeNotice('ru', { direction: 'back', minutes: 30 });
+    expect(textRu).toBe('🕐 Часы переведены на -30 минут');
     expect(textRu).not.toContain('0.5');
   });
 });

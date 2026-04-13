@@ -14,6 +14,7 @@ export type AgentContextBuilder = (
     isGroup: boolean;
     groupChatId?: number;
     groupTitle?: string;
+    topicThreadId?: number;
     onBotResponse?: (messageId: number) => void;
   },
   incomingMessageId?: number,

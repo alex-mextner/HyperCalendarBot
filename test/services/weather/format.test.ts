@@ -1,6 +1,46 @@
 import { describe, expect, test } from 'bun:test';
-import { formatDayWeatherLine, formatWeekWeatherLine } from '../../../src/services/weather/format.ts';
-import type { DayWeather } from '../../../src/services/weather/types.ts';
+import {
+  formatDayWeatherLine,
+  formatEventWeatherLine,
+  formatTempCurrent,
+  formatTempRange,
+  formatWeekWeatherLine,
+} from '../../../src/services/weather/format.ts';
+import type { DayWeather, EventForecast } from '../../../src/services/weather/types.ts';
+
+describe('formatTempRange', () => {
+  test('shows range when min differs from max', () => {
+    expect(formatTempRange(5, 15)).toBe('5..15°C');
+  });
+
+  test('collapses to single value when min equals max', () => {
+    expect(formatTempRange(13, 13)).toBe('13°C');
+  });
+
+  test('uses custom suffix', () => {
+    expect(formatTempRange(5, 15, '°')).toBe('5..15°');
+    expect(formatTempRange(10, 10, '°')).toBe('10°');
+  });
+});
+
+describe('formatTempCurrent', () => {
+  test('shows current with range when min differs from max', () => {
+    expect(formatTempCurrent(10, 5, 15)).toBe('10°C (5..15°C)');
+  });
+
+  test('shows only current when min equals max', () => {
+    expect(formatTempCurrent(13, 13, 13)).toBe('13°C');
+  });
+
+  test('shows only current when range is equal even if current differs', () => {
+    expect(formatTempCurrent(14, 13, 13)).toBe('14°C');
+  });
+
+  test('uses custom suffix', () => {
+    expect(formatTempCurrent(10, 5, 15, '°')).toBe('10° (5..15°)');
+    expect(formatTempCurrent(10, 10, 10, '°')).toBe('10°');
+  });
+});
 
 describe('formatDayWeatherLine', () => {
   const baseWeather: DayWeather = {
@@ -41,6 +81,21 @@ describe('formatDayWeatherLine', () => {
     expect(result).not.toContain('💨');
   });
 
+  test('omits range when min equals max', () => {
+    const same: DayWeather = { ...baseWeather, tempMin: 13, tempMax: 13, tempCurrent: 13 };
+    const result = formatDayWeatherLine('en', same);
+    expect(result).toBe('☀️ 13°C, clear sky');
+    expect(result).not.toContain('..');
+    expect(result).not.toContain('(');
+  });
+
+  test('shows single temp when no current and min equals max', () => {
+    const forecast: DayWeather = { ...baseWeather, tempCurrent: undefined, tempMin: 8, tempMax: 8 };
+    const result = formatDayWeatherLine('en', forecast);
+    expect(result).toBe('☀️ 8°C, clear sky');
+    expect(result).not.toContain('..');
+  });
+
   test('shows range when no current temp', () => {
     const forecast: DayWeather = { ...baseWeather, tempCurrent: undefined };
     const result = formatDayWeatherLine('en', forecast);
@@ -65,5 +120,88 @@ describe('formatWeekWeatherLine', () => {
     };
     const result = formatWeekWeatherLine('en', day);
     expect(result).toBe('🌨 -2..5°C');
+  });
+
+  test('shows single temp when min equals max', () => {
+    const day: DayWeather = {
+      tempMin: 7,
+      tempMax: 7,
+      conditionCode: 800,
+      description: 'clear',
+      windSpeed: 2,
+    };
+    const result = formatWeekWeatherLine('en', day);
+    expect(result).toBe('☀️ 7°C');
+    expect(result).not.toContain('..');
+  });
+});
+
+describe('formatEventWeatherLine', () => {
+  test('hourly forecast shows single temperature at the event time', () => {
+    const forecast: EventForecast = {
+      kind: 'hour',
+      hour: {
+        dt: 1_700_000_000,
+        temp: 17,
+        conditionCode: 800,
+        description: 'clear sky',
+        windSpeed: 3,
+        pop: 0,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toBe('☀️ 17°C, clear sky');
+    expect(result).not.toContain('..');
+  });
+
+  test('hourly forecast includes wind when >= 10 m/s', () => {
+    const forecast: EventForecast = {
+      kind: 'hour',
+      hour: {
+        dt: 1_700_000_000,
+        temp: 9,
+        conditionCode: 500,
+        description: 'light rain',
+        windSpeed: 14.2,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toContain('💨');
+    expect(result).toContain('14 m/s');
+  });
+
+  test('daily fallback shows min..max range', () => {
+    const forecast: EventForecast = {
+      kind: 'day',
+      day: {
+        date: '2026-04-15',
+        tempMin: 5,
+        tempMax: 18,
+        conditionCode: 801,
+        description: 'few clouds',
+        windSpeed: 4,
+      },
+    };
+    const result = formatEventWeatherLine('en', forecast);
+    expect(result).toBe('⛅ 5..18°C, few clouds');
+  });
+
+  test('daily fallback renders in Russian', () => {
+    const forecast: EventForecast = {
+      kind: 'day',
+      day: {
+        date: '2026-04-15',
+        tempMin: -3,
+        tempMax: 2,
+        conditionCode: 600,
+        description: 'снег',
+        windSpeed: 12,
+      },
+    };
+    const result = formatEventWeatherLine('ru', forecast);
+    expect(result).toContain('🌨');
+    expect(result).toContain('-3..2°C');
+    expect(result).toContain('снег');
+    expect(result).toContain('12 м/с');
   });
 });

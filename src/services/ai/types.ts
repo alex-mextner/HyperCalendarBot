@@ -43,6 +43,7 @@ import type { InvitationService } from '../sharing/invitation-service.ts';
 import type { PrivacyService } from '../sharing/privacy-service.ts';
 import type { SharingService } from '../sharing/sharing-service.ts';
 import type { StressDictionary } from '../voice/stress-dictionary.ts';
+import type { WeatherService } from '../weather/weather-service.ts';
 
 // ---------------------------------------------------------------------------
 // Capability group interfaces — each group is optional as a whole;
@@ -175,6 +176,8 @@ export interface AgentContext {
   incomingMessageId?: number;
   groupChatId?: number;
   groupTitle?: string;
+  /** Telegram forum topic thread ID. Present when the message is inside a topic. */
+  topicThreadId?: number;
   onBotResponse?: (messageId: number) => void;
   sender?: TelegramSender;
   /** Called after any successful tool call that references an event (by ID or creation). */
@@ -187,7 +190,7 @@ export interface AgentContext {
   sendMessageToChat?: (
     chatId: number,
     text: string,
-    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup },
+    options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   conflictChecker?: ConflictChecker;
@@ -225,6 +228,7 @@ export interface AgentContext {
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
+  weatherService?: WeatherService;
   /** Preloaded address context for system prompt (loaded async before agent runs) */
   preloadedAddressContext?: string;
   /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */

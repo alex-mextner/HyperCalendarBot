@@ -45,6 +45,45 @@ describe('FeedbackRepository', () => {
     expect(thread!.closed_at).toBeNull();
   });
 
+  test('createThread stores chat_id when provided', () => {
+    const id = repo.createThread({
+      user_id: 123,
+      type: 'bug',
+      subject: 'Group feedback',
+      chat_id: -100999,
+    });
+
+    const thread = repo.getThread(id);
+    expect(thread).not.toBeNull();
+    expect(thread!.chat_id).toBe(-100999);
+  });
+
+  test('createThread stores topic_thread_id when provided', () => {
+    const id = repo.createThread({
+      user_id: 123,
+      type: 'bug',
+      subject: 'Topic feedback',
+      chat_id: -100999,
+      topic_thread_id: 42,
+    });
+
+    const thread = repo.getThread(id);
+    expect(thread).not.toBeNull();
+    expect(thread!.topic_thread_id).toBe(42);
+  });
+
+  test('createThread defaults chat_id to null when not provided', () => {
+    const id = repo.createThread({
+      user_id: 123,
+      type: 'bug',
+      subject: 'Private feedback',
+    });
+
+    const thread = repo.getThread(id);
+    expect(thread).not.toBeNull();
+    expect(thread!.chat_id).toBeNull();
+  });
+
   test('getThread returns null for non-existent thread', () => {
     expect(repo.getThread(999)).toBeNull();
   });

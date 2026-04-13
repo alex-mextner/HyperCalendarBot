@@ -1,6 +1,7 @@
 import { TZDate } from '@date-fns/tz';
 import type { EventOccurrence } from '../../database/types.ts';
 import { getTheme } from '../../worker/templates/themes.ts';
+import type { DayWeather } from '../weather/types.ts';
 import { mapWeeklyOverviewData } from './data-mapper.ts';
 import type { ImageRenderer } from './render-service.ts';
 
@@ -11,6 +12,7 @@ export async function renderWeekImage(
   timezone: string,
   locale: 'ru' | 'en',
   userId: number,
+  weatherByDate?: { [date: string]: DayWeather },
 ): Promise<Buffer> {
   const startD = new Date(`${weekStartIso}T12:00:00Z`);
   const occurrencesByDay = new Map<string, EventOccurrence[]>();
@@ -37,6 +39,7 @@ export async function renderWeekImage(
     locale,
     theme: getTheme(),
     todayIso,
+    weatherByDate,
   });
 
   return renderService.renderDirect({

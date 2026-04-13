@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { localizeInterval, NotificationRenderer } from '../../../src/services/notification/renderer.ts';
-import type { DayWeather } from '../../../src/services/weather/types.ts';
+import type { DayWeather, EventForecast } from '../../../src/services/weather/types.ts';
 
 describe('NotificationRenderer', () => {
   const renderer = new NotificationRenderer();
@@ -108,7 +108,8 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day before',
         isAllDay: true,
       });
-      expect(result.text).toContain('Напоминание: Зарплата как CTO — завтра');
+      expect(result.text).toContain('⏰ Зарплата как CTO — завтра');
+      expect(result.text).not.toContain('Напоминание');
       expect(result.text).toContain('📅 Весь день');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain('через');
@@ -123,7 +124,8 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day of',
         isAllDay: true,
       });
-      expect(result.text).toContain('Напоминание: Праздник — сегодня');
+      expect(result.text).toContain('⏰ Праздник — сегодня');
+      expect(result.text).not.toContain('Напоминание');
       expect(result.text).toContain('📅 Весь день');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain('через');
@@ -137,10 +139,33 @@ describe('NotificationRenderer', () => {
         intervalLabel: 'day before',
         isAllDay: true,
       });
-      expect(result.text).toContain('Reminder: Salary — day before');
+      expect(result.text).toContain('⏰ Salary — day before');
+      expect(result.text).not.toContain('Reminder:');
       expect(result.text).toContain('📅 All day');
       expect(result.text).not.toContain('🕐');
       expect(result.text).not.toContain(' in ');
+    });
+
+    test('single reminder does not contain the word "Reminder"/"Напоминание"', () => {
+      const ru = renderer.renderEventReminder('ru', {
+        title: 'Лазер',
+        startTime: '14:00',
+        location: null,
+        intervalLabel: 'day before',
+        isAllDay: true,
+      });
+      expect(ru.text.startsWith('⏰ Лазер')).toBe(true);
+      expect(ru.text).not.toContain('Напоминание');
+
+      const en = renderer.renderEventReminder('en', {
+        title: 'Laser',
+        startTime: '14:00',
+        endTime: '15:00',
+        location: null,
+        intervalLabel: '30 minutes',
+      });
+      expect(en.text.startsWith('⏰ Laser')).toBe(true);
+      expect(en.text).not.toContain('Reminder:');
     });
 
     test('renders all-day reminder with location', () => {
@@ -156,6 +181,68 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('>Офис</a>');
       expect(result.text).not.toContain('🕐');
     });
+
+    test('appends hourly forecast to event reminder at the exact event time', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: {
+          dt: 1_700_000_000,
+          temp: 14,
+          conditionCode: 500,
+          description: 'light rain',
+          windSpeed: 3,
+        },
+      };
+      const result = renderer.renderEventReminder('en', {
+        title: 'Run',
+        startTime: '18:00',
+        endTime: '18:30',
+        location: null,
+        intervalLabel: '15 minutes',
+        forecast,
+      });
+      expect(result.text).toContain('🌧');
+      expect(result.text).toContain('14°C');
+      expect(result.text).toContain('light rain');
+      // Hourly must not show a daily range
+      expect(result.text).not.toContain('..');
+    });
+
+    test('appends daily fallback forecast when hourly is not available', () => {
+      const forecast: EventForecast = {
+        kind: 'day',
+        day: {
+          date: '2026-04-15',
+          tempMin: 5,
+          tempMax: 12,
+          conditionCode: 801,
+          description: 'few clouds',
+          windSpeed: 4,
+        },
+      };
+      const result = renderer.renderEventReminder('en', {
+        title: 'Lunch',
+        startTime: '13:00',
+        endTime: '14:00',
+        location: null,
+        intervalLabel: '1 hour',
+        forecast,
+      });
+      expect(result.text).toContain('⛅');
+      expect(result.text).toContain('5..12°C');
+    });
+
+    test('omits weather line when forecast is null', () => {
+      const result = renderer.renderEventReminder('en', {
+        title: 'Meeting',
+        startTime: '14:00',
+        endTime: '15:00',
+        location: null,
+        intervalLabel: '15 minutes',
+        forecast: null,
+      });
+      expect(result.text).not.toContain('°C');
+    });
   });
 
   describe('renderBatchReminder', () => {
@@ -164,7 +251,8 @@ describe('NotificationRenderer', () => {
         { title: 'Standup', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
         { title: 'Call', startTime: '10:00', location: 'Zoom', intervalLabel: '30 minutes' },
       ]);
-      expect(result.text).toContain('Reminders:');
+      expect(result.text.startsWith('⏰ Standup +1 more')).toBe(true);
+      expect(result.text).not.toContain('Reminders:');
       expect(result.text).toContain('• Standup — 10:00 (in 30 minutes)');
       expect(result.text).toContain('• Call — 10:00 (in 30 minutes)');
       expect(result.text).toContain('📍 <a href=');
@@ -176,7 +264,8 @@ describe('NotificationRenderer', () => {
         { title: 'Стендап', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
         { title: 'Звонок', startTime: '10:00', location: null, intervalLabel: 'at start' },
       ]);
-      expect(result.text).toContain('Напоминания:');
+      expect(result.text.startsWith('⏰ Стендап + ещё 1')).toBe(true);
+      expect(result.text).not.toContain('Напоминания:');
       expect(result.text).toContain('через 30 минут');
       expect(result.text).toContain('начинается!');
     });
@@ -189,6 +278,78 @@ describe('NotificationRenderer', () => {
       expect(result.text).toContain('• Стендап — 10:00 (через 30 минут)');
       expect(result.text).toContain('• Праздник — Весь день (сегодня)');
       expect(result.text).not.toContain('03:00');
+    });
+
+    test('batch header uses first title as first content word (phone preview)', () => {
+      // Phone notification previews show the first ~2 words.
+      // The old "⏰ Reminders:" header wasted them on a generic label.
+      const en = renderer.renderBatchReminder('en', [
+        { title: 'Laser', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Meeting', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Call', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      expect(en.text.split('\n')[0]).toBe('⏰ Laser +2 more');
+
+      const ru = renderer.renderBatchReminder('ru', [
+        { title: 'Лазер', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Встреча', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+        { title: 'Звонок', startTime: '14:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      expect(ru.text.split('\n')[0]).toBe('⏰ Лазер + ещё 2');
+    });
+
+    test('shows shared weather once at the bottom when all items have the same forecast', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 12, conditionCode: 800, description: 'clear sky', windSpeed: 3 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Standup', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+        { title: 'Call', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+      ]);
+      // Weather line appears once — at the bottom, after all bullets
+      const weatherLine = '☀️ 12°C, clear sky';
+      const firstIdx = result.text.indexOf(weatherLine);
+      expect(firstIdx).toBeGreaterThan(-1);
+      expect(result.text.indexOf(weatherLine, firstIdx + 1)).toBe(-1);
+      // The weather line is after both bullets
+      expect(firstIdx).toBeGreaterThan(result.text.indexOf('• Standup'));
+      expect(firstIdx).toBeGreaterThan(result.text.indexOf('• Call'));
+    });
+
+    test('shows per-item weather when forecasts differ', () => {
+      const sunny: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 20, conditionCode: 800, description: 'clear sky', windSpeed: 2 },
+      };
+      const rainy: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_003_600, temp: 14, conditionCode: 500, description: 'light rain', windSpeed: 5 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Walk', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast: sunny },
+        { title: 'Gym', startTime: '11:00', location: null, intervalLabel: '30 minutes', forecast: rainy },
+      ]);
+      // Both weather lines present, each indented under its item
+      expect(result.text).toContain('  ☀️ 20°C, clear sky');
+      expect(result.text).toContain('  🌧 14°C, light rain');
+    });
+
+    test('shows per-item weather when only some items have forecast', () => {
+      const forecast: EventForecast = {
+        kind: 'hour',
+        hour: { dt: 1_700_000_000, temp: 15, conditionCode: 800, description: 'clear sky', windSpeed: 1 },
+      };
+      const result = renderer.renderBatchReminder('en', [
+        { title: 'Walk', startTime: '10:00', location: null, intervalLabel: '30 minutes', forecast },
+        { title: 'Call', startTime: '10:00', location: null, intervalLabel: '30 minutes' },
+      ]);
+      // One has forecast, one doesn't -- per-item weather
+      expect(result.text).toContain('  ☀️ 15°C, clear sky');
+      // Weather line appears only once (only the first item has it)
+      const line = '☀️ 15°C, clear sky';
+      const idx = result.text.indexOf(line);
+      expect(result.text.indexOf(line, idx + 1)).toBe(-1);
     });
   });
 

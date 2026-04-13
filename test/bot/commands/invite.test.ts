@@ -18,6 +18,7 @@ const makeEvent = (id: number) => ({
   parent_event_id: null,
   original_start_at: null,
   is_cancelled: 0,
+  is_deleted: 0,
   created_at: '2026-03-01T00:00:00Z',
   updated_at: '2026-03-01T00:00:00Z',
 });

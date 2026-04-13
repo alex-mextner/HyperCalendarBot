@@ -54,6 +54,8 @@ export interface WeekDay {
   eventCount: number;
   isWeekend: boolean;
   events: MiniEvent[];
+  weatherEmoji?: string;
+  weatherTemp?: string;
 }
 
 export interface WeeklyOverviewData {

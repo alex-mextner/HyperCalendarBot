@@ -103,6 +103,44 @@ describe('handleToday', () => {
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('New Year');
   });
+  test('includes weather in text when weatherService provided', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const weatherService = {
+      getDayWeather: mock(() =>
+        Promise.resolve({
+          tempMin: 5,
+          tempMax: 15,
+          tempCurrent: 10,
+          conditionCode: 800,
+          description: 'clear sky',
+          windSpeed: 3,
+        }),
+      ),
+    };
+
+    await handleToday(ctx as never, svc as never, undefined, undefined, undefined, undefined, weatherService as never);
+
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).toContain('☀️');
+    expect(text).toContain('clear sky');
+  });
+
+  test('works without weather when weatherService returns null', async () => {
+    const { handleToday } = await import('../../../src/bot/commands/today.ts');
+    const ctx = makeCtx();
+    const svc = makeEventService();
+    const weatherService = {
+      getDayWeather: mock(() => Promise.resolve(null)),
+    };
+
+    await handleToday(ctx as never, svc as never, undefined, undefined, undefined, undefined, weatherService as never);
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
+    expect(text).not.toContain('°C');
+  });
 });
 
 describe('handleToday group context', () => {
