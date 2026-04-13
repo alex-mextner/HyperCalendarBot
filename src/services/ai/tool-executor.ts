@@ -285,6 +285,7 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   render_month_image: 'month_view',
   render_day_image: 'month_view',
   render_week_image: 'month_view',
+  connect_telegram_status: 'telegram_connect',
 };
 
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {

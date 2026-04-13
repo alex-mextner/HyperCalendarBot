@@ -803,6 +803,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             : undefined,
         contactRepo: db.contacts,
         timezoneScene: scenesSetup.scenes.timezoneScene,
+        connectTelegramScene: scenesSetup.scenes.connectTelegramScene,
+        telegramDeps: telegramMasterKey
+          ? { sessionRepo: db.telegramSessions, masterKey: telegramMasterKey }
+          : undefined,
         groupRepo: db.groupChats,
         scenePauseDeps: {
           sceneStorage: kvStorage,
@@ -1011,6 +1015,23 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         ? handleGoogleStatus(ctx, { syncRepo: googleDeps.syncRepo, calendarRepo: googleDeps.calendarRepo })
         : undefined,
     )
+    // Telegram account connection commands
+    .command('connect_telegram', async (ctx) => {
+      await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene);
+    })
+    .command('disconnect_telegram', async (ctx) => {
+      const user = ctx.dbUser;
+      if (!user) return;
+      const lang = (user.language ?? 'en') as 'en' | 'ru';
+      const session = db.telegramSessions.getActive(user.telegram_id);
+      if (!session) {
+        await ctx.send(t(lang).settings.telegramNotConnected);
+        return;
+      }
+      const s = t(lang).settings;
+      const kb = new InlineKeyboard().text(s.telegramDisconnect, 'stg:tg_disconnect_confirm').text(s.back, 'stg:back');
+      await ctx.send(s.telegramDisconnectConfirm, { reply_markup: kb });
+    })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
     // so any .command() registered after it will never fire.

@@ -51,6 +51,20 @@ if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
 }
 
+// Verify master key matches existing sessions before starting the bot
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  const { verifyMasterKey } = await import('./services/crypto/master-key-check.ts');
+  const key = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
+  const result = verifyMasterKey(db.telegramSessions, key);
+  if (!result.ok) {
+    botLogger.fatal(
+      { err: result.err },
+      'TELEGRAM_SESSION_MASTER_KEY does not match existing sessions — refusing to start',
+    );
+    process.exit(1);
+  }
+}
+
 if (config.BOT_ADMIN_ID) {
   initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 }
@@ -1014,6 +1028,17 @@ if (config.GOOGLE_CLIENT_ID) {
     { command: 'connect_google', description: 'Подключить Google Calendar' },
     { command: 'disconnect_google', description: 'Отключить Google Calendar' },
     { command: 'google_status', description: 'Статус синхронизации Google Calendar' },
+  );
+}
+
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  COMMANDS_EN.push(
+    { command: 'connect_telegram', description: 'Connect Telegram account for first-person invitations' },
+    { command: 'disconnect_telegram', description: 'Disconnect Telegram account' },
+  );
+  COMMANDS_RU.push(
+    { command: 'connect_telegram', description: 'Подключить Telegram-аккаунт для приглашений от твоего имени' },
+    { command: 'disconnect_telegram', description: 'Отключить подключенный Telegram-аккаунт' },
   );
 }
 

@@ -145,6 +145,11 @@ export interface CallbackHandlerOpts {
   };
   contactRepo?: ContactRepository;
   timezoneScene?: AnyScene;
+  connectTelegramScene?: AnyScene;
+  telegramDeps?: {
+    sessionRepo: import('../../database/repositories/telegram-session.repository.ts').TelegramSessionRepository;
+    masterKey: Buffer | null;
+  };
   groupRepo?: GroupChatRepository;
   scenePauseDeps?: {
     sceneStorage: { get(key: string): Promise<unknown>; delete(key: string): unknown };
@@ -194,6 +199,8 @@ export function createCallbackHandler(
     voiceDeps,
     contactRepo,
     timezoneScene,
+    connectTelegramScene,
+    telegramDeps,
     groupRepo,
     scenePauseDeps,
     triggerSync,
@@ -1153,7 +1160,26 @@ export function createCallbackHandler(
       await ctx.scene.enter(timezoneScene, { settingsMsgId: ctx.message.id, settingsChatId: ctx.chatId });
       return;
     }
-    return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);
+    const tgDeps =
+      telegramDeps && connectTelegramScene
+        ? {
+            sessionRepo: telegramDeps.sessionRepo,
+            masterKey: telegramDeps.masterKey,
+            enterScene: async () => {
+              await ctx.scene.enter(connectTelegramScene);
+            },
+          }
+        : undefined;
+    return handleSettingsCallback(
+      ctx,
+      user,
+      payload,
+      prefsService,
+      callSettingsRepo,
+      sharingSettingsRepo,
+      userRepo,
+      tgDeps,
+    );
   });
 
   // Geo-location timezone: confirm update
