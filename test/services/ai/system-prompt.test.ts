@@ -162,12 +162,11 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('listing her availability');
   });
 
-  test('abstract locations must stay as plain text, not geocoded', () => {
+  test('known locations section mentions abstract locations are kept as-is', () => {
     ctx.preloadedAddressContext = 'Gym: ул. Ленина 10, Москва (https://maps.google.com/...)';
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Abstract or relative locations');
-    expect(prompt).toContain('must stay as plain text');
-    expect(prompt).toContain('do NOT try to geocode');
+    expect(prompt).toContain('kept as-is automatically');
   });
 
   test('instructs to use pick_users and find_contact for invitations', () => {

@@ -76,7 +76,11 @@ const toolDefinitions: ToolDefinition[] = [
           description: 'End time in ISO 8601 UTC. Optional.',
         },
         description: { type: 'string', description: 'Event description. Optional.' },
-        location: { type: 'string', description: 'Event location. Optional.' },
+        location: {
+          type: 'string',
+          description:
+            'Event location. Optional. Concrete venues and addresses are auto-resolved to Google Maps links. Abstract/relative locations ("У Иры", "дома", "на работе", "у метро") are kept as plain text — no geocoding.',
+        },
         all_day: {
           type: 'boolean',
           description: 'Whether this is an all-day event. Optional.',
@@ -130,7 +134,8 @@ const toolDefinitions: ToolDefinition[] = [
         },
         location: {
           type: 'string',
-          description: 'New location. Pass null to remove. Optional.',
+          description:
+            'New location. Pass null to remove. Optional. Concrete venues and addresses are auto-resolved to Google Maps links. Abstract/relative locations ("У Иры", "дома", "на работе") are kept as plain text.',
         },
         recurrence_rule: {
           type: 'string',

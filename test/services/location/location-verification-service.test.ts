@@ -2,7 +2,10 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { CalendarEvent, User } from '../../../src/database/types.ts';
 import type { GeocodedLocation } from '../../../src/services/location/geocoding-service.ts';
-import { LocationVerificationService } from '../../../src/services/location/location-verification-service.ts';
+import {
+  isAbstractLocation,
+  LocationVerificationService,
+} from '../../../src/services/location/location-verification-service.ts';
 
 function makeUser(overrides: Partial<User> = {}): User {
   return {
@@ -118,6 +121,45 @@ function makeDeps(overrides: { [key: string]: unknown } = {}) {
   };
 }
 
+describe('isAbstractLocation', () => {
+  test('detects "У + person" patterns', () => {
+    expect(isAbstractLocation('У Иры')).toBe(true);
+    expect(isAbstractLocation('у Пети')).toBe(true);
+    expect(isAbstractLocation('У нас')).toBe(true);
+    expect(isAbstractLocation('у вас')).toBe(true);
+    expect(isAbstractLocation('у меня')).toBe(true);
+    expect(isAbstractLocation('У нас дома')).toBe(true);
+  });
+
+  test('detects "у + place type" without specific address', () => {
+    expect(isAbstractLocation('у метро')).toBe(true);
+    expect(isAbstractLocation('у парка')).toBe(true);
+  });
+
+  test('detects relative/colloquial locations', () => {
+    expect(isAbstractLocation('на районе')).toBe(true);
+    expect(isAbstractLocation('дома')).toBe(true);
+    expect(isAbstractLocation('на работе')).toBe(true);
+    expect(isAbstractLocation('в офисе')).toBe(true);
+  });
+
+  test('does NOT flag concrete venue names', () => {
+    expect(isAbstractLocation('Кофемания')).toBe(false);
+    expect(isAbstractLocation('ТЦ Мега')).toBe(false);
+    expect(isAbstractLocation('Парк Горького')).toBe(false);
+  });
+
+  test('does NOT flag street addresses', () => {
+    expect(isAbstractLocation('ул. Ленина 10')).toBe(false);
+    expect(isAbstractLocation('Большая Никитская 12')).toBe(false);
+  });
+
+  test('does NOT flag English venue names', () => {
+    expect(isAbstractLocation('Starbucks')).toBe(false);
+    expect(isAbstractLocation('Central Park')).toBe(false);
+  });
+});
+
 describe('LocationVerificationService', () => {
   test('returns early for events without location', async () => {
     const deps = makeDeps();
@@ -126,6 +168,17 @@ describe('LocationVerificationService', () => {
 
     expect(result.resolved).toBe(false);
     expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
+  });
+
+  test('skips geocoding for abstract locations', async () => {
+    const deps = makeDeps();
+    const svc = new LocationVerificationService(deps as never);
+    const result = await svc.verifyEventLocation(makeEvent({ location: 'У Иры' }), makeUser());
+
+    expect(result.resolved).toBe(false);
+    expect(deps.geocodingService.findPlace).not.toHaveBeenCalled();
+    expect(deps.geocodingService.geocodeAddress).not.toHaveBeenCalled();
+    expect(deps.addressCache.findMapping).not.toHaveBeenCalled();
   });
 
   test('uses cached mapping when available', async () => {

@@ -17,6 +17,34 @@ type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
 
 const logger = botLogger.child({ module: 'location-verification' });
 
+/**
+ * Detects abstract/relative locations that should NOT be geocoded.
+ * Examples: "У Иры", "у нас дома", "дома", "на работе", "в офисе", "у метро".
+ * Concrete venues ("Кофемания"), addresses ("ул. Ленина 10") return false.
+ */
+export function isAbstractLocation(location: string): boolean {
+  const s = location.trim().toLowerCase();
+
+  // "у + person/pronoun/generic place" — "у Иры", "у нас", "у метро", "у парка"
+  if (/^у\s+\S/.test(s)) return true;
+
+  // Single-word or short relative locations
+  const abstractPatterns = [
+    /^дома$/,
+    /^на работе$/,
+    /^в офисе$/,
+    /^на районе$/,
+    /^на даче$/,
+    /^в школе$/,
+    /^в универе$/,
+    /^в университете$/,
+    /^на учёбе$/,
+    /^на учебе$/,
+  ];
+
+  return abstractPatterns.some((re) => re.test(s));
+}
+
 export interface LocationVerificationDeps {
   geocodingService: GeocodingService;
   addressCache: AddressCache;
@@ -67,6 +95,12 @@ export class LocationVerificationService {
 
     const location = event.location.trim();
     if (location.length === 0) {
+      return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
+    }
+
+    // Skip abstract/relative locations — they should stay as plain text
+    if (isAbstractLocation(location)) {
+      logger.info({ eventId: event.id, location }, 'Abstract location, skipping geocoding');
       return { resolved: false, geocoded: null, cityExtracted: null, candidates: [] };
     }
 
