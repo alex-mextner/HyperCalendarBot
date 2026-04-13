@@ -175,14 +175,38 @@ describe('formatWeekAgenda weather', () => {
       weatherByDate,
     );
     expect(result).toContain('☀️');
-    expect(result).toContain('2..8°');
+    expect(result).toContain('2–8°');
     expect(result).toContain('🌨');
-    expect(result).toContain('-1..4°');
+    expect(result).toContain('-1–4°');
   });
 
   test('omits weather when weatherByDate is undefined', () => {
     const result = formatWeekAgenda([], '2026-03-09T00:00:00Z', '2026-03-15T23:59:59Z', 'UTC', 'en');
     expect(result).not.toContain('°');
+  });
+
+  test('shows weather on holiday-only days', () => {
+    const holidaysByDate = new Map([
+      [
+        '2026-03-09',
+        [{ name: 'May Day', date: '2026-03-09', type: 'public', countryCode: 'US', countryName: 'United States' }],
+      ],
+    ]);
+    const weatherByDate: { [date: string]: import('../../../src/services/weather/types.ts').DayWeather } = {
+      '2026-03-09': { tempMin: 10, tempMax: 20, conditionCode: 800, description: 'clear', windSpeed: 2 },
+    };
+    const result = formatWeekAgenda(
+      [],
+      '2026-03-09T00:00:00Z',
+      '2026-03-15T23:59:59Z',
+      'UTC',
+      'en',
+      holidaysByDate,
+      weatherByDate,
+    );
+    expect(result).toContain('May Day');
+    expect(result).toContain('☀️');
+    expect(result).toContain('10–20°');
   });
 });
 
@@ -594,7 +618,7 @@ describe('formatEventDetail — edge cases', () => {
       },
     });
     expect(result).toContain('⛅');
-    expect(result).toContain('2..11°C');
+    expect(result).toContain('2–11°C');
   });
 
   test('omits weather line when forecast is undefined or null', () => {

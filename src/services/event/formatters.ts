@@ -91,8 +91,10 @@ export function formatWeekAgenda(
     const wSuffix = dayW ? `  ${formatWeekWeatherLine(lang as Lang, dayW)}` : '';
 
     if (dayHolidays.length > 0) {
-      for (const h of dayHolidays) {
-        lines.push(`${dayLabel}  🎉 ${escapeHtml(h.name)}`);
+      for (let hi = 0; hi < dayHolidays.length; hi++) {
+        const h = dayHolidays[hi]!;
+        const suffix = hi === 0 && dayEvents.length === 0 ? wSuffix : '';
+        lines.push(`${dayLabel}${suffix}  🎉 ${escapeHtml(h.name)}`);
       }
     }
 

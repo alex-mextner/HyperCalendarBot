@@ -68,11 +68,11 @@ describe('weeklyOverviewTemplate', () => {
   test('renders weather emoji and temp when provided', () => {
     const data = makeWeekData();
     data.days[0]!.weatherEmoji = '☀️';
-    data.days[0]!.weatherTemp = '3..10°';
+    data.days[0]!.weatherTemp = '3–10°';
     const html = weeklyOverviewTemplate.render(data);
     expect(html).toContain('day-column__weather');
     expect(html).toContain('☀️');
-    expect(html).toContain('3..10°');
+    expect(html).toContain('3–10°');
   });
 
   test('omits weather div when weatherEmoji is undefined', () => {

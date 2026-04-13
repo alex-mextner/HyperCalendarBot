@@ -523,8 +523,8 @@ export const MSG = {
       clockChangeBack: (duration: string) => `🕐 Clocks shifted by -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}–${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}–${max}°C`,
       wind: (ms: number) => `${ms} m/s`,
       weekForecast: '🌤 Weather this week:',
       eventForecast: (weather: string) => `Weather: ${weather}`,
@@ -1161,8 +1161,8 @@ export const MSG = {
       clockChangeBack: (duration: string) => `🕐 Часы переведены на -${duration}`,
     },
     weather: {
-      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}..${max}°C)`,
-      tempRange: (min: number, max: number) => `${min}..${max}°C`,
+      tempCurrent: (current: number, min: number, max: number) => `${current}°C (${min}–${max}°C)`,
+      tempRange: (min: number, max: number) => `${min}–${max}°C`,
       wind: (ms: number) => `${ms} м/с`,
       weekForecast: '🌤 Погода на неделю:',
       eventForecast: (weather: string) => `Погода: ${weather}`,
