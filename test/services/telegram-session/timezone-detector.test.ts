@@ -1,7 +1,10 @@
 // test/services/telegram-session/timezone-detector.test.ts
 import { describe, expect, test } from 'bun:test';
 import type { Authorization } from '../../../src/services/telegram-session/session-bridge.ts';
-import { detectTimezoneFromAuthorizations } from '../../../src/services/telegram-session/timezone-detector.ts';
+import {
+  detectTimezoneFromAuthorizations,
+  getLoadedCountryCount,
+} from '../../../src/services/telegram-session/timezone-detector.ts';
 
 function makeAuth(overrides: Partial<Authorization>): Authorization {
   return {
@@ -94,9 +97,11 @@ describe('detectTimezoneFromAuthorizations', () => {
   test('multi-tz country with unknown region falls back to country default', () => {
     const auths: Authorization[] = [makeAuth({ country: 'US', region: 'UnknownRegion', platform: 'iOS' })];
     const result = detectTimezoneFromAuthorizations(auths, 'UTC');
-    // Should return the country default or null — depends on implementation
-    // US has a default of America/New_York per spec, so it returns that
     expect(result).not.toBeNull();
     expect(result?.detectedTimezone).toBe('America/New_York');
+  });
+
+  test('zone.tab loaded with 200+ countries', () => {
+    expect(getLoadedCountryCount()).toBeGreaterThan(200);
   });
 });

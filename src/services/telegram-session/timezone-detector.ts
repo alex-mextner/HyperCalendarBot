@@ -1,5 +1,6 @@
 // src/services/telegram-session/timezone-detector.ts
-import ct from 'countries-and-timezones';
+import { readFileSync } from 'node:fs';
+import { logger } from '../../utils/logger.ts';
 import type { Authorization } from './session-bridge.ts';
 
 export interface DetectionResult {
@@ -9,11 +10,44 @@ export interface DetectionResult {
 }
 
 /**
+ * Country → IANA timezone(s) parsed from the system's zone.tab (IANA tzdata).
+ * Loaded once at module init. Falls back to empty map if the file is missing
+ * (e.g. minimal Docker image without tzdata — timezone detection silently disabled).
+ */
+const countryTimezones = loadZoneTab();
+
+function loadZoneTab(): Map<string, string[]> {
+  const map = new Map<string, string[]>();
+  const paths = ['/usr/share/zoneinfo/zone.tab', '/usr/share/lib/zoneinfo/tab/zone_sun.tab'];
+  for (const path of paths) {
+    try {
+      const content = readFileSync(path, 'utf8');
+      for (const line of content.split('\n')) {
+        if (line.startsWith('#') || line.trim() === '') continue;
+        const parts = line.split('\t');
+        const cc = parts[0];
+        const tz = parts[2];
+        if (!cc || !tz) continue;
+        const existing = map.get(cc);
+        if (existing) {
+          existing.push(tz);
+        } else {
+          map.set(cc, [tz]);
+        }
+      }
+      return map;
+    } catch {
+      // Try next path
+    }
+  }
+  logger.warn('zone.tab not found — timezone detection disabled. Install tzdata in Docker image.');
+  return map;
+}
+
+/**
  * Multi-timezone countries where the Telegram `region` field can disambiguate.
  * Only needed for countries with >1 IANA timezone — single-tz countries are
- * resolved automatically via `countries-and-timezones`.
- *
- * Each entry: [regionSubstring (case-insensitive), ianaTimezone]. First match wins.
+ * resolved automatically via zone.tab.
  */
 const MULTI_TZ_REGIONS: {
   [country: string]: { regions: Array<[string, string]>; fallback: string };
@@ -137,17 +171,6 @@ const MULTI_TZ_REGIONS: {
   },
 };
 
-/**
- * Resolves a country code to a single IANA timezone using the
- * `countries-and-timezones` library (backed by IANA tzdata).
- * Returns the timezone if the country has exactly one, or null if it has multiple.
- */
-function resolveSingleTzCountry(countryCode: string): string | null {
-  const timezones = ct.getTimezonesForCountry(countryCode);
-  if (!timezones || timezones.length !== 1) return null;
-  return timezones[0]?.name ?? null;
-}
-
 function resolveMultiTz(country: string, region: string): string | null {
   const entry = MULTI_TZ_REGIONS[country];
   if (!entry) return null;
@@ -164,11 +187,11 @@ function resolveMultiTz(country: string, region: string): string | null {
 /**
  * Detects the most likely IANA timezone from a list of Telegram Authorization objects.
  *
- * Resolution strategy:
- * 1. Filter for mobile sessions (iOS / Android) — most reliable location signal
- * 2. Pick the most recently active one
- * 3. If the country has exactly 1 timezone (via IANA data) → use it
- * 4. If the country has multiple → use the region hint from the curated map
+ * Resolution:
+ * 1. Filter for mobile sessions (iOS/Android)
+ * 2. Pick the most recently active
+ * 3. Country has exactly 1 timezone in zone.tab → use it
+ * 4. Country has multiple → use region map
  * 5. Return null if timezone matches current or country is unknown
  */
 export function detectTimezoneFromAuthorizations(
@@ -176,7 +199,6 @@ export function detectTimezoneFromAuthorizations(
   currentTimezone: string,
 ): DetectionResult | null {
   const mobileSessions = authorizations.filter((a) => a.platform === 'iOS' || a.platform === 'Android');
-
   if (mobileSessions.length === 0) return null;
 
   const sorted = [...mobileSessions].sort((a, b) => b.date_active - a.date_active);
@@ -185,11 +207,14 @@ export function detectTimezoneFromAuthorizations(
 
   const { country, region } = session;
 
-  // Try single-tz country first (covers ~150 countries via IANA data)
-  let detectedTimezone = resolveSingleTzCountry(country);
+  let detectedTimezone: string | null = null;
 
-  // Multi-tz country — use region map
-  if (detectedTimezone === null) {
+  // Single-tz country (from system zone.tab)
+  const tzList = countryTimezones.get(country);
+  if (tzList && tzList.length === 1) {
+    detectedTimezone = tzList[0] ?? null;
+  } else if (tzList && tzList.length > 1) {
+    // Multi-tz — try region map
     detectedTimezone = resolveMultiTz(country, region);
   }
 
@@ -197,4 +222,9 @@ export function detectTimezoneFromAuthorizations(
   if (detectedTimezone === currentTimezone) return null;
 
   return { detectedTimezone, country, region };
+}
+
+/** Exposed for testing — number of countries loaded from zone.tab. */
+export function getLoadedCountryCount(): number {
+  return countryTimezones.size;
 }
