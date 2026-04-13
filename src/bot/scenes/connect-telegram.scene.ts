@@ -367,8 +367,8 @@ export function createConnectTelegramScene(
           return;
         }
 
-        // ct:send_pending:{eventId}:{inviteeId}
-        if (data.startsWith(`${CB_PREFIX}:send_pending:`)) {
+        // ct:send_all:{eventId} — batch send to all pending invitees
+        if (data.startsWith(`${CB_PREFIX}:send_all:`)) {
           await context.answer();
 
           if (!deps) {
@@ -378,29 +378,37 @@ export function createConnectTelegramScene(
             return;
           }
 
-          const parts = data.split(':');
-          const eventId = Number.parseInt(parts[2]!, 10);
-          const inviteeId = Number.parseInt(parts[3]!, 10);
-
-          if (Number.isNaN(eventId) || Number.isNaN(inviteeId)) {
-            sceneLogger.warn({ userId, data }, 'Invalid pending callback data');
+          const eventId = Number.parseInt(data.split(':')[2]!, 10);
+          if (Number.isNaN(eventId)) {
+            sceneLogger.warn({ userId, data }, 'Invalid send_all callback data');
             await context.scene.exit();
             return;
           }
 
-          const inviteeUsername = resolveInviteeUsername(deps, userId, inviteeId);
-          const result = deps.invitationService.sendInvitation(eventId, userId, inviteeId, inviteeUsername);
+          const pending = context.scene.params;
+          const inviteeIds = pending?.pendingInviteeIds ?? [];
+          let sentCount = 0;
 
-          if (result.success) {
-            sceneLogger.info({ userId, eventId, inviteeId }, 'Post-connect invitation created');
-            deliverPostConnectInvitation(deps, userId, eventId, inviteeId, inviteeUsername, result.invitation!.id, l);
-            await context.send(ct.pendingSent);
-          } else {
-            sceneLogger.warn({ userId, eventId, inviteeId, error: result.error }, 'Post-connect invitation failed');
-            // Still show success message — the invitation might already exist
-            await context.send(ct.pendingSent);
+          for (const inviteeId of inviteeIds) {
+            const inviteeUsername = resolveInviteeUsername(deps, userId, inviteeId);
+            const result = deps.invitationService.sendInvitation(eventId, userId, inviteeId, inviteeUsername);
+
+            if (result.success && result.invitation) {
+              sentCount++;
+              deliverPostConnectInvitation(deps, userId, eventId, inviteeId, inviteeUsername, result.invitation.id, l);
+            } else {
+              sceneLogger.warn(
+                { userId, eventId, inviteeId, error: result.error },
+                'Batch invitation failed for invitee',
+              );
+            }
           }
 
+          sceneLogger.info(
+            { userId, eventId, total: inviteeIds.length, sent: sentCount },
+            'Batch post-connect invitations',
+          );
+          await context.send(ct.pendingSent(sentCount || inviteeIds.length));
           await context.scene.exit();
           return;
         }
@@ -493,7 +501,10 @@ function deliverPostConnectInvitation(
 
 interface FinalizeContext {
   from: { id: number };
-  send: (text: string, options?: { reply_markup?: InlineKeyboard }) => Promise<unknown>;
+  send: (
+    text: string,
+    options?: { reply_markup?: InlineKeyboard; parse_mode?: 'HTML' | 'Markdown' | 'MarkdownV2' },
+  ) => Promise<unknown>;
   scene: {
     exit: () => Promise<boolean> | boolean;
     params: ConnectTelegramParams;
@@ -538,20 +549,34 @@ async function finalizeSession(
     const masked = maskPhone(phone);
     sceneLogger.info({ userId, phoneHash: hash }, 'Telegram account connected');
 
-    // Check for pending invitation offer
+    // Check for pending invitation offer (batch — all external invitees)
     const pending = context.scene.params;
     if (deps && pending?.pendingEventId && pending.pendingInviteeIds?.length) {
       const event = deps.eventRepo.findById(pending.pendingEventId, userId);
       if (event) {
-        const firstInviteeId = pending.pendingInviteeIds[0]!;
-        const inviteeName = resolveInviteeName(deps, userId, firstInviteeId);
+        const inviteeIds = pending.pendingInviteeIds;
+        const inviteeList = inviteeIds
+          .map((id) => {
+            const name = resolveInviteeName(deps, userId, id);
+            const username = resolveInviteeUsername(deps, userId, id);
+            // @username as tg://user deep link; fallback to plain name
+            return username
+              ? `• <a href="tg://user?id=${id}">@${username}</a>`
+              : `• <a href="tg://user?id=${id}">${name}</a>`;
+          })
+          .join('\n');
+        const count = inviteeIds.length;
         const dateLine = `${formatDateShort(event.start_at, event.timezone, lang)} ${formatTime(event.start_at, event.timezone)}`;
 
         const kb = new InlineKeyboard()
-          .text(ct.sendPendingBtn, `${CB_PREFIX}:send_pending:${event.id}:${firstInviteeId}`)
+          .text(ct.sendPendingBtn(count), `${CB_PREFIX}:send_all:${event.id}`)
+          .row()
           .text(ct.skipPendingBtn, CB_SKIP_PENDING);
 
-        await context.send(ct.successWithPending(masked, event.title, dateLine, inviteeName), { reply_markup: kb });
+        await context.send(ct.successWithPending(masked, event.title, dateLine, inviteeList, count), {
+          reply_markup: kb,
+          parse_mode: 'HTML',
+        });
         return true; // Don't exit — wait for callback
       }
     }

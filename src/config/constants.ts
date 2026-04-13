@@ -544,11 +544,11 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
       btnReconnect: 'Reconnect',
       cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
-      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
-        `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine}) — ${inviteeName} has not been invited yet.\nSend the invitation from your account?`,
-      sendPendingBtn: 'Send',
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+        `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine})\n\nNot yet invited:\n${inviteeList}`,
+      sendPendingBtn: (count: number) => `Send ${count} invitation${count > 1 ? 's' : ''}`,
       skipPendingBtn: 'Not now',
-      pendingSent: '✅ Invitation sent.',
+      pendingSent: (count: number) => `✅ ${count} invitation${count > 1 ? 's' : ''} sent.`,
       tzDetected: (region: string, iana: string) =>
         `It looks like you're now in ${region}.\nUpdate timezone to ${iana}?`,
       tzUpdated: (iana: string) => `✅ Timezone updated to ${iana}`,
@@ -1283,11 +1283,13 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
       btnReconnect: 'Переподключить',
       cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
-      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeName: string) =>
-        `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine}) — ${inviteeName} ещё не приглашён.\nОтправить приглашение от твоего имени?`,
-      sendPendingBtn: 'Отправить',
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+        `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine})\n\nЕщё не приглашены:\n${inviteeList}`,
+      sendPendingBtn: (count: number) =>
+        `Отправить ${count} ${ruPlural(count, 'приглашение', 'приглашения', 'приглашений')}`,
       skipPendingBtn: 'Не сейчас',
-      pendingSent: '✅ Приглашение отправлено.',
+      pendingSent: (count: number) =>
+        `✅ ${count} ${ruPlural(count, 'приглашение отправлено', 'приглашения отправлены', 'приглашений отправлено')}.`,
       tzDetected: (region: string, iana: string) => `Похоже, ты сейчас в ${region}.\nОбновить таймзону на ${iana}?`,
       tzUpdated: (iana: string) => `✅ Таймзона обновлена: ${iana}`,
       tzSkipped: 'Таймзона не изменена.',

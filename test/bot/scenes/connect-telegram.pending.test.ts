@@ -194,18 +194,22 @@ describe('connect-telegram post-connect pending invitation', () => {
       expect(msg).toContain('+7•••••4567');
     });
 
-    test('sendPendingBtn and skipPendingBtn are defined', () => {
+    test('sendPendingBtn returns count-aware label', () => {
       const { t } = require('../../../src/config/constants.ts');
-      expect(t('en').connectTelegram.sendPendingBtn).toBe('Send');
+      expect(t('en').connectTelegram.sendPendingBtn(1)).toBe('Send 1 invitation');
+      expect(t('en').connectTelegram.sendPendingBtn(3)).toBe('Send 3 invitations');
       expect(t('en').connectTelegram.skipPendingBtn).toBe('Not now');
-      expect(t('ru').connectTelegram.sendPendingBtn).toBe('Отправить');
+      expect(t('ru').connectTelegram.sendPendingBtn(1)).toContain('1 приглашение');
+      expect(t('ru').connectTelegram.sendPendingBtn(5)).toContain('5 приглашений');
       expect(t('ru').connectTelegram.skipPendingBtn).toBe('Не сейчас');
     });
 
-    test('pendingSent message is defined', () => {
+    test('pendingSent returns count-aware message', () => {
       const { t } = require('../../../src/config/constants.ts');
-      expect(t('en').connectTelegram.pendingSent).toContain('Invitation sent');
-      expect(t('ru').connectTelegram.pendingSent).toContain('Приглашение отправлено');
+      expect(t('en').connectTelegram.pendingSent(1)).toContain('1 invitation');
+      expect(t('en').connectTelegram.pendingSent(3)).toContain('3 invitations');
+      expect(t('ru').connectTelegram.pendingSent(1)).toContain('1 приглашение отправлено');
+      expect(t('ru').connectTelegram.pendingSent(5)).toContain('5 приглашений отправлено');
     });
   });
 });
