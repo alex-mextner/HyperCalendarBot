@@ -864,15 +864,7 @@ botRef.sendVoice = async (telegramId, audio) => {
 // Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
 // No botInitialized guard needed: the worker starts AFTER the flag is set.
 const broadcastWorker = createBroadcastWorker(broadcastConnection, {
-  sendMessage: async (chatId, text, parseMode, threadId) => {
-    const msg = await bot.api.sendMessage({
-      chat_id: chatId,
-      text,
-      ...(parseMode ? { parse_mode: parseMode } : {}),
-      ...(threadId ? { message_thread_id: threadId } : {}),
-    });
-    return { message_id: 'message_id' in msg ? msg.message_id : 0 };
-  },
+  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
 });
 broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
 

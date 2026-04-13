@@ -140,16 +140,7 @@ async function enqueueGroupNotifications(
 
   if (memberIds.length === 0) return 0;
 
-  // Generate ONE share link per event for all fallbacks (avoids per-recipient DB inserts)
-  let shareUrl: string | null = null;
-  if (ctx.deepLinkService && ctx.botUsername) {
-    try {
-      const link = ctx.deepLinkService.createShareLink(event.id, ctx.user.telegram_id);
-      shareUrl = ctx.deepLinkService.generateUrl(link.code, ctx.botUsername);
-    } catch (err) {
-      eventsLogger.warn({ err, eventId: event.id }, 'Failed to create share link for broadcast fallback');
-    }
-  }
+  const unreachableMentions: string[] = [];
 
   const jobs = memberIds.map((userId) => {
     const recipientUser = ctx.userRepo.findByTelegramId(userId);
@@ -165,32 +156,43 @@ async function enqueueGroupNotifications(
       action,
     );
 
-    const fallbackText = shareUrl
-      ? t(recipientLang).broadcast_unreachable(
-          buildRecipientMention(recipientUser, userId),
-          escapeHtml(event.title),
-          shareUrl,
-        )
-      : undefined;
+    if (!recipientUser?.onboarding_completed) {
+      unreachableMentions.push(buildRecipientMention(recipientUser, userId));
+    }
 
     return {
       recipientId: userId,
       text,
       parseMode: 'HTML' as const,
       origin: `group_event_${action}:${event.id}`,
-      fallbackChatId: ctx.groupChatId,
-      fallbackThreadId: ctx.topicThreadId,
-      fallbackText,
     };
   });
 
   try {
     await ctx.broadcast.enqueueBatch(jobs);
-    return jobs.length;
   } catch (err) {
     eventsLogger.error({ err, eventId: event.id, count: jobs.length }, 'Failed to enqueue group notifications');
     return 0;
   }
+
+  // Send ONE aggregated fallback to the group for users who likely haven't started the bot
+  if (unreachableMentions.length > 0 && ctx.sendMessageToChat && ctx.deepLinkService && ctx.botUsername) {
+    try {
+      const link = ctx.deepLinkService.createShareLink(event.id, ctx.user.telegram_id);
+      const shareUrl = ctx.deepLinkService.generateUrl(link.code, ctx.botUsername);
+      const userList = unreachableMentions.join(', ');
+      const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
+      const deepLinkMsg = t(lang).invite_deep_link(escapeHtml(event.title), shareUrl);
+      const fallbackText = `${userList}\n${deepLinkMsg}`;
+      await ctx.sendMessageToChat(ctx.groupChatId, fallbackText, {
+        message_thread_id: ctx.topicThreadId,
+      });
+    } catch (err) {
+      eventsLogger.warn({ err, groupChatId: ctx.groupChatId }, 'Failed to send broadcast fallback to group');
+    }
+  }
+
+  return jobs.length;
 }
 
 const eventsLogger = logger.child({ module: 'ai-tools' });

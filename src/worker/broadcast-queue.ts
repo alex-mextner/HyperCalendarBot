@@ -39,16 +39,10 @@ export interface BroadcastJobData {
   parseMode?: ParseMode;
   /** Free-form origin tag for audit/debugging, e.g. "group_event_created:42". */
   origin: string;
-  /** Group/topic chat ID to send fallback message when recipient is unreachable. */
-  fallbackChatId?: number;
-  /** Topic thread ID inside the fallback group chat. */
-  fallbackThreadId?: number;
-  /** Pre-formatted fallback text (HTML) sent to the group when the recipient can't be reached. */
-  fallbackText?: string;
 }
 
 export interface BroadcastSender {
-  sendMessage(chatId: number, text: string, parseMode?: ParseMode, threadId?: number): Promise<{ message_id: number }>;
+  sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
 }
 
 export interface BroadcastEnqueuer {
@@ -90,14 +84,16 @@ export function createBroadcastQueue(connection: ConnectionOptions): {
 }
 
 /**
- * Process a single broadcast job: deliver the message, handle permanent
- * Telegram errors (403/400) by sending a fallback to the source group,
- * and re-throw transient errors for BullMQ retry.
+ * Process a single broadcast job: deliver the message, silently complete
+ * on permanent Telegram errors (403/400), re-throw transient errors for retry.
+ *
+ * Fallback for unreachable users is handled at enqueue time (aggregated
+ * into one message per group), not per-job.
  *
  * Exported for testability — the worker wraps this in `createBroadcastWorker`.
  */
 export async function processBroadcastJob(data: BroadcastJobData, sender: BroadcastSender): Promise<void> {
-  const { recipientId, text, parseMode, fallbackChatId, fallbackThreadId, fallbackText } = data;
+  const { recipientId, text, parseMode } = data;
   try {
     await sender.sendMessage(recipientId, text, parseMode);
   } catch (err) {
@@ -107,13 +103,6 @@ export async function processBroadcastJob(data: BroadcastJobData, sender: Broadc
         { recipientId, origin: data.origin, code: tgErr.code },
         'Recipient unreachable (permanent), skipping retries',
       );
-      if (fallbackChatId && fallbackText) {
-        try {
-          await sender.sendMessage(fallbackChatId, fallbackText, 'HTML', fallbackThreadId);
-        } catch (fallbackErr) {
-          broadcastLogger.warn({ err: fallbackErr, fallbackChatId }, 'Broadcast fallback delivery failed');
-        }
-      }
       return;
     }
     throw err;

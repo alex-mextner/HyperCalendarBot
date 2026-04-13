@@ -166,10 +166,10 @@ describe('broadcast-queue module', () => {
     }
 
     test('delivers message to recipient on success', async () => {
-      const calls: { chatId: number; text: string; parseMode?: string; threadId?: number }[] = [];
+      const calls: { chatId: number; text: string; parseMode?: string }[] = [];
       const sender: BroadcastSender = {
-        sendMessage: async (chatId, text, parseMode, threadId) => {
-          calls.push({ chatId, text, parseMode, threadId });
+        sendMessage: async (chatId, text, parseMode) => {
+          calls.push({ chatId, text, parseMode });
           return { message_id: 1 };
         },
       };
@@ -188,95 +188,7 @@ describe('broadcast-queue module', () => {
       expect(calls[0]!.parseMode).toBe('HTML');
     });
 
-    test('on 403 sends fallback to group and does not throw', async () => {
-      const fallbackCalls: { chatId: number; text: string; parseMode?: string; threadId?: number }[] = [];
-      let firstCall = true;
-      const sender: BroadcastSender = {
-        sendMessage: async (chatId, text, parseMode, threadId) => {
-          if (firstCall) {
-            firstCall = false;
-            throw makeTelegramError(403);
-          }
-          fallbackCalls.push({ chatId, text, parseMode, threadId });
-          return { message_id: 2 };
-        },
-      };
-
-      const data: BroadcastJobData = {
-        recipientId: 42,
-        text: 'Hello',
-        parseMode: 'HTML',
-        origin: 'group_event_created:1',
-        fallbackChatId: -100123,
-        fallbackText: '@user ещё не запустил бота. Перешлите ссылку:\n\nhttps://t.me/TestBot?start=s_abc123',
-      };
-
-      await processBroadcastJob(data, sender);
-
-      expect(fallbackCalls).toHaveLength(1);
-      expect(fallbackCalls[0]!.chatId).toBe(-100123);
-      expect(fallbackCalls[0]!.text).toBe(
-        '@user ещё не запустил бота. Перешлите ссылку:\n\nhttps://t.me/TestBot?start=s_abc123',
-      );
-      expect(fallbackCalls[0]!.parseMode).toBe('HTML');
-    });
-
-    test('on 403 sends fallback with thread_id for forum topics', async () => {
-      const fallbackCalls: { chatId: number; threadId?: number }[] = [];
-      let firstCall = true;
-      const sender: BroadcastSender = {
-        sendMessage: async (chatId, _text, _parseMode, threadId) => {
-          if (firstCall) {
-            firstCall = false;
-            throw makeTelegramError(403);
-          }
-          fallbackCalls.push({ chatId, threadId });
-          return { message_id: 3 };
-        },
-      };
-
-      const data: BroadcastJobData = {
-        recipientId: 42,
-        text: 'Hello',
-        origin: 'group_event_created:1',
-        fallbackChatId: -100123,
-        fallbackThreadId: 77,
-        fallbackText: 'Fallback msg',
-      };
-
-      await processBroadcastJob(data, sender);
-
-      expect(fallbackCalls).toHaveLength(1);
-      expect(fallbackCalls[0]!.threadId).toBe(77);
-    });
-
-    test('on 400 sends fallback (peer_id_invalid, deactivated)', async () => {
-      let firstCall = true;
-      const fallbackChatIds: number[] = [];
-      const sender: BroadcastSender = {
-        sendMessage: async (chatId) => {
-          if (firstCall) {
-            firstCall = false;
-            throw makeTelegramError(400);
-          }
-          fallbackChatIds.push(chatId);
-          return { message_id: 4 };
-        },
-      };
-
-      const data: BroadcastJobData = {
-        recipientId: 42,
-        text: 'Hello',
-        origin: 'test:1',
-        fallbackChatId: -100123,
-        fallbackText: 'Fallback',
-      };
-
-      await processBroadcastJob(data, sender);
-      expect(fallbackChatIds).toEqual([-100123]);
-    });
-
-    test('on 403 without fallback data, completes silently', async () => {
+    test('on 403 completes silently without throwing', async () => {
       const sender: BroadcastSender = {
         sendMessage: async () => {
           throw makeTelegramError(403);
@@ -286,10 +198,26 @@ describe('broadcast-queue module', () => {
       const data: BroadcastJobData = {
         recipientId: 42,
         text: 'Hello',
-        origin: 'test:1',
+        origin: 'group_event_created:1',
       };
 
       // Should not throw — permanent error handled internally
+      await processBroadcastJob(data, sender);
+    });
+
+    test('on 400 completes silently (peer_id_invalid, deactivated)', async () => {
+      const sender: BroadcastSender = {
+        sendMessage: async () => {
+          throw makeTelegramError(400);
+        },
+      };
+
+      const data: BroadcastJobData = {
+        recipientId: 42,
+        text: 'Hello',
+        origin: 'test:1',
+      };
+
       await processBroadcastJob(data, sender);
     });
 
@@ -304,8 +232,6 @@ describe('broadcast-queue module', () => {
         recipientId: 42,
         text: 'Hello',
         origin: 'test:1',
-        fallbackChatId: -100123,
-        fallbackText: 'Should not be sent',
       };
 
       await expect(processBroadcastJob(data, sender)).rejects.toMatchObject({ code: 429 });
@@ -322,34 +248,9 @@ describe('broadcast-queue module', () => {
         recipientId: 42,
         text: 'Hello',
         origin: 'test:1',
-        fallbackChatId: -100123,
-        fallbackText: 'Should not be sent',
       };
 
       await expect(processBroadcastJob(data, sender)).rejects.toThrow('Network error');
-    });
-
-    test('fallback delivery failure does not propagate', async () => {
-      let callCount = 0;
-      const sender: BroadcastSender = {
-        sendMessage: async () => {
-          callCount++;
-          if (callCount === 1) throw makeTelegramError(403);
-          throw new Error('Group send failed too');
-        },
-      };
-
-      const data: BroadcastJobData = {
-        recipientId: 42,
-        text: 'Hello',
-        origin: 'test:1',
-        fallbackChatId: -100123,
-        fallbackText: 'Fallback',
-      };
-
-      // Should not throw even if fallback delivery fails
-      await processBroadcastJob(data, sender);
-      expect(callCount).toBe(2);
     });
   });
 
