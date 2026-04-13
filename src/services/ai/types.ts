@@ -286,6 +286,8 @@ export interface ToolHandlerMeta {
   readonly?: boolean;
   /** Not worth logging as a user action (all readonly tools + UI/meta tools). */
   skipActionLog?: boolean;
+  /** Tool always results in [SKIP] — no status message or tool label shown. */
+  silent?: boolean;
 }
 
 export interface AgentConfig {

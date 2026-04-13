@@ -11,7 +11,7 @@ import { validateResponse } from './response-validator.ts';
 import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -263,14 +263,6 @@ function isSkipText(text: string): boolean {
   if (t.length === 0) return false; // empty text is handled separately; not a SKIP
   return t === '[SKIP]' || text.includes('[SKIP]') || t === '...' || t === '…';
 }
-
-/**
- * Tools whose execution should never create or update a status message.
- * They always result in [SKIP] — showing a label is pointless visual noise
- * and in noPlaceholder (group) mode it creates a message that must be
- * immediately deleted, often failing or leaving orphans.
- */
-const SILENT_TOOLS = new Set(['set_reaction']);
 
 /** Recursively sort object keys for stable serialization. */
 function stableStringify(value: unknown): string {

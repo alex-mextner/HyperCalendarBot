@@ -332,7 +332,7 @@ const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMe
 /** Residual: inline-dispatched tools that have no imported handler function. */
 const INLINE_TOOL_META: { [tool: string]: import('./types.ts').ToolHandlerMeta } = {
   supplement_skip: { skipActionLog: true },
-  set_reaction: { skipActionLog: true },
+  set_reaction: { skipActionLog: true, silent: true },
 };
 
 function getToolMeta(toolName: string): import('./types.ts').ToolHandlerMeta | undefined {
@@ -349,6 +349,11 @@ const THROTTLE_EXEMPT = new Set(
 /** Derived: tools not worth logging as user actions. */
 const SKIP_ACTION_LOG = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
+);
+
+/** Derived: tools that always result in [SKIP] — no status message or tool label. */
+export const SILENT_TOOLS = new Set(
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
 );
 
 /** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
