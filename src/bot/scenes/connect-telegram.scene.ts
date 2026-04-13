@@ -8,7 +8,9 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import { decryptString, encryptBlob, encryptString } from '../../services/crypto/session-crypto.ts';
+import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import { buildUserSessionInvitationText } from '../../services/telegram-session/invitation-text.ts';
 import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
 import { formatDateShort, formatTime } from '../../utils/date.ts';
 import { logger } from '../../utils/logger.ts';
@@ -67,6 +69,15 @@ export interface ConnectTelegramDeps {
   userRepo: UserRepository;
   contactRepo: ContactRepository;
   invitationService: InvitationService;
+  sendAsConnectedUser?: (
+    inviterId: number,
+    targetId: number,
+    text: string,
+    username?: string,
+    meta?: { invitationId?: number },
+  ) => Promise<boolean>;
+  deepLinkService?: DeepLinkService;
+  botUsername?: string;
 }
 
 // --- Scene factory ---
@@ -382,6 +393,7 @@ export function createConnectTelegramScene(
 
           if (result.success) {
             sceneLogger.info({ userId, eventId, inviteeId }, 'Post-connect invitation created');
+            deliverPostConnectInvitation(deps, userId, eventId, inviteeId, inviteeUsername, result.invitation!.id, l);
             await context.send(ct.pendingSent);
           } else {
             sceneLogger.warn({ userId, eventId, inviteeId, error: result.error }, 'Post-connect invitation failed');
@@ -419,6 +431,62 @@ function resolveInviteeName(deps: ConnectTelegramDeps, ownerUserId: number, invi
   if (contact?.username) return `@${contact.username}`;
 
   return `User ${inviteeId}`;
+}
+
+// --- Delivery helper ---
+
+/**
+ * Fire-and-forget: sends the invitation via the user's connected Telegram session.
+ * Falls back silently (invitation DB record already created, bot API delivery
+ * will happen via the normal pipeline if this fails).
+ */
+function deliverPostConnectInvitation(
+  deps: ConnectTelegramDeps,
+  inviterId: number,
+  eventId: number,
+  inviteeId: number,
+  inviteeUsername: string | undefined,
+  invitationId: number,
+  lang: 'en' | 'ru',
+): void {
+  if (!deps.sendAsConnectedUser) {
+    sceneLogger.warn({ inviterId, eventId }, 'sendAsConnectedUser not available — skipping delivery');
+    return;
+  }
+
+  const event = deps.eventRepo.findById(eventId, inviterId);
+  if (!event) return;
+
+  const inviter = deps.userRepo.findByTelegramId(inviterId);
+  const inviterTimezone = inviter?.timezone ?? 'UTC';
+
+  // Build deep link for the invitee to respond
+  let deepLink: string | undefined;
+  if (deps.deepLinkService && deps.botUsername) {
+    const link = deps.deepLinkService.createInvitationLink(invitationId, eventId, inviterId);
+    deepLink = deps.deepLinkService.generateUrl(link.code, deps.botUsername);
+  }
+
+  if (!deepLink) {
+    sceneLogger.warn({ inviterId, eventId }, 'Deep link unavailable — skipping user-session delivery');
+    return;
+  }
+
+  const text = buildUserSessionInvitationText({
+    event: {
+      title: event.title,
+      start_utc: event.start_at,
+      location: event.location,
+      description: event.description,
+    },
+    inviterTimezone,
+    deepLink,
+    lang,
+  });
+
+  deps
+    .sendAsConnectedUser(inviterId, inviteeId, text, inviteeUsername, { invitationId })
+    .catch((err) => sceneLogger.warn({ err, inviterId, inviteeId, eventId }, 'Post-connect delivery failed'));
 }
 
 // --- Finalize helper ---

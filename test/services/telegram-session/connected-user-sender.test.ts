@@ -128,16 +128,31 @@ describe('createConnectedUserSender', () => {
     expect(sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'expired');
   });
 
+  test('calls onSessionExpired callback on SESSION_EXPIRED', async () => {
+    const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
+    const bridgeResult: BridgeResult = { success: false, error: 'SESSION_EXPIRED', message: 'Session expired' };
+    SessionBridge.sendAsUser = mock(async () => bridgeResult);
+    const onSessionExpired = mock((_userId: number) => {});
+
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY, onSessionExpired });
+    await sender(100, 200, 'hello');
+
+    expect(onSessionExpired).toHaveBeenCalledTimes(1);
+    expect(onSessionExpired).toHaveBeenCalledWith(100);
+  });
+
   test('returns false on other bridge errors without marking expired', async () => {
     const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
     const bridgeResult: BridgeResult = { success: false, error: 'FLOOD_WAIT', message: 'Too many requests' };
     SessionBridge.sendAsUser = mock(async () => bridgeResult);
+    const onSessionExpired = mock((_userId: number) => {});
 
-    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY });
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY, onSessionExpired });
     const result = await sender(100, 200, 'hello');
 
     expect(result).toBe(false);
     expect(sessionRepo.updateStatus).not.toHaveBeenCalled();
+    expect(onSessionExpired).not.toHaveBeenCalled();
   });
 
   test('returns false and marks expired on decryption failure', async () => {
@@ -149,6 +164,18 @@ describe('createConnectedUserSender', () => {
 
     expect(result).toBe(false);
     expect(sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'expired');
+  });
+
+  test('calls onSessionExpired callback on decryption failure', async () => {
+    const badEncrypted = Buffer.from('not-a-valid-encrypted-blob');
+    const sessionRepo = makeMockSessionRepo({ encrypted_session: badEncrypted });
+    const onSessionExpired = mock((_userId: number) => {});
+
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY, onSessionExpired });
+    await sender(100, 200, 'hello');
+
+    expect(onSessionExpired).toHaveBeenCalledTimes(1);
+    expect(onSessionExpired).toHaveBeenCalledWith(100);
   });
 
   test('cleans up temp file even on crash', async () => {
