@@ -584,7 +584,7 @@ async function finalizeSession(
           .row()
           .text(ct.skipPendingBtn, CB_SKIP_PENDING);
 
-        await context.send(ct.successWithPending(phoneMasked, event.title, dateLine, inviteeList, count), {
+        await context.send(ct.successWithPending(phoneMasked, event.title, dateLine, inviteeList), {
           reply_markup: kb,
           parse_mode: 'HTML',
         });

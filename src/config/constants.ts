@@ -150,6 +150,8 @@ export const MSG = {
     holidays_notify_on: (country: string) => `${country}: notifications ON`,
     holidays_notify_off: (country: string) => `${country}: notifications OFF`,
     ai_error: 'AI is temporarily unavailable. Use bot commands (/help).',
+    ai_send_error: '⚠️ An error occurred while sending the response. Please try again.',
+    ai_processing_error: '⚠️ An error occurred while processing your request.',
     ai_clear_history: 'Chat history cleared.',
     scene_help_btn: '🆘 Ask AI for help',
     notify_menu: '⚙️ Notification Settings',
@@ -544,7 +546,7 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
       btnReconnect: 'Reconnect',
       cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
-      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string) =>
         `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine})\n\nNot yet invited:\n${inviteeList}`,
       sendPendingBtn: (count: number) => `Send ${count} invitation${count > 1 ? 's' : ''}`,
       skipPendingBtn: 'Not now',
@@ -888,6 +890,8 @@ export const MSG = {
     holidays_notify_on: (country: string) => `${country}: уведомления ВКЛ`,
     holidays_notify_off: (country: string) => `${country}: уведомления ВЫКЛ`,
     ai_error: 'ИИ временно недоступен. Используйте команды бота (/help).',
+    ai_send_error: '⚠️ Произошла ошибка при отправке ответа. Попробуй ещё раз.',
+    ai_processing_error: '⚠️ Произошла ошибка при обработке запроса.',
     ai_clear_history: 'История чата очищена.',
     scene_help_btn: '🆘 Позвать на помощь',
     notify_menu: '⚙️ Настройки уведомлений',
@@ -1283,7 +1287,7 @@ export const MSG = {
       alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
       btnReconnect: 'Переподключить',
       cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
-      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string) =>
         `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine})\n\nЕщё не приглашены:\n${inviteeList}`,
       sendPendingBtn: (count: number) =>
         `Отправить ${count} ${ruPlural(count, 'приглашение', 'приглашения', 'приглашений')}`,

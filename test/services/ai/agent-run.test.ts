@@ -792,4 +792,63 @@ describe('CalendarBotAgent.run()', () => {
     const content = (call2Result as { content: string }).content;
     expect(content).toContain('DUPLICATE');
   });
+
+  // ── Regression: error delivery guarantee ────────────────────────────────
+
+  test('run() catches stream error and delivers error message to user', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    const result = await agent.run(ctx);
+
+    // REGRESSION: before the fix, an unhandled error could leave the user
+    // with just ⏳ and no response. Now the error message is appended.
+    const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
+    const finalEdit = editCalls[editCalls.length - 1] as unknown[];
+    const finalText = finalEdit[2] as string;
+    expect(finalText).toContain('⚠️');
+    expect(result.responseText).toContain('⚠️');
+  });
+
+  test('run() in group mode (noPlaceholder) handles error without leaving orphan messages', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('Provider timeout') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+    ctx.isGroup = true;
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    const result = await agent.run(ctx);
+
+    // In group mode (noPlaceholder), no ⏳ is sent. On error, the response
+    // should be delivered as a single message, not left unfinished.
+    const sendCalls = (sender.sendMessage as ReturnType<typeof mock>).mock.calls;
+    // Should have sent exactly 1 message with the error
+    const sentTexts = sendCalls.map((c) => (c as unknown[])[1] as string);
+    const errorMessages = sentTexts.filter((t) => t.includes('⚠️'));
+    expect(errorMessages.length).toBe(1);
+    expect(result.responseText).toContain('⚠️');
+  });
+
+  test('agent catch block error message uses t() for both languages', async () => {
+    // Verify English error
+    const { impl: implEn } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentEn = new CalendarBotAgent(config, sender, { streamImpl: implEn });
+    ctx.user = { ...ctx.user, language: 'en' };
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+    const resultEn = await agentEn.run(ctx);
+    expect(resultEn.responseText).toContain('⚠️');
+
+    // Verify Russian error uses the same ⚠️ prefix (from t())
+    const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
+    const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
+    ctx.user = { ...ctx.user, language: 'ru' };
+    const resultRu = await agentRu.run(ctx);
+    expect(resultRu.responseText).toContain('⚠️');
+
+    // Both must be different (localized), not the same hardcoded string
+    // Extract just the error part (after the ⚠️)
+    const enError = resultEn.responseText.split('⚠️')[1]!.trim();
+    const ruError = resultRu.responseText.split('⚠️')[1]!.trim();
+    expect(enError).not.toBe(ruError);
+  });
 });

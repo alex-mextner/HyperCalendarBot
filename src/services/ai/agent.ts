@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type OpenAI from 'openai';
 import { z } from 'zod';
+import { t } from '../../config/constants.ts';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
@@ -279,7 +280,7 @@ function stableStringify(value: unknown): string {
  * injected by the model (e.g. `_nonce`) are stripped to prevent false key
  * divergence.
  */
-function toolCallKey(name: string, input: { [key: string]: unknown }): string {
+export function toolCallKey(name: string, input: { [key: string]: unknown }): string {
   const schema = toolSchemas[name as keyof typeof toolSchemas];
   const knownKeys =
     schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
@@ -288,8 +289,14 @@ function toolCallKey(name: string, input: { [key: string]: unknown }): string {
         .filter((k) => knownKeys.includes(k))
         .sort()
     : Object.keys(input).sort();
+  // Strip null/undefined — optional params absent vs explicitly null must not
+  // break dedup. e.g. {query:"x"} and {query:"x", start_date:null} are the same.
   const canonical: { [key: string]: unknown } = {};
-  for (const k of filteredKeys) canonical[k] = input[k];
+  for (const k of filteredKeys) {
+    if (input[k] !== null && input[k] !== undefined) {
+      canonical[k] = input[k];
+    }
+  }
   return `${name}:${stableStringify(canonical)}`;
 }
 
@@ -693,13 +700,7 @@ export class CalendarBotAgent {
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
-
-      const lang = ctx.user.language;
-      const errorMsg =
-        lang === 'ru'
-          ? '\n\n⚠️ Произошла ошибка при обработке запроса.'
-          : '\n\n⚠️ An error occurred while processing your request.';
-      writer.appendText(errorMsg);
+      writer.appendText(`\n\n${t(ctx.user.language).ai_processing_error}`);
     }
 
     const finalText = writer.getText().trim();
@@ -725,7 +726,12 @@ export class CalendarBotAgent {
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }
 
-    await writer.finalize();
+    try {
+      await writer.finalize();
+    } catch (finalizeErr) {
+      aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
+      await writer.sendErrorFallback(t(ctx.user.language).ai_send_error);
+    }
 
     const msgId = writer.getMessageId();
     if (ctx.onBotResponse && msgId !== null) {
