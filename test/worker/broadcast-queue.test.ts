@@ -166,6 +166,10 @@ describe('broadcast-queue module', () => {
       expect(isPermanentTelegramError(400)).toBe(false);
     });
 
+    test('classifies 404 as permanent', () => {
+      expect(isPermanentTelegramError(404)).toBe(true);
+    });
+
     test('classifies 429 as transient', () => {
       expect(isPermanentTelegramError(429)).toBe(false);
     });

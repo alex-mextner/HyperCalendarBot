@@ -38,7 +38,8 @@ const BATCH_TTL_SECONDS = 3600; // 1 hour — generous ceiling for slow queues
 /** Permanent Telegram errors that will never succeed on retry. */
 export function isPermanentTelegramError(code: number): boolean {
   // 403 = bot blocked / user hasn't started bot / bot kicked from chat
-  return code === 403;
+  // 404 = chat not found (deleted account, invalid chat_id)
+  return code === 403 || code === 404;
 }
 
 // ---------------------------------------------------------------------------
