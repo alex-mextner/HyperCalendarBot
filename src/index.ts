@@ -298,7 +298,34 @@ if (config.REDIS_URL) {
 const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
 const { parseRedisUrl } = await import('./utils/redis.ts');
 const broadcastConnection = parseRedisUrl(config.REDIS_URL);
-const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(broadcastConnection);
+const broadcastRedisClient = new Bun.RedisClient(config.REDIS_URL);
+const broadcastRedis = {
+  set: async (key: string, value: string, ex: number) => {
+    await broadcastRedisClient.set(key, value, 'EX', ex);
+  },
+  get: (key: string) => broadcastRedisClient.get(key),
+  sadd: async (key: string, member: string) => {
+    await broadcastRedisClient.send('SADD', [key, member]);
+  },
+  smembers: async (key: string): Promise<string[]> => {
+    const result = await broadcastRedisClient.send('SMEMBERS', [key]);
+    return (result ?? []) as string[];
+  },
+  incr: async (key: string): Promise<number> => {
+    const result = await broadcastRedisClient.send('INCR', [key]);
+    return result as number;
+  },
+  del: async (...keys: string[]) => {
+    await broadcastRedisClient.send('DEL', keys);
+  },
+  expire: async (key: string, seconds: number) => {
+    await broadcastRedisClient.send('EXPIRE', [key, String(seconds)]);
+  },
+};
+const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(
+  broadcastConnection,
+  broadcastRedis,
+);
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
@@ -863,9 +890,21 @@ botRef.sendVoice = async (telegramId, audio) => {
 };
 // Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
 // No botInitialized guard needed: the worker starts AFTER the flag is set.
-const broadcastWorker = createBroadcastWorker(broadcastConnection, {
-  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
-});
+const broadcastWorker = createBroadcastWorker(
+  broadcastConnection,
+  {
+    sendMessage: async (chatId, text, parseMode, threadId) => {
+      const msg = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(threadId ? { message_thread_id: threadId } : {}),
+      });
+      return { message_id: 'message_id' in msg ? msg.message_id : 0 };
+    },
+  },
+  broadcastRedis,
+);
 broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
 
 broadcastQueueCleanup = {
