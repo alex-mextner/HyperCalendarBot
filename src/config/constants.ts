@@ -1,6 +1,18 @@
 // src/config/constants.ts
 
+import { parsePhoneNumber } from 'libphonenumber-js';
 import { ruPlural } from '../services/event/formatters.ts';
+
+export function maskPhone(phoneE164: string): string {
+  try {
+    const parsed = parsePhoneNumber(phoneE164);
+    if (!parsed.isValid()) return '+••• ••••';
+    const last4 = phoneE164.slice(-4);
+    return `+${parsed.countryCallingCode} ••• ${last4}`;
+  } catch {
+    return '+••• ••••';
+  }
+}
 
 // Rate limits
 export const RATE_LIMIT = {
@@ -304,6 +316,13 @@ export const MSG = {
       toggleVoiceEnable: '✅ Enable voice responses',
       toggleVoiceDisable: '❌ Disable voice responses',
       showCountries: '🏳️ Choose a country:',
+      telegramAccount: '📱 Telegram account',
+      telegramConnected: (masked: string) => `📱 Telegram: connected (${masked})`,
+      telegramNotConnected: '📱 Telegram: not connected',
+      telegramConnect: '📱 Connect',
+      telegramDisconnect: '📱 Disconnect',
+      telegramDisconnectConfirm: 'Disconnect Telegram account? Invitations will be sent from the bot.',
+      telegramDisconnected: '✅ Telegram account disconnected.',
     },
     aiTools: {
       history: {
@@ -341,6 +360,8 @@ export const MSG = {
         userPickerSent: 'User picker sent. Waiting for user to select participants.',
         tableRendering: (title: string) => `Table "${title}" is rendering and will appear in the chat shortly.`,
         tableRenderingVoice: 'Check the chat — the table is there.',
+        telegramConnectedStatus: (masked: string) => `Telegram account connected (${masked})`,
+        telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
       },
       slots: {
         noFreeSlots: 'No free slots — the entire day is busy.',
@@ -400,6 +421,14 @@ export const MSG = {
           `Visibility for "${title}" (id: ${id}) set to "${visibility}".`,
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
+        userSessionInvitation: (args: {
+          title: string;
+          dateLine: string;
+          locationLine: string;
+          descriptionLine: string;
+          deepLink: string;
+        }) =>
+          `Inviting you to "${args.title}"\n📅 ${args.dateLine}${args.locationLine}${args.descriptionLine}\n\nDetails & RSVP: ${args.deepLink}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>
@@ -449,6 +478,48 @@ export const MSG = {
         statusDisabledByUser:
           '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
       },
+    },
+    connectTelegram: {
+      consent: [
+        '🔐 Connect Telegram Account',
+        '',
+        'This lets the bot send meeting invitations on your behalf',
+        "to people who haven't started the bot yet.",
+        '',
+        '🔒 Security:',
+        '• Session data is encrypted with AES-256-GCM',
+        '• The encryption key lives only in the bot process memory — it is not stored on disk next to the data',
+        '• The bot stores a technical session — no passwords, no messages',
+        '',
+        'The bot will NOT:',
+        '• Read your messages',
+        '• Send messages without your command',
+        '• Access your contacts',
+        '',
+        'The bot WILL:',
+        '• Send meeting invitations on your behalf',
+        '',
+        'You can disconnect anytime in /settings.',
+      ].join('\n'),
+      btnConnect: 'Connect',
+      btnCancel: 'Cancel',
+      enterPhone: 'Enter phone number in international format:\nExample: +79001234567',
+      invalidPhone: 'Invalid format. Use international format: +79001234567',
+      codeSent: 'Verification code sent to Telegram.\nEnter the code (5 digits):',
+      invalidCode: 'Invalid code. Try again.',
+      codeExpired: 'Code expired. Start over: /connect_telegram',
+      tooManyAttempts: 'Too many failed attempts. Start over: /connect_telegram',
+      enter2fa: 'You have two-factor authentication enabled.\nEnter your password (it will not be stored):',
+      invalid2fa: 'Wrong password. Try again.',
+      success: (masked: string) =>
+        `✅ Telegram account connected (${masked})\n\nInvitations will now be sent from your account.\nDisconnect: /settings`,
+      cancelled: 'Connection cancelled.',
+      featureUnavailable: 'Feature temporarily unavailable.',
+      phoneAlreadyUsed: 'This phone number is already connected to another account.',
+      floodWait: (minutes: number) => `Telegram rate-limited. Try again in ${minutes} min.`,
+      alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
+      btnReconnect: 'Reconnect',
+      cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
     },
     callbackErrors: {
       notFound: 'Not found',
@@ -916,6 +987,13 @@ export const MSG = {
       toggleVoiceEnable: '✅ Включить голосовые ответы',
       toggleVoiceDisable: '❌ Отключить голосовые ответы',
       showCountries: '🏳️ Выберите страну:',
+      telegramAccount: '📱 Telegram-аккаунт',
+      telegramConnected: (masked: string) => `📱 Telegram: подключён (${masked})`,
+      telegramNotConnected: '📱 Telegram: не подключён',
+      telegramConnect: '📱 Подключить',
+      telegramDisconnect: '📱 Отключить',
+      telegramDisconnectConfirm: 'Отключить Telegram-аккаунт? Приглашения будут отправляться через бота.',
+      telegramDisconnected: '✅ Telegram-аккаунт отключён.',
     },
     aiTools: {
       history: {
@@ -953,6 +1031,8 @@ export const MSG = {
         userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
         tableRendering: (title: string) => `Таблица «${title}» рендерится и скоро появится в чате.`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
+        telegramConnectedStatus: (masked: string) => `Telegram-аккаунт подключён (${masked})`,
+        telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
       },
       slots: {
         noFreeSlots: 'Свободных окон нет — весь день занят.',
@@ -1012,6 +1092,14 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+        userSessionInvitation: (args: {
+          title: string;
+          dateLine: string;
+          locationLine: string;
+          descriptionLine: string;
+          deepLink: string;
+        }) =>
+          `Приглашаю тебя на «${args.title}»\n📅 ${args.dateLine}${args.locationLine}${args.descriptionLine}\n\nПодробнее и ответить: ${args.deepLink}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>
@@ -1061,6 +1149,48 @@ export const MSG = {
         statusDisabledByUser:
           '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },
+    },
+    connectTelegram: {
+      consent: [
+        '🔐 Подключение Telegram-аккаунта',
+        '',
+        'Это позволит боту отправлять приглашения на встречи от твоего имени',
+        'людям, которые ещё не пользуются ботом.',
+        '',
+        '🔒 Безопасность:',
+        '• Данные сессии зашифрованы AES-256-GCM',
+        '• Ключ шифрования живёт только в памяти процесса бота — на диске рядом с данными его нет',
+        '• Бот хранит только техническую сессию — без паролей и сообщений',
+        '',
+        'Бот НЕ будет:',
+        '• Читать твои сообщения',
+        '• Отправлять сообщения без твоей команды',
+        '• Получать доступ к твоим контактам',
+        '',
+        'Бот БУДЕТ:',
+        '• Отправлять приглашения на встречи от твоего имени',
+        '',
+        'Отключить можно в любой момент в /settings.',
+      ].join('\n'),
+      btnConnect: 'Подключить',
+      btnCancel: 'Отмена',
+      enterPhone: 'Введи номер телефона в международном формате:\nНапример: +79001234567',
+      invalidPhone: 'Неверный формат. Используй международный формат: +79001234567',
+      codeSent: 'Код подтверждения отправлен в Telegram.\nВведи код (5 цифр):',
+      invalidCode: 'Неверный код. Попробуй ещё раз.',
+      codeExpired: 'Код истёк. Начни заново: /connect_telegram',
+      tooManyAttempts: 'Слишком много попыток. Начни заново: /connect_telegram',
+      enter2fa: 'У тебя включена двухфакторная аутентификация.\nВведи пароль (он не будет сохранён):',
+      invalid2fa: 'Неверный пароль. Попробуй ещё раз.',
+      success: (masked: string) =>
+        `✅ Telegram-аккаунт подключён (${masked})\n\nТеперь приглашения на встречи будут отправляться от твоего имени.\nОтключить: /settings`,
+      cancelled: 'Подключение отменено.',
+      featureUnavailable: 'Функция временно недоступна.',
+      phoneAlreadyUsed: 'Этот номер телефона уже подключён к другому аккаунту.',
+      floodWait: (minutes: number) => `Telegram ограничил запросы. Попробуй через ${minutes} мин.`,
+      alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
+      btnReconnect: 'Переподключить',
+      cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
     },
     callbackErrors: {
       notFound: 'Не найдено',
