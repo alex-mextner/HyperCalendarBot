@@ -1212,6 +1212,11 @@ Condition is an expression using dot-notation on the event payload (e.g. "newEve
     },
   },
   {
+    name: 'connect_telegram_status',
+    description: 'Check if user has connected their Telegram account for direct invitation delivery',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
     name: 'end_conversation',
     description:
       "Mark the current conversation as complete. Call when the user's request is fully resolved and no follow-up is expected. Starts a fresh context for the next unrelated request. This also creates a clean log boundary.",

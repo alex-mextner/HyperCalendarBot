@@ -1,4 +1,4 @@
-import { t } from '../../../config/constants.ts';
+import { maskPhone, t } from '../../../config/constants.ts';
 import type {
   NotificationPreferencesRow,
   NotificationPreferencesUpdate,
@@ -7,6 +7,8 @@ import type {
   UserCallSettings,
   Visibility,
 } from '../../../database/types.ts';
+import { logger } from '../../../utils/logger.ts';
+import { decryptString } from '../../crypto/session-crypto.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 // ── Update interfaces (match AI tool schema in tools.ts) ──
@@ -307,4 +309,30 @@ function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
 
   ctx.user = updated;
   return { success: true, output: t(ctx.user.language).aiTools.settings.voiceUpdated(String(raw)) };
+}
+
+export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
+  const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
+  const session = ctx.telegramSessionRepo?.getActive(ctx.user.telegram_id);
+
+  if (!session || !ctx.telegramMasterKey) {
+    return {
+      success: true,
+      output: t(lang).aiTools.meta.telegramNotConnectedStatus,
+      data: { connected: false },
+    };
+  }
+
+  let masked = '+••• ••••';
+  try {
+    masked = maskPhone(decryptString(Buffer.from(session.encrypted_phone), ctx.telegramMasterKey));
+  } catch (err) {
+    logger.warn({ err, userId: ctx.user.telegram_id }, 'Phone decrypt failed in AI tool');
+  }
+
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.telegramConnectedStatus(masked),
+    data: { connected: true, phone_masked: masked, status: session.status },
+  };
 }

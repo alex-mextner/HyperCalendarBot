@@ -62,7 +62,7 @@ import {
 } from './tool-handlers/scheduled.ts';
 import { handleListCalendarAccess, handleManageSecretaries } from './tool-handlers/secretary.ts';
 import type { ManageSettingsInput } from './tool-handlers/settings.ts';
-import { handleManageSettings } from './tool-handlers/settings.ts';
+import { handleConnectTelegramStatus, handleManageSettings } from './tool-handlers/settings.ts';
 import {
   handleCancelInvitation,
   handleGetInvitationStatus,
@@ -196,6 +196,7 @@ export interface ToolInputMap {
   bash_execute: AgentCommand['payload'];
   playwright_action: AgentCommand['payload'];
   applescript_run: AgentCommand['payload'];
+  connect_telegram_status: Record<never, never>;
   resume_scene: Record<never, never>;
   cancel_scene: Record<never, never>;
 }
@@ -222,6 +223,7 @@ const SKIP_ACTION_LOG = new Set<string>([
   'get_invitation_status',
   'get_google_calendar_status',
   'list_google_calendars',
+  'connect_telegram_status',
   'list_calendar_access',
   'get_timezone_info',
   'convert_to_timezone',
@@ -481,6 +483,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'manage_settings':
         return handleManageSettings(ctx, input as ToolInputMap['manage_settings']);
+
+      case 'connect_telegram_status':
+        return handleConnectTelegramStatus(ctx);
 
       case 'share_event':
         return handleShareEvent(ctx, input as ToolInputMap['share_event']);

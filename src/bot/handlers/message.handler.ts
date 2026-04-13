@@ -184,6 +184,8 @@ export interface MessageHandlerDeps {
   birthdayService?: BirthdayService;
   userMemoryRepo?: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
   actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
+  telegramSessionRepo?: import('../../database/repositories/telegram-session.repository.ts').TelegramSessionRepository;
+  telegramMasterKey?: Buffer;
   chatHistoryIds?: Map<number, number>;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
@@ -578,6 +580,8 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             }
           })(),
       actionLogRepo: deps.actionLogRepo,
+      telegramSessionRepo: deps.telegramSessionRepo,
+      telegramMasterKey: deps.telegramMasterKey,
       chatHistoryId: deps.chatHistoryIds?.get(user.telegram_id),
       sceneStorage: {
         delete: async (key: string) => {
