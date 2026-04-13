@@ -1,6 +1,6 @@
 // test/utils/worker-alert.test.ts
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { UnrecoverableError } from 'bullmq';
+import { UnrecoverableError } from '../../src/utils/unrecoverable-error.ts';
 import { makeWorkerFailureHandler } from '../../src/utils/worker-alert.ts';
 
 describe('makeWorkerFailureHandler', () => {

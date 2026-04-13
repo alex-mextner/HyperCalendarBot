@@ -2,8 +2,6 @@
 // Creates a BullMQ worker 'failed' event handler that sends a Telegram alert
 // and pushes to the admin alert queue (for mac-alert-watcher → Claude).
 
-import { UnrecoverableError } from 'bullmq';
-
 interface WorkerAlertDeps {
   botToken: string;
   adminId: number;
@@ -19,7 +17,7 @@ export function makeWorkerFailureHandler(
     // UnrecoverableError is thrown intentionally to stop retries for permanent
     // failures (e.g. Telegram 403/404). The throwing site already logs at warn
     // level — alerting the admin would be pure noise.
-    if (err instanceof UnrecoverableError) return;
+    if (err.name === 'UnrecoverableError') return;
 
     const jobId = job?.id ?? '?';
 

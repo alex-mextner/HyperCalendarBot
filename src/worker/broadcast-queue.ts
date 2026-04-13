@@ -17,9 +17,10 @@
 //   * attempts: 3 with exponential backoff — survives transient 429s
 //   * failed jobs retained for 500 runs so admin can inspect via BullMQ UI
 
-import { type ConnectionOptions, Queue, UnrecoverableError, Worker } from 'bullmq';
+import { type ConnectionOptions, Queue, Worker } from 'bullmq';
 import { logger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import { UnrecoverableError } from '../utils/unrecoverable-error.ts';
 
 const broadcastLogger = logger.child({ module: 'broadcast' });
 
