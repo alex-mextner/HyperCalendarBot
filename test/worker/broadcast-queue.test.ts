@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { BroadcastJobData, BroadcastSender } from '../../src/worker/broadcast-queue.ts';
-import { createBroadcastQueue, createBroadcastWorker } from '../../src/worker/broadcast-queue.ts';
+import {
+  createBroadcastQueue,
+  createBroadcastWorker,
+  isTelegramPermanentError,
+} from '../../src/worker/broadcast-queue.ts';
 
 // Mock Redis connection — BullMQ Queue/Worker constructors accept connection
 // options but only attempt to connect when a command is issued. We mock at the
@@ -130,6 +134,59 @@ describe('broadcast-queue module', () => {
       };
 
       await expect(sender.sendMessage(1, 'x')).rejects.toThrow('Telegram 429');
+    });
+  });
+
+  describe('isTelegramPermanentError', () => {
+    test("returns true for 403 Forbidden (bot can't initiate)", () => {
+      const err = new Error("sendMessage: Forbidden: bot can't initiate conversation with a user");
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for "bot was blocked" message', () => {
+      const err = new Error('Forbidden: bot was blocked by the user');
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for "user is deactivated" message', () => {
+      const err = new Error('Forbidden: user is deactivated');
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for "chat not found" message', () => {
+      const err = new Error('Bad Request: chat not found');
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for PEER_ID_INVALID message', () => {
+      const err = new Error('PEER_ID_INVALID');
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for error with numeric code 403', () => {
+      const err = Object.assign(new Error('Forbidden'), { code: 403 });
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns true for error with numeric code 404', () => {
+      const err = Object.assign(new Error('Not Found'), { code: 404 });
+      expect(isTelegramPermanentError(err)).toBe(true);
+    });
+
+    test('returns false for transient 429 rate limit', () => {
+      const err = Object.assign(new Error('Too Many Requests: retry after 5'), { code: 429 });
+      expect(isTelegramPermanentError(err)).toBe(false);
+    });
+
+    test('returns false for generic network error', () => {
+      const err = new Error('ECONNREFUSED');
+      expect(isTelegramPermanentError(err)).toBe(false);
+    });
+
+    test('returns false for non-Error values', () => {
+      expect(isTelegramPermanentError('string error')).toBe(false);
+      expect(isTelegramPermanentError(null)).toBe(false);
+      expect(isTelegramPermanentError(undefined)).toBe(false);
     });
   });
 

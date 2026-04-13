@@ -5,11 +5,15 @@ import { CB, t } from '../../config/constants.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { GroupChatRepository } from '../../database/repositories/group-chat.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
+import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
-import type { User } from '../../database/types.ts';
+import type { TelegramSession, User } from '../../database/types.ts';
+import { decryptBlob } from '../../services/crypto/session-crypto.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
+import { SessionBridge } from '../../services/telegram-session/session-bridge.ts';
 import { getTimezoneDisplay } from '../../services/timezone/timezone-service.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import { cmdLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
 import { countryPickerKeyboard, reminderIntervalsKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
@@ -29,6 +33,8 @@ export function settingsCategoryKeyboard(lang: 'en' | 'ru'): InlineKeyboard {
     .text(s.categoryPrivacy, 'stg:privacy')
     .row()
     .text(s.categoryVoice, 'stg:voice')
+    .row()
+    .text(s.telegramAccount, 'stg:telegram')
     .row()
     .text(s.close, 'stg:close');
 }
@@ -232,6 +238,25 @@ function buildPrivacyView(
   return { text, kb };
 }
 
+// ─── Telegram Account ────────────────────────────────────────────────────────
+
+export function buildTelegramView(
+  session: TelegramSession | null,
+  lang: 'en' | 'ru',
+): { text: string; kb: InlineKeyboard } {
+  const s = t(lang).settings;
+
+  const statusLine = session?.status === 'active' ? s.telegramConnected(session.phone_masked) : s.telegramNotConnected;
+
+  const text = statusLine;
+  const kb =
+    session?.status === 'active'
+      ? backRow(new InlineKeyboard().text(s.telegramDisconnect, 'stg:tg_disconnect_confirm'), lang)
+      : backRow(new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect'), lang);
+
+  return { text, kb };
+}
+
 // ─── Voice ──────────────────────────────────────────────────────────────────
 
 function buildVoiceView(voiceEnabled: number | null, lang: 'en' | 'ru'): { text: string; kb: InlineKeyboard } {
@@ -294,6 +319,12 @@ export async function handleSettings(ctx: BotCommandContext, groupRepo: GroupCha
 
 // ─── Callback handler ────────────────────────────────────────────────────────
 
+interface TelegramSettingsDeps {
+  sessionRepo: TelegramSessionRepository;
+  masterKey: Buffer | null;
+  enterScene: () => Promise<void>;
+}
+
 export async function handleSettingsCallback(
   ctx: BotCallbackContext,
   user: User,
@@ -302,6 +333,7 @@ export async function handleSettingsCallback(
   callSettingsRepo?: CallSettingsRepository,
   sharingSettingsRepo?: SharingSettingsRepository,
   userRepo?: UserRepository,
+  telegramDeps?: TelegramSettingsDeps,
 ): Promise<void> {
   const lang = (user.language ?? 'en') as 'en' | 'ru';
 
@@ -498,5 +530,55 @@ export async function handleSettingsCallback(
     return;
   }
 
+  // ─── Telegram Account ───────────────────────────────────────────────────────
+
+  if (subAction === 'telegram' && telegramDeps) {
+    const session = telegramDeps.sessionRepo.findByUserId(user.telegram_id);
+    const { text, kb } = buildTelegramView(session, lang);
+    await ctx.answer();
+    await ctx.editText(text, { reply_markup: kb });
+    return;
+  }
+
+  if (subAction === 'tg_connect' && telegramDeps) {
+    await ctx.answer();
+    await telegramDeps.enterScene();
+    return;
+  }
+
+  if (subAction === 'tg_disconnect_confirm' && telegramDeps) {
+    const session = telegramDeps.sessionRepo.getActive(user.telegram_id);
+    if (session && telegramDeps.masterKey) {
+      await revokeRemoteSession(session, telegramDeps.masterKey, user.telegram_id);
+    }
+    telegramDeps.sessionRepo.updateStatus(user.telegram_id, 'revoked');
+    const s = t(lang).settings;
+    await ctx.answer();
+    await ctx.editText(s.telegramDisconnected, {
+      reply_markup: new InlineKeyboard().text(s.telegramConnect, 'stg:tg_connect').row().text(s.back, 'stg:back'),
+    });
+    return;
+  }
+
   await ctx.answer();
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+async function revokeRemoteSession(session: TelegramSession, masterKey: Buffer, userId: number): Promise<void> {
+  let tempPath: string | undefined;
+  try {
+    const decryptedSession = decryptBlob(Buffer.from(session.encrypted_session), masterKey);
+    tempPath = await SessionBridge.createTempSessionFile(userId, decryptedSession);
+    const result = await SessionBridge.logOut(tempPath);
+    if (!result.success) {
+      cmdLogger.warn({ userId, error: result.error }, 'Remote session logout failed');
+    }
+  } catch (err) {
+    cmdLogger.warn({ err, userId }, 'Failed to revoke remote Telegram session');
+  } finally {
+    if (tempPath) {
+      await SessionBridge.cleanupTempFile(tempPath);
+    }
+  }
 }

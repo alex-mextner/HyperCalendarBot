@@ -59,6 +59,8 @@ export class TelegramStreamWriter {
   private typingInterval: ReturnType<typeof setInterval> | null = null;
   /** Promise for the in-flight lazy placeholder creation (prevents races between flush/finalize) */
   private placeholderPromise: Promise<void> | null = null;
+  /** Set by discard() so a pending flush knows to delete the message after creation. */
+  private discarded = false;
 
   constructor(
     private sender: TelegramSender,
@@ -108,6 +110,7 @@ export class TelegramStreamWriter {
 
   /** Clear all accumulated state for retry after validation rejection */
   reset(): void {
+    this.discarded = false;
     this.text = '';
     this.plainResponseText = '';
     this.intermediateChunks = [];
@@ -181,24 +184,30 @@ export class TelegramStreamWriter {
 
     if (!this.messageId) {
       if (!this.noPlaceholder) return;
-      // Deduplicate: reuse the in-flight promise if another flush is already
-      // creating the placeholder. Without this, concurrent fire-and-forget
-      // flushes each create their own ⏳ message → multiple messages in chat.
+      // Deduplicate: reuse the in-flight promise if another flush (or finalize)
+      // is already creating the placeholder. Without this, concurrent
+      // fire-and-forget flushes each create their own ⏳ → multiple messages.
       if (!this.placeholderPromise) {
         this.placeholderPromise = this.sender
           .sendMessage(this.chatId, '⏳')
           .then((result) => {
             this.messageId = result.message_id;
+            // discard() ran while we were creating — delete the message and bail
+            if (this.discarded) {
+              this.sender.deleteMessage?.(this.chatId, this.messageId).catch((err) => {
+                aiLogger.warn({ err, chatId: this.chatId, messageId: this.messageId }, 'Post-discard cleanup failed');
+              });
+            }
           })
           .catch((err) => {
-            aiLogger.error({ err }, 'Lazy placeholder creation failed');
+            aiLogger.warn({ err, chatId: this.chatId }, 'Failed to create placeholder message');
           })
           .finally(() => {
             this.placeholderPromise = null;
           });
       }
       await this.placeholderPromise;
-      if (!this.messageId) return; // placeholder creation failed — skip this flush
+      if (!this.messageId || this.discarded) return;
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
@@ -334,6 +343,9 @@ export class TelegramStreamWriter {
 
   async discard(): Promise<void> {
     this.stopTypingLoop();
+    this.discarded = true;
+    // Wait for any pending placeholder creation so we can clean it up
+    if (this.placeholderPromise) await this.placeholderPromise;
     if (this.messageId) {
       try {
         await this.sender.deleteMessage?.(this.chatId, this.messageId);
@@ -357,6 +369,7 @@ export class TelegramStreamWriter {
     this.pendingIndicators = [];
     this.intermediateChunks = [];
     this.plainResponseText = '';
+    this.discarded = false;
   }
 
   getMessageId(): number | null {

@@ -20,8 +20,29 @@
 import { type ConnectionOptions, Queue, Worker } from 'bullmq';
 import { logger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
+import { UnrecoverableError } from '../utils/unrecoverable-error.ts';
 
 const broadcastLogger = logger.child({ module: 'broadcast' });
+
+const PERMANENT_TG_CODES = new Set([403, 404]);
+const PERMANENT_TG_PATTERNS = [
+  "bot can't initiate",
+  'bot was blocked',
+  'user is deactivated',
+  'chat not found',
+  'PEER_ID_INVALID',
+];
+
+function hasNumericCode(err: Error): err is Error & { code: number } {
+  return 'code' in err && typeof err.code === 'number';
+}
+
+export function isTelegramPermanentError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  if (hasNumericCode(err) && PERMANENT_TG_CODES.has(err.code)) return true;
+  const msg = err.message.toLowerCase();
+  return PERMANENT_TG_PATTERNS.some((p) => msg.includes(p.toLowerCase()));
+}
 
 export interface BroadcastJobData {
   /** Target chat (user DM or group chat). */
@@ -84,7 +105,15 @@ export function createBroadcastWorker(
     async (job) => {
       const { recipientId, text, parseMode, origin } = job.data;
       broadcastLogger.debug({ jobId: job.id, recipientId, origin }, 'Dispatching broadcast');
-      await sender.sendMessage(recipientId, text, parseMode);
+      try {
+        await sender.sendMessage(recipientId, text, parseMode);
+      } catch (err) {
+        if (isTelegramPermanentError(err)) {
+          broadcastLogger.warn({ jobId: job.id, recipientId, origin, err }, 'Recipient unreachable — skipping retries');
+          throw new UnrecoverableError(err instanceof Error ? err.message : String(err));
+        }
+        throw err;
+      }
     },
     {
       connection,

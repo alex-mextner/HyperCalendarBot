@@ -14,6 +14,11 @@ export function makeWorkerFailureHandler(
   deps: WorkerAlertDeps,
 ): (job: { id?: string } | undefined, err: Error) => void {
   return (job, err) => {
+    // UnrecoverableError is thrown intentionally to stop retries for permanent
+    // failures (e.g. Telegram 403/404). The throwing site already logs at warn
+    // level — alerting the admin would be pure noise.
+    if (err.name === 'UnrecoverableError') return;
+
     const jobId = job?.id ?? '?';
 
     const text = `🔴 <b>Worker failure: ${workerName}</b>\njob=${jobId}\n<code>${escapeHtml(err.message)}</code>`;

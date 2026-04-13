@@ -31,6 +31,7 @@ import { ParticipantGoogleSyncRepository } from './repositories/participant-goog
 import { SecretaryRepository } from './repositories/secretary.repository.ts';
 import { SharedEventRepository } from './repositories/shared-event.repository.ts';
 import { SharingSettingsRepository } from './repositories/sharing-settings.repository.ts';
+import { TelegramSessionRepository } from './repositories/telegram-session.repository.ts';
 import { UserRepository } from './repositories/user.repository.ts';
 import { UserMemoryRepository } from './repositories/user-memory.repository.ts';
 import { WorkflowSessionRepository } from './repositories/workflow-session.repository.ts';
@@ -68,6 +69,7 @@ export class DatabaseService {
   readonly alerts: AlertRepository;
   readonly featureUsage: FeatureUsageRepository;
   readonly participantGoogleSync: ParticipantGoogleSyncRepository;
+  readonly telegramSessions: TelegramSessionRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -114,6 +116,7 @@ export class DatabaseService {
     this.alerts = new AlertRepository(this.db);
     this.featureUsage = new FeatureUsageRepository(this.db);
     this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);
+    this.telegramSessions = new TelegramSessionRepository(this.db);
   }
 
   close(): void {

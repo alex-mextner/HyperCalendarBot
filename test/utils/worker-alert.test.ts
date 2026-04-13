@@ -1,5 +1,6 @@
 // test/utils/worker-alert.test.ts
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { UnrecoverableError } from '../../src/utils/unrecoverable-error.ts';
 import { makeWorkerFailureHandler } from '../../src/utils/worker-alert.ts';
 
 describe('makeWorkerFailureHandler', () => {
@@ -73,6 +74,15 @@ describe('makeWorkerFailureHandler', () => {
     const body = JSON.parse(opts.body as string) as { text: string };
     expect(body.text).not.toContain('<script>');
     expect(body.text).toContain('&lt;script&gt;');
+  });
+
+  test('skips alert for UnrecoverableError (permanent failures)', () => {
+    const pushAlert = mock((_msg: string, _source: string) => {});
+    const handler = makeWorkerFailureHandler('broadcast-notification', { ...deps, pushAlert });
+    handler({ id: 'job-99' }, new UnrecoverableError("bot can't initiate conversation with a user"));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pushAlert).not.toHaveBeenCalled();
   });
 
   test('does not throw when fetch rejects', async () => {

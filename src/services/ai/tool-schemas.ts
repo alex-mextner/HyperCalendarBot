@@ -408,6 +408,8 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   list_triggers: emptyObject,
   resume_scene: emptyObject,
   cancel_scene: emptyObject,
+  connect_telegram_status: emptyObject,
+  dismiss_connect_telegram_prompt: emptyObject,
 
   // Event tools
   get_events: getEventsSchema,

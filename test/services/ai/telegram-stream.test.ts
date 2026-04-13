@@ -196,25 +196,22 @@ describe('TelegramStreamWriter', () => {
     expect(writer.getText()).toBe('hello');
   });
 
+  // ── Execution log cap ───────────────────────────────────────────────────
+
   test('finalize caps execution log so total fits in one message', async () => {
     const writer = new TelegramStreamWriter(sender, 123, 'ru');
     await writer.init();
-    // Simulate many tool calls creating a large execution log
     for (let i = 0; i < 50; i++) {
       writer.appendText(`Searching batch ${i}...`);
       writer.setToolLabel('search_events', { query: `long query text number ${i}` });
       writer.markToolResult(true);
     }
     writer.commitIntermediate();
-    // Final response
     writer.appendText('Не нашёл событие.');
     await writer.finalize();
 
-    // Should edit the placeholder once (no extra sendMessage for overflow chunks)
     expect(editMock).toHaveBeenCalledTimes(1);
-    // Only init + no overflow = 1 sendMessage call
     expect(sendMock).toHaveBeenCalledTimes(1);
-    // The message should contain the response and a truncated blockquote
     const text = editMock.mock.calls[0]![2] as string;
     expect(text).toContain('Не нашёл событие');
     expect(text).toContain('<blockquote expandable>');
@@ -224,26 +221,40 @@ describe('TelegramStreamWriter', () => {
   test('finalize skips blockquote when response alone fills message', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();
-    // Tool calls in execution log
     writer.setToolLabel('get_events');
     writer.markToolResult(true);
     writer.commitIntermediate();
-    // Very long response that fills the whole message
     writer.appendText('A'.repeat(3950));
     await writer.finalize();
 
     const text = editMock.mock.calls[0]![2] as string;
-    // Blockquote is skipped because response alone fills the message
     expect(text).not.toContain('blockquote');
     expect(text).toContain('A'.repeat(100));
   });
+
+  test('truncated execution log body has balanced HTML tags', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru');
+    await writer.init();
+    for (let i = 0; i < 80; i++) {
+      writer.setToolLabel('search_events', { query: `search query number ${i} with extra padding words` });
+      writer.markToolResult(true);
+    }
+    writer.commitIntermediate();
+    writer.appendText('R'.repeat(500));
+    await writer.finalize();
+
+    const text = editMock.mock.calls[0]![2] as string;
+    const openCount = (text.match(/<i>/g) ?? []).length;
+    const closeCount = (text.match(/<\/i>/g) ?? []).length;
+    expect(openCount).toBe(closeCount);
+  });
+
+  // ── Error fallback ──────────────────────────────────────────────────────
 
   test('sendErrorFallback edits existing message with error text', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();
     await writer.sendErrorFallback('⚠️ Error occurred');
-
-    // Should edit the placeholder message (messageId=42 from init)
     expect(editMock).toHaveBeenCalledWith(123, 42, '⚠️ Error occurred');
   });
 
@@ -251,13 +262,39 @@ describe('TelegramStreamWriter', () => {
     const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
     await writer.init();
     await writer.sendErrorFallback('⚠️ Error occurred');
-
-    // No placeholder was created, so it sends a fresh message
     expect(sendMock).toHaveBeenCalledWith(123, '⚠️ Error occurred');
   });
 
+  test('sendErrorFallback falls back to sendMessage when edit fails', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    editMock.mockImplementationOnce(() => Promise.reject(new Error('edit failed')));
+    await writer.sendErrorFallback('⚠️ Error occurred');
+    const lastSendCall = sendMock.mock.calls[sendMock.mock.calls.length - 1] as unknown[];
+    expect(lastSendCall[1]).toBe('⚠️ Error occurred');
+  });
+
+  test('sendErrorFallback skips fallback send on "message is not modified"', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    const initSendCount = sendMock.mock.calls.length;
+    editMock.mockImplementationOnce(() => Promise.reject(new Error('message is not modified')));
+    await writer.sendErrorFallback('⚠️ Error occurred');
+    expect(sendMock.mock.calls.length).toBe(initSendCount);
+  });
+
+  test('sendErrorFallback retries even when placeholder was never created', async () => {
+    const failingSend = mock(() => Promise.reject(new Error('network error')));
+    sender.sendMessage = failingSend;
+    const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+    await writer.sendErrorFallback('⚠️ Error');
+    expect(failingSend.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── Concurrent flush / placeholder races ────────────────────────────────
+
   test('concurrent flushes in noPlaceholder mode create only one placeholder', async () => {
-    // Simulate slow sendMessage to trigger the race window
     let resolveFirst: ((v: { message_id: number }) => void) | null = null;
     const slowSend = mock(
       () =>
@@ -272,284 +309,209 @@ describe('TelegramStreamWriter', () => {
     sender.sendMessage = slowSend;
 
     const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
-    await writer.init(); // does nothing (noPlaceholder)
+    await writer.init();
 
-    // Fire two concurrent flushes
     writer.appendText('A'.repeat(25));
     const flush1 = writer.flush(true);
     const flush2 = writer.flush(true);
 
-    // Resolve the first sendMessage after both flushes have started
     resolveFirst!({ message_id: 50 });
     await flush1;
     await flush2;
 
-    // Only ONE sendMessage call for the placeholder (second flush returns early)
     expect(slowSend).toHaveBeenCalledTimes(1);
+    expect(writer.getMessageId()).toBe(50);
   });
 
-  test('sendErrorFallback falls back to sendMessage when edit fails', async () => {
+  test('finalize during pending flush creates only one message', async () => {
+    let flushResolve: ((v: { message_id: number }) => void) | null = null;
+    const delayedSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          if (!flushResolve) {
+            flushResolve = resolve;
+          } else {
+            resolve({ message_id: 200 });
+          }
+        }),
+    );
+    sender.sendMessage = delayedSend;
+
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
+    await writer.init();
+
+    writer.appendText('A'.repeat(25));
+    const flushPromise = writer.flush(true);
+
+    writer.appendText(' — final answer');
+    const finalizePromise = writer.finalize();
+
+    flushResolve!({ message_id: 100 });
+    await flushPromise;
+    await finalizePromise;
+
+    // finalize awaits the same placeholder promise → reuses messageId=100
+    expect(delayedSend).toHaveBeenCalledTimes(1);
+  });
+
+  test('rapid tool-start + text-delta flushes in group produce one message', async () => {
+    let sendResolve: ((v: { message_id: number }) => void) | null = null;
+    let sendCallCount = 0;
+    const delayedSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          sendCallCount++;
+          if (sendCallCount === 1) {
+            sendResolve = resolve;
+          } else {
+            resolve({ message_id: 200 + sendCallCount });
+          }
+        }),
+    );
+    sender.sendMessage = delayedSend;
+
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
+    await writer.init();
+
+    writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
+    const f1 = writer.flush(true);
+    writer.appendText('Ищу...');
+    const f2 = writer.flush(true);
+    writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
+    const f3 = writer.flush(true);
+
+    sendResolve!({ message_id: 100 });
+    await f1;
+    await f2;
+    await f3;
+
+    expect(delayedSend).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Discard ─────────────────────────────────────────────────────────────
+
+  test('discard deletes message created by flush in noPlaceholder mode', async () => {
+    const deleteMock = mock(() => Promise.resolve());
+    const testSender: TelegramSender = {
+      sendMessage: sendMock,
+      editMessageText: editMock,
+      deleteMessage: deleteMock,
+    };
+
+    const writer = new TelegramStreamWriter(testSender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+
+    writer.setToolLabel('get_events');
+    await writer.flush(true);
+    await writer.discard();
+
+    expect(deleteMock).toHaveBeenCalledTimes(1);
+    expect(deleteMock).toHaveBeenCalledWith(123, 42);
+  });
+
+  test('discard during pending flush still deletes the message', async () => {
+    let resolveCreate: ((v: { message_id: number }) => void) | null = null;
+    const slowSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const deleteMock = mock(() => Promise.resolve());
+    const testSender: TelegramSender = {
+      sendMessage: slowSend,
+      editMessageText: editMock,
+      deleteMessage: deleteMock,
+    };
+
+    const writer = new TelegramStreamWriter(testSender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+
+    writer.appendText('A'.repeat(25));
+    writer.setToolLabel('get_events');
+
+    // Fire-and-forget flush — starts creating message (pending)
+    writer.flush(true).catch(() => {});
+
+    // Resolve create → discard flag is set, so the promise deletes it
+    resolveCreate!({ message_id: 50 });
+    await writer.discard();
+
+    expect(deleteMock).toHaveBeenCalledWith(123, 50);
+  });
+
+  // ── Error recovery ──────────────────────────────────────────────────────
+
+  test('finalize swallows edit errors but sendErrorFallback delivers', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();
-    editMock.mockImplementationOnce(() => Promise.reject(new Error('edit failed')));
-    await writer.sendErrorFallback('⚠️ Error occurred');
-
-    // Edit failed, so it should try sendMessage as fallback
-    const lastSendCall = sendMock.mock.calls[sendMock.mock.calls.length - 1] as unknown[];
-    expect(lastSendCall[1]).toBe('⚠️ Error occurred');
+    writer.appendText('Some response');
+    editMock.mockImplementationOnce(() => Promise.reject(new Error('Telegram API down')));
+    await writer.finalize();
+    editMock.mockImplementation(() => Promise.resolve());
+    await writer.sendErrorFallback('⚠️ Ошибка');
+    const lastEditCall = editMock.mock.calls[editMock.mock.calls.length - 1] as unknown[];
+    expect(lastEditCall[2]).toBe('⚠️ Ошибка');
   });
 
-  test('sendErrorFallback skips fallback send on "message is not modified"', async () => {
+  test('typing loop is stopped even when finalize edit fails', async () => {
+    const chatActionMock = mock(() => Promise.resolve());
+    sender.sendChatAction = chatActionMock;
+
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();
-    const initSendCount = sendMock.mock.calls.length;
-    editMock.mockImplementationOnce(() => Promise.reject(new Error('message is not modified')));
-    await writer.sendErrorFallback('⚠️ Error occurred');
+    const callsBefore = chatActionMock.mock.calls.length;
 
-    // "message is not modified" means text is already displayed — no extra send
-    expect(sendMock.mock.calls.length).toBe(initSendCount);
+    editMock.mockImplementationOnce(() => Promise.reject(new Error('boom')));
+    await writer.finalize();
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(chatActionMock.mock.calls.length).toBe(callsBefore);
   });
 
-  // ── Regression tests: scenarios that were broken before the fix ──────────
+  // ── Execution log overflow regression ───────────────────────────────────
 
-  describe('regression: group chat race condition (issue #75)', () => {
-    test('rapid tool-start + text-delta flushes in group produce one message', async () => {
-      // Simulates the exact scenario from the bug report:
-      // AI calls search_events, streaming fires onToolCallStart + onTextDelta
-      // in quick succession. Both call flush() fire-and-forget. Before the fix,
-      // both would create separate ⏳ placeholders → 2+ messages.
-      let sendResolve: ((v: { message_id: number }) => void) | null = null;
-      let sendCallCount = 0;
-      const delayedSend = mock(
-        () =>
-          new Promise<{ message_id: number }>((resolve) => {
-            sendCallCount++;
-            if (sendCallCount === 1) {
-              // First call: delay to simulate network latency
-              sendResolve = resolve;
-            } else {
-              resolve({ message_id: 200 + sendCallCount });
-            }
-          }),
-      );
-      sender.sendMessage = delayedSend;
-
-      const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
-      await writer.init();
-
-      // Simulate onToolCallStart → flush (fire-and-forget)
-      writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
-      const f1 = writer.flush(true);
-
-      // Simulate onTextDelta right after → flush (fire-and-forget)
-      writer.appendText('Ищу...');
-      const f2 = writer.flush(true);
-
-      // Another onToolCallStart for second search call
-      writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
-      const f3 = writer.flush(true);
-
-      // Now resolve the first sendMessage
-      sendResolve!({ message_id: 100 });
-      await f1;
-      await f2;
-      await f3;
-
-      // REGRESSION: old code would have created 3 separate ⏳ messages.
-      // Fixed code creates exactly 1.
-      expect(delayedSend).toHaveBeenCalledTimes(1);
-    });
-
-    test('group chat with 2 tool calls finalizes into exactly one message', async () => {
-      const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
-      await writer.init();
-
-      // Round 1: AI thinks and calls search_events twice
-      writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
+  test('10 tool calls with long args still produce single message', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru');
+    await writer.init();
+    for (let i = 0; i < 10; i++) {
+      writer.appendText(`Думаю что нужно сделать запрос номер ${i} для получения данных...`);
+      writer.setToolLabel('search_events', {
+        query: `длинный запрос с множеством слов для поиска событий номер ${i}`,
+        start_date: '2026-01-01',
+        end_date: '2026-12-31',
+        scope: 'group',
+      });
       writer.markToolResult(true);
-      writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
-      writer.markToolResult(true);
-      writer.commitIntermediate();
+    }
+    writer.commitIntermediate();
+    writer.appendText('Вот результаты поиска: ничего не найдено по вашему запросу.');
+    await writer.finalize();
 
-      // Round 2: AI responds
-      writer.appendText('Не нашёл событие «вечерняя прогулка» ни в групповом, ни в личном календаре.');
-      await writer.finalize();
-
-      // REGRESSION: old code could split execution log + response into 3 messages.
-      // Fixed code: everything fits in 1 message (1 send for lazy placeholder + 0 overflow).
-      const totalSends = sendMock.mock.calls.length;
-      expect(totalSends).toBe(1); // 1 send (lazy placeholder in finalize or fresh)
-      expect(editMock).toHaveBeenCalledTimes(0); // no placeholder to edit → sent fresh
-
-      // The single message contains both the blockquote and the response
-      const sentText = sendMock.mock.calls[0]![1] as string;
-      expect(sentText).toContain('вечерняя прогулка');
-      expect(sentText).toContain('blockquote');
-      expect(sentText.length).toBeLessThanOrEqual(4000);
-    });
+    expect(sendMock).toHaveBeenCalledTimes(1);
+    expect(editMock).toHaveBeenCalledTimes(1);
+    const text = editMock.mock.calls[0]![2] as string;
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).toContain('ничего не найдено');
+    expect(text).toContain('…');
   });
 
-  describe('regression: error delivery guarantee', () => {
-    test('finalize swallows edit errors but sendErrorFallback delivers', async () => {
-      const writer = new TelegramStreamWriter(sender, 123);
-      await writer.init();
-      writer.appendText('Some response');
+  test('group chat with 2 tool calls finalizes into exactly one message', async () => {
+    const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
+    await writer.init();
+    writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
+    writer.markToolResult(true);
+    writer.setToolLabel('search_events', { query: 'вечерняя прогулка', scope: 'group' });
+    writer.markToolResult(true);
+    writer.commitIntermediate();
+    writer.appendText('Не нашёл событие «вечерняя прогулка» ни в групповом, ни в личном календаре.');
+    await writer.finalize();
 
-      // Make finalize's editMessageText fail silently (caught internally)
-      editMock.mockImplementationOnce(() => Promise.reject(new Error('Telegram API down')));
-      await writer.finalize(); // does not throw — error is caught
-
-      // Reset edit mock so sendErrorFallback can succeed
-      editMock.mockImplementation(() => Promise.resolve());
-      await writer.sendErrorFallback('⚠️ Ошибка');
-
-      // Error was delivered via edit (messageId exists from init)
-      const lastEditCall = editMock.mock.calls[editMock.mock.calls.length - 1] as unknown[];
-      expect(lastEditCall[2]).toBe('⚠️ Ошибка');
-    });
-
-    test('typing loop is stopped even when finalize edit fails', async () => {
-      const chatActionMock = mock(() => Promise.resolve());
-      sender.sendChatAction = chatActionMock;
-
-      const writer = new TelegramStreamWriter(sender, 123);
-      await writer.init();
-
-      // Record how many typing calls happened before finalize
-      const callsBefore = chatActionMock.mock.calls.length;
-
-      // Make finalize's edit fail (caught internally)
-      editMock.mockImplementationOnce(() => Promise.reject(new Error('boom')));
-      await writer.finalize();
-
-      // Wait — if typing loop wasn't stopped, we'd see new calls
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      const callsAfter = chatActionMock.mock.calls.length;
-
-      // No new typing calls after finalize (loop was stopped in first line)
-      expect(callsAfter).toBe(callsBefore);
-    });
-  });
-
-  describe('regression: execution log overflow', () => {
-    test('10 tool calls with long args still produce single message', async () => {
-      const writer = new TelegramStreamWriter(sender, 123, 'ru');
-      await writer.init();
-
-      // 10 tool calls with long argument strings — realistic scenario
-      for (let i = 0; i < 10; i++) {
-        writer.appendText(`Думаю что нужно сделать запрос номер ${i} для получения данных...`);
-        writer.setToolLabel('search_events', {
-          query: `длинный запрос с множеством слов для поиска событий номер ${i}`,
-          start_date: '2026-01-01',
-          end_date: '2026-12-31',
-          scope: 'group',
-        });
-        writer.markToolResult(true);
-      }
-      writer.commitIntermediate();
-      writer.appendText('Вот результаты поиска: ничего не найдено по вашему запросу.');
-      await writer.finalize();
-
-      // REGRESSION: old code would splitMessage and send 2+ messages.
-      // Fixed code caps execution log body to fit in one message.
-      expect(sendMock).toHaveBeenCalledTimes(1); // only init placeholder
-      expect(editMock).toHaveBeenCalledTimes(1); // one final edit
-
-      const text = editMock.mock.calls[0]![2] as string;
-      expect(text.length).toBeLessThanOrEqual(4000);
-      // Response text is preserved (not truncated)
-      expect(text).toContain('ничего не найдено');
-      // Execution log is truncated with ellipsis
-      expect(text).toContain('…');
-    });
-  });
-
-  // ── Known bugs: these tests document remaining issues ─────────────────
-  // Skipped because they FAIL on the current implementation. Un-skip when fixing.
-
-  describe('BUG: execution log cap can break HTML tags', () => {
-    test('truncated body must have balanced HTML tags', async () => {
-      const writer = new TelegramStreamWriter(sender, 123, 'ru');
-      await writer.init();
-
-      // Create tool lines that contain <i>...</i> tags (from markToolResult).
-      // When the body is sliced at an arbitrary position, the <i> tag can be
-      // left unclosed, making Telegram reject the message.
-      // 80 lines × ~70 chars = ~5600 chars body — guaranteed to exceed budget.
-      for (let i = 0; i < 80; i++) {
-        writer.setToolLabel('search_events', { query: `search query number ${i} with extra padding words` });
-        writer.markToolResult(true);
-      }
-      writer.commitIntermediate();
-
-      // 500-char response leaves ~3400 chars for body → truncation at ~line 48
-      // which almost certainly cuts inside an <i>...</i> tag
-      writer.appendText('R'.repeat(500));
-      await writer.finalize();
-
-      const text = editMock.mock.calls[0]![2] as string;
-      // Count opening and closing <i> tags — they must be balanced
-      const openCount = (text.match(/<i>/g) ?? []).length;
-      const closeCount = (text.match(/<\/i>/g) ?? []).length;
-      expect(openCount).toBe(closeCount);
-    });
-  });
-
-  describe('finalize awaits in-flight flush placeholder', () => {
-    test('finalize during pending flush creates only one message', async () => {
-      // Scenario: in group chat, flush starts creating placeholder (slow API),
-      // then finalize is called before flush completes. finalize must await
-      // the same placeholder promise and reuse the messageId.
-      let flushResolve: ((v: { message_id: number }) => void) | null = null;
-      const delayedSend = mock(
-        () =>
-          new Promise<{ message_id: number }>((resolve) => {
-            if (!flushResolve) {
-              flushResolve = resolve;
-            } else {
-              resolve({ message_id: 200 });
-            }
-          }),
-      );
-      sender.sendMessage = delayedSend;
-
-      const writer = new TelegramStreamWriter(sender, 123, 'ru', { noPlaceholder: true });
-      await writer.init();
-
-      // Start a flush (fire-and-forget, like onTextDelta does)
-      writer.appendText('A'.repeat(25));
-      const flushPromise = writer.flush(true);
-
-      // While flush is still waiting for sendMessage, call finalize
-      writer.appendText(' — final answer');
-      const finalizePromise = writer.finalize();
-
-      // Now resolve the flush's sendMessage
-      flushResolve!({ message_id: 100 });
-      await flushPromise;
-      await finalizePromise;
-
-      // Fixed: finalize awaits the same placeholder promise, reuses messageId=100.
-      // Only 1 sendMessage for the placeholder (not 2).
-      expect(delayedSend).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('sendErrorFallback retries on failure regardless of messageId', () => {
-    test('error delivery is retried even when placeholder was never created', async () => {
-      const failingSend = mock(() => Promise.reject(new Error('network error')));
-      sender.sendMessage = failingSend;
-
-      const writer = new TelegramStreamWriter(sender, 123, 'en', { noPlaceholder: true });
-      await writer.init(); // no placeholder created
-
-      // sendErrorFallback: messageId is null → tries sendMessage → fails →
-      // catch block: retries sendMessage regardless of messageId
-      await writer.sendErrorFallback('⚠️ Error');
-
-      // Fixed: retries even when messageId is null (2 attempts total)
-      expect(failingSend.mock.calls.length).toBeGreaterThanOrEqual(2);
-    });
+    expect(sendMock.mock.calls.length).toBe(1);
+    expect(editMock).toHaveBeenCalledTimes(0);
+    const sentText = sendMock.mock.calls[0]![1] as string;
+    expect(sentText).toContain('вечерняя прогулка');
+    expect(sentText).toContain('blockquote');
+    expect(sentText.length).toBeLessThanOrEqual(4000);
   });
 });

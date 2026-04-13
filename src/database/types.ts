@@ -25,6 +25,7 @@ export interface User {
   default_event_duration_minutes: number;
   assistant_enabled: number; // 0 | 1
   city: string | null;
+  connect_telegram_dismissed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -653,6 +654,21 @@ export interface InsertHolidayData {
   year: number;
 }
 
+// --- Telegram Sessions ---
+
+export interface TelegramSession {
+  user_id: number;
+  encrypted_session: Buffer;
+  phone_masked: string;
+  phone_hash: string;
+  status: 'active' | 'expired' | 'revoked';
+  tz_detection_consent_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotificationLogChannel = 'telegram_text' | 'voice_call' | 'mtproto_admin' | 'mtproto_user';
+
 // --- Notification Log ---
 
 export interface NotificationLogRow {
@@ -673,7 +689,7 @@ export interface InsertNotificationLogData {
   user_id: number;
   type: string;
   reference_key: string;
-  channel: string;
+  channel: NotificationLogChannel;
   payload: string;
 }
 

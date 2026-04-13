@@ -51,6 +51,20 @@ if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
 }
 
+// Verify master key matches existing sessions before starting the bot
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  const { verifyMasterKey } = await import('./services/crypto/master-key-check.ts');
+  const key = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
+  const result = verifyMasterKey(db.telegramSessions, key);
+  if (!result.ok) {
+    botLogger.fatal(
+      { err: result.err },
+      'TELEGRAM_SESSION_MASTER_KEY does not match existing sessions — refusing to start',
+    );
+    process.exit(1);
+  }
+}
+
 if (config.BOT_ADMIN_ID) {
   initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 }
@@ -66,7 +80,13 @@ function onWorkerFailed(name: string): (job: { id?: string } | undefined, err: E
       })
     : null;
   return (job, err) => {
-    botLogger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
+    // UnrecoverableError = intentional permanent failure (e.g. Telegram 403).
+    // Already logged at warn by the throwing site — don't spam error logs.
+    if (err.name === 'UnrecoverableError') {
+      botLogger.warn({ jobId: job?.id, worker: name, err }, 'Worker job permanently failed (no retry)');
+    } else {
+      botLogger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
+    }
     alertHandler?.(job, err);
   };
 }
@@ -523,6 +543,7 @@ if (config.REDIS_URL) {
     setupSqliteBackupCron,
     setupRecurringRemindersCron,
     setupActionLogCleanupCron,
+    setupSessionKeepaliveCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSqliteBackup } = await import('./database/backup.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
@@ -530,6 +551,7 @@ if (config.REDIS_URL) {
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
   const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+  const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
 
   const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const cronBirthdayService = new BirthdayService(
@@ -581,6 +603,24 @@ if (config.REDIS_URL) {
     onRecurringReminders: () => {
       cronMaterializer.materializeUpcomingRecurringReminders(db.events);
     },
+    onSessionKeepalive: config.TELEGRAM_SESSION_MASTER_KEY
+      ? async () => {
+          const masterKey = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY as string, 'hex');
+          await processSessionKeepalive({
+            sessionRepo: db.telegramSessions,
+            masterKey,
+            onSessionExpired: (userId) => {
+              botRef
+                .sendMessage(
+                  userId,
+                  'Твой подключённый Telegram-аккаунт был отозван или истёк. Подключи его снова командой /connect_telegram.',
+                )
+                .then(() => {})
+                .catch((err) => botLogger.error({ err, userId }, 'Failed to notify user of expired session'));
+            },
+          });
+        }
+      : undefined,
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
@@ -592,6 +632,9 @@ if (config.REDIS_URL) {
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
   await setupActionLogCleanupCron(botTasksQueue);
+  if (config.TELEGRAM_SESSION_MASTER_KEY) {
+    await setupSessionKeepaliveCron(botTasksQueue);
+  }
 
   botTasksWorker.on('failed', onWorkerFailed('bot-tasks'));
 
@@ -1038,6 +1081,17 @@ if (config.GOOGLE_CLIENT_ID) {
     { command: 'connect_google', description: 'Подключить Google Calendar' },
     { command: 'disconnect_google', description: 'Отключить Google Calendar' },
     { command: 'google_status', description: 'Статус синхронизации Google Calendar' },
+  );
+}
+
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  COMMANDS_EN.push(
+    { command: 'connect_telegram', description: 'Connect Telegram account for first-person invitations' },
+    { command: 'disconnect_telegram', description: 'Disconnect Telegram account' },
+  );
+  COMMANDS_RU.push(
+    { command: 'connect_telegram', description: 'Подключить Telegram-аккаунт для приглашений от твоего имени' },
+    { command: 'disconnect_telegram', description: 'Отключить подключенный Telegram-аккаунт' },
   );
 }
 
