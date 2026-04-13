@@ -95,7 +95,6 @@ const botRef: {
   sendVoice: async () => {},
   editMessage: async () => {},
 };
-let botInitialized = false;
 
 let googleDeps: GoogleBotDeps | undefined;
 
@@ -294,37 +293,13 @@ if (config.REDIS_URL) {
   }
 }
 
-let broadcastEnqueuer: import('./worker/broadcast-queue.ts').BroadcastEnqueuer | undefined;
+// Broadcast queue — enqueuer created early so createBot() can wire it into tool handlers.
+// Worker is created later, after botRef is patched (see below "Broadcast worker").
+const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
+const { parseRedisUrl } = await import('./utils/redis.ts');
+const broadcastConnection = parseRedisUrl(config.REDIS_URL);
+const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(broadcastConnection);
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
-if (config.REDIS_URL) {
-  const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
-  const { parseRedisUrl } = await import('./utils/redis.ts');
-  const connection = parseRedisUrl(config.REDIS_URL);
-  const { queue: broadcastQueue, enqueuer } = createBroadcastQueue(connection);
-  broadcastEnqueuer = enqueuer;
-
-  // Worker's sendMessage closes over botRef so it picks up the patched bot API
-  // once the GramIO instance is live. Queue jobs are only enqueued from tool
-  // handlers that run AFTER the bot is fully initialized, so by the time the
-  // worker dequeues anything, botRef.sendMessage is the real implementation.
-  // Guard: if somehow a job fires before bot init, throw so BullMQ retries.
-  const broadcastWorker = createBroadcastWorker(connection, {
-    sendMessage: (chatId, text, parseMode) => {
-      if (!botInitialized) throw new Error('Bot not initialized yet — broadcast worker must retry');
-      return botRef.sendMessage(chatId, text, parseMode);
-    },
-  });
-  broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
-
-  broadcastQueueCleanup = {
-    close: async () => {
-      await broadcastWorker.close();
-      await broadcastQueue.close();
-    },
-  };
-
-  botLogger.info('Broadcast notification queue initialized');
-}
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
   try {
@@ -886,7 +861,21 @@ botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
-botInitialized = true;
+// Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
+// No botInitialized guard needed: the worker starts AFTER the flag is set.
+const broadcastWorker = createBroadcastWorker(broadcastConnection, {
+  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
+});
+broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
+
+broadcastQueueCleanup = {
+  close: async () => {
+    await broadcastWorker.close();
+    await broadcastQueue.close();
+  },
+};
+
+botLogger.info('Broadcast notification queue initialized');
 
 // Scheduled AI calls + trigger system — requires Redis for BullMQ
 if (config.REDIS_URL) {
