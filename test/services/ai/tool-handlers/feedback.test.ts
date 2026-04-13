@@ -64,8 +64,8 @@ describe('handleSendFeedback', () => {
     };
   });
 
-  test('creates thread and first message', () => {
-    const result = handleSendFeedback(ctx, { type: 'bug', message: 'Something is broken' });
+  test('creates thread and first message', async () => {
+    const result = await handleSendFeedback(ctx, { type: 'bug', message: 'Something is broken' });
 
     expect(result.success).toBe(true);
     expect(result.output).toBe('Feedback sent to developer. They will respond in this chat.');
@@ -81,56 +81,56 @@ describe('handleSendFeedback', () => {
     expect(messages[0]!.text).toBe('Something is broken');
   });
 
-  test('stores chat_id from agent context on thread when in group', () => {
+  test('stores chat_id from agent context on thread when in group', async () => {
     ctx.chatId = -100555;
     ctx.isGroup = true;
-    handleSendFeedback(ctx, { type: 'bug', message: 'Group bug' });
+    await handleSendFeedback(ctx, { type: 'bug', message: 'Group bug' });
 
     const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
     expect(thread).not.toBeNull();
     expect(thread!.chat_id).toBe(-100555);
   });
 
-  test('does not store chat_id when in private chat', () => {
+  test('does not store chat_id when in private chat', async () => {
     ctx.chatId = USER_ID;
     ctx.isGroup = false;
-    handleSendFeedback(ctx, { type: 'bug', message: 'Private bug' });
+    await handleSendFeedback(ctx, { type: 'bug', message: 'Private bug' });
 
     const thread = feedbackRepo.getOpenThreadForUser(USER_ID);
     expect(thread).not.toBeNull();
     expect(thread!.chat_id).toBeNull();
   });
 
-  test('rejects when botAdminId not configured', () => {
+  test('rejects when botAdminId not configured', async () => {
     ctx.feedback = undefined;
-    const result = handleSendFeedback(ctx, { type: 'question', message: 'Hello' });
+    const result = await handleSendFeedback(ctx, { type: 'question', message: 'Hello' });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('not configured');
   });
 
-  test('rejects when feedbackRepo not available', () => {
+  test('rejects when feedbackRepo not available', async () => {
     ctx.feedback = undefined;
-    const result = handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
+    const result = await handleSendFeedback(ctx, { type: 'feature', message: 'Add dark mode' });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('not configured');
   });
 
-  test('rejects when 3 open threads exist', () => {
+  test('rejects when 3 open threads exist', async () => {
     for (let i = 0; i < 3; i++) {
       feedbackRepo.createThread({ user_id: USER_ID, type: 'other', subject: `Thread ${i}` });
     }
 
-    const result = handleSendFeedback(ctx, { type: 'bug', message: 'Another bug' });
+    const result = await handleSendFeedback(ctx, { type: 'bug', message: 'Another bug' });
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('Maximum 3 open feedback threads');
   });
 
-  test('subject truncated to 50 chars', () => {
+  test('subject truncated to 50 chars', async () => {
     const longMessage = 'A'.repeat(60);
-    const result = handleSendFeedback(ctx, { type: 'other', message: longMessage });
+    const result = await handleSendFeedback(ctx, { type: 'other', message: longMessage });
 
     expect(result.success).toBe(true);
 
@@ -138,7 +138,7 @@ describe('handleSendFeedback', () => {
     expect(thread!.subject).toBe(`${'A'.repeat(50)}...`);
   });
 
-  test('subject not truncated when message is exactly 50 chars', () => {
+  test('subject not truncated when message is exactly 50 chars', async () => {
     const message = 'B'.repeat(50);
     handleSendFeedback(ctx, { type: 'other', message });
 
@@ -169,7 +169,7 @@ describe('handleSendFeedback', () => {
 
   test('returns agentHint warning when sendMessageToChat not provided', async () => {
     ctx.sendMessageToChat = undefined;
-    const result = handleSendFeedback(ctx, { type: 'bug', message: 'Crash' });
+    const result = await handleSendFeedback(ctx, { type: 'bug', message: 'Crash' });
 
     expect(result.success).toBe(true);
     expect(result.agentHint).toContain('WARNING');

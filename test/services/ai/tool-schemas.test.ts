@@ -29,6 +29,7 @@ describe('toolSchemas', () => {
       'get_events',
       'create_event',
       'update_event',
+      'attach_pending_location_to_event',
       'delete_event',
       'get_free_slots',
       'search_events',
@@ -48,6 +49,7 @@ describe('toolSchemas', () => {
       'update_contact',
       'render_day_image',
       'render_week_image',
+      'render_month_image',
       'render_table',
       'end_call',
       'make_call',
@@ -73,6 +75,7 @@ describe('toolSchemas', () => {
       'manage_secretaries',
       'propose_calendar_change',
       'get_history',
+      'get_action_log',
       'schedule_ai_call',
       'schedule_ai_calls_list',
       'schedule_ai_call_cancel',
@@ -100,7 +103,7 @@ describe('toolSchemas', () => {
   });
 
   test('create_event schema validates required fields', () => {
-    const schema = toolSchemas.create_event!;
+    const schema = toolSchemas.create_event;
 
     const valid = schema.safeParse({ title: 'Meeting', start_at: '2026-03-15T14:00:00Z' });
     expect(valid.success).toBe(true);
@@ -113,7 +116,7 @@ describe('toolSchemas', () => {
   });
 
   test('create_event schema accepts optional fields', () => {
-    const schema = toolSchemas.create_event!;
+    const schema = toolSchemas.create_event;
     const result = schema.safeParse({
       title: 'Meeting',
       start_at: '2026-03-15T14:00:00Z',
@@ -130,7 +133,7 @@ describe('toolSchemas', () => {
   });
 
   test('create_event schema rejects wrong types', () => {
-    const schema = toolSchemas.create_event!;
+    const schema = toolSchemas.create_event;
     const result = schema.safeParse({
       title: 123,
       start_at: '2026-03-15T14:00:00Z',
@@ -139,7 +142,7 @@ describe('toolSchemas', () => {
   });
 
   test('get_events schema rejects missing required fields', () => {
-    const schema = toolSchemas.get_events!;
+    const schema = toolSchemas.get_events;
 
     const noEndDate = schema.safeParse({ start_date: '2026-03-15T00:00:00Z' });
     expect(noEndDate.success).toBe(false);
@@ -152,7 +155,7 @@ describe('toolSchemas', () => {
   });
 
   test('set_reminder schema validates array of numbers', () => {
-    const schema = toolSchemas.set_reminder!;
+    const schema = toolSchemas.set_reminder;
 
     const valid = schema.safeParse({ event_id: 1, minutes_before: [15, 60] });
     expect(valid.success).toBe(true);
@@ -165,7 +168,7 @@ describe('toolSchemas', () => {
   });
 
   test('share_event schema validates enum values', () => {
-    const schema = toolSchemas.share_event!;
+    const schema = toolSchemas.share_event;
 
     const valid = schema.safeParse({ event_id: 1, target_type: 'user', target_id: 42 });
     expect(valid.success).toBe(true);
@@ -175,7 +178,7 @@ describe('toolSchemas', () => {
   });
 
   test('send_feedback schema validates feedback type enum', () => {
-    const schema = toolSchemas.send_feedback!;
+    const schema = toolSchemas.send_feedback;
 
     const valid = schema.safeParse({ type: 'bug', message: 'Something broke' });
     expect(valid.success).toBe(true);
@@ -185,7 +188,7 @@ describe('toolSchemas', () => {
   });
 
   test('manage_settings schema validates action enum', () => {
-    const schema = toolSchemas.manage_settings!;
+    const schema = toolSchemas.manage_settings;
 
     const getAll = schema.safeParse({ action: 'get' });
     expect(getAll.success).toBe(true);
@@ -198,7 +201,7 @@ describe('toolSchemas', () => {
   });
 
   test('passthrough allows extra fields', () => {
-    const schema = toolSchemas.get_events!;
+    const schema = toolSchemas.get_events;
     const result = schema.safeParse({
       start_date: '2026-03-15T00:00:00Z',
       end_date: '2026-03-15T23:59:59Z',
@@ -208,7 +211,7 @@ describe('toolSchemas', () => {
   });
 
   test('create_birthday_event schema validates nested object', () => {
-    const schema = toolSchemas.create_birthday_event!;
+    const schema = toolSchemas.create_birthday_event;
 
     const valid = schema.safeParse({ celebrant_id: 42, date: { day: 15, month: 3 } });
     expect(valid.success).toBe(true);
@@ -221,7 +224,7 @@ describe('toolSchemas', () => {
   });
 
   test('get_timezone_info schema accepts string or array', () => {
-    const schema = toolSchemas.get_timezone_info!;
+    const schema = toolSchemas.get_timezone_info;
 
     const single = schema.safeParse({ timezone: 'Europe/Moscow' });
     expect(single.success).toBe(true);
@@ -234,7 +237,7 @@ describe('toolSchemas', () => {
   });
 
   test('remember_user_fact schema validates type enum', () => {
-    const schema = toolSchemas.remember_user_fact!;
+    const schema = toolSchemas.remember_user_fact;
 
     const valid = schema.safeParse({ type: 'append', content: 'Likes coffee' });
     expect(valid.success).toBe(true);

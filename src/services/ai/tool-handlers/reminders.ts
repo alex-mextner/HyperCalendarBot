@@ -1,6 +1,6 @@
 import { type Lang, t } from '../../../config/constants.ts';
 import type { CalendarEvent } from '../../../database/types.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 import { resolveScope } from './shared.ts';
 
@@ -153,6 +153,7 @@ export function handleGetReminders(ctx: AgentContext, input: GetRemindersInput):
 
   return { success: false, error: 'Provide event_id, event_ids, or query.' };
 }
+handleGetReminders.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 function buildMultiEventResult(events: CalendarEvent[], ctx: AgentContext, lang: Lang): ToolResult {
   const withReminders: string[] = [];

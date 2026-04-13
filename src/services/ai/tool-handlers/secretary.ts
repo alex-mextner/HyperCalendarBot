@@ -2,7 +2,7 @@ import { InlineKeyboard } from 'gramio';
 import type { CalendarSecretary } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { deliverMessage } from '../deliver-message.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const secretaryLogger = botLogger.child({ module: 'secretary' });
 
@@ -76,7 +76,7 @@ async function sendSecretaryNotification(
   });
 }
 
-export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): ToolResult {
+export async function handleManageSecretaries(ctx: AgentContext, input: ManageSecretariesInput): Promise<ToolResult> {
   if (!ctx.secretary || !ctx.userRepo) return { success: false, error: 'Secretary feature not configured.' };
 
   if (input.action === 'invite') {
@@ -96,9 +96,16 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
       permission,
     });
 
-    sendSecretaryInvite(ctx, record, secretaryUser).catch((err: unknown) => {
+    try {
+      await sendSecretaryInvite(ctx, record, secretaryUser);
+    } catch (err) {
       secretaryLogger.error({ err, recordId: record.id }, 'Failed to send secretary invite');
-    });
+      return {
+        success: false,
+        error: 'SECRETARY_INVITE_DELIVERY_FAILED',
+        output: JSON.stringify({ status: 'delivery_failed', secretary_access_id: record.id }),
+      };
+    }
 
     return {
       success: true,
@@ -118,12 +125,17 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
     if (secUser && ctx.sender) {
       const ownerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
       const ownerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
-      sendSecretaryNotification(
-        ctx,
-        record.secretary_id,
-        secUser.username,
-        `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
-      ).catch((err: unknown) => secretaryLogger.error({ err }, 'failed to send revoke notification'));
+      try {
+        await sendSecretaryNotification(
+          ctx,
+          record.secretary_id,
+          secUser.username,
+          `Твой доступ к календарю ${ownerName}${ownerHandle} был отозван.`,
+        );
+      } catch (err) {
+        // Revocation is already committed — notification failure is logged, not surfaced.
+        secretaryLogger.error({ err }, 'failed to send revoke notification');
+      }
     }
     return { success: true, output: JSON.stringify({ ok: true }) };
   }
@@ -140,12 +152,17 @@ export function handleManageSecretaries(ctx: AgentContext, input: ManageSecretar
     const secHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
     const ownerUser = ctx.userRepo!.findByTelegramId(record.owner_id);
     if (ownerUser && ctx.sender) {
-      sendSecretaryNotification(
-        ctx,
-        record.owner_id,
-        ownerUser.username,
-        `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
-      ).catch((err: unknown) => secretaryLogger.error({ err }, 'failed to send self_remove notification'));
+      try {
+        await sendSecretaryNotification(
+          ctx,
+          record.owner_id,
+          ownerUser.username,
+          `${secName}${secHandle} добровольно покинул роль секретаря твоего календаря.`,
+        );
+      } catch (err) {
+        // Self-removal is already committed — notification failure is logged, not surfaced.
+        secretaryLogger.error({ err }, 'failed to send self_remove notification');
+      }
     }
     return { success: true, output: JSON.stringify({ ok: true }) };
   }
@@ -177,3 +194,4 @@ export function handleListCalendarAccess(ctx: AgentContext): ToolResult {
     }),
   };
 }
+handleListCalendarAccess.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;

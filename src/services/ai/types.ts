@@ -145,6 +145,13 @@ export interface BirthdayCapability {
   userMemoryRepo: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
 }
 
+export interface BroadcastCapability {
+  /** Enqueue a single per-recipient broadcast. */
+  enqueue: (data: import('../../worker/broadcast-queue.ts').BroadcastJobData) => Promise<void>;
+  /** Enqueue multiple recipients in one Redis round-trip. */
+  enqueueBatch: (items: import('../../worker/broadcast-queue.ts').BroadcastJobData[]) => Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // Main context
 // ---------------------------------------------------------------------------
@@ -217,6 +224,7 @@ export interface AgentContext {
   scene?: SceneCapability;
   agents?: AgentsCapability;
   birthday?: BirthdayCapability;
+  broadcast?: BroadcastCapability;
   locationVerification?: LocationVerificationService;
   addressCache?: AddressCache;
   pendingGeoStore?: import('../location/pending-geo-store.ts').PendingGeoStore;
@@ -263,6 +271,21 @@ export interface ToolResult {
    * Never sent to AI or user directly — side-channel for workflows.
    */
   data?: ToolResultData;
+}
+
+/**
+ * Behavioral metadata attached directly to tool handler functions via
+ * `handlerFn.meta = { ... }`. Read at runtime by the tool executor to
+ * derive throttle exemption, action-log skipping, etc.
+ *
+ * When adding a new tool handler, set `.meta` right after the function
+ * declaration — don't maintain separate lists.
+ */
+export interface ToolHandlerMeta {
+  /** No side effects — exempt from cross-run throttle. */
+  readonly?: boolean;
+  /** Not worth logging as a user action (all readonly tools + UI/meta tools). */
+  skipActionLog?: boolean;
 }
 
 export interface AgentConfig {

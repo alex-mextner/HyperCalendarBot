@@ -9,6 +9,7 @@ function makeGroupMemberRepo(
   return {
     upsert: mock(() => {}),
     getMembers: mock((chatId: number) => members.filter((m) => m.chat_id === chatId)),
+    getActiveMembers: mock((chatId: number) => members.filter((m) => m.chat_id === chatId)),
   } as unknown as GroupMemberRepository;
 }
 

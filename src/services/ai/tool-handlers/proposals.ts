@@ -43,15 +43,29 @@ export async function handleProposeCalendarChange(ctx: AgentContext, input: Prop
     expires_at: expiresAt,
   });
 
-  deliverProposalDm(ctx, calendarProposalRepo, proposal, input.target_telegram_id).catch((err) =>
-    proposalLogger.error({ err }, 'proposal DM delivery failed'),
-  );
+  let dmDelivered = true;
+  try {
+    await deliverProposalDm(ctx, calendarProposalRepo, proposal, input.target_telegram_id);
+  } catch (err) {
+    proposalLogger.error({ err, proposalId: proposal.id }, 'proposal DM delivery failed');
+    dmDelivered = false;
+  }
 
-  notifyGroupChat(ctx, calendarProposalRepo, proposal, input.target_telegram_id).catch((err) =>
-    proposalLogger.error({ err }, 'proposal group notification failed'),
-  );
+  try {
+    await notifyGroupChat(ctx, calendarProposalRepo, proposal, input.target_telegram_id);
+  } catch (err) {
+    // The group chat notification is a mirror of the DM; failure is logged but
+    // the proposal is already committed and the DM may already be there.
+    proposalLogger.error({ err, proposalId: proposal.id }, 'proposal group notification failed');
+  }
 
-  return { success: true, output: JSON.stringify({ status: 'awaiting_confirmation', proposal_id: proposal.id }) };
+  return {
+    success: true,
+    output: JSON.stringify({
+      status: dmDelivered ? 'awaiting_confirmation' : 'awaiting_confirmation_dm_failed',
+      proposal_id: proposal.id,
+    }),
+  };
 }
 
 function computeExpiresAt(input: ProposeInput): string {

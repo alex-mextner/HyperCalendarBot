@@ -330,11 +330,12 @@ export const MSG = {
         contactFound: (data: string) => `Contact found: ${data}`,
         contactUpdated: (label: string) => `Contact updated: ${label}`,
         questionSent: 'Question sent. Waiting for user response.',
-        dayImageRendering: (date: string) => `Image for ${date} is being rendered and will be sent as a photo.`,
-        weekImageRendering: (weekStart: string) =>
-          `Weekly calendar starting ${weekStart} is being rendered and will be sent as a photo.`,
-        monthImageRendering: (month: string) =>
-          `Monthly calendar for ${month} is being rendered and will be sent as a photo.`,
+        dayImageSent: (date: string) => `Day calendar image for ${date} has been sent to the chat.`,
+        weekImageSent: (weekStart: string) => `Weekly calendar image starting ${weekStart} has been sent to the chat.`,
+        monthImageSent: (month: string) => `Monthly calendar image for ${month} has been sent to the chat.`,
+        dayImageFailed: (date: string) => `Failed to render or send the day image for ${date}.`,
+        weekImageFailed: (weekStart: string) => `Failed to render or send the weekly image starting ${weekStart}.`,
+        monthImageFailed: (month: string) => `Failed to render or send the monthly image for ${month}.`,
         callQueued: 'Call queued. You will receive a voice call shortly.',
         callFailed: (text: string) => `📞 Couldn't reach you by call.\n\n${text}`,
         gcalNotConnected: 'Google Calendar is not connected. You can connect it with /connect_google command.',
@@ -344,7 +345,10 @@ export const MSG = {
         gcalNoCalendars: 'No Google Calendars found. Sync may still be in progress.',
         gcalList: (lines: string) => `Google Calendars:\n${lines}`,
         userPickerSent: 'User picker sent. Waiting for user to select participants.',
-        tableRendering: (title: string) => `Table "${title}" is rendering and will appear in the chat shortly.`,
+        sceneResumed: 'Continue the wizard from where you left off.',
+        sceneCancelled: 'Wizard cancelled.',
+        tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
+        tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
       },
       slots: {
@@ -374,6 +378,12 @@ export const MSG = {
           `You declined the shared event (id: ${id}). It has been removed from your calendar.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Event "${title}" snoozed by ${minutes} min. New start: ${newStart}`,
+        notificationQueued: (count: number) => `Notification queued for ${count} participant${count !== 1 ? 's' : ''}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Update on "${eventTitle}" from ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. This event has ${count} participant${count > 1 ? 's' : ''} — notify them if the change is significant (use notify_participants tool).`,
+        locationAttached: (eventId: number) => `📍 Location attached to event #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `No reminders set for "${title}".`,
@@ -405,6 +415,11 @@ export const MSG = {
           `Visibility for "${title}" (id: ${id}) set to "${visibility}".`,
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
+        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
+          `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string) => `⚠️ Could not deliver invitation for "${eventTitle}" directly.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>
@@ -965,10 +980,13 @@ export const MSG = {
         contactFound: (data: string) => `Контакт найден: ${data}`,
         contactUpdated: (label: string) => `Контакт обновлён: ${label}`,
         questionSent: 'Вопрос отправлен. Ожидаю ответа.',
-        dayImageRendering: (date: string) => `Изображение за ${date} формируется и будет отправлено фото.`,
-        weekImageRendering: (weekStart: string) =>
-          `Недельный календарь с ${weekStart} формируется и будет отправлен фото.`,
-        monthImageRendering: (month: string) => `Месячный календарь за ${month} формируется и будет отправлен фото.`,
+        dayImageSent: (date: string) => `Картинка календаря за ${date} отправлена в чат.`,
+        weekImageSent: (weekStart: string) => `Картинка недельного календаря с ${weekStart} отправлена в чат.`,
+        monthImageSent: (month: string) => `Картинка месячного календаря за ${month} отправлена в чат.`,
+        dayImageFailed: (date: string) => `Не удалось отрендерить или отправить картинку за ${date}.`,
+        weekImageFailed: (weekStart: string) =>
+          `Не удалось отрендерить или отправить недельную картинку с ${weekStart}.`,
+        monthImageFailed: (month: string) => `Не удалось отрендерить или отправить месячную картинку за ${month}.`,
         callQueued: 'Звонок поставлен в очередь. Ты получишь голосовой звонок в ближайшее время.',
         callFailed: (text: string) => `📞 Не удалось дозвониться.\n\n${text}`,
         gcalNotConnected: 'Google Calendar не подключён. Ты можешь подключить его командой /connect_google.',
@@ -979,7 +997,10 @@ export const MSG = {
         gcalNoCalendars: 'Google-календари не найдены. Возможно, синхронизация ещё идёт.',
         gcalList: (lines: string) => `Google-календари:\n${lines}`,
         userPickerSent: 'Форма выбора участников отправлена. Ожидаю ответа.',
-        tableRendering: (title: string) => `Таблица «${title}» рендерится и скоро появится в чате.`,
+        sceneResumed: 'Продолжай заполнение с того места, где остановился.',
+        sceneCancelled: 'Заполнение отменено.',
+        tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
+        tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
       },
       slots: {
@@ -1008,6 +1029,13 @@ export const MSG = {
         eventDeclined: (id: number) => `Ты отклонил(а) общее событие (id: ${id}). Оно удалено из твоего календаря.`,
         snoozed: (title: string, minutes: number, newStart: string) =>
           `Событие «${title}» отложено на ${minutes} мин. Новое начало: ${newStart}`,
+        notificationQueued: (count: number) =>
+          `Уведомление поставлено в очередь для ${count} ${ruPlural(count, 'участника', 'участников', 'участников')}.`,
+        participantUpdate: (eventTitle: string, senderName: string, message: string) =>
+          `📅 Обновление по «${eventTitle}» от ${senderName}:\n${message}`,
+        participantHint: (count: number) =>
+          `. У этого события ${count} ${ruPlural(count, 'участник', 'участника', 'участников')} — уведоми их, если изменение существенное (инструмент notify_participants).`,
+        locationAttached: (eventId: number) => `📍 Локация привязана к событию #${eventId}.`,
       },
       reminders: {
         noReminders: (title: string) => `Для «${title}» нет напоминаний.`,
@@ -1040,6 +1068,12 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
+        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
+          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string) =>
+          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`,
+        mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
+          `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>

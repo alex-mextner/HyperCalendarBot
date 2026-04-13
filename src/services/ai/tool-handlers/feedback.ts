@@ -8,7 +8,7 @@ interface SendFeedbackInput {
   message: string;
 }
 
-export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput): ToolResult {
+export async function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput): Promise<ToolResult> {
   if (!ctx.feedback) {
     return { success: false, error: 'Feedback system is not configured.' };
   }
@@ -53,8 +53,8 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
   const typeEmoji = { bug: '🐛', feature: '💡', question: '❓', other: '💬' }[input.type] ?? '💬';
   const text = `${typeEmoji} Feedback #${threadId} (${input.type}) от ${username}\n\n«${input.message}»`;
 
-  ctx
-    .sendMessageToChat(botAdminId, text, {
+  try {
+    await ctx.sendMessageToChat(botAdminId, text, {
       reply_markup: {
         inline_keyboard: [
           [
@@ -63,10 +63,17 @@ export function handleSendFeedback(ctx: AgentContext, input: SendFeedbackInput):
           ],
         ],
       },
-    })
-    .catch((err: unknown) => {
-      cmdLogger.error({ err: err }, 'Failed to send feedback notification to admin');
     });
+  } catch (err) {
+    // Feedback row is already persisted; admin just won't get the instant DM.
+    cmdLogger.error({ err, threadId, botAdminId }, 'Failed to send feedback notification to admin');
+    return {
+      success: true,
+      output: t(ctx.user.language).aiTools.feedback.feedbackSent,
+      agentHint:
+        'Feedback is saved in the DB but the admin notification could not be delivered. Thank the user and do not claim the admin was notified.',
+    };
+  }
 
   return { success: true, output: t(ctx.user.language).aiTools.feedback.feedbackSent };
 }

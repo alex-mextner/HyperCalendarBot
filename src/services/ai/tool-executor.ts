@@ -204,43 +204,152 @@ export type ToolName = keyof ToolInputMap;
 
 const aiLogger = logger.child({ module: 'ai' });
 
-/** Tools that are read-only or meta — not worth logging as user actions. */
-const SKIP_ACTION_LOG = new Set<string>([
-  'supplement_skip',
-  'end_conversation',
-  'get_events',
-  'get_event',
-  'get_upcoming',
-  'get_free_slots',
-  'search_events',
-  'get_reminders',
-  'get_contacts',
-  'find_contact',
-  'find_user',
-  'get_history',
-  'get_holidays',
-  'get_invitation_status',
-  'get_google_calendar_status',
-  'list_google_calendars',
-  'list_calendar_access',
-  'get_timezone_info',
-  'convert_to_timezone',
-  'get_bot_info',
-  'calculate',
-  'lookup_stress',
-  'schedule_ai_calls_list',
-  'list_triggers',
-  'set_reaction',
-  'ask_user',
-  'pick_users',
-  'render_day_image',
-  'render_week_image',
-  'render_month_image',
-  'render_table',
-  'resume_scene',
-  'cancel_scene',
-  'get_action_log',
-]);
+// ── Cross-run time throttle ────────────────────────────────────────────────
+// Defence-in-depth against repeated tool calls with identical arguments within
+// a short window. Complements the in-run dedup in CalendarBotAgent.run() — that
+// catches loops inside one agent run; this catches rapid cross-run repeats
+// (e.g. bot restart mid-run, or multiple queued user messages triggering the
+// same tool).
+
+const THROTTLE_TTL_MS = 5_000;
+/** Maximum number of entries kept in the throttle map (LRU soft bound). */
+const THROTTLE_MAX_ENTRIES = 1_000;
+
+const throttleMap = new Map<string, number>();
+
+/** Recursively sort object keys for stable serialization. */
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  const sorted = Object.keys(value as { [key: string]: unknown }).sort();
+  const parts = sorted.map((k) => `${JSON.stringify(k)}:${stableStringify((value as { [key: string]: unknown })[k])}`);
+  return `{${parts.join(',')}}`;
+}
+
+/**
+ * Build a canonical throttle key. Keys known to the tool schema are extracted
+ * and sorted so `{a,b}` and `{b,a}` collide. Extra keys injected by the model
+ * (e.g. `_nonce`) are stripped to prevent false key divergence.
+ */
+function buildThrottleKey(chatId: number, toolName: string, input: unknown): string {
+  let canonicalArgs: string;
+  if (input && typeof input === 'object') {
+    const record = input as { [key: string]: unknown };
+    const schema = toolSchemas[toolName as keyof typeof toolSchemas];
+    const knownKeys =
+      schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
+    const filteredKeys = knownKeys
+      ? Object.keys(record)
+          .filter((k) => knownKeys.includes(k))
+          .sort()
+      : Object.keys(record).sort();
+    const canonical: { [key: string]: unknown } = {};
+    for (const k of filteredKeys) canonical[k] = record[k];
+    canonicalArgs = stableStringify(canonical);
+  } else {
+    canonicalArgs = JSON.stringify(input);
+  }
+  return `${chatId}:${toolName}:${canonicalArgs}`;
+}
+
+/**
+ * Evict stale entries opportunistically when the map grows beyond the soft
+ * cap. Called on each insert. O(n) but only triggered at the ceiling.
+ * If stale eviction is insufficient (all entries fresh), force-evict oldest
+ * entries to guarantee the map stays bounded.
+ */
+function evictStaleThrottleEntries(now: number): void {
+  if (throttleMap.size < THROTTLE_MAX_ENTRIES) return;
+  for (const [key, ts] of throttleMap) {
+    if (now - ts >= THROTTLE_TTL_MS) throttleMap.delete(key);
+  }
+  // Force-evict oldest entries if still over cap (all entries are fresh)
+  if (throttleMap.size >= THROTTLE_MAX_ENTRIES) {
+    const excess = throttleMap.size - THROTTLE_MAX_ENTRIES + 100; // evict batch of 100
+    let removed = 0;
+    for (const key of throttleMap.keys()) {
+      if (removed >= excess) break;
+      throttleMap.delete(key);
+      removed++;
+    }
+  }
+}
+
+/** Test-only: clears the throttle map so each test starts clean. */
+export function _resetToolThrottleForTest(): void {
+  throttleMap.clear();
+}
+
+const THROTTLE_MARKER =
+  'THROTTLED: this tool was just called with identical arguments (within the last 5 seconds). ' +
+  'Use the previous result. Do NOT call it again — respond to the user or call a different tool.';
+
+/**
+ * Per-tool metadata — derived from `.meta` on handler functions at module load.
+ * Handler functions declare their metadata via `handlerFn.meta = { ... }` right
+ * after the function body. This map collects them by tool name so the executor
+ * can derive THROTTLE_EXEMPT and SKIP_ACTION_LOG without maintaining a parallel list.
+ *
+ * Tools handled inline in the switch (supplement_skip, set_reaction) that don't
+ * have an imported handler function use the small residual map below.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: handler functions have heterogeneous signatures — we only read .meta
+const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMeta } & ((...args: any[]) => any) } = {
+  get_events: handleGetEvents,
+  get_event: handleGetEvent,
+  get_upcoming: handleGetUpcoming,
+  get_free_slots: handleGetFreeSlots,
+  search_events: handleSearchEvents,
+  get_reminders: handleGetReminders,
+  get_contacts: handleGetContacts,
+  find_contact: handleFindContact,
+  find_user: handleFindUser,
+  get_history: handleGetHistory,
+  get_holidays: handleGetHolidays,
+  get_invitation_status: handleGetInvitationStatus,
+  get_google_calendar_status: handleGetGoogleCalendarStatus,
+  list_google_calendars: handleListGoogleCalendars,
+  list_calendar_access: handleListCalendarAccess,
+  get_timezone_info: handleGetTimezoneInfoWithCityFallback,
+  convert_to_timezone: handleConvertToTimezone,
+  get_bot_info: handleGetBotInfo,
+  calculate: handleCalculate,
+  lookup_stress: handleLookupStress,
+  schedule_ai_calls_list: handleScheduleAiCallsList,
+  list_triggers: handleListTriggers,
+  get_action_log: handleGetActionLog,
+  ask_user: handleAskUser,
+  pick_users: handlePickUsers,
+  end_conversation: handleEndConversation,
+  render_day_image: handleRenderDayImage,
+  render_week_image: handleRenderWeekImage,
+  render_month_image: handleRenderMonthImage,
+  render_table: handleRenderTable,
+  resume_scene: handleResumeScene,
+  cancel_scene: handleCancelScene,
+};
+
+/** Residual: inline-dispatched tools that have no imported handler function. */
+const INLINE_TOOL_META: { [tool: string]: import('./types.ts').ToolHandlerMeta } = {
+  supplement_skip: { skipActionLog: true },
+  set_reaction: { skipActionLog: true },
+};
+
+function getToolMeta(toolName: string): import('./types.ts').ToolHandlerMeta | undefined {
+  const handler = HANDLER_MAP[toolName];
+  if (handler?.meta) return handler.meta;
+  return INLINE_TOOL_META[toolName];
+}
+
+/** Derived: readonly tools are exempt from cross-run throttle. */
+const THROTTLE_EXEMPT = new Set(
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.readonly),
+);
+
+/** Derived: tools not worth logging as user actions. */
+const SKIP_ACTION_LOG = new Set(
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
+);
 
 /** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
 const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
@@ -290,8 +399,37 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
+  // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
+  // THROTTLED result without invoking the handler. Prevents rapid cross-run
+  // repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
+  // Only applied to tools with side-effects — purely read-only tools are exempt
+  // so legitimate repeated queries within 5s don't get stale answers.
+  // Build the throttle key before dispatch — used both for the pre-check and
+  // the post-success write.
+  let throttleKey: string | null = null;
+  if (!THROTTLE_EXEMPT.has(toolName)) {
+    const now = Date.now();
+    throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
+    const lastCalledAt = throttleMap.get(throttleKey);
+    if (lastCalledAt !== undefined && now - lastCalledAt < THROTTLE_TTL_MS) {
+      aiLogger.warn(
+        { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
+        'Tool call throttled (identical within 5s)',
+      );
+      return { success: true, output: THROTTLE_MARKER };
+    }
+  }
+
   try {
     const result = await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]);
+
+    // Record throttle entry only after a successful execution — failed calls
+    // must not poison the throttle window so retries get a real attempt.
+    if (result.success && throttleKey) {
+      const now = Date.now();
+      evictStaleThrottleEntries(now);
+      throttleMap.set(throttleKey, now);
+    }
 
     // Track which event was touched, for last_mentioned_event resolution in intents
     if (result.success) {

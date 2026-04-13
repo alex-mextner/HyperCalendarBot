@@ -1,7 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleRenderTable } from '../../../../src/services/ai/tool-handlers/render.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
-import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -9,7 +8,8 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     chatId: 1,
     isGroup: false,
     sender: {
-      sendPhoto: mock(() => Promise.resolve()),
+      sendPhoto: mock(() => Promise.resolve({ message_id: 1 })),
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     },
     renderService: {
       renderDirect: mock(() => Promise.resolve(Buffer.from('png'))),
@@ -22,9 +22,9 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
 }
 
 describe('handleRenderTable', () => {
-  test('returns success with rendering message', () => {
+  test('returns success after render + send photo', async () => {
     const ctx = makeCtx();
-    const result = handleRenderTable(ctx, {
+    const result = await handleRenderTable(ctx, {
       title: 'Тест',
       markdown: '| A |\n|---|\n| 1 |',
     });
@@ -32,54 +32,84 @@ describe('handleRenderTable', () => {
     expect(result.output).toBeTruthy();
   });
 
-  test('output contains the title', () => {
+  test('output contains the title and past-tense marker', async () => {
     const ctx = makeCtx();
-    const result = handleRenderTable(ctx, {
+    const result = await handleRenderTable(ctx, {
       title: 'МойЗаголовок',
       markdown: '| A |\n|---|\n| 1 |',
     });
     expect(result.output).toContain('МойЗаголовок');
+    // Past tense — avoids the AI-loop class of bugs where models
+    // retry because they think the render hasn't completed.
+    expect(result.output).toContain('отправлена');
   });
 
-  test('fails when renderService missing', () => {
+  test('sendPhoto is awaited before handler returns', async () => {
+    const sendPhoto = mock(() => Promise.resolve({ message_id: 42 }));
+    const ctx = makeCtx({
+      sender: {
+        sendPhoto,
+        sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+      } as never,
+    });
+    await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
+    expect(sendPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  test('agentHint instructs the model not to retry', async () => {
+    const ctx = makeCtx();
+    const result = await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
+    expect(result.agentHint).toBeDefined();
+    expect(result.agentHint!).toContain('Do NOT call render_table again');
+  });
+
+  test('fails when renderService missing', async () => {
     const ctx = makeCtx({ renderService: undefined });
-    const result = handleRenderTable(ctx, {
+    const result = await handleRenderTable(ctx, {
       title: 'Тест',
       markdown: '| A |\n|---|\n| 1 |',
     });
     expect(result.success).toBe(false);
   });
 
-  test('fails when sendPhoto missing', () => {
+  test('fails when sendPhoto missing', async () => {
     const ctx = makeCtx({ sender: {} as never });
-    const result = handleRenderTable(ctx, {
+    const result = await handleRenderTable(ctx, {
       title: 'Тест',
       markdown: '| A |\n|---|\n| 1 |',
     });
     expect(result.success).toBe(false);
   });
 
-  test('voice call: returns success with chat-redirect message', () => {
+  test('voice call: output tells user to check chat', async () => {
     const ctx = makeCtx({ inputMode: 'live_call' });
-    const result = handleRenderTable(ctx, {
+    const result = await handleRenderTable(ctx, {
       title: 'Тест',
       markdown: '| A |\n|---|\n| 1 |',
     });
     expect(result.success).toBe(true);
-    // Should still render and send, but output tells user to check chat
     expect(result.output).toMatch(/чат|chat/i);
   });
 
-  test('render failure is caught and does not throw', async () => {
+  test('render failure returns success:false with error message', async () => {
     const ctx = makeCtx({
       renderService: {
         renderDirect: mock(() => Promise.reject(new Error('playwright down'))),
       },
     });
-    const result = handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
-    // Synchronous return is still success
-    expect(result.success).toBe(true);
-    // Allow the fire-and-forget promise to settle — must not throw unhandled rejection
-    await flushPromises();
+    const result = await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
+    expect(result.success).toBe(false);
+    expect(result.error).toBeTruthy();
+  });
+
+  test('sendPhoto failure returns success:false with error message', async () => {
+    const ctx = makeCtx({
+      sender: {
+        sendPhoto: mock(() => Promise.reject(new Error('Telegram 429'))),
+        sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+      } as never,
+    });
+    const result = await handleRenderTable(ctx, { title: 'T', markdown: '| A |\n|---|\n| 1 |' });
+    expect(result.success).toBe(false);
   });
 });

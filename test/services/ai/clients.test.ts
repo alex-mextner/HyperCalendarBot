@@ -9,6 +9,7 @@ beforeEach(() => {
   resetClients();
   process.env = { ...originalEnv };
   process.env.BOT_TOKEN = 'test-token';
+  process.env.REDIS_URL = 'redis://localhost:6379';
   process.env.ZAI_API_KEY = 'zai-key';
   process.env.ZAI_BASE_URL = 'https://zai.example/v1';
   process.env.ZAI_MODEL = 'glm-test';

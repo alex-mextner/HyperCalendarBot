@@ -10,7 +10,7 @@ import { SharedEventRepository } from '../../../src/database/repositories/shared
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { executeTool } from '../../../src/services/ai/tool-executor.ts';
+import { _resetToolThrottleForTest, executeTool } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -30,6 +30,9 @@ describe('executeTool', () => {
   const USER_ID = 123;
 
   beforeEach(() => {
+    // Throttle state is module-level and must not leak between tests that
+    // reuse the same (chatId, toolName, args) tuple.
+    _resetToolThrottleForTest();
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
@@ -597,6 +600,113 @@ describe('executeTool', () => {
       expect(logs).toHaveLength(1);
       const meta = JSON.parse(logs[0]!.metadata!);
       expect(meta._inputMode).toBe('voice_message');
+    });
+  });
+
+  // ── Cross-run time throttle ────────────────────────────────────────────────
+  // Defence-in-depth against repeated tool calls with identical arguments
+  // within a short time window — regardless of whether they come from a single
+  // agent run or two back-to-back runs. Catches cases where in-run dedup would
+  // not fire (e.g. the bot crashes, restarts, and the model asks for the same
+  // rendering again within seconds).
+
+  describe('time-based throttle', () => {
+    beforeEach(() => {
+      _resetToolThrottleForTest();
+    });
+
+    test('second identical call within 5s window is throttled (side-effect tool)', async () => {
+      // Side-effect tools (not in SKIP_ACTION_LOG) are throttled
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Throttle Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const r1 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
+      expect(r1.success).toBe(true);
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'A' });
+      expect(r2.success).toBe(true);
+      expect(r2.output ?? '').toContain('THROTTLED');
+    });
+
+    test('throttle key normalizes argument order (side-effect tool)', async () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Order Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'B' });
+      const r2 = await executeTool(ctx, 'update_event', { title: 'B', event_id: event.id });
+      expect(r2.output ?? '').toContain('THROTTLED');
+    });
+
+    test('read-only tools are NOT throttled (exempt from cross-run throttle)', async () => {
+      const r1 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      const r2 = await executeTool(ctx, 'get_events', {
+        start_date: '2026-03-15T00:00:00Z',
+        end_date: '2026-03-15T23:59:59Z',
+      });
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different args are NOT throttled', async () => {
+      const event1 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'E1',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const event2 = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'E2',
+        start_at: '2026-03-16T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const r1 = await executeTool(ctx, 'update_event', { event_id: event1.id, title: 'X' });
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event2.id, title: 'X' });
+      expect(r1.output ?? '').not.toContain('THROTTLED');
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different chats do NOT share throttle state', async () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Chat Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const otherCtx: AgentContext = { ...ctx, chatId: 999999 };
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Y' });
+      const r2 = await executeTool(otherCtx, 'update_event', { event_id: event.id, title: 'Y' });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('different tool names are NOT throttled against each other', async () => {
+      const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
+      await executeTool(ctx, 'create_event', { title: 'Foo', start_at: `${tomorrow}14:00:00Z` });
+      const r2 = await executeTool(ctx, 'create_event', { title: 'Bar', start_at: `${tomorrow}15:00:00Z` });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
+    });
+
+    test('throttle entry expires after TTL (simulated via reset)', async () => {
+      const event = ctx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'TTL Test',
+        start_at: '2026-03-15T10:00:00Z',
+        timezone: 'UTC',
+      });
+      await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Z' });
+      _resetToolThrottleForTest();
+      const r2 = await executeTool(ctx, 'update_event', { event_id: event.id, title: 'Z' });
+      expect(r2.output ?? '').not.toContain('THROTTLED');
     });
   });
 });

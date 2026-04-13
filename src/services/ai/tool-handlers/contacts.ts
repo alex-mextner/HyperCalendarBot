@@ -1,5 +1,5 @@
 import { t } from '../../../config/constants.ts';
-import type { AgentContext, ToolResult } from '../types.ts';
+import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 export function handleGetContacts(ctx: AgentContext, input: { force?: boolean }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
@@ -22,6 +22,7 @@ export function handleGetContacts(ctx: AgentContext, input: { force?: boolean })
   });
   return { success: true, output: t(lang).aiTools.meta.contactsList(lines.join('\n')) };
 }
+handleGetContacts.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleAddContact(
   ctx: AgentContext,
@@ -59,6 +60,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
   const data = parts.join(', ');
   return { success: true, output: t(ctx.user.language).aiTools.meta.contactFound(data) };
 }
+handleFindContact.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
 export function handleUpdateContact(
   ctx: AgentContext,

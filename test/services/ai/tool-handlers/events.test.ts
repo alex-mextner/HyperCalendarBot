@@ -25,7 +25,6 @@ import { ConflictChecker } from '../../../../src/services/event/conflict-checker
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
-import { flushPromises } from '../../../helpers/mock-context.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -140,8 +139,8 @@ describe('event tool handlers', () => {
   describe('handleCreateEvent', () => {
     const futureDate = new Date(Date.now() + 86400000).toISOString().slice(0, 11);
 
-    test('creates event and returns details', () => {
-      const result = handleCreateEvent(ctx, {
+    test('creates event and returns details', async () => {
+      const result = await handleCreateEvent(ctx, {
         title: 'New Meeting',
         start_at: `${futureDate}14:00:00Z`,
         end_at: `${futureDate}15:00:00Z`,
@@ -151,8 +150,8 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('id');
     });
 
-    test('creates event with description and location', () => {
-      const result = handleCreateEvent(ctx, {
+    test('creates event with description and location', async () => {
+      const result = await handleCreateEvent(ctx, {
         title: 'Lunch',
         start_at: `${futureDate}12:00:00Z`,
         description: 'Team lunch',
@@ -162,8 +161,8 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Lunch');
     });
 
-    test('rejects past event without force', () => {
-      const result = handleCreateEvent(ctx, {
+    test('rejects past event without force', async () => {
+      const result = await handleCreateEvent(ctx, {
         title: 'Past Event',
         start_at: '2020-01-01T10:00:00Z',
       });
@@ -171,8 +170,8 @@ describe('event tool handlers', () => {
       expect(result.error).toContain('PAST_EVENT');
     });
 
-    test('allows past event with force: true', () => {
-      const result = handleCreateEvent(ctx, {
+    test('allows past event with force: true', async () => {
+      const result = await handleCreateEvent(ctx, {
         title: 'Past Event',
         start_at: '2020-01-01T10:00:00Z',
         force: true,
@@ -181,8 +180,8 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Past Event');
     });
 
-    test('allows all-day past event without force', () => {
-      const result = handleCreateEvent(ctx, {
+    test('allows all-day past event without force', async () => {
+      const result = await handleCreateEvent(ctx, {
         title: 'Past Holiday',
         start_at: '2020-01-01T00:00:00Z',
         all_day: true,
@@ -191,7 +190,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Past Holiday');
     });
 
-    test('returns agentHint with conflict info when new event overlaps existing', () => {
+    test('returns agentHint with conflict info when new event overlaps existing', async () => {
       const eventRepo = new EventRepository(db);
       const conflictCtx = {
         ...ctx,
@@ -213,7 +212,7 @@ describe('event tool handlers', () => {
       });
 
       // Create overlapping event
-      const result = handleCreateEvent(conflictCtx, {
+      const result = await handleCreateEvent(conflictCtx, {
         title: 'Новое событие',
         start_at: `${futureDate}11:30:00Z`,
         end_at: `${futureDate}12:30:00Z`,
@@ -225,7 +224,7 @@ describe('event tool handlers', () => {
       expect(result.agentHint).toContain('11:00');
     });
 
-    test('no agentHint when no conflict', () => {
+    test('no agentHint when no conflict', async () => {
       const eventRepo = new EventRepository(db);
       const conflictCtx = {
         ...ctx,
@@ -237,7 +236,7 @@ describe('event tool handlers', () => {
         },
       } as unknown as AgentContext;
 
-      const result = handleCreateEvent(conflictCtx, {
+      const result = await handleCreateEvent(conflictCtx, {
         title: 'Без конфликта',
         start_at: `${futureDate}09:00:00Z`,
         end_at: `${futureDate}10:00:00Z`,
@@ -249,14 +248,14 @@ describe('event tool handlers', () => {
   });
 
   describe('handleUpdateEvent', () => {
-    test('updates event title', () => {
+    test('updates event title', async () => {
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Old Title',
         start_at: '2026-03-15T10:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleUpdateEvent(ctx, {
+      const result = await handleUpdateEvent(ctx, {
         event_id: event.id,
         title: 'New Title',
       });
@@ -264,8 +263,8 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('New Title');
     });
 
-    test('returns error for non-existent event', () => {
-      const result = handleUpdateEvent(ctx, {
+    test('returns error for non-existent event', async () => {
+      const result = await handleUpdateEvent(ctx, {
         event_id: 9999,
         title: 'Whatever',
       });
@@ -275,19 +274,19 @@ describe('event tool handlers', () => {
   });
 
   describe('handleDeleteEvent', () => {
-    test('deletes event', () => {
+    test('deletes event', async () => {
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'To Delete',
         start_at: '2026-03-15T10:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleDeleteEvent(ctx, { event_id: event.id });
+      const result = await handleDeleteEvent(ctx, { event_id: event.id });
       expect(result.success).toBe(true);
     });
 
-    test('returns error for non-existent event', () => {
-      const result = handleDeleteEvent(ctx, { event_id: 9999 });
+    test('returns error for non-existent event', async () => {
+      const result = await handleDeleteEvent(ctx, { event_id: 9999 });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
@@ -365,7 +364,7 @@ describe('event tool handlers', () => {
   });
 
   describe('handleUpdateEvent — participant info', () => {
-    test('output mentions participant count when event has accepted participants', () => {
+    test('output mentions participant count when event has accepted participants', async () => {
       const participantRepo = new ParticipantRepository(db);
       const otherUserId = 999;
       const userRepo = new UserRepository(db);
@@ -380,7 +379,7 @@ describe('event tool handlers', () => {
       participantRepo.add(event.id, otherUserId, 'accepted');
 
       const ctxWithParticipants = { ...ctx, participantRepo };
-      const result = handleUpdateEvent(ctxWithParticipants, {
+      const result = await handleUpdateEvent(ctxWithParticipants, {
         event_id: event.id,
         title: 'Renamed Meeting',
       });
@@ -389,7 +388,7 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('notify');
     });
 
-    test('output does not mention participants when event has none', () => {
+    test('output does not mention participants when event has none', async () => {
       const participantRepo = new ParticipantRepository(db);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -399,7 +398,7 @@ describe('event tool handlers', () => {
       });
 
       const ctxWithParticipants = { ...ctx, participantRepo };
-      const result = handleUpdateEvent(ctxWithParticipants, {
+      const result = await handleUpdateEvent(ctxWithParticipants, {
         event_id: event.id,
         title: 'Still Solo',
       });
@@ -409,7 +408,7 @@ describe('event tool handlers', () => {
   });
 
   describe('handleNotifyParticipants', () => {
-    test('sends message to accepted participants', () => {
+    test('sends message to accepted participants', async () => {
       const participantRepo = new ParticipantRepository(db);
       const otherUserId = 999;
       const userRepo = new UserRepository(db);
@@ -423,30 +422,33 @@ describe('event tool handlers', () => {
       });
       participantRepo.add(event.id, otherUserId, 'accepted');
 
-      const sent: { chatId: number; text: string }[] = [];
-      const ctxWithSender = {
+      const enqueuedBatches: { recipientId: number; text: string; origin: string }[][] = [];
+      const ctxWithBroadcast = {
         ...ctx,
         participantRepo,
-        sender: {
-          sendMessage: async (chatId: number, text: string) => {
-            sent.push({ chatId, text });
-            return { message_id: 1 };
+        broadcast: {
+          enqueue: async () => {},
+          enqueueBatch: async (items: { recipientId: number; text: string; origin: string }[]) => {
+            enqueuedBatches.push(items);
           },
-          editMessageText: async () => {},
         },
       };
 
-      const result = handleNotifyParticipants(ctxWithSender, {
+      const result = await handleNotifyParticipants(ctxWithBroadcast, {
         event_id: event.id,
         message: 'Meeting moved to 11:00',
       });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('1 participant');
+      expect(enqueuedBatches).toHaveLength(1);
+      expect(enqueuedBatches[0]).toHaveLength(1);
+      expect(enqueuedBatches[0]![0]!.recipientId).toBe(otherUserId);
+      expect(enqueuedBatches[0]![0]!.text).toContain('Meeting moved to 11:00');
     });
 
-    test('returns error when event not found', () => {
-      const result = handleNotifyParticipants(ctx, {
+    test('returns error when event not found', async () => {
+      const result = await handleNotifyParticipants(ctx, {
         event_id: 9999,
         message: 'hello',
       });
@@ -454,7 +456,7 @@ describe('event tool handlers', () => {
       expect(result.error).toContain('not found');
     });
 
-    test('returns error when no participants', () => {
+    test('returns error when no participants', async () => {
       const participantRepo = new ParticipantRepository(db);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -463,8 +465,12 @@ describe('event tool handlers', () => {
         timezone: 'UTC',
       });
 
-      const ctxWithParticipants = { ...ctx, participantRepo };
-      const result = handleNotifyParticipants(ctxWithParticipants, {
+      const ctxWithParticipants = {
+        ...ctx,
+        participantRepo,
+        broadcast: { enqueue: async () => {}, enqueueBatch: async () => {} },
+      };
+      const result = await handleNotifyParticipants(ctxWithParticipants, {
         event_id: event.id,
         message: 'Test',
       });
@@ -520,9 +526,9 @@ describe('event tool handlers', () => {
       expect(result.output).not.toContain('Personal Event');
     });
 
-    test('handleCreateEvent with scope=group creates group event', () => {
+    test('handleCreateEvent with scope=group creates group event', async () => {
       const gCtx = makeGroupCtx();
-      const result = handleCreateEvent(gCtx, {
+      const result = await handleCreateEvent(gCtx, {
         title: 'Group Meeting',
         start_at: '2026-03-15T14:00:00Z',
         scope: 'group',
@@ -542,10 +548,10 @@ describe('event tool handlers', () => {
       expect(events[0]!.event.created_by).toBe(USER_ID);
     });
 
-    test('handleUpdateEvent with scope=group updates group event', () => {
+    test('handleUpdateEvent with scope=group updates group event', async () => {
       const event = createGroupEvent('Old Group Title', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
-      const result = handleUpdateEvent(gCtx, {
+      const result = await handleUpdateEvent(gCtx, {
         event_id: event.id,
         title: 'New Group Title',
         scope: 'group',
@@ -557,7 +563,7 @@ describe('event tool handlers', () => {
     test('handleDeleteEvent with scope=group deletes from group calendar', async () => {
       const event = createGroupEvent('To Delete Group', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
-      const result = handleDeleteEvent(gCtx, { event_id: event.id, scope: 'group' });
+      const result = await handleDeleteEvent(gCtx, { event_id: event.id, scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('To Delete Group');
 
@@ -651,7 +657,7 @@ describe('event tool handlers', () => {
 
     test('handleDeleteEvent with scope=group returns error for non-existent group event', async () => {
       const gCtx = makeGroupCtx();
-      const result = handleDeleteEvent(gCtx, { event_id: 9999, scope: 'group' });
+      const result = await handleDeleteEvent(gCtx, { event_id: 9999, scope: 'group' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
     });
@@ -708,18 +714,37 @@ describe('event tool handlers', () => {
       return { getRegisteredMembers: mock(async () => memberIds) } as Partial<GroupMemberService> as GroupMemberService;
     }
 
-    test('handleCreateEvent notifies all group members including creator', async () => {
+    // Collect enqueued broadcast jobs via a shared captor. Each test that
+    // exercises the group-notification path wires this into ctx.broadcast so
+    // we can assert on exactly what was queued for delivery.
+    interface CapturedJob {
+      recipientId: number;
+      text: string;
+      parseMode?: string;
+      origin: string;
+    }
+    function makeCapturingBroadcast(): {
+      captured: CapturedJob[];
+      broadcast: { enqueue: (d: CapturedJob) => Promise<void>; enqueueBatch: (items: CapturedJob[]) => Promise<void> };
+    } {
+      const captured: CapturedJob[] = [];
+      return {
+        captured,
+        broadcast: {
+          enqueue: async (d) => {
+            captured.push(d);
+          },
+          enqueueBatch: async (items) => {
+            captured.push(...items);
+          },
+        },
+      };
+    }
+
+    test('handleCreateEvent enqueues notifications for all group members including creator', async () => {
       const MEMBER_ID = 456;
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
-
-      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
-          sent.push({ chatId, text, parseMode });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const mockGroupChatRepo = { findByChatId: () => null } as never;
       const gCtx: AgentContext = {
@@ -730,9 +755,9 @@ describe('event tool handlers', () => {
           groupMemberService,
           checkGroupMembership: undefined as never,
         },
-        sender,
+        broadcast,
       };
-      const result = handleCreateEvent(gCtx, {
+      const result = await handleCreateEvent(gCtx, {
         title: 'Party',
         start_at: '2026-03-20T18:00:00Z',
         scope: 'group',
@@ -740,32 +765,24 @@ describe('event tool handlers', () => {
       });
 
       expect(result.success).toBe(true);
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(captured.length).toBe(2);
+      const chatIds = captured.map((j) => j.recipientId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
-      expect(sent.every((s) => s.text.includes('Party'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('18:00'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.text.includes('Party'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('Test Group'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('18:00'))).toBe(true);
+      expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.origin.startsWith('group_event_created:'))).toBe(true);
     });
 
-    test('handleCreateEvent sends notification in recipient language', async () => {
+    test('handleCreateEvent renders notification in recipient language at enqueue time', async () => {
       const RU_MEMBER_ID = 789;
       const userRepo = ctx.userRepo as UserRepository;
       userRepo.create({ telegram_id: RU_MEMBER_ID, timezone: 'UTC', language: 'ru' });
       const groupMemberService = makeMemberService([USER_ID, RU_MEMBER_ID]);
+      const { captured, broadcast } = makeCapturingBroadcast();
 
-      const sent: { chatId: number; text: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string) => {
-          sent.push({ chatId, text });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
-
-      handleCreateEvent(
+      await handleCreateEvent(
         {
           ...makeGroupCtx(),
           group: {
@@ -774,7 +791,7 @@ describe('event tool handlers', () => {
             groupMemberService,
             checkGroupMembership: undefined as never,
           },
-          sender,
+          broadcast,
         } as AgentContext,
         {
           title: 'Встреча',
@@ -784,28 +801,19 @@ describe('event tool handlers', () => {
         },
       );
 
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const ruNotification = sent.find((s) => s.chatId === RU_MEMBER_ID);
-      expect(ruNotification?.text).toContain('Новое событие');
+      expect(captured.length).toBe(2);
+      const ruJob = captured.find((j) => j.recipientId === RU_MEMBER_ID);
+      expect(ruJob?.text).toContain('Новое событие');
     });
 
-    test('handleUpdateEvent notifies group members on group update', async () => {
+    test('handleUpdateEvent enqueues notifications for group members on update', async () => {
       const MEMBER_ID = 456;
       const groupMemberService = makeMemberService([USER_ID, MEMBER_ID]);
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const event = createGroupEvent('Sprint Planning', '2026-03-21T09:00:00Z');
 
-      const sent: { chatId: number; text: string; parseMode?: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (chatId: number, text: string, parseMode?: string) => {
-          sent.push({ chatId, text, parseMode });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
-
-      const result = handleUpdateEvent(
+      const result = await handleUpdateEvent(
         {
           ...makeGroupCtx(),
           group: {
@@ -814,7 +822,7 @@ describe('event tool handlers', () => {
             groupMemberService,
             checkGroupMembership: undefined as never,
           },
-          sender,
+          broadcast,
         } as AgentContext,
         {
           event_id: event.id,
@@ -824,13 +832,13 @@ describe('event tool handlers', () => {
       );
 
       expect(result.success).toBe(true);
-      await flushPromises();
-      expect(sent.length).toBe(2);
-      const chatIds = sent.map((s) => s.chatId).sort();
+      expect(captured.length).toBe(2);
+      const chatIds = captured.map((j) => j.recipientId).sort();
       expect(chatIds).toEqual([USER_ID, MEMBER_ID].sort());
-      expect(sent.every((s) => s.text.includes('Sprint Planning Updated'))).toBe(true);
-      expect(sent.every((s) => s.text.includes('Test Group'))).toBe(true);
-      expect(sent.every((s) => s.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.text.includes('Sprint Planning Updated'))).toBe(true);
+      expect(captured.every((j) => j.text.includes('Test Group'))).toBe(true);
+      expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
+      expect(captured.every((j) => j.origin.startsWith('group_event_updated:'))).toBe(true);
     });
 
     test('handleCreateEvent uses invite link as clickable group link when available', async () => {
@@ -840,14 +848,7 @@ describe('event tool handlers', () => {
       groupChatRepo.setInviteLink(GROUP_CHAT_ID, INVITE_LINK);
 
       const groupMemberService = makeMemberService([USER_ID]);
-      const sent: { text: string }[] = [];
-      const sender = {
-        sendMessage: mock(async (_chatId: number, text: string) => {
-          sent.push({ text });
-          return { message_id: 1 };
-        }),
-        editMessageText: mock(async () => {}),
-      };
+      const { captured, broadcast } = makeCapturingBroadcast();
 
       const gCtx: AgentContext = {
         ...makeGroupCtx(),
@@ -857,14 +858,18 @@ describe('event tool handlers', () => {
           groupMemberService,
           checkGroupMembership: undefined as never,
         },
-        sender,
+        broadcast,
       };
-      handleCreateEvent(gCtx, { title: 'Drinks', start_at: '2026-03-20T19:00:00Z', scope: 'group', force: true });
+      await handleCreateEvent(gCtx, {
+        title: 'Drinks',
+        start_at: '2026-03-20T19:00:00Z',
+        scope: 'group',
+        force: true,
+      });
 
-      await flushPromises();
-      expect(sent.length).toBe(1);
-      expect(sent[0]!.text).toContain(`href="${INVITE_LINK}"`);
-      expect(sent[0]!.text).toContain('Test Group');
+      expect(captured.length).toBe(1);
+      expect(captured[0]!.text).toContain(`href="${INVITE_LINK}"`);
+      expect(captured[0]!.text).toContain('Test Group');
     });
   });
 
@@ -921,7 +926,7 @@ describe('event tool handlers', () => {
       expect(result.output).not.toContain('Group Drinks By Other');
     });
 
-    test('handleDeleteEvent (personal) succeeds for group-owned events created by the user', () => {
+    test('handleDeleteEvent (personal) succeeds for group-owned events created by the user', async () => {
       db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -933,12 +938,12 @@ describe('event tool handlers', () => {
         created_by: USER_ID,
       });
 
-      const result = handleDeleteEvent(ctx, { event_id: event.id });
+      const result = await handleDeleteEvent(ctx, { event_id: event.id });
 
       expect(result.success).toBe(true);
     });
 
-    test('handleDeleteEvent (personal) refuses to delete group-owned events created by another user', () => {
+    test('handleDeleteEvent (personal) refuses to delete group-owned events created by another user', async () => {
       const OTHER_USER = 998;
       new UserRepository(db).create({ telegram_id: OTHER_USER });
       const event = ctx.eventService.createEvent({
@@ -951,7 +956,7 @@ describe('event tool handlers', () => {
         created_by: OTHER_USER,
       });
 
-      const result = handleDeleteEvent(ctx, { event_id: event.id });
+      const result = await handleDeleteEvent(ctx, { event_id: event.id });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');
@@ -1001,7 +1006,7 @@ describe('event tool handlers', () => {
       expect(result.output).not.toContain('Group Planning By Other');
     });
 
-    test('handleUpdateEvent (personal) succeeds for group-owned events created by the user', () => {
+    test('handleUpdateEvent (personal) succeeds for group-owned events created by the user', async () => {
       db.run('INSERT INTO group_members (chat_id, user_id) VALUES (?, ?)', [GROUP_ID, USER_ID]);
       const event = ctx.eventService.createEvent({
         user_id: USER_ID,
@@ -1013,13 +1018,13 @@ describe('event tool handlers', () => {
         created_by: USER_ID,
       });
 
-      const result = handleUpdateEvent(ctx, { event_id: event.id, title: 'Updated Group Meeting' });
+      const result = await handleUpdateEvent(ctx, { event_id: event.id, title: 'Updated Group Meeting' });
 
       expect(result.success).toBe(true);
       expect(result.output).toContain('Updated Group Meeting');
     });
 
-    test('handleUpdateEvent (personal) refuses to update group-owned events created by another user', () => {
+    test('handleUpdateEvent (personal) refuses to update group-owned events created by another user', async () => {
       const OTHER_USER = 996;
       new UserRepository(db).create({ telegram_id: OTHER_USER });
       const event = ctx.eventService.createEvent({
@@ -1032,7 +1037,7 @@ describe('event tool handlers', () => {
         created_by: OTHER_USER,
       });
 
-      const result = handleUpdateEvent(ctx, { event_id: event.id, title: 'Tampered' });
+      const result = await handleUpdateEvent(ctx, { event_id: event.id, title: 'Tampered' });
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('not found');

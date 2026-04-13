@@ -77,13 +77,13 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleGetHolidays', () => {
-    test('returns message when no subscriptions', () => {
+    test('returns message when no subscriptions', async () => {
       const result = handleGetHolidays(ctx, {});
       expect(result.success).toBe(true);
       expect(result.output).toContain('No');
     });
 
-    test('returns holidays list with English header for en user', () => {
+    test('returns holidays list with English header for en user', async () => {
       const mockCtx = {
         ...ctx,
         holidayService: {
@@ -98,7 +98,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('New Year');
     });
 
-    test('returns Russian holidays list for ru user', () => {
+    test('returns Russian holidays list for ru user', async () => {
       const mockCtx = {
         ...ctx,
         user: { ...ctx.user, language: 'ru' as const },
@@ -164,14 +164,14 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleGetContacts', () => {
-    test('returns empty message when no contacts', () => {
+    test('returns empty message when no contacts', async () => {
       ctx.contactRepo = new ContactRepository(db);
       const result = handleGetContacts(ctx, {});
       expect(result.success).toBe(true);
       expect(result.output).toContain('empty');
     });
 
-    test('lists contacts with usernames', () => {
+    test('lists contacts with usernames', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
       ctx.contactRepo = contactRepo;
@@ -181,13 +181,13 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('@larichkina_b');
     });
 
-    test('returns error when contactRepo not configured', () => {
+    test('returns error when contactRepo not configured', async () => {
       ctx.contactRepo = undefined;
       const result = handleGetContacts(ctx, {});
       expect(result.success).toBe(false);
     });
 
-    test('blocks in group context without force', () => {
+    test('blocks in group context without force', async () => {
       ctx.isGroup = true;
       ctx.groupChatId = -100;
       ctx.contactRepo = new ContactRepository(db);
@@ -196,7 +196,7 @@ describe('meta tool handlers', () => {
       expect(result.error).toContain('force: true');
     });
 
-    test('allows in group context with force: true', () => {
+    test('allows in group context with force: true', async () => {
       ctx.isGroup = true;
       ctx.groupChatId = -100;
       const contactRepo = new ContactRepository(db);
@@ -209,7 +209,7 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleFindContact', () => {
-    test('finds contact by name', () => {
+    test('finds contact by name', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Лена', 'larichkina_b');
       ctx.contactRepo = contactRepo;
@@ -218,7 +218,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('larichkina_b');
     });
 
-    test('finds contact by @username', () => {
+    test('finds contact by @username', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Mextner', 'mextner');
       ctx.contactRepo = contactRepo;
@@ -228,7 +228,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('@mextner');
     });
 
-    test('finds contact by username without @', () => {
+    test('finds contact by username without @', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Mextner', 'mextner');
       ctx.contactRepo = contactRepo;
@@ -237,7 +237,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('Mextner');
     });
 
-    test('prefers name match over username fallback', () => {
+    test('prefers name match over username fallback', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Alex', 'alexbot');
       contactRepo.add(USER_ID, 'mextner', 'other_user');
@@ -247,7 +247,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('name: mextner');
     });
 
-    test('returns error for unknown contact', () => {
+    test('returns error for unknown contact', async () => {
       ctx.contactRepo = new ContactRepository(db);
       const result = handleFindContact(ctx, { name: 'Nobody' });
       expect(result.success).toBe(false);
@@ -256,7 +256,7 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleAddContact', () => {
-    test('adds new contact', () => {
+    test('adds new contact', async () => {
       ctx.contactRepo = new ContactRepository(db);
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
@@ -264,7 +264,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('@vova123');
     });
 
-    test('upserts existing contact with username', () => {
+    test('upserts existing contact with username', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова');
       ctx.contactRepo = contactRepo;
@@ -273,7 +273,7 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('vova123');
     });
 
-    test('upserts existing contact without error', () => {
+    test('upserts existing contact without error', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова', 'vova');
       ctx.contactRepo = contactRepo;
@@ -284,7 +284,7 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleUpdateContact', () => {
-    test('updates preferred_name by current name', () => {
+    test('updates preferred_name by current name', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Антон Tikididu', 'Tikididu');
       ctx.contactRepo = contactRepo;
@@ -295,7 +295,7 @@ describe('meta tool handlers', () => {
       expect(updated?.preferred_name).toBe('Антон');
     });
 
-    test('renames contact display name', () => {
+    test('renames contact display name', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'OldName');
       ctx.contactRepo = contactRepo;
@@ -305,7 +305,7 @@ describe('meta tool handlers', () => {
       expect(contactRepo.findByName(USER_ID, 'NewName')).not.toBeNull();
     });
 
-    test('finds contact by @username', () => {
+    test('finds contact by @username', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова', 'vova123');
       ctx.contactRepo = contactRepo;
@@ -315,14 +315,14 @@ describe('meta tool handlers', () => {
       expect(updated?.preferred_name).toBe('Вовка');
     });
 
-    test('returns error for unknown contact', () => {
+    test('returns error for unknown contact', async () => {
       ctx.contactRepo = new ContactRepository(db);
       const result = handleUpdateContact(ctx, { search: 'Nobody', name: 'Someone' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('Nobody');
     });
 
-    test('returns error when no fields provided', () => {
+    test('returns error when no fields provided', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Лена');
       ctx.contactRepo = contactRepo;
@@ -330,7 +330,7 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(false);
     });
 
-    test('returns error when contactRepo not configured', () => {
+    test('returns error when contactRepo not configured', async () => {
       ctx.contactRepo = undefined;
       const result = handleUpdateContact(ctx, { search: 'Лена', name: 'Лена2' });
       expect(result.success).toBe(false);
@@ -338,39 +338,39 @@ describe('meta tool handlers', () => {
   });
 
   describe('handleAskUser', () => {
-    test('returns stopLoop true', () => {
+    test('returns stopLoop true', async () => {
       const sendButtons = () => Promise.resolve({ message_id: 1 });
       ctx.sender = { sendMessage: sendButtons as never, editMessageText: (() => {}) as never, sendButtons };
-      const result = handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
+      const result = await handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
       expect(result.success).toBe(true);
       expect(result.stopLoop).toBe(true);
     });
 
-    test('returns error when sender has no sendButtons', () => {
+    test('returns error when sender has no sendButtons', async () => {
       ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never };
-      const result = handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
+      const result = await handleAskUser(ctx, { question: 'Sure?', options: ['Да', 'Нет'] });
       expect(result.success).toBe(false);
     });
   });
 
   describe('handlePickUsers', () => {
-    test('returns stopLoop true', () => {
+    test('returns stopLoop true', async () => {
       const sendUserPicker = () => Promise.resolve({ message_id: 1 });
       ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never, sendUserPicker };
-      const result = handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
+      const result = await handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
       expect(result.success).toBe(true);
       expect(result.stopLoop).toBe(true);
     });
 
-    test('returns error when sender has no sendUserPicker', () => {
+    test('returns error when sender has no sendUserPicker', async () => {
       ctx.sender = { sendMessage: (() => {}) as never, editMessageText: (() => {}) as never };
-      const result = handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
+      const result = await handlePickUsers(ctx, { event_id: 1, prompt: 'Pick users' });
       expect(result.success).toBe(false);
     });
   });
 
   describe('handleGetBotInfo', () => {
-    test('returns capabilities text', () => {
+    test('returns capabilities text', async () => {
       const result = handleGetBotInfo();
       expect(result.success).toBe(true);
       expect(result.output).toContain('voice');
@@ -404,14 +404,14 @@ describe('meta tool handlers', () => {
       };
     });
 
-    test('returns error when renderService not available', () => {
+    test('returns error when renderService not available', async () => {
       ctx.renderService = undefined;
-      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('not available');
     });
 
-    test('fetches personal events by default when isGroup=false', () => {
+    test('fetches personal events by default when isGroup=false', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Event',
@@ -419,12 +419,12 @@ describe('meta tool handlers', () => {
         end_at: '2026-03-15T11:00:00Z',
         timezone: 'UTC',
       });
-      const result = handleRenderDayImage(ctx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(ctx, { date: '2026-03-15' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
     });
 
-    test('fetches group events when scope=group', () => {
+    test('fetches group events when scope=group', async () => {
       ctx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Personal Only',
@@ -448,19 +448,19 @@ describe('meta tool handlers', () => {
         groupChatId: GROUP_CHAT_ID,
         chatId: GROUP_CHAT_ID,
       };
-      const result = handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
+      const result = await handleRenderDayImage(gCtx, { date: '2026-03-15', scope: 'group' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('2026-03-15');
     });
 
-    test('scope defaults to group when isGroup=true', () => {
+    test('scope defaults to group when isGroup=true', async () => {
       const gCtx: AgentContext = {
         ...ctx,
         isGroup: true,
         groupChatId: GROUP_CHAT_ID,
         chatId: GROUP_CHAT_ID,
       };
-      const result = handleRenderDayImage(gCtx, { date: '2026-03-15' });
+      const result = await handleRenderDayImage(gCtx, { date: '2026-03-15' });
       expect(result.success).toBe(true);
       // Just verifying it doesn't crash — scope resolved to group
     });
@@ -468,157 +468,157 @@ describe('meta tool handlers', () => {
 });
 
 describe('handleCalculate', () => {
-  test('adds two integers', () => {
+  test('adds two integers', async () => {
     const r = handleCalculate({ expression: '2 + 31' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('33');
   });
 
-  test('complex arithmetic expression', () => {
+  test('complex arithmetic expression', async () => {
     const r = handleCalculate({ expression: '22 * 60 + 34' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('1354');
   });
 
-  test('adds minutes to HH:MM', () => {
+  test('adds minutes to HH:MM', async () => {
     const r = handleCalculate({ expression: '22:34 + 31min' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('23:05');
   });
 
-  test('HH:MM wraps around midnight', () => {
+  test('HH:MM wraps around midnight', async () => {
     const r = handleCalculate({ expression: '23:50 + 30min' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('00:20');
   });
 
-  test('subtracts minutes from HH:MM', () => {
+  test('subtracts minutes from HH:MM', async () => {
     const r = handleCalculate({ expression: '22:34 - 10min' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('22:24');
   });
 
-  test('adds hours to HH:MM', () => {
+  test('adds hours to HH:MM', async () => {
     const r = handleCalculate({ expression: '09:00 + 2h' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('11:00');
   });
 
-  test('adds minutes to ISO datetime', () => {
+  test('adds minutes to ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 31min' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-03-18T23:05:00.000Z');
   });
 
-  test('ISO datetime crosses midnight', () => {
+  test('ISO datetime crosses midnight', async () => {
     const r = handleCalculate({ expression: '2026-03-18T23:50:00Z + 20min' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-03-19T00:10:00.000Z');
   });
 
-  test('adds hours to ISO datetime', () => {
+  test('adds hours to ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 2hours' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-03-19T00:34:00.000Z');
   });
 
-  test('subtracts from ISO datetime', () => {
+  test('subtracts from ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-19T00:05:00Z - 1hour' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-03-18T23:05:00.000Z');
   });
 
-  test('adds days to ISO date', () => {
+  test('adds days to ISO date', async () => {
     const r = handleCalculate({ expression: '2026-03-18 + 7days' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-03-25');
   });
 
-  test('returns error for unparseable expression', () => {
+  test('returns error for unparseable expression', async () => {
     const r = handleCalculate({ expression: 'hello world' });
     expect(r.success).toBe(false);
     expect(r.error).toBeDefined();
   });
 
-  test('adds weeks to ISO datetime', () => {
+  test('adds weeks to ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 2weeks' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-04-01T22:34:00.000Z');
   });
 
-  test('adds 1 month to ISO datetime (end-of-month clamp)', () => {
+  test('adds 1 month to ISO datetime (end-of-month clamp)', async () => {
     const r = handleCalculate({ expression: '2026-01-31T12:00:00Z + 1month' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-02-28T12:00:00.000Z');
   });
 
-  test('subtracts 1 month from ISO datetime', () => {
+  test('subtracts 1 month from ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-31T12:00:00Z - 1month' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-02-28T12:00:00.000Z');
   });
 
-  test('adds 1 year to ISO datetime', () => {
+  test('adds 1 year to ISO datetime', async () => {
     const r = handleCalculate({ expression: '2026-03-18T22:34:00Z + 1year' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2027-03-18T22:34:00.000Z');
   });
 
-  test('adds weeks to date-only', () => {
+  test('adds weeks to date-only', async () => {
     const r = handleCalculate({ expression: '2026-03-18 + 2weeks' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-04-01');
   });
 
-  test('adds months to date-only', () => {
+  test('adds months to date-only', async () => {
     const r = handleCalculate({ expression: '2026-03-18 + 1month' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2026-04-18');
   });
 
-  test('adds years to date-only', () => {
+  test('adds years to date-only', async () => {
     const r = handleCalculate({ expression: '2026-03-18 + 1year' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2027-03-18');
   });
 
-  test('datetime diff less than 60 min', () => {
+  test('datetime diff less than 60 min', async () => {
     const r = handleCalculate({ expression: '2026-03-21T17:31:07Z - 2026-03-21T17:00:07Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('31 min');
   });
 
-  test('datetime diff exact hours', () => {
+  test('datetime diff exact hours', async () => {
     const r = handleCalculate({ expression: '2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('1h');
   });
 
-  test('datetime diff hours and minutes', () => {
+  test('datetime diff hours and minutes', async () => {
     const r = handleCalculate({ expression: '2026-03-21T19:30:00Z - 2026-03-21T17:00:00Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('2h 30min');
   });
 
-  test('datetime diff in days', () => {
+  test('datetime diff in days', async () => {
     const r = handleCalculate({ expression: '2026-03-25T12:00:00Z - 2026-03-21T12:00:00Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('4 days');
   });
 
-  test('datetime diff 1 day (singular)', () => {
+  test('datetime diff 1 day (singular)', async () => {
     const r = handleCalculate({ expression: '2026-03-22T12:00:00Z - 2026-03-21T12:00:00Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('1 day');
   });
 
-  test('datetime diff days and hours', () => {
+  test('datetime diff days and hours', async () => {
     const r = handleCalculate({ expression: '2026-03-22T18:00:00Z - 2026-03-21T12:00:00Z' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('1 day 6h');
   });
 
-  test('date-only diff', () => {
+  test('date-only diff', async () => {
     const r = handleCalculate({ expression: '2026-04-10 - 2026-03-21' });
     expect(r.success).toBe(true);
     expect(r.output).toBe('20 days');
@@ -626,7 +626,7 @@ describe('handleCalculate', () => {
 });
 
 describe('handleMakeCall', () => {
-  test('blocks make_call during live_call', () => {
+  test('blocks make_call during live_call', async () => {
     const liveCtx = {
       user: { telegram_id: 1, language: 'en' },
       inputMode: 'live_call',
@@ -636,7 +636,7 @@ describe('handleMakeCall', () => {
     expect(result.error).toContain('live call');
   });
 
-  test('returns error when callQueue not available', () => {
+  test('returns error when callQueue not available', async () => {
     const noQueueCtx = {
       user: { telegram_id: 1, language: 'en' },
       inputMode: undefined,
@@ -647,28 +647,28 @@ describe('handleMakeCall', () => {
 });
 
 describe('validateAndGetOffset', () => {
-  test('returns offset for valid timezone', () => {
+  test('returns offset for valid timezone', async () => {
     const dt = new Date('2026-01-15T12:00:00Z'); // January — unambiguously winter (UTC+2)
     const result = validateAndGetOffset('Europe/Kyiv', dt);
     expect(result.offsetStr).toBe('+02:00');
     expect(result.offsetMinutes).toBe(120);
   });
 
-  test('returns offset for UTC', () => {
+  test('returns offset for UTC', async () => {
     const dt = new Date('2026-03-20T12:00:00Z');
     const result = validateAndGetOffset('UTC', dt);
     expect(result.offsetStr).toBe('+00:00');
     expect(result.offsetMinutes).toBe(0);
   });
 
-  test('throws RangeError for invalid timezone', () => {
+  test('throws RangeError for invalid timezone', async () => {
     const dt = new Date('2026-03-20T12:00:00Z');
     expect(() => {
       validateAndGetOffset('Garbage/Fake', dt);
     }).toThrow(RangeError);
   });
 
-  test('throws RangeError for invalid timezone with specific message', () => {
+  test('throws RangeError for invalid timezone with specific message', async () => {
     const dt = new Date('2026-03-20T12:00:00Z');
     expect(() => {
       validateAndGetOffset('Invalid/Timezone', dt);
@@ -677,27 +677,27 @@ describe('validateAndGetOffset', () => {
 });
 
 describe('getTimezoneSuggestions', () => {
-  test('returns up to 30 suggestions for valid region prefix', () => {
+  test('returns up to 30 suggestions for valid region prefix', async () => {
     const suggestions = getTimezoneSuggestions('America/Blah');
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.length).toBeLessThanOrEqual(30);
     expect(suggestions.every((s: string) => s.startsWith('America/'))).toBe(true);
   });
 
-  test('returns globally sorted suggestions when no slash', () => {
+  test('returns globally sorted suggestions when no slash', async () => {
     const suggestions = getTimezoneSuggestions('Moscow');
     expect(suggestions.length).toBeGreaterThan(0);
     expect(suggestions.length).toBeLessThanOrEqual(30);
   });
 
-  test('deduplicates by timezone', () => {
+  test('deduplicates by timezone', async () => {
     const suggestions = getTimezoneSuggestions('America/Blah');
     const tzNames = suggestions.map((s: string) => s.split(' ')[0]);
     const unique = new Set(tzNames);
     expect(unique.size).toBe(tzNames.length);
   });
 
-  test('format includes timezone and city name', () => {
+  test('format includes timezone and city name', async () => {
     const suggestions = getTimezoneSuggestions('America/Blah');
     expect(suggestions[0]).toMatch(/^[\w/]+ \(.+\)$/);
   });
@@ -705,7 +705,7 @@ describe('getTimezoneSuggestions', () => {
 
 describe('handleGetTimezoneInfo', () => {
   // --- single timezone ---
-  test('returns correct info for valid IANA timezone', () => {
+  test('returns correct info for valid IANA timezone', async () => {
     const result = handleGetTimezoneInfo({ timezone: 'Europe/London' });
     expect(result.success).toBe(true);
     const data = JSON.parse(result.output!);
@@ -715,7 +715,7 @@ describe('handleGetTimezoneInfo', () => {
     expect(data.local_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
   });
 
-  test('accepts at parameter and returns offset at that time', () => {
+  test('accepts at parameter and returns offset at that time', async () => {
     // New York in January is UTC-5 (EST, no DST)
     const result = handleGetTimezoneInfo({ timezone: 'America/New_York', at: '2026-01-15T12:00:00Z' });
     expect(result.success).toBe(true);
@@ -724,7 +724,7 @@ describe('handleGetTimezoneInfo', () => {
     expect(data.dst_active).toBe(false);
   });
 
-  test('detects DST active in summer', () => {
+  test('detects DST active in summer', async () => {
     // New York in July is UTC-4 (EDT, DST active)
     const result = handleGetTimezoneInfo({ timezone: 'America/New_York', at: '2026-07-15T12:00:00Z' });
     expect(result.success).toBe(true);
@@ -733,26 +733,26 @@ describe('handleGetTimezoneInfo', () => {
     expect(data.dst_active).toBe(true);
   });
 
-  test('returns error and suggestions for invalid timezone', () => {
+  test('returns error and suggestions for invalid timezone', async () => {
     const result = handleGetTimezoneInfo({ timezone: 'America/Blah' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid timezone');
     expect(result.error).toContain('America/');
   });
 
-  test('returns format error when no slash', () => {
+  test('returns format error when no slash', async () => {
     const result = handleGetTimezoneInfo({ timezone: 'Moscow' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('IANA');
   });
 
-  test('returns error for invalid at datetime', () => {
+  test('returns error for invalid at datetime', async () => {
     const result = handleGetTimezoneInfo({ timezone: 'Europe/London', at: 'not-a-date' });
     expect(result.success).toBe(false);
   });
 
   // --- array of timezones ---
-  test('compares two timezones and shows which is ahead', () => {
+  test('compares two timezones and shows which is ahead', async () => {
     const result = handleGetTimezoneInfo({
       timezone: ['Europe/Moscow', 'America/New_York'],
       at: '2026-01-15T12:00:00Z', // winter: Moscow +03:00, NY -05:00
@@ -766,7 +766,7 @@ describe('handleGetTimezoneInfo', () => {
     expect(data.ahead).toContain('ahead');
   });
 
-  test('array: ranks N timezones west to east, no difference fields', () => {
+  test('array: ranks N timezones west to east, no difference fields', async () => {
     const result = handleGetTimezoneInfo({
       timezone: ['Asia/Tokyo', 'America/New_York', 'Europe/London'],
       at: '2026-01-15T12:00:00Z',
@@ -783,7 +783,7 @@ describe('handleGetTimezoneInfo', () => {
     expect(data.difference_hours).toBeUndefined();
   });
 
-  test('array: returns error if any timezone is invalid', () => {
+  test('array: returns error if any timezone is invalid', async () => {
     const result = handleGetTimezoneInfo({ timezone: ['Europe/Moscow', 'America/Blah'] });
     expect(result.success).toBe(false);
     expect(result.error).toContain('America/Blah');
@@ -791,7 +791,7 @@ describe('handleGetTimezoneInfo', () => {
 });
 
 describe('handleConvertToTimezone', () => {
-  test('converts UTC datetime to local time in target timezone', () => {
+  test('converts UTC datetime to local time in target timezone', async () => {
     const result = handleConvertToTimezone({ datetime: '2026-07-15T14:00:00Z', timezone: 'America/New_York' });
     expect(result.success).toBe(true);
     const data = JSON.parse(result.output!);
@@ -800,20 +800,20 @@ describe('handleConvertToTimezone', () => {
     expect(data.utc_offset).toBe('-04:00');
   });
 
-  test('converts datetime with offset to another timezone', () => {
+  test('converts datetime with offset to another timezone', async () => {
     const result = handleConvertToTimezone({ datetime: '2026-01-15T10:00:00+01:00', timezone: 'Asia/Tokyo' });
     expect(result.success).toBe(true);
     const data = JSON.parse(result.output!);
     expect(data.local_datetime).toBe('2026-01-15T18:00:00+09:00');
   });
 
-  test('returns error for invalid timezone', () => {
+  test('returns error for invalid timezone', async () => {
     const result = handleConvertToTimezone({ datetime: '2026-01-15T10:00:00Z', timezone: 'Europe/Blah' });
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid timezone');
   });
 
-  test('returns error for invalid datetime', () => {
+  test('returns error for invalid datetime', async () => {
     const result = handleConvertToTimezone({ datetime: 'not-a-date', timezone: 'Europe/London' });
     expect(result.success).toBe(false);
   });

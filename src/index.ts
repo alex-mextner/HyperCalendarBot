@@ -293,6 +293,14 @@ if (config.REDIS_URL) {
   }
 }
 
+// Broadcast queue — enqueuer created early so createBot() can wire it into tool handlers.
+// Worker is created later, after botRef is patched (see below "Broadcast worker").
+const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
+const { parseRedisUrl } = await import('./utils/redis.ts');
+const broadcastConnection = parseRedisUrl(config.REDIS_URL);
+const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(broadcastConnection);
+let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
+
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
@@ -827,6 +835,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
       },
       weatherService,
+      broadcastEnqueuer,
     },
   );
 
@@ -852,6 +861,21 @@ botRef.sendVoice = async (telegramId, audio) => {
   const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
+// Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
+// No botInitialized guard needed: the worker starts AFTER the flag is set.
+const broadcastWorker = createBroadcastWorker(broadcastConnection, {
+  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
+});
+broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
+
+broadcastQueueCleanup = {
+  close: async () => {
+    await broadcastWorker.close();
+    await broadcastQueue.close();
+  },
+};
+
+botLogger.info('Broadcast notification queue initialized');
 
 // Scheduled AI calls + trigger system — requires Redis for BullMQ
 if (config.REDIS_URL) {
@@ -1036,6 +1060,7 @@ async function shutdown(): Promise<void> {
   if (botTasksQueueCleanup) await botTasksQueueCleanup.close();
   if (syncQueueCleanup) await syncQueueCleanup.close();
   if (imageQueueCleanup) await imageQueueCleanup.close();
+  if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
   if (googleRedisClient) googleRedisClient.close();
   if (webServerHandle) webServerHandle.stop();
