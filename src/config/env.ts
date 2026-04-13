@@ -1,4 +1,6 @@
 // src/config/env.ts
+import { logger } from '../utils/logger.ts';
+
 export interface EnvConfig {
   BOT_TOKEN: string;
   DATABASE_PATH: string;
@@ -46,6 +48,7 @@ export interface EnvConfig {
   ADMIN_ALERT_TOKEN?: string;
   OPENWEATHER_API_KEY?: string;
   GOOGLE_API_KEY?: string;
+  TELEGRAM_SESSION_MASTER_KEY?: string;
 }
 
 function requireEnv(name: string): string {
@@ -97,6 +100,16 @@ export function loadConfig(): EnvConfig {
       })()
     : 100;
 
+  const rawMasterKey = process.env.TELEGRAM_SESSION_MASTER_KEY?.trim();
+  let telegramSessionMasterKey: string | undefined;
+  if (rawMasterKey) {
+    if (/^[0-9a-f]{64}$/i.test(rawMasterKey)) {
+      telegramSessionMasterKey = rawMasterKey;
+    } else {
+      logger.warn('TELEGRAM_SESSION_MASTER_KEY must be 64 hex chars (32 bytes) — connect-telegram feature disabled');
+    }
+  }
+
   return {
     BOT_TOKEN,
     DATABASE_PATH: process.env.DATABASE_PATH || './data/calendar.db',
@@ -144,5 +157,6 @@ export function loadConfig(): EnvConfig {
     ADMIN_ALERT_TOKEN: process.env.ADMIN_ALERT_TOKEN || undefined,
     OPENWEATHER_API_KEY: process.env.OPENWEATHER_API_KEY || undefined,
     GOOGLE_API_KEY: process.env.GOOGLE_API_KEY || undefined,
+    TELEGRAM_SESSION_MASTER_KEY: telegramSessionMasterKey,
   };
 }

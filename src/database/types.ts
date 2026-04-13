@@ -648,6 +648,20 @@ export interface InsertHolidayData {
   year: number;
 }
 
+// --- Telegram Sessions ---
+
+export interface TelegramSession {
+  user_id: number;
+  encrypted_session: Buffer;
+  encrypted_phone: Buffer;
+  phone_hash: string;
+  status: 'active' | 'expired' | 'revoked';
+  created_at: string;
+  updated_at: string;
+}
+
+export type NotificationLogChannel = 'telegram_text' | 'voice_call' | 'mtproto_admin' | 'mtproto_user';
+
 // --- Notification Log ---
 
 export interface NotificationLogRow {

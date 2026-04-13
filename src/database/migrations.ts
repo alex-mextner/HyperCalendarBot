@@ -977,4 +977,22 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE events ADD COLUMN venue_name TEXT DEFAULT NULL');
     },
   },
+  {
+    name: '054_create_user_telegram_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE user_telegram_sessions (
+          user_id          INTEGER PRIMARY KEY,
+          encrypted_session BLOB NOT NULL,
+          encrypted_phone   BLOB NOT NULL,
+          phone_hash       TEXT NOT NULL,
+          status           TEXT NOT NULL DEFAULT 'active',
+          created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_tg_sessions_phone_hash ON user_telegram_sessions(phone_hash);
+      `);
+    },
+  },
 ];
