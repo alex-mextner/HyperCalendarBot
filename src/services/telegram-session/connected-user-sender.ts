@@ -11,6 +11,23 @@ const senderLogger = logger.child({ module: 'connected-user-sender' });
 const tzConsentAsked = new Map<number, number>();
 const TZ_CONSENT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
+// Rate-limit: max sends per hour per user to prevent FloodWait from Telegram
+const SEND_RATE_LIMIT = 10;
+const SEND_RATE_WINDOW_MS = 60 * 60 * 1000;
+const sendCounts = new Map<number, { count: number; windowStart: number }>();
+
+export function isRateLimited(userId: number): boolean {
+  const now = Date.now();
+  const entry = sendCounts.get(userId);
+  if (!entry || now - entry.windowStart > SEND_RATE_WINDOW_MS) {
+    sendCounts.set(userId, { count: 1, windowStart: now });
+    return false;
+  }
+  if (entry.count >= SEND_RATE_LIMIT) return true;
+  entry.count++;
+  return false;
+}
+
 export interface ConnectedUserSenderDeps {
   sessionRepo: TelegramSessionRepository;
   masterKey: Buffer;
@@ -70,6 +87,11 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     username?: string,
     meta?: SendMeta,
   ): Promise<boolean> {
+    if (isRateLimited(inviterId)) {
+      senderLogger.warn({ inviterId, targetId }, 'Rate-limited — falling back to admin session');
+      return false;
+    }
+
     const session = deps.sessionRepo.getActive(inviterId);
     if (!session) return false;
 

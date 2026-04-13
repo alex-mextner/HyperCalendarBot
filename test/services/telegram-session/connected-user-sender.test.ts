@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { NotificationLogRepository } from '../../../src/database/repositories/notification-log.repository.ts';
 import type { TelegramSessionRepository } from '../../../src/database/repositories/telegram-session.repository.ts';
 import { encryptBlob } from '../../../src/services/crypto/session-crypto.ts';
-import { createConnectedUserSender } from '../../../src/services/telegram-session/connected-user-sender.ts';
+import {
+  createConnectedUserSender,
+  isRateLimited,
+} from '../../../src/services/telegram-session/connected-user-sender.ts';
 import type { BridgeResult } from '../../../src/services/telegram-session/session-bridge.ts';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
 
@@ -189,5 +192,60 @@ describe('createConnectedUserSender', () => {
 
     expect(result).toBe(false);
     expect(SessionBridge.cleanupTempFile).toHaveBeenCalledWith('/tmp/tgsess_test.session');
+  });
+
+  test('returns false when rate-limited', async () => {
+    const sessionRepo = makeMockSessionRepo({ encrypted_session: ENCRYPTED_SESSION });
+    const bridgeResult: BridgeResult = { success: true, data: { status: 'ok' as const } };
+    SessionBridge.sendAsUser = mock(async () => bridgeResult);
+
+    const sender = createConnectedUserSender({ sessionRepo, masterKey: MASTER_KEY });
+    // Use a unique user ID to avoid interference from other tests
+    const userId = 77700;
+
+    // First 10 calls should succeed (rate limit is 10/hour)
+    for (let i = 0; i < 10; i++) {
+      await sender(userId, 200, `msg ${i}`);
+    }
+
+    // 11th call should be rate-limited, returning false without calling getActive
+    const result = await sender(userId, 200, 'over limit');
+    expect(result).toBe(false);
+    // getActive should have been called only 10 times (not 11)
+    const getActiveCalls = (sessionRepo.getActive as ReturnType<typeof mock>).mock.calls.filter(
+      (call: unknown[]) => call[0] === userId,
+    );
+    expect(getActiveCalls.length).toBe(10);
+  });
+});
+
+describe('isRateLimited', () => {
+  test('allows first call for a new user', () => {
+    expect(isRateLimited(99901)).toBe(false);
+  });
+
+  test('allows up to SEND_RATE_LIMIT calls', () => {
+    const userId = 99902;
+    for (let i = 0; i < 9; i++) {
+      expect(isRateLimited(userId)).toBe(false);
+    }
+  });
+
+  test('blocks after SEND_RATE_LIMIT calls', () => {
+    const userId = 99903;
+    for (let i = 0; i < 10; i++) {
+      isRateLimited(userId);
+    }
+    expect(isRateLimited(userId)).toBe(true);
+  });
+
+  test('different users have independent limits', () => {
+    const userA = 99904;
+    const userB = 99905;
+    for (let i = 0; i < 10; i++) {
+      isRateLimited(userA);
+    }
+    expect(isRateLimited(userA)).toBe(true);
+    expect(isRateLimited(userB)).toBe(false);
   });
 });
