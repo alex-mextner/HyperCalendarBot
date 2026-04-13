@@ -1,5 +1,6 @@
 // src/index.ts
 
+import { UnrecoverableError } from 'bullmq';
 import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
 import { agentDispatcher } from './agent/dispatcher.ts';
@@ -66,7 +67,13 @@ function onWorkerFailed(name: string): (job: { id?: string } | undefined, err: E
       })
     : null;
   return (job, err) => {
-    botLogger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
+    // UnrecoverableError = intentional permanent failure (e.g. Telegram 403).
+    // Already logged at warn by the throwing site — don't spam error logs.
+    if (err instanceof UnrecoverableError) {
+      botLogger.warn({ jobId: job?.id, worker: name, err }, 'Worker job permanently failed (no retry)');
+    } else {
+      botLogger.error({ jobId: job?.id, worker: name, err }, 'Worker job failed');
+    }
     alertHandler?.(job, err);
   };
 }
