@@ -318,7 +318,34 @@ if (config.REDIS_URL) {
 const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
 const { parseRedisUrl } = await import('./utils/redis.ts');
 const broadcastConnection = parseRedisUrl(config.REDIS_URL);
-const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(broadcastConnection);
+const broadcastRedisClient = new Bun.RedisClient(config.REDIS_URL);
+const broadcastRedis = {
+  set: async (key: string, value: string, ex: number) => {
+    await broadcastRedisClient.set(key, value, 'EX', ex);
+  },
+  get: (key: string) => broadcastRedisClient.get(key),
+  sadd: async (key: string, member: string) => {
+    await broadcastRedisClient.send('SADD', [key, member]);
+  },
+  smembers: async (key: string): Promise<string[]> => {
+    const result = await broadcastRedisClient.send('SMEMBERS', [key]);
+    return z.array(z.string()).parse(result ?? []);
+  },
+  incr: async (key: string): Promise<number> => {
+    const result = await broadcastRedisClient.send('INCR', [key]);
+    return z.number().parse(result);
+  },
+  del: async (...keys: string[]) => {
+    await broadcastRedisClient.send('DEL', keys);
+  },
+  expire: async (key: string, seconds: number) => {
+    await broadcastRedisClient.send('EXPIRE', [key, String(seconds)]);
+  },
+};
+const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(
+  broadcastConnection,
+  broadcastRedis,
+);
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
@@ -890,7 +917,10 @@ botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
     ...(parseMode ? { parse_mode: parseMode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
+  if (!('message_id' in msg)) {
+    throw new Error(`sendMessage returned no message_id for chat ${telegramId}`);
+  }
+  return { message_id: msg.message_id };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
@@ -906,15 +936,31 @@ botRef.sendVoice = async (telegramId, audio) => {
 };
 // Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
 // No botInitialized guard needed: the worker starts AFTER the flag is set.
-const broadcastWorker = createBroadcastWorker(broadcastConnection, {
-  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
-});
+const broadcastWorker = createBroadcastWorker(
+  broadcastConnection,
+  {
+    sendMessage: async (chatId, text, parseMode, threadId) => {
+      const msg = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(threadId ? { message_thread_id: threadId } : {}),
+      });
+      if (!('message_id' in msg)) {
+        throw new Error(`sendMessage returned no message_id for chat ${chatId}`);
+      }
+      return { message_id: msg.message_id };
+    },
+  },
+  broadcastRedis,
+);
 broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
 
 broadcastQueueCleanup = {
   close: async () => {
     await broadcastWorker.close();
     await broadcastQueue.close();
+    await broadcastRedisClient.close();
   },
 };
 

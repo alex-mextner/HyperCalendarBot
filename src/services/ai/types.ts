@@ -151,6 +151,11 @@ export interface BroadcastCapability {
   enqueue: (data: import('../../worker/broadcast-queue.ts').BroadcastJobData) => Promise<void>;
   /** Enqueue multiple recipients in one Redis round-trip. */
   enqueueBatch: (items: import('../../worker/broadcast-queue.ts').BroadcastJobData[]) => Promise<void>;
+  /** Register a batch for aggregated failure tracking (requires Redis). */
+  registerBatch?: (
+    batchId: string,
+    meta: import('../../worker/broadcast-queue.ts').BroadcastBatchMeta,
+  ) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
