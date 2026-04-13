@@ -122,15 +122,28 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('Group event creation — consensus required');
   });
 
-  test('group prompt includes consensus-required block with group-specific examples', () => {
+  test('group prompt requires clear intent AND consensus for event creation', () => {
     ctx.isGroup = true;
     ctx.groupTitle = 'Friends';
     ctx.groupChatId = -100;
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('Group event creation — consensus required');
+    expect(prompt).toContain('clear intent + consensus required');
+    // Two conditions
+    expect(prompt).toContain('Clear intent to create');
+    expect(prompt).toContain('Consensus');
+    // Availability sharing is not intent
+    expect(prompt).toContain('is NOT intent to create an event');
+  });
+
+  test('group prompt has three creation modes with group-specific examples', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Friends';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
     // Proposal → wait → agreement → create
     expect(prompt).toContain('Давай в 7 на пейнтбол');
     expect(prompt).toContain('Давай!');
+    expect(prompt).toContain('create');
     // Objection blocks creation
     expect(prompt).toContain('do NOT create, discussion continues');
     // Availability discussion
