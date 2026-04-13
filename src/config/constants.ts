@@ -82,6 +82,8 @@ export const CB = {
   LOCATION_CANDIDATE: 'loc_cand',
   CT_TZ_UPDATE: 'ct_tzu',
   CT_TZ_SKIP: 'ct_tzs',
+  CT_TZ_CONSENT_YES: 'ct_tcy',
+  CT_TZ_CONSENT_NO: 'ct_tcn',
 } as const;
 
 // i18n messages
@@ -531,6 +533,20 @@ export const MSG = {
         `It looks like you're now in ${region}.\nUpdate timezone to ${iana}?`,
       tzUpdated: (iana: string) => `✅ Timezone updated to ${iana}`,
       tzSkipped: 'Timezone not changed.',
+      tzConsentPrompt:
+        '🌍 The bot can detect your timezone from your Telegram session so events show at the correct local time.\nAllow? (only country/region is read, not messages)',
+      tzConsentYes: 'Allow',
+      tzConsentNo: 'No',
+      sessionExpired: [
+        '⚠️ Your connected Telegram account has been disconnected.',
+        '',
+        'This usually happens when you change your Telegram password or log out from all sessions.',
+        '',
+        "Without a connected account, invitations go from the bot — people may not recognize who's inviting them.",
+        'Reconnect so invitations come from you personally:',
+        '/connect_telegram',
+      ].join('\n'),
+      privateOnly: 'This command works only in private messages. Send /connect_telegram to me directly.',
     },
     callbackErrors: {
       notFound: 'Not found',
@@ -676,6 +692,9 @@ export const MSG = {
       language_switch: '💡 I speak Russian and English — switch language anytime in /settings.',
       action_log: '💡 Send /log to see a full history of actions taken on your calendar.',
       past_events: '💡 "What did I have last Tuesday?" — I can look up past events too.',
+      // ── Telegram connect ──
+      connect_telegram:
+        '📱 Connect your Telegram account so event invitations come from you personally — people respond much better. /connect_telegram',
     },
     gtdQuotes: [
       // David Allen, "Getting Things Done: The Art of Stress-Free Productivity" (2001/2015)
@@ -1210,6 +1229,20 @@ export const MSG = {
       tzDetected: (region: string, iana: string) => `Похоже, ты сейчас в ${region}.\nОбновить таймзону на ${iana}?`,
       tzUpdated: (iana: string) => `✅ Таймзона обновлена: ${iana}`,
       tzSkipped: 'Таймзона не изменена.',
+      tzConsentPrompt:
+        '🌍 Бот может определять таймзону по твоему Telegram-подключению, чтобы события показывались в правильное время.\nРазрешить? (читается только страна и регион, не сообщения)',
+      tzConsentYes: 'Разрешить',
+      tzConsentNo: 'Нет',
+      sessionExpired: [
+        '⚠️ Подключённый Telegram-аккаунт был отключён.',
+        '',
+        'Обычно это происходит при смене пароля Telegram или выходе из всех сессий.',
+        '',
+        'Без подключённого аккаунта приглашения идут от бота — получатели могут не понять, кто их приглашает.',
+        'Переподключи аккаунт, чтобы приглашения шли от тебя лично:',
+        '/connect_telegram',
+      ].join('\n'),
+      privateOnly: 'Эта команда работает только в личных сообщениях. Отправь /connect_telegram мне в личку.',
     },
     callbackErrors: {
       notFound: 'Не найдено',
@@ -1360,6 +1393,9 @@ export const MSG = {
       language_switch: '💡 Я говорю по-русски и по-английски — сменить язык можно в /settings.',
       action_log: '💡 Отправь /log чтобы увидеть полную историю действий с календарём.',
       past_events: '💡 «Что у меня было в прошлый вторник?» — я могу посмотреть прошлые события.',
+      // ── Telegram connect ──
+      connect_telegram:
+        '📱 Подключи свой Telegram-аккаунт — тогда приглашения на встречи будут приходить от тебя лично, а не от бота. Люди отвечают гораздо охотнее. /connect_telegram',
     },
     gtdQuotes: [
       // Дэвид Аллен, «Как привести дела в порядок» (Getting Things Done, 2001/2015)

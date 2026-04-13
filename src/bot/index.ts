@@ -50,6 +50,7 @@ import type { TranscriptionService } from '../services/voice/transcription-servi
 import { botLogger } from '../utils/logger.ts';
 import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import {
   createActivateCommand,
@@ -78,6 +79,7 @@ import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
+import { isGroup } from './group-context.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
@@ -216,6 +218,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
   const googleSchedulePush = googleDeps?.schedulePush;
+  // Late-bound: sendAsConnectedUser is created after bot init,
+  // but only called at scene runtime (in callback handlers).
+  let sendAsConnectedUserRef:
+    | ((
+        inviterId: number,
+        targetId: number,
+        text: string,
+        username?: string,
+        meta?: { invitationId?: number },
+      ) => Promise<boolean>)
+    | undefined;
+
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
@@ -226,7 +240,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     prefsService,
     holidayService,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
-    invitationService,
+    {
+      invitationService,
+      sendAsConnectedUser: (inviterId, targetId, text, username, meta) => {
+        if (!sendAsConnectedUserRef) return Promise.resolve(false);
+        return sendAsConnectedUserRef(inviterId, targetId, text, username, meta);
+      },
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+    },
   );
 
   const intentRepo = new IntentRepository(db.db);
@@ -279,8 +301,30 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             })
             .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz update prompt'));
         },
+        onTzConsentNeeded: (userId) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const s = t(lang).connectTelegram;
+          const kb = new InlineKeyboard()
+            .text(s.tzConsentYes, CB.CT_TZ_CONSENT_YES)
+            .text(s.tzConsentNo, CB.CT_TZ_CONSENT_NO);
+          bot.api
+            .sendMessage({
+              chat_id: userId,
+              text: s.tzConsentPrompt,
+              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
+            })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz consent prompt'));
+        },
+        onSessionExpired: (userId) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          bot.api
+            .sendMessage({ chat_id: userId, text: t(lang).connectTelegram.sessionExpired })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send session expired notification'));
+        },
       })
     : undefined;
+
+  sendAsConnectedUserRef = sendAsConnectedUser;
 
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
@@ -630,6 +674,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
     .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
+    .command('admin_tg_sessions', (ctx) =>
+      handleAdminTgSessions(ctx, db.telegramSessions, db.notificationLog, botAdminId),
+    )
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx, {
@@ -1036,6 +1083,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     )
     // Telegram account connection commands
     .command('connect_telegram', async (ctx) => {
+      if (isGroup(ctx)) {
+        await ctx.send(t(ctx.lang).connectTelegram.privateOnly);
+        return;
+      }
       const userId = ctx.dbUser?.telegram_id;
       if (userId) {
         const recentEvent = findMostRecentEventWithExternalParticipants(
@@ -1055,6 +1106,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene);
     })
     .command('disconnect_telegram', async (ctx) => {
+      if (isGroup(ctx)) {
+        await ctx.send(t(ctx.lang).connectTelegram.privateOnly);
+        return;
+      }
       const user = ctx.dbUser;
       if (!user) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';

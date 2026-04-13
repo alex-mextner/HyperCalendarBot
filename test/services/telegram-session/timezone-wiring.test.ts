@@ -50,7 +50,44 @@ describe('checkTimezoneOpportunistically', () => {
     SessionBridge.cleanupTempFile = originalCleanup;
   });
 
-  test('skips when tz_detection_consent_at is null', async () => {
+  test('calls onTzConsentNeeded when tz_detection_consent_at is null', async () => {
+    const sessionRepo = makeMockSessionRepo({ tz_detection_consent_at: null });
+    const onTimezoneDetected = mock(() => {});
+    const onTzConsentNeeded = mock(() => {});
+    const deps: ConnectedUserSenderDeps = {
+      sessionRepo,
+      masterKey: MASTER_KEY,
+      onTimezoneDetected,
+      onTzConsentNeeded,
+    };
+
+    await checkTimezoneOpportunistically(deps, 100, SESSION_DATA);
+
+    expect(onTzConsentNeeded).toHaveBeenCalledWith(100);
+    expect(onTimezoneDetected).not.toHaveBeenCalled();
+    // Should not create a temp file — consent not yet given
+    expect(SessionBridge.createTempSessionFile).not.toHaveBeenCalled();
+  });
+
+  test('does not call onTzConsentNeeded when already asked within 24h', async () => {
+    const sessionRepo = makeMockSessionRepo({ tz_detection_consent_at: null });
+    const onTzConsentNeeded = mock(() => {});
+    const deps: ConnectedUserSenderDeps = {
+      sessionRepo,
+      masterKey: MASTER_KEY,
+      onTzConsentNeeded,
+    };
+
+    // First call — should ask
+    await checkTimezoneOpportunistically(deps, 200, SESSION_DATA);
+    expect(onTzConsentNeeded).toHaveBeenCalledTimes(1);
+
+    // Second call within the cooldown window — should not ask again
+    await checkTimezoneOpportunistically(deps, 200, SESSION_DATA);
+    expect(onTzConsentNeeded).toHaveBeenCalledTimes(1);
+  });
+
+  test('skips silently when tz_detection_consent_at is null and no onTzConsentNeeded handler', async () => {
     const sessionRepo = makeMockSessionRepo({ tz_detection_consent_at: null });
     const onTimezoneDetected = mock(() => {});
     const deps: ConnectedUserSenderDeps = {
@@ -62,7 +99,6 @@ describe('checkTimezoneOpportunistically', () => {
     await checkTimezoneOpportunistically(deps, 100, SESSION_DATA);
 
     expect(onTimezoneDetected).not.toHaveBeenCalled();
-    // Should not even create a temp file
     expect(SessionBridge.createTempSessionFile).not.toHaveBeenCalled();
   });
 

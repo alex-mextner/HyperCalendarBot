@@ -1575,6 +1575,32 @@ export function createCallbackHandler(
     await ctx.editText(t(lang).connectTelegram.tzSkipped, { reply_markup: undefined });
   });
 
+  // Timezone detection consent: user allows
+  dispatch.set(CB.CT_TZ_CONSENT_YES, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    if (!telegramDeps?.sessionRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_CONSENT_YES: sessionRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    telegramDeps.sessionRepo.setTzConsentAt(user.telegram_id, new Date().toISOString());
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzConsentYes, { reply_markup: undefined });
+  });
+
+  // Timezone detection consent: user refuses
+  dispatch.set(CB.CT_TZ_CONSENT_NO, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    if (!telegramDeps?.sessionRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_CONSENT_NO: sessionRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    telegramDeps.sessionRepo.setTzConsentAt(user.telegram_id, 'never');
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzConsentNo, { reply_markup: undefined });
+  });
+
   return async (ctx: BotCallbackContext) => {
     const data = ctx.data as string;
     if (!data) return;
