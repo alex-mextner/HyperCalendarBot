@@ -20,7 +20,7 @@ FROM debian:bookworm-slim AS runner
 WORKDIR /app
 ARG BUN_VERSION
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl unzip ca-certificates python3 python3-venv && \
+    apt-get install -y --no-install-recommends curl unzip ca-certificates python3 python3-venv tzdata && \
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s "bun-v${BUN_VERSION}" && \
     curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh && \
     rm -rf /var/lib/apt/lists/*

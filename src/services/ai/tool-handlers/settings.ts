@@ -308,3 +308,37 @@ function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {
   ctx.user = updated;
   return { success: true, output: t(ctx.user.language).aiTools.settings.voiceUpdated(String(raw)) };
 }
+
+export function handleDismissConnectTelegramPrompt(ctx: AgentContext): ToolResult {
+  ctx.userRepo.setConnectTelegramDismissedAt(ctx.user.telegram_id, new Date().toISOString());
+  return { success: true, output: 'Noted. Will not suggest again for 30 days.' };
+}
+handleDismissConnectTelegramPrompt.meta = { skipActionLog: true } satisfies import('../types.ts').ToolHandlerMeta;
+
+export function handleConnectTelegramStatus(ctx: AgentContext): ToolResult {
+  const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
+  const session = ctx.telegramSessionRepo?.getActive(ctx.user.telegram_id);
+
+  if (!session || !ctx.telegramMasterKey) {
+    const dismissedAt = ctx.user.connect_telegram_dismissed_at;
+    const dismissedRecently =
+      dismissedAt !== null && dismissedAt !== undefined
+        ? Date.now() - new Date(dismissedAt).getTime() < 30 * 24 * 60 * 60 * 1000
+        : false;
+    return {
+      success: true,
+      output: t(lang).aiTools.meta.telegramNotConnectedStatus,
+      data: { connected: false, dismissed_recently: dismissedRecently },
+    };
+  }
+
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.telegramConnectedStatus(session.phone_masked),
+    data: { connected: true, phone_masked: session.phone_masked, status: session.status },
+  };
+}
+handleConnectTelegramStatus.meta = {
+  readonly: true,
+  skipActionLog: true,
+} satisfies import('../types.ts').ToolHandlerMeta;

@@ -144,6 +144,11 @@ export interface CallbackHandlerOpts {
   };
   contactRepo?: ContactRepository;
   timezoneScene?: AnyScene;
+  connectTelegramScene?: AnyScene;
+  telegramDeps?: {
+    sessionRepo: import('../../database/repositories/telegram-session.repository.ts').TelegramSessionRepository;
+    masterKey: Buffer | null;
+  };
   groupRepo?: GroupChatRepository;
   scenePauseDeps?: {
     sceneStorage: { get(key: string): Promise<unknown>; delete(key: string): unknown };
@@ -193,6 +198,8 @@ export function createCallbackHandler(
     voiceDeps,
     contactRepo,
     timezoneScene,
+    connectTelegramScene,
+    telegramDeps,
     groupRepo,
     scenePauseDeps,
     triggerSync,
@@ -1149,7 +1156,26 @@ export function createCallbackHandler(
       await ctx.scene.enter(timezoneScene, { settingsMsgId: ctx.message.id, settingsChatId: ctx.chatId });
       return;
     }
-    return handleSettingsCallback(ctx, user, payload, prefsService, callSettingsRepo, sharingSettingsRepo, userRepo);
+    const tgDeps =
+      telegramDeps && connectTelegramScene
+        ? {
+            sessionRepo: telegramDeps.sessionRepo,
+            masterKey: telegramDeps.masterKey,
+            enterScene: async () => {
+              await ctx.scene.enter(connectTelegramScene);
+            },
+          }
+        : undefined;
+    return handleSettingsCallback(
+      ctx,
+      user,
+      payload,
+      prefsService,
+      callSettingsRepo,
+      sharingSettingsRepo,
+      userRepo,
+      tgDeps,
+    );
   });
 
   // Geo-location timezone: confirm update
@@ -1517,6 +1543,63 @@ export function createCallbackHandler(
     const minutes = Number(parts[1]);
     const eventId = Number(parts[2]);
     await handleSnoozeCallback(ctx, user.telegram_id, eventId, minutes, snoozeDeps.reminderRepo, snoozeDeps.eventRepo);
+  });
+
+  // Connected-Telegram timezone detection: user confirms update
+  dispatch.set(CB.CT_TZ_UPDATE, async (ctx, payload, _parts, user) => {
+    const iana = payload;
+    const lang = (user.language ?? 'en') as Lang;
+    try {
+      Intl.DateTimeFormat(undefined, { timeZone: iana });
+    } catch {
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    if (!userRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_UPDATE: userRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    const countryCode = guessCountryFromTimezone(iana);
+    userRepo.update(user.telegram_id, {
+      timezone: iana,
+      ...(countryCode ? { country_code: countryCode } : {}),
+    });
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzUpdated(iana), { reply_markup: undefined });
+  });
+
+  // Connected-Telegram timezone detection: user skips
+  dispatch.set(CB.CT_TZ_SKIP, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzSkipped, { reply_markup: undefined });
+  });
+
+  // Timezone detection consent: user allows
+  dispatch.set(CB.CT_TZ_CONSENT_YES, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    if (!telegramDeps?.sessionRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_CONSENT_YES: sessionRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    telegramDeps.sessionRepo.setTzConsentAt(user.telegram_id, new Date().toISOString());
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzConsentYes, { reply_markup: undefined });
+  });
+
+  // Timezone detection consent: user refuses
+  dispatch.set(CB.CT_TZ_CONSENT_NO, async (ctx, _payload, _parts, user) => {
+    const lang = (user.language ?? 'en') as Lang;
+    if (!telegramDeps?.sessionRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'CT_TZ_CONSENT_NO: sessionRepo not available');
+      await ctx.answer({ text: t(lang).callbackErrors.error });
+      return;
+    }
+    telegramDeps.sessionRepo.setTzConsentAt(user.telegram_id, 'never');
+    await ctx.answer();
+    await ctx.editText(t(lang).connectTelegram.tzConsentNo, { reply_markup: undefined });
   });
 
   return async (ctx: BotCallbackContext) => {

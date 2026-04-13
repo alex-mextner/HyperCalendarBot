@@ -44,9 +44,18 @@ Stored blob = IV (12 bytes) || ciphertext || auth_tag (16 bytes)
 
 ### 1.2 Key Management
 
-- Master key rotation: re-encrypt all sessions with new key. Migration script provided.
-- If master key is compromised: rotate key + revoke all Pyrogram sessions
-  (call `client.log_out()` for each stored session).
+- **Fail-fast startup check:** on every bot start, if `TELEGRAM_SESSION_MASTER_KEY` is set and the
+  DB has at least one `active` session, the bot decrypts the most recently updated session. If
+  decryption fails (wrong key, rotated key, truncated env var), the bot logs a `fatal` and calls
+  `process.exit(1)`. This prevents an accidental key swap from silently bricking every stored
+  session while the bot keeps serving other traffic. No sessions in the DB → check passes trivially.
+- **Key rotation (intentional):** re-encrypt all sessions with the new key via a one-shot script
+  that (a) loads the OLD key from `.env.backup`, (b) loads the NEW key from `.env`, (c) for each row
+  decrypts with OLD + encrypts with NEW inside a transaction. Script lives at
+  `scripts/rotate-session-master-key.ts`. This is manual, not part of the CI deploy pipeline.
+- **Compromise response:** rotate key + revoke all Pyrogram sessions (`client.log_out()` for each
+  stored session), then ask users to re-connect. The AI agent can drive this via a broadcast command
+  once the `connect_telegram_status` tool exists.
 
 ### 1.3 Session Lifecycle
 
@@ -78,16 +87,24 @@ Pyrogram sessions are SQLite files — can't be piped via stdin. On each send:
 CREATE TABLE user_telegram_sessions (
   user_id          INTEGER PRIMARY KEY,           -- FK → users.telegram_id
   encrypted_session BLOB NOT NULL,                -- AES-256-GCM encrypted Pyrogram session
-  phone_hash       TEXT NOT NULL,                 -- SHA-256 of phone number (for display: "connected as +7***89")
-  phone_last4      TEXT NOT NULL,                 -- last 4 digits for UI display
+  encrypted_phone  BLOB NOT NULL,                 -- AES-256-GCM encrypted phone in E.164 format (e.g. "+79001234567")
+  phone_hash       TEXT NOT NULL,                 -- SHA-256 of phone (for uniqueness / soft takeover on reconnect)
   status           TEXT NOT NULL DEFAULT 'active', -- 'active' | 'expired' | 'revoked'
   created_at       TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
   FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
 );
+CREATE INDEX idx_tg_sessions_phone_hash ON user_telegram_sessions(phone_hash);
 ```
 
-**No plain-text phone numbers stored.** Only hash (for dedup) and last 4 digits (for display).
+**No plain-text phone numbers stored.** The phone number is encrypted with the same master key as
+the session blob. For display (`+7 ••• 4567`), the phone is decrypted in-memory, the country code is
+extracted via `libphonenumber-js`, and the middle digits are masked. `phone_hash` exists only for
+uniqueness — it lets a reconnect with the same phone perform a soft takeover (previous row deleted,
+new row inserted in the same SQLite transaction).
+
+**Migration number:** next available sequential migration (054 as of the plan's authoring date —
+check `src/database/migrations.ts` for the latest and append).
 
 ---
 
@@ -103,9 +120,9 @@ CREATE TABLE user_telegram_sessions (
 людям, которые ещё не пользуются ботом.
 
 🔒 Безопасность:
-• Данные сессии зашифрованы AES-256-GCM (военный стандарт шифрования)
-• Бот хранит только техническую сессию — без номера телефона, паролей и сообщений
-• Ключ шифрования хранится отдельно от данных и никогда не записывается на диск
+• Данные сессии зашифрованы AES-256-GCM
+• Ключ шифрования живёт только в памяти процесса бота — на диске рядом с данными его нет
+• Бот хранит только техническую сессию — без паролей и сообщений
 
 Бот НЕ будет:
 • Читать твои сообщения
@@ -114,12 +131,16 @@ CREATE TABLE user_telegram_sessions (
 
 Бот БУДЕТ:
 • Отправлять приглашения на встречи от твоего имени
-• Определять твою таймзону по региону подключения — чтобы при путешествиях события приходили в правильное время
 
 Отключить можно в любой момент в /settings.
 
 [Подключить] [Отмена]
 ```
+
+> Note: the §13 timezone detection bullet is added back to the consent screen in the Task 13
+> rollout. Users who connected before §13 shipped must re-consent via a one-time confirmation
+> prompt before the first `account.getAuthorizations()` call — tracked via
+> `user_telegram_sessions.tz_detection_consent_at`.
 
 **Step 2: Phone number**
 ```
@@ -149,11 +170,15 @@ Password is used once for `client.check_password()`, then discarded. Not stored 
 
 **Step 5: Success**
 ```
-✅ Telegram-аккаунт подключён (+7***4567)
+✅ Telegram-аккаунт подключён (+7 ••• 4567)
 
 Теперь приглашения на встречи будут отправляться от твоего имени.
 Отключить: /disconnect_telegram
 ```
+
+The masked display (`+7 ••• 4567`) is computed at render time by decrypting the stored
+`encrypted_phone`, extracting the country calling code via `libphonenumber-js`, and dotting out the
+middle digits. No masked fragment of the phone is ever persisted.
 
 Session file → encrypt → store in DB → delete session file.
 
@@ -190,16 +215,25 @@ venv/bin/python scripts/connect-session.py sign_in \
   --session_path /tmp/tgsess_42_xyz.session
 # stdout: {"status": "ok"} or {"status": "2fa_required"}
 
-# Step 3: Enter 2FA password (if needed)
-venv/bin/python scripts/connect-session.py check_password \
-  --password "hunter2" \
+# Step 3: Enter 2FA password (if needed) — password read from stdin, NOT CLI arg
+echo "hunter2" | venv/bin/python scripts/connect-session.py check_password \
+  --session_path /tmp/tgsess_42_xyz.session
+# stdout: {"status": "ok"}
+
+# Step 4 (disconnect flow): revoke the stored session on Telegram's side
+venv/bin/python scripts/connect-session.py log_out \
   --session_path /tmp/tgsess_42_xyz.session
 # stdout: {"status": "ok"}
 ```
 
 - Each subcommand creates a new Pyrogram Client, performs one operation, disconnects
-- Session path is a temp file managed by the TypeScript side
+- Session path is a temp file managed by the TypeScript side, created atomically with
+  `open(O_CREAT|O_EXCL|O_WRONLY, 0o600)` to protect against symlink races on shared hosts
+- **2FA password is read from stdin, never passed as a CLI argument** — CLI args are visible in
+  `ps auxe` and `/proc/<pid>/cmdline` to any local user
 - `MTPROTO_API_ID` and `MTPROTO_API_HASH` from env (same as existing scripts)
+- Client `name` is computed via `pathlib.Path(session_path).with_suffix('').name` so dots anywhere
+  in the path do not break the split
 
 ### `scripts/send-as-user.py`
 
@@ -302,7 +336,7 @@ if (userSession && masterKey) {
 ### `/connect_telegram`
 Starts the connection scene. If already connected:
 ```
-✅ Telegram-аккаунт подключён (+7***4567)
+✅ Telegram-аккаунт подключён (+7 ••• 4567)
 Переподключить? [Да] [Нет]
 ```
 
@@ -321,7 +355,7 @@ On confirm: set `status = 'revoked'`, call `client.log_out()` via Python script.
 ```
 ⚙️ Настройки
 ...
-📱 Telegram-аккаунт: подключён (+7***4567) [Отключить]
+📱 Telegram-аккаунт: подключён (+7 ••• 4567) [Отключить]
 ```
 
 If not connected:
@@ -394,7 +428,9 @@ Tool for AI agent to check if user has a connected session:
 }
 ```
 
-Returns: `{ connected: boolean, phone_last4?: string, status?: string }`
+Returns: `{ connected: false } | { connected: true, phone_masked: string, status: string }` —
+`phone_masked` is the `+7 ••• 4567` format computed from `encrypted_phone`. No `phone_last4` field
+is exposed (it was in an earlier draft that stored `phone_last4` as a plain column).
 
 Used by AI agent to provide contextual help when the user creates an event with
 participants who haven't started the bot. See Section 10.1.
@@ -430,7 +466,7 @@ recently created event with uninvited external participants, the success message
 an offer to send invitations now:
 
 ```
-✅ Telegram-аккаунт подключён (+7***4567)
+✅ Telegram-аккаунт подключён (+7 ••• 4567)
 
 У тебя есть встреча «Обед с Леной» (15 апреля, 13:00) — Лена ещё не приглашена.
 Отправить ей приглашение от твоего имени?
@@ -503,13 +539,16 @@ so first-person "Приглашаю" would be confusing.
 |------|----------|
 | User changes Telegram password | Session expires, bot detects at next send, notifies user |
 | User logs out from all sessions | Same as above — `AuthKeyUnregistered` |
-| Multiple users connect same phone | Rejected: `phone_hash` uniqueness check |
-| Master key rotated | Migration script re-encrypts all sessions |
-| Master key missing at startup | Feature disabled, existing sessions inaccessible |
+| Multiple users connect same phone | Soft takeover: the old row is deleted inside the same SQLite transaction that inserts the new one (same human, different bot account is legitimate) |
+| Master key rotated (intentional) | Run `scripts/rotate-session-master-key.ts` manually with OLD + NEW keys |
+| Master key rotated (accidental) | Startup fail-fast check (§1.2) exits the process before traffic is served |
+| Master key missing at startup | Feature disabled, existing sessions remain in DB but are inaccessible until the key returns |
 | Pyrogram session file corrupted | Decrypt succeeds but send fails → mark expired |
 | User deletes account | Bot API delivery of regular messages also fails → user cleanup cascade |
+| Connect cooldown | 60-second in-memory cooldown on scene re-entry to avoid FloodWait from repeated send_code |
+| Symlink race on /tmp | Temp session file created with `O_CREAT|O_EXCL|O_WRONLY`, 0o600 — fails closed if path exists |
 | Connect triggered after event creation | Scene receives `pendingEventId` + `pendingInviteeIds`, offers to invite on success |
-| User dismisses connect prompt | Track in user preferences, don't show again for 30 days |
+| User dismisses connect prompt | Track in `users.connect_telegram_dismissed_at`, don't show again for 30 days |
 
 ---
 

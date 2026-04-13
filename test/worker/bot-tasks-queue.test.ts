@@ -43,6 +43,7 @@ const {
   setupSessionCleanupCron,
   setupBirthdaySyncCron,
   setupChatHistoryCleanupCron,
+  setupSessionKeepaliveCron,
 } = await import('../../src/worker/bot-tasks-queue.ts');
 
 describe('createBotTasksQueue', () => {
@@ -117,12 +118,20 @@ describe('bot-tasks job processor', () => {
     expect(onChatHistoryCleanup).toHaveBeenCalledTimes(1);
   });
 
+  test('calls onSessionKeepalive for cron-session-keepalive', async () => {
+    const onSessionKeepalive = mock(async () => {});
+    createBotTasksQueue({ redisUrl: 'redis://localhost:6379', onSessionKeepalive });
+    await capturedProcessor({ data: { type: 'cron-session-keepalive' } });
+    expect(onSessionKeepalive).toHaveBeenCalledTimes(1);
+  });
+
   test('does not throw when optional handlers are absent', async () => {
     createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
     await expect(capturedProcessor({ data: { type: 'cron-secretary-expiry' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-sharing-cleanup' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-birthday-sync' } })).resolves.toBeUndefined();
     await expect(capturedProcessor({ data: { type: 'cron-chat-history-cleanup' } })).resolves.toBeUndefined();
+    await expect(capturedProcessor({ data: { type: 'cron-session-keepalive' } })).resolves.toBeUndefined();
   });
 
   test('failed handler logs without throwing when job is present', () => {
@@ -233,5 +242,21 @@ describe('cron setup functions', () => {
     expect(data.type).toBe('cron-chat-history-cleanup');
     expect(opts.repeat.every).toBe(24 * 60 * 60_000);
     expect(opts.jobId).toBe('chat-history-cleanup-tick');
+  });
+
+  test('setupSessionKeepaliveCron adds job with 14-day interval', async () => {
+    mockQueueAdd.mockClear();
+    const { queue } = createBotTasksQueue({ redisUrl: 'redis://localhost:6379' });
+    await setupSessionKeepaliveCron(queue);
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    const [name, data, opts] = mockQueueAdd.mock.calls[0] as unknown as [
+      string,
+      { type: string },
+      { repeat: { every: number }; jobId: string },
+    ];
+    expect(name).toBe('session-keepalive-tick');
+    expect(data.type).toBe('cron-session-keepalive');
+    expect(opts.repeat.every).toBe(14 * 24 * 60 * 60_000);
+    expect(opts.jobId).toBe('session-keepalive-tick');
   });
 });

@@ -1,7 +1,19 @@
 // src/config/constants.ts
 
+import { parsePhoneNumber } from 'libphonenumber-js';
 import { ruPlural } from '../services/event/formatters.ts';
 import { formatTempCurrent, formatTempRange } from '../services/weather/format.ts';
+
+export function maskPhone(phoneE164: string): string {
+  try {
+    const parsed = parsePhoneNumber(phoneE164);
+    if (!parsed.isValid()) return '+••• ••••';
+    const last4 = phoneE164.slice(-4);
+    return `+${parsed.countryCallingCode} ••• ${last4}`;
+  } catch {
+    return '+••• ••••';
+  }
+}
 
 // Rate limits
 export const RATE_LIMIT = {
@@ -69,6 +81,10 @@ export const CB = {
   ADD_CANCEL: 'add:cancel',
   LOCATION_GEO: 'loc_geo',
   LOCATION_CANDIDATE: 'loc_cand',
+  CT_TZ_UPDATE: 'ct_tzu',
+  CT_TZ_SKIP: 'ct_tzs',
+  CT_TZ_CONSENT_YES: 'ct_tcy',
+  CT_TZ_CONSENT_NO: 'ct_tcn',
 } as const;
 
 // i18n messages
@@ -309,6 +325,13 @@ export const MSG = {
       toggleVoiceEnable: '✅ Enable voice responses',
       toggleVoiceDisable: '❌ Disable voice responses',
       showCountries: '🏳️ Choose a country:',
+      telegramAccount: '📱 Telegram account',
+      telegramConnected: (masked: string) => `📱 Telegram: connected (${masked})`,
+      telegramNotConnected: '📱 Telegram: not connected',
+      telegramConnect: '📱 Connect',
+      telegramDisconnect: '📱 Disconnect',
+      telegramDisconnectConfirm: 'Disconnect Telegram account? Invitations will be sent from the bot.',
+      telegramDisconnected: '✅ Telegram account disconnected.',
     },
     aiTools: {
       history: {
@@ -350,6 +373,8 @@ export const MSG = {
         tableSent: (title: string) => `Table "${title}" has been sent to the chat.`,
         tableFailed: (title: string) => `Failed to render or send the table "${title}".`,
         tableRenderingVoice: 'Check the chat — the table is there.',
+        telegramConnectedStatus: (masked: string) => `Telegram account connected (${masked})`,
+        telegramNotConnectedStatus: 'Telegram account not connected. Connect via /connect_telegram',
       },
       slots: {
         noFreeSlots: 'No free slots — the entire day is busy.',
@@ -420,6 +445,14 @@ export const MSG = {
         deliveryFallbackNoLink: (eventTitle: string) => `⚠️ Could not deliver invitation for "${eventTitle}" directly.`,
         mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
           `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
+        userSessionInvitation: (args: {
+          title: string;
+          dateLine: string;
+          locationLine: string;
+          descriptionLine: string;
+          deepLink: string;
+        }) =>
+          `Inviting you to "${args.title}"\n📅 ${args.dateLine}${args.locationLine}${args.descriptionLine}\n\nDetails & RSVP: ${args.deepLink}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>
@@ -469,6 +502,71 @@ export const MSG = {
         statusDisabledByUser:
           '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
       },
+    },
+    connectTelegram: {
+      consent: [
+        '🔐 Connect Telegram Account',
+        '',
+        'This lets the bot send meeting invitations on your behalf',
+        "to people who haven't started the bot yet.",
+        '',
+        '🔒 Security:',
+        '• Session data is encrypted with AES-256-GCM',
+        '• The encryption key lives only in the bot process memory — it is not stored on disk next to the data',
+        '• The bot stores a technical session — no passwords, no messages',
+        '',
+        'The bot will NOT:',
+        '• Read your messages',
+        '• Send messages without your command',
+        '• Access your contacts',
+        '',
+        'The bot WILL:',
+        '• Send meeting invitations on your behalf',
+        '',
+        'You can disconnect anytime in /settings.',
+      ].join('\n'),
+      btnConnect: 'Connect',
+      btnCancel: 'Cancel',
+      enterPhone: 'Enter phone number in international format:\nExample: +79001234567',
+      invalidPhone: 'Invalid format. Use international format: +79001234567',
+      codeSent: 'Verification code sent to Telegram.\nEnter the code (5 digits):',
+      invalidCode: 'Invalid code. Try again.',
+      codeExpired: 'Code expired. Start over: /connect_telegram',
+      tooManyAttempts: 'Too many failed attempts. Start over: /connect_telegram',
+      enter2fa: 'You have two-factor authentication enabled.\nEnter your password (it will not be stored):',
+      invalid2fa: 'Wrong password. Try again.',
+      success: (masked: string) =>
+        `✅ Telegram account connected (${masked})\n\nInvitations will now be sent from your account.\nDisconnect: /settings`,
+      cancelled: 'Connection cancelled.',
+      featureUnavailable: 'Feature temporarily unavailable.',
+      phoneAlreadyUsed: 'This phone number is already connected to another account.',
+      floodWait: (minutes: number) => `Telegram rate-limited. Try again in ${minutes} min.`,
+      alreadyConnected: (masked: string) => `✅ Telegram account already connected (${masked})\nReconnect?`,
+      btnReconnect: 'Reconnect',
+      cooldown: (seconds: number) => `Please wait ${seconds}s before retrying.`,
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+        `✅ Telegram account connected (${masked})\n\nYou have a meeting "${eventTitle}" (${dateLine})\n\nNot yet invited:\n${inviteeList}`,
+      sendPendingBtn: (count: number) => `Send ${count} invitation${count > 1 ? 's' : ''}`,
+      skipPendingBtn: 'Not now',
+      pendingSent: (count: number) => `✅ ${count} invitation${count > 1 ? 's' : ''} sent.`,
+      tzDetected: (region: string, iana: string) =>
+        `It looks like you're now in ${region}.\nUpdate timezone to ${iana}?`,
+      tzUpdated: (iana: string) => `✅ Timezone updated to ${iana}`,
+      tzSkipped: 'Timezone not changed.',
+      tzConsentPrompt:
+        '🌍 The bot can detect your timezone from your Telegram session so events show at the correct local time.\nAllow? (only country/region is read, not messages)',
+      tzConsentYes: 'Allow',
+      tzConsentNo: 'No',
+      sessionExpired: [
+        '⚠️ Your connected Telegram account has been disconnected.',
+        '',
+        'This usually happens when you change your Telegram password or log out from all sessions.',
+        '',
+        "Without a connected account, invitations go from the bot — people may not recognize who's inviting them.",
+        'Reconnect so invitations come from you personally:',
+        '/connect_telegram',
+      ].join('\n'),
+      privateOnly: 'This command works only in private messages. Send /connect_telegram to me directly.',
     },
     callbackErrors: {
       notFound: 'Not found',
@@ -636,6 +734,9 @@ export const MSG = {
       language_switch: '💡 I speak Russian and English — switch language anytime in /settings.',
       action_log: '💡 Send /log to see a full history of actions taken on your calendar.',
       past_events: '💡 "What did I have last Tuesday?" — I can look up past events too.',
+      // ── Telegram connect ──
+      connect_telegram:
+        '📱 Connect your Telegram account so event invitations come from you personally — people respond much better. /connect_telegram',
     },
     gtdQuotes: [
       // David Allen, "Getting Things Done: The Art of Stress-Free Productivity" (2001/2015)
@@ -959,6 +1060,13 @@ export const MSG = {
       toggleVoiceEnable: '✅ Включить голосовые ответы',
       toggleVoiceDisable: '❌ Отключить голосовые ответы',
       showCountries: '🏳️ Выберите страну:',
+      telegramAccount: '📱 Telegram-аккаунт',
+      telegramConnected: (masked: string) => `📱 Telegram: подключён (${masked})`,
+      telegramNotConnected: '📱 Telegram: не подключён',
+      telegramConnect: '📱 Подключить',
+      telegramDisconnect: '📱 Отключить',
+      telegramDisconnectConfirm: 'Отключить Telegram-аккаунт? Приглашения будут отправляться через бота.',
+      telegramDisconnected: '✅ Telegram-аккаунт отключён.',
     },
     aiTools: {
       history: {
@@ -1002,6 +1110,8 @@ export const MSG = {
         tableSent: (title: string) => `Таблица «${title}» отправлена в чат.`,
         tableFailed: (title: string) => `Не удалось отрендерить или отправить таблицу «${title}».`,
         tableRenderingVoice: 'Загляни в чат — там таблица.',
+        telegramConnectedStatus: (masked: string) => `Telegram-аккаунт подключён (${masked})`,
+        telegramNotConnectedStatus: 'Telegram-аккаунт не подключён. Подключить: /connect_telegram',
       },
       slots: {
         noFreeSlots: 'Свободных окон нет — весь день занят.',
@@ -1074,6 +1184,14 @@ export const MSG = {
           `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`,
         mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
           `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
+        userSessionInvitation: (args: {
+          title: string;
+          dateLine: string;
+          locationLine: string;
+          descriptionLine: string;
+          deepLink: string;
+        }) =>
+          `Приглашаю тебя на «${args.title}»\n📅 ${args.dateLine}${args.locationLine}${args.descriptionLine}\n\nПодробнее и ответить: ${args.deepLink}`,
       },
       birthdays: {
         created: (name: string, day: number, month: number) =>
@@ -1123,6 +1241,72 @@ export const MSG = {
         statusDisabledByUser:
           '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },
+    },
+    connectTelegram: {
+      consent: [
+        '🔐 Подключение Telegram-аккаунта',
+        '',
+        'Это позволит боту отправлять приглашения на встречи от твоего имени',
+        'людям, которые ещё не пользуются ботом.',
+        '',
+        '🔒 Безопасность:',
+        '• Данные сессии зашифрованы AES-256-GCM',
+        '• Ключ шифрования живёт только в памяти процесса бота — на диске рядом с данными его нет',
+        '• Бот хранит только техническую сессию — без паролей и сообщений',
+        '',
+        'Бот НЕ будет:',
+        '• Читать твои сообщения',
+        '• Отправлять сообщения без твоей команды',
+        '• Получать доступ к твоим контактам',
+        '',
+        'Бот БУДЕТ:',
+        '• Отправлять приглашения на встречи от твоего имени',
+        '',
+        'Отключить можно в любой момент в /settings.',
+      ].join('\n'),
+      btnConnect: 'Подключить',
+      btnCancel: 'Отмена',
+      enterPhone: 'Введи номер телефона в международном формате:\nНапример: +79001234567',
+      invalidPhone: 'Неверный формат. Используй международный формат: +79001234567',
+      codeSent: 'Код подтверждения отправлен в Telegram.\nВведи код (5 цифр):',
+      invalidCode: 'Неверный код. Попробуй ещё раз.',
+      codeExpired: 'Код истёк. Начни заново: /connect_telegram',
+      tooManyAttempts: 'Слишком много попыток. Начни заново: /connect_telegram',
+      enter2fa: 'У тебя включена двухфакторная аутентификация.\nВведи пароль (он не будет сохранён):',
+      invalid2fa: 'Неверный пароль. Попробуй ещё раз.',
+      success: (masked: string) =>
+        `✅ Telegram-аккаунт подключён (${masked})\n\nТеперь приглашения на встречи будут отправляться от твоего имени.\nОтключить: /settings`,
+      cancelled: 'Подключение отменено.',
+      featureUnavailable: 'Функция временно недоступна.',
+      phoneAlreadyUsed: 'Этот номер телефона уже подключён к другому аккаунту.',
+      floodWait: (minutes: number) => `Telegram ограничил запросы. Попробуй через ${minutes} мин.`,
+      alreadyConnected: (masked: string) => `✅ Telegram-аккаунт уже подключён (${masked})\nПереподключить?`,
+      btnReconnect: 'Переподключить',
+      cooldown: (seconds: number) => `Подожди ${seconds}с перед повтором.`,
+      successWithPending: (masked: string, eventTitle: string, dateLine: string, inviteeList: string, count: number) =>
+        `✅ Telegram-аккаунт подключён (${masked})\n\nУ тебя есть встреча «${eventTitle}» (${dateLine})\n\nЕщё не приглашены:\n${inviteeList}`,
+      sendPendingBtn: (count: number) =>
+        `Отправить ${count} ${ruPlural(count, 'приглашение', 'приглашения', 'приглашений')}`,
+      skipPendingBtn: 'Не сейчас',
+      pendingSent: (count: number) =>
+        `✅ ${count} ${ruPlural(count, 'приглашение отправлено', 'приглашения отправлены', 'приглашений отправлено')}.`,
+      tzDetected: (region: string, iana: string) => `Похоже, ты сейчас в ${region}.\nОбновить таймзону на ${iana}?`,
+      tzUpdated: (iana: string) => `✅ Таймзона обновлена: ${iana}`,
+      tzSkipped: 'Таймзона не изменена.',
+      tzConsentPrompt:
+        '🌍 Бот может определять таймзону по твоему Telegram-подключению, чтобы события показывались в правильное время.\nРазрешить? (читается только страна и регион, не сообщения)',
+      tzConsentYes: 'Разрешить',
+      tzConsentNo: 'Нет',
+      sessionExpired: [
+        '⚠️ Подключённый Telegram-аккаунт был отключён.',
+        '',
+        'Обычно это происходит при смене пароля Telegram или выходе из всех сессий.',
+        '',
+        'Без подключённого аккаунта приглашения идут от бота — получатели могут не понять, кто их приглашает.',
+        'Переподключи аккаунт, чтобы приглашения шли от тебя лично:',
+        '/connect_telegram',
+      ].join('\n'),
+      privateOnly: 'Эта команда работает только в личных сообщениях. Отправь /connect_telegram мне в личку.',
     },
     callbackErrors: {
       notFound: 'Не найдено',
@@ -1295,6 +1479,9 @@ export const MSG = {
       language_switch: '💡 Я говорю по-русски и по-английски — сменить язык можно в /settings.',
       action_log: '💡 Отправь /log чтобы увидеть полную историю действий с календарём.',
       past_events: '💡 «Что у меня было в прошлый вторник?» — я могу посмотреть прошлые события.',
+      // ── Telegram connect ──
+      connect_telegram:
+        '📱 Подключи свой Telegram-аккаунт — тогда приглашения на встречи будут приходить от тебя лично, а не от бота. Люди отвечают гораздо охотнее. /connect_telegram',
     },
     gtdQuotes: [
       // Дэвид Аллен, «Как привести дела в порядок» (Getting Things Done, 2001/2015)

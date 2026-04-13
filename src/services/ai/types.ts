@@ -17,6 +17,7 @@ import type { ParticipantRepository } from '../../database/repositories/particip
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
+import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type {
   EventOccurrence,
@@ -211,6 +212,8 @@ export interface AgentContext {
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
   featureUsageRepo?: FeatureUsageRepository;
+  telegramSessionRepo?: TelegramSessionRepository;
+  telegramMasterKey?: Buffer;
 
   // Capability groups
   sharing?: SharingCapability;
@@ -235,6 +238,10 @@ export interface AgentContext {
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
 }
 
+export type TelegramSessionData =
+  | { connected: false; dismissed_recently: boolean }
+  | { connected: true; phone_masked: string; status: string };
+
 /** Structured data from tool handlers for intent executor consumption. */
 export type ToolResultData =
   | EventSummary
@@ -242,6 +249,7 @@ export type ToolResultData =
   | { telegram_id: number; name: string }
   | ScheduledAiCall[]
   | Trigger[]
+  | TelegramSessionData
   | [];
 
 /**
@@ -318,6 +326,13 @@ export interface TelegramSender {
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
+  sendAsConnectedUser?(
+    inviterId: number,
+    targetId: number,
+    text: string,
+    username?: string,
+    meta?: { invitationId?: number },
+  ): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
   sendChatAction?(chatId: number, action: 'typing'): Promise<void>;

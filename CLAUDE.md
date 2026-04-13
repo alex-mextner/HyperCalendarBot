@@ -207,11 +207,39 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. `as never` remains banned everywhere — use `as unknown as X` in test factories
   4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
      (bun:test types `calls` as `unknown[][]` — no way around it)
-- **`JSON.parse` and `Response.json()` must always go through Zod** — never use the raw return
-  value, never cast with `as`. Always `z.schema().parse(JSON.parse(...))` or
-  `z.schema().parse(await res.json())`. No `(await res.json()) as SomeType` — define a Zod schema
-  and `.parse()` it. For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the
-  matching Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **Never call `JSON.parse` directly — use a zod codec.** Bare `JSON.parse(str)` can throw
+  `SyntaxError` on malformed input, which every caller would otherwise have to wrap in `try/catch`.
+  Use `z.codec(z.string(), Schema, { decode, encode })` from zod v4 — the `decode` callback runs
+  `JSON.parse` inside and pushes an issue on failure, so `safeParse` returns `{ success: false }`
+  instead of throwing.
+
+  ```ts
+  import { z } from 'zod';
+
+  function jsonStringCodec<T extends z.ZodTypeAny>(inner: T) {
+    return z.codec(z.string(), inner, {
+      decode: (raw, ctx) => {
+        try { return JSON.parse(raw); }
+        catch { ctx.issues.push({ code: 'custom', message: 'Invalid JSON', input: raw }); return {} as z.input<T>; }
+      },
+      encode: (value) => JSON.stringify(value),
+    });
+  }
+
+  const Parsed = jsonStringCodec(MySchema).safeParse(rawString);
+  if (!Parsed.success) { /* handle error */ }
+  ```
+
+  The same rule applies to `Response.json()` — wrap with `await res.text()` + codec, or keep using
+  `z.schema().safeParse(await res.json())` **only** where you are sure the response is well-formed
+  JSON (framework-level, not external API). Never `(await res.json()) as SomeType` — define a Zod
+  schema and run it through a codec.
+
+  **Grandfathered exceptions** (do not propagate to new code):
+  - DB-stored JSON columns with simple types (`number[]`, `string[]`) where `JSON.parse` is inside
+    a repository method that already guards with try/catch. New repositories must use a codec.
+  - `feedback_json_parse_safeParse.md` memory entry documents the previous pattern; it stays
+    valid for those grandfathered call sites only.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
   No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
@@ -328,6 +356,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. Run `codex exec review --uncommitted` — address every issue it finds that isn't a false positive.
   4. Run `codex exec "security review --uncommitted"` — address every security issue it finds that
      isn't a false positive.
+  `codex` is the Codex CLI (Google DeepMind) — an AI code review tool installed globally.
+  If `codex` is not found, skip steps 3-4 but do NOT skip the self-review in step 2.
 - **Commits must NEVER break the tree**: before `git commit`, all of the following must pass clean:
   - `tsc --noEmit` — zero type errors
   - `bun run lint` — zero lint errors AND zero warnings
