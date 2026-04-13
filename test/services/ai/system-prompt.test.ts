@@ -106,18 +106,19 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('authoritative clock');
   });
 
-  test('DM prompt has three event creation modes with DM-only examples', () => {
+  test('DM prompt has two event creation modes: create or ask', () => {
     ctx.isGroup = false;
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('EVENT CREATION — three modes');
+    expect(prompt).toContain('EVENT CREATION — two modes in DMs');
     expect(prompt).toContain('Create immediately');
-    expect(prompt).toContain('Ask to clarify missing details');
-    expect(prompt).toContain('Do NOT create — wait for confirmation');
-    // DM examples present
+    expect(prompt).toContain('Ask first');
+    // DM examples
     expect(prompt).toContain('Запиши встречу завтра в 10');
     expect(prompt).toContain('Запиши встречу с Леной');
-    expect(prompt).toContain('Либо я могу в 7 вечера, либо после 9');
-    // Group consensus block absent in DM
+    expect(prompt).toContain('Либо в 7, либо после 9');
+    // No waiting in DMs
+    expect(prompt).toContain('Never wait silently in DMs');
+    // Group consensus block absent
     expect(prompt).not.toContain('Group event creation — consensus required');
   });
 
@@ -127,28 +128,13 @@ describe('buildSystemPrompt', () => {
     ctx.groupChatId = -100;
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('Group event creation — consensus required');
-    // Group examples: proposal → wait → agreement → create
+    // Proposal → wait → agreement → create
     expect(prompt).toContain('Давай в 7 на пейнтбол');
-    expect(prompt).toContain('wait');
     expect(prompt).toContain('Давай!');
-    expect(prompt).toContain('create');
     // Objection blocks creation
     expect(prompt).toContain('do NOT create, discussion continues');
     // Availability discussion
     expect(prompt).toContain('listing her availability');
-  });
-
-  test('clarify mode instructs to ask when key details are ambiguous', () => {
-    const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('important details are missing or unclear');
-    expect(prompt).toContain('ask_user to resolve the ambiguity');
-  });
-
-  test('wait mode instructs to detect scheduling discussions and not create events', () => {
-    const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('multiple time options');
-    expect(prompt).toContain('wait for the user');
-    expect(prompt).toContain('scheduling discussion');
   });
 
   test('instructs to use pick_users and find_contact for invitations', () => {
