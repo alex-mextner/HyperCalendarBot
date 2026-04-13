@@ -110,6 +110,7 @@ export class TelegramStreamWriter {
 
   /** Clear all accumulated state for retry after validation rejection */
   reset(): void {
+    this.discarded = false;
     this.text = '';
     this.plainResponseText = '';
     this.intermediateChunks = [];
@@ -188,14 +189,17 @@ export class TelegramStreamWriter {
       try {
         const result = await this.sender.sendMessage(this.chatId, '⏳');
         this.messageId = result.message_id;
-      } catch {
-        return; // Failed to create — skip this flush
+      } catch (err) {
+        aiLogger.warn({ err, chatId: this.chatId }, 'Failed to create placeholder message');
+        return;
       } finally {
         this.creatingMessage = false;
       }
       // discard() ran while we were creating — delete the message and bail
       if (this.discarded) {
-        this.sender.deleteMessage?.(this.chatId, this.messageId).catch(() => {});
+        this.sender.deleteMessage?.(this.chatId, this.messageId).catch((err) => {
+          aiLogger.warn({ err, chatId: this.chatId, messageId: this.messageId }, 'Post-discard cleanup failed');
+        });
         return;
       }
     }
@@ -320,6 +324,7 @@ export class TelegramStreamWriter {
     this.pendingIndicators = [];
     this.intermediateChunks = [];
     this.plainResponseText = '';
+    this.discarded = false;
   }
 
   getMessageId(): number | null {
