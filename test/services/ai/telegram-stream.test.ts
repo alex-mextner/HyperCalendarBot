@@ -247,4 +247,44 @@ describe('TelegramStreamWriter', () => {
     expect(deleteMock).toHaveBeenCalledTimes(1);
     expect(deleteMock).toHaveBeenCalledWith(123, 42);
   });
+
+  test('discard during pending text-flush create still deletes the message', async () => {
+    // Race scenario: onTextDelta fire-and-forget flush starts sendMessage (slow),
+    // then discard() is called before sendMessage resolves. The message created
+    // by the pending flush must still be cleaned up.
+    let resolveCreate: ((v: { message_id: number }) => void) | null = null;
+    const slowSend = mock(
+      () =>
+        new Promise<{ message_id: number }>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const deleteMock = mock(() => Promise.resolve());
+    const testSender: TelegramSender = {
+      sendMessage: slowSend,
+      editMessageText: editMock,
+      deleteMessage: deleteMock,
+    };
+
+    const writer = new TelegramStreamWriter(testSender, 123, 'en', { noPlaceholder: true });
+    await writer.init();
+
+    // Simulate onTextDelta producing 25 chars + tool label
+    writer.appendText('A'.repeat(25));
+    writer.setToolLabel('get_events');
+
+    // Fire-and-forget flush — starts creating message (pending)
+    writer.flush(true).catch(() => {});
+
+    // discard() before create resolves — messageId is still null
+    await writer.discard();
+
+    // Create resolves after discard
+    resolveCreate!({ message_id: 50 });
+    // Let microtasks settle
+    await new Promise<void>((r) => setTimeout(r, 10));
+
+    // Message 50 must be deleted — it was created after discard ran
+    expect(deleteMock).toHaveBeenCalledWith(123, 50);
+  });
 });

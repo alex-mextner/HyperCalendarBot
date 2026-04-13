@@ -59,6 +59,8 @@ export class TelegramStreamWriter {
   private typingInterval: ReturnType<typeof setInterval> | null = null;
   /** Prevents concurrent message creation in noPlaceholder mode. */
   private creatingMessage = false;
+  /** Set by discard() so a pending flush knows to delete the message after creation. */
+  private discarded = false;
 
   constructor(
     private sender: TelegramSender,
@@ -191,6 +193,11 @@ export class TelegramStreamWriter {
       } finally {
         this.creatingMessage = false;
       }
+      // discard() ran while we were creating — delete the message and bail
+      if (this.discarded) {
+        this.sender.deleteMessage?.(this.chatId, this.messageId).catch(() => {});
+        return;
+      }
     }
 
     let displayText = markdownToHtml(this.text) || '⏳';
@@ -287,6 +294,7 @@ export class TelegramStreamWriter {
 
   async discard(): Promise<void> {
     this.stopTypingLoop();
+    this.discarded = true;
     if (this.messageId) {
       try {
         await this.sender.deleteMessage?.(this.chatId, this.messageId);
@@ -294,6 +302,8 @@ export class TelegramStreamWriter {
         /* ignore — message may already be gone */
       }
     }
+    // If messageId is null but creatingMessage is true, the pending flush
+    // will check the discarded flag after creation and delete the message.
   }
 
   /**
