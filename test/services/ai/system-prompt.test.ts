@@ -112,6 +112,13 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('always confirm the details before creating');
   });
 
+  test('instructs to detect scheduling discussions and not create events prematurely', () => {
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('SCHEDULING DISCUSSION');
+    expect(prompt).toContain('multiple time options');
+    expect(prompt).toContain('wait for the user');
+  });
+
   test('instructs to use pick_users and find_contact for invitations', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('pick_users');
