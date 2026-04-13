@@ -310,6 +310,9 @@ export class TelegramStreamWriter {
         await this.sender.sendMessage(this.chatId, errorText);
       }
     } catch (err) {
+      const errStr = String(err);
+      // "message is not modified" means the text is already displayed — no action needed
+      if (errStr.includes('message is not modified')) return;
       aiLogger.error({ err }, 'Error fallback delivery also failed');
       // Last attempt: plain send without editing
       if (this.messageId) {

@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type OpenAI from 'openai';
 import { z } from 'zod';
+import { t } from '../../config/constants.ts';
 import type { ChatHistoryMessage } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
@@ -723,12 +724,7 @@ export class CalendarBotAgent {
       await writer.finalize();
     } catch (finalizeErr) {
       aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
-      const lang = ctx.user.language;
-      const fallback =
-        lang === 'ru'
-          ? '⚠️ Произошла ошибка при отправке ответа. Попробуй ещё раз.'
-          : '⚠️ An error occurred while sending the response. Please try again.';
-      await writer.sendErrorFallback(fallback);
+      await writer.sendErrorFallback(t(ctx.user.language).ai_send_error);
     }
 
     const msgId = writer.getMessageId();
