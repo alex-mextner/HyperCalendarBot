@@ -960,6 +960,7 @@ broadcastQueueCleanup = {
   close: async () => {
     await broadcastWorker.close();
     await broadcastQueue.close();
+    await broadcastRedisClient.close();
   },
 };
 
