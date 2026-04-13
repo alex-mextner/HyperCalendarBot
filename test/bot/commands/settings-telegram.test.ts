@@ -15,6 +15,7 @@ function makeSession(masterKey: Buffer, overrides: Partial<TelegramSession> = {}
     encrypted_phone: encryptString(phone, masterKey),
     phone_hash: 'abc123',
     status: 'active',
+    tz_detection_consent_at: null,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides,

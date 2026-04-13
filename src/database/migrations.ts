@@ -1001,4 +1001,10 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE users ADD COLUMN connect_telegram_dismissed_at TEXT DEFAULT NULL');
     },
   },
+  {
+    name: '056_user_telegram_sessions_tz_consent',
+    up: (db) => {
+      db.exec('ALTER TABLE user_telegram_sessions ADD COLUMN tz_detection_consent_at TEXT DEFAULT NULL');
+    },
+  },
 ];

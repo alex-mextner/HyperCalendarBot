@@ -657,6 +657,7 @@ export interface TelegramSession {
   encrypted_phone: Buffer;
   phone_hash: string;
   status: 'active' | 'expired' | 'revoked';
+  tz_detection_consent_at: string | null;
   created_at: string;
   updated_at: string;
 }
