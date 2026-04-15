@@ -37,6 +37,15 @@ export interface AiMessageJobData {
   source: 'scheduled' | 'trigger';
   scheduleId?: string;
   triggerId?: string;
+  /** Backoff retry attempt index (1 = first retry, 2 = second, 3 = third/last). Absent on original messages. */
+  retryAttempt?: number;
+}
+
+/** Stores pending BullMQ retry job IDs per user for cancellation when a new message arrives. */
+export interface RetryJobStore {
+  set(userId: number, jobId: string): Promise<void>;
+  get(userId: number): Promise<string | null>;
+  del(userId: number): Promise<void>;
 }
 
 /** Dependency injection interface for the job queue. */
@@ -45,6 +54,7 @@ export interface QueueAdapter {
   addRepeat(data: AiMessageJobData, cron: string): Promise<void>;
   removeDelayed(scheduleId: string): Promise<void>;
   removeRepeat(cron: string): Promise<void>;
+  removeJobById(jobId: string): Promise<void>;
 }
 
 /** DB row from ai_triggers table. */

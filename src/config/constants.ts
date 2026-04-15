@@ -138,6 +138,14 @@ export const MSG = {
       ];
       return phrases[Math.floor(Math.random() * phrases.length)]!;
     },
+    agent_give_up: () => {
+      const phrases = [
+        "Can't right now — the devs are already on it.",
+        'Paws up. The devs are already on it.',
+        "I'm out of steam for today. Don't be mad — ping me later.",
+      ];
+      return phrases[Math.floor(Math.random() * phrases.length)]!;
+    },
     agent_timeout: '⚠️ That took too long — timing out.',
     rate_limited: 'Slow down, too many messages.',
     add_title_prompt: "Let's create an event. What's the title?",
@@ -942,6 +950,14 @@ export const MSG = {
         'Момент, у меня тут зависло одно окно. Перезапускаю.',
         'Секундочку, ищу нужную вкладку. Их тут 847.',
         'Подожди немного, тут пришёл email на 15 страниц — надо быстро пробежать.',
+      ];
+      return phrases[Math.floor(Math.random() * phrases.length)]!;
+    },
+    agent_give_up: () => {
+      const phrases = [
+        'Нишмогла, разрабы уже смотрят в чём дело.',
+        'У меня лапки, разрабы уже смотрят в чём дело.',
+        'Чот я сегодня утомился уже, не серчайте — я пока вздремну, напишите попозже.',
       ];
       return phrases[Math.floor(Math.random() * phrases.length)]!;
     },

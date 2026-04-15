@@ -759,22 +759,20 @@ export class CalendarBotAgent {
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
 
-      if (ctx.wasExplicitInvocation !== false) {
+      // Show stall phrase only on the first failure of an explicit invocation
+      if (ctx.wasExplicitInvocation !== false && (ctx.retryAttempt ?? 0) === 0 && !ctx.supplementMode) {
         const lang = ctx.user.language as 'en' | 'ru';
         const stallMessage = t(lang).agent_error();
         writer.appendText(`\n\n${stallMessage}`);
-
         // Save to chat history so the model can see it and play along if the user reacts.
-        if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
-        }
+        this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
+      }
 
-        if (ctx.retryEnqueue && !ctx.supplementMode) {
-          const RETRY_DELAY_MS = 60_000;
-          ctx.retryEnqueue(ctx.messageText, RETRY_DELAY_MS).catch((err) => {
-            aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to queue retry');
-          });
-        }
+      // Enqueue next retry (or trigger graceful fail after max attempts)
+      if (ctx.retryEnqueue && !ctx.supplementMode && ctx.wasExplicitInvocation !== false) {
+        ctx.retryEnqueue(ctx.messageText).catch((err) => {
+          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
+        });
       }
     }
 

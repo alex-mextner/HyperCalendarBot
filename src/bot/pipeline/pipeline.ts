@@ -11,6 +11,7 @@ export async function runPipeline(
   groupContext?: GroupContext,
   incomingMessageId?: number,
   wasExplicitInvocation?: boolean,
+  retryAttempt?: number,
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
   let supplementMode = false;
@@ -25,6 +26,7 @@ export async function runPipeline(
         supplementMode,
         supplementAutoResponse,
         wasExplicitInvocation,
+        retryAttempt,
       });
       if (result.handled) {
         if ('needsSupplement' in result) {

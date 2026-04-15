@@ -201,6 +201,7 @@ export interface MessageHandlerDeps {
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
   weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
   aiRetryQueue?: import('../../services/scheduled/types.ts').QueueAdapter;
+  aiRetryJobStore?: import('../../services/scheduled/types.ts').RetryJobStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -868,6 +869,7 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     intentLearner: deps.intentLearner,
     scenePauseService: deps.scenePauseService,
     retryQueue: deps.aiRetryQueue,
+    retryJobStore: deps.aiRetryJobStore,
   });
 
   // Static layers that don't require per-message context
