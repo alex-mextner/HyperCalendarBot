@@ -123,10 +123,10 @@ export const MSG = {
     something_wrong: 'Something went wrong. Try again or use /help.',
     agent_error: () => {
       const phrases = [
-        'Give me a moment, I need to think this through.',
-        'One sec — gathering my thoughts.',
-        'Hold on, let me collect myself.',
-        'Just a second, I need to regroup.',
+        'Give me a moment — need to brew some coffee first.',
+        'One sec, thinking.',
+        'Hold on, working through this.',
+        'Be right back — just need a moment.',
       ];
       return phrases[Math.floor(Math.random() * phrases.length)]!;
     },
@@ -923,9 +923,9 @@ export const MSG = {
     agent_error: () => {
       const phrases = [
         'Минутку, мне надо заварить себе кофе, и сразу отвечу.',
-        'Дай мне секунду — собираюсь с мыслями.',
-        'Одну секунду, мне нужно сосредоточиться.',
-        'Подожди чуть, я сейчас.',
+        'Подожди чуть, я тут кое-что обдумываю.',
+        'Дай секунду — надо переварить.',
+        'Сейчас, уже думаю.',
       ];
       return phrases[Math.floor(Math.random() * phrases.length)]!;
     },
