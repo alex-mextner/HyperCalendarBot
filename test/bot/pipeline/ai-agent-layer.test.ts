@@ -268,3 +268,109 @@ describe('supplement mode', () => {
     expect(capturedContext?.supplementMode).toBe(true);
   });
 });
+
+describe('retry / backoff', () => {
+  function makeRetrySetup(jobStoreGetImpl: () => Promise<string | null> = async () => null) {
+    const captured: { ctx?: AgentContext } = {};
+    const addDelayed = mock(async (_data: unknown, _delay: number): Promise<string> => 'job-123');
+    const removeJobById = mock(async (_jobId: string): Promise<void> => {});
+    const jobStoreGet = mock(jobStoreGetImpl);
+    const jobStoreDel = mock(async (_userId: number): Promise<void> => {});
+    const jobStoreSet = mock(async (_userId: number, _jobId: string): Promise<void> => {});
+
+    const agent: MockAgentLayerDeps['agent'] = {
+      run: mock((agentCtx: AgentContext) => {
+        captured.ctx = agentCtx;
+        return Promise.resolve({ responseText: 'ok', toolCalls: [], toolResults: [] });
+      }),
+    };
+
+    const deps = {
+      agent,
+      agentContextBuilder: makeContextBuilder(),
+      retryQueue: { addDelayed, removeJobById },
+      retryJobStore: { get: jobStoreGet, del: jobStoreDel, set: jobStoreSet },
+    } as unknown as AgentLayerDeps;
+
+    return { deps, addDelayed, removeJobById, jobStoreGet, jobStoreDel, jobStoreSet, captured };
+  }
+
+  test('retryEnqueue is wired on agentContext when retryQueue is provided', async () => {
+    const { deps, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg');
+    expect(captured.ctx?.retryEnqueue).toBeFunction();
+  });
+
+  test('attempt=0 → addDelayed called with 30s delay', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
+    expect(delay).toBe(30_000);
+  });
+
+  test('attempt=1 → addDelayed called with 60s delay', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 1 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
+    expect(delay).toBe(60_000);
+  });
+
+  test('attempt=2 → addDelayed called with 120s delay', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 2 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
+    expect(delay).toBe(120_000);
+  });
+
+  test('retryEnqueue passes retryAttempt+1 in job data', async () => {
+    const { deps, addDelayed, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 1 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    const [jobData] = addDelayed.mock.calls[0] as unknown as [{ retryAttempt: number }, number];
+    expect(jobData.retryAttempt).toBe(2);
+  });
+
+  test('retryEnqueue stores returned jobId in jobStore', async () => {
+    const { deps, jobStoreSet, captured } = makeRetrySetup();
+    await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    expect(jobStoreSet).toHaveBeenCalledWith(1, 'job-123');
+  });
+
+  test('graceful fail when MAX_RETRY_ATTEMPTS exhausted: sends agent_give_up, no addDelayed', async () => {
+    const { deps, addDelayed, jobStoreDel, captured } = makeRetrySetup();
+    const ctx = makeCtx();
+    // MAX_RETRY_ATTEMPTS = 3
+    await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+    expect(addDelayed).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const [sentText] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown as [string];
+    expect(typeof sentText).toBe('string');
+    expect(sentText.length).toBeGreaterThan(0);
+    expect(jobStoreDel).toHaveBeenCalledWith(1);
+  });
+
+  test('cancels pending retry job when fresh message arrives (attempt=0)', async () => {
+    const { deps, removeJobById } = makeRetrySetup(async () => 'pending-job-id');
+    await createAiAgentLayer(deps)(makeCtx(), 'new message', { retryAttempt: 0 });
+    expect(removeJobById).toHaveBeenCalledWith('pending-job-id');
+  });
+
+  test('does NOT cancel pending job when retryAttempt > 0', async () => {
+    const { deps, removeJobById } = makeRetrySetup(async () => 'pending-job-id');
+    await createAiAgentLayer(deps)(makeCtx(), 'retry attempt', { retryAttempt: 1 });
+    expect(removeJobById).not.toHaveBeenCalled();
+  });
+
+  test('Redis failure in cancel block does not break pipeline', async () => {
+    const { deps } = makeRetrySetup(async () => {
+      throw new Error('Redis connection refused');
+    });
+    const result = await createAiAgentLayer(deps)(makeCtx(), 'msg', { retryAttempt: 0 });
+    expect(result.handled).toBe(true);
+  });
+});
