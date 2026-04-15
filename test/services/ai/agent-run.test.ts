@@ -225,12 +225,16 @@ describe('CalendarBotAgent.run()', () => {
     await agent.run(ctx);
 
     expect(sender.sendMessage).toHaveBeenCalledTimes(1); // init
-    expect(sender.editMessageText).toHaveBeenCalled(); // finalize with error text
+    expect(sender.editMessageText).toHaveBeenCalled(); // finalize with stall text
 
-    // Only the user row — assistant turn was never produced
+    // User row + stall message saved so the model can play along if the user reacts
     const history = ctx.chatHistory.getRecent(USER_ID);
-    expect(history.length).toBe(1);
+    expect(history.length).toBe(2);
     expect(history[0]!.role).toBe('user');
+    expect(history[1]!.role).toBe('assistant');
+    const parsed = JSON.parse(history[1]!.content) as { role: string; content: string };
+    expect(parsed.content).toBeTruthy();
+    expect(parsed.content).not.toContain('An error occurred');
   });
 
   test('run() handles error with Russian language user', async () => {

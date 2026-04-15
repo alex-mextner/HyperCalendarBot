@@ -760,7 +760,13 @@ export class CalendarBotAgent {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
 
       const lang = ctx.user.language as 'en' | 'ru';
-      writer.appendText(`\n\n${t(lang).agent_error()}`);
+      const stallMessage = t(lang).agent_error();
+      writer.appendText(`\n\n${stallMessage}`);
+
+      // Save to chat history so the model can see it and play along if the user reacts.
+      if (!ctx.supplementMode) {
+        this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
+      }
 
       if (ctx.retryEnqueue && !ctx.supplementMode) {
         const RETRY_DELAY_MS = 60_000;
