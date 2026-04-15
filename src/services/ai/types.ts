@@ -239,6 +239,8 @@ export interface AgentContext {
   preloadedAddressContext?: string;
   /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
+  /** When set, queues a retry of the current message after delayMs. Not wired for queue-originated jobs (prevents retry loops). */
+  retryEnqueue?: (messageText: string, delayMs: number) => Promise<void>;
 }
 
 export type TelegramSessionData =

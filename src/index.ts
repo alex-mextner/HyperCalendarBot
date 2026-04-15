@@ -1135,6 +1135,7 @@ if (config.REDIS_URL) {
   // Patch msgDeps so agentContextBuilder picks up the services
   msgDeps.scheduledCallService = scheduledCallService;
   msgDeps.triggerService = { repo: triggerRepo };
+  msgDeps.aiRetryQueue = aiMsgQueue;
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
   const syntheticRunner = new SyntheticPipelineRunner({

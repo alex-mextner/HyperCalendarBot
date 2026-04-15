@@ -520,7 +520,8 @@ export class CalendarBotAgent {
 
         if (Date.now() - startTime > TIMEOUT_MS) {
           aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout');
-          writer.appendText('\n\n⚠️ Timeout reached.');
+          const lang = ctx.user.language as 'en' | 'ru';
+          writer.appendText(`\n\n${t(lang).agent_timeout}`);
           break;
         }
 
@@ -753,7 +754,18 @@ export class CalendarBotAgent {
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
-      writer.appendText(`\n\n${t(ctx.user.language).ai_processing_error}`);
+
+      const lang = ctx.user.language as 'en' | 'ru';
+      const msgs = t(lang);
+      writer.appendText(`\n\n${msgs.agent_error}`);
+
+      if (ctx.retryEnqueue && !ctx.supplementMode) {
+        const RETRY_DELAY_MS = 60_000;
+        writer.appendText(`\n${msgs.agent_retry}`);
+        ctx.retryEnqueue(ctx.messageText, RETRY_DELAY_MS).catch((err) => {
+          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to queue retry');
+        });
+      }
     }
 
     const finalText = writer.getText().trim();

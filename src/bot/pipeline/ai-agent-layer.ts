@@ -4,6 +4,7 @@ import { t } from '../../config/constants.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
+import type { AiMessageJobData } from '../../services/scheduled/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { AgentContextBuilder } from '../agent-context-factory.ts';
 import type { BotCommandContext } from '../types.ts';
@@ -14,6 +15,7 @@ export interface AgentLayerDeps {
   agentContextBuilder: AgentContextBuilder;
   intentLearner?: IntentLearner;
   scenePauseService?: ScenePauseService;
+  retryQueue?: { addDelayed(data: AiMessageJobData, delayMs: number): Promise<string> };
 }
 
 export function createAiAgentLayer(deps: AgentLayerDeps) {
@@ -43,6 +45,12 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     if (extra?.feedbackContext && agentContext.feedback) {
       agentContext.feedback.feedbackContext = extra.feedbackContext;
+    }
+
+    if (deps.retryQueue) {
+      const queue = deps.retryQueue;
+      agentContext.retryEnqueue = (messageText, delayMs) =>
+        queue.addDelayed({ userId: user.telegram_id, message: messageText, source: 'trigger' }, delayMs).then(() => {});
     }
 
     if (extra?.supplementMode) {

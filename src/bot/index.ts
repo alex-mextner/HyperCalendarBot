@@ -482,6 +482,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     onboardingScene: scenesSetup.scenes.onboardingScene,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
+    aiRetryQueue: undefined as import('../services/scheduled/types.ts').QueueAdapter | undefined,
     domainEvents: domainEventBus,
     editMessage: async (chatId: number, messageId: number, text: string) => {
       await bot.api

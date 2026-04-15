@@ -242,7 +242,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const lastEditText = editCalls[editCalls.length - 1]?.[2] as string;
-    expect(lastEditText).toContain('Произошла ошибка');
+    expect(lastEditText).toContain('Минутку, мне надо заварить');
   });
 
   test('run() breaks loop when model returns text without tool calls', async () => {
