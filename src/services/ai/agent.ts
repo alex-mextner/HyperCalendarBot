@@ -159,7 +159,7 @@ const StoredToolResultArraySchema = z.array(
  */
 const LegacyAnthropicContentBlocksSchema = z.array(z.object({ type: z.string() }).passthrough());
 
-const AssistantMessageCodec = jsonCodec(StoredAssistantMessageSchema);
+export const AssistantMessageCodec = jsonCodec(StoredAssistantMessageSchema);
 const ToolResultsCodec = jsonCodec(StoredToolResultArraySchema);
 const LegacyAnthropicContentBlocksCodec = jsonCodec(LegacyAnthropicContentBlocksSchema);
 const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());

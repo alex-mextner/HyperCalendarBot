@@ -274,7 +274,7 @@ function buildFastChain(): ProviderSlot[] {
  * Fallback rules:
  * - Provider returns 5xx / timeout / 429  → try next
  * - Balance exhausted                     → alert admin, try next
- * - Provider already streamed text to user → propagate the error (can't splice)
+ * - Provider died mid-stream after text was emitted → discard partial text, try next
  * - 200 OK but empty text AND no tool calls → try next (z.ai coding-endpoint quirk)
  * - 4xx non-429                           → propagate (client error — our bug)
  */

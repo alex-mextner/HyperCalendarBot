@@ -8,7 +8,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { AssistantMessageCodec, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
@@ -232,9 +232,11 @@ describe('CalendarBotAgent.run()', () => {
     expect(history.length).toBe(2);
     expect(history[0]!.role).toBe('user');
     expect(history[1]!.role).toBe('assistant');
-    const parsed = JSON.parse(history[1]!.content) as { role: string; content: string };
-    expect(parsed.content).toBeTruthy();
-    expect(parsed.content).not.toContain('An error occurred');
+    const parseResult = AssistantMessageCodec.safeParse(history[1]!.content);
+    expect(parseResult.success).toBe(true);
+    const stallContent = parseResult.success ? (parseResult.data.content ?? '') : '';
+    expect(stallContent).toBeTruthy();
+    expect(stallContent).not.toContain('An error occurred');
   });
 
   test('run() handles error with Russian language user', async () => {
@@ -246,9 +248,10 @@ describe('CalendarBotAgent.run()', () => {
 
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const lastEditText = editCalls[editCalls.length - 1]?.[2] as string;
-    // Russian cute phrases are shown — verify the message is non-empty and not English
+    // Russian cute phrases are shown — verify non-empty, not English, contains Cyrillic
     expect(lastEditText).toBeTruthy();
     expect(lastEditText).not.toContain('An error occurred');
+    expect(/[а-яёА-ЯЁ]/.test(lastEditText)).toBe(true);
   });
 
   test('run() breaks loop when model returns text without tool calls', async () => {
