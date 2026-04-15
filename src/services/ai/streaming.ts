@@ -27,11 +27,16 @@ export interface StreamRoundOptions {
   /** Use the fast chain (cheap/fast models) instead of the smart chain. Default: false. */
   fast?: boolean;
   signal?: AbortSignal;
+  /** User ID for log context only. */
+  userId?: number;
 }
 
 export interface StreamCallbacks {
   onTextDelta?: (text: string) => void;
   onToolCallStart?: (name: string) => void;
+  /** Called when provider failed mid-stream and fallback to next provider is attempted.
+   *  Caller should discard partial buffered content so the next provider starts clean. */
+  onProviderSwitch?: () => void;
 }
 
 export interface StreamToolCall {
@@ -291,11 +296,11 @@ export async function aiStreamRound(
 
   for (const slot of chain) {
     try {
-      aiLogger.info({ provider: slot.name }, 'Trying provider');
+      aiLogger.info({ provider: slot.name, userId: options.userId }, 'Trying provider');
       return await slot.stream(options, wrappedCallbacks);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      aiLogger.error({ err: lastError, provider: slot.name }, 'Provider failed');
+      aiLogger.error({ err: lastError, provider: slot.name, userId: options.userId }, 'Provider failed');
 
       const balanceExhausted = isBalanceExhausted(error);
       if (balanceExhausted) {
@@ -303,12 +308,17 @@ export async function aiStreamRound(
       }
 
       if (textEmitted) {
-        aiLogger.error({ provider: slot.name }, 'Provider died mid-stream after text was emitted — cannot fallback');
-        throw error;
+        aiLogger.error(
+          { provider: slot.name, userId: options.userId },
+          'Provider died mid-stream after text was emitted — discarding partial text and trying next provider',
+        );
+        callbacks.onProviderSwitch?.();
+        textEmitted = false;
+        // Fall through to the retryable check below so next provider is attempted.
       }
 
       if (isRetryableError(error) || balanceExhausted || error instanceof EmptyProviderResponseError) {
-        aiLogger.warn({ provider: slot.name }, 'Falling through to next provider');
+        aiLogger.warn({ provider: slot.name, userId: options.userId }, 'Falling through to next provider');
         continue;
       }
 

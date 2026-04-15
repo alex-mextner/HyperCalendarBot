@@ -538,6 +538,9 @@ export class CalendarBotAgent {
             // creating orphaned messages.
             writer.setToolLabel(name);
           },
+          onProviderSwitch: () => {
+            writer.resetBuffers();
+          },
         };
 
         const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
@@ -548,6 +551,7 @@ export class CalendarBotAgent {
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
+            userId: ctx.user.telegram_id,
           },
           callbacks,
         );
@@ -756,12 +760,10 @@ export class CalendarBotAgent {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
 
       const lang = ctx.user.language as 'en' | 'ru';
-      const msgs = t(lang);
-      writer.appendText(`\n\n${msgs.agent_error}`);
+      writer.appendText(`\n\n${t(lang).agent_error()}`);
 
       if (ctx.retryEnqueue && !ctx.supplementMode) {
         const RETRY_DELAY_MS = 60_000;
-        writer.appendText(`\n${msgs.agent_retry}`);
         ctx.retryEnqueue(ctx.messageText, RETRY_DELAY_MS).catch((err) => {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to queue retry');
         });

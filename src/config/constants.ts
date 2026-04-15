@@ -121,9 +121,16 @@ export const MSG = {
     confirm_delete: (title: string) => `Delete "${title}"?`,
     search_no_results: 'No events found.',
     something_wrong: 'Something went wrong. Try again or use /help.',
-    agent_error: '⚠️ Something went sideways on my end.',
+    agent_error: () => {
+      const phrases = [
+        'Give me a moment, I need to think this through.',
+        'One sec — gathering my thoughts.',
+        'Hold on, let me collect myself.',
+        'Just a second, I need to regroup.',
+      ];
+      return phrases[Math.floor(Math.random() * phrases.length)]!;
+    },
     agent_timeout: '⚠️ That took too long — timing out.',
-    agent_retry: 'Will retry automatically in a minute…',
     rate_limited: 'Slow down, too many messages.',
     add_title_prompt: "Let's create an event. What's the title?",
     add_time_prompt: 'When? (e.g., "tomorrow 18:00", "Mar 15 19:30")',
@@ -913,9 +920,16 @@ export const MSG = {
     confirm_delete: (title: string) => `Удалить "${title}"?`,
     search_no_results: 'Ничего не найдено.',
     something_wrong: 'Что-то пошло не так. Попробуйте ещё раз или /help.',
-    agent_error: '⚠️ Минутку, мне надо заварить себе кофе, и сразу отвечу.',
+    agent_error: () => {
+      const phrases = [
+        'Минутку, мне надо заварить себе кофе, и сразу отвечу.',
+        'Дай мне секунду — собираюсь с мыслями.',
+        'Одну секунду, мне нужно сосредоточиться.',
+        'Подожди чуть, я сейчас.',
+      ];
+      return phrases[Math.floor(Math.random() * phrases.length)]!;
+    },
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
-    agent_retry: 'Повторю автоматически через минуту…',
     rate_limited: 'Слишком много сообщений, подождите.',
     add_title_prompt: 'Создаём событие. Как назовём?',
     add_time_prompt: 'Когда? (например, "завтра 18:00", "15 мар 19:30")',
