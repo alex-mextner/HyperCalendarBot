@@ -49,14 +49,22 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
 
     // Cancel any pending retry when a fresh user message arrives
     if (currentAttempt === 0 && deps.retryJobStore && deps.retryQueue) {
-      const pendingJobId = await deps.retryJobStore.get(user.telegram_id);
-      if (pendingJobId) {
-        await deps.retryQueue
-          .removeJobById(pendingJobId)
-          .catch((err: unknown) =>
-            cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to cancel pending retry job'),
-          );
-        await deps.retryJobStore.del(user.telegram_id);
+      try {
+        const pendingJobId = await deps.retryJobStore.get(user.telegram_id);
+        if (pendingJobId) {
+          await deps.retryQueue
+            .removeJobById(pendingJobId)
+            .catch((err: unknown) =>
+              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to cancel pending retry job'),
+            );
+          await deps.retryJobStore
+            .del(user.telegram_id)
+            .catch((err: unknown) =>
+              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store'),
+            );
+        }
+      } catch (err: unknown) {
+        cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to check pending retry job in store');
       }
     }
 
