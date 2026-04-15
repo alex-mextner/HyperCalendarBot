@@ -10,6 +10,7 @@ export async function runPipeline(
   layers: PipelineLayer[],
   groupContext?: GroupContext,
   incomingMessageId?: number,
+  wasExplicitInvocation?: boolean,
 ): Promise<void> {
   let feedbackContext: FeedbackThreadContext | undefined;
   let supplementMode = false;
@@ -23,6 +24,7 @@ export async function runPipeline(
         incomingMessageId,
         supplementMode,
         supplementAutoResponse,
+        wasExplicitInvocation,
       });
       if (result.handled) {
         if ('needsSupplement' in result) {

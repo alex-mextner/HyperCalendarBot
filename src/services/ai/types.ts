@@ -241,6 +241,10 @@ export interface AgentContext {
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
   /** When set, queues a retry of the current message after delayMs. Not wired for queue-originated jobs (prevents retry loops). */
   retryEnqueue?: (messageText: string, delayMs: number) => Promise<void>;
+  /** True when the user explicitly addressed the bot (DM, @mention, "Бот,", reply to bot).
+   *  False for keyword-only or session-continuation group messages.
+   *  Stall phrases and retry queue fire only when true. */
+  wasExplicitInvocation?: boolean;
 }
 
 export type TelegramSessionData =

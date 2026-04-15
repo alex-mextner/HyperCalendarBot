@@ -28,6 +28,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       incomingMessageId?: number;
       supplementMode?: boolean;
       supplementAutoResponse?: string;
+      wasExplicitInvocation?: boolean;
     },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser;
@@ -57,6 +58,8 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       agentContext.supplementMode = true;
       agentContext.supplementAutoResponse = extra.supplementAutoResponse;
     }
+
+    agentContext.wasExplicitInvocation = extra?.wasExplicitInvocation ?? true;
 
     if (deps.scenePauseService) {
       const pauseState = await deps.scenePauseService.get(user.telegram_id);

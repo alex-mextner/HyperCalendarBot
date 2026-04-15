@@ -733,6 +733,25 @@ describe('CalendarBotAgent.run()', () => {
     expect(realCallCount).toBe(1);
   });
 
+  test('run() error skips stall phrase and retry when wasExplicitInvocation is false', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('provider failed') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    const retryEnqueue = mock(() => Promise.resolve());
+    ctx.wasExplicitInvocation = false;
+    ctx.retryEnqueue = retryEnqueue;
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    await agent.run(ctx);
+
+    // No retry queued for non-explicit invocation
+    expect(retryEnqueue).not.toHaveBeenCalled();
+    // No stall assistant turn saved — history has only the user message
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const assistantRows = history.filter((h) => h.role === 'assistant');
+    expect(assistantRows.length).toBe(0);
+  });
+
   test('different args with same tool name are NOT deduped', async () => {
     const { impl } = makeStreamImpl([
       {

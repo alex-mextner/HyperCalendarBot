@@ -759,20 +759,22 @@ export class CalendarBotAgent {
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
 
-      const lang = ctx.user.language as 'en' | 'ru';
-      const stallMessage = t(lang).agent_error();
-      writer.appendText(`\n\n${stallMessage}`);
+      if (ctx.wasExplicitInvocation !== false) {
+        const lang = ctx.user.language as 'en' | 'ru';
+        const stallMessage = t(lang).agent_error();
+        writer.appendText(`\n\n${stallMessage}`);
 
-      // Save to chat history so the model can see it and play along if the user reacts.
-      if (!ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
-      }
+        // Save to chat history so the model can see it and play along if the user reacts.
+        if (!ctx.supplementMode) {
+          this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
+        }
 
-      if (ctx.retryEnqueue && !ctx.supplementMode) {
-        const RETRY_DELAY_MS = 60_000;
-        ctx.retryEnqueue(ctx.messageText, RETRY_DELAY_MS).catch((err) => {
-          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to queue retry');
-        });
+        if (ctx.retryEnqueue && !ctx.supplementMode) {
+          const RETRY_DELAY_MS = 60_000;
+          ctx.retryEnqueue(ctx.messageText, RETRY_DELAY_MS).catch((err) => {
+            aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to queue retry');
+          });
+        }
       }
     }
 

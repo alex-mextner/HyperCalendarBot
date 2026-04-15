@@ -121,7 +121,7 @@ const ADDRESS_MAX_DISTANCE = 2;
 
 // Exact "календарь"/"calendar" words are already in keyword list.
 // This function handles typos only in the address prefix (e.g. "Каледарь,", "Calender,").
-function startsWithCalendarAddress(text: string): boolean {
+export function startsWithCalendarAddress(text: string): boolean {
   const firstWord = (text.trim().split(/[\s,!.?:]+/)[0] ?? '').toLowerCase();
   if (firstWord.length < 5) return false;
   return ADDRESS_TARGETS.some((target) => levenshtein(firstWord, target) <= ADDRESS_MAX_DISTANCE);
