@@ -32,7 +32,7 @@ export class SyntheticPipelineRunner {
       const currentAttempt = jobData.retryAttempt ?? 0;
       agentCtx.retryAttempt = currentAttempt;
 
-      if (this.deps.retryQueue && currentAttempt > 0) {
+      if (this.deps.retryQueue) {
         const queue = this.deps.retryQueue;
         const jobStore = this.deps.retryJobStore;
         const lang = user.language as 'en' | 'ru';

@@ -154,6 +154,74 @@ describe('SyntheticPipelineRunner', () => {
     expect(contextBuilder).toHaveBeenCalledWith(fakeUser, fakeUser.telegram_id, 'remind me tomorrow');
     expect(intentRun).toHaveBeenCalledWith(agentCtx, 'remind me tomorrow');
   });
+
+  test('wires retryEnqueue on scheduled call at attempt=0', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+
+    expect(captured.ctx?.retryEnqueue).toBeFunction();
+  });
+
+  test('wires retryEnqueue on trigger call at attempt=0', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'trigger fired', source: 'trigger' });
+
+    expect(captured.ctx?.retryEnqueue).toBeFunction();
+  });
+
+  test('scheduled call at attempt=0: retryEnqueue queues with 30s delay', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+    const addDelayed = mock(async (_data: unknown, _delay: number): Promise<string> => 'job-1');
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+    await captured.ctx!.retryEnqueue!('check calendar');
+
+    const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
+    expect(delay).toBe(30_000);
+    const [jobData] = addDelayed.mock.calls[0] as unknown as [{ retryAttempt: number }, number];
+    expect(jobData.retryAttempt).toBe(1);
+  });
 });
 
 // ─── createAiMessagesQueue ─────────────────────────────────────────────────────
