@@ -117,11 +117,14 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
   immediately invokes the next step handler with the **same context/message**, not just advances the
   counter for the next incoming message. This means if step N calls `step.next()`, step N+1 runs on
   the same user input (phone number interpreted as OTP code, OTP code interpreted as 2FA password, etc.).
-  **Do NOT use `firstTime` guards** — `firstTime` is reset via the `onNext` callback in Koa-compose,
-  but step handlers don't call `next()`, so `onNext` never fires and `firstTime` stays `true` forever.
-  **Use `_transitionMsgId` pattern instead**: save `context.id` in scene state before `step.next()`,
-  then check `if (context.scene.state._transitionMsgId === context.id) return;` at the top of the
-  receiving step. Real user messages have a different ID and proceed normally.
+  **Do NOT use `firstTime` guards** — `firstTime` is reset via `onNext` in Koa-compose, but step
+  handlers don't call `next()`, so `onNext` never fires and `firstTime` stays `true` forever.
+  **Do NOT use scene state flags** — `context.scene.update()` writes to storage but doesn't update
+  the in-memory `storageData` that `go()` passes to `scene.run()`, so the receiving step never sees it.
+  **Use in-memory `pendingStepTransitions` Set** (defined in `connect-telegram.scene.ts`):
+  `pendingStepTransitions.add(userId)` before `step.next()`, then
+  `if (pendingStepTransitions.delete(context.from.id)) return;` at the top of the receiving step.
+  Works because `step.next()` re-invokes synchronously in the same event loop tick.
   Exception: steps that listen to a different event type (e.g. `callback_query` after a `message` step)
   are safe because the event type filter prevents execution — no guard needed.
 
