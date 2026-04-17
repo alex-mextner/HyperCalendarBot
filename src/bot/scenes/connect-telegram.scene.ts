@@ -168,9 +168,9 @@ export function createConnectTelegramScene(
       })
 
       // Step 1: Phone number
+      // No firstTime guard — step 0→1 transition is via callback_query,
+      // which doesn't match this step's 'message' filter (natural protection).
       .step('message', async (context) => {
-        if (context.scene.step.firstTime) return;
-
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
@@ -184,7 +184,7 @@ export function createConnectTelegramScene(
 
         // Accept phone from shared contact or typed text; strip spaces/dashes/parens
         const raw = context.text?.trim();
-        const sharedPhone = (context as unknown as { contact?: { phone_number?: string } }).contact?.phone_number;
+        const sharedPhone = context.contact?.phoneNumber;
         const normalized = (sharedPhone ?? raw)?.replace(/[\s\-()]/g, '');
         const phone = normalized ? (normalized.startsWith('+') ? normalized : `+${normalized}`) : undefined;
 
