@@ -117,11 +117,13 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
   immediately invokes the next step handler with the **same context/message**, not just advances the
   counter for the next incoming message. This means if step N calls `step.next()`, step N+1 runs on
   the same user input (phone number interpreted as OTP code, OTP code interpreted as 2FA password, etc.).
-  **Always add `if (context.scene.step.firstTime) return;`** at the top of any message-type step that
-  receives control via `step.next()` from a previous message-type step. The framework resets `firstTime`
-  to `false` after the handler runs, so the next real user message will be processed normally.
+  **Do NOT use `firstTime` guards** — `firstTime` is reset via the `onNext` callback in Koa-compose,
+  but step handlers don't call `next()`, so `onNext` never fires and `firstTime` stays `true` forever.
+  **Use `_transitionMsgId` pattern instead**: save `context.id` in scene state before `step.next()`,
+  then check `if (context.scene.state._transitionMsgId === context.id) return;` at the top of the
+  receiving step. Real user messages have a different ID and proceed normally.
   Exception: steps that listen to a different event type (e.g. `callback_query` after a `message` step)
-  are safe because the event type filter prevents execution.
+  are safe because the event type filter prevents execution — no guard needed.
 
 ### Database
 
