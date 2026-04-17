@@ -48,6 +48,8 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+  /** Message ID that triggered step.next() — used to skip re-processing in the next step */
+  _transitionMsgId?: number;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -232,6 +234,7 @@ export function createConnectTelegramScene(
           phoneCodeHash: result.data.phone_code_hash,
           sessionPath,
           codeAttempts: 0,
+          _transitionMsgId: context.id,
         });
         await context.send(ct.codeSent, { reply_markup: { remove_keyboard: true } });
         await context.scene.step.next();
@@ -239,7 +242,8 @@ export function createConnectTelegramScene(
 
       // Step 2: OTP code
       .step('message', async (context) => {
-        if (context.scene.step.firstTime) return;
+        // Skip re-processing when step.next() from step 1 re-invokes with same message
+        if (context.scene.state._transitionMsgId === context.id) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
@@ -304,7 +308,7 @@ export function createConnectTelegramScene(
 
         if (result.data.status === '2fa_required') {
           await context.send(ct.enter2fa);
-          await context.scene.update({ passwordAttempts: 0 });
+          await context.scene.update({ passwordAttempts: 0, _transitionMsgId: context.id });
           await context.scene.step.next();
           return;
         }
@@ -318,7 +322,8 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
-        if (context.scene.step.firstTime) return;
+        // Skip re-processing when step.next() from step 2 re-invokes with same message
+        if (context.scene.state._transitionMsgId === context.id) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
