@@ -10,6 +10,8 @@ ALERT_URL="https://hypercal.invntrm.ru/admin/alerts"
 ENV_FILE="/opt/hypercal/.env"
 STATE_FILE="/tmp/hypercal-down"
 TIMEOUT=10
+RETRY_COUNT=3
+RETRY_DELAY=15
 
 # Read secrets from .env
 BOT_TOKEN=$(grep -m1 "^BOT_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
@@ -44,7 +46,19 @@ push_alert() {
   fi
 }
 
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000")
+probe_health() {
+  curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
+}
+
+# Retry to avoid false positives during deploys (container swap ~10-15s).
+# Only alert if all attempts fail — a transient single 503 is not an outage.
+HTTP_CODE=$(probe_health)
+attempt=1
+while [[ "$HTTP_CODE" != "200" && $attempt -lt $RETRY_COUNT ]]; do
+  sleep "$RETRY_DELAY"
+  attempt=$((attempt + 1))
+  HTTP_CODE=$(probe_health)
+done
 
 if [[ "$HTTP_CODE" != "200" ]]; then
   if [[ ! -f "$STATE_FILE" ]]; then
