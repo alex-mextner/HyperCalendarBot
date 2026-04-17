@@ -30,6 +30,13 @@ export const CODE_REGEX = /^\d{5}$/;
 const CONNECT_COOLDOWN_MS = 60_000;
 const connectAttempts = new Map<number, number>();
 
+/**
+ * In-memory set of userIds whose step.next() is currently re-processing.
+ * step.next() runs synchronously in the same tick, so this is safe.
+ * Added before step.next(), checked+removed at the top of the receiving step.
+ */
+const pendingStepTransitions = new Set<number>();
+
 export function registerConnectAttempt(userId: number): void {
   connectAttempts.set(userId, Date.now());
 }
@@ -48,8 +55,6 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
-  /** Message ID that triggered step.next() — used to skip re-processing in the next step */
-  _transitionMsgId?: number;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -204,6 +209,9 @@ export function createConnectTelegramScene(
           return;
         }
 
+        // Immediate feedback: remove keyboard + show progress
+        await context.send(ct.sendingCode, { reply_markup: { remove_keyboard: true } });
+
         // Reserve temp session path and send code
         const sessionPath = SessionBridge.reserveEmptySessionPath(userId);
         const result = await SessionBridge.sendCode(phone, sessionPath);
@@ -234,16 +242,15 @@ export function createConnectTelegramScene(
           phoneCodeHash: result.data.phone_code_hash,
           sessionPath,
           codeAttempts: 0,
-          _transitionMsgId: context.id,
         });
-        await context.send(ct.codeSent, { reply_markup: { remove_keyboard: true } });
+        await context.send(ct.codeSent);
+        pendingStepTransitions.add(userId);
         await context.scene.step.next();
       })
 
       // Step 2: OTP code
       .step('message', async (context) => {
-        // Skip re-processing when step.next() from step 1 re-invokes with same message
-        if (context.scene.state._transitionMsgId === context.id) return;
+        if (pendingStepTransitions.delete(context.from.id)) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
@@ -308,7 +315,8 @@ export function createConnectTelegramScene(
 
         if (result.data.status === '2fa_required') {
           await context.send(ct.enter2fa);
-          await context.scene.update({ passwordAttempts: 0, _transitionMsgId: context.id });
+          await context.scene.update({ passwordAttempts: 0 });
+          pendingStepTransitions.add(userId);
           await context.scene.step.next();
           return;
         }
@@ -322,8 +330,7 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
-        // Skip re-processing when step.next() from step 2 re-invokes with same message
-        if (context.scene.state._transitionMsgId === context.id) return;
+        if (pendingStepTransitions.delete(context.from.id)) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
