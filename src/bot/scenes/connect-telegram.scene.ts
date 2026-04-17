@@ -250,7 +250,15 @@ export function createConnectTelegramScene(
 
       // Step 2: OTP code
       .step('message', async (context) => {
-        if (pendingStepTransitions.delete(context.from.id)) return;
+        const guardHit = pendingStepTransitions.delete(context.from.id);
+        // Fallback: contact shares are never OTP codes
+        if (guardHit || context.contact) {
+          sceneLogger.debug(
+            { userId: context.from.id, guardHit, hasContact: !!context.contact },
+            'Step 2 skip re-processing',
+          );
+          return;
+        }
 
         const { lang } = context;
         const l = lang ?? 'en';
@@ -330,7 +338,13 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
-        if (pendingStepTransitions.delete(context.from.id)) return;
+        const guardHit = pendingStepTransitions.delete(context.from.id);
+        // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
+        const maybeOtp = context.text?.trim();
+        if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) {
+          sceneLogger.debug({ userId: context.from.id, guardHit, text: maybeOtp }, 'Step 3 skip re-processing');
+          return;
+        }
 
         const { lang } = context;
         const l = lang ?? 'en';
