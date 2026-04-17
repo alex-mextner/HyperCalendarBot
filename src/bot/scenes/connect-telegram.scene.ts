@@ -182,10 +182,11 @@ export function createConnectTelegramScene(
           return;
         }
 
-        // Accept phone from shared contact or typed text
+        // Accept phone from shared contact or typed text; strip spaces/dashes/parens
         const raw = context.text?.trim();
         const sharedPhone = (context as unknown as { contact?: { phone_number?: string } }).contact?.phone_number;
-        const phone = sharedPhone ? (sharedPhone.startsWith('+') ? sharedPhone : `+${sharedPhone}`) : raw;
+        const normalized = (sharedPhone ?? raw)?.replace(/[\s\-()]/g, '');
+        const phone = normalized ? (normalized.startsWith('+') ? normalized : `+${normalized}`) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
           await context.send(ct.invalidPhone);
