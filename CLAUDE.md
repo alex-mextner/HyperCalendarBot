@@ -113,6 +113,15 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
   ```
 - Scene shared types (`AddEventState`, `OnboardingState`, `TimezoneState`, `SceneKvStorage`)
   live in `src/bot/scenes/types.ts`.
+- **`step.next()` re-processes the current message** — `@gramio/scenes` `step.next()` (and `step.go()`)
+  immediately invokes the next step handler with the **same context/message**, not just advances the
+  counter for the next incoming message. This means if step N calls `step.next()`, step N+1 runs on
+  the same user input (phone number interpreted as OTP code, OTP code interpreted as 2FA password, etc.).
+  **Always add `if (context.scene.step.firstTime) return;`** at the top of any message-type step that
+  receives control via `step.next()` from a previous message-type step. The framework resets `firstTime`
+  to `false` after the handler runs, so the next real user message will be processed normally.
+  Exception: steps that listen to a different event type (e.g. `callback_query` after a `message` step)
+  are safe because the event type filter prevents execution.
 
 ### Database
 
