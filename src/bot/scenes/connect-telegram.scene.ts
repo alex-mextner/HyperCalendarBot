@@ -1,7 +1,7 @@
 // src/bot/scenes/connect-telegram.scene.ts
 
 import { Scene } from '@gramio/scenes';
-import { InlineKeyboard } from 'gramio';
+import { InlineKeyboard, Keyboard } from 'gramio';
 import { maskPhone, t } from '../../config/constants.ts';
 import type { ContactRepository } from '../../database/repositories/contact.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
@@ -159,7 +159,8 @@ export function createConnectTelegramScene(
           if (data === CB_CONNECT || data === CB_RECONNECT) {
             registerConnectAttempt(userId);
             await context.answer();
-            await context.send(ct.enterPhone);
+            const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
+            await context.send(ct.enterPhone, { reply_markup: phoneKb });
             await context.scene.step.next();
             return;
           }
@@ -168,11 +169,12 @@ export function createConnectTelegramScene(
 
       // Step 1: Phone number
       .step('message', async (context) => {
+        if (context.scene.step.firstTime) return;
+
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
-        const text = context.text?.trim();
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!masterKeyHex) {
           await context.send(ct.featureUnavailable);
@@ -180,12 +182,15 @@ export function createConnectTelegramScene(
           return;
         }
 
-        if (!text || !PHONE_REGEX.test(text)) {
+        // Accept phone from shared contact or typed text
+        const raw = context.text?.trim();
+        const sharedPhone = (context as unknown as { contact?: { phone_number?: string } }).contact?.phone_number;
+        const phone = sharedPhone ? (sharedPhone.startsWith('+') ? sharedPhone : `+${sharedPhone}`) : raw;
+
+        if (!phone || !PHONE_REGEX.test(phone)) {
           await context.send(ct.invalidPhone);
           return;
         }
-
-        const phone = text;
 
         // Check phone_hash uniqueness — another user may have this phone
         const hash = SessionBridge.phoneHash(phone);
@@ -227,12 +232,14 @@ export function createConnectTelegramScene(
           sessionPath,
           codeAttempts: 0,
         });
-        await context.send(ct.codeSent);
+        await context.send(ct.codeSent, { reply_markup: { remove_keyboard: true } });
         await context.scene.step.next();
       })
 
       // Step 2: OTP code
       .step('message', async (context) => {
+        if (context.scene.step.firstTime) return;
+
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
@@ -310,6 +317,8 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
+        if (context.scene.step.firstTime) return;
+
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
