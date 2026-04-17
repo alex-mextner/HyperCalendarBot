@@ -903,6 +903,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_USERNAME: config.BOT_USERNAME,
         AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
+        TELEGRAM_SESSION_MASTER_KEY: config.TELEGRAM_SESSION_MASTER_KEY,
       },
       weatherService,
       broadcastEnqueuer,
