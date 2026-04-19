@@ -186,11 +186,30 @@ export function mentionsBot(text: string): boolean {
 //   • time of day:   "15:30", "в 15:00", "at 8:30" (bare numbers like "at 8"
 //                    are too ambiguous — they trip on prices, scores, etc.)
 
-const NUMERIC_DATE_RE =
-  /(?<![\p{L}\p{N}])(?:(?:\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)|(?:\d{4}[./-]\d{1,2}[./-]\d{1,2}))(?![\p{L}\p{N}])/u;
+// Candidate numeric date: DD.MM, DD.MM.YYYY, YYYY-MM-DD.
+// The second lookbehind rejects matches that are part of a longer dotted/dashed
+// sequence (IP addresses like 192.168.1.1, phone numbers +7-999-123-45-67).
+const NUMERIC_DATE_CANDIDATE_RE =
+  /(?<![\p{L}\p{N}])(?<!\d[./-])(\d{1,4})([./-])(\d{1,2})(?:\2(\d{2,4}))?(?![\p{L}\p{N}])/gu;
 
-// Long month stems. Matched with an optional `[\p{L}]*` suffix so Russian case
-// endings (апрел+я, октябр+е, ноябр+ю) are covered without listing every form.
+function containsNumericDate(text: string): boolean {
+  for (const m of text.matchAll(NUMERIC_DATE_CANDIDATE_RE)) {
+    const a = Number(m[1]);
+    const b = Number(m[3]);
+    // YYYY-MM-DD: first group is a 4-digit year
+    if (m[1]!.length === 4) {
+      if (b >= 1 && b <= 12 && (!m[4] || (Number(m[4]) >= 1 && Number(m[4]) <= 31))) return true;
+      continue;
+    }
+    // DD.MM or DD.MM.YYYY: day 1-31, month 1-12
+    if (a >= 1 && a <= 31 && b >= 1 && b <= 12) return true;
+  }
+  return false;
+}
+
+// Long month stems. Matched with up to 3 trailing letters so Russian case
+// endings (апрел+я, октябр+е, январ+ями) are covered without listing every
+// form. The {0,3} cap rejects false positives like "мартышек" (4+ letter tail).
 // `ма[йяю]` handles "май", "мая", "маю" — stems shorter than four chars don't
 // share a common prefix the way the others do.
 const MONTH_STEMS_LONG =
@@ -198,9 +217,9 @@ const MONTH_STEMS_LONG =
   'january|february|march|april|june|july|august|september|october|november|december';
 
 // Short abbreviations. Matched only when standalone (no letter immediately after).
-const MONTH_STEMS_SHORT = 'янв|фев|мар|апр|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec';
+const MONTH_STEMS_SHORT = 'янв|фев|мар|апр|май|авг|сен|окт|ноя|дек|jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec';
 
-const MONTH_TOKEN = `(?:(?:${MONTH_STEMS_LONG})[\\p{L}]*|(?:${MONTH_STEMS_SHORT})(?![\\p{L}]))`;
+const MONTH_TOKEN = `(?:(?:${MONTH_STEMS_LONG})[\\p{L}]{0,3}(?![\\p{L}])|(?:${MONTH_STEMS_SHORT})(?![\\p{L}]))`;
 
 // "15 апреля", "15 апр", "15 april", "apr 15", "октября 10"
 const DAY_MONTH_RE = new RegExp(
@@ -212,7 +231,7 @@ const DAY_MONTH_RE = new RegExp(
 const TIME_RE = /(?<![\p{L}\p{N}])\d{1,2}:\d{2}(?![\p{L}\p{N}])/u;
 
 export function containsDateHint(text: string): boolean {
-  if (NUMERIC_DATE_RE.test(text)) return true;
+  if (containsNumericDate(text)) return true;
   if (DAY_MONTH_RE.test(text)) return true;
   if (TIME_RE.test(text)) return true;
   return false;

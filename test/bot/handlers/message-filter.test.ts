@@ -136,6 +136,12 @@ describe('containsDateHint', () => {
     test('random greeting', () => expect(containsDateHint('как дела?')).toBe(false));
     test('isolated month word (no day)', () => expect(containsDateHint('апрель уже близко')).toBe(false));
     test('word "may" without a day', () => expect(containsDateHint('i may go')).toBe(false));
+    test('IP address', () => expect(containsDateHint('connect to 192.168.1.1')).toBe(false));
+    test('version string', () => expect(containsDateHint('обновись до 2.0.1')).toBe(false));
+    test('price with decimals', () => expect(containsDateHint('стоит 15.50 руб')).toBe(false));
+    test('pi constant', () => expect(containsDateHint('число пи 3.14')).toBe(false));
+    test('phone number', () => expect(containsDateHint('звони +7-999-123-45-67')).toBe(false));
+    test('month stem inside a word (мартышек)', () => expect(containsDateHint('15 мартышек на дереве')).toBe(false));
   });
 });
 
@@ -152,4 +158,6 @@ describe('isGroupRelevant', () => {
   test('time triggers', () => expect(isGroupRelevant('в 19:30 подойду', bot)).toBe(true));
   test('unrelated small talk is ignored', () => expect(isGroupRelevant('как дела у тебя?', bot)).toBe(false));
   test('word "робот" alone is ignored', () => expect(isGroupRelevant('робот убирает в доме', bot)).toBe(false));
+  test('IP address is ignored', () => expect(isGroupRelevant('сервер на 192.168.1.1', bot)).toBe(false));
+  test('price is ignored', () => expect(isGroupRelevant('стоит 15.50 руб', bot)).toBe(false));
 });
