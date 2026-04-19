@@ -553,12 +553,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const incomingMsgId = context.update?.message?.message_id;
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
-          // /cal is an AI command — save args as plain user message, not a command event
+          // /cal is an AI command — save args as plain user message, not a command event.
+          // In groups, bare /cal means "look at the recent context above"; save the literal
+          // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
+          // prints usage help, so there's nothing to save.
           const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
-          if (calArgs) {
+          const savedText = calArgs || (logChatId ? '/cal' : '');
+          if (savedText) {
             chatHistoryIds.set(
               user.telegram_id,
-              conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId),
+              conversationLogger.logUserMessage(user.telegram_id, savedText, logChatId),
             );
           }
         } else if (incomingText.startsWith('/')) {
@@ -732,7 +736,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const user = ctx.dbUser;
       if (!user) return;
       const text = (ctx.args ?? '').trim();
-      if (!text) {
+      const chat = ctx.chat;
+      const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+      if (!text && !isGroup) {
         const lang = (user.language ?? 'en') as 'en' | 'ru';
         await ctx.send(
           lang === 'ru'
@@ -741,8 +747,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         );
         return;
       }
-      const chat = ctx.chat;
-      const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+      // In groups, bare /cal is a "look at the recent context above" trigger.
+      // The middleware already saved "/cal" to group chat history, so the agent
+      // picks up the last 50 messages and decides what to do.
+      const effectiveText = text || '/cal';
       const chatId = ctx.chatId;
       if (!chatId) return;
 
@@ -760,7 +768,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             },
           }
         : undefined;
-      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo, ctx.id));
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), effectiveText, groupInfo, ctx.id));
     })
     // Callback queries
     .on('callback_query', (ctx) => {
