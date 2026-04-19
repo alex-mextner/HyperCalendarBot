@@ -244,12 +244,15 @@ export function createConnectTelegramScene(
           return;
         }
 
-        await context.scene.update({
-          encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
-          phoneCodeHash: result.data.phone_code_hash,
-          sessionPath,
-          codeAttempts: 0,
-        });
+        await context.scene.update(
+          {
+            encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
+            phoneCodeHash: result.data.phone_code_hash,
+            sessionPath,
+            codeAttempts: 0,
+          },
+          { step: undefined },
+        );
         await context.send(ct.codeSent);
         pendingStepTransitions.add(userId);
         await context.scene.step.next();
@@ -268,11 +271,8 @@ export function createConnectTelegramScene(
         );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
-        if (guardHit || context.contact) {
-          // Persist step transition — pass {step:undefined} to avoid default go(stepId+1)
-          await context.scene.update({}, { step: undefined });
-          return;
-        }
+        // onNext in compose() persists the step unconditionally after all middleware runs
+        if (guardHit || context.contact) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
@@ -295,7 +295,7 @@ export function createConnectTelegramScene(
         }
 
         const attempts = (codeAttempts ?? 0) + 1;
-        await context.scene.update({ codeAttempts: attempts });
+        await context.scene.update({ codeAttempts: attempts }, { step: undefined });
 
         const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
         const result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
@@ -337,7 +337,7 @@ export function createConnectTelegramScene(
 
         if (result.data.status === '2fa_required') {
           await context.send(ct.enter2fa);
-          await context.scene.update({ passwordAttempts: 0 });
+          await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
           pendingStepTransitions.add(userId);
           await context.scene.step.next();
           return;
@@ -359,10 +359,7 @@ export function createConnectTelegramScene(
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
         const maybeOtp = context.text?.trim();
-        if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) {
-          await context.scene.update({}, { step: undefined });
-          return;
-        }
+        if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
         const { lang } = context;
         const l = lang ?? 'en';
@@ -385,7 +382,7 @@ export function createConnectTelegramScene(
         }
 
         const attempts = (passwordAttempts ?? 0) + 1;
-        await context.scene.update({ passwordAttempts: attempts });
+        await context.scene.update({ passwordAttempts: attempts }, { step: undefined });
 
         const result = await SessionBridge.checkPassword(text, sessionPath);
 
