@@ -290,7 +290,7 @@ export function createConnectTelegramScene(
         }
 
         // Strip spaces/dashes — user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
-        const code = text?.replace(/[\s\-]/g, '');
+        const code = text?.replace(/[\s-]/g, '');
         if (!code || !CODE_REGEX.test(code)) {
           await context.send(ct.invalidCode);
           return;
@@ -369,7 +369,7 @@ export function createConnectTelegramScene(
         );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
-        const maybeOtp = context.text?.trim()?.replace(/[\s\-]/g, '');
+        const maybeOtp = context.text?.trim()?.replace(/[\s-]/g, '');
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
         const { lang } = context;
