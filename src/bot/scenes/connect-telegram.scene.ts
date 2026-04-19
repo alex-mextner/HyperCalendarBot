@@ -120,6 +120,46 @@ export interface ConnectTelegramDeps {
   forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
+// --- Cancel-authorization helper ---
+
+interface CancelAuthContext {
+  answer: () => Promise<unknown>;
+  send: (text: string, options?: { reply_markup?: InlineKeyboard }) => Promise<unknown>;
+  from: { id: number };
+  chatId: number | bigint | undefined;
+  scene: {
+    state: ConnectTelegramState;
+    exit: () => Promise<boolean> | boolean;
+  };
+}
+
+/**
+ * Handle the "Cancel authorization" inline button.
+ * Cleans up the temp session file, exits the scene, and — if the user's last input
+ * was natural-language (stashed in `pendingForwardText`) — hands it off to the AI.
+ */
+async function handleCancelAuth(
+  context: CancelAuthContext,
+  ct: ReturnType<typeof t>['connectTelegram'],
+  deps: ConnectTelegramDeps | undefined,
+): Promise<void> {
+  await context.answer();
+  const userId = context.from.id;
+  const { sessionPath, pendingForwardText } = context.scene.state;
+  if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
+  const chatId = context.chatId;
+  if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
+    await context.send(ct.authCancelledAnswering);
+    await context.scene.exit();
+    deps
+      .forwardToAi(userId, Number(chatId), pendingForwardText)
+      .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
+    return;
+  }
+  await context.send(ct.authCancelled);
+  await context.scene.exit();
+}
+
 // --- Scene factory ---
 
 export function createConnectTelegramScene(
@@ -279,20 +319,7 @@ export function createConnectTelegramScene(
 
         if (context.is('callback_query')) {
           if (context.data === CB_CANCEL_AUTH) {
-            await context.answer();
-            const { sessionPath, pendingForwardText } = context.scene.state;
-            if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
-            const chatId = context.chatId;
-            if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
-              await context.send(ct.authCancelledAnswering);
-              await context.scene.exit();
-              deps
-                .forwardToAi(userId, Number(chatId), pendingForwardText)
-                .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
-              return;
-            }
-            await context.send(ct.authCancelled);
-            await context.scene.exit();
+            await handleCancelAuth(context, ct, deps);
           }
           return;
         }
@@ -393,19 +420,28 @@ export function createConnectTelegramScene(
       })
 
       // Step 3: 2FA password
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
+        const { lang } = context;
+        const l = lang ?? 'en';
+        const userId = context.from.id;
+        const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await handleCancelAuth(context, ct, deps);
+          }
+          return;
+        }
+
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
         const trimmed = context.text?.trim();
         const maybeOtp = trimmed ? normalizeOtpCode(trimmed) : undefined;
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
         const text = context.text?.trim();
         const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
+        const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
@@ -416,7 +452,7 @@ export function createConnectTelegramScene(
         }
 
         if (!text) {
-          await context.send(ct.invalid2fa);
+          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
           return;
         }
 
@@ -454,7 +490,7 @@ export function createConnectTelegramScene(
             return;
           }
 
-          await context.send(ct.invalid2fa);
+          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
           return;
         }
 

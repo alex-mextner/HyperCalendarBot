@@ -64,6 +64,7 @@ function makeCtx(overrides: {
   chatId?: number;
   userId?: number;
   lang?: 'en' | 'ru';
+  stepId?: number;
 }): MockCtx {
   const activeType = overrides.activeType ?? 'callback_query';
   const state: SceneState = overrides.state ?? {};
@@ -80,7 +81,7 @@ function makeCtx(overrides: {
       state,
       params: {},
       step: {
-        id: 2,
+        id: overrides.stepId ?? 2,
         firstTime: false,
         next: mock(() => Promise.resolve()),
         go: mock(() => Promise.resolve()),
@@ -256,5 +257,59 @@ describe('connect-telegram: Cancel authorization button', () => {
 
     expect(ctx.scene.state.pendingForwardText).toBeUndefined();
     expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
+
+  test('2FA step also handles Cancel authorization callback', async () => {
+    const forwardToAi = mock(() => Promise.resolve());
+    const scene = makeScene({ forwardToAi });
+    const twoFaStep = getStepFns(scene)[3]!;
+
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:cancel_auth',
+      chatId: 777,
+      userId: 321,
+      stepId: 3,
+      state: {
+        encryptedPhoneHex: 'abcd',
+        sessionPath: '/tmp/2fa.session',
+        pendingForwardText: 'какая у меня встреча завтра',
+      },
+    });
+
+    await twoFaStep(ctx, NOOP_NEXT);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(cleanupSpy).toHaveBeenCalledWith('/tmp/2fa.session');
+    expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    const text = ctx.send.mock.calls[0]![0] as string;
+    expect(text).toContain('Авторизация отменена');
+    expect(text).toContain('Отвечаю');
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(forwardToAi).toHaveBeenCalledTimes(1);
+    const fwdArgs = forwardToAi.mock.calls[0] as unknown as [number, number, string];
+    expect(fwdArgs[2]).toBe('какая у меня встреча завтра');
+  });
+
+  test('invalid2fa is shown with cancel button for empty password', async () => {
+    const scene = makeScene();
+    const twoFaStep = getStepFns(scene)[3]!;
+
+    const ctx = makeCtx({
+      activeType: 'message',
+      text: '',
+      stepId: 3,
+      state: {
+        encryptedPhoneHex: 'abcd',
+        sessionPath: '/tmp/2fa.session',
+      },
+    });
+
+    await twoFaStep(ctx, NOOP_NEXT);
+
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const [text, opts] = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: unknown }];
+    expect(text).toBe('Неверный пароль. Попробуй ещё раз.');
+    expect(opts?.reply_markup).toBeDefined();
   });
 });
