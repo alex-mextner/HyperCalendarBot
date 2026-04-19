@@ -78,7 +78,16 @@ export async function handleStart(ctx: BotCommandContext, deps: StartDeps): Prom
 
           if (!user.onboarding_completed) {
             cmdLogger.info({ userId: user.telegram_id }, 'Starting onboarding after invitation deep link');
-            await ctx.scene.enter(deps.onboardingScene);
+            await ctx.scene.enter(
+              deps.onboardingScene,
+              invitation && invitation.status === 'pending'
+                ? {
+                    pendingInvitationId: invitation.id,
+                    pendingEventId: resolved.payload.event_id,
+                    pendingInviterTelegramId: invitation.inviter_id,
+                  }
+                : {},
+            );
           }
           return;
         }

@@ -151,7 +151,7 @@ export interface ToolInputMap {
   get_holidays: { limit?: number };
   manage_settings: ManageSettingsInput;
   share_event: { event_id: number; target_type: 'user' | 'group'; target_id: number };
-  send_invitation: { event_id: number; invitee_id: number; invitee_username?: string };
+  send_invitation: { event_id: number; invitee_id?: number; invitee_username?: string };
   get_invitation_status: { event_id: number };
   share_agenda: { period: 'today' | 'tomorrow' | 'week'; target_type: 'user' | 'group'; target_id: number };
   set_event_visibility: { event_id: number; visibility: 'private' | 'free_busy' | 'full'; owner_id?: number };

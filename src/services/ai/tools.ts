@@ -504,7 +504,8 @@ const toolDefinitions: ToolDefinition[] = [
     name: 'send_invitation',
     description:
       'Create an invitation record and attempt delivery to another user. ' +
-      'invitee_id MUST come from find_contact, find_user, or the pick_users callback in this conversation — never from memory or assumption. ' +
+      'Provide invitee_id (from find_contact, find_user, or pick_users) or invitee_username — at least one is required. ' +
+      'If only username is provided, the bot resolves the ID automatically. If resolve fails, a user picker opens. ' +
       'Success means the record was created and delivery is in progress; it does NOT mean the message was received.',
     input_schema: {
       type: 'object' as const,
@@ -513,14 +514,16 @@ const toolDefinitions: ToolDefinition[] = [
         invitee_id: {
           type: 'number',
           description:
-            'Telegram ID of the user to invite. Must be a value returned by find_contact, find_user, or pick_users in this conversation.',
+            'Telegram ID of the user to invite. From find_contact, find_user, or pick_users. ' +
+            'Optional if invitee_username is provided.',
         },
         invitee_username: {
           type: 'string',
-          description: 'Telegram @username of the invitee (without @). Pass if known from find_contact.',
+          description:
+            'Telegram @username of the invitee (without @). If invitee_id is not provided, the bot resolves it automatically.',
         },
       },
-      required: ['event_id', 'invitee_id'],
+      required: ['event_id'],
     },
   },
   {

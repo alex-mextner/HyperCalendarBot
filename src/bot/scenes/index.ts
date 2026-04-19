@@ -51,7 +51,19 @@ export function createScenesPlugin(
   const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);
   const timezoneScene = createTimezoneScene(db, userComposer);
-  const onboardingScene = createOnboardingScene(db, userComposer, gcalConfigured, prefsService, holidayService);
+  const onboardingScene = createOnboardingScene(
+    db,
+    userComposer,
+    gcalConfigured,
+    prefsService,
+    holidayService,
+    undefined,
+    {
+      invitationRepo: db.invitations,
+      userRepo: db.users,
+      eventService,
+    },
+  );
   const connectTelegramDeps = connectTelegramSceneDeps?.invitationService
     ? {
         eventRepo: db.events,

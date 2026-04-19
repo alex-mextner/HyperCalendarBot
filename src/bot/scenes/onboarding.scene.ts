@@ -4,6 +4,10 @@ import { Scene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import { CB, t } from '../../config/constants.ts';
 import type { DatabaseService } from '../../database/index.ts';
+import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { UserRepository } from '../../database/repositories/user.repository.ts';
+import type { EventService } from '../../services/event/event-service.ts';
+import { formatInvitation } from '../../services/event/formatters.ts';
 import type { HolidayService } from '../../services/holiday/holiday-service.ts';
 import type { NotificationPreferencesService } from '../../services/notification/preferences.ts';
 import { resolveCity } from '../../services/timezone/city-resolver.ts';
@@ -12,6 +16,7 @@ import {
   guessCountryFromTimezone,
   resolveTimezone,
 } from '../../services/timezone/timezone-service.ts';
+import { botLogger } from '../../utils/logger.ts';
 import {
   cityInputPrompt,
   countryKeyboard,
@@ -21,9 +26,15 @@ import {
   timezoneMethodKeyboard,
 } from '../keyboards.ts';
 import type { UserResolverComposer } from '../middleware/user-resolver.ts';
-import type { OnboardingState } from './types.ts';
+import type { OnboardingParams, OnboardingState } from './types.ts';
 
 const GCAL_ONBOARD_LATER = `${CB.GCAL}:onboard:later`;
+
+export interface OnboardingInvitationDeps {
+  invitationRepo: InvitationRepository;
+  userRepo: UserRepository;
+  eventService: EventService;
+}
 
 export function createOnboardingScene(
   db: DatabaseService,
@@ -32,11 +43,14 @@ export function createOnboardingScene(
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
   resolveCityFn?: typeof resolveCity,
+  invitationDeps?: OnboardingInvitationDeps,
 ) {
   const resolveCity_ = resolveCityFn ?? resolveCity;
   return (
     new Scene('onboarding')
       .state<OnboardingState>()
+      .params<OnboardingParams>()
+      // extend() AFTER params() — params() uses Modify which replaces Derives.global
       .extend(userComposer)
       // onEnter sends welcome — because scene is entered from /start (message)
       // but step 0 is "callback_query", so firstTime won't fire on entry
@@ -201,6 +215,44 @@ export function createOnboardingScene(
 
         const tourKb = new InlineKeyboard().text(t(l).feature_tour_btn, `${CB.FEATURE_TOUR}:0`);
         await context.send(t(l).onboard_done, { reply_markup: tourKb });
+
+        // Re-display invitation with user's timezone after onboarding
+        const params = context.scene.params;
+        if (params?.pendingInvitationId && params.pendingEventId && params.pendingInviterTelegramId && invitationDeps) {
+          try {
+            const invitation = invitationDeps.invitationRepo.findById(params.pendingInvitationId);
+            if (invitation && invitation.status === 'pending') {
+              const event = invitationDeps.eventService.getEvent(
+                params.pendingEventId,
+                params.pendingInviterTelegramId,
+              );
+              const inviter = invitationDeps.userRepo.findByTelegramId(params.pendingInviterTelegramId);
+              const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${params.pendingInviterTelegramId}`;
+              const userTz = context.scene.state.timezone;
+              if (event && userTz) {
+                const text = formatInvitation(
+                  event,
+                  event.timezone,
+                  l,
+                  inviterName,
+                  params.pendingInviterTelegramId,
+                  inviter?.username,
+                  userTz,
+                  true,
+                );
+                const kb = new InlineKeyboard()
+                  .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+                  .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+                  .row()
+                  .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
+                  .text(t(l).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
+                await context.send(text, { parse_mode: 'HTML', reply_markup: kb });
+              }
+            }
+          } catch (err) {
+            botLogger.warn({ err, userId: context.from.id }, 'Failed to re-display invitation after onboarding');
+          }
+        }
 
         // Show Google Calendar onboarding prompt if configured and not already connected
         if (gcalConfigured) {

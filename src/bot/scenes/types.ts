@@ -10,6 +10,12 @@ export interface AddEventState {
   location?: string;
 }
 
+export interface OnboardingParams {
+  pendingInvitationId?: number;
+  pendingEventId?: number;
+  pendingInviterTelegramId?: number;
+}
+
 export interface OnboardingState {
   lang?: 'en' | 'ru';
   detectedTz?: string;
