@@ -62,6 +62,7 @@ async def cmd_send_code(args: argparse.Namespace) -> None:
         print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
         sys.exit(1)
     finally:
+        await client.storage.save()
         await client.disconnect()
 
 
@@ -83,6 +84,7 @@ async def cmd_sign_in(args: argparse.Namespace) -> None:
         print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
         sys.exit(1)
     finally:
+        await client.storage.save()
         await client.disconnect()
 
 
@@ -100,6 +102,7 @@ async def cmd_check_password(args: argparse.Namespace) -> None:
         print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
         sys.exit(1)
     finally:
+        await client.storage.save()
         await client.disconnect()
 
 
@@ -113,6 +116,7 @@ async def cmd_log_out(args: argparse.Namespace) -> None:
         print(error_json("LOG_OUT_FAILED", str(e)))
         sys.exit(1)
     finally:
+        await client.storage.save()
         await client.disconnect()
 
 
@@ -143,6 +147,7 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
         print(error_json("AUTH_QUERY_FAILED", str(e)))
         sys.exit(1)
     finally:
+        await client.storage.save()
         await client.disconnect()
 
 
