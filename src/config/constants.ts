@@ -204,6 +204,7 @@ export const MSG = {
     // in `<b>...</b>` and concatenates `fromHtml` verbatim.
     invitation_received: (titleHtml: string, fromHtml: string) =>
       `📨 <b>${titleHtml}</b> — invitation from ${fromHtml}`,
+    invite_timezone_note: (inviterName: string, tz: string) => `\n⏰ Time shown in ${inviterName}'s timezone (${tz})`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -943,6 +944,7 @@ export const MSG = {
     // SAFETY: see en.invitation_received — both args must be HTML-safe before
     // being passed; template wraps `titleHtml` in <b> and concatenates `fromHtml`.
     invitation_received: (titleHtml: string, fromHtml: string) => `📨 <b>${titleHtml}</b> — приглашение от ${fromHtml}`,
+    invite_timezone_note: (inviterName: string, tz: string) => `\n⏰ Время в часовом поясе ${inviterName} (${tz})`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',

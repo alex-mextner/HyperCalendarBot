@@ -195,6 +195,7 @@ export function formatInvitation(
   const header = t(lang as Lang).invitation_received(escapeHtml(event.title), inviterLink);
 
   // Title is already in the header — skip it in the detail block to avoid duplication.
+  let card: string;
   if (!event.all_day) {
     const timeLabel = formatTimeWithTimezones(
       event.start_at,
@@ -208,10 +209,17 @@ export function formatInvitation(
       ? `${formatTime(event.start_at, timezone)}–${formatTime(event.end_at, timezone)}`
       : formatTime(event.start_at, timezone);
     const annotatedDetail = eventDetail.replace(plainTime, timeLabel);
-    return `${header}\n\n${annotatedDetail}`;
+    card = `${header}\n\n${annotatedDetail}`;
+  } else {
+    card = `${header}\n\n${formatEventDetail(event, timezone, lang, { includeTitle: false })}`;
   }
 
-  return `${header}\n\n${formatEventDetail(event, timezone, lang, { includeTitle: false })}`;
+  // Add timezone note for non-onboarded recipients so they know whose timezone is shown
+  if (!recipientOnboarded) {
+    card += t(lang as Lang).invite_timezone_note(escapeHtml(inviterName), timezone);
+  }
+
+  return card;
 }
 
 export function formatEventListItem(event: CalendarEvent, timezone: string, index: number, lang = 'en'): string {

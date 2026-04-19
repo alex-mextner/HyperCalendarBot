@@ -640,16 +640,17 @@ describe('formatInvitation', () => {
     timezone: 'Europe/Moscow',
   });
 
-  test('no recipient info — shows only sender timezone', () => {
+  test('no recipient info — shows sender timezone + inviter note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1);
     expect(result).toContain('15:00 (Europe/Moscow)');
-    expect(result).not.toContain('Europe/Kyiv');
+    expect(result).toContain("Alice's timezone");
   });
 
-  test('recipient not onboarded — shows only sender timezone', () => {
+  test('recipient not onboarded — shows sender timezone + inviter note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', false);
     expect(result).toContain('15:00 (Europe/Moscow)');
-    expect(result).not.toContain('Europe/Kyiv');
+    expect(result).toContain("Alice's timezone");
+    expect(result).not.toContain('14:00');
   });
 
   test('recipient null timezone — shows only sender timezone', () => {
@@ -658,16 +659,18 @@ describe('formatInvitation', () => {
     expect(result).not.toContain('(Europe/Moscow) /');
   });
 
-  test('recipient onboarded with different timezone — shows both timezones', () => {
+  test('recipient onboarded with different timezone — shows both timezones, no note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Kyiv', true);
     expect(result).toContain('15:00 (Europe/Moscow) / 14:00 (Europe/Kyiv)');
+    expect(result).not.toContain('timezone');
   });
 
-  test('recipient onboarded with same timezone — shows timezone once', () => {
+  test('recipient onboarded with same timezone — shows timezone once, no note', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, null, 'Europe/Moscow', true);
     expect(result).toContain('15:00 (Europe/Moscow)');
-    // Should not show duplicate
+    // Should not show duplicate or timezone note
     expect(result.match(/Europe\/Moscow/g)?.length).toBe(1);
+    expect(result).not.toContain('timezone');
   });
 
   test('all-day event — no timezone annotation', () => {
@@ -690,6 +693,12 @@ describe('formatInvitation', () => {
     expect(firstLine).toContain('Team Meeting');
     expect(firstLine).toContain('invitation from');
     expect(firstLine).toContain('@alice_tg');
+  });
+
+  test('timezone note in Russian for non-onboarded recipient', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алиса', 1, null, null, false);
+    expect(result).toContain('часовом поясе Алиса');
+    expect(result).toContain('Europe/Moscow');
   });
 
   test('Russian header front-loads event title (phone preview)', () => {
@@ -738,7 +747,9 @@ describe('formatInvitation', () => {
     // formatEventDetail or the invitation header that reintroduces the
     // duplicated title (or shifts the overall layout) trips this test.
     const result = formatInvitation(event, 'Europe/Moscow', 'en', 'Alice', 1, 'alice_tg');
-    expect(result).toBe(`📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)`);
+    expect(result).toBe(
+      `📨 <b>Team Meeting</b> — invitation from @alice_tg\n\n🕐 Wed 11, 15:00 (Europe/Moscow) (1h)\n⏰ Time shown in Alice's timezone (Europe/Moscow)`,
+    );
   });
 });
 
