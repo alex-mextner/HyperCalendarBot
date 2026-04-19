@@ -179,8 +179,42 @@ describe('handleStart with deep links', () => {
     expect(ctx.send).toHaveBeenCalled();
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('Party');
-    // Then starts onboarding
-    expect(ctx.scene.enter).toHaveBeenCalledWith(onboardingScene);
+    // Then starts onboarding with invitation params
+    expect(ctx.scene.enter).toHaveBeenCalledWith(onboardingScene, {
+      pendingInvitationId: 10,
+      pendingEventId: 42,
+      pendingInviterTelegramId: 200,
+    });
+  });
+
+  test('i_ deep link passes empty params to onboarding for non-pending invitation', async () => {
+    const { handleStart } = await import('../../../src/bot/commands/start.ts');
+    const onboardingScene = { name: 'onboarding' };
+    const ctx = {
+      args: 'i_invite123',
+      dbUser: { telegram_id: 100, language: 'en', onboarding_completed: 0 },
+      send: mock(() => Promise.resolve()),
+      scene: { enter: mock(() => Promise.resolve()) },
+    };
+    await handleStart(
+      ctx as never,
+      makeDeps({
+        onboardingScene: onboardingScene as never,
+        deepLinkService: {
+          resolve: mock(() => ({
+            type: 'invitation' as const,
+            payload: { invitation_id: 10, event_id: 42 },
+            createdBy: 200,
+          })),
+        } as never,
+        eventService: { getEvent: mock(() => null) } as never,
+        invitationRepo: {
+          findById: mock(() => ({ id: 10, inviter_id: 200, invitee_id: 100, status: 'accepted' })),
+        } as never,
+      }),
+    );
+    // Expired/accepted invitation — enter onboarding with empty params
+    expect(ctx.scene.enter).toHaveBeenCalledWith(onboardingScene, {});
   });
 
   test('g_ deep link shows group connected message', async () => {
