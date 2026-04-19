@@ -175,9 +175,16 @@ export function createConnectTelegramScene(
       })
 
       // Step 1: Phone number
-      // No firstTime guard — step 0→1 transition is via callback_query,
-      // which doesn't match this step's 'message' filter (natural protection).
       .step('message', async (context) => {
+        sceneLogger.info(
+          {
+            userId: context.from.id,
+            stepId: context.scene.step.id,
+            text: context.text?.substring(0, 15),
+            hasContact: !!context.contact,
+          },
+          'CT step 1 entry',
+        );
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
@@ -250,6 +257,15 @@ export function createConnectTelegramScene(
 
       // Step 2: OTP code
       .step('message', async (context) => {
+        sceneLogger.info(
+          {
+            userId: context.from.id,
+            stepId: context.scene.step.id,
+            text: context.text?.substring(0, 15),
+            hasContact: !!context.contact,
+          },
+          'CT step 2 entry',
+        );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         if (guardHit || context.contact) {
@@ -336,6 +352,10 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
+        sceneLogger.info(
+          { userId: context.from.id, stepId: context.scene.step.id, text: '***', hasContact: !!context.contact },
+          'CT step 3 entry',
+        );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
         const maybeOtp = context.text?.trim();
