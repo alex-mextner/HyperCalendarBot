@@ -226,6 +226,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         meta?: { invitationId?: number },
       ) => Promise<boolean>)
     | undefined;
+  // Late-bound: the AI agent is created after createScenesPlugin.
+  // The scene calls this on "Cancel authorization" to keep the conversation going.
+  let forwardToAiRef: ((userId: number, chatId: number, text: string) => Promise<void>) | undefined;
 
   const scenesSetup = createScenesPlugin(
     db,
@@ -245,6 +248,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       },
       deepLinkService,
       botUsername: envConfig?.BOT_USERNAME,
+      forwardToAi: (userId, chatId, text) => {
+        if (!forwardToAiRef) return Promise.resolve();
+        return forwardToAiRef(userId, chatId, text);
+      },
     },
   );
 
@@ -517,6 +524,14 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     addressCache,
     pendingGeoStore,
     weatherService,
+  };
+
+  // Wire late-bound ref now that agent and msgDeps exist. Used by connect-telegram scene's
+  // "Cancel authorization" button to forward the original user message to the AI agent.
+  forwardToAiRef = async (userId: number, chatId: number, text: string) => {
+    const user = db.users.findByTelegramId(userId);
+    if (!user) return;
+    await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
   };
 
   // AI Assistant commands (not in setMyCommands — internal use only)

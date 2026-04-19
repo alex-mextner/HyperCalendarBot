@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import {
   CODE_REGEX,
   isConnectCooldownActive,
+  isOtpLikeText,
   normalizeOtpCode,
   normalizePhone,
   PHONE_REGEX,
   pendingStepTransitions,
   registerConnectAttempt,
 } from '../../../src/bot/scenes/connect-telegram.scene.ts';
+import { t } from '../../../src/config/constants.ts';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
 
 describe('connect-telegram scene helpers', () => {
@@ -131,5 +133,52 @@ describe('normalizeOtpCode', () => {
   test('letters are not stripped (result fails CODE_REGEX)', () => {
     const normalized = normalizeOtpCode('1a2b3');
     expect(CODE_REGEX.test(normalized)).toBe(false);
+  });
+});
+
+describe('isOtpLikeText', () => {
+  test('accepts plain digits', () => {
+    expect(isOtpLikeText('12345')).toBe(true);
+    expect(isOtpLikeText('1234')).toBe(true);
+  });
+
+  test('accepts digits with spaces and dashes', () => {
+    expect(isOtpLikeText('1 2 3 4 5')).toBe(true);
+    expect(isOtpLikeText('123-45')).toBe(true);
+    expect(isOtpLikeText('1 2-3 4 5')).toBe(true);
+    expect(isOtpLikeText('12 345')).toBe(true);
+  });
+
+  test('rejects natural-language text', () => {
+    expect(isOtpLikeText('what is my calendar?')).toBe(false);
+    expect(isOtpLikeText('покажи события')).toBe(false);
+    expect(isOtpLikeText('code is 12345')).toBe(false);
+  });
+
+  test('rejects text with letters among digits', () => {
+    expect(isOtpLikeText('1a2b3')).toBe(false);
+    expect(isOtpLikeText('123 abc')).toBe(false);
+  });
+
+  test('rejects empty string', () => {
+    expect(isOtpLikeText('')).toBe(false);
+  });
+});
+
+describe('cancel-authorization i18n', () => {
+  test('EN connectTelegram exposes new cancel strings', () => {
+    const ct = t('en').connectTelegram;
+    expect(ct.btnCancelAuth).toBe('Cancel authorization');
+    expect(ct.authCancelled).toBe('Authorization cancelled.');
+    expect(ct.authCancelledAnswering).toContain('Authorization cancelled');
+    expect(ct.authCancelledAnswering).toContain('Answering');
+  });
+
+  test('RU connectTelegram exposes new cancel strings', () => {
+    const ct = t('ru').connectTelegram;
+    expect(ct.btnCancelAuth).toBe('Отменить авторизацию');
+    expect(ct.authCancelled).toBe('Авторизация отменена.');
+    expect(ct.authCancelledAnswering).toContain('Авторизация отменена');
+    expect(ct.authCancelledAnswering).toContain('Отвечаю');
   });
 });

@@ -26,6 +26,12 @@ const sceneLogger = logger.child({ module: 'connect-telegram-scene' });
 
 export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
+const OTP_LIKE_REGEX = /^[\d\s-]+$/;
+
+/** True if the text contains only digits, spaces and dashes (an OTP-shaped string). */
+export function isOtpLikeText(text: string): boolean {
+  return OTP_LIKE_REGEX.test(text);
+}
 
 const CONNECT_COOLDOWN_MS = 60_000;
 const connectAttempts = new Map<number, number>();
@@ -66,6 +72,8 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+  /** Last non-OTP-shaped text the user sent at the OTP step — forwarded to AI on cancel. */
+  pendingForwardText?: string;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -92,6 +100,7 @@ const CB_CONNECT = `${CB_PREFIX}:connect`;
 const CB_CANCEL = `${CB_PREFIX}:cancel`;
 const CB_RECONNECT = `${CB_PREFIX}:reconnect`;
 const CB_SKIP_PENDING = `${CB_PREFIX}:skip_pending`;
+const CB_CANCEL_AUTH = `${CB_PREFIX}:cancel_auth`;
 
 export interface ConnectTelegramDeps {
   eventRepo: EventRepository;
@@ -107,6 +116,8 @@ export interface ConnectTelegramDeps {
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
+  /** Hand off a user message to the AI agent (used when cancelling auth to keep a conversation going). */
+  forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
 // --- Scene factory ---
@@ -260,16 +271,37 @@ export function createConnectTelegramScene(
       })
 
       // Step 2: OTP code
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
+        const { lang } = context;
+        const l = lang ?? 'en';
+        const userId = context.from.id;
+        const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await context.answer();
+            const { sessionPath, pendingForwardText } = context.scene.state;
+            if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
+            const chatId = context.chatId;
+            if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
+              await context.send(ct.authCancelledAnswering);
+              await context.scene.exit();
+              deps
+                .forwardToAi(userId, Number(chatId), pendingForwardText)
+                .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
+              return;
+            }
+            await context.send(ct.authCancelled);
+            await context.scene.exit();
+          }
+          return;
+        }
+
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         // onNext in compose() persists the step unconditionally after all middleware runs
         if (guardHit || context.contact) return;
 
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
         const text = context.text?.trim();
         const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
 
@@ -284,7 +316,11 @@ export function createConnectTelegramScene(
         // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
         const code = text ? normalizeOtpCode(text) : undefined;
         if (!code || !CODE_REGEX.test(code)) {
-          await context.send(ct.invalidCode);
+          // Save the non-OTP-shaped text for AI forwarding on cancel; pure digits/spaces/dashes go nowhere
+          const forwardText = text && !isOtpLikeText(text) ? text : undefined;
+          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
+          const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidCode, { reply_markup: kb });
           return;
         }
 
@@ -325,7 +361,10 @@ export function createConnectTelegramScene(
             return;
           }
 
-          await context.send(ct.invalidCode);
+          // Digits-only code rejected by Telegram — no text to forward, just offer to bail out
+          await context.scene.update({ pendingForwardText: undefined }, { step: undefined });
+          const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidCode, { reply_markup: retryKb });
           return;
         }
 

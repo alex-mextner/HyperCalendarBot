@@ -28,6 +28,7 @@ interface ConnectTelegramSceneDeps {
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
+  forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
 export function createScenesPlugin(
@@ -73,6 +74,7 @@ export function createScenesPlugin(
         sendAsConnectedUser: connectTelegramSceneDeps.sendAsConnectedUser,
         deepLinkService: connectTelegramSceneDeps.deepLinkService,
         botUsername: connectTelegramSceneDeps.botUsername,
+        forwardToAi: connectTelegramSceneDeps.forwardToAi,
       }
     : undefined;
   const connectTelegramScene = createConnectTelegramScene(
