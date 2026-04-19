@@ -298,7 +298,20 @@ export function createConnectTelegramScene(
         await context.scene.update({ codeAttempts: attempts }, { step: undefined });
 
         const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
+        const sessionExists = await Bun.file(sessionPath).exists();
+        sceneLogger.info(
+          { userId, sessionPath, sessionExists, phoneCodeHashLen: phoneCodeHash?.length },
+          'signIn: pre-check',
+        );
         const result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
+        sceneLogger.info(
+          {
+            userId,
+            success: result.success,
+            ...(result.success ? {} : { error: result.error, message: result.message }),
+          },
+          'signIn: result',
+        );
 
         if (!result.success) {
           if (result.error === 'CODE_EXPIRED') {
