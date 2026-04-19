@@ -23,7 +23,6 @@
         "marked": "^15.0.12",
         "mitt": "^3.0.1",
         "openai": "^6.34.0",
-        "petrovich": "^0.2.1",
         "pino": "^10.3.1",
         "playwright": "^1.59.1",
         "playwright-core": "^1.59.1",
@@ -804,8 +803,6 @@
     "pe-library": ["pe-library@0.4.1", "", {}, "sha512-eRWB5LBz7PpDu4PUlwT0PhnQfTQJlDDdPa35urV4Osrm0t0AqQFGn+UIkU3klZvwJ8KPO3VbBFsXquA6p6kqZw=="],
 
     "pend": ["pend@1.2.0", "", {}, "sha512-F3asv42UuXchdzt+xXqfW1OGlVBe+mxa2mqI0pg5yAHZPvFmY3Y6drSf/GQ1A86WgWEN9Kzh/WrgKa6iGcHXLg=="],
-
-    "petrovich": ["petrovich@0.2.1", "", {}, "sha512-qBuAhvo7C0nusL4ZhgK+tcHYTX8uqkHFyQVbVcvB6/h3K1Hu2zPXT4hnX9/o5MSXc28AGkaoatqX/3D/KEhM+Q=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 

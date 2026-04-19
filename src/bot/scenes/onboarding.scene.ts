@@ -16,6 +16,7 @@ import {
   guessCountryFromTimezone,
   resolveTimezone,
 } from '../../services/timezone/timezone-service.ts';
+import { botLogger } from '../../utils/logger.ts';
 import {
   cityInputPrompt,
   countryKeyboard,
@@ -218,31 +219,38 @@ export function createOnboardingScene(
         // Re-display invitation with user's timezone after onboarding
         const params = context.scene.params;
         if (params?.pendingInvitationId && params.pendingEventId && params.pendingInviterTelegramId && invitationDeps) {
-          const invitation = invitationDeps.invitationRepo.findById(params.pendingInvitationId);
-          if (invitation && invitation.status === 'pending') {
-            const event = invitationDeps.eventService.getEvent(params.pendingEventId, params.pendingInviterTelegramId);
-            const inviter = invitationDeps.userRepo.findByTelegramId(params.pendingInviterTelegramId);
-            const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${params.pendingInviterTelegramId}`;
-            const userTz = context.scene.state.timezone;
-            if (event && userTz) {
-              const text = formatInvitation(
-                event,
-                event.timezone,
-                l,
-                inviterName,
+          try {
+            const invitation = invitationDeps.invitationRepo.findById(params.pendingInvitationId);
+            if (invitation && invitation.status === 'pending') {
+              const event = invitationDeps.eventService.getEvent(
+                params.pendingEventId,
                 params.pendingInviterTelegramId,
-                inviter?.username,
-                userTz,
-                true,
               );
-              const kb = new InlineKeyboard()
-                .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
-                .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
-                .row()
-                .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
-                .text(t(l).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
-              await context.send(text, { parse_mode: 'HTML', reply_markup: kb });
+              const inviter = invitationDeps.userRepo.findByTelegramId(params.pendingInviterTelegramId);
+              const inviterName = inviter?.first_name ?? inviter?.username ?? `User ${params.pendingInviterTelegramId}`;
+              const userTz = context.scene.state.timezone;
+              if (event && userTz) {
+                const text = formatInvitation(
+                  event,
+                  event.timezone,
+                  l,
+                  inviterName,
+                  params.pendingInviterTelegramId,
+                  inviter?.username,
+                  userTz,
+                  true,
+                );
+                const kb = new InlineKeyboard()
+                  .text('✅ Accept', `${CB.INVITATION_ACTION}:accept:${invitation.id}`)
+                  .text('❌ Decline', `${CB.INVITATION_ACTION}:decline:${invitation.id}`)
+                  .row()
+                  .text('Maybe 🤔', `${CB.INVITATION_ACTION}:maybe:${invitation.id}`)
+                  .text(t(l).invite_propose_btn, `${CB.INVITATION_ACTION}:propose:${invitation.id}`);
+                await context.send(text, { parse_mode: 'HTML', reply_markup: kb });
+              }
             }
+          } catch (err) {
+            botLogger.warn({ err, userId: context.from.id }, 'Failed to re-display invitation after onboarding');
           }
         }
 

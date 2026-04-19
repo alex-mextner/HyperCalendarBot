@@ -253,11 +253,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       const resolved = await ctx.resolveUsername(inviteeUsername);
       if (!resolved) {
         // Username not found — open user picker automatically
-        const lang = ctx.user.language as 'en' | 'ru';
-        const prompt =
-          lang === 'ru'
-            ? `@${inviteeUsername} не найден в Telegram. Выберите нужного человека из контактов.`
-            : `@${inviteeUsername} not found on Telegram. Select the person from your contacts.`;
+        const prompt = t(ctx.user.language).invite_resolve_not_found(inviteeUsername);
         return handlePickUsers(ctx, { event_id: input.event_id, prompt });
       }
       inviteeId = resolved.id;
