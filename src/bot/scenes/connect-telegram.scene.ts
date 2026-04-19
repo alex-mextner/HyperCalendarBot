@@ -35,7 +35,19 @@ const connectAttempts = new Map<number, number>();
  * step.next() runs synchronously in the same tick, so this is safe.
  * Added before step.next(), checked+removed at the top of the receiving step.
  */
-const pendingStepTransitions = new Set<number>();
+export const pendingStepTransitions = new Set<number>();
+
+/** Strip spaces, dashes, and parentheses; ensure leading '+'. */
+export function normalizePhone(raw: string): string | undefined {
+  const normalized = raw.replace(/[\s\-()]/g, '');
+  if (!normalized) return undefined;
+  return normalized.startsWith('+') ? normalized : `+${normalized}`;
+}
+
+/** Strip spaces and dashes from OTP input (users add separators to avoid Telegram anti-phishing). */
+export function normalizeOtpCode(raw: string): string {
+  return raw.replace(/[\s-]/g, '');
+}
 
 export function registerConnectAttempt(userId: number): void {
   connectAttempts.set(userId, Date.now());
@@ -51,7 +63,6 @@ export function isConnectCooldownActive(userId: number): boolean {
 export interface ConnectTelegramState {
   /** Phone number encrypted with master key, stored as hex. Never plain text in scene storage (SQLite). */
   encryptedPhoneHex?: string;
-  phoneCodeHash?: string;
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
@@ -187,11 +198,11 @@ export function createConnectTelegramScene(
           return;
         }
 
-        // Accept phone from shared contact or typed text; strip spaces/dashes/parens
+        // Accept phone from shared contact or typed text
         const raw = context.text?.trim();
         const sharedPhone = context.contact?.phoneNumber;
-        const normalized = (sharedPhone ?? raw)?.replace(/[\s\-()]/g, '');
-        const phone = normalized ? (normalized.startsWith('+') ? normalized : `+${normalized}`) : undefined;
+        const phoneInput = sharedPhone ?? raw;
+        const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
           await context.send(ct.invalidPhone);
@@ -238,7 +249,6 @@ export function createConnectTelegramScene(
         await context.scene.update(
           {
             encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
-            phoneCodeHash: result.data.phone_code_hash,
             sessionPath,
             codeAttempts: 0,
           },
@@ -261,18 +271,18 @@ export function createConnectTelegramScene(
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
         const text = context.text?.trim();
-        const { encryptedPhoneHex, phoneCodeHash, sessionPath, codeAttempts } = context.scene.state;
+        const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
-        if (!encryptedPhoneHex || !phoneCodeHash || !sessionPath || !masterKeyHex) {
+        if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
           sceneLogger.warn({ userId }, 'OTP step missing state or master key');
           await context.send(ct.featureUnavailable);
           await context.scene.exit();
           return;
         }
 
-        // Strip spaces/dashes — user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
-        const code = text?.replace(/[\s-]/g, '');
+        // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
+        const code = text ? normalizeOtpCode(text) : undefined;
         if (!code || !CODE_REGEX.test(code)) {
           await context.send(ct.invalidCode);
           return;
@@ -281,16 +291,16 @@ export function createConnectTelegramScene(
         const attempts = (codeAttempts ?? 0) + 1;
         await context.scene.update({ codeAttempts: attempts }, { step: undefined });
 
-        // Use the live auth handle (same MTProto session as send_code) or fall back to separate process
+        // Use the live auth handle (same MTProto session as send_code)
         const handle = SessionBridge.getLiveAuthHandle(userId);
-        let result: Awaited<ReturnType<typeof SessionBridge.signIn>>;
-        if (handle) {
-          result = await handle.submitCode(code);
-        } else {
-          sceneLogger.warn({ userId }, 'No live auth handle, falling back to separate signIn');
-          const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
-          result = await SessionBridge.signIn(phone, code, phoneCodeHash, sessionPath);
+        if (!handle) {
+          sceneLogger.warn({ userId }, 'No live auth handle — session expired, must start over');
+          await context.send(ct.codeExpired);
+          await SessionBridge.cleanupTempFile(sessionPath);
+          await context.scene.exit();
+          return;
         }
+        const result = await handle.submitCode(code);
 
         if (!result.success) {
           if (result.error === 'CODE_EXPIRED') {
@@ -347,7 +357,8 @@ export function createConnectTelegramScene(
       .step('message', async (context) => {
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
-        const maybeOtp = context.text?.trim()?.replace(/[\s-]/g, '');
+        const trimmed = context.text?.trim();
+        const maybeOtp = trimmed ? normalizeOtpCode(trimmed) : undefined;
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
         const { lang } = context;

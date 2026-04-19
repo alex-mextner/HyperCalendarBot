@@ -2,8 +2,7 @@
 """Pyrogram auth bridge for /connect_telegram flow.
 
 Subcommands:
-  send_code          — send verification code to phone
-  sign_in            — verify code, produce session file
+  send_and_sign      — send code + wait for OTP on stdin + sign in (single process)
   check_password     — enter 2FA password (read from stdin to avoid ps aux leak)
   log_out            — invalidate a Pyrogram session
   get_authorizations — return JSON array of active sessions
@@ -50,45 +49,6 @@ def make_client(session_path: str) -> Client:
         system_version="Windows 11",
         app_version="5.9.0",
     )
-
-
-async def cmd_send_code(args: argparse.Namespace) -> None:
-    client = make_client(args.session_path)
-    await client.connect()
-    try:
-        sent = await client.send_code(args.phone)
-        print(json.dumps({"phone_code_hash": sent.phone_code_hash}))
-    except PhoneNumberInvalid:
-        print(error_json("PHONE_INVALID", "Invalid phone number"))
-        sys.exit(1)
-    except FloodWait as e:
-        print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
-        sys.exit(1)
-    finally:
-        await client.storage.save()
-        await client.disconnect()
-
-
-async def cmd_sign_in(args: argparse.Namespace) -> None:
-    client = make_client(args.session_path)
-    await client.connect()
-    try:
-        await client.sign_in(args.phone, args.phone_code_hash, args.code)
-        print(json.dumps({"status": "ok"}))
-    except SessionPasswordNeeded:
-        print(json.dumps({"status": "2fa_required"}))
-    except PhoneCodeInvalid:
-        print(error_json("CODE_INVALID", "Invalid verification code"))
-        sys.exit(1)
-    except PhoneCodeExpired:
-        print(error_json("CODE_EXPIRED", "Verification code expired"))
-        sys.exit(1)
-    except FloodWait as e:
-        print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
-        sys.exit(1)
-    finally:
-        await client.storage.save()
-        await client.disconnect()
 
 
 async def cmd_send_and_sign(args: argparse.Namespace) -> None:
@@ -206,16 +166,6 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_send = sub.add_parser("send_code")
-    p_send.add_argument("--phone", required=True)
-    p_send.add_argument("--session_path", required=True)
-
-    p_sign = sub.add_parser("sign_in")
-    p_sign.add_argument("--phone", required=True)
-    p_sign.add_argument("--code", required=True)
-    p_sign.add_argument("--phone_code_hash", required=True)
-    p_sign.add_argument("--session_path", required=True)
-
     p_send_sign = sub.add_parser("send_and_sign")
     p_send_sign.add_argument("--phone", required=True)
     p_send_sign.add_argument("--session_path", required=True)
@@ -232,8 +182,6 @@ def main() -> None:
     args = parser.parse_args()
 
     commands = {
-        "send_code": cmd_send_code,
-        "sign_in": cmd_sign_in,
         "send_and_sign": cmd_send_and_sign,
         "check_password": cmd_check_password,
         "log_out": cmd_log_out,

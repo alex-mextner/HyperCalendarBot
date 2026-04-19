@@ -188,28 +188,6 @@ function reserveEmptySessionPath(userId: number): string {
   return `/tmp/tgsess_${userId}_${rand}.session`;
 }
 
-/** Send verification code to a phone number. */
-async function sendCode(phone: string, sessionPath: string): Promise<BridgeResult> {
-  bridgeLogger.info({ phoneMask: `+***${phone.slice(-4)}` }, 'Sending verification code');
-  return spawnBridge([CONNECT_SCRIPT, 'send_code', '--phone', phone, '--session_path', sessionPath]);
-}
-
-/** Verify the SMS/Telegram code. */
-async function signIn(phone: string, code: string, phoneCodeHash: string, sessionPath: string): Promise<BridgeResult> {
-  return spawnBridge([
-    CONNECT_SCRIPT,
-    'sign_in',
-    '--phone',
-    phone,
-    '--code',
-    code,
-    '--phone_code_hash',
-    phoneCodeHash,
-    '--session_path',
-    sessionPath,
-  ]);
-}
-
 /** Submit 2FA password (piped via stdin to avoid ps aux leak). */
 async function checkPassword(password: string, sessionPath: string): Promise<BridgeResult> {
   return spawnBridge([CONNECT_SCRIPT, 'check_password', '--session_path', sessionPath], Buffer.from(`${password}\n`));
@@ -388,8 +366,6 @@ export const SessionBridge = {
   phoneHash,
   createTempSessionFile,
   reserveEmptySessionPath,
-  sendCode,
-  signIn,
   spawnSendAndSign,
   getLiveAuthHandle,
   removeLiveAuthHandle,
