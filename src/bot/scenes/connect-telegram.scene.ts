@@ -253,10 +253,8 @@ export function createConnectTelegramScene(
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         if (guardHit || context.contact) {
-          sceneLogger.debug(
-            { userId: context.from.id, guardHit, hasContact: !!context.contact },
-            'Step 2 skip re-processing',
-          );
+          // Persist step transition — onNext doesn't fire because we don't call next()
+          await context.scene.update({});
           return;
         }
 
@@ -342,7 +340,7 @@ export function createConnectTelegramScene(
         // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
         const maybeOtp = context.text?.trim();
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) {
-          sceneLogger.debug({ userId: context.from.id, guardHit, text: maybeOtp }, 'Step 3 skip re-processing');
+          await context.scene.update({});
           return;
         }
 
