@@ -120,6 +120,10 @@ async function spawnBridge(args: string[], stdinData?: Buffer): Promise<BridgeRe
 function parseResult(stdout: string, stderr: string, exitCode: number): BridgeResult {
   const trimmedStdout = stdout.trim();
 
+  if (stderr.trim()) {
+    bridgeLogger.debug({ stderr: stderr.trim(), exitCode }, 'Bridge stderr');
+  }
+
   if (exitCode === 0) {
     const parsed = SuccessStringCodec.safeParse(trimmedStdout);
     if (parsed.success) {

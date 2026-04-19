@@ -52,8 +52,11 @@ def make_client(session_path: str) -> Client:
 async def cmd_send_code(args: argparse.Namespace) -> None:
     client = make_client(args.session_path)
     await client.connect()
+    dc_before = await client.storage.dc_id()
     try:
         sent = await client.send_code(args.phone)
+        dc_after = await client.storage.dc_id()
+        print(json.dumps({"_dc_before": dc_before, "_dc_after": dc_after}), file=sys.stderr)
         print(json.dumps({"phone_code_hash": sent.phone_code_hash}))
     except PhoneNumberInvalid:
         print(error_json("PHONE_INVALID", "Invalid phone number"))
@@ -69,6 +72,8 @@ async def cmd_send_code(args: argparse.Namespace) -> None:
 async def cmd_sign_in(args: argparse.Namespace) -> None:
     client = make_client(args.session_path)
     await client.connect()
+    dc_id = await client.storage.dc_id()
+    print(json.dumps({"_sign_in_dc": dc_id}), file=sys.stderr)
     try:
         await client.sign_in(args.phone, args.phone_code_hash, args.code)
         print(json.dumps({"status": "ok"}))
