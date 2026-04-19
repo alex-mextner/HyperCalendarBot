@@ -695,10 +695,21 @@ describe('formatInvitation', () => {
     expect(firstLine).toContain('@alice_tg');
   });
 
-  test('timezone note in Russian for non-onboarded recipient', () => {
+  test('timezone note in Russian declines name to genitive', () => {
     const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алиса', 1, null, null, false);
-    expect(result).toContain('часовом поясе Алиса');
+    expect(result).toContain('часовом поясе Алисы');
+    expect(result).not.toContain('часовом поясе Алиса');
     expect(result).toContain('Europe/Moscow');
+  });
+
+  test('timezone note in Russian declines male name to genitive', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'ru', 'Алексей', 1, null, null, false);
+    expect(result).toContain('часовом поясе Алексея');
+  });
+
+  test('timezone note keeps non-Russian name unchanged', () => {
+    const result = formatInvitation(event, 'Europe/Moscow', 'en', 'John', 1, null, null, false);
+    expect(result).toContain("John's timezone");
   });
 
   test('Russian header front-loads event title (phone preview)', () => {

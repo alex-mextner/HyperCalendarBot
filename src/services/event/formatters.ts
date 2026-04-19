@@ -1,5 +1,6 @@
 // src/services/event/formatters.ts
 import { TZDate } from '@date-fns/tz';
+import { inclineFirstname } from 'lvovich';
 import { type Lang, t } from '../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../database/types.ts';
 import {
@@ -216,7 +217,9 @@ export function formatInvitation(
 
   // Add timezone note for non-onboarded recipients so they know whose timezone is shown
   if (!recipientOnboarded) {
-    card += t(lang as Lang).invite_timezone_note(escapeHtml(inviterName), timezone);
+    // Decline name to genitive for Russian ("в часовом поясе Алексея", not "Алексей")
+    const displayName = lang === 'ru' ? inclineFirstname(inviterName, 'genitive') : inviterName;
+    card += t(lang as Lang).invite_timezone_note(escapeHtml(displayName), timezone);
   }
 
   return card;
