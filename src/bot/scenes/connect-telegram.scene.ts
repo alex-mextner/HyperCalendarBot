@@ -289,7 +289,9 @@ export function createConnectTelegramScene(
           return;
         }
 
-        if (!text || !CODE_REGEX.test(text)) {
+        // Strip spaces/dashes — user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
+        const code = text?.replace(/[\s\-]/g, '');
+        if (!code || !CODE_REGEX.test(code)) {
           await context.send(ct.invalidCode);
           return;
         }
@@ -301,11 +303,11 @@ export function createConnectTelegramScene(
         const handle = SessionBridge.getLiveAuthHandle(userId);
         let result: Awaited<ReturnType<typeof SessionBridge.signIn>>;
         if (handle) {
-          result = await handle.submitCode(text);
+          result = await handle.submitCode(code);
         } else {
           sceneLogger.warn({ userId }, 'No live auth handle, falling back to separate signIn');
           const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
-          result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
+          result = await SessionBridge.signIn(phone, code, phoneCodeHash, sessionPath);
         }
 
         if (!result.success) {
@@ -366,8 +368,8 @@ export function createConnectTelegramScene(
           'CT step 3 entry',
         );
         const guardHit = pendingStepTransitions.delete(context.from.id);
-        // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
-        const maybeOtp = context.text?.trim();
+        // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
+        const maybeOtp = context.text?.trim()?.replace(/[\s\-]/g, '');
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
         const { lang } = context;
