@@ -408,6 +408,148 @@ describe('sharing tool handlers', () => {
       expect(result.error).toBe('Invitation already sent');
     });
 
+    test('resolves invitee via resolveUsername when only username provided', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Resolve Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        resolveUsername: async (username: string) => {
+          expect(username).toBe('targetuser');
+          return { id: 300, firstName: 'Target', username: 'targetuser' };
+        },
+      });
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'targetuser',
+      });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('300');
+    });
+
+    test('opens pick_users when resolve returns null', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Picker Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      let pickerPrompt = '';
+      const ctx = makeCtx({
+        resolveUsername: async () => null,
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendUserPicker: async (_chatId: number, prompt: string) => {
+            pickerPrompt = prompt;
+            return { message_id: 1 };
+          },
+        },
+      });
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'nobody',
+      });
+      expect(result.success).toBe(true);
+      expect(result.stopLoop).toBe(true);
+      expect(pickerPrompt).toContain('@nobody');
+    });
+
+    test('returns error when neither invitee_id nor invitee_username provided', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Missing ID',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx();
+      const result = await handleSendInvitation(ctx, { event_id: event.id });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('invitee_id');
+    });
+
+    test('returns error when resolveUsername unavailable and no invitee_id', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Resolve',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx();
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'someone',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('resolution');
+    });
+
+    test('auto-adds resolved user as contact', async () => {
+      const { ContactRepository } = await import('../../../../src/database/repositories/contact.repository.ts');
+      const contactRepo = new ContactRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Contact Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        resolveUsername: async () => ({ id: 400, firstName: 'Resolved', username: 'resolved_user' }),
+        contactRepo,
+      });
+      await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'resolved_user',
+      });
+      const contact = contactRepo.findByTelegramId(USER_ID, 400);
+      expect(contact).not.toBeNull();
+      expect(contact!.name).toBe('Resolved');
+    });
+
+    test('returns error when resolve fails and no sendUserPicker', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Picker',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        resolveUsername: async () => null,
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+        },
+      });
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'nobody',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('picker');
+    });
+
+    test('handles resolveUsername exception gracefully', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Error Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        resolveUsername: async () => {
+          throw new Error('MTProto connection failed');
+        },
+      });
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'broken',
+      });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('@broken');
+    });
+
     test('returns error when invitee disabled invitations', async () => {
       sharingSettingsRepo.ensureDefaults(OTHER_USER_ID);
       sharingSettingsRepo.update(OTHER_USER_ID, { allow_invitations: 0 });
