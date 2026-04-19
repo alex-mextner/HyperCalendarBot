@@ -1,31 +1,44 @@
 import type { Database } from 'bun:sqlite';
 import type { Contact } from '../types.ts';
 
+function scoreField(field: string | null, query: string): number {
+  if (!field) return 0;
+  const target = field.toLowerCase();
+  if (target === query) return 1;
+  if (target.startsWith(query)) return 0.85;
+  if (query.startsWith(target)) return 0.8;
+  if (target.includes(query) || query.includes(target)) return 0.65;
+  return 0;
+}
+
 export class ContactRepository {
   constructor(private db: Database) {}
 
   findByName(userId: number, name: string): Contact | null {
+    return this.searchByName(userId, name)[0]?.contact ?? null;
+  }
+
+  /**
+   * Return every contact whose name or preferred_name matches `name`, each scored 0..1.
+   * Scoring (best over name/preferred_name):
+   *   1.00 exact (case-insensitive)
+   *   0.85 query is prefix of target
+   *   0.80 target is prefix of query
+   *   0.65 substring (either direction, non-prefix)
+   * Sorted by confidence desc, then by name asc for stable ordering.
+   */
+  searchByName(userId: number, name: string): { contact: Contact; confidence: number }[] {
     const lower = name.toLowerCase();
+    if (lower.length === 0) return [];
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
 
-    // 1. Exact match on name or preferred_name
-    const exact = contacts.find(
-      (c) => c.name.toLowerCase() === lower || (c.preferred_name?.toLowerCase() ?? '') === lower,
-    );
-    if (exact) return exact;
-
-    // 2. Substring match: query is part of name/preferred_name or vice versa
-    // Handles "Лена" matching "Елена", "Алена" and short-form lookups
-    const substring = contacts.find((c) => {
-      const cName = c.name.toLowerCase();
-      const cPref = c.preferred_name?.toLowerCase();
-      return (
-        cName.includes(lower) ||
-        lower.includes(cName) ||
-        (cPref ? cPref.includes(lower) || lower.includes(cPref) : false)
-      );
-    });
-    return substring ?? null;
+    const scored: { contact: Contact; confidence: number }[] = [];
+    for (const c of contacts) {
+      const score = Math.max(scoreField(c.name, lower), scoreField(c.preferred_name, lower));
+      if (score > 0) scored.push({ contact: c, confidence: score });
+    }
+    scored.sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name));
+    return scored;
   }
 
   findByTelegramId(userId: number, contactTelegramId: number): Contact | null {

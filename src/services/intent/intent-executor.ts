@@ -163,6 +163,7 @@ async function runLevel1(
 type ToolResultElement =
   | EventSummary
   | { telegram_id: number; name: string }
+  | { matches: import('../ai/types.ts').ContactMatch[] }
   | import('../scheduled/types.ts').ScheduledAiCall
   | import('../scheduled/types.ts').Trigger
   | import('../ai/types.ts').TelegramSessionData;

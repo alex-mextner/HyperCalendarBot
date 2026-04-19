@@ -198,6 +198,92 @@ describe('ContactRepository', () => {
     });
   });
 
+  describe('searchByName', () => {
+    test('returns empty array for empty query', () => {
+      repo.add(USER_ID, 'Лена');
+      expect(repo.searchByName(USER_ID, '')).toEqual([]);
+    });
+
+    test('returns empty array when no contacts match', () => {
+      repo.add(USER_ID, 'Вова');
+      expect(repo.searchByName(USER_ID, 'Максим')).toEqual([]);
+    });
+
+    test('scores exact match at 1.0', () => {
+      repo.add(USER_ID, 'Лена');
+      const results = repo.searchByName(USER_ID, 'Лена');
+      expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(1);
+    });
+
+    test('scores exact match case-insensitively', () => {
+      repo.add(USER_ID, 'Елена');
+      const results = repo.searchByName(USER_ID, 'елена');
+      expect(results[0]!.confidence).toBe(1);
+    });
+
+    test('scores query-as-prefix at 0.85', () => {
+      repo.add(USER_ID, 'Алексей');
+      const results = repo.searchByName(USER_ID, 'Ал');
+      expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(0.85);
+    });
+
+    test('scores target-as-prefix at 0.80', () => {
+      repo.add(USER_ID, 'Ал');
+      const results = repo.searchByName(USER_ID, 'Алексей');
+      expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(0.8);
+    });
+
+    test('scores non-prefix substring at 0.65', () => {
+      repo.add(USER_ID, 'Елена');
+      const results = repo.searchByName(USER_ID, 'Лена');
+      expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(0.65);
+    });
+
+    test('returns multiple matches ranked by confidence', () => {
+      repo.add(USER_ID, 'Alex', 'alex_exact');
+      repo.add(USER_ID, 'Alexander', 'alex_full');
+      repo.add(USER_ID, 'Mexalex', 'mexalex');
+      const results = repo.searchByName(USER_ID, 'Alex');
+      expect(results.length).toBe(3);
+      expect(results[0]!.contact.name).toBe('Alex');
+      expect(results[0]!.confidence).toBe(1);
+      expect(results[1]!.contact.name).toBe('Alexander');
+      expect(results[1]!.confidence).toBe(0.85);
+      expect(results[2]!.contact.name).toBe('Mexalex');
+      expect(results[2]!.confidence).toBe(0.65);
+    });
+
+    test('uses the best of name and preferred_name for scoring', () => {
+      repo.add(USER_ID, 'FancyName', 'fancy', 1, 'Лена');
+      const results = repo.searchByName(USER_ID, 'Лена');
+      expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(1);
+    });
+
+    test('does not return contacts of other users', () => {
+      new UserRepository(db).create({ telegram_id: 200 });
+      repo.add(USER_ID, 'Лена');
+      repo.add(200, 'Лена');
+      const results = repo.searchByName(USER_ID, 'Лена');
+      expect(results.length).toBe(1);
+    });
+
+    test('ordering is stable for ties by name ascending', () => {
+      repo.add(USER_ID, 'Anton');
+      repo.add(USER_ID, 'Alice');
+      const results = repo.searchByName(USER_ID, 'A');
+      expect(results.length).toBe(2);
+      expect(results[0]!.confidence).toBe(0.85);
+      expect(results[1]!.confidence).toBe(0.85);
+      expect(results[0]!.contact.name).toBe('Alice');
+      expect(results[1]!.contact.name).toBe('Anton');
+    });
+  });
+
   test('contacts are isolated per user', () => {
     new UserRepository(db).create({ telegram_id: 200 });
     repo.add(USER_ID, 'Лена');

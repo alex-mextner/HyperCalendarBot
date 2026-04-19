@@ -1,5 +1,36 @@
 import { t } from '../../../config/constants.ts';
-import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import type { Contact } from '../../../database/types.ts';
+import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult } from '../types.ts';
+
+const MAX_CONTACT_MATCHES = 5;
+
+function toContactMatch(contact: Contact, confidence: number): ContactMatch {
+  return {
+    id: contact.id,
+    name: contact.name,
+    preferred_name: contact.preferred_name,
+    username: contact.username,
+    telegram_id: contact.telegram_id,
+    confidence,
+  };
+}
+
+function formatContactFields(contact: Contact): string {
+  const parts = [`name: ${contact.name}`];
+  if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
+  if (contact.username) parts.push(`username: @${contact.username}`);
+  if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
+  return parts.join(', ');
+}
+
+function formatContactMatchLine(match: ContactMatch): string {
+  const parts = [`name: ${match.name}`];
+  if (match.preferred_name) parts.push(`preferred_name: ${match.preferred_name}`);
+  if (match.username) parts.push(`username: @${match.username}`);
+  if (match.telegram_id) parts.push(`telegram_id: ${match.telegram_id}`);
+  const pct = Math.round(match.confidence * 100);
+  return `- ${parts.join(', ')} (${pct}%)`;
+}
 
 export function handleGetContacts(ctx: AgentContext, input: { force?: boolean }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
@@ -47,18 +78,46 @@ export function handleAddContact(
 
 export function handleFindContact(ctx: AgentContext, input: { name: string }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
-  const query = input.name;
   const userId = ctx.user.telegram_id;
-  const contact = query.startsWith('@')
-    ? (ctx.contactRepo.findByUsername(userId, query) ?? ctx.contactRepo.findByName(userId, query.slice(1)))
-    : (ctx.contactRepo.findByName(userId, query) ?? ctx.contactRepo.findByUsername(userId, query));
-  if (!contact) return { success: false, error: `No contact named "${input.name}" in address book.` };
-  const parts = [`name: ${contact.name}`];
-  if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
-  if (contact.username) parts.push(`username: @${contact.username}`);
-  if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
-  const data = parts.join(', ');
-  return { success: true, output: t(ctx.user.language).aiTools.meta.contactFound(data) };
+  const rawQuery = input.name;
+  const nameQuery = rawQuery.startsWith('@') ? rawQuery.slice(1) : rawQuery;
+
+  const byId = new Map<number, { contact: Contact; confidence: number }>();
+  for (const match of ctx.contactRepo.searchByName(userId, nameQuery)) {
+    byId.set(match.contact.id, match);
+  }
+
+  const usernameMatch = ctx.contactRepo.findByUsername(userId, nameQuery);
+  if (usernameMatch) {
+    const existing = byId.get(usernameMatch.id);
+    if (!existing || existing.confidence < 1) {
+      byId.set(usernameMatch.id, { contact: usernameMatch, confidence: 1 });
+    }
+  }
+
+  const ranked = [...byId.values()]
+    .sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name))
+    .slice(0, MAX_CONTACT_MATCHES);
+
+  if (ranked.length === 0) return { success: false, error: `No contact named "${rawQuery}" in address book.` };
+
+  const lang = ctx.user.language;
+  const matches = ranked.map(({ contact, confidence }) => toContactMatch(contact, confidence));
+
+  if (ranked.length === 1) {
+    const only = ranked[0]!;
+    return {
+      success: true,
+      output: t(lang).aiTools.meta.contactFound(formatContactFields(only.contact)),
+      data: { matches },
+    };
+  }
+
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.contactMatches(matches.map(formatContactMatchLine).join('\n')),
+    data: { matches },
+  };
 }
 handleFindContact.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 

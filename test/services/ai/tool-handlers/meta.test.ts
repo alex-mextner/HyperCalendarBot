@@ -253,6 +253,61 @@ describe('meta tool handlers', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('Nobody');
     });
+
+    test('returns multiple matches with confidence scores when several contacts match', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Alex', 'alex_exact', 111);
+      contactRepo.add(USER_ID, 'Alexander', 'alex_full', 222);
+      contactRepo.add(USER_ID, 'Mexalex', 'mexalex', 333);
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Alex' });
+      expect(result.success).toBe(true);
+      if (!result.data || Array.isArray(result.data) || !('matches' in result.data)) {
+        throw new Error('expected matches in result.data');
+      }
+      const matches = result.data.matches;
+      expect(matches.length).toBe(3);
+      expect(matches[0]!.name).toBe('Alex');
+      expect(matches[0]!.confidence).toBe(1);
+      expect(matches[1]!.name).toBe('Alexander');
+      expect(matches[1]!.confidence).toBe(0.85);
+      expect(matches[2]!.name).toBe('Mexalex');
+      expect(matches[2]!.confidence).toBe(0.65);
+      expect(result.output).toContain('Alex');
+      expect(result.output).toContain('100%');
+      expect(result.output).toContain('85%');
+      expect(result.output).toContain('65%');
+    });
+
+    test('single match output keeps legacy "Contact found" format', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Contact found:');
+      expect(result.output).toContain('name: Лена');
+      expect(result.output).toContain('telegram_id: 716928723');
+      if (!result.data || Array.isArray(result.data) || !('matches' in result.data)) {
+        throw new Error('expected matches in result.data');
+      }
+      expect(result.data.matches.length).toBe(1);
+      expect(result.data.matches[0]!.confidence).toBe(1);
+    });
+
+    test('caps results at 5 matches', async () => {
+      const contactRepo = new ContactRepository(db);
+      for (let i = 0; i < 10; i++) {
+        contactRepo.add(USER_ID, `Лена${i}`, undefined, i + 1);
+      }
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(true);
+      if (!result.data || Array.isArray(result.data) || !('matches' in result.data)) {
+        throw new Error('expected matches in result.data');
+      }
+      expect(result.data.matches.length).toBe(5);
+    });
   });
 
   describe('handleAddContact', () => {
