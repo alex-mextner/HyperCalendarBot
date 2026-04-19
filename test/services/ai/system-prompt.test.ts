@@ -162,11 +162,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('listing her availability');
   });
 
-  test('instructs to use pick_users and find_contact for invitations', () => {
+  test('instructs how to invite people: @username direct, names via contacts, fallback to pick_users', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('pick_users');
-    expect(prompt).toContain('find_contact');
-    expect(prompt).toContain('EXACT sequence');
+    expect(prompt).toContain('get_contacts');
+    expect(prompt).toContain('invitee_username');
+    expect(prompt).toContain('send_invitation');
   });
 
   test('includes group context block when isGroup is true', () => {
