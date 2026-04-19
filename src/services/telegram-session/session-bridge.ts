@@ -232,6 +232,147 @@ async function sendAsUser(sessionPath: string, userId: number, text: string, use
   return spawnBridge(args);
 }
 
+/**
+ * Long-lived auth handle: one Python process does send_code + sign_in
+ * within the same MTProto session (avoids CODE_EXPIRED from reconnection).
+ */
+interface AuthHandle {
+  /** Phone code hash from send_code */
+  phoneCodeHash: string;
+  /** Send OTP code to the process and get sign_in result */
+  submitCode(code: string): Promise<BridgeResult>;
+  /** Kill the process if user cancels */
+  kill(): void;
+}
+
+/** In-memory map: userId → live auth process handle */
+const liveAuthHandles = new Map<number, AuthHandle>();
+
+function getLiveAuthHandle(userId: number): AuthHandle | undefined {
+  return liveAuthHandles.get(userId);
+}
+
+function removeLiveAuthHandle(userId: number): void {
+  const handle = liveAuthHandles.get(userId);
+  if (handle) {
+    handle.kill();
+    liveAuthHandles.delete(userId);
+  }
+}
+
+/**
+ * Spawn a single Python process that sends the code and waits for the OTP on stdin.
+ * Returns an AuthHandle; call handle.submitCode(code) when the user enters the code.
+ */
+async function spawnSendAndSign(
+  phone: string,
+  sessionPath: string,
+  userId: number,
+): Promise<BridgeResult & { handle?: AuthHandle }> {
+  bridgeLogger.info({ phoneMask: `+***${phone.slice(-4)}` }, 'Spawning send_and_sign process');
+
+  // Kill any previous handle for this user
+  removeLiveAuthHandle(userId);
+
+  const proc = Bun.spawn(
+    [PYTHON_PATH, CONNECT_SCRIPT, 'send_and_sign', '--phone', phone, '--session_path', sessionPath],
+    {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      stdin: 'pipe',
+    },
+  );
+
+  const timeout = setTimeout(
+    () => {
+      proc.kill();
+      liveAuthHandles.delete(userId);
+    },
+    5 * 60 * 1000,
+  ); // 5 min timeout for entire flow
+
+  // Read the first line from stdout (phone_code_hash JSON)
+  const reader = proc.stdout.getReader();
+  let firstLine = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      firstLine += new TextDecoder().decode(value);
+      if (firstLine.includes('\n')) break;
+    }
+  } catch {
+    clearTimeout(timeout);
+    proc.kill();
+    return { success: false, error: 'UNEXPECTED', message: 'Failed to read send_code output' };
+  }
+
+  const line = firstLine.split('\n')[0]!.trim();
+  const parsed = SuccessStringCodec.safeParse(line);
+  if (!parsed.success) {
+    clearTimeout(timeout);
+    // Maybe it's an error JSON
+    const errParsed = ErrorStringCodec.safeParse(line);
+    if (errParsed.success) {
+      return { success: false, error: errParsed.data.error, message: errParsed.data.message ?? errParsed.data.error };
+    }
+    proc.kill();
+    return { success: false, error: 'UNEXPECTED', message: 'Unparseable send_code output' };
+  }
+
+  const phoneCodeHash = (parsed.data as { phone_code_hash?: string }).phone_code_hash;
+  if (!phoneCodeHash) {
+    clearTimeout(timeout);
+    proc.kill();
+    return { success: false, error: 'UNEXPECTED', message: 'No phone_code_hash in output' };
+  }
+
+  const handle: AuthHandle = {
+    phoneCodeHash,
+    async submitCode(code: string): Promise<BridgeResult> {
+      try {
+        // Write the code to stdin
+        proc.stdin.write(`${code}\n`);
+        await proc.stdin.flush();
+        proc.stdin.end();
+
+        // Read remaining stdout + stderr
+        const [restStdout, stderr, exitCode] = await Promise.all([
+          // Read remaining output from the reader
+          (async () => {
+            let rest = firstLine.includes('\n') ? firstLine.split('\n').slice(1).join('\n') : '';
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              rest += new TextDecoder().decode(value);
+            }
+            return rest.trim();
+          })(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+
+        if (stderr.trim()) {
+          bridgeLogger.info({ stderr: stderr.trim(), exitCode }, 'Bridge stderr (send_and_sign)');
+        }
+
+        return parseResult(restStdout, stderr, exitCode);
+      } finally {
+        clearTimeout(timeout);
+        liveAuthHandles.delete(userId);
+      }
+    },
+    kill() {
+      clearTimeout(timeout);
+      proc.kill();
+    },
+  };
+
+  liveAuthHandles.set(userId, handle);
+  return { success: true, data: { phone_code_hash: phoneCodeHash }, handle };
+}
+
 /** Remove a temp session file. Does not throw if already gone. */
 async function cleanupTempFile(sessionPath: string): Promise<void> {
   try {
@@ -249,6 +390,9 @@ export const SessionBridge = {
   reserveEmptySessionPath,
   sendCode,
   signIn,
+  spawnSendAndSign,
+  getLiveAuthHandle,
+  removeLiveAuthHandle,
   checkPassword,
   logOut,
   getAuthorizations,

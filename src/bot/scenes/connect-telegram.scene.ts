@@ -219,9 +219,9 @@ export function createConnectTelegramScene(
         // Immediate feedback: remove keyboard + show progress
         await context.send(ct.sendingCode, { reply_markup: { remove_keyboard: true } });
 
-        // Reserve temp session path and send code
+        // Single long-lived process: send_code now, sign_in later via stdin
         const sessionPath = SessionBridge.reserveEmptySessionPath(userId);
-        const result = await SessionBridge.sendCode(phone, sessionPath);
+        const result = await SessionBridge.spawnSendAndSign(phone, sessionPath, userId);
 
         if (!result.success) {
           if (result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined) {
@@ -297,21 +297,16 @@ export function createConnectTelegramScene(
         const attempts = (codeAttempts ?? 0) + 1;
         await context.scene.update({ codeAttempts: attempts }, { step: undefined });
 
-        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
-        const sessionExists = await Bun.file(sessionPath).exists();
-        sceneLogger.info(
-          { userId, sessionPath, sessionExists, phoneCodeHashLen: phoneCodeHash?.length },
-          'signIn: pre-check',
-        );
-        const result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
-        sceneLogger.info(
-          {
-            userId,
-            success: result.success,
-            ...(result.success ? {} : { error: result.error, message: result.message }),
-          },
-          'signIn: result',
-        );
+        // Use the live auth handle (same MTProto session as send_code) or fall back to separate process
+        const handle = SessionBridge.getLiveAuthHandle(userId);
+        let result: Awaited<ReturnType<typeof SessionBridge.signIn>>;
+        if (handle) {
+          result = await handle.submitCode(text);
+        } else {
+          sceneLogger.warn({ userId }, 'No live auth handle, falling back to separate signIn');
+          const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
+          result = await SessionBridge.signIn(phone, text, phoneCodeHash, sessionPath);
+        }
 
         if (!result.success) {
           if (result.error === 'CODE_EXPIRED') {
@@ -357,6 +352,7 @@ export function createConnectTelegramScene(
         }
 
         // status === 'ok' — finalize
+        const phone = decryptPhoneFromState(encryptedPhoneHex, masterKeyHex);
         const hasPending = await finalizeSession(context, sessionRepo, config, phone, sessionPath, l, deps);
         if (hasPending) {
           await context.scene.step.go(4); // Jump to pending invitation step
