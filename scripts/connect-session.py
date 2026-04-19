@@ -46,6 +46,9 @@ def make_client(session_path: str) -> Client:
         api_id=API_ID,
         api_hash=API_HASH,
         workdir=str(p.parent) or ".",
+        device_model="Desktop",
+        system_version="Windows 11",
+        app_version="5.9.0",
     )
 
 
