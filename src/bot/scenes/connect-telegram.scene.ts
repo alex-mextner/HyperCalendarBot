@@ -176,15 +176,6 @@ export function createConnectTelegramScene(
 
       // Step 1: Phone number
       .step('message', async (context) => {
-        sceneLogger.info(
-          {
-            userId: context.from.id,
-            stepId: context.scene.step.id,
-            text: context.text?.substring(0, 15),
-            hasContact: !!context.contact,
-          },
-          'CT step 1 entry',
-        );
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
@@ -260,15 +251,6 @@ export function createConnectTelegramScene(
 
       // Step 2: OTP code
       .step('message', async (context) => {
-        sceneLogger.info(
-          {
-            userId: context.from.id,
-            stepId: context.scene.step.id,
-            text: context.text?.substring(0, 15),
-            hasContact: !!context.contact,
-          },
-          'CT step 2 entry',
-        );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         // onNext in compose() persists the step unconditionally after all middleware runs
@@ -363,10 +345,6 @@ export function createConnectTelegramScene(
 
       // Step 3: 2FA password
       .step('message', async (context) => {
-        sceneLogger.info(
-          { userId: context.from.id, stepId: context.scene.step.id, text: '***', hasContact: !!context.contact },
-          'CT step 3 entry',
-        );
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
         const maybeOtp = context.text?.trim()?.replace(/[\s-]/g, '');

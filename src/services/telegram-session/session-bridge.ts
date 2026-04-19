@@ -121,7 +121,7 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
   const trimmedStdout = stdout.trim();
 
   if (stderr.trim()) {
-    bridgeLogger.info({ stderr: stderr.trim(), exitCode }, 'Bridge stderr');
+    bridgeLogger.debug({ stderr: stderr.trim(), exitCode }, 'Bridge stderr');
   }
 
   if (exitCode === 0) {
@@ -354,7 +354,7 @@ async function spawnSendAndSign(
         ]);
 
         if (stderr.trim()) {
-          bridgeLogger.info({ stderr: stderr.trim(), exitCode }, 'Bridge stderr (send_and_sign)');
+          bridgeLogger.debug({ stderr: stderr.trim(), exitCode }, 'Bridge stderr (send_and_sign)');
         }
 
         return parseResult(restStdout, stderr, exitCode);
