@@ -253,8 +253,8 @@ export function createConnectTelegramScene(
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         if (guardHit || context.contact) {
-          // Persist step transition — onNext doesn't fire because we don't call next()
-          await context.scene.update({});
+          // Persist step transition — pass {step:undefined} to avoid default go(stepId+1)
+          await context.scene.update({}, { step: undefined });
           return;
         }
 
@@ -340,7 +340,7 @@ export function createConnectTelegramScene(
         // Fallback: if text is a 5-digit OTP code, it's re-processing from step 2
         const maybeOtp = context.text?.trim();
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) {
-          await context.scene.update({});
+          await context.scene.update({}, { step: undefined });
           return;
         }
 
