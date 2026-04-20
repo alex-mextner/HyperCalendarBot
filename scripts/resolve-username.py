@@ -48,18 +48,20 @@ async def resolve_with_retry(app):
 
 async def main():
     from pyrogram import Client
+    from mtproto_lock import session_lock
 
-    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
-    await app.start()
-    try:
-        result = await resolve_with_retry(app)
-        if result is not None:
-            print(json.dumps(result), flush=True)
-            sys.exit(0)
-        else:
-            sys.exit(1)
-    finally:
-        await app.stop()
+    with session_lock():
+        app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
+        await app.start()
+        try:
+            result = await resolve_with_retry(app)
+            if result is not None:
+                print(json.dumps(result), flush=True)
+                sys.exit(0)
+            else:
+                sys.exit(1)
+        finally:
+            await app.stop()
 
 
 asyncio.run(main())

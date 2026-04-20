@@ -146,6 +146,41 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
 
 For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.
 
+**`voice_caller.session` fragility**: all MTProto scripts use `data/voice_caller.session`. This is a
+Pyrogram SQLite session file (journal mode DELETE, not WAL). Multiple scripts spawn concurrently
+(resolve-username, send-message, fetch-birthdays, voice-call-bridge) and each does `app.start()` →
+work → `app.stop()` with `save()` → `conn.commit()`. Concurrent writes to the same SQLite file
+without WAL can corrupt session fields (`user_id`, `is_bot` set to NULL), making Pyrogram think the
+session is empty and prompting for phone number. Symptom: `Enter phone number or bot token:` + EOFError.
+Telegram can also revoke auth keys (error 404) for long-inactive sessions.
+Recovery: decrypt the user's active session from `user_telegram_sessions` and write it to
+`data/voice_caller.session`:
+```bash
+docker exec hypercal-bot sh -c "cd /app && bun -e \"
+const { createDecipheriv } = require('crypto');
+const { Database } = require('bun:sqlite');
+const KEY = Buffer.from(process.env.TELEGRAM_SESSION_MASTER_KEY, 'hex');
+const db = new Database('data/calendar.db', { readonly: true });
+const row = db.query('SELECT encrypted_session FROM user_telegram_sessions WHERE status = \\\"active\\\" ORDER BY rowid DESC LIMIT 1').get();
+db.close();
+const blob = Buffer.from(row.encrypted_session);
+const iv = blob.subarray(0, 12);
+const tag = blob.subarray(blob.length - 16);
+const ct = blob.subarray(12, blob.length - 16);
+const d = createDecipheriv('aes-256-gcm', KEY, iv);
+d.setAuthTag(tag);
+const out = Buffer.concat([d.update(ct), d.final()]);
+require('fs').writeFileSync('data/voice_caller.session', out);
+console.log('Restored', out.length, 'bytes');
+\""
+```
+
+### Database file naming
+
+The production SQLite database is `data/calendar.db` (NOT `bot.db`, NOT `data.db`). The path is
+set in `src/database/db.ts`. Never assume the filename — always check the code or logs
+(`"path":"./data/calendar.db"` at startup). Creating a wrong-name file pollutes the data directory.
+
 ## Logging
 
 - Use **pino** for all logging. The `err` key triggers pino's error serializer (stack trace included).

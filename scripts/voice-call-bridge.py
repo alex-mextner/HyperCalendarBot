@@ -190,8 +190,10 @@ async def main():
                     speaking = False
                     await ws.send(json.dumps({"type": "VAD_END"}))
 
-        # ------- Start call -------
-        await app.start()
+        # ------- Start call (lock session file during start/stop) -------
+        from mtproto_lock import session_lock
+        with session_lock():
+            await app.start()
         await calls.start()
 
         @calls.on_update()
@@ -241,7 +243,8 @@ async def main():
     except Exception:
         pass
     try:
-        await app.stop()
+        with session_lock():
+            await app.stop()
     except Exception:
         pass
 

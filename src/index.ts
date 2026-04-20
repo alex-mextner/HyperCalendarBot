@@ -757,6 +757,25 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       }
       return parseResult.data;
     };
+    // Verify session is alive at startup — fail loud if dead
+    const checkProc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
+      env: { ...process.env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [checkStdout, checkStderr, checkExit] = await Promise.all([
+      new Response(checkProc.stdout).text(),
+      new Response(checkProc.stderr).text(),
+      checkProc.exited,
+    ]);
+    if (checkExit === 0) {
+      botLogger.info({ stdout: checkStdout.trim() }, 'MTProto session verified');
+    } else {
+      botLogger.error(
+        { stderr: checkStderr.slice(0, 300), stdout: checkStdout.slice(0, 300) },
+        'MTProto session is DEAD — resolve/send-message/voice calls will fail. Recovery: decrypt session from user_telegram_sessions (see CLAUDE.md)',
+      );
+    }
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
     botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');

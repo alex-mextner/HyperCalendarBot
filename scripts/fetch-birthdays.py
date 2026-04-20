@@ -20,34 +20,36 @@ FLOOD_WAIT_MAX = 30
 async def fetch(user_ids: list[int]) -> dict:
     from pyrogram import Client
     from pyrogram.errors import FloodWait
+    from mtproto_lock import session_lock
 
     results = {}
-    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
-    await app.start()
-    try:
-        for uid in user_ids:
-            for attempt in range(2):
-                try:
-                    user = await app.get_users(uid)
-                    bd = getattr(user, 'birthday', None)
-                    if bd is None:
-                        results[str(uid)] = None
-                    else:
-                        entry: dict = {"day": bd.day, "month": bd.month}
-                        if getattr(bd, 'year', None):
-                            entry["year"] = bd.year
-                        results[str(uid)] = entry
-                    break
-                except FloodWait as e:
-                    if e.value > FLOOD_WAIT_MAX:
-                        print(f"FloodWait {e.value}s exceeds limit", file=sys.stderr)
-                        sys.exit(1)
-                    await asyncio.sleep(e.value)
-                except Exception as e:
-                    print(f"skip uid={uid}: {e}", file=sys.stderr)
-                    break  # omit unresolvable users
-    finally:
-        await app.stop()
+    with session_lock():
+        app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
+        await app.start()
+        try:
+            for uid in user_ids:
+                for attempt in range(2):
+                    try:
+                        user = await app.get_users(uid)
+                        bd = getattr(user, 'birthday', None)
+                        if bd is None:
+                            results[str(uid)] = None
+                        else:
+                            entry: dict = {"day": bd.day, "month": bd.month}
+                            if getattr(bd, 'year', None):
+                                entry["year"] = bd.year
+                            results[str(uid)] = entry
+                        break
+                    except FloodWait as e:
+                        if e.value > FLOOD_WAIT_MAX:
+                            print(f"FloodWait {e.value}s exceeds limit", file=sys.stderr)
+                            sys.exit(1)
+                        await asyncio.sleep(e.value)
+                    except Exception as e:
+                        print(f"skip uid={uid}: {e}", file=sys.stderr)
+                        break  # omit unresolvable users
+        finally:
+            await app.stop()
     return results
 
 
