@@ -714,6 +714,44 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
   botLogger.info('Silero TTS initialized');
 }
 
+// ─── MTProto session helpers ─────────────────────────────────────────────────
+
+async function verifyMtprotoSession(): Promise<boolean> {
+  const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
+    env: { ...process.env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, , exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode === 0) {
+    botLogger.info({ stdout: stdout.trim() }, 'MTProto session verified');
+    return true;
+  }
+  return false;
+}
+
+async function recoverSessionFromDb(sessionRepo: typeof db.telegramSessions, masterKey: Buffer): Promise<boolean> {
+  const session = sessionRepo.getMostRecentActive();
+  if (!session) {
+    botLogger.warn('No active session in user_telegram_sessions — cannot recover');
+    return false;
+  }
+  try {
+    const { decryptBlob } = await import('./services/crypto/session-crypto.ts');
+    const decrypted = decryptBlob(Buffer.from(session.encrypted_session), masterKey);
+    await Bun.write('data/voice_caller.session', decrypted);
+    botLogger.info({ userId: session.user_id, bytes: decrypted.length }, 'Session file restored from DB');
+    return true;
+  } catch (err) {
+    botLogger.error({ err }, 'Failed to decrypt/restore session from DB');
+    return false;
+  }
+}
+
 // MTProto userbot for delivering messages to users who haven't started the bot
 // Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
 if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
@@ -757,23 +795,26 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       }
       return parseResult.data;
     };
-    // Verify session is alive at startup — fail loud if dead
-    const checkProc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
-      env: { ...process.env },
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [checkStdout, checkStderr, checkExit] = await Promise.all([
-      new Response(checkProc.stdout).text(),
-      new Response(checkProc.stderr).text(),
-      checkProc.exited,
-    ]);
-    if (checkExit === 0) {
-      botLogger.info({ stdout: checkStdout.trim() }, 'MTProto session verified');
-    } else {
+    // Verify session is alive at startup — auto-recover from user_telegram_sessions if dead
+    let sessionAlive = await verifyMtprotoSession();
+    if (!sessionAlive && config.TELEGRAM_SESSION_MASTER_KEY) {
+      botLogger.warn('MTProto session dead — attempting auto-recovery from user_telegram_sessions');
+      const recovered = await recoverSessionFromDb(
+        db.telegramSessions,
+        Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex'),
+      );
+      if (recovered) {
+        sessionAlive = await verifyMtprotoSession();
+        if (sessionAlive) {
+          botLogger.info('MTProto session auto-recovered successfully');
+        } else {
+          botLogger.error('MTProto session recovery failed — restored file is also dead');
+        }
+      }
+    }
+    if (!sessionAlive) {
       botLogger.error(
-        { stderr: checkStderr.slice(0, 300), stdout: checkStdout.slice(0, 300) },
-        'MTProto session is DEAD — resolve/send-message/voice calls will fail. Recovery: decrypt session from user_telegram_sessions (see CLAUDE.md)',
+        'MTProto session is DEAD — resolve/send-message/voice calls will fail. No active session in DB to recover from.',
       );
     }
     botLogger.info('MTProto messenger initialized (pyrogram)');
