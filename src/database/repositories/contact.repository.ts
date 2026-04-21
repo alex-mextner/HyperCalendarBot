@@ -37,7 +37,7 @@ export class ContactRepository {
       const score = Math.max(scoreField(c.name, normalizedQuery), scoreField(c.preferred_name, normalizedQuery));
       if (score > 0) scored.push({ contact: c, confidence: score });
     }
-    scored.sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name));
+    scored.sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name, 'ru'));
     return scored;
   }
 

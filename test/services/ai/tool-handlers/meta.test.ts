@@ -306,6 +306,26 @@ describe('meta tool handlers', () => {
       }
       expect(result.data.matches.length).toBe(5);
     });
+
+    test('single fuzzy match shows confidence percentage in output', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Елена', 'elena_user', 999);
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('Contact found:');
+      expect(result.output).toContain('name: Елена');
+      expect(result.output).toContain('(80%)');
+    });
+
+    test('single exact match does not show confidence percentage', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Лена', 'lena_user', 111);
+      ctx.contactRepo = contactRepo;
+      const result = handleFindContact(ctx, { name: 'Лена' });
+      expect(result.success).toBe(true);
+      expect(result.output).not.toContain('%');
+    });
   });
 
   describe('handleAddContact', () => {
@@ -387,6 +407,54 @@ describe('meta tool handlers', () => {
       ctx.contactRepo = undefined;
       const result = handleUpdateContact(ctx, { search: 'Лена', name: 'Лена2' });
       expect(result.success).toBe(false);
+    });
+
+    test('refuses to update when search is ambiguous (multiple fuzzy matches)', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Елена', 'elena_user', 111);
+      contactRepo.add(USER_ID, 'Олена', 'olena_user', 222);
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Лена', preferred_name: 'Ленок' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Multiple');
+      expect(result.error).toContain('Елена');
+      expect(result.error).toContain('Олена');
+      // Nothing was actually updated
+      expect(contactRepo.findByName(USER_ID, 'Елена')?.preferred_name).toBeNull();
+      expect(contactRepo.findByName(USER_ID, 'Олена')?.preferred_name).toBeNull();
+    });
+
+    test('refuses to update when two contacts tie at exact match', async () => {
+      const contactRepo = new ContactRepository(db);
+      // Two distinct stored names that phoneticNormalize to the same form → both score 1.0
+      // "Вова" → "фофа", "Фофа" → "фофа"
+      contactRepo.add(USER_ID, 'Вова', 'vova1', 111);
+      contactRepo.add(USER_ID, 'Фофа', 'fofa', 222);
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Вова', preferred_name: 'Вовка' });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Multiple');
+    });
+
+    test('allows single fuzzy match without ambiguity', async () => {
+      const contactRepo = new ContactRepository(db);
+      contactRepo.add(USER_ID, 'Елена', 'elena_user', 111);
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Лена', preferred_name: 'Ленок' });
+      expect(result.success).toBe(true);
+      expect(contactRepo.findByName(USER_ID, 'Елена')?.preferred_name).toBe('Ленок');
+    });
+
+    test('exact match wins over fuzzy alternatives', async () => {
+      const contactRepo = new ContactRepository(db);
+      // "Лена" exact match alongside a fuzzy "Елена" — should pick the exact one.
+      contactRepo.add(USER_ID, 'Лена', 'lena_exact', 111);
+      contactRepo.add(USER_ID, 'Елена', 'elena_full', 222);
+      ctx.contactRepo = contactRepo;
+      const result = handleUpdateContact(ctx, { search: 'Лена', preferred_name: 'Ленусик' });
+      expect(result.success).toBe(true);
+      expect(contactRepo.findByName(USER_ID, 'Лена')?.preferred_name).toBe('Ленусик');
+      expect(contactRepo.findByName(USER_ID, 'Елена')?.preferred_name).toBeNull();
     });
   });
 
