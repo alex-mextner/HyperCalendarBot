@@ -326,14 +326,14 @@ else
    automatically, which handles all downstream notifications + GCal pushes
 5. `editProposalRepo.updateStatus(id, 'accepted')`
 6. Edit organizer message: remove buttons, show `✅`
-7. Notify proposer: `t(lang).sync.proposalAccepted(title)`
+7. Notify proposer with diff: `t(lang).sync.proposalAccepted(title, formatChanges(changes, lang))`
 
 `editprop:reject:{id}`:
 1. Validate: caller is organizer
 2. `editProposalRepo.updateStatus(id, 'rejected')`
 3. Edit organizer message: remove buttons, show `❌`
 4. Push original event data to participant's GCal (revert): `syncQueue.add('push-participant-event', { action: 'update' })`
-5. Notify proposer: `t(lang).sync.proposalRejected(title)`
+5. Notify proposer with diff: `t(lang).sync.proposalRejected(title, formatChanges(changes, lang))`
 
 #### Task 4.2: Proposal Expiry Worker
 **File**: `src/services/scheduled/bot-tasks.ts` (or new file if bot-tasks doesn't exist)

@@ -645,10 +645,10 @@ sync: {
   rejectBtn: 'Отклонить ❌',
 
   // Organizer responds → notify participant
-  proposalAccepted: (title: string) =>
-    `✅ «${title}» — изменения приняты`,
-  proposalRejected: (title: string) =>
-    `❌ «${title}» — изменения отклонены`,
+  proposalAccepted: (title: string, changes: string) =>
+    `✅ «${title}» принято:\n${changes}`,
+  proposalRejected: (title: string, changes: string) =>
+    `❌ «${title}» отклонено:\n${changes}`,
 
   // TTL expired
   proposalExpired: (title: string) =>
@@ -688,10 +688,10 @@ sync: {
   acceptBtn: 'Accept ✅',
   rejectBtn: 'Decline ❌',
 
-  proposalAccepted: (title: string) =>
-    `✅ "${title}" — changes accepted`,
-  proposalRejected: (title: string) =>
-    `❌ "${title}" — changes declined`,
+  proposalAccepted: (title: string, changes: string) =>
+    `✅ "${title}" accepted:\n${changes}`,
+  proposalRejected: (title: string, changes: string) =>
+    `❌ "${title}" declined:\n${changes}`,
 
   proposalExpired: (title: string) =>
     `⏰ "${title}" — no response, changes reverted`,
