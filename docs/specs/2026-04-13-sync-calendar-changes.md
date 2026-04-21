@@ -59,7 +59,7 @@
 2. Каждому участнику отправить уведомление: «Событие "Standup" отменено организатором»
 3. Удалить копии из Google Calendar участников (push delete)
 4. Очистить `participant_google_sync` records
-5. Обновить `event_participants.status` → `'declined'` (или отдельный статус `'cancelled'`)
+5. Обновить `event_participants.status` → `'declined'` (используем существующий статус, без нового 'cancelled')
 6. Удалить локальное событие
 
 ## Поддерживаемые поля
@@ -147,12 +147,15 @@ class EventChangeNotifier {
     event: CalendarEvent;
     changes: FieldChange[];
     source: ChangeSource;
+    skipProposalExpiry?: boolean;  // true при proposal_accept — proposal уже обработан caller'ом
+    excludeUserIds?: number[];     // не слать уведомление этим пользователям (proposer получит отдельное)
   }): Promise<void> {
     // 1. Skip if no shared fields changed or no participants
-    // 2. Auto-expire pending proposals for this event
-    // 3. Notify each active participant (status !== 'declined')
+    // 2. Auto-expire pending proposals (unless skipProposalExpiry)
+    // 3. Notify each active participant except excludeUserIds
     // 4. Push updated event to each participant's GCal
-    // 5. Rematerialize reminders if time changed
+    // 5. Rematerialize reminders if time changed AND source === 'google_sync'
+    //    (при 'bot'/'proposal_accept' EventService уже rematerialized)
     // 6. Push to organizer's GCal if source === 'bot' (not 'google_sync' — would loop)
   }
 
@@ -162,8 +165,9 @@ class EventChangeNotifier {
   }): Promise<void> {
     // 1. Notify each active participant
     // 2. Delete from each participant's GCal
-    // 3. Clean up participant_google_sync records
-    // 4. Auto-expire pending proposals
+    // 3. Push delete to organizer's GCal if source === 'bot'
+    // 4. Clean up participant_google_sync records
+    // 5. Auto-expire pending proposals
   }
 }
 ```
@@ -174,16 +178,25 @@ class EventChangeNotifier {
 Replaces `onParticipantsNotify`.
 
 ```typescript
+interface ChangeNotifierOptions {
+  skipProposalExpiry?: boolean;
+  excludeUserIds?: number[];
+}
+
 // EventService.updateEvent — existing code already computes oldEvent vs updatedEvent
-updateEvent(id, userId, data) {
+updateEvent(id, userId, data, notifierOptions?: ChangeNotifierOptions) {
   const existing = this.eventRepo.findById(id, userId);
   const updated = this.eventRepo.update(id, userId, data);
   // ... materializer, domain events (existing) ...
   if (this.changeNotifier && updated && existing) {
-    const changes = computeEventDiff(existing, updated);
+    const changes = computeEventDiff(
+      snapshotFromCalendarEvent(existing),
+      snapshotFromCalendarEvent(updated),
+    );
     // fire-and-forget with .catch(log)
     this.changeNotifier.onEventChanged({
       event: updated, changes, source: 'bot',
+      ...notifierOptions,
     }).catch(err => logger.error({ err }, 'EventChangeNotifier.onEventChanged failed'));
   }
   return updated;
@@ -544,7 +557,10 @@ for (const proposal of expiredProposals) {
   // Notify participant
   notify(proposal.proposer_id, t(lang).sync.proposalExpired(eventTitle));
   // Edit organizer's message: remove buttons
-  editMessage(proposal.organizer_message_id, t(lang).sync.proposalExpiredOrganizer(eventTitle));
+  if (proposal.organizer_chat_id && proposal.organizer_message_id) {
+    editMessage(proposal.organizer_chat_id, proposal.organizer_message_id,
+      t(orgLang).sync.proposalExpiredOrganizer(eventTitle));
+  }
 }
 ```
 
@@ -627,6 +643,9 @@ Revert для timezone не нужен.
 
 Namespace: `MSG.{lang}.sync`. Строки следуют правилу front-load: первые слова — суть,
 без филлеров типа "Изменения для", "Напоминание:", "Событие".
+
+`formatChanges` выводит строки в фиксированном порядке (самое важное первым):
+**time → location → title → description → all_day → recurrence**
 
 ### Russian (`MSG.ru.sync`)
 
@@ -717,23 +736,26 @@ sync: {
 ## Rematerialization
 
 При изменении `start_at`, `end_at` или `all_day` — напоминания нужно пересчитать.
-`EventChangeNotifier` использует `hasTimeChange(changes)` и вызывает:
+
+**Source-aware**: `EventChangeNotifier` rematerializes **только при `source === 'google_sync'`**.
+При `source === 'bot'` или `source === 'proposal_accept'` EventService.updateEvent() уже
+вызывает materializer.materialize() — повторный вызов был бы расточительным (delete + recreate
+тех же самых reminders).
 
 ```typescript
-if (hasTimeChange(changes)) {
+// Только в onEventChanged, только при google_sync
+if (source === 'google_sync' && hasTimeChange(sharedChanges)) {
   materializer.deleteForEvent(event.id);
   materializer.materialize(
     { id: event.id, start_at: event.start_at, reminder_overrides: event.reminder_overrides,
       all_day: event.all_day, user_timezone: event.timezone },
     event.user_id,
   );
-  // Для каждого участника с accepted status — тоже rematerialize их reminders
-  for (const p of activeParticipants) {
-    materializer.deleteForEvent(event.id); // participant reminders are per-event, not per-user
-    // (если у участников свои reminders — будущая фича)
-  }
 }
 ```
+
+Participant reminders (каждый участник со своими настройками напоминаний) — будущая фича.
+Сейчас reminders привязаны к event, не к user.
 
 ## Domain Events (future extension)
 

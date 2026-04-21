@@ -99,45 +99,51 @@ class EventChangeNotifier {
     event: CalendarEvent;
     changes: FieldChange[];
     source: ChangeSource;
+    skipProposalExpiry?: boolean;  // true при proposal_accept
+    excludeUserIds?: number[];     // не слать уведомление proposer'у
   }): Promise<void> {
-    const { event, changes, source } = params;
+    const { event, changes, source, skipProposalExpiry, excludeUserIds } = params;
     if (event.owner_type !== 'user') return;  // MVP: skip group events
 
     const sharedChanges = getSharedChanges(changes);
     if (sharedChanges.length === 0) return;
 
     const participants = this.deps.participantRepo.getByEvent(event.id);
-    const active = participants.filter(p => p.status !== 'declined' && p.user_id !== event.user_id);
-    if (active.length === 0) return;
+    const active = participants.filter(p =>
+      p.status !== 'declined' &&
+      p.user_id !== event.user_id &&
+      !excludeUserIds?.includes(p.user_id),
+    );
 
-    // Auto-expire pending proposals
-    const pendingProposals = this.deps.editProposalRepo.getPendingForEvent(event.id);
-    for (const proposal of pendingProposals) {
-      this.deps.editProposalRepo.updateStatus(proposal.id, 'expired');
-      // Notify proposer
-      const lang = this.deps.getUserLang(proposal.proposer_id);
-      await this.deps.notifyUser(
-        proposal.proposer_id,
-        t(lang).sync.proposalExpired(event.title),
-      );
-      // Edit organizer's message (remove buttons)
-      if (proposal.organizer_message_id && proposal.organizer_chat_id) {
-        const orgLang = this.deps.getUserLang(event.user_id);
-        await this.deps.editMessage(
-          proposal.organizer_chat_id,
-          proposal.organizer_message_id,
-          t(orgLang).sync.proposalExpiredOrganizer(event.title),
+    // Auto-expire pending proposals (unless caller already handled the proposal)
+    if (!skipProposalExpiry) {
+      const pendingProposals = this.deps.editProposalRepo.getPendingForEvent(event.id);
+      for (const proposal of pendingProposals) {
+        this.deps.editProposalRepo.updateStatus(proposal.id, 'expired');
+        const lang = this.deps.getUserLang(proposal.proposer_id);
+        await this.deps.notifyUser(
+          proposal.proposer_id,
+          t(lang).sync.proposalExpired(event.title),
         );
+        if (proposal.organizer_message_id && proposal.organizer_chat_id) {
+          const orgLang = this.deps.getUserLang(event.user_id);
+          await this.deps.editMessage(
+            proposal.organizer_chat_id,
+            proposal.organizer_message_id,
+            t(orgLang).sync.proposalExpiredOrganizer(event.title),
+          );
+        }
       }
     }
 
-    // Notify each active participant
+    if (active.length === 0) return;
+
+    // Notify each active participant (excluding excludeUserIds)
     for (const p of active) {
       const lang = this.deps.getUserLang(p.user_id);
       const text = t(lang).sync.eventChanged(event.title, formatChanges(sharedChanges, lang));
       await this.deps.notifyUser(p.user_id, text);
 
-      // Push updated event to participant's Google Calendar
       await this.deps.syncQueue.add('push-participant-event', {
         type: 'push-participant-event',
         userId: p.user_id,
@@ -156,8 +162,9 @@ class EventChangeNotifier {
       });
     }
 
-    // Rematerialize reminders if time changed
-    if (hasTimeChange(sharedChanges)) {
+    // Rematerialize reminders ONLY when source is google_sync
+    // (bot/proposal_accept: EventService.updateEvent already rematerialized)
+    if (source === 'google_sync' && hasTimeChange(sharedChanges)) {
       this.deps.materializer.deleteForEvent(event.id);
       this.deps.materializer.materialize(
         { id: event.id, start_at: event.start_at, reminder_overrides: event.reminder_overrides,
@@ -196,6 +203,16 @@ class EventChangeNotifier {
       });
     }
 
+    // Push delete to organizer's GCal (only if change came from bot)
+    if (source === 'bot') {
+      await this.deps.syncQueue.add('push-event', {
+        type: 'push-event',
+        userId: event.user_id,
+        eventId: event.id,
+        action: 'delete',
+      });
+    }
+
     // Clean up participant_google_sync records
     this.deps.participantSyncRepo.deleteByEvent(event.id);
   }
@@ -207,13 +224,18 @@ class EventChangeNotifier {
 - 3 active participants → 3 notifications + 3 push jobs
 - 1 declined participant → skipped
 - Pending proposals auto-expired + proposers notified
+- `skipProposalExpiry: true` → proposals NOT expired
+- `excludeUserIds: [42]` → user 42 NOT notified, others are
 - Group event → early return
-- Time change → rematerialization called
+- Time change + `source: 'google_sync'` → rematerialization called
+- Time change + `source: 'bot'` → rematerialization NOT called (EventService does it)
 - `source: 'bot'` → push to organizer GCal
 - `source: 'google_sync'` → NO push to organizer GCal
 - Only shared changes passed → personal fields ignored
 - No shared changes → early return (even if timezone changed)
 - `onEventDeleted` → all participants notified + GCal deleted + participant_google_sync cleaned
+- `onEventDeleted` + `source: 'bot'` → push delete to organizer GCal
+- `onEventDeleted` + `source: 'google_sync'` → NO push delete to organizer GCal
 
 #### Task 2.2: Integrate into EventService
 **File**: `src/services/event/event-service.ts`
@@ -223,9 +245,11 @@ Changes to `EventServiceDeps`:
 - Remove `onParticipantsNotify?: (userIds: number[], text: string) => void`
 - Add `changeNotifier?: EventChangeNotifier`
 
-`updateEvent()`:
+`updateEvent(id, userId, data, notifierOptions?)`:
+- New optional param: `notifierOptions?: { skipProposalExpiry?: boolean; excludeUserIds?: number[] }`
 - After update + domain events, call `changeNotifier.onEventChanged()` with
   `computeEventDiff(snapshotFromCalendarEvent(existing), snapshotFromCalendarEvent(updated))`
+- Pass `notifierOptions` through to the notifier (for proposal_accept flow)
 - Fire-and-forget with `.catch(err => logger.error(...))`
 
 `deleteEvent()`:
@@ -321,10 +345,11 @@ else
 `editprop:accept:{id}`:
 1. Validate: caller is organizer (`event.user_id === ctx.from.id`)
 2. Parse `changes` JSON from proposal → `FieldChange[]`
-3. Build `UpdateEventData` from changes (careful with all_day: boolean→number conversion)
-4. `eventService.updateEvent(eventId, ownerId, data)` — this triggers `EventChangeNotifier`
-   automatically, which handles all downstream notifications + GCal pushes
-5. `editProposalRepo.updateStatus(id, 'accepted')`
+3. `editProposalRepo.updateStatus(id, 'accepted')` — BEFORE updateEvent to avoid auto-expiry race
+4. Build `UpdateEventData` from changes (careful with all_day: boolean→number conversion)
+5. `eventService.updateEvent(eventId, ownerId, data, { skipProposalExpiry: true, excludeUserIds: [proposal.proposer_id] })`
+   — `skipProposalExpiry`: this proposal is already accepted, don't expire it
+   — `excludeUserIds`: proposer gets a separate "accepted" message (step 7), not generic "changed"
 6. Edit organizer message: remove buttons, show `✅`
 7. Notify proposer with diff: `t(lang).sync.proposalAccepted(title, formatChanges(changes, lang))`
 
