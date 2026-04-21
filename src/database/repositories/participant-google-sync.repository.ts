@@ -101,4 +101,20 @@ export class ParticipantGoogleSyncRepository {
   deleteByUser(userId: number): void {
     this.db.prepare('DELETE FROM participant_google_sync WHERE user_id = ?').run(userId);
   }
+
+  getByUserAndGoogleEventId(userId: number, googleEventId: string): ParticipantGoogleSync | null {
+    return (
+      (this.db
+        .prepare('SELECT * FROM participant_google_sync WHERE user_id = ? AND google_event_id = ?')
+        .get(userId, googleEventId) as ParticipantGoogleSync | null) ?? null
+    );
+  }
+
+  updateTimezoneOverride(userId: number, eventId: number, timezone: string): void {
+    this.db
+      .prepare(
+        "UPDATE participant_google_sync SET timezone_override = ?, updated_at = datetime('now') WHERE user_id = ? AND event_id = ?",
+      )
+      .run(timezone, userId, eventId);
+  }
 }

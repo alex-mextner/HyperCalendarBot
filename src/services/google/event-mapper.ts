@@ -45,7 +45,7 @@ export interface GoogleEvent {
   updated?: string | null;
 }
 
-interface LocalEventFromGoogle {
+export interface LocalEventFromGoogle {
   user_id: number;
   title: string;
   description: string | null;

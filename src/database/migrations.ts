@@ -1009,4 +1009,26 @@ export const migrations: Migration[] = [
       db.exec('ALTER TABLE feedback_threads ADD COLUMN topic_thread_id INTEGER DEFAULT NULL');
     },
   },
+  {
+    name: '057_edit_proposals_sync_fields',
+    up: (db) => {
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN expires_at TEXT');
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN original_values TEXT');
+      db.exec("ALTER TABLE edit_proposals ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'");
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN organizer_message_id INTEGER');
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN organizer_chat_id INTEGER');
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN participant_message_id INTEGER');
+      db.exec('ALTER TABLE edit_proposals ADD COLUMN participant_chat_id INTEGER');
+    },
+  },
+  {
+    name: '058_participant_google_sync_tz_and_index',
+    up: (db) => {
+      db.exec('ALTER TABLE participant_google_sync ADD COLUMN timezone_override TEXT');
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_participant_google_sync_google_event
+         ON participant_google_sync (user_id, google_event_id)`,
+      );
+    },
+  },
 ];
