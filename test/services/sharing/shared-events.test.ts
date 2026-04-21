@@ -646,14 +646,19 @@ describe('creator delete notifies participants', () => {
     userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
   });
 
-  test('deleteEvent fires onParticipantsNotify for accepted participants', async () => {
-    const notified: { userIds: number[]; text: string }[] = [];
+  test('deleteEvent fires changeNotifier.onEventDeleted for events with accepted participants', async () => {
+    const deletedEvents: { title: string; source: string }[] = [];
+    const mockNotifier = {
+      onEventChanged: async () => {},
+      onEventDeleted: async (params: { event: { title: string }; source: string }) => {
+        deletedEvents.push({ title: params.event.title, source: params.source });
+      },
+    };
     eventService = new EventService({
       eventRepo,
       participantRepo,
-      onParticipantsNotify: (userIds, text) => {
-        notified.push({ userIds, text });
-      },
+      changeNotifier:
+        mockNotifier as unknown as import('../../../src/services/event/event-change-notifier.ts').EventChangeNotifier,
     });
 
     const event = eventService.createEvent({
@@ -666,19 +671,25 @@ describe('creator delete notifies participants', () => {
 
     eventService.deleteEvent(event.id, CREATOR);
 
-    expect(notified).toHaveLength(1);
-    expect(notified[0]!.userIds).toEqual([INVITEE]);
-    expect(notified[0]!.text).toContain('Team Meeting');
+    await Bun.sleep(10);
+    expect(deletedEvents).toHaveLength(1);
+    expect(deletedEvents[0]!.title).toBe('Team Meeting');
+    expect(deletedEvents[0]!.source).toBe('bot');
   });
 
-  test('deleteEvent does not fire callback when no accepted participants', async () => {
-    const notified: { userIds: number[]; text: string }[] = [];
+  test('deleteEvent fires changeNotifier even with no participants (notifier filters)', async () => {
+    const deletedEvents: { title: string }[] = [];
+    const mockNotifier = {
+      onEventChanged: async () => {},
+      onEventDeleted: async (params: { event: { title: string } }) => {
+        deletedEvents.push({ title: params.event.title });
+      },
+    };
     eventService = new EventService({
       eventRepo,
       participantRepo,
-      onParticipantsNotify: (userIds, text) => {
-        notified.push({ userIds, text });
-      },
+      changeNotifier:
+        mockNotifier as unknown as import('../../../src/services/event/event-change-notifier.ts').EventChangeNotifier,
     });
 
     const event = eventService.createEvent({
@@ -690,17 +701,14 @@ describe('creator delete notifies participants', () => {
 
     eventService.deleteEvent(event.id, CREATOR);
 
-    expect(notified).toHaveLength(0);
+    await Bun.sleep(10);
+    expect(deletedEvents).toHaveLength(1);
   });
 
-  test('deleteEvent does not notify declined participants', async () => {
-    const notified: { userIds: number[]; text: string }[] = [];
+  test('deleteEvent without changeNotifier does not throw', async () => {
     eventService = new EventService({
       eventRepo,
       participantRepo,
-      onParticipantsNotify: (userIds, text) => {
-        notified.push({ userIds, text });
-      },
     });
 
     const event = eventService.createEvent({
@@ -711,9 +719,7 @@ describe('creator delete notifies participants', () => {
     });
     participantRepo.add(event.id, INVITEE, 'declined');
 
-    eventService.deleteEvent(event.id, CREATOR);
-
-    expect(notified).toHaveLength(0);
+    expect(() => eventService.deleteEvent(event.id, CREATOR)).not.toThrow();
   });
 });
 

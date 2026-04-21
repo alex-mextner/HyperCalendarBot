@@ -171,11 +171,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     materializer,
     participantRepo: db.participants,
     groupMemberRepo: db.groupMembers,
-    onParticipantsNotify: (userIds, text) => {
-      for (const uid of userIds) {
-        bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
-      }
-    },
     domainEvents: domainEventBus,
   });
   const holidayService = new HolidayService(db.holidays);
