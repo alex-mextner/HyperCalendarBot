@@ -405,7 +405,9 @@ export function createConnectTelegramScene(
 
         if (result.data.status === '2fa_required') {
           await context.send(ct.enter2fa);
-          await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
+          // Clear pendingForwardText so a stale natural-language input from step 2
+          // does not leak into a cancel click at step 3.
+          await context.scene.update({ passwordAttempts: 0, pendingForwardText: undefined }, { step: undefined });
           pendingStepTransitions.add(userId);
           await context.scene.step.next();
           return;

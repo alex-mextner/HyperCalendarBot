@@ -31,23 +31,32 @@ interface ConnectTelegramSceneDeps {
   forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
 }
 
+/**
+ * Build the SQLite-backed, chat-scoped scene storage.
+ * Split out so that msgDeps can reference it BEFORE scenes are constructed —
+ * that in turn lets the caller build the AI agent and pass a real
+ * `forwardToAi` closure into the scene plugin, avoiding late-bound refs.
+ */
+export function createScopedSceneStorage(db: DatabaseService): ReturnType<typeof createSceneStorage> {
+  const storage = createSceneStorage(db.db);
+  // Cast satisfies GramIO's generic Storage<Data> structural contract:
+  // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
+  return wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
+}
+
 export function createScenesPlugin(
   db: DatabaseService,
   eventService: EventService,
   botToken: string,
   userComposer: UserResolverComposer,
   config: ConnectTelegramConfig,
+  scopedStorage: ReturnType<typeof createSceneStorage>,
   gcalConfigured = false,
   prefsService?: NotificationPreferencesService,
   holidayService?: HolidayService,
   onEventCreated?: (userId: number, eventId: number) => Promise<void>,
   connectTelegramSceneDeps?: ConnectTelegramSceneDeps,
 ) {
-  const storage = createSceneStorage(db.db);
-  // Cast satisfies GramIO's generic Storage<Data> structural contract:
-  // wrapWithChatId returns a plain string-keyed interface that is a superset at runtime.
-  const scopedStorage = wrapWithChatId(storage) as ReturnType<typeof createSceneStorage>;
-
   const addEventScene = createAddEventScene(eventService, userComposer, db.actionLog, onEventCreated);
   const editValueScene = createEditValueScene(eventService, userComposer, db.actionLog);
   const importScene = createImportScene(eventService, botToken, userComposer, db.actionLog);

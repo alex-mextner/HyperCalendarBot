@@ -88,7 +88,7 @@ import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
-import { createScenesPlugin } from './scenes/index.ts';
+import { createScenesPlugin, createScopedSceneStorage } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
 
 export interface GoogleBotDeps {
@@ -215,51 +215,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
   const googleSchedulePush = googleDeps?.schedulePush;
-  // Late-bound: sendAsConnectedUser is created after bot init,
-  // but only called at scene runtime (in callback handlers).
-  let sendAsConnectedUserRef:
-    | ((
-        inviterId: number,
-        targetId: number,
-        text: string,
-        username?: string,
-        meta?: { invitationId?: number },
-      ) => Promise<boolean>)
-    | undefined;
-  // Late-bound: the AI agent is created after createScenesPlugin.
-  // The scene calls this on "Cancel authorization" to keep the conversation going.
-  let forwardToAiRef: ((userId: number, chatId: number, text: string) => Promise<void>) | undefined;
 
-  const scenesSetup = createScenesPlugin(
-    db,
-    eventService,
-    token,
-    userComposer,
-    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
-    !!googleDeps,
-    prefsService,
-    holidayService,
-    googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
-    {
-      invitationService,
-      sendAsConnectedUser: (inviterId, targetId, text, username, meta) => {
-        if (!sendAsConnectedUserRef) return Promise.resolve(false);
-        return sendAsConnectedUserRef(inviterId, targetId, text, username, meta);
-      },
-      deepLinkService,
-      botUsername: envConfig?.BOT_USERNAME,
-      forwardToAi: (userId, chatId, text) => {
-        if (!forwardToAiRef) return Promise.resolve();
-        return forwardToAiRef(userId, chatId, text);
-      },
-    },
-  );
+  // Build the scene storage up-front so it can be shared with msgDeps (via sceneStorage)
+  // BEFORE the scene plugin itself is constructed. The plugin is built at the bottom of
+  // this function — by that point agent + msgDeps exist, and we pass a real forwardToAi
+  // closure with no late-bound refs.
+  const scopedStorage = createScopedSceneStorage(db);
 
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
-  const kvStorage = scenesSetup.storage as SceneKvStorage;
+  const kvStorage = scopedStorage as SceneKvStorage;
   const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
@@ -330,8 +297,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         },
       })
     : undefined;
-
-  sendAsConnectedUserRef = sendAsConnectedUser;
 
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
@@ -424,7 +389,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     googleSchedulePush: googleDeps?.schedulePush,
     googleScheduleParticipantPush: googleDeps?.scheduleParticipantPush,
     deepLinkService,
-    sceneStorage: scenesSetup.storage,
+    sceneStorage: scopedStorage,
     botUsername: envConfig?.BOT_USERNAME,
     botId: Number(token.split(':')[0]),
     groupSessions,
@@ -486,7 +451,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     chatHistoryIds,
     agentRegistry,
     agentDispatcher,
-    onboardingScene: scenesSetup.scenes.onboardingScene,
+    // Assigned below, after the scenes plugin is built.
+    onboardingScene: undefined as import('@gramio/scenes').AnyScene | undefined,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     aiRetryQueue: undefined as import('../services/scheduled/types.ts').QueueAdapter | undefined,
@@ -526,13 +492,34 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     weatherService,
   };
 
-  // Wire late-bound ref now that agent and msgDeps exist. Used by connect-telegram scene's
-  // "Cancel authorization" button to forward the original user message to the AI agent.
-  forwardToAiRef = async (userId: number, chatId: number, text: string) => {
-    const user = db.users.findByTelegramId(userId);
-    if (!user) return;
-    await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
-  };
+  // Now that agent and msgDeps are fully built, construct the scene plugin with real
+  // closures for sendAsConnectedUser and forwardToAi — no late-bound refs.
+  const scenesSetup = createScenesPlugin(
+    db,
+    eventService,
+    token,
+    userComposer,
+    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
+    scopedStorage,
+    !!googleDeps,
+    prefsService,
+    holidayService,
+    googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
+    {
+      invitationService,
+      sendAsConnectedUser,
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+      forwardToAi: async (userId: number, chatId: number, text: string) => {
+        const user = db.users.findByTelegramId(userId);
+        if (!user) return;
+        await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
+      },
+    },
+  );
+
+  // Fill in the one scene reference msgDeps needs now that scenes exist.
+  msgDeps.onboardingScene = scenesSetup.scenes.onboardingScene;
 
   // AI Assistant commands (not in setMyCommands — internal use only)
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
