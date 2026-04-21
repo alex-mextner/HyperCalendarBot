@@ -312,4 +312,77 @@ describe('connect-telegram: Cancel authorization button', () => {
     expect(text).toBe('Неверный пароль. Попробуй ещё раз.');
     expect(opts?.reply_markup).toBeDefined();
   });
+
+  test('2FA step ignores unknown callback_query data', async () => {
+    const forwardToAi = mock(() => Promise.resolve());
+    const scene = makeScene({ forwardToAi });
+    const twoFaStep = getStepFns(scene)[3]!;
+
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:something_else',
+      stepId: 3,
+      state: { encryptedPhoneHex: 'abcd', sessionPath: '/tmp/2fa.session' },
+    });
+
+    await twoFaStep(ctx, NOOP_NEXT);
+
+    expect(ctx.answer).not.toHaveBeenCalled();
+    expect(ctx.send).not.toHaveBeenCalled();
+    expect(ctx.scene.exit).not.toHaveBeenCalled();
+    expect(forwardToAi).not.toHaveBeenCalled();
+  });
+
+  test('cancel falls back to plain "cancelled" when forwardToAi dep is missing', async () => {
+    // No forwardToAi dep provided — even with pending text, we can't forward.
+    const scene = makeScene();
+    const otpStep = getStepFns(scene)[2]!;
+
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:cancel_auth',
+      state: {
+        encryptedPhoneHex: 'abcd',
+        sessionPath: '/tmp/fake.session',
+        pendingForwardText: 'кое-что для ИИ',
+      },
+    });
+
+    await otpStep(ctx, NOOP_NEXT);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(cleanupSpy).toHaveBeenCalledTimes(1);
+    expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    // Plain variant, not "Отвечаю…"
+    expect(ctx.send.mock.calls[0]![0]).toBe('Авторизация отменена.');
+  });
+
+  test('forwardToAi rejection is swallowed — user-facing flow still completes', async () => {
+    const forwardToAi = mock(() => Promise.reject(new Error('AI pipeline broke')));
+    const scene = makeScene({ forwardToAi });
+    const otpStep = getStepFns(scene)[2]!;
+
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:cancel_auth',
+      state: {
+        encryptedPhoneHex: 'abcd',
+        sessionPath: '/tmp/fake.session',
+        pendingForwardText: 'покажи события',
+      },
+    });
+
+    // Handler awaits forwardToAi only inside its own .catch() — the handler itself
+    // resolves cleanly regardless of AI-side failure.
+    await otpStep(ctx, NOOP_NEXT);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send.mock.calls[0]![0]).toContain('Авторизация отменена');
+    expect(forwardToAi).toHaveBeenCalledTimes(1);
+    // Give the fire-and-forget promise a tick to settle its rejection.
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+  });
 });

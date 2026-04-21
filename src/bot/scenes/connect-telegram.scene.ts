@@ -388,7 +388,7 @@ export function createConnectTelegramScene(
             return;
           }
 
-          // Digits-only code rejected by Telegram — no text to forward, just offer to bail out
+          // Valid-shape OTP rejected by Telegram — nothing worth forwarding, just offer to bail out
           await context.scene.update({ pendingForwardText: undefined }, { step: undefined });
           const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.invalidCode, { reply_markup: retryKb });

@@ -1,4 +1,5 @@
 // src/bot/index.ts
+import type { AnyScene } from '@gramio/scenes';
 import { Bot, InlineKeyboard } from 'gramio';
 import { agentDispatcher } from '../agent/dispatcher.ts';
 import { agentRegistry } from '../agent/registry.ts';
@@ -452,7 +453,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     agentRegistry,
     agentDispatcher,
     // Assigned below, after the scenes plugin is built.
-    onboardingScene: undefined as import('@gramio/scenes').AnyScene | undefined,
+    onboardingScene: undefined as AnyScene | undefined,
     scheduledCallService: undefined as ScheduledAiCallService | undefined,
     triggerService: undefined as { repo: typeof triggerRepo } | undefined,
     aiRetryQueue: undefined as import('../services/scheduled/types.ts').QueueAdapter | undefined,
@@ -494,6 +495,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   // Now that agent and msgDeps are fully built, construct the scene plugin with real
   // closures for sendAsConnectedUser and forwardToAi — no late-bound refs.
+  // INVARIANT: nothing may read msgDeps.onboardingScene between the msgDeps literal
+  // above and the `msgDeps.onboardingScene = ...` assignment below. Only handlers
+  // registered on `bot` read it, and they cannot fire until createBot() returns.
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
