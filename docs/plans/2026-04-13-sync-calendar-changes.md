@@ -7,338 +7,365 @@ Based on spec: `docs/specs/2026-04-13-sync-calendar-changes.md`
 ### Phase 1: Foundation (pure logic, no side effects)
 
 #### Task 1.1: Change Detection Module
-**File**: `src/services/google/change-detection.ts`
+**New file**: `src/services/google/change-detection.ts`
 **Test**: `test/services/google/change-detection.test.ts`
 
-- `computeEventDiff(existing, incoming)` → `FieldChange[]`
-  - Compare tracked fields: title, description, start_at, end_at, all_day, location, recurrence_rule
-  - Normalize values before comparison (e.g. all_day 0/1 → boolean, trim timestamps)
-  - Return empty array if no changes
-- `formatChanges(changes, lang)` → string
-  - Human-readable multi-line diff using i18n strings
-  - Front-load most important change (time > location > title > description > recurrence)
-- `hasTimeChange(changes)` → boolean
-  - Utility to check if reminders need rematerialization
+Types:
+- `EventFieldSnapshot` — normalized common type (all_day: boolean, not number)
+- `SharedField`, `PersonalField`, `TrackedField` — field category unions
+- `FieldChange` — `{ field, oldValue, newValue }`
+
+Functions:
+- `snapshotFromCalendarEvent(e: CalendarEvent): EventFieldSnapshot` — normalizes all_day 0/1 → boolean
+- `snapshotFromGoogleLocal(e: LocalEventFromGoogle): EventFieldSnapshot`
+- `computeEventDiff(existing, incoming): FieldChange[]` — compare all tracked fields
+  - Normalize: trim strings, `null === ''` for description/location, `null === null`
+- `getSharedChanges(changes): FieldChange[]` — filter to shared fields only
+- `getPersonalChanges(changes): FieldChange[]` — filter to personal fields only
+- `hasTimeChange(changes): boolean` — start_at, end_at, or all_day changed
+- `formatChanges(changes, lang): string` — i18n multi-line diff, front-load time changes
 
 **Tests**:
 - No changes → empty array
-- Single field change (each of 7 fields)
-- Multiple fields changed
-- Normalization: trailing whitespace, null vs empty string
-- `formatChanges` output for each field type
-- `formatChanges` with multiple changes
+- Single field change (each of 8 tracked fields)
+- Multiple fields changed simultaneously
+- Normalization: trailing whitespace, null vs empty string, all_day 0 vs false
+- `getSharedChanges` filters out timezone
+- `getPersonalChanges` returns only timezone
+- `formatChanges` output for RU and EN
+- `formatChanges` with multiple changes (ordering: time first)
 
 #### Task 1.2: DB Migration + Type Updates
 **File**: `src/database/migrations.ts` (append new migration)
 **File**: `src/database/types.ts`
 
-Migration:
+Migration SQL:
 ```sql
 ALTER TABLE edit_proposals ADD COLUMN expires_at TEXT;
 ALTER TABLE edit_proposals ADD COLUMN original_values TEXT;
 ALTER TABLE edit_proposals ADD COLUMN source TEXT NOT NULL DEFAULT 'manual';
 ALTER TABLE edit_proposals ADD COLUMN organizer_message_id INTEGER;
+ALTER TABLE edit_proposals ADD COLUMN organizer_chat_id INTEGER;
 ALTER TABLE edit_proposals ADD COLUMN participant_message_id INTEGER;
+ALTER TABLE edit_proposals ADD COLUMN participant_chat_id INTEGER;
+ALTER TABLE participant_google_sync ADD COLUMN timezone_override TEXT;
 CREATE INDEX IF NOT EXISTS idx_participant_google_sync_google_event
   ON participant_google_sync (user_id, google_event_id);
 ```
 
-Update `EditProposal` interface:
-```typescript
-interface EditProposal {
-  // existing fields...
-  expires_at: string | null;
-  original_values: string | null; // JSON
-  source: 'google_sync' | 'manual' | 'ai_tool';
-  organizer_message_id: number | null;
-  participant_message_id: number | null;
-}
-```
-
-Update `EditProposalStatus`: add `'expired'`.
+Type changes:
+- `EditProposalStatus`: add `'expired'`
+- `EditProposal`: add 7 new fields (expires_at, original_values, source, organizer_message_id,
+  organizer_chat_id, participant_message_id, participant_chat_id)
+- `CreateEditProposalData`: add optional expires_at, original_values, source
+- `ParticipantGoogleSync`: add `timezone_override: string | null`
 
 #### Task 1.3: Repository Enhancements
 **File**: `src/database/repositories/edit-proposal.repository.ts`
 **File**: `src/database/repositories/participant-google-sync.repository.ts`
 
 EditProposalRepository:
-- `getExpired()` → expired pending proposals
-- `getPendingByProposerAndEvent(proposerId, eventId)` → for "update existing proposal" logic
-- `updateChanges(id, changes, originalValues, expiresAt)` → update pending proposal
-- Update `create()` to accept new fields
+- `getExpired(): EditProposal[]` — `WHERE status='pending' AND expires_at < datetime('now')`
+- `getPendingByProposerAndEvent(proposerId, eventId): EditProposal | null`
+- `updateChanges(id, changes, originalValues, expiresAt)` — update pending proposal in-place
+- Update `create()` to accept new fields (expires_at, original_values, source)
+- Update `updateStatus()` to also accept `'expired'`
 
 ParticipantGoogleSyncRepository:
-- `getByUserAndGoogleEventId(userId, googleEventId)` → lookup by google_event_id
+- `getByUserAndGoogleEventId(userId, googleEventId): ParticipantGoogleSync | null`
+- `updateTimezoneOverride(userId, eventId, timezone): void`
 
 **Tests**: unit tests for each new method
 
-### Phase 2: Sync Service Integration
+#### Task 1.4: i18n Strings
+**File**: `src/config/constants.ts`
 
-#### Task 2.1: Participant Change Detection in incrementalPull
+Add `sync` namespace to both `MSG.en` and `MSG.ru` (see spec for exact strings).
+All strings front-loaded per CLAUDE.md rules.
+
+### Phase 2: EventChangeNotifier
+
+#### Task 2.1: EventChangeNotifier Service
+**New file**: `src/services/event/event-change-notifier.ts`
+**Test**: `test/services/event/event-change-notifier.test.ts`
+
+```typescript
+type ChangeSource = 'bot' | 'google_sync' | 'proposal_accept';
+
+class EventChangeNotifier {
+  constructor(private deps: EventChangeNotifierDeps) {}
+
+  async onEventChanged(params: {
+    event: CalendarEvent;
+    changes: FieldChange[];
+    source: ChangeSource;
+  }): Promise<void> {
+    const { event, changes, source } = params;
+    if (event.owner_type !== 'user') return;  // MVP: skip group events
+
+    const sharedChanges = getSharedChanges(changes);
+    if (sharedChanges.length === 0) return;
+
+    const participants = this.deps.participantRepo.getByEvent(event.id);
+    const active = participants.filter(p => p.status !== 'declined' && p.user_id !== event.user_id);
+    if (active.length === 0) return;
+
+    // Auto-expire pending proposals
+    const pendingProposals = this.deps.editProposalRepo.getPendingForEvent(event.id);
+    for (const proposal of pendingProposals) {
+      this.deps.editProposalRepo.updateStatus(proposal.id, 'expired');
+      // Notify proposer
+      const lang = this.deps.getUserLang(proposal.proposer_id);
+      await this.deps.notifyUser(
+        proposal.proposer_id,
+        t(lang).sync.proposalExpired(event.title),
+      );
+      // Edit organizer's message (remove buttons)
+      if (proposal.organizer_message_id && proposal.organizer_chat_id) {
+        const orgLang = this.deps.getUserLang(event.user_id);
+        await this.deps.editMessage(
+          proposal.organizer_chat_id,
+          proposal.organizer_message_id,
+          t(orgLang).sync.proposalExpiredOrganizer(event.title),
+        );
+      }
+    }
+
+    // Notify each active participant
+    for (const p of active) {
+      const lang = this.deps.getUserLang(p.user_id);
+      const text = t(lang).sync.eventChanged(event.title, formatChanges(sharedChanges, lang));
+      await this.deps.notifyUser(p.user_id, text);
+
+      // Push updated event to participant's Google Calendar
+      await this.deps.syncQueue.add('push-participant-event', {
+        type: 'push-participant-event',
+        userId: p.user_id,
+        eventId: event.id,
+        action: 'update',
+      });
+    }
+
+    // Push to organizer's GCal (only if change came from bot, not from GCal itself)
+    if (source === 'bot' || source === 'proposal_accept') {
+      await this.deps.syncQueue.add('push-event', {
+        type: 'push-event',
+        userId: event.user_id,
+        eventId: event.id,
+        action: 'update',
+      });
+    }
+
+    // Rematerialize reminders if time changed
+    if (hasTimeChange(sharedChanges)) {
+      this.deps.materializer.deleteForEvent(event.id);
+      this.deps.materializer.materialize(
+        { id: event.id, start_at: event.start_at, reminder_overrides: event.reminder_overrides,
+          all_day: event.all_day, user_timezone: event.timezone },
+        event.user_id,
+      );
+    }
+  }
+
+  async onEventDeleted(params: {
+    event: CalendarEvent;
+    source: ChangeSource;
+  }): Promise<void> {
+    const { event, source } = params;
+    if (event.owner_type !== 'user') return;
+
+    const participants = this.deps.participantRepo.getByEvent(event.id);
+    const active = participants.filter(p => p.status !== 'declined' && p.user_id !== event.user_id);
+
+    // Auto-expire pending proposals
+    const pendingProposals = this.deps.editProposalRepo.getPendingForEvent(event.id);
+    for (const proposal of pendingProposals) {
+      this.deps.editProposalRepo.updateStatus(proposal.id, 'expired');
+    }
+
+    for (const p of active) {
+      const lang = this.deps.getUserLang(p.user_id);
+      await this.deps.notifyUser(p.user_id, t(lang).sync.eventCancelled(event.title));
+
+      // Delete from participant's Google Calendar
+      await this.deps.syncQueue.add('push-participant-event', {
+        type: 'push-participant-event',
+        userId: p.user_id,
+        eventId: event.id,
+        action: 'delete',
+      });
+    }
+
+    // Clean up participant_google_sync records
+    this.deps.participantSyncRepo.deleteByEvent(event.id);
+  }
+}
+```
+
+**Tests**:
+- No participants → no side effects
+- 3 active participants → 3 notifications + 3 push jobs
+- 1 declined participant → skipped
+- Pending proposals auto-expired + proposers notified
+- Group event → early return
+- Time change → rematerialization called
+- `source: 'bot'` → push to organizer GCal
+- `source: 'google_sync'` → NO push to organizer GCal
+- Only shared changes passed → personal fields ignored
+- No shared changes → early return (even if timezone changed)
+- `onEventDeleted` → all participants notified + GCal deleted + participant_google_sync cleaned
+
+#### Task 2.2: Integrate into EventService
+**File**: `src/services/event/event-service.ts`
+**File**: `src/bot/index.ts`
+
+Changes to `EventServiceDeps`:
+- Remove `onParticipantsNotify?: (userIds: number[], text: string) => void`
+- Add `changeNotifier?: EventChangeNotifier`
+
+`updateEvent()`:
+- After update + domain events, call `changeNotifier.onEventChanged()` with
+  `computeEventDiff(snapshotFromCalendarEvent(existing), snapshotFromCalendarEvent(updated))`
+- Fire-and-forget with `.catch(err => logger.error(...))`
+
+`deleteEvent()`:
+- Replace `onParticipantsNotify` block with `changeNotifier.onEventDeleted()`
+- Fire-and-forget with `.catch(err => logger.error(...))`
+
+`bot/index.ts`:
+- Replace `onParticipantsNotify` lambda with `changeNotifier: new EventChangeNotifier({ ... })`
+
+### Phase 3: Sync Service Integration
+
+#### Task 3.1: Participant Detection in incrementalPull
 **File**: `src/services/google/sync-service.ts`
 
-Modify `handleUpdatedOrNewEvent`:
+SyncService constructor — new optional deps:
+- `changeNotifier?: EventChangeNotifier`
+
+`handleUpdatedOrNewEvent` — rewrite with snapshot pattern:
+
 ```
-existing = findByGoogleEventId(userId, calendarId, googleEventId)
-if (existing) → current flow (owner update)
-  + NEW: after update, call ownerChangeHandler
-else
-  participantSync = participantSyncRepo.getByUserAndGoogleEventId(userId, googleEventId)
-  if (participantSync)
-    masterEvent = eventRepo.findByIdUnfiltered(participantSync.event_id)
-    → handleParticipantChange(userId, masterEvent, incomingGoogleEvent, participantSync)
+Transaction:
+  existing = findByGoogleEventId(userId, calendarId, googleEventId)
+  if (existing)
+    snapshot = snapshotFromCalendarEvent(existing)
+    // existing update code
+    incoming = snapshotFromGoogleLocal(local)
+    changes = computeEventDiff(snapshot, incoming)
+    if (changes.length > 0) → capture pendingNotification for changeNotifier
   else
-    → current flow (insert new event)
+    participantSync = participantSyncRepo.getByUserAndGoogleEventId(userId, googleEventId)
+    if (participantSync)
+      masterEvent = eventRepo.findByIdUnfiltered(participantSync.event_id)
+      → capture pendingNotification for handleParticipantChange
+    else
+      → insert new event (existing code)
+End transaction
+Execute pendingNotification (async)
 ```
 
-Modify `handleDeletedEvent`:
+`handleDeletedEvent` — make async, add participant detection:
+
 ```
 existing = findByGoogleEventId(userId, calendarId, googleEventId)
-if (existing) → current flow (owner delete)
-  + NEW: notify participants, delete their GCal copies
+if (existing)
+  → changeNotifier.onEventDeleted(...) BEFORE remove
+  → existing remove + sync log
 else
   participantSync = participantSyncRepo.getByUserAndGoogleEventId(userId, googleEventId)
   if (participantSync)
     → handleParticipantDelete(userId, participantSync)
 ```
 
-SyncService constructor needs new deps:
-- `participantRepo: ParticipantRepository`
-- `editProposalRepo: EditProposalRepository`
-- `onParticipantChange` callback
-- `onOwnerChange` callback
-
-#### Task 2.2: Owner Change Handler
-**File**: `src/services/google/owner-change-handler.ts`
-**Test**: `test/services/google/owner-change-handler.test.ts`
-
-Called after `handleUpdatedOrNewEvent` updates an owner's event:
-
-```typescript
-async function handleOwnerChange(
-  event: CalendarEvent,
-  changes: FieldChange[],
-  deps: {
-    participantRepo: ParticipantRepository;
-    editProposalRepo: EditProposalRepository;
-    syncQueue: Queue<GoogleSyncJobData>;
-    notifyUser: (userId: number, message: string) => Promise<void>;
-    getUserLang: (userId: number) => Lang;
-    getUserName: (userId: number) => string;
-  },
-): Promise<void> {
-  if (changes.length === 0) return;
-
-  const participants = deps.participantRepo.getByEvent(event.id);
-  if (participants.length === 0) return;
-
-  // Auto-expire pending proposals for this event (organizer changed it themselves)
-  const pendingProposals = deps.editProposalRepo.getPendingForEvent(event.id);
-  for (const proposal of pendingProposals) {
-    deps.editProposalRepo.updateStatus(proposal.id, 'expired');
-    // Notify proposer that organizer changed the event
-  }
-
-  // Notify each participant
-  for (const p of participants) {
-    if (p.status === 'declined') continue;
-    const lang = deps.getUserLang(p.user_id);
-    const message = formatChanges(changes, lang);
-    await deps.notifyUser(p.user_id, message);
-
-    // Push updated event to participant's Google Calendar
-    deps.syncQueue.add('push-participant-event', {
-      type: 'push-participant-event',
-      userId: p.user_id,
-      eventId: event.id,
-      action: 'update',
-    });
-  }
-
-  // Rematerialize reminders if time changed
-  if (hasTimeChange(changes)) {
-    // trigger reminder recalculation
-  }
-}
-```
-
-**Tests**:
-- No participants → no notifications
-- 3 participants → 3 notifications + 3 push jobs
-- Declined participant skipped
-- Pending proposals auto-expired
-- Time change triggers rematerialization
-
-#### Task 2.3: Participant Change Handler
-**File**: `src/services/google/participant-change-handler.ts`
+#### Task 3.2: Participant Change Handler
+**New file**: `src/services/google/participant-change-handler.ts`
 **Test**: `test/services/google/participant-change-handler.test.ts`
 
-Called when participant's pull detects changes to a shared event:
+`handleParticipantChange(participantUserId, masterEvent, incomingLocal, participantSync, deps)`:
 
-```typescript
-async function handleParticipantChange(
-  participantUserId: number,
-  masterEvent: CalendarEvent,
-  incomingLocal: LocalEventFromGoogle,
-  participantSync: ParticipantGoogleSync,
-  deps: { ... },
-): Promise<void> {
-  const changes = computeEventDiff(masterEvent, incomingLocal);
-  if (changes.length === 0) return;
+1. `computeEventDiff(snapshotFromCalendarEvent(masterEvent), snapshotFromGoogleLocal(incomingLocal))`
+2. Split into shared + personal changes
+3. **Personal changes** (timezone): `participantSyncRepo.updateTimezoneOverride(userId, eventId, newTz)`
+4. **Shared changes**: if empty → return
+5. Check existing pending proposal: `editProposalRepo.getPendingByProposerAndEvent(userId, eventId)`
+6. If existing → `updateChanges()` + edit organizer message
+7. If new → `create()` + send organizer notification with [Accept][Decline] buttons
+   - Store `organizer_message_id`, `organizer_chat_id` after send
+8. Update `participant_google_sync` etag
 
-  // Check for existing pending proposal
-  const existing = deps.editProposalRepo.getPendingByProposerAndEvent(
-    participantUserId, masterEvent.id
-  );
+`handleParticipantDelete(participantUserId, participantSync, deps)`:
 
-  const originalValues = JSON.stringify(
-    Object.fromEntries(
-      changes.map(c => [c.field, c.oldValue])
-    )
-  );
-
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
-
-  if (existing) {
-    // Update existing proposal
-    deps.editProposalRepo.updateChanges(
-      existing.id,
-      JSON.stringify(changes),
-      originalValues,
-      expiresAt,
-    );
-    // Edit organizer's message with updated changes
-  } else {
-    // Create new proposal
-    const proposal = deps.editProposalRepo.create({
-      event_id: masterEvent.id,
-      proposer_id: participantUserId,
-      changes: JSON.stringify(changes),
-      original_values: originalValues,
-      expires_at: expiresAt,
-      source: 'google_sync',
-    });
-    // Send notification to organizer with inline buttons
-    // Store organizer_message_id
-  }
-
-  // Update participant_google_sync etag (so we don't re-process same change)
-  deps.participantSyncRepo.updateSyncFields(participantUserId, masterEvent.id, {
-    google_etag: incomingLocal.google_etag ?? undefined,
-    last_synced_at: new Date().toISOString(),
-  });
-}
-```
+1. Load master event
+2. `participantRepo.updateStatus(eventId, userId, 'declined')`
+3. `invitationRepo.findActiveByEventAndInvitee(eventId, userId)` → if found, `updateStatus('declined')`
+4. `participantSyncRepo.delete(userId, eventId)`
+5. Cancel pending proposals from this participant
+6. Notify organizer
 
 **Tests**:
-- Single field change → new proposal created
-- Multiple fields → all in one proposal
+- Single shared field change → new proposal created
+- Timezone-only change → no proposal, timezone_override updated
+- Mixed shared+personal → proposal for shared, timezone stored separately
 - Existing pending proposal → updated, not duplicated
-- Organizer notified via message with buttons
-- participant_google_sync etag updated
+- Organizer notified with buttons, message_id stored
+- Participant delete → status=declined, organizer notified, participant_google_sync cleaned
+- Participant delete with active invitation → invitation also declined
+- Participant delete with no invitation → OK (null check)
 
-#### Task 2.4: Participant Delete Handler
+### Phase 4: Proposal Lifecycle
 
-In `handleDeletedEvent`, when participant deletes:
-
-```typescript
-async function handleParticipantDelete(
-  participantUserId: number,
-  participantSync: ParticipantGoogleSync,
-  deps: { ... },
-): Promise<void> {
-  const masterEvent = deps.eventRepo.findByIdUnfiltered(participantSync.event_id);
-  if (!masterEvent) return;
-
-  // Update participant status to declined
-  deps.participantRepo.updateStatus(masterEvent.id, participantUserId, 'declined');
-
-  // Update invitation status if exists
-  const invitation = deps.invitationRepo.findByEventAndInvitee(masterEvent.id, participantUserId);
-  if (invitation) {
-    deps.invitationRepo.updateStatus(invitation.id, 'declined', invitation.status);
-  }
-
-  // Clean up participant_google_sync
-  deps.participantSyncRepo.delete(participantUserId, masterEvent.id);
-
-  // Cancel any pending proposals from this participant
-  const pendingProposals = deps.editProposalRepo.getPendingByProposerAndEvent(
-    participantUserId, masterEvent.id,
-  );
-  for (const p of pendingProposals) {
-    deps.editProposalRepo.updateStatus(p.id, 'rejected');
-  }
-
-  // Notify organizer
-  const participantName = deps.getUserName(participantUserId);
-  const lang = deps.getUserLang(masterEvent.user_id);
-  await deps.notifyUser(
-    masterEvent.user_id,
-    t(lang).sync.participantDeclinedViaGoogle(participantName, masterEvent.title),
-  );
-}
-```
-
-### Phase 3: Proposal Lifecycle
-
-#### Task 3.1: Callback Handlers (Accept / Reject)
+#### Task 4.1: Callback Handlers (Accept / Reject)
 **File**: `src/bot/handlers/callback.handler.ts`
 
-```
-editprop:accept:{id}  →  apply changes to master event, notify all participants, push updates
-editprop:reject:{id}  →  revert participant's GCal copy, notify participant
-```
+`editprop:accept:{id}`:
+1. Validate: caller is organizer (`event.user_id === ctx.from.id`)
+2. Parse `changes` JSON from proposal → `FieldChange[]`
+3. Build `UpdateEventData` from changes (careful with all_day: boolean→number conversion)
+4. `eventService.updateEvent(eventId, ownerId, data)` — this triggers `EventChangeNotifier`
+   automatically, which handles all downstream notifications + GCal pushes
+5. `editProposalRepo.updateStatus(id, 'accepted')`
+6. Edit organizer message: remove buttons, show `✅`
+7. Notify proposer: `t(lang).sync.proposalAccepted(title)`
 
-Accept flow:
-1. Validate: caller is the organizer (event.user_id === ctx.from.id)
-2. Parse `changes` JSON from proposal
-3. Apply each change to the master event via `eventRepo.update()`
-4. Mark proposal as accepted
-5. Edit organizer message: remove buttons, show "✅ Принято"
-6. Notify participant: "✅ Изменения приняты"
-7. Notify other participants about the changes
-8. Push updated event to all participants' Google Calendars
-9. Push updated event to organizer's Google Calendar (if synced)
-10. Rematerialize reminders if time changed
+`editprop:reject:{id}`:
+1. Validate: caller is organizer
+2. `editProposalRepo.updateStatus(id, 'rejected')`
+3. Edit organizer message: remove buttons, show `❌`
+4. Push original event data to participant's GCal (revert): `syncQueue.add('push-participant-event', { action: 'update' })`
+5. Notify proposer: `t(lang).sync.proposalRejected(title)`
 
-Reject flow:
-1. Validate: caller is the organizer
-2. Mark proposal as rejected
-3. Edit organizer message: remove buttons, show "❌ Отклонено"
-4. Push original event data to participant's Google Calendar (revert)
-5. Notify participant: "❌ Изменения отклонены"
+#### Task 4.2: Proposal Expiry Worker
+**File**: `src/services/scheduled/bot-tasks.ts` (or new file if bot-tasks doesn't exist)
 
-#### Task 3.2: Proposal Expiry Worker
-**File**: modify `src/services/scheduled/bot-tasks.ts` or equivalent
+BullMQ repeating job (every 5 minutes) in `bot-tasks` queue:
 
-BullMQ repeating job (every 5 minutes):
 ```typescript
-async function processExpiredProposals(deps: { ... }): Promise<void> {
+async function processExpiredProposals(deps): Promise<void> {
   const expired = deps.editProposalRepo.getExpired();
   for (const proposal of expired) {
     deps.editProposalRepo.updateStatus(proposal.id, 'expired');
 
     // Revert participant's Google Calendar copy
-    deps.syncQueue.add('push-participant-event', {
+    await deps.syncQueue.add('push-participant-event', {
       type: 'push-participant-event',
       userId: proposal.proposer_id,
       eventId: proposal.event_id,
       action: 'update',
     });
 
-    // Notify participant
     const event = deps.eventRepo.findByIdUnfiltered(proposal.event_id);
-    if (event) {
-      const lang = deps.getUserLang(proposal.proposer_id);
-      await deps.notifyUser(proposal.proposer_id, t(lang).sync.proposalExpired(event.title));
-    }
+    if (!event) continue;
+
+    // Notify participant
+    const lang = deps.getUserLang(proposal.proposer_id);
+    await deps.notifyUser(proposal.proposer_id, t(lang).sync.proposalExpired(event.title));
 
     // Edit organizer message (remove buttons)
-    if (proposal.organizer_message_id && event) {
+    if (proposal.organizer_message_id && proposal.organizer_chat_id) {
       const orgLang = deps.getUserLang(event.user_id);
       await deps.editMessage(
-        event.user_id,
+        proposal.organizer_chat_id,
         proposal.organizer_message_id,
         t(orgLang).sync.proposalExpiredOrganizer(event.title),
       );
@@ -347,68 +374,73 @@ async function processExpiredProposals(deps: { ... }): Promise<void> {
 }
 ```
 
-### Phase 4: Owner Delete → Participant Notification
+### Phase 5: Feature Tracking & Wiring
 
-#### Task 4.1: Enhance handleDeletedEvent
-**File**: `src/services/google/sync-service.ts`
-
-Before deleting the event:
-1. Get all participants: `participantRepo.getByEvent(eventId)`
-2. For each active participant:
-   - Notify: "❌ Событие отменено организатором"
-   - Delete from their Google Calendar: `syncQueue.add('push-participant-event', { action: 'delete' })`
-   - Clean up `participant_google_sync`
-3. Delete the event (existing logic)
-
-### Phase 5: i18n & Feature Tracking
-
-#### Task 5.1: Add i18n strings
-**File**: `src/config/constants.ts`
-
-Add `sync` namespace to `MSG.en` and `MSG.ru` with all strings from the spec.
-
-#### Task 5.2: Feature tracking maps
+#### Task 5.1: Feature tracking maps
 **File**: `src/services/feature-tracking.ts`
 
 Add `editprop:accept` and `editprop:reject` to `CALLBACK_FEATURE_MAP`.
 
-### Phase 6: Integration & Wiring
+#### Task 5.2: Wire everything together
+**File**: `src/bot/index.ts`
 
-#### Task 6.1: Wire everything together
-- Pass new deps to SyncService constructor
-- Register callback handlers
-- Set up expiry repeating job
-- Wire sync queue with new job types if needed
+- Create `EventChangeNotifier` instance with all deps
+- Pass to `EventService` (replaces `onParticipantsNotify`)
+- Pass to `SyncService` (new dep)
+- Register `editprop:accept` / `editprop:reject` callback handlers
+- Add `proposal-expiry` repeating job to bot-tasks queue
 
-#### Task 6.2: Integration tests
-- Scenario: organizer edits in GCal → participants notified + GCal updated
-- Scenario: participant edits in GCal → proposal created → organizer accepts → applied
-- Scenario: participant edits → proposal expires → reverted
-- Scenario: participant edits → organizer rejects → reverted
-- Scenario: participant deletes → treated as decline
-- Scenario: organizer deletes → participants notified
-- Scenario: participant edits while organizer also editing → proposals auto-expired
+### Phase 6: Integration Tests
+
+**Test file**: `test/services/google/sync-change-propagation.test.ts`
+
+Scenarios:
+1. Organizer edits in GCal → participants notified + their GCal updated
+2. Organizer edits via bot → same notifications (via EventChangeNotifier)
+3. Participant edits shared fields in GCal → proposal created → organizer accepts → applied to all
+4. Participant edits only timezone → no proposal, timezone_override stored
+5. Participant edits shared+timezone → proposal for shared, timezone stored
+6. Participant edits → proposal expires (1h TTL) → reverted + notified
+7. Participant edits → organizer rejects → reverted + notified
+8. Participant deletes → treated as decline, organizer notified
+9. Organizer deletes → all participants notified + GCal copies deleted
+10. Participant edits while organizer also editing → proposals auto-expired
+11. Participant makes multiple edits → existing proposal updated, not duplicated
+12. Group event → no change propagation (MVP filter)
 
 ## Dependency Graph
 
 ```
-Task 1.1 (change detection)     ─┐
-Task 1.2 (migration + types)    ─┤
-Task 1.3 (repo enhancements)    ─┤─→ Task 2.1 (sync-service integration)
-                                  │
-Task 5.1 (i18n strings)         ─┤─→ Task 2.2 (owner change handler)
-                                  │─→ Task 2.3 (participant change handler)
-                                  │─→ Task 2.4 (participant delete handler)
-                                  │
-                                  ├─→ Task 3.1 (callback handlers)
-                                  ├─→ Task 3.2 (expiry worker)
-                                  ├─→ Task 4.1 (owner delete notifications)
-                                  │
-                                  └─→ Task 6.1 (wiring)
-                                       └─→ Task 6.2 (integration tests)
+Phase 1 (parallel):
+  Task 1.1 (change detection)
+  Task 1.2 (migration + types)
+  Task 1.3 (repo enhancements)
+  Task 1.4 (i18n strings)
+    │
+    ▼
+Phase 2:
+  Task 2.1 (EventChangeNotifier)
+  Task 2.2 (EventService integration)
+    │
+    ▼
+Phase 3:
+  Task 3.1 (SyncService participant detection)
+  Task 3.2 (Participant change/delete handlers)
+    │
+    ▼
+Phase 4:
+  Task 4.1 (Callback handlers: accept/reject)
+  Task 4.2 (Expiry worker)
+    │
+    ▼
+Phase 5:
+  Task 5.1 (Feature tracking)
+  Task 5.2 (Wiring in bot/index.ts)
+    │
+    ▼
+Phase 6:
+  Integration tests
 ```
 
 Phase 1 tasks are independent and can be done in parallel.
-Phase 2–4 depend on Phase 1.
-Phase 5 can be done alongside Phase 1.
-Phase 6 is last.
+Each subsequent phase depends on the previous.
