@@ -1,14 +1,16 @@
 import type { Database } from 'bun:sqlite';
+import { levenshtein, maxEditDistance, phoneticNormalize } from '../../utils/fuzzy.ts';
 import type { Contact } from '../types.ts';
 
-function scoreField(field: string | null, query: string): number {
-  if (!field) return 0;
-  const target = field.toLowerCase();
-  if (target === query) return 1;
-  if (target.startsWith(query)) return 0.85;
-  if (query.startsWith(target)) return 0.8;
-  if (target.includes(query) || query.includes(target)) return 0.65;
-  return 0;
+function scoreField(field: string | null, normalizedQuery: string): number {
+  if (!field || !normalizedQuery) return 0;
+  const target = phoneticNormalize(field);
+  if (!target) return 0;
+  if (target === normalizedQuery) return 1;
+  const dist = levenshtein(normalizedQuery, target);
+  const maxLen = Math.max(normalizedQuery.length, target.length);
+  if (dist > maxEditDistance(maxLen)) return 0;
+  return 1 - dist / maxLen;
 }
 
 export class ContactRepository {
@@ -19,22 +21,20 @@ export class ContactRepository {
   }
 
   /**
-   * Return every contact whose name or preferred_name matches `name`, each scored 0..1.
-   * Scoring (best over name/preferred_name):
-   *   1.00 exact (case-insensitive)
-   *   0.85 query is prefix of target
-   *   0.80 target is prefix of query
-   *   0.65 substring (either direction, non-prefix)
+   * Return every contact whose name or preferred_name matches `name`, scored 0..1.
+   * Uses Russian phonetic normalization + Levenshtein distance, capped by
+   * length-adaptive edit-distance threshold (see src/utils/fuzzy.ts).
    * Sorted by confidence desc, then by name asc for stable ordering.
    */
   searchByName(userId: number, name: string): { contact: Contact; confidence: number }[] {
-    const lower = name.toLowerCase();
-    if (lower.length === 0) return [];
+    if (name.length === 0) return [];
+    const normalizedQuery = phoneticNormalize(name);
+    if (!normalizedQuery) return [];
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
 
     const scored: { contact: Contact; confidence: number }[] = [];
     for (const c of contacts) {
-      const score = Math.max(scoreField(c.name, lower), scoreField(c.preferred_name, lower));
+      const score = Math.max(scoreField(c.name, normalizedQuery), scoreField(c.preferred_name, normalizedQuery));
       if (score > 0) scored.push({ contact: c, confidence: score });
     }
     scored.sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name));

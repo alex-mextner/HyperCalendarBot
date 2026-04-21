@@ -256,27 +256,25 @@ describe('meta tool handlers', () => {
 
     test('returns multiple matches with confidence scores when several contacts match', async () => {
       const contactRepo = new ContactRepository(db);
-      contactRepo.add(USER_ID, 'Alex', 'alex_exact', 111);
-      contactRepo.add(USER_ID, 'Alexander', 'alex_full', 222);
-      contactRepo.add(USER_ID, 'Mexalex', 'mexalex', 333);
+      contactRepo.add(USER_ID, 'Лена', 'lena_exact', 111);
+      contactRepo.add(USER_ID, 'Елена', 'elena_full', 222);
+      contactRepo.add(USER_ID, 'Олена', 'olena', 333);
       ctx.contactRepo = contactRepo;
-      const result = handleFindContact(ctx, { name: 'Alex' });
+      const result = handleFindContact(ctx, { name: 'Лена' });
       expect(result.success).toBe(true);
       if (!result.data || Array.isArray(result.data) || !('matches' in result.data)) {
         throw new Error('expected matches in result.data');
       }
       const matches = result.data.matches;
       expect(matches.length).toBe(3);
-      expect(matches[0]!.name).toBe('Alex');
+      expect(matches[0]!.name).toBe('Лена');
       expect(matches[0]!.confidence).toBe(1);
-      expect(matches[1]!.name).toBe('Alexander');
-      expect(matches[1]!.confidence).toBe(0.85);
-      expect(matches[2]!.name).toBe('Mexalex');
-      expect(matches[2]!.confidence).toBe(0.65);
-      expect(result.output).toContain('Alex');
+      // Both "Елена" and "Олена" are one insertion away from "Лена" → tie at 0.8
+      expect(matches[1]!.confidence).toBeCloseTo(0.8, 5);
+      expect(matches[2]!.confidence).toBeCloseTo(0.8, 5);
+      expect(result.output).toContain('Лена');
       expect(result.output).toContain('100%');
-      expect(result.output).toContain('85%');
-      expect(result.output).toContain('65%');
+      expect(result.output).toContain('80%');
     });
 
     test('single match output keeps legacy "Contact found" format', async () => {

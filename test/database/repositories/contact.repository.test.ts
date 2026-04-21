@@ -145,7 +145,7 @@ describe('ContactRepository', () => {
     expect(contact!.preferred_name).toBe('Вова');
   });
 
-  describe('findByName substring matching', () => {
+  describe('findByName fuzzy matching', () => {
     test('short form query finds full name (Лена → Елена)', () => {
       repo.add(USER_ID, 'Елена', 'elena_user', 111);
       const found = repo.findByName(USER_ID, 'Лена');
@@ -160,7 +160,7 @@ describe('ContactRepository', () => {
       expect(found!.preferred_name).toBe('Лена');
     });
 
-    test('exact match takes priority over substring match', () => {
+    test('exact match takes priority over fuzzy match', () => {
       const exactContact = repo.add(USER_ID, 'Лена', 'lena_exact', 333);
       repo.add(USER_ID, 'Елена', 'elena_full', 444);
       const found = repo.findByName(USER_ID, 'Лена');
@@ -168,32 +168,30 @@ describe('ContactRepository', () => {
       expect(found!.id).toBe(exactContact.id);
     });
 
-    test('short prefix query finds full name (Ал → Алексей)', () => {
+    test('returns null when edit distance exceeds threshold (Ал → Алексей)', () => {
+      // "ал" (2) vs "алексей" (7): dist 5, maxLen 7, maxEdit(7)=2 → rejected
       repo.add(USER_ID, 'Алексей', 'alex_user', 555);
-      const found = repo.findByName(USER_ID, 'Ал');
-      expect(found).not.toBeNull();
-      expect(found!.name).toBe('Алексей');
+      expect(repo.findByName(USER_ID, 'Ал')).toBeNull();
     });
 
-    test('substring match returns null when no contact matches', () => {
+    test('returns null when no contact is similar enough', () => {
       repo.add(USER_ID, 'Вова', 'vova_user', 666);
       repo.add(USER_ID, 'Аня', 'anya_user', 777);
       expect(repo.findByName(USER_ID, 'Максим')).toBeNull();
     });
 
-    test('substring match is case-insensitive', () => {
+    test('fuzzy match is case-insensitive', () => {
       repo.add(USER_ID, 'Елена');
       const found = repo.findByName(USER_ID, 'лена');
       expect(found).not.toBeNull();
       expect(found!.name).toBe('Елена');
     });
 
-    test('preferred_name exact match takes priority over name substring', () => {
+    test('preferred_name exact match takes priority over name fuzzy match', () => {
       repo.add(USER_ID, 'Елена', 'elena_user', 888);
       const preferred = repo.add(USER_ID, 'FancyName', 'fancy_user', 999, 'Лена');
       const found = repo.findByName(USER_ID, 'Лена');
       expect(found).not.toBeNull();
-      // Exact match on preferred_name wins over substring of "Елена"
       expect(found!.id).toBe(preferred.id);
     });
   });
@@ -204,7 +202,7 @@ describe('ContactRepository', () => {
       expect(repo.searchByName(USER_ID, '')).toEqual([]);
     });
 
-    test('returns empty array when no contacts match', () => {
+    test('returns empty array when nothing is similar enough', () => {
       repo.add(USER_ID, 'Вова');
       expect(repo.searchByName(USER_ID, 'Максим')).toEqual([]);
     });
@@ -222,39 +220,46 @@ describe('ContactRepository', () => {
       expect(results[0]!.confidence).toBe(1);
     });
 
-    test('scores query-as-prefix at 0.85', () => {
-      repo.add(USER_ID, 'Алексей');
-      const results = repo.searchByName(USER_ID, 'Ал');
+    test('phonetic normalization collapses ё and е', () => {
+      repo.add(USER_ID, 'Алёна');
+      const results = repo.searchByName(USER_ID, 'Алена');
       expect(results.length).toBe(1);
-      expect(results[0]!.confidence).toBe(0.85);
+      expect(results[0]!.confidence).toBe(1);
     });
 
-    test('scores target-as-prefix at 0.80', () => {
-      repo.add(USER_ID, 'Ал');
-      const results = repo.searchByName(USER_ID, 'Алексей');
+    test('phonetic normalization collapses voiced/voiceless pairs', () => {
+      // З → С in phoneticNormalize, so "Зарема" and "Сарема" become identical.
+      repo.add(USER_ID, 'Зарема');
+      const results = repo.searchByName(USER_ID, 'Сарема');
       expect(results.length).toBe(1);
-      expect(results[0]!.confidence).toBe(0.8);
+      expect(results[0]!.confidence).toBe(1);
     });
 
-    test('scores non-prefix substring at 0.65', () => {
+    test('single-edit mismatch scores below 1 but above threshold (Лена → Елена)', () => {
       repo.add(USER_ID, 'Елена');
       const results = repo.searchByName(USER_ID, 'Лена');
       expect(results.length).toBe(1);
-      expect(results[0]!.confidence).toBe(0.65);
+      // lev=1, maxLen=5 → 1 - 1/5 = 0.8
+      expect(results[0]!.confidence).toBeCloseTo(0.8, 5);
+    });
+
+    test('rejects matches beyond edit-distance threshold', () => {
+      // "Ал" (2 chars) vs "Алексей" (7): 5 edits, allowed max is 2 → no match
+      repo.add(USER_ID, 'Алексей');
+      expect(repo.searchByName(USER_ID, 'Ал')).toEqual([]);
     });
 
     test('returns multiple matches ranked by confidence', () => {
-      repo.add(USER_ID, 'Alex', 'alex_exact');
-      repo.add(USER_ID, 'Alexander', 'alex_full');
-      repo.add(USER_ID, 'Mexalex', 'mexalex');
-      const results = repo.searchByName(USER_ID, 'Alex');
+      repo.add(USER_ID, 'Лена', 'lena_exact');
+      repo.add(USER_ID, 'Елена', 'elena_full');
+      repo.add(USER_ID, 'Олена', 'olena');
+      const results = repo.searchByName(USER_ID, 'Лена');
       expect(results.length).toBe(3);
-      expect(results[0]!.contact.name).toBe('Alex');
+      expect(results[0]!.contact.name).toBe('Лена');
       expect(results[0]!.confidence).toBe(1);
-      expect(results[1]!.contact.name).toBe('Alexander');
-      expect(results[1]!.confidence).toBe(0.85);
-      expect(results[2]!.contact.name).toBe('Mexalex');
-      expect(results[2]!.confidence).toBe(0.65);
+      // Both "Елена" and "Олена" are one insertion away from "Лена" → tie at 0.8
+      expect(results[1]!.confidence).toBeCloseTo(0.8, 5);
+      expect(results[2]!.confidence).toBeCloseTo(0.8, 5);
     });
 
     test('uses the best of name and preferred_name for scoring', () => {
@@ -273,14 +278,14 @@ describe('ContactRepository', () => {
     });
 
     test('ordering is stable for ties by name ascending', () => {
-      repo.add(USER_ID, 'Anton');
-      repo.add(USER_ID, 'Alice');
-      const results = repo.searchByName(USER_ID, 'A');
+      repo.add(USER_ID, 'Олена');
+      repo.add(USER_ID, 'Елена');
+      const results = repo.searchByName(USER_ID, 'Лена');
       expect(results.length).toBe(2);
-      expect(results[0]!.confidence).toBe(0.85);
-      expect(results[1]!.confidence).toBe(0.85);
-      expect(results[0]!.contact.name).toBe('Alice');
-      expect(results[1]!.contact.name).toBe('Anton');
+      expect(results[0]!.confidence).toBeCloseTo(0.8, 5);
+      expect(results[1]!.confidence).toBeCloseTo(0.8, 5);
+      expect(results[0]!.contact.name).toBe('Елена');
+      expect(results[1]!.contact.name).toBe('Олена');
     });
   });
 
