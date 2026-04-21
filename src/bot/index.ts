@@ -1,5 +1,4 @@
 // src/bot/index.ts
-import type { AnyScene } from '@gramio/scenes';
 import { Bot, InlineKeyboard } from 'gramio';
 import { agentDispatcher } from '../agent/dispatcher.ts';
 import { agentRegistry } from '../agent/registry.ts';
@@ -34,7 +33,6 @@ import { NotificationPreferencesService } from '../services/notification/prefere
 import { ScenePauseService } from '../services/scene-pause.ts';
 import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
-import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
 import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
 import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
@@ -82,7 +80,7 @@ import { isGroup } from './group-context.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
+import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import { type PickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
@@ -344,7 +342,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   // Written in logging middleware, read in buildAgentContextFactory.
   const chatHistoryIds = new Map<number, number>();
 
-  const msgDeps = {
+  const msgDeps: MessageHandlerDeps = {
     agent,
     eventService,
     holidayService,
@@ -453,11 +451,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     agentRegistry,
     agentDispatcher,
     // Assigned below, after the scenes plugin is built.
-    onboardingScene: undefined as AnyScene | undefined,
-    scheduledCallService: undefined as ScheduledAiCallService | undefined,
-    triggerService: undefined as { repo: typeof triggerRepo } | undefined,
-    aiRetryQueue: undefined as import('../services/scheduled/types.ts').QueueAdapter | undefined,
-    aiRetryJobStore: undefined as import('../services/scheduled/types.ts').RetryJobStore | undefined,
+    onboardingScene: undefined,
+    scheduledCallService: undefined,
+    triggerService: undefined,
+    aiRetryQueue: undefined,
+    aiRetryJobStore: undefined,
     domainEvents: domainEventBus,
     editMessage: async (chatId: number, messageId: number, text: string) => {
       await bot.api

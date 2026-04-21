@@ -1170,7 +1170,7 @@ if (config.REDIS_URL) {
     intentRun: async (agentCtx, message) => {
       const match = intentMatcher.match(message);
       if (!match) return { handled: false };
-      const intent = msgDeps.intentRepo.getById(match.intentId);
+      const intent = msgDeps.intentRepo?.getById(match.intentId);
       if (!intent) return { handled: false };
       const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
       if (!workflowResult.success) return { handled: false };

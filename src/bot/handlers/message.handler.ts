@@ -188,6 +188,8 @@ export interface MessageHandlerDeps {
   actionLogRepo?: import('../../database/repositories/action-log.repository.ts').ActionLogRepository;
   telegramSessionRepo?: import('../../database/repositories/telegram-session.repository.ts').TelegramSessionRepository;
   telegramMasterKey?: Buffer;
+  featureUsageRepo?: import('../../database/repositories/feature-usage.repository.ts').FeatureUsageRepository;
+  domainEvents?: import('../../services/scheduled/domain-event-bus.ts').DomainEventBus;
   chatHistoryIds?: Map<number, number>;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
