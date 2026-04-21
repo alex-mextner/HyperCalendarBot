@@ -211,14 +211,16 @@ async function sendAsUser(sessionPath: string, userId: number, text: string, use
 }
 
 /**
- * Long-lived auth handle: one Python process does send_code + sign_in
- * within the same MTProto session (avoids CODE_EXPIRED from reconnection).
+ * Long-lived auth handle: one Python process does send_code + sign_in + check_password
+ * within the same MTProto session (avoids CODE_EXPIRED and auth_key overwrites).
  */
 interface AuthHandle {
   /** Phone code hash from send_code */
   phoneCodeHash: string;
   /** Send OTP code to the process and get sign_in result */
   submitCode(code: string): Promise<BridgeResult>;
+  /** Send 2FA password (same process, same MTProto connection) */
+  submitPassword(password: string): Promise<BridgeResult>;
   /** Kill the process if user cancels */
   kill(): void;
 }
@@ -306,43 +308,68 @@ async function spawnSendAndSign(
     return { success: false, error: 'UNEXPECTED', message: 'No phone_code_hash in output' };
   }
 
+  // Buffer for partial reads — stdout may deliver multiple lines at once or split across reads
+  let readBuffer = firstLine.includes('\n') ? firstLine.split('\n').slice(1).join('\n') : '';
+
+  /** Read the next complete line from stdout (blocks until \n arrives or stream ends). */
+  async function readNextLine(): Promise<string | null> {
+    while (!readBuffer.includes('\n')) {
+      const { done, value } = await reader.read();
+      if (done) return readBuffer.trim() || null;
+      readBuffer += new TextDecoder().decode(value);
+    }
+    const nlIndex = readBuffer.indexOf('\n');
+    const line = readBuffer.slice(0, nlIndex).trim();
+    readBuffer = readBuffer.slice(nlIndex + 1);
+    return line;
+  }
+
+  /** Write a line to stdin and read the response line from stdout. */
+  async function sendAndRead(input: string): Promise<BridgeResult> {
+    proc.stdin.write(`${input}\n`);
+    await proc.stdin.flush();
+    const line = await readNextLine();
+    if (!line) return { success: false, error: 'UNEXPECTED', message: 'Process closed stdout' };
+    return parseResult(line, '', 0);
+  }
+
+  /** Close stdin, wait for process exit, clean up. */
+  async function finalize(): Promise<void> {
+    clearTimeout(timeout);
+    liveAuthHandles.delete(userId);
+    try {
+      proc.stdin.end();
+    } catch {
+      /* already closed */
+    }
+    await proc.exited;
+  }
+
   const handle: AuthHandle = {
     phoneCodeHash,
     async submitCode(code: string): Promise<BridgeResult> {
-      try {
-        // Write the code to stdin
-        proc.stdin.write(`${code}\n`);
-        await proc.stdin.flush();
-        proc.stdin.end();
-
-        // Read remaining stdout + stderr
-        const [restStdout, stderr, exitCode] = await Promise.all([
-          // Read remaining output from the reader
-          (async () => {
-            let rest = firstLine.includes('\n') ? firstLine.split('\n').slice(1).join('\n') : '';
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              rest += new TextDecoder().decode(value);
-            }
-            return rest.trim();
-          })(),
-          new Response(proc.stderr).text(),
-          proc.exited,
-        ]);
-
-        if (stderr.trim()) {
-          bridgeLogger.debug({ stderr: stderr.trim(), exitCode }, 'Bridge stderr (send_and_sign)');
-        }
-
-        return parseResult(restStdout, stderr, exitCode);
-      } finally {
-        clearTimeout(timeout);
-        liveAuthHandles.delete(userId);
+      const result = await sendAndRead(code);
+      // If 2fa_required, keep the process alive for submitPassword
+      if (result.success && result.data && 'status' in result.data && result.data.status === '2fa_required') {
+        return result;
       }
+      // For ok, error, or anything else — process will exit
+      await finalize();
+      return result;
+    },
+    async submitPassword(password: string): Promise<BridgeResult> {
+      const result = await sendAndRead(password);
+      // PASSWORD_INVALID — process stays alive for retry
+      if (!result.success && result.error === 'PASSWORD_INVALID') {
+        return result;
+      }
+      // ok or fatal error — process exits
+      await finalize();
+      return result;
     },
     kill() {
       clearTimeout(timeout);
+      liveAuthHandles.delete(userId);
       proc.kill();
     },
   };

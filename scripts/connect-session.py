@@ -81,12 +81,24 @@ async def cmd_send_and_sign(args: argparse.Namespace) -> None:
             await client.sign_in(args.phone, sent.phone_code_hash, code)
             print(json.dumps({"status": "ok"}))
         except SessionPasswordNeeded:
-            # Set user_id/is_bot to non-None so that the next check_password
-            # process doesn't see session_empty=True and overwrite the auth_key.
-            # Real values are set by check_password() on success.
-            await client.storage.user_id(0)
-            await client.storage.is_bot(False)
             print(json.dumps({"status": "2fa_required"}))
+            sys.stdout.flush()
+            # Stay alive — handle 2FA in the same process/connection.
+            # Each stdin line is a password attempt; result goes to stdout.
+            for line in sys.stdin:
+                password = line.rstrip("\n")
+                if not password:
+                    continue
+                try:
+                    await client.check_password(password)
+                    print(json.dumps({"status": "ok"}))
+                    break
+                except PasswordHashInvalid:
+                    print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
+                    sys.stdout.flush()
+                except FloodWait as e:
+                    print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
+                    break
         except PhoneCodeInvalid:
             print(error_json("CODE_INVALID", "Invalid verification code"))
             sys.exit(1)

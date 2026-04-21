@@ -381,14 +381,26 @@ export function createConnectTelegramScene(
           return;
         }
 
+        // Use the same live auth handle — same Python process and MTProto connection
+        // that did send_code + sign_in. No new process = no session_empty overwrite.
+        const handle = SessionBridge.getLiveAuthHandle(userId);
+        if (!handle) {
+          sceneLogger.warn({ userId }, 'No live auth handle for 2FA — session expired, must start over');
+          await context.send(ct.codeExpired);
+          await SessionBridge.cleanupTempFile(sessionPath);
+          await context.scene.exit();
+          return;
+        }
+
         const attempts = (passwordAttempts ?? 0) + 1;
         await context.scene.update({ passwordAttempts: attempts }, { step: undefined });
 
-        const result = await SessionBridge.checkPassword(text, sessionPath);
+        const result = await handle.submitPassword(text);
 
         if (!result.success) {
           if (attempts >= MAX_PASSWORD_ATTEMPTS) {
             await context.send(ct.tooManyAttempts);
+            SessionBridge.removeLiveAuthHandle(userId);
             await SessionBridge.cleanupTempFile(sessionPath);
             await context.scene.exit();
             return;
@@ -397,6 +409,7 @@ export function createConnectTelegramScene(
           if (result.error === 'FLOOD_WAIT' && result.retryAfter !== undefined) {
             const minutes = Math.ceil(result.retryAfter / 60);
             await context.send(ct.floodWait(minutes));
+            SessionBridge.removeLiveAuthHandle(userId);
             await SessionBridge.cleanupTempFile(sessionPath);
             await context.scene.exit();
             return;
