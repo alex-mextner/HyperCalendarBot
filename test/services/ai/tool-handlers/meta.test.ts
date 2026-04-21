@@ -273,11 +273,11 @@ describe('meta tool handlers', () => {
       expect(matches[1]!.confidence).toBeCloseTo(0.8, 5);
       expect(matches[2]!.confidence).toBeCloseTo(0.8, 5);
       expect(result.output).toContain('Лена');
-      expect(result.output).toContain('100%');
+      expect(result.output).toContain('(exact)');
       expect(result.output).toContain('80%');
     });
 
-    test('single match output keeps legacy "Contact found" format', async () => {
+    test('single exact match labels confidence as "exact"', async () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
       ctx.contactRepo = contactRepo;
@@ -286,6 +286,8 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('Contact found:');
       expect(result.output).toContain('name: Лена');
       expect(result.output).toContain('telegram_id: 716928723');
+      expect(result.output).toContain('(exact)');
+      expect(result.output).not.toContain('100%');
       if (!result.data || Array.isArray(result.data) || !('matches' in result.data)) {
         throw new Error('expected matches in result.data');
       }
@@ -318,13 +320,14 @@ describe('meta tool handlers', () => {
       expect(result.output).toContain('(80%)');
     });
 
-    test('single exact match does not show confidence percentage', async () => {
+    test('single fuzzy match does not show "exact" label', async () => {
       const contactRepo = new ContactRepository(db);
-      contactRepo.add(USER_ID, 'Лена', 'lena_user', 111);
+      contactRepo.add(USER_ID, 'Елена', 'elena_user', 999);
       ctx.contactRepo = contactRepo;
       const result = handleFindContact(ctx, { name: 'Лена' });
       expect(result.success).toBe(true);
-      expect(result.output).not.toContain('%');
+      expect(result.output).not.toContain('exact');
+      expect(result.output).toContain('80%');
     });
   });
 

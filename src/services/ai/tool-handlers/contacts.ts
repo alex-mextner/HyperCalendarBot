@@ -26,13 +26,16 @@ function formatContactFields(contact: Contact): string {
   return parts.join(', ');
 }
 
+function confidenceLabel(confidence: number): string {
+  return confidence >= 1 ? 'exact' : `${Math.round(confidence * 100)}%`;
+}
+
 function formatContactMatchLine(match: ContactMatch): string {
   const parts = [`name: ${match.name}`];
   if (match.preferred_name) parts.push(`preferred_name: ${match.preferred_name}`);
   if (match.username) parts.push(`username: @${match.username}`);
   if (match.telegram_id) parts.push(`telegram_id: ${match.telegram_id}`);
-  const pct = Math.round(match.confidence * 100);
-  return `- ${parts.join(', ')} (${pct}%)`;
+  return `- ${parts.join(', ')} (${confidenceLabel(match.confidence)})`;
 }
 
 function searchContactsRanked(contactRepo: ContactRepository, userId: number, rawQuery: string): RankedContact[] {
@@ -110,8 +113,7 @@ export function handleFindContact(ctx: AgentContext, input: { name: string }): T
 
   if (ranked.length === 1) {
     const only = ranked[0]!;
-    const fields = formatContactFields(only.contact);
-    const display = only.confidence < 1 ? `${fields} (${Math.round(only.confidence * 100)}%)` : fields;
+    const display = `${formatContactFields(only.contact)} (${confidenceLabel(only.confidence)})`;
     return {
       success: true,
       output: t(lang).aiTools.meta.contactFound(display),
