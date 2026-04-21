@@ -116,6 +116,7 @@ const webServerDeps: WebServerDeps = {
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
+let googleSyncQueueRef: import('bullmq').Queue | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
 let callQueue:
@@ -194,6 +195,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
         .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification')),
   });
 
+  googleSyncQueueRef = queue;
   syncQueueCleanup = {
     close: async () => {
       await worker.close();
@@ -523,6 +525,7 @@ if (config.REDIS_URL) {
     setupSecretaryExpiryCron,
     setupSharingCleanupCron,
     setupProposalExpiryCron,
+    setupEditProposalExpiryCron,
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
     setupChatHistoryCleanupCron,
@@ -534,6 +537,7 @@ if (config.REDIS_URL) {
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
+  const { processExpiredEditProposals } = await import('./services/google/edit-proposal-expiry.ts');
   const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
 
@@ -563,6 +567,21 @@ if (config.REDIS_URL) {
         proposalRepo: db.calendarProposals,
         editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
       }),
+    onEditProposalExpiry: () => {
+      if (!googleSyncQueueRef) return Promise.resolve();
+      return processExpiredEditProposals({
+        editProposalRepo: db.editProposals,
+        eventRepo: db.events,
+        syncQueue: googleSyncQueueRef,
+        notifyUser: (userId, text) =>
+          botRef
+            .sendMessage(userId, text)
+            .then(() => {})
+            .catch((err) => botLogger.error({ err, userId }, 'Failed to notify about edit proposal expiry')),
+        editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
+        getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
+      });
+    },
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
@@ -592,6 +611,7 @@ if (config.REDIS_URL) {
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
   await setupProposalExpiryCron(botTasksQueue);
+  await setupEditProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
   await setupChatHistoryCleanupCron(botTasksQueue);

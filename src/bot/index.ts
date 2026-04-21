@@ -744,6 +744,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
               ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
             });
           },
+          enqueueSyncJob: googleDeps?.scheduleParticipantPush
+            ? async (job) => {
+                await googleDeps!.scheduleParticipantPush!(
+                  job.userId,
+                  job.eventId,
+                  job.action as 'create' | 'update' | 'delete',
+                );
+              }
+            : undefined,
         },
         userRepo: db.users,
         intentDeps: {
