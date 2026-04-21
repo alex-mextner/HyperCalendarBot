@@ -220,19 +220,37 @@ describe('ContactRepository', () => {
       expect(results[0]!.confidence).toBe(1);
     });
 
-    test('phonetic normalization collapses ё and е', () => {
+    test('phonetic normalization collapses ё and е (capped at 0.99)', () => {
       repo.add(USER_ID, 'Алёна');
       const results = repo.searchByName(USER_ID, 'Алена');
       expect(results.length).toBe(1);
-      expect(results[0]!.confidence).toBe(1);
+      // Not strict-equal (ё !== е) but phonetic-equal → capped below 1
+      expect(results[0]!.confidence).toBe(0.99);
     });
 
-    test('phonetic normalization collapses voiced/voiceless pairs', () => {
+    test('phonetic normalization collapses voiced/voiceless pairs (capped at 0.99)', () => {
       // З → С in phoneticNormalize, so "Зарема" and "Сарема" become identical.
       repo.add(USER_ID, 'Зарема');
       const results = repo.searchByName(USER_ID, 'Сарема');
       expect(results.length).toBe(1);
+      expect(results[0]!.confidence).toBe(0.99);
+    });
+
+    test('strict trim+lowerCase equality scores 1.0 even with whitespace/case', () => {
+      repo.add(USER_ID, 'Лена');
+      expect(repo.searchByName(USER_ID, '  Лена  ')[0]!.confidence).toBe(1);
+      expect(repo.searchByName(USER_ID, 'ЛЕНА')[0]!.confidence).toBe(1);
+    });
+
+    test('strict match wins over phonetic tie (Вова typed as Вова, not Фофа)', () => {
+      repo.add(USER_ID, 'Вова');
+      repo.add(USER_ID, 'Фофа');
+      const results = repo.searchByName(USER_ID, 'Вова');
+      expect(results.length).toBe(2);
+      expect(results[0]!.contact.name).toBe('Вова');
       expect(results[0]!.confidence).toBe(1);
+      expect(results[1]!.contact.name).toBe('Фофа');
+      expect(results[1]!.confidence).toBe(0.99);
     });
 
     test('single-edit mismatch scores below 1 but above threshold (Лена → Елена)', () => {

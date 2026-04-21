@@ -2,15 +2,19 @@ import type { Database } from 'bun:sqlite';
 import { levenshtein, maxEditDistance, phoneticNormalize } from '../../utils/fuzzy.ts';
 import type { Contact } from '../types.ts';
 
-function scoreField(field: string | null, normalizedQuery: string): number {
+function scoreField(field: string | null, queryLower: string, normalizedQuery: string): number {
   if (!field || !normalizedQuery) return 0;
-  const target = phoneticNormalize(field);
+  // Strict (trim+lowerCase) equality is the ONLY path that scores 1.0 — it guarantees
+  // the user typed exactly this name. Anything below goes through phonetic collapse,
+  // which loses information (e.g. "Вова"/"Фофа" phonetic-tie), so we cap at 0.99.
+  const fieldLower = field.trim().toLowerCase();
+  if (fieldLower === queryLower) return 1;
+  const target = phoneticNormalize(fieldLower);
   if (!target) return 0;
-  if (target === normalizedQuery) return 1;
   const dist = levenshtein(normalizedQuery, target);
   const maxLen = Math.max(normalizedQuery.length, target.length);
   if (dist > maxEditDistance(maxLen)) return 0;
-  return 1 - dist / maxLen;
+  return Math.min(1 - dist / maxLen, 0.99);
 }
 
 export class ContactRepository {
@@ -22,19 +26,28 @@ export class ContactRepository {
 
   /**
    * Return every contact whose name or preferred_name matches `name`, scored 0..1.
-   * Uses Russian phonetic normalization + Levenshtein distance, capped by
-   * length-adaptive edit-distance threshold (see src/utils/fuzzy.ts).
+   * Strict (trim+lowerCase) exact match is checked before phonetic normalization
+   * to preserve distinctions like "Вова" vs "Фофа" that phonetic collapse erases.
+   * Falls back to Levenshtein distance on phonetically-normalized forms,
+   * capped by maxEditDistance (see src/utils/fuzzy.ts).
    * Sorted by confidence desc, then by name asc for stable ordering.
    */
   searchByName(userId: number, name: string): { contact: Contact; confidence: number }[] {
-    if (name.length === 0) return [];
-    const normalizedQuery = phoneticNormalize(name);
+    const queryLower = name.trim().toLowerCase();
+    if (queryLower.length === 0) return [];
+    // queryLower is already trim+lowerCase; phoneticNormalize collapses further
+    // (ё=е, voiced→voiceless pairs, soft signs, duplicate chars). Both sides of
+    // the later Levenshtein compare are run through this same normalization.
+    const normalizedQuery = phoneticNormalize(queryLower);
     if (!normalizedQuery) return [];
     const contacts = this.db.prepare('SELECT * FROM contacts WHERE user_id = ?').all(userId) as Contact[];
 
     const scored: { contact: Contact; confidence: number }[] = [];
     for (const c of contacts) {
-      const score = Math.max(scoreField(c.name, normalizedQuery), scoreField(c.preferred_name, normalizedQuery));
+      const score = Math.max(
+        scoreField(c.name, queryLower, normalizedQuery),
+        scoreField(c.preferred_name, queryLower, normalizedQuery),
+      );
       if (score > 0) scored.push({ contact: c, confidence: score });
     }
     scored.sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name, 'ru'));

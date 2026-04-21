@@ -427,14 +427,14 @@ describe('meta tool handlers', () => {
       expect(contactRepo.findByName(USER_ID, 'Олена')?.preferred_name).toBeNull();
     });
 
-    test('refuses to update when two contacts tie at exact match', async () => {
+    test('refuses to update when two contacts phonetically tie (not strict-equal to either)', async () => {
       const contactRepo = new ContactRepository(db);
-      // Two distinct stored names that phoneticNormalize to the same form → both score 1.0
-      // "Вова" → "фофа", "Фофа" → "фофа"
+      // Query "Вофа" phonetically equals both ("фофа") but is strict-equal to neither.
+      // Both score 0.99; the tie triggers disambiguation.
       contactRepo.add(USER_ID, 'Вова', 'vova1', 111);
       contactRepo.add(USER_ID, 'Фофа', 'fofa', 222);
       ctx.contactRepo = contactRepo;
-      const result = handleUpdateContact(ctx, { search: 'Вова', preferred_name: 'Вовка' });
+      const result = handleUpdateContact(ctx, { search: 'Вофа', preferred_name: 'Вовка' });
       expect(result.success).toBe(false);
       expect(result.error).toContain('Multiple');
     });
