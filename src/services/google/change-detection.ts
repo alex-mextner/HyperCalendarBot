@@ -58,7 +58,12 @@ export interface LocalEventFromGoogleSnapshot {
   recurrence_rule: string | null;
 }
 
-export function snapshotFromCalendarEvent(e: CalendarEvent): EventFieldSnapshot {
+export function snapshotFromCalendarEvent(
+  e: Pick<
+    CalendarEvent,
+    'title' | 'description' | 'start_at' | 'end_at' | 'all_day' | 'timezone' | 'location' | 'recurrence_rule'
+  >,
+): EventFieldSnapshot {
   return {
     title: e.title,
     description: e.description,

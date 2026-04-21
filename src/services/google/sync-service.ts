@@ -7,8 +7,15 @@ import type { GoogleSyncRepository } from '../../database/repositories/google-sy
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import type { CalendarEvent } from '../../database/types.ts';
 import { syncLogger } from '../../utils/logger.ts';
+import type { EventChangeNotifier } from '../event/event-change-notifier.ts';
 import type { GoogleCalendarApi } from './calendar-api.ts';
+import { computeEventDiff, snapshotFromCalendarEvent, snapshotFromGoogleLocal } from './change-detection.ts';
 import { type GoogleEvent, googleToLocal, localToGoogle } from './event-mapper.ts';
+import {
+  handleParticipantChange,
+  handleParticipantDelete,
+  type ParticipantHandlerDeps,
+} from './participant-change-handler.ts';
 
 export class SyncService {
   constructor(
@@ -19,6 +26,8 @@ export class SyncService {
     private notifyUser?: (userId: number, message: string) => Promise<void>,
     private getUserLang?: (userId: number) => Lang,
     private participantSyncRepo?: ParticipantGoogleSyncRepository,
+    private changeNotifier?: EventChangeNotifier,
+    private participantHandlerDeps?: ParticipantHandlerDeps,
   ) {}
 
   async initialSync(api: GoogleCalendarApi, userId: number, calendarId: string): Promise<number> {
@@ -82,7 +91,7 @@ export class SyncService {
         if (gEvent.extendedProperties?.private?.hypercalendarbot_event_id) continue;
 
         if (gEvent.status === 'cancelled') {
-          this.handleDeletedEvent(userId, calendarId, gEvent.id!);
+          await this.handleDeletedEvent(userId, calendarId, gEvent.id!);
         } else {
           await this.handleUpdatedOrNewEvent(userId, calendarId, gEvent as GoogleEvent);
         }
@@ -162,10 +171,13 @@ export class SyncService {
     return googleMs > localMs ? 'keep_google' : 'keep_local';
   }
 
-  private handleDeletedEvent(userId: number, calendarId: string, googleEventId: string): void {
+  private async handleDeletedEvent(userId: number, calendarId: string, googleEventId: string): Promise<void> {
     const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, googleEventId);
 
     if (existing) {
+      if (this.changeNotifier) {
+        await this.changeNotifier.onEventDeleted({ event: existing, source: 'google_sync' });
+      }
       this.eventRepo.remove(existing.id, userId);
       this.syncRepo.logSync({
         user_id: userId,
@@ -174,19 +186,25 @@ export class SyncService {
         direction: 'pull',
         action: 'delete',
       });
+      return;
+    }
+
+    const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, googleEventId);
+    if (participantSync && this.participantHandlerDeps) {
+      await handleParticipantDelete(userId, participantSync, this.participantHandlerDeps);
     }
   }
 
   private async handleUpdatedOrNewEvent(userId: number, calendarId: string, gEvent: GoogleEvent): Promise<void> {
     const local = googleToLocal(gEvent, userId, calendarId);
 
-    // Run the SELECT + writes atomically to prevent races between concurrent sync jobs
-    let conflictNotification: (() => Promise<void>) | null = null;
-    // TypeScript infers the transaction return as never due to the mutable closure; cast explicitly.
+    let pendingNotification: (() => Promise<void>) | null = null;
     const applyUpdate = this.db.transaction(() => {
       const existing = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
 
       if (existing) {
+        let conflictNotification: (() => Promise<void>) | null = null;
+
         if (existing.sync_status === 'pending_push') {
           const winner = this.resolveConflict(existing, gEvent.updated ?? '');
           if (winner === 'keep_local') {
@@ -205,6 +223,8 @@ export class SyncService {
             conflictNotification = () => this.notifyUser!(userId, t(conflictLang).gcal_conflict(local.title, 'google'));
           }
         }
+
+        const snapshot = snapshotFromCalendarEvent(existing);
 
         this.eventRepo.updateSyncFields(existing.id, {
           google_etag: local.google_etag ?? undefined,
@@ -228,7 +248,36 @@ export class SyncService {
           direction: 'pull',
           action: 'update',
         });
+
+        const incoming = snapshotFromGoogleLocal(local);
+        const changes = computeEventDiff(snapshot, incoming);
+
+        if (changes.length > 0 && this.changeNotifier) {
+          const updatedEvent = this.eventRepo.findByGoogleEventId(userId, calendarId, local.google_event_id);
+          if (updatedEvent) {
+            pendingNotification = async () => {
+              if (conflictNotification) await conflictNotification();
+              await this.changeNotifier!.onEventChanged({
+                event: updatedEvent,
+                changes,
+                source: 'google_sync',
+              });
+            };
+          }
+        } else if (conflictNotification) {
+          pendingNotification = conflictNotification;
+        }
       } else {
+        const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, local.google_event_id);
+        if (participantSync) {
+          const masterEvent = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
+          if (masterEvent && this.participantHandlerDeps) {
+            pendingNotification = () =>
+              handleParticipantChange(userId, masterEvent, local, this.participantHandlerDeps!);
+          }
+          return;
+        }
+
         this.eventRepo.insertSyncedEvent({
           user_id: userId,
           title: local.title,
@@ -253,8 +302,7 @@ export class SyncService {
       }
     });
     applyUpdate();
-    // TypeScript loses track of the mutable variable after the transaction closure; reassert the type.
-    const notify = conflictNotification as (() => Promise<void>) | null;
+    const notify = pendingNotification as (() => Promise<void>) | null;
     if (notify) await notify();
   }
 
@@ -270,8 +318,6 @@ export class SyncService {
     if (action === 'delete') {
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
       if (!syncRecord?.google_event_id) {
-        // Never pushed to Google — clean up the pending tracking record
-        // (needed for decline scenario where the event itself stays but participant opts out)
         participantSyncRepo.delete(participantUserId, eventId);
         return;
       }
@@ -280,7 +326,6 @@ export class SyncService {
       } catch (err) {
         const code = (err as { code?: number }).code;
         if (code !== 404 && code !== 410) throw err;
-        // Event already gone from Google — proceed with local cleanup
       }
       participantSyncRepo.delete(participantUserId, eventId);
       this.syncRepo.logSync({
@@ -297,24 +342,23 @@ export class SyncService {
     const event = this.eventRepo.findByIdUnfiltered(eventId);
     if (!event) return;
 
-    const calendarId = 'primary';
+    const gcalId = 'primary';
     const gEvent = localToGoogle(event);
 
     if (action === 'create') {
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
       if (syncRecord?.google_event_id) {
-        // Already pushed — treat as update
-        const updated = await api.updateEvent(calendarId, syncRecord.google_event_id, gEvent);
+        const updated = await api.updateEvent(gcalId, syncRecord.google_event_id, gEvent);
         participantSyncRepo.updateSyncFields(participantUserId, eventId, {
           google_etag: updated.etag ?? undefined,
           sync_status: 'synced',
           last_synced_at: new Date().toISOString(),
         });
       } else {
-        const created = await api.insertEvent(calendarId, gEvent);
+        const created = await api.insertEvent(gcalId, gEvent);
         participantSyncRepo.upsert(participantUserId, eventId, {
           google_event_id: created.id,
-          google_calendar_id: calendarId,
+          google_calendar_id: gcalId,
           google_etag: created.etag,
           sync_status: 'synced',
           last_synced_at: new Date().toISOString(),
@@ -328,14 +372,12 @@ export class SyncService {
         details: 'participant_sync',
       });
     } else {
-      // update
       const syncRecord = participantSyncRepo.getByUserAndEvent(participantUserId, eventId);
       if (!syncRecord?.google_event_id) {
-        // Never pushed — create instead
-        const created = await api.insertEvent(calendarId, gEvent);
+        const created = await api.insertEvent(gcalId, gEvent);
         participantSyncRepo.upsert(participantUserId, eventId, {
           google_event_id: created.id,
-          google_calendar_id: calendarId,
+          google_calendar_id: gcalId,
           google_etag: created.etag,
           sync_status: 'synced',
           last_synced_at: new Date().toISOString(),
@@ -348,7 +390,7 @@ export class SyncService {
           details: 'participant_sync',
         });
       } else {
-        const updated = await api.updateEvent(calendarId, syncRecord.google_event_id, gEvent);
+        const updated = await api.updateEvent(gcalId, syncRecord.google_event_id, gEvent);
         participantSyncRepo.updateSyncFields(participantUserId, eventId, {
           google_etag: updated.etag ?? undefined,
           sync_status: 'synced',

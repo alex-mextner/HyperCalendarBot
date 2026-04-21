@@ -101,6 +101,7 @@ export class EventRepository {
   ): Pick<
     CalendarEvent,
     | 'id'
+    | 'user_id'
     | 'title'
     | 'description'
     | 'start_at'
@@ -111,16 +112,18 @@ export class EventRepository {
     | 'recurrence_rule'
     | 'reminder_overrides'
     | 'sync_version'
+    | 'owner_type'
   > | null {
     return this.db
       .prepare(
-        `SELECT id, title, description, start_at, end_at, all_day, timezone, location,
-                recurrence_rule, reminder_overrides, sync_version
+        `SELECT id, user_id, title, description, start_at, end_at, all_day, timezone, location,
+                recurrence_rule, reminder_overrides, sync_version, owner_type
          FROM events WHERE id = ? AND is_cancelled = 0 AND is_deleted = 0`,
       )
       .get(id) as Pick<
       CalendarEvent,
       | 'id'
+      | 'user_id'
       | 'title'
       | 'description'
       | 'start_at'
@@ -131,6 +134,7 @@ export class EventRepository {
       | 'recurrence_rule'
       | 'reminder_overrides'
       | 'sync_version'
+      | 'owner_type'
     > | null;
   }
 
