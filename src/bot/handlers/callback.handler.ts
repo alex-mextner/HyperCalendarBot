@@ -114,6 +114,7 @@ export interface CallbackHandlerOpts {
   editProposalDeps?: {
     editProposalRepo: EditProposalRepository;
     sendMessage: (chatId: number, text: string, options?: { parse_mode: ParseMode }) => Promise<void>;
+    enqueueSyncJob?: (job: { type: string; userId: number; eventId: number; action: string }) => Promise<void>;
   };
   callSettingsRepo?: CallSettingsRepository;
   sharingSettingsRepo?: SharingSettingsRepository;
@@ -812,9 +813,31 @@ export function createCallbackHandler(
     const eventTitle = eventForTitle?.title ?? `#${proposal.event_id}`;
 
     if (subAction === 'accept') {
-      const changes = JSON.parse(proposal.changes) as UpdateEventData;
-      const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, changes);
+      const isGoogleSync = proposal.source === 'google_sync';
+      let updateData: UpdateEventData;
+      let changesForDisplay: import('../../services/google/change-detection.ts').FieldChange[] = [];
+
+      if (isGoogleSync) {
+        changesForDisplay = JSON.parse(
+          proposal.changes,
+        ) as import('../../services/google/change-detection.ts').FieldChange[];
+        updateData = {};
+        for (const change of changesForDisplay) {
+          if (change.field === 'all_day') {
+            (updateData as Record<string, unknown>)[change.field] = change.newValue ? 1 : 0;
+          } else {
+            (updateData as Record<string, unknown>)[change.field] = change.newValue;
+          }
+        }
+      } else {
+        updateData = JSON.parse(proposal.changes) as UpdateEventData;
+      }
+
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
+      const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, updateData, {
+        skipProposalExpiry: true,
+        excludeUserIds: [proposal.proposer_id],
+      });
       await ctx.answer();
       await ctx.editText(
         updated
@@ -824,19 +847,49 @@ export function createCallbackHandler(
 
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification(eventTitle))
-        .catch(() => {});
+      if (isGoogleSync && changesForDisplay.length > 0) {
+        const { formatChanges } = await import('../../services/google/change-detection.ts');
+        const diffText = formatChanges(changesForDisplay, proposerLang);
+        editProposalDeps
+          .sendMessage(proposal.proposer_id, t(proposerLang).sync.proposalAccepted(eventTitle, diffText))
+          .catch(() => {});
+      } else {
+        editProposalDeps
+          .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalAcceptedNotification(eventTitle))
+          .catch(() => {});
+      }
     } else if (subAction === 'reject') {
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'rejected');
       await ctx.answer();
       await ctx.editText(t(lang).callbackErrors.proposalRejected);
 
+      if (proposal.source === 'google_sync' && editProposalDeps.enqueueSyncJob) {
+        editProposalDeps
+          .enqueueSyncJob({
+            type: 'push-participant-event',
+            userId: proposal.proposer_id,
+            eventId: proposal.event_id,
+            action: 'update',
+          })
+          .catch(() => {});
+      }
+
       const proposerUser = userRepo?.findByTelegramId(proposal.proposer_id);
       const proposerLang = (proposerUser?.language ?? lang) as Lang;
-      editProposalDeps
-        .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification(eventTitle))
-        .catch(() => {});
+      if (proposal.source === 'google_sync') {
+        const changesForDisplay = JSON.parse(
+          proposal.changes,
+        ) as import('../../services/google/change-detection.ts').FieldChange[];
+        const { formatChanges } = await import('../../services/google/change-detection.ts');
+        const diffText = formatChanges(changesForDisplay, proposerLang);
+        editProposalDeps
+          .sendMessage(proposal.proposer_id, t(proposerLang).sync.proposalRejected(eventTitle, diffText))
+          .catch(() => {});
+      } else {
+        editProposalDeps
+          .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification(eventTitle))
+          .catch(() => {});
+      }
     }
   });
 
