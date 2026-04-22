@@ -1137,7 +1137,9 @@ if (config.REDIS_URL) {
   // ScheduledAiCallService — manages BullMQ delayed/repeat jobs
   const scheduledCallService = new ScheduledAiCallService(scheduleRepo, aiMsgQueue);
 
-  // Patch msgDeps so agentContextBuilder picks up the services
+  // Patch msgDeps so agentContextBuilder picks up the services, then freeze it —
+  // all downstream consumers (AI agent context builder, pipeline layers) capture
+  // msgDeps by reference; freezing locks the dependency graph after last mutation.
   msgDeps.scheduledCallService = scheduledCallService;
   msgDeps.triggerService = { repo: triggerRepo };
   msgDeps.aiRetryQueue = aiMsgQueue;
@@ -1157,6 +1159,7 @@ if (config.REDIS_URL) {
     },
   };
   msgDeps.aiRetryJobStore = retryJobStore;
+  Object.freeze(msgDeps);
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
   const syntheticRunner = new SyntheticPipelineRunner({

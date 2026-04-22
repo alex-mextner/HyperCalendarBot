@@ -385,4 +385,51 @@ describe('connect-telegram: Cancel authorization button', () => {
     // Give the fire-and-forget promise a tick to settle its rejection.
     await new Promise<void>((resolve) => queueMicrotask(resolve));
   });
+
+  test('phone step also handles Cancel authorization callback', async () => {
+    const forwardToAi = mock(() => Promise.resolve());
+    const scene = makeScene({ forwardToAi });
+    const phoneStep = getStepFns(scene)[1]!;
+
+    const ctx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:cancel_auth',
+      chatId: 888,
+      userId: 555,
+      stepId: 1,
+      state: { pendingForwardText: 'какой сегодня день' },
+    });
+
+    await phoneStep(ctx, NOOP_NEXT);
+
+    expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
+    const text = ctx.send.mock.calls[0]![0] as string;
+    expect(text).toContain('Авторизация отменена');
+    expect(text).toContain('Отвечаю');
+    await new Promise<void>((resolve) => queueMicrotask(resolve));
+    expect(forwardToAi).toHaveBeenCalledTimes(1);
+    const fwdArgs = forwardToAi.mock.calls[0] as unknown as [number, number, string];
+    expect(fwdArgs[2]).toBe('какой сегодня день');
+  });
+
+  test('invalidPhone attaches cancel button and stashes non-phone text', async () => {
+    const scene = makeScene();
+    const phoneStep = getStepFns(scene)[1]!;
+
+    const ctx = makeCtx({
+      activeType: 'message',
+      text: 'что у меня по работе',
+      stepId: 1,
+      state: {},
+    });
+
+    await phoneStep(ctx, NOOP_NEXT);
+
+    expect(ctx.scene.state.pendingForwardText).toBe('что у меня по работе');
+    expect(ctx.send).toHaveBeenCalledTimes(1);
+    const [text, opts] = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: unknown }];
+    expect(text).toBe('Неверный формат. Используй международный формат: +79001234567');
+    expect(opts?.reply_markup).toBeDefined();
+  });
 });

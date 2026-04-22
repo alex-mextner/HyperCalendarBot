@@ -521,6 +521,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   );
 
   // Fill in the one scene reference msgDeps needs now that scenes exist.
+  // NOTE: msgDeps is frozen in src/index.ts after scheduledCallService and triggerService
+  // are wired — this is the last in-createBot() mutation.
   msgDeps.onboardingScene = scenesSetup.scenes.onboardingScene;
 
   // AI Assistant commands (not in setMyCommands — internal use only)

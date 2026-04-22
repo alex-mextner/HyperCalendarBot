@@ -230,6 +230,10 @@ export function createConnectTelegramScene(
             await context.answer();
             const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
             await context.send(ct.enterPhone, { reply_markup: phoneKb });
+            // Reply-keyboard and inline keyboard cannot coexist on one message, so the
+            // cancel button ships as a separate inline message right after.
+            const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+            await context.send(ct.orCancelAuth, { reply_markup: cancelKb });
             await context.scene.step.next();
             return;
           }
@@ -237,11 +241,19 @@ export function createConnectTelegramScene(
       })
 
       // Step 1: Phone number
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await handleCancelAuth(context, ct, deps);
+          }
+          return;
+        }
+
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!masterKeyHex) {
           await context.send(ct.featureUnavailable);
@@ -256,7 +268,11 @@ export function createConnectTelegramScene(
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
-          await context.send(ct.invalidPhone);
+          // Stash non-phone-like text so cancel can forward it to the AI.
+          const forwardText = raw && !PHONE_REGEX.test(raw.replace(/[\s\-()]/g, '')) ? raw : undefined;
+          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
+          const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidPhone, { reply_markup: invalidKb });
           return;
         }
 
@@ -404,7 +420,8 @@ export function createConnectTelegramScene(
         }
 
         if (result.data.status === '2fa_required') {
-          await context.send(ct.enter2fa);
+          const enter2faKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.enter2fa, { reply_markup: enter2faKb });
           // Clear pendingForwardText so a stale natural-language input from step 2
           // does not leak into a cancel click at step 3.
           await context.scene.update({ passwordAttempts: 0, pendingForwardText: undefined }, { step: undefined });

@@ -172,6 +172,7 @@ describe('cancel-authorization i18n', () => {
     expect(ct.authCancelled).toBe('Authorization cancelled.');
     expect(ct.authCancelledAnswering).toContain('Authorization cancelled');
     expect(ct.authCancelledAnswering).toContain('Answering');
+    expect(ct.orCancelAuth).toContain('cancel');
   });
 
   test('RU connectTelegram exposes new cancel strings', () => {
@@ -180,5 +181,6 @@ describe('cancel-authorization i18n', () => {
     expect(ct.authCancelled).toBe('Авторизация отменена.');
     expect(ct.authCancelledAnswering).toContain('Авторизация отменена');
     expect(ct.authCancelledAnswering).toContain('Отвечаю');
+    expect(ct.orCancelAuth).toContain('отмени');
   });
 });
