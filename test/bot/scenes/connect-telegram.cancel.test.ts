@@ -432,4 +432,22 @@ describe('connect-telegram: Cancel authorization button', () => {
     expect(text).toBe('Неверный формат. Используй международный формат: +79001234567');
     expect(opts?.reply_markup).toBeDefined();
   });
+
+  test('invalidPhone does NOT stash digit-only input (phone-shaped, not natural language)', async () => {
+    const scene = makeScene();
+    const phoneStep = getStepFns(scene)[1]!;
+
+    const ctx = makeCtx({
+      activeType: 'message',
+      // Phone-shaped but too short — rejected by PHONE_REGEX after normalization
+      text: '12345',
+      stepId: 1,
+      state: { pendingForwardText: 'stale' },
+    });
+
+    await phoneStep(ctx, NOOP_NEXT);
+
+    // Digit-only input is phone-shaped; nothing worth forwarding to AI.
+    expect(ctx.scene.state.pendingForwardText).toBeUndefined();
+  });
 });

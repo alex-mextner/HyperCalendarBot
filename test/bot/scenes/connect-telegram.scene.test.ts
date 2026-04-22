@@ -3,6 +3,7 @@ import {
   CODE_REGEX,
   isConnectCooldownActive,
   isOtpLikeText,
+  isPhoneLikeText,
   normalizeOtpCode,
   normalizePhone,
   PHONE_REGEX,
@@ -162,6 +163,35 @@ describe('isOtpLikeText', () => {
 
   test('rejects empty string', () => {
     expect(isOtpLikeText('')).toBe(false);
+  });
+});
+
+describe('isPhoneLikeText', () => {
+  test('accepts digit-only strings', () => {
+    expect(isPhoneLikeText('12345')).toBe(true);
+    expect(isPhoneLikeText('79001234567')).toBe(true);
+  });
+
+  test('accepts phone-shaped strings with separators', () => {
+    expect(isPhoneLikeText('+79001234567')).toBe(true);
+    expect(isPhoneLikeText('+7 900 123 45 67')).toBe(true);
+    expect(isPhoneLikeText('+7-900-123-45-67')).toBe(true);
+    expect(isPhoneLikeText('+7 (900) 123-45-67')).toBe(true);
+  });
+
+  test('rejects natural-language text', () => {
+    expect(isPhoneLikeText('what is my calendar?')).toBe(false);
+    expect(isPhoneLikeText('покажи события')).toBe(false);
+    expect(isPhoneLikeText('call me at +79001234567')).toBe(false);
+  });
+
+  test('rejects strings with letters', () => {
+    expect(isPhoneLikeText('+7900abc1234')).toBe(false);
+    expect(isPhoneLikeText('phone')).toBe(false);
+  });
+
+  test('rejects empty string', () => {
+    expect(isPhoneLikeText('')).toBe(false);
   });
 });
 

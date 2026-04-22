@@ -27,10 +27,16 @@ const sceneLogger = logger.child({ module: 'connect-telegram-scene' });
 export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
 const OTP_LIKE_REGEX = /^[\d\s-]+$/;
+const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
 
 /** True if the text contains only digits, spaces and dashes (an OTP-shaped string). */
 export function isOtpLikeText(text: string): boolean {
   return OTP_LIKE_REGEX.test(text);
+}
+
+/** True if the text looks like a phone attempt (digits, '+', spaces, dashes, parens only). */
+export function isPhoneLikeText(text: string): boolean {
+  return PHONE_LIKE_REGEX.test(text);
 }
 
 const CONNECT_COOLDOWN_MS = 60_000;
@@ -268,8 +274,9 @@ export function createConnectTelegramScene(
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
-          // Stash non-phone-like text so cancel can forward it to the AI.
-          const forwardText = raw && !PHONE_REGEX.test(raw.replace(/[\s\-()]/g, '')) ? raw : undefined;
+          // Stash non-phone-shaped text so cancel can forward it to the AI.
+          // Pure digits/+/spaces/dashes/parens are phone-shaped — nothing worth forwarding.
+          const forwardText = raw && !isPhoneLikeText(raw) ? raw : undefined;
           await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
           const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
           await context.send(ct.invalidPhone, { reply_markup: invalidKb });
