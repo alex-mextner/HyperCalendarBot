@@ -206,6 +206,7 @@ export interface ParticipantGoogleSync {
   google_etag: string | null;
   sync_status: SyncStatus;
   last_synced_at: string | null;
+  timezone_override: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -420,23 +421,35 @@ export interface CreateFeedbackMessageData {
 
 // --- Edit Proposals ---
 
-export type EditProposalStatus = 'pending' | 'accepted' | 'rejected';
+export type EditProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
+
+export type EditProposalSource = 'google_sync' | 'manual' | 'ai_tool';
 
 export interface EditProposal {
   id: number;
   event_id: number;
   proposer_id: number;
-  changes: string; // JSON
+  changes: string; // JSON: FieldChange[]
   reason: string | null;
   status: EditProposalStatus;
   created_at: string;
+  expires_at: string | null;
+  original_values: string | null; // JSON: { [field]: oldValue }
+  source: EditProposalSource;
+  organizer_message_id: number | null;
+  organizer_chat_id: number | null;
+  participant_message_id: number | null;
+  participant_chat_id: number | null;
 }
 
 export interface CreateEditProposalData {
   event_id: number;
   proposer_id: number;
-  changes: string; // JSON
+  changes: string; // JSON: FieldChange[]
   reason?: string;
+  expires_at?: string;
+  original_values?: string;
+  source?: EditProposalSource;
 }
 
 // --- Secretary Access ---

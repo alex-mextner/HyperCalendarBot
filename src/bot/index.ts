@@ -150,6 +150,7 @@ export interface CreateBotOpts {
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
+  changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -173,6 +174,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     pendingGeoStore,
     weatherService,
     broadcastEnqueuer,
+    changeNotifier,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -180,12 +182,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     materializer,
     participantRepo: db.participants,
     groupMemberRepo: db.groupMembers,
-    onParticipantsNotify: (userIds, text) => {
-      for (const uid of userIds) {
-        bot.api.sendMessage({ chat_id: uid, text }).catch(() => {});
-      }
-    },
     domainEvents: domainEventBus,
+    changeNotifier,
   });
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();
@@ -843,6 +841,15 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
               ...(options?.parse_mode ? { parse_mode: options.parse_mode } : {}),
             });
           },
+          enqueueSyncJob: googleDeps?.scheduleParticipantPush
+            ? async (job) => {
+                await googleDeps!.scheduleParticipantPush!(
+                  job.userId,
+                  job.eventId,
+                  job.action as 'create' | 'update' | 'delete',
+                );
+              }
+            : undefined,
         },
         userRepo: db.users,
         intentDeps: {

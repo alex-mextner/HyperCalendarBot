@@ -5,8 +5,11 @@ import type { GroupMemberRepository } from '../../database/repositories/group-me
 import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { CalendarEvent, CreateEventData, EventOccurrence, UpdateEventData } from '../../database/types.ts';
 import { getDayRangeUtc, getNDayRangeUtc, getWeekRangeUtc } from '../../utils/date.ts';
+import { logger } from '../../utils/logger.ts';
+import { computeEventDiff, snapshotFromCalendarEvent } from '../google/change-detection.ts';
 import type { ReminderMaterializer } from '../notification/materializer.ts';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
+import type { ChangeNotifierOptions, EventChangeNotifier } from './event-change-notifier.ts';
 import { expandRecurrence } from './recurrence.ts';
 
 export interface FreeSlot {
@@ -20,7 +23,7 @@ export interface EventServiceDeps {
   materializer?: ReminderMaterializer;
   participantRepo?: ParticipantRepository;
   groupMemberRepo?: GroupMemberRepository;
-  onParticipantsNotify?: (userIds: number[], text: string) => void;
+  changeNotifier?: EventChangeNotifier;
   domainEvents?: DomainEventBus;
 }
 
@@ -29,7 +32,7 @@ export class EventService {
   private materializer?: ReminderMaterializer;
   private participantRepo?: ParticipantRepository;
   private groupMemberRepo?: GroupMemberRepository;
-  private onParticipantsNotify?: (userIds: number[], text: string) => void;
+  private changeNotifier?: EventChangeNotifier;
   private domainEvents?: DomainEventBus;
 
   constructor(deps: EventServiceDeps) {
@@ -37,7 +40,7 @@ export class EventService {
     this.materializer = deps.materializer;
     this.participantRepo = deps.participantRepo;
     this.groupMemberRepo = deps.groupMemberRepo;
-    this.onParticipantsNotify = deps.onParticipantsNotify;
+    this.changeNotifier = deps.changeNotifier;
     this.domainEvents = deps.domainEvents;
   }
 
@@ -79,8 +82,13 @@ export class EventService {
     return event;
   }
 
-  updateEvent(id: number, userId: number, data: UpdateEventData): CalendarEvent | null {
-    const existing = this.domainEvents ? this.eventRepo.findById(id, userId) : null;
+  updateEvent(
+    id: number,
+    userId: number,
+    data: UpdateEventData,
+    notifierOptions?: ChangeNotifierOptions,
+  ): CalendarEvent | null {
+    const existing = this.domainEvents || this.changeNotifier ? this.eventRepo.findById(id, userId) : null;
     const updated = this.eventRepo.update(id, userId, data);
     if (this.materializer && updated) {
       this.materializer.materialize(
@@ -93,7 +101,6 @@ export class EventService {
         },
         updated.user_id,
       );
-      // For recurring events, also rematerialize upcoming occurrences
       if (updated.recurrence_rule) {
         this.materializeRecurringOccurrences(updated, updated.reminder_overrides ?? null);
       }
@@ -105,21 +112,30 @@ export class EventService {
         oldEvent: existing,
       });
     }
+    if (this.changeNotifier && updated && existing) {
+      const changes = computeEventDiff(snapshotFromCalendarEvent(existing), snapshotFromCalendarEvent(updated));
+      if (changes.length > 0) {
+        this.changeNotifier
+          .onEventChanged({
+            event: updated,
+            changes,
+            source: 'bot',
+            ...notifierOptions,
+          })
+          .catch((err) => {
+            logger.error({ err, eventId: id }, 'EventChangeNotifier.onEventChanged failed');
+          });
+      }
+    }
     return updated;
   }
 
   deleteEvent(id: number, userId: number): boolean {
     const event = this.eventRepo.findById(id, userId);
-    if (this.onParticipantsNotify && this.participantRepo && event) {
-      const accepted = this.participantRepo
-        .getByEvent(id)
-        .filter((p) => p.status === 'accepted' && p.user_id !== userId);
-      if (accepted.length > 0) {
-        this.onParticipantsNotify(
-          accepted.map((p) => p.user_id),
-          `Event "${event.title}" has been cancelled by the organizer.`,
-        );
-      }
+    if (this.changeNotifier && event) {
+      this.changeNotifier.onEventDeleted({ event, source: 'bot' }).catch((err) => {
+        logger.error({ err, eventId: id }, 'EventChangeNotifier.onEventDeleted failed');
+      });
     }
     if (this.materializer) {
       this.materializer.deleteForEvent(id);

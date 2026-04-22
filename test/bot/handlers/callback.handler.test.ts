@@ -196,7 +196,16 @@ describe('editProposal callback wiring', () => {
     await handler(ctx as never);
 
     expect(updateStatus).toHaveBeenCalledWith(7, 'accepted');
-    expect(eventService.updateEvent).toHaveBeenCalledWith(42, 100, { title: 'New title' });
+    expect(eventService.updateEvent).toHaveBeenCalledWith(
+      42,
+      100,
+      { title: 'New title' },
+      {
+        source: 'proposal_accept',
+        skipProposalExpiry: true,
+        excludeUserIds: [200],
+      },
+    );
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const [chatId, text] = sendMessage.mock.calls[0] as unknown as [number, string];
     expect(chatId).toBe(200);

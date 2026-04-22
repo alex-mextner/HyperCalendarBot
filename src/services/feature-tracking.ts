@@ -47,6 +47,7 @@ const CALLBACK_FEATURE_MAP: { [prefix: string]: FeatureKey } = {
   inv: 'sharing', // invitation action
   st: 'settings', // settings
   sec: 'secretary', // secretary
+  epr: 'sharing', // edit proposal accept/reject
 };
 
 /** Maps scene names to feature keys */

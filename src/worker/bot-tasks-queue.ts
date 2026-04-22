@@ -8,6 +8,7 @@ export type BotTaskJobType =
   | 'cron-secretary-expiry'
   | 'cron-sharing-cleanup'
   | 'cron-proposal-expiry'
+  | 'cron-edit-proposal-expiry'
   | 'cron-session-cleanup'
   | 'cron-birthday-sync'
   | 'cron-chat-history-cleanup'
@@ -25,6 +26,7 @@ interface BotTasksQueueDeps {
   onSecretaryExpiry?: () => Promise<void>;
   onSharingCleanup?: () => void;
   onProposalExpiry?: () => Promise<void>;
+  onEditProposalExpiry?: () => Promise<void>;
   onSessionCleanup?: () => void;
   onBirthdaySync?: () => Promise<void>;
   onChatHistoryCleanup?: () => void;
@@ -60,6 +62,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-proposal-expiry') {
         if (deps.onProposalExpiry) await deps.onProposalExpiry();
+        return;
+      }
+      if (job.data.type === 'cron-edit-proposal-expiry') {
+        if (deps.onEditProposalExpiry) await deps.onEditProposalExpiry();
         return;
       }
       if (job.data.type === 'cron-session-cleanup') {
@@ -127,6 +133,15 @@ export async function setupProposalExpiryCron(queue: Queue<BotTaskJobData>): Pro
     { repeat: { every: 60 * 60_000 }, removeOnComplete: true, jobId: 'proposal-expiry-tick' },
   );
   botTasksLogger.info('Proposal expiry cron scheduled (hourly)');
+}
+
+export async function setupEditProposalExpiryCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  await queue.add(
+    'edit-proposal-expiry-tick',
+    { type: 'cron-edit-proposal-expiry' },
+    { repeat: { every: 5 * 60_000 }, removeOnComplete: true, jobId: 'edit-proposal-expiry-tick' },
+  );
+  botTasksLogger.info('Edit proposal expiry cron scheduled (every 5min)');
 }
 
 export async function setupSessionCleanupCron(queue: Queue<BotTaskJobData>): Promise<void> {

@@ -835,6 +835,26 @@ export const MSG = {
       batchIntro: (count: number) => `Calendar reminder. ${count} ${count === 1 ? 'event' : 'events'} starting soon:`,
       eventAt: (title: string, timeStr: string) => `${title} at ${timeStr}.`,
     },
+    sync: {
+      eventChanged: (title: string, changes: string) => `📅 "${title}" changed:\n${changes}`,
+      eventCancelled: (title: string) => `❌ "${title}" — cancelled by organizer`,
+      changeProposed: (participantName: string, title: string, changes: string) =>
+        `📝 ${participantName} → "${title}":\n${changes}`,
+      acceptBtn: 'Accept ✅',
+      rejectBtn: 'Decline ❌',
+      proposalAccepted: (title: string, changes: string) => `✅ "${title}" accepted:\n${changes}`,
+      proposalRejected: (title: string, changes: string) => `❌ "${title}" declined:\n${changes}`,
+      proposalExpired: (title: string) => `⏰ "${title}" — no response, changes reverted`,
+      proposalExpiredOrganizer: (title: string) => `⏰ "${title}" — proposal expired`,
+      participantDeclinedViaGoogle: (participantName: string, title: string) =>
+        `👋 ${participantName} declined "${title}"`,
+      changeTime: (oldTime: string, newTime: string) => `• ${oldTime} → ${newTime}`,
+      changeTitle: (oldTitle: string, newTitle: string) => `• ${oldTitle} → ${newTitle}`,
+      changeLocation: (oldLoc: string, newLoc: string) => `• ${oldLoc} → ${newLoc}`,
+      changeDescription: '• Description updated',
+      changeAllDay: (isAllDay: boolean) => (isAllDay ? '• Now all-day' : '• No longer all-day'),
+      changeRecurrence: '• Recurrence changed',
+    },
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -1590,6 +1610,26 @@ export const MSG = {
       batchIntro: (count: number) =>
         `Календарное напоминание. ${count} ${ruPlural(count, 'событие', 'события', 'событий')} начинаются скоро:`,
       eventAt: (title: string, timeStr: string) => `${title} в ${timeStr}.`,
+    },
+    sync: {
+      eventChanged: (title: string, changes: string) => `📅 «${title}» изменён:\n${changes}`,
+      eventCancelled: (title: string) => `❌ «${title}» — отменено организатором`,
+      changeProposed: (participantName: string, title: string, changes: string) =>
+        `📝 ${participantName} → «${title}»:\n${changes}`,
+      acceptBtn: 'Принять ✅',
+      rejectBtn: 'Отклонить ❌',
+      proposalAccepted: (title: string, changes: string) => `✅ «${title}» принято:\n${changes}`,
+      proposalRejected: (title: string, changes: string) => `❌ «${title}» отклонено:\n${changes}`,
+      proposalExpired: (title: string) => `⏰ «${title}» — нет ответа, изменения отменены`,
+      proposalExpiredOrganizer: (title: string) => `⏰ «${title}» — предложение истекло`,
+      participantDeclinedViaGoogle: (participantName: string, title: string) =>
+        `👋 ${participantName} отклонил «${title}»`,
+      changeTime: (oldTime: string, newTime: string) => `• ${oldTime} → ${newTime}`,
+      changeTitle: (oldTitle: string, newTitle: string) => `• ${oldTitle} → ${newTitle}`,
+      changeLocation: (oldLoc: string, newLoc: string) => `• ${oldLoc} → ${newLoc}`,
+      changeDescription: '• Описание обновлено',
+      changeAllDay: (isAllDay: boolean) => (isAllDay ? '• Теперь на весь день' : '• Больше не на весь день'),
+      changeRecurrence: '• Повторения изменены',
     },
   },
 } as const;

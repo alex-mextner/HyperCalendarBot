@@ -130,6 +130,8 @@ const webServerDeps: WebServerDeps = {
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
+let googleSyncQueueRef: import('bullmq').Queue | undefined;
+let syncChangeNotifierRef: import('./services/event/event-change-notifier.ts').EventChangeNotifier | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
 let callQueue:
@@ -175,7 +177,25 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     },
   };
 
-  const { queue, worker } = createGoogleSyncQueue({
+  const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+  const syncMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+
+  const sendSyncNotification = (telegramId: number, text: string) =>
+    botRef
+      .sendMessage(telegramId, text)
+      .then(() => {})
+      .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification'));
+
+  const editSyncMessage = (chatId: number, messageId: number, text: string) =>
+    botRef.editMessage(chatId, messageId, text);
+
+  const getSyncUserLang = (userId: number) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang;
+
+  const {
+    queue,
+    worker,
+    changeNotifier: syncChangeNotifier,
+  } = createGoogleSyncQueue({
     db: db.db,
     config,
     redisUrl: config.REDIS_URL,
@@ -184,7 +204,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
     participantSyncRepo: db.participantGoogleSync,
-    getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
+    getUserLang: getSyncUserLang,
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
     onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
@@ -201,13 +221,41 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
         } as Parameters<typeof bot.api.sendMessage>[0])
         .catch((err) => botLogger.error({ err, userId }, 'Failed to show calendar picker'));
     },
-    sendMessage: (telegramId, text) =>
-      botRef
-        .sendMessage(telegramId, text)
-        .then(() => {})
-        .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification')),
+    sendMessage: sendSyncNotification,
+    changeNotifierDeps: {
+      participantRepo: db.participants,
+      editProposalRepo: db.editProposals,
+      participantSyncRepo: db.participantGoogleSync,
+      invitationRepo: db.invitations,
+      materializer: syncMaterializer,
+      notifyUser: sendSyncNotification,
+      editMessage: editSyncMessage,
+      sendMessageWithButtons: async (userId, text, buttons) => {
+        const { InlineKeyboard } = await import('gramio');
+        const kb = new InlineKeyboard();
+        for (const row of buttons) {
+          for (const btn of row) {
+            kb.text(btn.text, btn.callbackData);
+          }
+          kb.row();
+        }
+        const msg = await botRef.sendMessage(userId, text, undefined, kb as never).catch((err) => {
+          botLogger.error({ err, userId }, 'Failed to send proposal with buttons');
+          return null;
+        });
+        if (!msg) return null;
+        return { messageId: msg.message_id, chatId: userId };
+      },
+      getUserLang: getSyncUserLang,
+      getUserName: (userId) => {
+        const user = db.users.findByTelegramId(userId);
+        return user?.first_name ?? user?.username ?? `User ${userId}`;
+      },
+    },
   });
 
+  googleSyncQueueRef = queue;
+  syncChangeNotifierRef = syncChangeNotifier;
   syncQueueCleanup = {
     close: async () => {
       await worker.close();
@@ -564,6 +612,7 @@ if (config.REDIS_URL) {
     setupSecretaryExpiryCron,
     setupSharingCleanupCron,
     setupProposalExpiryCron,
+    setupEditProposalExpiryCron,
     setupSessionCleanupCron,
     setupBirthdaySyncCron,
     setupChatHistoryCleanupCron,
@@ -576,6 +625,7 @@ if (config.REDIS_URL) {
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
   const { runSharingCleanup } = await import('./services/sharing/sharing-cleanup.ts');
   const { runProposalExpiry } = await import('./worker/proposal-expiry.ts');
+  const { processExpiredEditProposals } = await import('./services/google/edit-proposal-expiry.ts');
   const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
   const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
@@ -606,6 +656,21 @@ if (config.REDIS_URL) {
         proposalRepo: db.calendarProposals,
         editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
       }),
+    onEditProposalExpiry: () => {
+      if (!googleSyncQueueRef) return Promise.resolve();
+      return processExpiredEditProposals({
+        editProposalRepo: db.editProposals,
+        eventRepo: db.events,
+        syncQueue: googleSyncQueueRef,
+        notifyUser: (userId, text) =>
+          botRef
+            .sendMessage(userId, text)
+            .then(() => {})
+            .catch((err) => botLogger.error({ err, userId }, 'Failed to notify about edit proposal expiry')),
+        editMessage: (chatId, messageId, text) => botRef.editMessage(chatId, messageId, text),
+        getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
+      });
+    },
     onSessionCleanup: () => {
       db.workflowSessions.cleanup();
       db.groupSessions.deleteExpired();
@@ -653,6 +718,7 @@ if (config.REDIS_URL) {
   await setupSecretaryExpiryCron(botTasksQueue);
   await setupSharingCleanupCron(botTasksQueue);
   await setupProposalExpiryCron(botTasksQueue);
+  await setupEditProposalExpiryCron(botTasksQueue);
   await setupSessionCleanupCron(botTasksQueue);
   await setupBirthdaySyncCron(botTasksQueue);
   await setupChatHistoryCleanupCron(botTasksQueue);
@@ -967,6 +1033,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       },
       weatherService,
       broadcastEnqueuer,
+      changeNotifier: syncChangeNotifierRef,
     },
   );
 
