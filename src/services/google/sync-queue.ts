@@ -5,12 +5,17 @@ import { Queue, Worker } from 'bullmq';
 import type { OAuth2Client } from 'google-auth-library';
 import { type Lang, t } from '../../config/constants.ts';
 import type { EnvConfig } from '../../config/env.ts';
+import type { EditProposalRepository } from '../../database/repositories/edit-proposal.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { GoogleCalendarRepository } from '../../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../../database/repositories/google-sync.repository.ts';
+import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
+import type { ParticipantRepository } from '../../database/repositories/participant.repository.ts';
 import type { ParticipantGoogleSyncRepository } from '../../database/repositories/participant-google-sync.repository.ts';
 import { syncLogger } from '../../utils/logger.ts';
 import { parseRedisUrl } from '../../utils/redis.ts';
+import { EventChangeNotifier } from '../event/event-change-notifier.ts';
+import type { ReminderMaterializer } from '../notification/materializer.ts';
 import { GoogleCalendarApi } from './calendar-api.ts';
 import type { GoogleOAuthService } from './oauth.ts';
 import { SyncService } from './sync-service.ts';
@@ -34,8 +39,19 @@ export interface GoogleSyncJobData {
   eventId?: number;
   action?: 'create' | 'update' | 'delete';
   trigger?: 'cron' | 'webhook' | 'manual';
-  /** Google event ID for delete jobs where the local event is already removed from DB. */
   googleEventId?: string;
+}
+
+export interface ChangeNotifierSyncDeps {
+  participantRepo: ParticipantRepository;
+  editProposalRepo: EditProposalRepository;
+  participantSyncRepo: ParticipantGoogleSyncRepository;
+  invitationRepo: InvitationRepository;
+  materializer: ReminderMaterializer;
+  notifyUser: (userId: number, text: string) => Promise<void>;
+  editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+  getUserLang: (userId: number) => Lang;
+  getUserName: (userId: number) => string;
 }
 
 interface GoogleSyncQueueDeps {
@@ -56,6 +72,7 @@ interface GoogleSyncQueueDeps {
   getUserLang?: (userId: number) => Lang;
   syncService?: SyncService;
   createCalendarApi?: (authClient: OAuth2Client) => GoogleCalendarApi;
+  changeNotifierDeps?: ChangeNotifierSyncDeps;
 }
 
 export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
@@ -71,6 +88,34 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
     },
   });
 
+  let changeNotifier: EventChangeNotifier | undefined;
+  if (deps.changeNotifierDeps) {
+    const cnd = deps.changeNotifierDeps;
+    changeNotifier = new EventChangeNotifier({
+      participantRepo: cnd.participantRepo,
+      editProposalRepo: cnd.editProposalRepo,
+      participantSyncRepo: cnd.participantSyncRepo,
+      materializer: cnd.materializer,
+      syncQueue: queue,
+      notifyUser: cnd.notifyUser,
+      editMessage: cnd.editMessage,
+      getUserLang: cnd.getUserLang,
+    });
+  }
+
+  const participantHandlerDeps = deps.changeNotifierDeps
+    ? {
+        eventRepo: deps.eventRepo,
+        participantRepo: deps.changeNotifierDeps.participantRepo,
+        participantSyncRepo: deps.changeNotifierDeps.participantSyncRepo,
+        editProposalRepo: deps.changeNotifierDeps.editProposalRepo,
+        invitationRepo: deps.changeNotifierDeps.invitationRepo,
+        notifyUser: deps.changeNotifierDeps.notifyUser,
+        getUserLang: deps.changeNotifierDeps.getUserLang,
+        getUserName: deps.changeNotifierDeps.getUserName,
+      }
+    : undefined;
+
   const syncService =
     deps.syncService ??
     new SyncService(
@@ -81,6 +126,8 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
       deps.sendMessage,
       deps.getUserLang,
       deps.participantSyncRepo,
+      changeNotifier,
+      participantHandlerDeps,
     );
 
   const worker = new Worker<GoogleSyncJobData>(
@@ -141,10 +188,9 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         }
         case 'push-event': {
           if (!eventId || !action) throw new Error('eventId and action required for push-event');
-          // Fast path: local event already deleted — delete from Google using stored ID
           if (action === 'delete' && job.data.googleEventId) {
-            const calendarId = job.data.calendarId ?? 'primary';
-            await api.deleteEvent(calendarId, job.data.googleEventId);
+            const calId = job.data.calendarId ?? 'primary';
+            await api.deleteEvent(calId, job.data.googleEventId);
             break;
           }
           await syncService.pushEvent(api, userId, eventId, action);
@@ -219,7 +265,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
     }
   });
 
-  return { queue, worker, syncService };
+  return { queue, worker, syncService, changeNotifier };
 }
 
 function parseRetryAfter(err: unknown): number | undefined {

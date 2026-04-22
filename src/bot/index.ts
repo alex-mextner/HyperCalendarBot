@@ -141,6 +141,7 @@ export interface CreateBotOpts {
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
+  changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -164,6 +165,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     pendingGeoStore,
     weatherService,
     broadcastEnqueuer,
+    changeNotifier,
   } = opts;
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
@@ -172,6 +174,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     participantRepo: db.participants,
     groupMemberRepo: db.groupMembers,
     domainEvents: domainEventBus,
+    changeNotifier,
   });
   const holidayService = new HolidayService(db.holidays);
   holidayService.refreshOnStartup();

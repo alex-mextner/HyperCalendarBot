@@ -117,6 +117,7 @@ const webServerDeps: WebServerDeps = {
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
 let googleSyncQueueRef: import('bullmq').Queue | undefined;
+let syncChangeNotifierRef: import('./services/event/event-change-notifier.ts').EventChangeNotifier | undefined;
 let imageQueueCleanup: { close: () => Promise<void> } | undefined;
 let renderService: import('./services/image/render-service.ts').RenderService | undefined;
 let callQueue:
@@ -162,7 +163,25 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     },
   };
 
-  const { queue, worker } = createGoogleSyncQueue({
+  const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+  const syncMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
+
+  const sendSyncNotification = (telegramId: number, text: string) =>
+    botRef
+      .sendMessage(telegramId, text)
+      .then(() => {})
+      .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification'));
+
+  const editSyncMessage = (chatId: number, messageId: number, text: string) =>
+    botRef.editMessage(chatId, messageId, text);
+
+  const getSyncUserLang = (userId: number) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang;
+
+  const {
+    queue,
+    worker,
+    changeNotifier: syncChangeNotifier,
+  } = createGoogleSyncQueue({
     db: db.db,
     config,
     redisUrl: config.REDIS_URL,
@@ -171,7 +190,7 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
     syncRepo: db.googleSync,
     calendarRepo: db.googleCalendars,
     participantSyncRepo: db.participantGoogleSync,
-    getUserLang: (userId) => (db.users.findByTelegramId(userId)?.language ?? 'en') as Lang,
+    getUserLang: getSyncUserLang,
     onCronSyncTick: (q) => executeSyncCronTick(q, db.googleSync, db.googleCalendars),
     onWatchRenewalTick: () => renewExpiringChannels(config, oauthService, db.googleCalendars),
     onCleanupTick: () => executeCleanup(db.googleSync, db.googleCalendars),
@@ -188,14 +207,25 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
         } as Parameters<typeof bot.api.sendMessage>[0])
         .catch((err) => botLogger.error({ err, userId }, 'Failed to show calendar picker'));
     },
-    sendMessage: (telegramId, text) =>
-      botRef
-        .sendMessage(telegramId, text)
-        .then(() => {})
-        .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send sync notification')),
+    sendMessage: sendSyncNotification,
+    changeNotifierDeps: {
+      participantRepo: db.participants,
+      editProposalRepo: db.editProposals,
+      participantSyncRepo: db.participantGoogleSync,
+      invitationRepo: db.invitations,
+      materializer: syncMaterializer,
+      notifyUser: sendSyncNotification,
+      editMessage: editSyncMessage,
+      getUserLang: getSyncUserLang,
+      getUserName: (userId) => {
+        const user = db.users.findByTelegramId(userId);
+        return user?.first_name ?? user?.username ?? `User ${userId}`;
+      },
+    },
   });
 
   googleSyncQueueRef = queue;
+  syncChangeNotifierRef = syncChangeNotifier;
   syncQueueCleanup = {
     close: async () => {
       await worker.close();
@@ -862,6 +892,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       },
       weatherService,
       broadcastEnqueuer,
+      changeNotifier: syncChangeNotifierRef,
     },
   );
 
