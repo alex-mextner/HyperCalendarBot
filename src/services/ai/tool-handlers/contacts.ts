@@ -1,5 +1,60 @@
 import { t } from '../../../config/constants.ts';
-import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
+import type { Contact } from '../../../database/types.ts';
+import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult } from '../types.ts';
+
+const MAX_CONTACT_MATCHES = 5;
+
+type RankedContact = { contact: Contact; confidence: number };
+
+function toContactMatch(contact: Contact, confidence: number): ContactMatch {
+  return {
+    id: contact.id,
+    name: contact.name,
+    preferred_name: contact.preferred_name,
+    username: contact.username,
+    telegram_id: contact.telegram_id,
+    confidence,
+  };
+}
+
+function formatContactFields(contact: Contact): string {
+  const parts = [`name: ${contact.name}`];
+  if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
+  if (contact.username) parts.push(`username: @${contact.username}`);
+  if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
+  return parts.join(', ');
+}
+
+function confidenceLabel(confidence: number): string {
+  return confidence >= 1 ? 'exact' : `${Math.round(confidence * 100)}%`;
+}
+
+function formatContactMatchLine(match: ContactMatch): string {
+  const parts = [`name: ${match.name}`];
+  if (match.preferred_name) parts.push(`preferred_name: ${match.preferred_name}`);
+  if (match.username) parts.push(`username: @${match.username}`);
+  if (match.telegram_id) parts.push(`telegram_id: ${match.telegram_id}`);
+  return `- ${parts.join(', ')} (${confidenceLabel(match.confidence)})`;
+}
+
+function searchContactsRanked(contactRepo: ContactRepository, userId: number, rawQuery: string): RankedContact[] {
+  const nameQuery = rawQuery.startsWith('@') ? rawQuery.slice(1) : rawQuery;
+  const byId = new Map<number, RankedContact>();
+  for (const match of contactRepo.searchByName(userId, nameQuery)) {
+    byId.set(match.contact.id, match);
+  }
+  const usernameMatch = contactRepo.findByUsername(userId, nameQuery);
+  if (usernameMatch) {
+    const existing = byId.get(usernameMatch.id);
+    if (!existing || existing.confidence < 1) {
+      byId.set(usernameMatch.id, { contact: usernameMatch, confidence: 1 });
+    }
+  }
+  return [...byId.values()]
+    .sort((a, b) => b.confidence - a.confidence || a.contact.name.localeCompare(b.contact.name, 'ru'))
+    .slice(0, MAX_CONTACT_MATCHES);
+}
 
 export function handleGetContacts(ctx: AgentContext, input: { force?: boolean }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
@@ -47,18 +102,30 @@ export function handleAddContact(
 
 export function handleFindContact(ctx: AgentContext, input: { name: string }): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
-  const query = input.name;
   const userId = ctx.user.telegram_id;
-  const contact = query.startsWith('@')
-    ? (ctx.contactRepo.findByUsername(userId, query) ?? ctx.contactRepo.findByName(userId, query.slice(1)))
-    : (ctx.contactRepo.findByName(userId, query) ?? ctx.contactRepo.findByUsername(userId, query));
-  if (!contact) return { success: false, error: `No contact named "${input.name}" in address book.` };
-  const parts = [`name: ${contact.name}`];
-  if (contact.preferred_name) parts.push(`preferred_name: ${contact.preferred_name}`);
-  if (contact.username) parts.push(`username: @${contact.username}`);
-  if (contact.telegram_id) parts.push(`telegram_id: ${contact.telegram_id}`);
-  const data = parts.join(', ');
-  return { success: true, output: t(ctx.user.language).aiTools.meta.contactFound(data) };
+  const rawQuery = input.name;
+  const ranked = searchContactsRanked(ctx.contactRepo, userId, rawQuery);
+
+  if (ranked.length === 0) return { success: false, error: `No contact named "${rawQuery}" in address book.` };
+
+  const lang = ctx.user.language;
+  const matches = ranked.map(({ contact, confidence }) => toContactMatch(contact, confidence));
+
+  if (ranked.length === 1) {
+    const only = ranked[0]!;
+    const display = `${formatContactFields(only.contact)} (${confidenceLabel(only.confidence)})`;
+    return {
+      success: true,
+      output: t(lang).aiTools.meta.contactFound(display),
+      data: { matches },
+    };
+  }
+
+  return {
+    success: true,
+    output: t(lang).aiTools.meta.contactMatches(matches.map(formatContactMatchLine).join('\n')),
+    data: { matches },
+  };
 }
 handleFindContact.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
 
@@ -68,18 +135,32 @@ export function handleUpdateContact(
 ): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
   const userId = ctx.user.telegram_id;
-  const query = input.search;
-  const contact = query.startsWith('@')
-    ? (ctx.contactRepo.findByUsername(userId, query) ?? ctx.contactRepo.findByName(userId, query.slice(1)))
-    : (ctx.contactRepo.findByName(userId, query) ?? ctx.contactRepo.findByUsername(userId, query));
-  if (!contact) return { success: false, error: `No contact named "${input.search}" in address book.` };
+  const ranked = searchContactsRanked(ctx.contactRepo, userId, input.search);
+
+  if (ranked.length === 0) {
+    return { success: false, error: `No contact named "${input.search}" in address book.` };
+  }
+
+  const top = ranked[0]!;
+  const second = ranked[1];
+  const isAmbiguous = second !== undefined && (top.confidence < 1 || top.confidence === second.confidence);
+  if (isAmbiguous) {
+    const lines = ranked
+      .map(({ contact, confidence }) => formatContactMatchLine(toContactMatch(contact, confidence)))
+      .join('\n');
+    return {
+      success: false,
+      error: `Multiple contacts match "${input.search}". Ask the user which one to update:\n${lines}`,
+    };
+  }
+
   const patch: { name?: string; preferred_name?: string; username?: string } = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.preferred_name !== undefined) patch.preferred_name = input.preferred_name;
   if (input.username !== undefined) patch.username = input.username;
   if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
-  ctx.contactRepo.update(contact.id, patch);
-  const updatedName = patch.name ?? contact.name;
+  ctx.contactRepo.update(top.contact.id, patch);
+  const updatedName = patch.name ?? top.contact.name;
   const updated = ctx.contactRepo.findByName(userId, updatedName);
   const displayName = updated?.preferred_name ?? updated?.name ?? updatedName;
   const updatedLabel = `"${displayName}"${updated?.username ? ` (@${updated.username})` : ''}`;

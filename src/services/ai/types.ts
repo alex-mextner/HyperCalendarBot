@@ -247,11 +247,27 @@ export type TelegramSessionData =
   | { connected: false; dismissed_recently: boolean }
   | { connected: true; phone_masked: string; status: string };
 
+/**
+ * Must be `type`, not `interface` — needed for structural compatibility with
+ * `ToolOutputValue` (the recursive `{ [k: string]: … }` index type) in
+ * intent-executor's `ToolResultElement`. A named interface has no implicit
+ * index signature and fails that assignability check.
+ */
+export type ContactMatch = {
+  id: number;
+  name: string;
+  preferred_name: string | null;
+  username: string | null;
+  telegram_id: number | null;
+  confidence: number;
+};
+
 /** Structured data from tool handlers for intent executor consumption. */
 export type ToolResultData =
   | EventSummary
   | EventSummary[]
   | { telegram_id: number; name: string }
+  | { matches: ContactMatch[] }
   | ScheduledAiCall[]
   | Trigger[]
   | TelegramSessionData

@@ -609,7 +609,8 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'find_contact',
-    description: "Look up a person by name in the user's address book. Returns username and telegram_id if known.",
+    description:
+      "Look up a person by name or @username in the user's address book. Returns up to 5 candidates ranked by match confidence (exact > prefix > substring). If the top result is not clearly the right person, call ask_user to disambiguate — never guess.",
     input_schema: {
       type: 'object' as const,
       properties: {
