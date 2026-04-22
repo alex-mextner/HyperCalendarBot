@@ -102,6 +102,30 @@ describe('ContactRepository', () => {
     expect(contact!.telegram_id).toBe(999);
   });
 
+  test('upsert does not merge phonetically-similar distinct names', () => {
+    // "Вова" and "Фофа" both phoneticNormalize to "фофа" — the fuzzy matcher
+    // would score them at 0.99. Dedup must use STRICT equality, not fuzzy,
+    // otherwise adding "Фофа" after "Вова" silently patches Вова's row.
+    repo.upsert(USER_ID, 'Вова', 'vova', 111);
+    repo.upsert(USER_ID, 'Фофа', 'fofa', 222);
+    const contacts = repo.list(USER_ID);
+    expect(contacts.length).toBe(2);
+    const vova = contacts.find((c) => c.name === 'Вова');
+    const fofa = contacts.find((c) => c.name === 'Фофа');
+    expect(vova?.telegram_id).toBe(111);
+    expect(vova?.username).toBe('vova');
+    expect(fofa?.telegram_id).toBe(222);
+    expect(fofa?.username).toBe('fofa');
+  });
+
+  test('upsert dedups on strict name match with whitespace/case differences', () => {
+    repo.add(USER_ID, 'Лена', 'lena', 111);
+    repo.upsert(USER_ID, '  ЛЕНА  ', undefined, undefined, 'Ленок');
+    const contacts = repo.list(USER_ID);
+    expect(contacts.length).toBe(1);
+    expect(contacts[0]!.preferred_name).toBe('Ленок');
+  });
+
   test('findByTelegramId returns correct contact', () => {
     repo.add(USER_ID, 'Лена', 'larichkina_b', 716928723);
     const contact = repo.findByTelegramId(USER_ID, 716928723);

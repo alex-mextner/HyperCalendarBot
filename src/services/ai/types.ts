@@ -247,6 +247,12 @@ export type TelegramSessionData =
   | { connected: false; dismissed_recently: boolean }
   | { connected: true; phone_masked: string; status: string };
 
+/**
+ * Must be `type`, not `interface` — needed for structural compatibility with
+ * `ToolOutputValue` (the recursive `{ [k: string]: … }` index type) in
+ * intent-executor's `ToolResultElement`. A named interface has no implicit
+ * index signature and fails that assignability check.
+ */
 export type ContactMatch = {
   id: number;
   name: string;
