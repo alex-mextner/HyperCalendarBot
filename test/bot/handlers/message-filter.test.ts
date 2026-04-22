@@ -1,188 +1,61 @@
 import { describe, expect, test } from 'bun:test';
-
-// Mirror of CALENDAR_KEYWORDS from message.handler.ts
-const CALENDAR_KEYWORDS = [
-  'событие',
-  'события',
-  'событий',
-  'встреча',
-  'встречу',
-  'встречи',
-  'встречаемся',
-  'потусим',
-  'потусить',
-  'потусуем',
-  'собираемся',
-  'собираться',
-  'планирую',
-  'планируем',
-  'запланируй',
-  'запланировать',
-  'напомни',
-  'напоминание',
-  'напомнить',
-  'календарь',
-  'календар',
-  'расписание',
-  'расписани',
-  'когда',
-  'во сколько',
-  'перенеси',
-  'перенести',
-  'перенос',
-  'отмени',
-  'отменить',
-  'отмена',
-  'удали',
-  'удалить',
-  'завтра',
-  'послезавтра',
-  'сегодня',
-  'запись',
-  'записаться',
-  'записать',
-  'назначить',
-  'назначь',
-  'отложить',
-  'отложи',
-  'event',
-  'events',
-  'meeting',
-  'schedule',
-  'scheduled',
-  'reminder',
-  'remind',
-  'calendar',
-  'appointment',
-  'reschedule',
-  'postpone',
-  'tomorrow',
-  'today',
-];
-
-// Mirror of phoneticNormalize from message.handler.ts
-function phoneticNormalize(word: string): string {
-  let s = word.toLowerCase();
-  s = s.replace(/ё/g, 'е');
-  s = s.replace(/[ъь]/g, '');
-  s = s.replace(/б/g, 'п');
-  s = s.replace(/в/g, 'ф');
-  s = s.replace(/г/g, 'к');
-  s = s.replace(/д/g, 'т');
-  s = s.replace(/ж/g, 'ш');
-  s = s.replace(/з/g, 'с');
-  s = s.replace(/(.)\1+/g, '$1');
-  return s;
-}
-
-function levenshtein(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  const dp: number[][] = Array.from({ length: m + 1 }, (_, i) =>
-    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)),
-  );
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i]![j] =
-        a[i - 1] === b[j - 1] ? dp[i - 1]![j - 1]! : 1 + Math.min(dp[i - 1]![j]!, dp[i]![j - 1]!, dp[i - 1]![j - 1]!);
-    }
-  }
-  return dp[m]![n]!;
-}
-
-function maxEditDistance(len: number): number {
-  if (len <= 3) return 0;
-  if (len <= 5) return 1;
-  return 2;
-}
-
-const NORMALIZED_KEYWORDS = CALENDAR_KEYWORDS.map((kw) => {
-  const parts = kw.split(/\s+/);
-  return { normalized: parts.map(phoneticNormalize) };
-});
-
-function matchesKeyword(text: string): boolean {
-  const inputWords = text
-    .toLowerCase()
-    .split(/[\s,.!?;:()]+/)
-    .filter((w) => w.length > 0);
-  const normalizedInput = inputWords.map(phoneticNormalize);
-
-  for (const kw of NORMALIZED_KEYWORDS) {
-    if (kw.normalized.length === 1) {
-      const kwNorm = kw.normalized[0]!;
-      for (const inputNorm of normalizedInput) {
-        const maxDist = maxEditDistance(kwNorm.length);
-        if (levenshtein(inputNorm, kwNorm) <= maxDist) return true;
-      }
-    } else {
-      for (let i = 0; i <= normalizedInput.length - kw.normalized.length; i++) {
-        let allMatch = true;
-        for (let j = 0; j < kw.normalized.length; j++) {
-          const inputNorm = normalizedInput[i + j]!;
-          const kwNorm = kw.normalized[j]!;
-          const maxDist = maxEditDistance(kwNorm.length);
-          if (levenshtein(inputNorm, kwNorm) > maxDist) {
-            allMatch = false;
-            break;
-          }
-        }
-        if (allMatch) return true;
-      }
-    }
-  }
-  return false;
-}
+import {
+  containsDateHint,
+  isGroupRelevant,
+  matchesKeywordFuzzy,
+  mentionsBot,
+  phoneticNormalize,
+} from '../../../src/bot/handlers/group-message-filter.ts';
 
 describe('group message keyword filter', () => {
   describe('matches relevant messages (exact)', () => {
-    test('встреча завтра', () => expect(matchesKeyword('встреча завтра в 15:00')).toBe(true));
-    test('планируем встречу', () => expect(matchesKeyword('планируем встречу')).toBe(true));
-    test('напомни мне', () => expect(matchesKeyword('напомни мне в 9')).toBe(true));
-    test('когда собираемся', () => expect(matchesKeyword('когда собираемся?')).toBe(true));
-    test('потусим завтра', () => expect(matchesKeyword('потусим завтра?')).toBe(true));
-    test('schedule meeting', () => expect(matchesKeyword("let's schedule a meeting")).toBe(true));
-    test('tomorrow at 3', () => expect(matchesKeyword('tomorrow at 3pm')).toBe(true));
-    test('event at start of message', () => expect(matchesKeyword('event tomorrow')).toBe(true));
-    test('reminder please', () => expect(matchesKeyword('set a reminder')).toBe(true));
-    test('перенеси на пятницу', () => expect(matchesKeyword('перенеси встречу на пятницу')).toBe(true));
-    test('удалить событие', () => expect(matchesKeyword('удалить событие')).toBe(true));
-    test('case insensitive', () => expect(matchesKeyword('ВСТРЕЧА ЗАВТРА')).toBe(true));
-    test('with punctuation', () => expect(matchesKeyword('событие!')).toBe(true));
-    test('запись к врачу', () => expect(matchesKeyword('запись к врачу на среду')).toBe(true));
-    test('назначить встречу', () => expect(matchesKeyword('назначить встречу')).toBe(true));
-    test('отложи на час', () => expect(matchesKeyword('отложи на час')).toBe(true));
+    test('встреча завтра', () => expect(matchesKeywordFuzzy('встреча завтра в 15:00')).toBe(true));
+    test('планируем встречу', () => expect(matchesKeywordFuzzy('планируем встречу')).toBe(true));
+    test('напомни мне', () => expect(matchesKeywordFuzzy('напомни мне в 9')).toBe(true));
+    test('когда собираемся', () => expect(matchesKeywordFuzzy('когда собираемся?')).toBe(true));
+    test('потусим завтра', () => expect(matchesKeywordFuzzy('потусим завтра?')).toBe(true));
+    test('schedule meeting', () => expect(matchesKeywordFuzzy("let's schedule a meeting")).toBe(true));
+    test('tomorrow at 3', () => expect(matchesKeywordFuzzy('tomorrow at 3pm')).toBe(true));
+    test('event at start of message', () => expect(matchesKeywordFuzzy('event tomorrow')).toBe(true));
+    test('reminder please', () => expect(matchesKeywordFuzzy('set a reminder')).toBe(true));
+    test('перенеси на пятницу', () => expect(matchesKeywordFuzzy('перенеси встречу на пятницу')).toBe(true));
+    test('удалить событие', () => expect(matchesKeywordFuzzy('удалить событие')).toBe(true));
+    test('case insensitive', () => expect(matchesKeywordFuzzy('ВСТРЕЧА ЗАВТРА')).toBe(true));
+    test('with punctuation', () => expect(matchesKeywordFuzzy('событие!')).toBe(true));
+    test('запись к врачу', () => expect(matchesKeywordFuzzy('запись к врачу на среду')).toBe(true));
+    test('назначить встречу', () => expect(matchesKeywordFuzzy('назначить встречу')).toBe(true));
+    test('отложи на час', () => expect(matchesKeywordFuzzy('отложи на час')).toBe(true));
   });
 
   describe('matches with typos (Levenshtein)', () => {
-    test('каледарь (missing н)', () => expect(matchesKeyword('каледарь покажи')).toBe(true));
-    test('напомини (extra и)', () => expect(matchesKeyword('напомини мне')).toBe(true));
-    test('расписанние (double н)', () => expect(matchesKeyword('покажи расписанние')).toBe(true));
-    test('собиремся (wrong vowel)', () => expect(matchesKeyword('собиремся в 8')).toBe(true));
-    test('запланировтаь (transposition)', () => expect(matchesKeyword('запланировтаь на завтра')).toBe(true));
-    test('calender (common EN typo)', () => expect(matchesKeyword('check the calender')).toBe(true));
-    test('shcedule (common EN typo)', () => expect(matchesKeyword('shcedule a call')).toBe(true));
-    test('remiinder (double i)', () => expect(matchesKeyword('set a remiinder')).toBe(true));
+    test('каледарь (missing н)', () => expect(matchesKeywordFuzzy('каледарь покажи')).toBe(true));
+    test('напомини (extra и)', () => expect(matchesKeywordFuzzy('напомини мне')).toBe(true));
+    test('расписанние (double н)', () => expect(matchesKeywordFuzzy('покажи расписанние')).toBe(true));
+    test('собиремся (wrong vowel)', () => expect(matchesKeywordFuzzy('собиремся в 8')).toBe(true));
+    test('запланировтаь (transposition)', () => expect(matchesKeywordFuzzy('запланировтаь на завтра')).toBe(true));
+    test('calender (common EN typo)', () => expect(matchesKeywordFuzzy('check the calender')).toBe(true));
+    test('shcedule (common EN typo)', () => expect(matchesKeywordFuzzy('shcedule a call')).toBe(true));
+    test('remiinder (double i)', () => expect(matchesKeywordFuzzy('set a remiinder')).toBe(true));
   });
 
   describe('matches with phonetic variations (devoicing)', () => {
-    test('фстреча (в→ф devoicing)', () => expect(matchesKeyword('фстреча в 10')).toBe(true));
-    test('сопытие (б→п devoicing)', () => expect(matchesKeyword('сопытие в парке')).toBe(true));
-    test('сафтра (з→с, в→ф devoicing)', () => expect(matchesKeyword('сафтра пойдем')).toBe(true));
-    test('напомнёт (ё→е, close to напомнить)', () => expect(matchesKeyword('напомнёт мне')).toBe(true));
-    test('soft sign removed (календарь = календар)', () => expect(matchesKeyword('календар покажи')).toBe(true));
+    test('фстреча (в→ф devoicing)', () => expect(matchesKeywordFuzzy('фстреча в 10')).toBe(true));
+    test('сопытие (б→п devoicing)', () => expect(matchesKeywordFuzzy('сопытие в парке')).toBe(true));
+    test('сафтра (з→с, в→ф devoicing)', () => expect(matchesKeywordFuzzy('сафтра пойдем')).toBe(true));
+    test('напомнёт (ё→е, close to напомнить)', () => expect(matchesKeywordFuzzy('напомнёт мне')).toBe(true));
+    test('soft sign removed (календарь = календар)', () => expect(matchesKeywordFuzzy('календар покажи')).toBe(true));
   });
 
   describe('does NOT match irrelevant messages', () => {
-    test('планшет купил', () => expect(matchesKeyword('планшет купил новый')).toBe(false));
-    test('местоимение', () => expect(matchesKeyword('это местоимение')).toBe(false));
-    test('eventually', () => expect(matchesKeyword('it will eventually work')).toBe(false));
-    test('prevent', () => expect(matchesKeyword('prevent this from happening')).toBe(false));
-    test('random chat', () => expect(matchesKeyword('привет, как дела?')).toBe(false));
-    test('code discussion', () => expect(matchesKeyword('push the fix to main')).toBe(false));
-    test('food talk', () => expect(matchesKeyword('закажем пиццу')).toBe(false));
-    test('short random words', () => expect(matchesKeyword('ну ок')).toBe(false));
-    test('politics', () => expect(matchesKeyword('новости из парламента')).toBe(false));
+    test('планшет купил', () => expect(matchesKeywordFuzzy('планшет купил новый')).toBe(false));
+    test('местоимение', () => expect(matchesKeywordFuzzy('это местоимение')).toBe(false));
+    test('eventually', () => expect(matchesKeywordFuzzy('it will eventually work')).toBe(false));
+    test('prevent', () => expect(matchesKeywordFuzzy('prevent this from happening')).toBe(false));
+    test('random chat', () => expect(matchesKeywordFuzzy('привет, как дела?')).toBe(false));
+    test('code discussion', () => expect(matchesKeywordFuzzy('push the fix to main')).toBe(false));
+    test('food talk', () => expect(matchesKeywordFuzzy('закажем пиццу')).toBe(false));
+    test('short random words', () => expect(matchesKeywordFuzzy('ну ок')).toBe(false));
+    test('politics', () => expect(matchesKeywordFuzzy('новости из парламента')).toBe(false));
   });
 
   describe('phoneticNormalize', () => {
@@ -200,7 +73,91 @@ describe('group message keyword filter', () => {
     });
     test('collapses doubles', () => {
       expect(phoneticNormalize('рассписание')).toBe('расписание');
-      // After normalization: р stays, а stays, сс→с, п stays, и stays, с stays, а stays, н stays, и stays, е stays
     });
   });
+});
+
+describe('mentionsBot', () => {
+  describe('matches direct "бот" references', () => {
+    test('bare бот', () => expect(mentionsBot('бот, что сегодня?')).toBe(true));
+    test('бот in the middle', () => expect(mentionsBot('эй бот покажи')).toBe(true));
+    test('бота (genitive)', () => expect(mentionsBot('спросим бота')).toBe(true));
+    test('боту (dative)', () => expect(mentionsBot('напишу боту')).toBe(true));
+    test('ботом (instrumental)', () => expect(mentionsBot('поговори с ботом')).toBe(true));
+    test('боте (prepositional)', () => expect(mentionsBot('в боте есть настройки')).toBe(true));
+    test('боты (plural)', () => expect(mentionsBot('все боты так делают')).toBe(true));
+    test('uppercase Бот', () => expect(mentionsBot('Бот сделай напоминание')).toBe(true));
+    test('english bot', () => expect(mentionsBot('hey bot, help')).toBe(true));
+    test('english bots', () => expect(mentionsBot('all bots are smart')).toBe(true));
+    test('bot followed by punctuation', () => expect(mentionsBot('бот!')).toBe(true));
+  });
+
+  describe('does NOT match substrings inside other words', () => {
+    test('ботинки (boots)', () => expect(mentionsBot('купил ботинки')).toBe(false));
+    test('робот (robot)', () => expect(mentionsBot('робот идёт')).toBe(false));
+    test('работа', () => expect(mentionsBot('сегодня много работы')).toBe(false));
+    test('about', () => expect(mentionsBot('talk about this')).toBe(false));
+    test('bottom', () => expect(mentionsBot('scroll to the bottom')).toBe(false));
+    test('пот (sweat — phonetic clone of бот)', () => expect(mentionsBot('весь в поту')).toBe(false));
+  });
+});
+
+describe('containsDateHint', () => {
+  describe('numeric date formats', () => {
+    test('DD.MM', () => expect(containsDateHint('встречаемся 15.04')).toBe(true));
+    test('DD.MM.YYYY', () => expect(containsDateHint('встречаемся 15.04.2026')).toBe(true));
+    test('DD.MM.YY', () => expect(containsDateHint('встречаемся 15.04.26')).toBe(true));
+    test('DD/MM', () => expect(containsDateHint('see you 15/04')).toBe(true));
+    test('DD-MM', () => expect(containsDateHint('на 15-04')).toBe(true));
+    test('YYYY-MM-DD', () => expect(containsDateHint('event at 2026-04-15')).toBe(true));
+    test('single-digit day/month', () => expect(containsDateHint('5.4 приду')).toBe(true));
+  });
+
+  describe('month name + day', () => {
+    test('15 апреля', () => expect(containsDateHint('встреча 15 апреля')).toBe(true));
+    test('15 апр', () => expect(containsDateHint('15 апр в кафе')).toBe(true));
+    test('15 april', () => expect(containsDateHint('meeting on 15 april')).toBe(true));
+    test('apr 15', () => expect(containsDateHint('apr 15 lunch')).toBe(true));
+    test('march 3', () => expect(containsDateHint('see you march 3')).toBe(true));
+    test('3 мая', () => expect(containsDateHint('концерт 3 мая')).toBe(true));
+    test('октября 10', () => expect(containsDateHint('октября 10 приеду')).toBe(true));
+  });
+
+  describe('time of day', () => {
+    test('HH:MM', () => expect(containsDateHint('в 15:30 встречаемся')).toBe(true));
+    test('H:MM', () => expect(containsDateHint('в 9:00 начинаем')).toBe(true));
+    test('at HH:MM', () => expect(containsDateHint('meet at 8:30')).toBe(true));
+  });
+
+  describe('does NOT match irrelevant patterns', () => {
+    test('plain number', () => expect(containsDateHint('мне 25 лет')).toBe(false));
+    test('version numbers', () => expect(containsDateHint('используем v1.2')).toBe(false));
+    test('score', () => expect(containsDateHint('счёт 2:1 в нашу пользу')).toBe(false));
+    test('random greeting', () => expect(containsDateHint('как дела?')).toBe(false));
+    test('isolated month word (no day)', () => expect(containsDateHint('апрель уже близко')).toBe(false));
+    test('word "may" without a day', () => expect(containsDateHint('i may go')).toBe(false));
+    test('IP address', () => expect(containsDateHint('connect to 192.168.1.1')).toBe(false));
+    test('version string', () => expect(containsDateHint('обновись до 2.0.1')).toBe(false));
+    test('price with decimals', () => expect(containsDateHint('стоит 15.50 руб')).toBe(false));
+    test('pi constant', () => expect(containsDateHint('число пи 3.14')).toBe(false));
+    test('phone number', () => expect(containsDateHint('звони +7-999-123-45-67')).toBe(false));
+    test('month stem inside a word (мартышек)', () => expect(containsDateHint('15 мартышек на дереве')).toBe(false));
+  });
+});
+
+describe('isGroupRelevant', () => {
+  const bot = 'MyCalBot';
+
+  test('@mention triggers', () => expect(isGroupRelevant(`hello @${bot} help`, bot)).toBe(true));
+  test('calendar address triggers', () => expect(isGroupRelevant('Календарь, что сегодня?', bot)).toBe(true));
+  test('calendar address with typo triggers', () => expect(isGroupRelevant('Каледарь покажи', bot)).toBe(true));
+  test('calendar keyword triggers', () => expect(isGroupRelevant('встреча завтра в 15:00', bot)).toBe(true));
+  test('"бот" mention triggers', () => expect(isGroupRelevant('бот, помоги', bot)).toBe(true));
+  test('numeric date triggers', () => expect(isGroupRelevant('давай 15.04 после работы', bot)).toBe(true));
+  test('month+day triggers', () => expect(isGroupRelevant('давай 15 апреля', bot)).toBe(true));
+  test('time triggers', () => expect(isGroupRelevant('в 19:30 подойду', bot)).toBe(true));
+  test('unrelated small talk is ignored', () => expect(isGroupRelevant('как дела у тебя?', bot)).toBe(false));
+  test('word "робот" alone is ignored', () => expect(isGroupRelevant('робот убирает в доме', bot)).toBe(false));
+  test('IP address is ignored', () => expect(isGroupRelevant('сервер на 192.168.1.1', bot)).toBe(false));
+  test('price is ignored', () => expect(isGroupRelevant('стоит 15.50 руб', bot)).toBe(false));
 });

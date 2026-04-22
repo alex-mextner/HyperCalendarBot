@@ -24,6 +24,8 @@ const COMMAND_FEATURE_MAP: { [cmd: string]: FeatureKey } = {
   google_status: 'google_calendar',
   log: 'history',
   contacts: 'contacts',
+  connect_telegram: 'telegram_connect',
+  disconnect_telegram: 'telegram_connect',
 };
 
 /** Maps callback data prefixes to feature keys */
@@ -54,6 +56,7 @@ const SCENE_FEATURE_MAP: { [scene: string]: FeatureKey } = {
   'edit-value': 'events_edit',
   import: 'import',
   timezone: 'settings',
+  'connect-telegram': 'telegram_connect',
 };
 
 /** Maps abstract actions to feature keys */

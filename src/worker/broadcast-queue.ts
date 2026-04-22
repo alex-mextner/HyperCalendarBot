@@ -16,33 +16,35 @@
 //   * concurrency: 5 parallel workers so short bursts clear quickly
 //   * attempts: 3 with exponential backoff — survives transient 429s
 //   * failed jobs retained for 500 runs so admin can inspect via BullMQ UI
+//
+// Batch failure tracking:
+//   When a batch of broadcasts is enqueued, a batch is registered in Redis with
+//   the total job count and fallback metadata. On permanent delivery failures
+//   (403), the worker records the failed recipient's mention in a Redis set.
+//   After the last job finishes (success or fail), the worker sends ONE aggregated
+//   fallback message to the source group listing all unreachable users.
 
 import { type ConnectionOptions, Queue, Worker } from 'bullmq';
+import { z } from 'zod';
+import { parseTelegramError } from '../services/notification/worker.ts';
 import { logger } from '../utils/logger.ts';
-import type { ParseMode } from '../utils/telegram.ts';
-import { UnrecoverableError } from '../utils/unrecoverable-error.ts';
+import { type ParseMode, splitMessage } from '../utils/telegram.ts';
 
 const broadcastLogger = logger.child({ module: 'broadcast' });
 
-const PERMANENT_TG_CODES = new Set([403, 404]);
-const PERMANENT_TG_PATTERNS = [
-  "bot can't initiate",
-  'bot was blocked',
-  'user is deactivated',
-  'chat not found',
-  'PEER_ID_INVALID',
-];
+const BATCH_KEY_PREFIX = 'broadcast:batch:';
+const BATCH_TTL_SECONDS = 3600; // 1 hour — generous ceiling for slow queues
 
-function hasNumericCode(err: Error): err is Error & { code: number } {
-  return 'code' in err && typeof err.code === 'number';
+/** Permanent Telegram errors that will never succeed on retry. */
+export function isPermanentTelegramError(code: number): boolean {
+  // 403 = bot blocked / user hasn't started bot / bot kicked from chat
+  // 404 = chat not found (deleted account, invalid chat_id)
+  return code === 403 || code === 404;
 }
 
-export function isTelegramPermanentError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false;
-  if (hasNumericCode(err) && PERMANENT_TG_CODES.has(err.code)) return true;
-  const msg = err.message.toLowerCase();
-  return PERMANENT_TG_PATTERNS.some((p) => msg.includes(p.toLowerCase()));
-}
+// ---------------------------------------------------------------------------
+// Data types
+// ---------------------------------------------------------------------------
 
 export interface BroadcastJobData {
   /** Target chat (user DM or group chat). */
@@ -52,24 +54,60 @@ export interface BroadcastJobData {
   parseMode?: ParseMode;
   /** Free-form origin tag for audit/debugging, e.g. "group_event_created:42". */
   origin: string;
+  /** Links this job to a tracked batch for aggregated failure reporting. */
+  batchId?: string;
+  /** HTML mention of the recipient (e.g. @nick or <a href="tg://user?id=...">Name</a>). */
+  recipientMention?: string;
 }
+
+export interface BroadcastBatchMeta {
+  total: number;
+  groupChatId: number;
+  threadId?: number;
+  /** Pre-formatted invite_deep_link text (without user list). */
+  fallbackText: string;
+}
+
+const BroadcastBatchMetaSchema = z.object({
+  total: z.number(),
+  groupChatId: z.number(),
+  threadId: z.number().optional(),
+  fallbackText: z.string(),
+});
 
 export interface BroadcastSender {
-  sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
+  sendMessage(chatId: number, text: string, parseMode?: ParseMode, threadId?: number): Promise<{ message_id: number }>;
 }
+
+// ---------------------------------------------------------------------------
+// Redis interface for batch tracking (thin wrapper, testable)
+// ---------------------------------------------------------------------------
+
+export interface BroadcastRedis {
+  set(key: string, value: string, ex: number): Promise<void>;
+  get(key: string): Promise<string | null>;
+  sadd(key: string, member: string): Promise<void>;
+  smembers(key: string): Promise<string[]>;
+  incr(key: string): Promise<number>;
+  del(...keys: string[]): Promise<void>;
+  expire(key: string, seconds: number): Promise<void>;
+}
+
+// ---------------------------------------------------------------------------
+// Enqueuer
+// ---------------------------------------------------------------------------
 
 export interface BroadcastEnqueuer {
-  /**
-   * Enqueue a single per-recipient broadcast job. The caller is responsible
-   * for per-recipient formatting (language, timezone, etc.) — the worker
-   * dispatches the already-rendered text as-is.
-   */
   enqueue(data: BroadcastJobData): Promise<void>;
-  /** Enqueue a batch in a single Redis round-trip. Use when fanning out ≥3 jobs. */
   enqueueBatch(data: BroadcastJobData[]): Promise<void>;
+  /** Register a batch for aggregated failure tracking (requires Redis). */
+  registerBatch?(batchId: string, meta: BroadcastBatchMeta): Promise<void>;
 }
 
-export function createBroadcastQueue(connection: ConnectionOptions): {
+export function createBroadcastQueue(
+  connection: ConnectionOptions,
+  redis?: BroadcastRedis,
+): {
   queue: Queue<BroadcastJobData>;
   enqueuer: BroadcastEnqueuer;
 } {
@@ -91,52 +129,179 @@ export function createBroadcastQueue(connection: ConnectionOptions): {
       if (items.length === 0) return;
       await queue.addBulk(items.map((data) => ({ name: 'broadcast', data })));
     },
+    registerBatch: redis
+      ? async (batchId, meta) => {
+          const metaKey = `${BATCH_KEY_PREFIX}${batchId}:meta`;
+          const doneKey = `${BATCH_KEY_PREFIX}${batchId}:done`;
+          await redis.set(metaKey, JSON.stringify(meta), BATCH_TTL_SECONDS);
+          await redis.set(doneKey, '0', BATCH_TTL_SECONDS);
+        }
+      : undefined,
   };
 
   return { queue, enqueuer };
 }
 
+// ---------------------------------------------------------------------------
+// Job processor (exported for testability)
+// ---------------------------------------------------------------------------
+
+/**
+ * Process a single broadcast job: deliver the message, track permanent
+ * failures in Redis for batch aggregation, re-throw transient errors.
+ */
+export async function processBroadcastJob(
+  data: BroadcastJobData,
+  sender: BroadcastSender,
+  redis?: BroadcastRedis,
+): Promise<void> {
+  const { recipientId, text, parseMode } = data;
+  try {
+    await sender.sendMessage(recipientId, text, parseMode);
+  } catch (err) {
+    const tgErr = parseTelegramError(err);
+    if (tgErr && isPermanentTelegramError(tgErr.code)) {
+      broadcastLogger.warn(
+        { recipientId, origin: data.origin, code: tgErr.code },
+        'Recipient unreachable (permanent), skipping retries',
+      );
+      // Track failure for batch aggregation
+      if (redis && data.batchId && data.recipientMention) {
+        const failKey = `${BATCH_KEY_PREFIX}${data.batchId}:failed`;
+        await redis.sadd(failKey, data.recipientMention);
+        await redis.expire(failKey, BATCH_TTL_SECONDS);
+      }
+      return;
+    }
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Batch completion handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Increment the done counter for a batch. When all jobs are done, send ONE
+ * aggregated fallback to the group listing unreachable users, then cleanup.
+ */
+export async function completeBatchJob(batchId: string, redis: BroadcastRedis, sender: BroadcastSender): Promise<void> {
+  const doneKey = `${BATCH_KEY_PREFIX}${batchId}:done`;
+  const metaKey = `${BATCH_KEY_PREFIX}${batchId}:meta`;
+  const failKey = `${BATCH_KEY_PREFIX}${batchId}:failed`;
+
+  const done = await redis.incr(doneKey);
+  const metaStr = await redis.get(metaKey);
+  if (!metaStr) return;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(metaStr);
+  } catch {
+    broadcastLogger.warn({ batchId }, 'Corrupt batch meta JSON in Redis');
+    return;
+  }
+  const parseResult = BroadcastBatchMetaSchema.safeParse(parsed);
+  if (!parseResult.success) {
+    broadcastLogger.warn({ batchId, err: parseResult.error }, 'Invalid batch meta in Redis');
+    return;
+  }
+  const meta = parseResult.data;
+  if (done < meta.total) return;
+
+  // All jobs finished — check for failures
+  try {
+    const failedMentions = await redis.smembers(failKey);
+    if (failedMentions.length > 0) {
+      const userList = failedMentions.join(', ');
+      const fullMessage = `${userList}\n${meta.fallbackText}`;
+      for (const chunk of splitMessage(fullMessage)) {
+        await sender.sendMessage(meta.groupChatId, chunk, 'HTML', meta.threadId);
+      }
+      broadcastLogger.info(
+        { batchId, failedCount: failedMentions.length, groupChatId: meta.groupChatId },
+        'Batch fallback sent to group',
+      );
+    }
+  } catch (err) {
+    broadcastLogger.warn({ err, batchId }, 'Failed to send batch fallback');
+  }
+
+  // Cleanup Redis keys
+  await redis.del(metaKey, doneKey, failKey).catch(() => {
+    // Non-critical — keys expire via TTL anyway
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Worker
+// ---------------------------------------------------------------------------
+
 export function createBroadcastWorker(
   connection: ConnectionOptions,
   sender: BroadcastSender,
+  redis?: BroadcastRedis,
 ): Worker<BroadcastJobData> {
   const worker = new Worker<BroadcastJobData>(
     'broadcast-notification',
     async (job) => {
-      const { recipientId, text, parseMode, origin } = job.data;
-      broadcastLogger.debug({ jobId: job.id, recipientId, origin }, 'Dispatching broadcast');
-      try {
-        await sender.sendMessage(recipientId, text, parseMode);
-      } catch (err) {
-        if (isTelegramPermanentError(err)) {
-          broadcastLogger.warn({ jobId: job.id, recipientId, origin, err }, 'Recipient unreachable — skipping retries');
-          throw new UnrecoverableError(err instanceof Error ? err.message : String(err));
-        }
-        throw err;
-      }
+      broadcastLogger.debug(
+        { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin },
+        'Dispatching broadcast',
+      );
+      await processBroadcastJob(job.data, sender, redis);
     },
     {
       connection,
       concurrency: 5,
-      // Telegram global limit is ~30 msg/sec for bots; stay at 20/sec so
-      // other outgoing traffic (replies to other users) has headroom.
       limiter: { max: 20, duration: 1_000 },
     },
   );
 
-  worker.on('failed', (job, err) => {
-    if (!job) return;
-    broadcastLogger.error(
-      { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin, attempts: job.attemptsMade, err },
-      'Broadcast job failed',
-    );
-  });
-
+  // Batch tracking: increment done counter after each completed job
   worker.on('completed', (job) => {
     broadcastLogger.debug(
       { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin },
       'Broadcast delivered',
     );
+    if (redis && job.data.batchId) {
+      completeBatchJob(job.data.batchId, redis, sender).catch((err) => {
+        broadcastLogger.warn({ err, batchId: job.data.batchId }, 'Batch completion tracking failed');
+      });
+    }
+  });
+
+  // Also track jobs that exhaust all retries (transient errors)
+  worker.on('failed', (job, err) => {
+    if (!job) return;
+    const maxAttempts = job.opts.attempts ?? 3;
+    const isExhausted = job.attemptsMade >= maxAttempts;
+
+    if (isExhausted) {
+      broadcastLogger.error(
+        { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin, attempts: job.attemptsMade, err },
+        'Broadcast job exhausted retries',
+      );
+      const { batchId, recipientMention } = job.data;
+      if (redis && batchId) {
+        const trackAndComplete = async () => {
+          if (recipientMention) {
+            const failKey = `${BATCH_KEY_PREFIX}${batchId}:failed`;
+            await redis.sadd(failKey, recipientMention);
+            await redis.expire(failKey, BATCH_TTL_SECONDS);
+          }
+          await completeBatchJob(batchId, redis, sender);
+        };
+        trackAndComplete().catch((trackErr) => {
+          broadcastLogger.warn({ err: trackErr, batchId }, 'Batch failure tracking failed');
+        });
+      }
+    } else {
+      broadcastLogger.warn(
+        { jobId: job.id, recipientId: job.data.recipientId, origin: job.data.origin, attempts: job.attemptsMade, err },
+        'Broadcast job failed (will retry)',
+      );
+    }
   });
 
   return worker;

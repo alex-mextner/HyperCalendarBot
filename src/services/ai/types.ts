@@ -17,6 +17,7 @@ import type { ParticipantRepository } from '../../database/repositories/particip
 import type { SecretaryRepository } from '../../database/repositories/secretary.repository.ts';
 import type { SharedEventRepository } from '../../database/repositories/shared-event.repository.ts';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository.ts';
+import type { TelegramSessionRepository } from '../../database/repositories/telegram-session.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type {
   EventOccurrence,
@@ -150,6 +151,11 @@ export interface BroadcastCapability {
   enqueue: (data: import('../../worker/broadcast-queue.ts').BroadcastJobData) => Promise<void>;
   /** Enqueue multiple recipients in one Redis round-trip. */
   enqueueBatch: (items: import('../../worker/broadcast-queue.ts').BroadcastJobData[]) => Promise<void>;
+  /** Register a batch for aggregated failure tracking (requires Redis). */
+  registerBatch?: (
+    batchId: string,
+    meta: import('../../worker/broadcast-queue.ts').BroadcastBatchMeta,
+  ) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +217,8 @@ export interface AgentContext {
   sceneStorage?: { delete(key: string): Promise<void> };
   actionLogRepo?: ActionLogRepository;
   featureUsageRepo?: FeatureUsageRepository;
+  telegramSessionRepo?: TelegramSessionRepository;
+  telegramMasterKey?: Buffer;
 
   // Capability groups
   sharing?: SharingCapability;
@@ -235,13 +243,34 @@ export interface AgentContext {
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
 }
 
+export type TelegramSessionData =
+  | { connected: false; dismissed_recently: boolean }
+  | { connected: true; phone_masked: string; status: string };
+
+/**
+ * Must be `type`, not `interface` — needed for structural compatibility with
+ * `ToolOutputValue` (the recursive `{ [k: string]: … }` index type) in
+ * intent-executor's `ToolResultElement`. A named interface has no implicit
+ * index signature and fails that assignability check.
+ */
+export type ContactMatch = {
+  id: number;
+  name: string;
+  preferred_name: string | null;
+  username: string | null;
+  telegram_id: number | null;
+  confidence: number;
+};
+
 /** Structured data from tool handlers for intent executor consumption. */
 export type ToolResultData =
   | EventSummary
   | EventSummary[]
   | { telegram_id: number; name: string }
+  | { matches: ContactMatch[] }
   | ScheduledAiCall[]
   | Trigger[]
+  | TelegramSessionData
   | [];
 
 /**
@@ -286,6 +315,8 @@ export interface ToolHandlerMeta {
   readonly?: boolean;
   /** Not worth logging as a user action (all readonly tools + UI/meta tools). */
   skipActionLog?: boolean;
+  /** Tool always results in [SKIP] — no status message or tool label shown. */
+  silent?: boolean;
 }
 
 export interface AgentConfig {
@@ -318,6 +349,13 @@ export interface TelegramSender {
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
+  sendAsConnectedUser?(
+    inviterId: number,
+    targetId: number,
+    text: string,
+    username?: string,
+    meta?: { invitationId?: number },
+  ): Promise<boolean>;
   deleteMessage?(chatId: number, messageId: number): Promise<void>;
   setReaction?(chatId: number, messageId: number, emoji: string): Promise<void>;
   sendChatAction?(chatId: number, action: 'typing'): Promise<void>;

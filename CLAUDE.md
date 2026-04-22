@@ -113,6 +113,20 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
   ```
 - Scene shared types (`AddEventState`, `OnboardingState`, `TimezoneState`, `SceneKvStorage`)
   live in `src/bot/scenes/types.ts`.
+- **`step.next()` re-processes the current message** — `@gramio/scenes` `step.next()` (and `step.go()`)
+  immediately invokes the next step handler with the **same context/message**, not just advances the
+  counter for the next incoming message. This means if step N calls `step.next()`, step N+1 runs on
+  the same user input (phone number interpreted as OTP code, OTP code interpreted as 2FA password, etc.).
+  **Do NOT use `firstTime` guards** — `firstTime` is reset via `onNext` in Koa-compose, but step
+  handlers don't call `next()`, so `onNext` never fires and `firstTime` stays `true` forever.
+  **Do NOT use scene state flags** — `context.scene.update()` writes to storage but doesn't update
+  the in-memory `storageData` that `go()` passes to `scene.run()`, so the receiving step never sees it.
+  **Use in-memory `pendingStepTransitions` Set** (defined in `connect-telegram.scene.ts`):
+  `pendingStepTransitions.add(userId)` before `step.next()`, then
+  `if (pendingStepTransitions.delete(context.from.id)) return;` at the top of the receiving step.
+  Works because `step.next()` re-invokes synchronously in the same event loop tick.
+  Exception: steps that listen to a different event type (e.g. `callback_query` after a `message` step)
+  are safe because the event type filter prevents execution — no guard needed.
 
 ### Database
 
@@ -131,6 +145,41 @@ Multi-step wizards: `add-event`, `edit-value`, `import`, `timezone`, `onboarding
 ### MTProto Bridge
 
 For users who haven't started the bot (can't receive bot API messages), delivery falls back to Pyrogram (`scripts/send-message.py`). Voice calls use `scripts/voice-call-bridge.py`. Both are spawned via `Bun.spawn(['venv/bin/python', ...])`.
+
+**`voice_caller.session` fragility**: all MTProto scripts use `data/voice_caller.session`. This is a
+Pyrogram SQLite session file (journal mode DELETE, not WAL). Multiple scripts spawn concurrently
+(resolve-username, send-message, fetch-birthdays, voice-call-bridge) and each does `app.start()` →
+work → `app.stop()` with `save()` → `conn.commit()`. Concurrent writes to the same SQLite file
+without WAL can corrupt session fields (`user_id`, `is_bot` set to NULL), making Pyrogram think the
+session is empty and prompting for phone number. Symptom: `Enter phone number or bot token:` + EOFError.
+Telegram can also revoke auth keys (error 404) for long-inactive sessions.
+Recovery: decrypt the user's active session from `user_telegram_sessions` and write it to
+`data/voice_caller.session`:
+```bash
+docker exec hypercal-bot sh -c "cd /app && bun -e \"
+const { createDecipheriv } = require('crypto');
+const { Database } = require('bun:sqlite');
+const KEY = Buffer.from(process.env.TELEGRAM_SESSION_MASTER_KEY, 'hex');
+const db = new Database('data/calendar.db', { readonly: true });
+const row = db.query('SELECT encrypted_session FROM user_telegram_sessions WHERE status = \\\"active\\\" ORDER BY rowid DESC LIMIT 1').get();
+db.close();
+const blob = Buffer.from(row.encrypted_session);
+const iv = blob.subarray(0, 12);
+const tag = blob.subarray(blob.length - 16);
+const ct = blob.subarray(12, blob.length - 16);
+const d = createDecipheriv('aes-256-gcm', KEY, iv);
+d.setAuthTag(tag);
+const out = Buffer.concat([d.update(ct), d.final()]);
+require('fs').writeFileSync('data/voice_caller.session', out);
+console.log('Restored', out.length, 'bytes');
+\""
+```
+
+### Database file naming
+
+The production SQLite database is `data/calendar.db` (NOT `bot.db`, NOT `data.db`). The path is
+set in `src/database/db.ts`. Never assume the filename — always check the code or logs
+(`"path":"./data/calendar.db"` at startup). Creating a wrong-name file pollutes the data directory.
 
 ## Logging
 
@@ -207,11 +256,39 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. `as never` remains banned everywhere — use `as unknown as X` in test factories
   4. `mock.calls` tuple access may use a single cast: `mock.calls[0] as unknown as [string, number]`
      (bun:test types `calls` as `unknown[][]` — no way around it)
-- **`JSON.parse` and `Response.json()` must always go through Zod** — never use the raw return
-  value, never cast with `as`. Always `z.schema().parse(JSON.parse(...))` or
-  `z.schema().parse(await res.json())`. No `(await res.json()) as SomeType` — define a Zod schema
-  and `.parse()` it. For DB-stored JSON columns with simple types (`number[]`, `string[]`), use the
-  matching Zod array schema. For complex DB types, validate the structural shape with Zod.
+- **Never call `JSON.parse` directly — use a zod codec.** Bare `JSON.parse(str)` can throw
+  `SyntaxError` on malformed input, which every caller would otherwise have to wrap in `try/catch`.
+  Use `z.codec(z.string(), Schema, { decode, encode })` from zod v4 — the `decode` callback runs
+  `JSON.parse` inside and pushes an issue on failure, so `safeParse` returns `{ success: false }`
+  instead of throwing.
+
+  ```ts
+  import { z } from 'zod';
+
+  function jsonStringCodec<T extends z.ZodTypeAny>(inner: T) {
+    return z.codec(z.string(), inner, {
+      decode: (raw, ctx) => {
+        try { return JSON.parse(raw); }
+        catch { ctx.issues.push({ code: 'custom', message: 'Invalid JSON', input: raw }); return {} as z.input<T>; }
+      },
+      encode: (value) => JSON.stringify(value),
+    });
+  }
+
+  const Parsed = jsonStringCodec(MySchema).safeParse(rawString);
+  if (!Parsed.success) { /* handle error */ }
+  ```
+
+  The same rule applies to `Response.json()` — wrap with `await res.text()` + codec, or keep using
+  `z.schema().safeParse(await res.json())` **only** where you are sure the response is well-formed
+  JSON (framework-level, not external API). Never `(await res.json()) as SomeType` — define a Zod
+  schema and run it through a codec.
+
+  **Grandfathered exceptions** (do not propagate to new code):
+  - DB-stored JSON columns with simple types (`number[]`, `string[]`) where `JSON.parse` is inside
+    a repository method that already guards with try/catch. New repositories must use a codec.
+  - `feedback_json_parse_safeParse.md` memory entry documents the previous pattern; it stays
+    valid for those grandfathered call sites only.
 - **`z.unknown()` is banned** — always use a concrete schema. If data is polymorphic, define a union
   of known shapes. `z.unknown()` provides zero runtime validation and is equivalent to no schema.
   No exceptions — workflow DSL inputs use `z.string()`, tool outputs use typed unions.
@@ -328,6 +405,8 @@ Optional features that depend on an env var must deactivate gracefully when the 
   3. Run `codex exec review --uncommitted` — address every issue it finds that isn't a false positive.
   4. Run `codex exec "security review --uncommitted"` — address every security issue it finds that
      isn't a false positive.
+  `codex` is the Codex CLI (Google DeepMind) — an AI code review tool installed globally.
+  If `codex` is not found, skip steps 3-4 but do NOT skip the self-review in step 2.
 - **Commits must NEVER break the tree**: before `git commit`, all of the following must pass clean:
   - `tsc --noEmit` — zero type errors
   - `bun run lint` — zero lint errors AND zero warnings

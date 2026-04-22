@@ -14,7 +14,8 @@ export type BotTaskJobType =
   | 'cron-chat-history-cleanup'
   | 'cron-sqlite-backup'
   | 'cron-recurring-reminders'
-  | 'cron-action-log-cleanup';
+  | 'cron-action-log-cleanup'
+  | 'cron-session-keepalive';
 
 export interface BotTaskJobData {
   type: BotTaskJobType;
@@ -32,6 +33,7 @@ interface BotTasksQueueDeps {
   onSqliteBackup?: () => Promise<void>;
   onRecurringReminders?: () => void;
   onActionLogCleanup?: () => void;
+  onSessionKeepalive?: () => Promise<void>;
 }
 
 export function createBotTasksQueue(deps: BotTasksQueueDeps) {
@@ -88,6 +90,10 @@ export function createBotTasksQueue(deps: BotTasksQueueDeps) {
       }
       if (job.data.type === 'cron-action-log-cleanup') {
         deps.onActionLogCleanup?.();
+        return;
+      }
+      if (job.data.type === 'cron-session-keepalive') {
+        if (deps.onSessionKeepalive) await deps.onSessionKeepalive();
         return;
       }
     },
@@ -192,4 +198,14 @@ export async function setupActionLogCleanupCron(queue: Queue<BotTaskJobData>): P
     { repeat: { every: WEEKLY_MS }, removeOnComplete: true, jobId: 'action-log-cleanup-tick' },
   );
   botTasksLogger.info('Action log cleanup cron scheduled (weekly, retains 90 days)');
+}
+
+export async function setupSessionKeepaliveCron(queue: Queue<BotTaskJobData>): Promise<void> {
+  const BIWEEKLY_MS = 14 * 24 * 60 * 60_000;
+  await queue.add(
+    'session-keepalive-tick',
+    { type: 'cron-session-keepalive' },
+    { repeat: { every: BIWEEKLY_MS }, removeOnComplete: true, jobId: 'session-keepalive-tick' },
+  );
+  botTasksLogger.info('Session keepalive cron scheduled (every 14 days)');
 }

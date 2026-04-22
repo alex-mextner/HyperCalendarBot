@@ -110,6 +110,15 @@ function buildGroupEventNotification(
  * Each recipient gets a language- and timezone-localized message formatted
  * at enqueue time; the worker just dispatches the pre-formatted text.
  */
+function buildRecipientMention(
+  recipientUser: { first_name?: string | null; username?: string | null; telegram_id: number } | null,
+  userId: number,
+): string {
+  if (recipientUser?.username) return `@${escapeHtml(recipientUser.username)}`;
+  const name = recipientUser?.first_name ?? String(userId);
+  return `<a href="tg://user?id=${userId}">${escapeHtml(name)}</a>`;
+}
+
 async function enqueueGroupNotifications(
   ctx: AgentContext,
   event: CalendarEvent,
@@ -131,6 +140,25 @@ async function enqueueGroupNotifications(
 
   if (memberIds.length === 0) return 0;
 
+  const batchId = `${action}:${event.id}:${Date.now()}`;
+  const lang = (ctx.user.language ?? 'en') as 'en' | 'ru';
+
+  // Register batch for aggregated failure tracking (share link + group context)
+  if (ctx.broadcast.registerBatch && ctx.deepLinkService && ctx.botUsername) {
+    try {
+      const link = ctx.deepLinkService.createShareLink(event.id, ctx.user.telegram_id);
+      const shareUrl = ctx.deepLinkService.generateUrl(link.code, ctx.botUsername);
+      await ctx.broadcast.registerBatch(batchId, {
+        total: memberIds.length,
+        groupChatId: ctx.groupChatId,
+        threadId: ctx.topicThreadId,
+        fallbackText: t(lang).invite_deep_link(escapeHtml(event.title), shareUrl),
+      });
+    } catch (err) {
+      eventsLogger.warn({ err, eventId: event.id }, 'Failed to register broadcast batch');
+    }
+  }
+
   const jobs = memberIds.map((userId) => {
     const recipientUser = ctx.userRepo.findByTelegramId(userId);
     const recipientLang = (recipientUser?.language ?? 'en') as 'en' | 'ru';
@@ -144,11 +172,14 @@ async function enqueueGroupNotifications(
       organizerLink,
       action,
     );
+
     return {
       recipientId: userId,
       text,
       parseMode: 'HTML' as const,
       origin: `group_event_${action}:${event.id}`,
+      batchId,
+      recipientMention: buildRecipientMention(recipientUser, userId),
     };
   });
 
@@ -178,6 +209,7 @@ interface CreateEventInput {
   end_at?: string;
   description?: string;
   location?: string;
+  location_abstract?: boolean;
   all_day?: boolean;
   recurrence_rule?: string;
   reminder_minutes?: number[];
@@ -193,6 +225,7 @@ interface UpdateEventInput {
   end_at?: string | null;
   description?: string | null;
   location?: string | null;
+  location_abstract?: boolean;
   recurrence_rule?: string | null;
   scope?: Scope;
   owner_id?: number;
@@ -355,8 +388,8 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
       }
     }
 
-    // Trigger background location verification if event has a location
-    if (event.location && ctx.locationVerification) {
+    // Trigger background location verification if event has a concrete location
+    if (event.location && ctx.locationVerification && !input.location_abstract) {
       ctx.locationVerification
         .verifyEventLocation(event, ctx.user)
         .catch((err) => logger.error({ err, eventId: event.id }, 'Background location verification failed'));
@@ -520,8 +553,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     output += t(ctx.user.language).aiTools.events.participantHint(acceptedParticipants.length);
   }
 
-  // Trigger background location verification if location was updated
-  if (input.location && ctx.locationVerification) {
+  // Trigger background location verification if location was updated with a concrete location
+  if (input.location && ctx.locationVerification && !input.location_abstract) {
     ctx.locationVerification
       .verifyEventLocation(updated, ctx.user)
       .catch((err) => logger.error({ err, eventId: updated.id }, 'Background location verification failed'));

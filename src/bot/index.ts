@@ -19,6 +19,7 @@ import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { formatInvitation } from '../services/event/formatters.ts';
+import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { GroupSessionManager } from '../services/group/group-session.ts';
@@ -42,12 +43,14 @@ import { InlineService } from '../services/sharing/inline-service.ts';
 import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
+import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
 import { escapeHtml, type ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
+import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
 import {
   createActivateCommand,
@@ -76,6 +79,7 @@ import { handleStart } from './commands/start.ts';
 import { handleToday } from './commands/today.ts';
 import { handleTomorrow } from './commands/tomorrow.ts';
 import { handleWeek } from './commands/week.ts';
+import { isGroup } from './group-context.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
@@ -137,7 +141,12 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'AGENT_DOWNLOAD_URL' | 'INLINE_BOT_TOKEN'
+    | 'BOT_ADMIN_ID'
+    | 'INTENT_LEARNER_DAILY_LIMIT'
+    | 'BOT_USERNAME'
+    | 'AGENT_DOWNLOAD_URL'
+    | 'INLINE_BOT_TOKEN'
+    | 'TELEGRAM_SESSION_MASTER_KEY'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -209,15 +218,37 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
   const googleSchedulePush = googleDeps?.schedulePush;
+  // Late-bound: sendAsConnectedUser is created after bot init,
+  // but only called at scene runtime (in callback handlers).
+  let sendAsConnectedUserRef:
+    | ((
+        inviterId: number,
+        targetId: number,
+        text: string,
+        username?: string,
+        meta?: { invitationId?: number },
+      ) => Promise<boolean>)
+    | undefined;
+
   const scenesSetup = createScenesPlugin(
     db,
     eventService,
     token,
     userComposer,
+    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
     !!googleDeps,
     prefsService,
     holidayService,
     googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
+    {
+      invitationService,
+      sendAsConnectedUser: (inviterId, targetId, text, username, meta) => {
+        if (!sendAsConnectedUserRef) return Promise.resolve(false);
+        return sendAsConnectedUserRef(inviterId, targetId, text, username, meta);
+      },
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+    },
   );
 
   const intentRepo = new IntentRepository(db.db);
@@ -249,8 +280,58 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     }
   };
 
+  const telegramMasterKey = envConfig?.TELEGRAM_SESSION_MASTER_KEY
+    ? Buffer.from(envConfig.TELEGRAM_SESSION_MASTER_KEY, 'hex')
+    : null;
+
+  const sendAsConnectedUser = telegramMasterKey
+    ? createConnectedUserSender({
+        sessionRepo: db.telegramSessions,
+        masterKey: telegramMasterKey,
+        notifLogRepo: db.notificationLog,
+        getUserTimezone: (userId) => db.users.findByTelegramId(userId)?.timezone ?? 'UTC',
+        onTimezoneDetected: (userId, detection) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const s = t(lang).connectTelegram;
+          const kb = new InlineKeyboard()
+            .text('\u2705', `${CB.CT_TZ_UPDATE}:${detection.detectedTimezone}`)
+            .text('\u274c', CB.CT_TZ_SKIP);
+          bot.api
+            .sendMessage({
+              chat_id: userId,
+              text: s.tzDetected(detection.region, detection.detectedTimezone),
+              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
+            })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz update prompt'));
+        },
+        onTzConsentNeeded: (userId) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const s = t(lang).connectTelegram;
+          const kb = new InlineKeyboard()
+            .text(s.tzConsentYes, CB.CT_TZ_CONSENT_YES)
+            .text(s.tzConsentNo, CB.CT_TZ_CONSENT_NO);
+          bot.api
+            .sendMessage({
+              chat_id: userId,
+              text: s.tzConsentPrompt,
+              reply_markup: kb as Parameters<typeof bot.api.sendMessage>[0]['reply_markup'],
+            })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz consent prompt'));
+        },
+        onSessionExpired: (userId) => {
+          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          bot.api
+            .sendMessage({ chat_id: userId, text: t(lang).connectTelegram.sessionExpired })
+            .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send session expired notification'));
+        },
+      })
+    : undefined;
+
+  sendAsConnectedUserRef = sendAsConnectedUser;
+
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
+    sendAsConnectedUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
   const triggerRepo = new TriggerRepository(db.db);
@@ -381,6 +462,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     userMemoryRepo: db.userMemory,
     broadcastEnqueuer,
     actionLogRepo: db.actionLog,
+    telegramSessionRepo: db.telegramSessions,
+    telegramMasterKey: telegramMasterKey ?? undefined,
     featureUsageRepo: db.featureUsage,
     chatHistoryIds,
     agentRegistry,
@@ -468,12 +551,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const incomingMsgId = context.update?.message?.message_id;
       if (incomingText) {
         if (incomingText.match(/^\/cal(\s|$)/)) {
-          // /cal is an AI command — save args as plain user message, not a command event
+          // /cal is an AI command — save args as plain user message, not a command event.
+          // In groups, bare /cal means "look at the recent context above"; save the literal
+          // "/cal" so the agent has a new user turn to respond to. In DMs, bare /cal just
+          // prints usage help, so there's nothing to save.
           const calArgs = incomingText.replace(/^\/cal\s*/, '').trim();
-          if (calArgs) {
+          const savedText = calArgs || (logChatId ? '/cal' : '');
+          if (savedText) {
             chatHistoryIds.set(
               user.telegram_id,
-              conversationLogger.logUserMessage(user.telegram_id, calArgs, logChatId),
+              conversationLogger.logUserMessage(user.telegram_id, savedText, logChatId),
             );
           }
         } else if (incomingText.startsWith('/')) {
@@ -618,6 +705,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     .command('holidays', (ctx) => handleHolidays(ctx, holidayService, db.groupChats))
     .command('birthdays', (ctx) => handleBirthdays(ctx, birthdayService, db.groupChats, db.groupMembers))
     .command('log', (ctx) => handleLog(ctx, db.actionLog, botAdminId))
+    .command('admin_tg_sessions', (ctx) =>
+      handleAdminTgSessions(ctx, db.telegramSessions, db.notificationLog, botAdminId),
+    )
     // Sharing commands
     .command('invite', (ctx) =>
       handleInvite(ctx, {
@@ -644,7 +734,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const user = ctx.dbUser;
       if (!user) return;
       const text = (ctx.args ?? '').trim();
-      if (!text) {
+      const chat = ctx.chat;
+      const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+      if (!text && !isGroup) {
         const lang = (user.language ?? 'en') as 'en' | 'ru';
         await ctx.send(
           lang === 'ru'
@@ -653,8 +745,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         );
         return;
       }
-      const chat = ctx.chat;
-      const isGroup = chat?.type === 'group' || chat?.type === 'supergroup';
+      // In groups, bare /cal is a "look at the recent context above" trigger.
+      // The middleware already saved "/cal" to group chat history, so the agent
+      // picks up the last 50 messages and decides what to do.
+      const effectiveText = text || '/cal';
       const chatId = ctx.chatId;
       if (!chatId) return;
 
@@ -672,7 +766,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             },
           }
         : undefined;
-      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), text, groupInfo, ctx.id));
+      await agent.run(buildAgentContextFactory(msgDeps)(user, Number(chatId), effectiveText, groupInfo, ctx.id));
     })
     // Callback queries
     .on('callback_query', (ctx) => {
@@ -829,6 +923,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             : undefined,
         contactRepo: db.contacts,
         timezoneScene: scenesSetup.scenes.timezoneScene,
+        connectTelegramScene: scenesSetup.scenes.connectTelegramScene,
+        telegramDeps: telegramMasterKey
+          ? { sessionRepo: db.telegramSessions, masterKey: telegramMasterKey }
+          : undefined,
         groupRepo: db.groupChats,
         scenePauseDeps: {
           sceneStorage: kvStorage,
@@ -1037,6 +1135,47 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         ? handleGoogleStatus(ctx, { syncRepo: googleDeps.syncRepo, calendarRepo: googleDeps.calendarRepo })
         : undefined,
     )
+    // Telegram account connection commands
+    .command('connect_telegram', async (ctx) => {
+      if (isGroup(ctx)) {
+        await ctx.send(t(ctx.lang).connectTelegram.privateOnly);
+        return;
+      }
+      const userId = ctx.dbUser?.telegram_id;
+      if (userId) {
+        const recentEvent = findMostRecentEventWithExternalParticipants(
+          userId,
+          db.actionLog,
+          db.participants,
+          db.users,
+        );
+        if (recentEvent) {
+          await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene, {
+            pendingEventId: recentEvent.eventId,
+            pendingInviteeIds: recentEvent.externalInviteeIds,
+          });
+          return;
+        }
+      }
+      await ctx.scene.enter(scenesSetup.scenes.connectTelegramScene);
+    })
+    .command('disconnect_telegram', async (ctx) => {
+      if (isGroup(ctx)) {
+        await ctx.send(t(ctx.lang).connectTelegram.privateOnly);
+        return;
+      }
+      const user = ctx.dbUser;
+      if (!user) return;
+      const lang = (user.language ?? 'en') as 'en' | 'ru';
+      const session = db.telegramSessions.getActive(user.telegram_id);
+      if (!session) {
+        await ctx.send(t(lang).settings.telegramNotConnected);
+        return;
+      }
+      const s = t(lang).settings;
+      const kb = new InlineKeyboard().text(s.telegramDisconnect, 'stg:tg_disconnect_confirm').text(s.back, 'stg:back');
+      await ctx.send(s.telegramDisconnectConfirm, { reply_markup: kb });
+    })
     // Free-text messages → AI agent (wizard routing handled by @gramio/scenes)
     // IMPORTANT: .on('message') must be LAST — it is a terminal handler that never calls next(),
     // so any .command() registered after it will never fire.

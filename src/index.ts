@@ -51,6 +51,20 @@ if (config.ADMIN_ALERT_TOKEN) {
   pushCrashAlert = (msg) => db.alerts.push(msg, 'bot-crash');
 }
 
+// Verify master key matches existing sessions before starting the bot
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  const { verifyMasterKey } = await import('./services/crypto/master-key-check.ts');
+  const key = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex');
+  const result = verifyMasterKey(db.telegramSessions, key);
+  if (!result.ok) {
+    botLogger.fatal(
+      { err: result.err },
+      'TELEGRAM_SESSION_MASTER_KEY does not match existing sessions — refusing to start',
+    );
+    process.exit(1);
+  }
+}
+
 if (config.BOT_ADMIN_ID) {
   initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 }
@@ -352,7 +366,34 @@ if (config.REDIS_URL) {
 const { createBroadcastQueue, createBroadcastWorker } = await import('./worker/broadcast-queue.ts');
 const { parseRedisUrl } = await import('./utils/redis.ts');
 const broadcastConnection = parseRedisUrl(config.REDIS_URL);
-const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(broadcastConnection);
+const broadcastRedisClient = new Bun.RedisClient(config.REDIS_URL);
+const broadcastRedis = {
+  set: async (key: string, value: string, ex: number) => {
+    await broadcastRedisClient.set(key, value, 'EX', ex);
+  },
+  get: (key: string) => broadcastRedisClient.get(key),
+  sadd: async (key: string, member: string) => {
+    await broadcastRedisClient.send('SADD', [key, member]);
+  },
+  smembers: async (key: string): Promise<string[]> => {
+    const result = await broadcastRedisClient.send('SMEMBERS', [key]);
+    return z.array(z.string()).parse(result ?? []);
+  },
+  incr: async (key: string): Promise<number> => {
+    const result = await broadcastRedisClient.send('INCR', [key]);
+    return z.number().parse(result);
+  },
+  del: async (...keys: string[]) => {
+    await broadcastRedisClient.send('DEL', keys);
+  },
+  expire: async (key: string, seconds: number) => {
+    await broadcastRedisClient.send('EXPIRE', [key, String(seconds)]);
+  },
+};
+const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQueue(
+  broadcastConnection,
+  broadcastRedis,
+);
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
 if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
@@ -578,6 +619,7 @@ if (config.REDIS_URL) {
     setupSqliteBackupCron,
     setupRecurringRemindersCron,
     setupActionLogCleanupCron,
+    setupSessionKeepaliveCron,
   } = await import('./worker/bot-tasks-queue.ts');
   const { runSqliteBackup } = await import('./database/backup.ts');
   const { runSecretaryExpiry } = await import('./worker/secretary-expiry.ts');
@@ -586,6 +628,7 @@ if (config.REDIS_URL) {
   const { processExpiredEditProposals } = await import('./services/google/edit-proposal-expiry.ts');
   const { BirthdayService, BIRTHDAY_SYNC_THROTTLE_MS } = await import('./services/birthday/birthday-service.ts');
   const { ReminderMaterializer } = await import('./services/notification/materializer.ts');
+  const { processSessionKeepalive } = await import('./worker/session-keepalive.ts');
 
   const cronMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const cronBirthdayService = new BirthdayService(
@@ -652,6 +695,24 @@ if (config.REDIS_URL) {
     onRecurringReminders: () => {
       cronMaterializer.materializeUpcomingRecurringReminders(db.events);
     },
+    onSessionKeepalive: config.TELEGRAM_SESSION_MASTER_KEY
+      ? async () => {
+          const masterKey = Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY as string, 'hex');
+          await processSessionKeepalive({
+            sessionRepo: db.telegramSessions,
+            masterKey,
+            onSessionExpired: (userId) => {
+              botRef
+                .sendMessage(
+                  userId,
+                  'Твой подключённый Telegram-аккаунт был отозван или истёк. Подключи его снова командой /connect_telegram.',
+                )
+                .then(() => {})
+                .catch((err) => botLogger.error({ err, userId }, 'Failed to notify user of expired session'));
+            },
+          });
+        }
+      : undefined,
   });
 
   await setupSecretaryExpiryCron(botTasksQueue);
@@ -664,6 +725,9 @@ if (config.REDIS_URL) {
   await setupSqliteBackupCron(botTasksQueue);
   await setupRecurringRemindersCron(botTasksQueue);
   await setupActionLogCleanupCron(botTasksQueue);
+  if (config.TELEGRAM_SESSION_MASTER_KEY) {
+    await setupSessionKeepaliveCron(botTasksQueue);
+  }
 
   botTasksWorker.on('failed', onWorkerFailed('bot-tasks'));
 
@@ -716,6 +780,44 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
   botLogger.info('Silero TTS initialized');
 }
 
+// ─── MTProto session helpers ─────────────────────────────────────────────────
+
+async function verifyMtprotoSession(): Promise<boolean> {
+  const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
+    env: { ...process.env },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const [stdout, , exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]);
+  if (exitCode === 0) {
+    botLogger.info({ stdout: stdout.trim() }, 'MTProto session verified');
+    return true;
+  }
+  return false;
+}
+
+async function recoverSessionFromDb(sessionRepo: typeof db.telegramSessions, masterKey: Buffer): Promise<boolean> {
+  const session = sessionRepo.getMostRecentActive();
+  if (!session) {
+    botLogger.warn('No active session in user_telegram_sessions — cannot recover');
+    return false;
+  }
+  try {
+    const { decryptBlob } = await import('./services/crypto/session-crypto.ts');
+    const decrypted = decryptBlob(Buffer.from(session.encrypted_session), masterKey);
+    await Bun.write('data/voice_caller.session', decrypted);
+    botLogger.info({ userId: session.user_id, bytes: decrypted.length }, 'Session file restored from DB');
+    return true;
+  } catch (err) {
+    botLogger.error({ err }, 'Failed to decrypt/restore session from DB');
+    return false;
+  }
+}
+
 // MTProto userbot for delivering messages to users who haven't started the bot
 // Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
 if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
@@ -759,6 +861,28 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       }
       return parseResult.data;
     };
+    // Verify session is alive at startup — auto-recover from user_telegram_sessions if dead
+    let sessionAlive = await verifyMtprotoSession();
+    if (!sessionAlive && config.TELEGRAM_SESSION_MASTER_KEY) {
+      botLogger.warn('MTProto session dead — attempting auto-recovery from user_telegram_sessions');
+      const recovered = await recoverSessionFromDb(
+        db.telegramSessions,
+        Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex'),
+      );
+      if (recovered) {
+        sessionAlive = await verifyMtprotoSession();
+        if (sessionAlive) {
+          botLogger.info('MTProto session auto-recovered successfully');
+        } else {
+          botLogger.error('MTProto session recovery failed — restored file is also dead');
+        }
+      }
+    }
+    if (!sessionAlive) {
+      botLogger.error(
+        'MTProto session is DEAD — resolve/send-message/voice calls will fail. No active session in DB to recover from.',
+      );
+    }
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
     botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
@@ -905,6 +1029,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_USERNAME: config.BOT_USERNAME,
         AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
+        TELEGRAM_SESSION_MASTER_KEY: config.TELEGRAM_SESSION_MASTER_KEY,
       },
       weatherService,
       broadcastEnqueuer,
@@ -920,7 +1045,10 @@ botRef.sendMessage = async (telegramId, text, parseMode, replyMarkup) => {
     ...(parseMode ? { parse_mode: parseMode } : {}),
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
-  return { message_id: 'message_id' in msg ? msg.message_id : 0 };
+  if (!('message_id' in msg)) {
+    throw new Error(`sendMessage returned no message_id for chat ${telegramId}`);
+  }
+  return { message_id: msg.message_id };
 };
 botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   await bot.api.editMessageText({
@@ -936,15 +1064,31 @@ botRef.sendVoice = async (telegramId, audio) => {
 };
 // Broadcast worker — created after botRef is patched so sendMessage is the real implementation.
 // No botInitialized guard needed: the worker starts AFTER the flag is set.
-const broadcastWorker = createBroadcastWorker(broadcastConnection, {
-  sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
-});
+const broadcastWorker = createBroadcastWorker(
+  broadcastConnection,
+  {
+    sendMessage: async (chatId, text, parseMode, threadId) => {
+      const msg = await bot.api.sendMessage({
+        chat_id: chatId,
+        text,
+        ...(parseMode ? { parse_mode: parseMode } : {}),
+        ...(threadId ? { message_thread_id: threadId } : {}),
+      });
+      if (!('message_id' in msg)) {
+        throw new Error(`sendMessage returned no message_id for chat ${chatId}`);
+      }
+      return { message_id: msg.message_id };
+    },
+  },
+  broadcastRedis,
+);
 broadcastWorker.on('failed', onWorkerFailed('broadcast-notification'));
 
 broadcastQueueCleanup = {
   close: async () => {
     await broadcastWorker.close();
     await broadcastQueue.close();
+    await broadcastRedisClient.close();
   },
 };
 
@@ -1111,6 +1255,17 @@ if (config.GOOGLE_CLIENT_ID) {
     { command: 'connect_google', description: 'Подключить Google Calendar' },
     { command: 'disconnect_google', description: 'Отключить Google Calendar' },
     { command: 'google_status', description: 'Статус синхронизации Google Calendar' },
+  );
+}
+
+if (config.TELEGRAM_SESSION_MASTER_KEY) {
+  COMMANDS_EN.push(
+    { command: 'connect_telegram', description: 'Connect Telegram account for first-person invitations' },
+    { command: 'disconnect_telegram', description: 'Disconnect Telegram account' },
+  );
+  COMMANDS_RU.push(
+    { command: 'connect_telegram', description: 'Подключить Telegram-аккаунт для приглашений от твоего имени' },
+    { command: 'disconnect_telegram', description: 'Отключить подключенный Telegram-аккаунт' },
   );
 }
 

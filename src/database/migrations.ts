@@ -980,13 +980,6 @@ export const migrations: Migration[] = [
   {
     name: '054_event_soft_delete',
     up: (db) => {
-      // Soft-delete flag: `remove()` sets is_deleted = 1 instead of hard-deleting.
-      // Keeps the title (and every other column) around so downstream systems
-      // that reference the event by id — edit proposals, action log, feedback
-      // threads, notifications — can always resolve the title, even after the
-      // owner removes the event. All user-facing read paths filter on
-      // is_deleted = 0; only the few internal lookups that need the title of a
-      // removed event skip the filter.
       db.exec('ALTER TABLE events ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0');
       db.exec('CREATE INDEX idx_events_is_deleted ON events(is_deleted) WHERE is_deleted = 1');
     },
@@ -994,11 +987,6 @@ export const migrations: Migration[] = [
   {
     name: '055_drop_is_deleted_partial_index',
     up: (db) => {
-      // The partial index from 054 only helps admin queries like "show me
-      // removed events" that we don't currently run. Hot-path reads filter
-      // `is_deleted = 0` alongside existing indexed predicates (`user_id`,
-      // `start_at`, `group_id`), so SQLite's query planner uses those and
-      // ignores the partial index anyway. Drop it to keep the schema tidy.
       db.exec('DROP INDEX IF EXISTS idx_events_is_deleted');
     },
   },
@@ -1010,7 +998,37 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '057_edit_proposals_sync_fields',
+    name: '057_create_user_telegram_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE user_telegram_sessions (
+          user_id          INTEGER PRIMARY KEY,
+          encrypted_session BLOB NOT NULL,
+          phone_masked     TEXT NOT NULL,
+          phone_hash       TEXT NOT NULL,
+          status           TEXT NOT NULL DEFAULT 'active',
+          created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+          updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+          FOREIGN KEY (user_id) REFERENCES users(telegram_id) ON DELETE CASCADE
+        );
+        CREATE INDEX idx_tg_sessions_phone_hash ON user_telegram_sessions(phone_hash);
+      `);
+    },
+  },
+  {
+    name: '058_users_connect_telegram_dismissed_at',
+    up: (db) => {
+      db.exec('ALTER TABLE users ADD COLUMN connect_telegram_dismissed_at TEXT DEFAULT NULL');
+    },
+  },
+  {
+    name: '059_user_telegram_sessions_tz_consent',
+    up: (db) => {
+      db.exec('ALTER TABLE user_telegram_sessions ADD COLUMN tz_detection_consent_at TEXT DEFAULT NULL');
+    },
+  },
+  {
+    name: '060_edit_proposals_sync_fields',
     up: (db) => {
       db.exec('ALTER TABLE edit_proposals ADD COLUMN expires_at TEXT');
       db.exec('ALTER TABLE edit_proposals ADD COLUMN original_values TEXT');
@@ -1022,7 +1040,7 @@ export const migrations: Migration[] = [
     },
   },
   {
-    name: '058_participant_google_sync_tz_and_index',
+    name: '061_participant_google_sync_tz_and_index',
     up: (db) => {
       db.exec('ALTER TABLE participant_google_sync ADD COLUMN timezone_override TEXT');
       db.exec(

@@ -106,17 +106,68 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('authoritative clock');
   });
 
-  test('instructs to create events immediately without confirmation', () => {
+  test('DM prompt has two event creation modes: create or ask', () => {
+    ctx.isGroup = false;
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('create immediately');
-    expect(prompt).not.toContain('always confirm the details before creating');
+    expect(prompt).toContain('EVENT CREATION — two modes in DMs');
+    expect(prompt).toContain('Create immediately');
+    expect(prompt).toContain('Ask first');
+    // DM examples
+    expect(prompt).toContain('Запиши встречу завтра в 10');
+    expect(prompt).toContain('Запиши встречу с Леной');
+    expect(prompt).toContain('Либо в 7, либо после 9');
+    // No waiting in DMs
+    expect(prompt).toContain('Never wait silently in DMs');
+    // Group consensus block absent
+    expect(prompt).not.toContain('Group event creation — consensus required');
   });
 
-  test('instructs to use pick_users and find_contact for invitations', () => {
+  test('group prompt requires clear intent AND consensus for event creation', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Friends';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('clear intent + consensus required');
+    expect(prompt).toContain('Clear intent to create');
+    expect(prompt).toContain('Consensus');
+    expect(prompt).toContain('is NOT intent to create an event');
+  });
+
+  test('group consensus applies to event details (location, time), not only creation', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Friends';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('same consensus logic applies to');
+    expect(prompt).toContain('event details');
+    expect(prompt).toContain('У Иры');
+  });
+
+  test('group prompt has three creation modes with group-specific examples', () => {
+    ctx.isGroup = true;
+    ctx.groupTitle = 'Friends';
+    ctx.groupChatId = -100;
+    const prompt = buildSystemPrompt(ctx);
+    // Proposal → [SKIP] → agreement → create
+    expect(prompt).toContain('Давай в 7 на пейнтбол');
+    expect(prompt).toContain('[SKIP], no consensus yet');
+    expect(prompt).toContain('Давай!');
+    expect(prompt).toContain('create');
+    // Objection → [SKIP]
+    expect(prompt).toContain('do NOT create, discussion continues');
+    // No consensus → [SKIP]
+    expect(prompt).toContain('Skip — no consensus yet');
+    expect(prompt).toContain('output [SKIP] and do not reply');
+    // Availability discussion → [SKIP]
+    expect(prompt).toContain('listing her availability');
+  });
+
+  test('instructs how to invite people: @username direct, names via contacts, fallback to pick_users', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('pick_users');
-    expect(prompt).toContain('find_contact');
-    expect(prompt).toContain('EXACT sequence');
+    expect(prompt).toContain('get_contacts');
+    expect(prompt).toContain('invitee_username');
+    expect(prompt).toContain('send_invitation');
   });
 
   test('includes group context block when isGroup is true', () => {

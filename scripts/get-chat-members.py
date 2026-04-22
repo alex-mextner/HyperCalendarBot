@@ -13,17 +13,20 @@ async def main():
 
     chat_id = int(sys.argv[1])
 
-    app = Client("voice_caller", workdir="data")
-    async with app:
-        members = []
-        async for member in app.get_chat_members(chat_id):
-            if member.user and not member.user.is_bot:
-                members.append({
-                    "id": member.user.id,
-                    "username": member.user.username,
-                    "first_name": member.user.first_name,
-                })
-        print(json.dumps(members))
+    from mtproto_lock import session_lock
+
+    with session_lock():
+        app = Client("voice_caller", workdir="data")
+        async with app:
+            members = []
+            async for member in app.get_chat_members(chat_id):
+                if member.user and not member.user.is_bot:
+                    members.append({
+                        "id": member.user.id,
+                        "username": member.user.username,
+                        "first_name": member.user.first_name,
+                    })
+            print(json.dumps(members))
 
 
 asyncio.run(main())

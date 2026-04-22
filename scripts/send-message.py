@@ -66,16 +66,18 @@ async def send_with_retry(app):
 
 async def main():
     from pyrogram import Client
+    from mtproto_lock import session_lock
 
-    app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data",
-                 device_model="iPhone 16 Pro", system_version="18.3.2",
-                 app_version="11.4", lang_code="en", system_lang_code="en-US")
-    await app.start()
-    try:
-        ok = await send_with_retry(app)
-        sys.exit(0 if ok else 1)
-    finally:
-        await app.stop()
+    with session_lock():
+        app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data",
+                     device_model="iPhone 16 Pro", system_version="18.3.2",
+                     app_version="11.4", lang_code="en", system_lang_code="en-US")
+        await app.start()
+        try:
+            ok = await send_with_retry(app)
+            sys.exit(0 if ok else 1)
+        finally:
+            await app.stop()
 
 
 asyncio.run(main())

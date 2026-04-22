@@ -161,6 +161,33 @@ describe('event tool handlers', () => {
       expect(result.output).toContain('Lunch');
     });
 
+    test('triggers location verification for concrete locations', async () => {
+      const verifyMock = mock(() =>
+        Promise.resolve({ resolved: true, geocoded: null, cityExtracted: null, candidates: [] }),
+      );
+      ctx.locationVerification = { verifyEventLocation: verifyMock } as never;
+      await handleCreateEvent(ctx, {
+        title: 'Meeting',
+        start_at: `${futureDate}14:00:00Z`,
+        location: 'Кофемания',
+      });
+      expect(verifyMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('skips location verification when location_abstract is true', async () => {
+      const verifyMock = mock(() =>
+        Promise.resolve({ resolved: true, geocoded: null, cityExtracted: null, candidates: [] }),
+      );
+      ctx.locationVerification = { verifyEventLocation: verifyMock } as never;
+      await handleCreateEvent(ctx, {
+        title: 'Hangout',
+        start_at: `${futureDate}14:00:00Z`,
+        location: 'У Иры',
+        location_abstract: true,
+      });
+      expect(verifyMock).not.toHaveBeenCalled();
+    });
+
     test('rejects past event without force', async () => {
       const result = await handleCreateEvent(ctx, {
         title: 'Past Event',

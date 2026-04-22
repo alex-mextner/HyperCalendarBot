@@ -3,8 +3,10 @@ import type { CalendarEvent, Visibility } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatInvitation } from '../../event/formatters.ts';
+import { buildUserSessionInvitationText } from '../../telegram-session/invitation-text.ts';
 import { deliverMessage } from '../deliver-message.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
+import { handlePickUsers } from './meta.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
@@ -77,11 +79,46 @@ async function deliverInvitation(params: DeliveryParams): Promise<{ delivered: b
   const fallbackMsg =
     url !== null ? tr.deliveryFallbackWithLink(eventTitle, url) : tr.deliveryFallbackNoLink(eventTitle);
 
+  // User-session MTProto: first-person text via user's own connected session
+  const userFirstPersonText =
+    event && url && sender.sendAsConnectedUser
+      ? buildUserSessionInvitationText({
+          event: {
+            title: event.title,
+            start_utc: event.start_at,
+            location: event.location,
+            description: event.description,
+          },
+          inviterTimezone: ctx.user.timezone,
+          deepLink: url,
+          lang,
+        })
+      : null;
+
+  const userMtprotoSend =
+    userFirstPersonText && sender.sendAsConnectedUser
+      ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
+          sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
+      : undefined;
+
+  // Admin MTProto: third-person text via admin session (existing fallback)
   const mtprotoSend =
     sender.sendAsUser && url !== null
       ? (userId: number, _text: string, username?: string): Promise<boolean> => {
           const mtprotoText = tr.mtprotoInvite(inviterName, eventTitle, url);
           return sender.sendAsUser!(userId, mtprotoText, username);
+        }
+      : undefined;
+
+  // Combined: try user session first (first-person), fall back to admin session (third-person)
+  const combinedMtprotoSend =
+    userMtprotoSend || mtprotoSend
+      ? async (targetId: number, text: string, username?: string): Promise<boolean> => {
+          if (userMtprotoSend) {
+            const ok = await userMtprotoSend(targetId, text, username);
+            if (ok) return true;
+          }
+          return mtprotoSend ? mtprotoSend(targetId, text, username) : false;
         }
       : undefined;
 
@@ -101,7 +138,7 @@ async function deliverInvitation(params: DeliveryParams): Promise<{ delivered: b
         }
         return sender.sendMessage(recipientId, msgText);
       },
-      mtprotoSend,
+      mtprotoSend: combinedMtprotoSend,
     });
 
     if (result.delivered && result.messageId !== undefined) {
@@ -149,7 +186,7 @@ interface ShareEventInput {
 
 interface SendInvitationInput {
   event_id: number;
-  invitee_id: number;
+  invitee_id?: number;
   invitee_username?: string;
 }
 
@@ -203,11 +240,43 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     return { success: false, error: 'Invitations are not configured.' };
   }
 
+  let inviteeId = input.invitee_id;
+  let inviteeUsername = input.invitee_username;
+  let resolvedFirstName: string | undefined;
+
+  // Resolve invitee_id when only username provided
+  if (!inviteeId && inviteeUsername) {
+    if (!ctx.resolveUsername) {
+      return { success: false, error: 'Cannot resolve @username: username resolution is not available.' };
+    }
+    try {
+      const resolved = await ctx.resolveUsername(inviteeUsername);
+      if (!resolved) {
+        // Username not found — open user picker automatically
+        const prompt = t(ctx.user.language).invite_resolve_not_found(inviteeUsername);
+        return handlePickUsers(ctx, { event_id: input.event_id, prompt });
+      }
+      inviteeId = resolved.id;
+      resolvedFirstName = resolved.firstName;
+      if (resolved.username) inviteeUsername = resolved.username;
+    } catch (err) {
+      deliveryLogger.error({ err, username: inviteeUsername }, 'Failed to resolve username');
+      return {
+        success: false,
+        error: `Failed to resolve @${inviteeUsername}. Try using find_user or pick_users instead.`,
+      };
+    }
+  }
+
+  if (!inviteeId) {
+    return { success: false, error: 'Either invitee_id or invitee_username must be provided.' };
+  }
+
   const result = ctx.sharing.invitationService.sendInvitation(
     input.event_id,
     ctx.user.telegram_id,
-    input.invitee_id,
-    input.invitee_username,
+    inviteeId,
+    inviteeUsername,
   );
 
   if (!result.success) {
@@ -218,23 +287,23 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   // Auto-add invitee to inviter's contacts
   if (ctx.contactRepo) {
-    const invitee = ctx.userRepo.findByTelegramId(input.invitee_id);
-    if (invitee) {
-      ctx.contactRepo.upsert(
-        ctx.user.telegram_id,
-        invitee.first_name ?? invitee.username ?? `User ${invitee.telegram_id}`,
-        invitee.username ?? undefined,
-        invitee.telegram_id,
-      );
-    }
+    const invitee = ctx.userRepo.findByTelegramId(inviteeId);
+    const contactName =
+      invitee?.first_name ?? invitee?.username ?? resolvedFirstName ?? inviteeUsername ?? `User ${inviteeId}`;
+    ctx.contactRepo.upsert(
+      ctx.user.telegram_id,
+      contactName,
+      inviteeUsername ?? invitee?.username ?? undefined,
+      inviteeId,
+    );
   }
 
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
   const delivery = await deliverInvitation({
     invitationId: invitation.id,
     eventId: input.event_id,
-    inviteeId: input.invitee_id,
-    inviteeUsername: input.invitee_username ?? lookupInviteeUsername(ctx, input.invitee_id),
+    inviteeId,
+    inviteeUsername: inviteeUsername ?? lookupInviteeUsername(ctx, inviteeId),
     inviterId: ctx.user.telegram_id,
     inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
     inviterUsername: ctx.user.username ?? undefined,
@@ -245,7 +314,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, input.invitee_id),
+    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId),
     agentHint: delivery.delivered
       ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
       : delivery.viaDeepLink
