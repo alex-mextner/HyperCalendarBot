@@ -835,6 +835,7 @@ export function createCallbackHandler(
 
       editProposalDeps.editProposalRepo.updateStatus(proposalId, 'accepted');
       const updated = eventService.updateEvent(proposal.event_id, user.telegram_id, updateData, {
+        source: 'proposal_accept',
         skipProposalExpiry: true,
         excludeUserIds: [proposal.proposer_id],
       });

@@ -216,6 +216,22 @@ if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
       materializer: syncMaterializer,
       notifyUser: sendSyncNotification,
       editMessage: editSyncMessage,
+      sendMessageWithButtons: async (userId, text, buttons) => {
+        const { InlineKeyboard } = await import('gramio');
+        const kb = new InlineKeyboard();
+        for (const row of buttons) {
+          for (const btn of row) {
+            kb.text(btn.text, btn.callbackData);
+          }
+          kb.row();
+        }
+        const msg = await botRef.sendMessage(userId, text, undefined, kb as never).catch((err) => {
+          botLogger.error({ err, userId }, 'Failed to send proposal with buttons');
+          return null;
+        });
+        if (!msg) return null;
+        return { messageId: msg.message_id, chatId: userId };
+      },
       getUserLang: getSyncUserLang,
       getUserName: (userId) => {
         const user = db.users.findByTelegramId(userId);

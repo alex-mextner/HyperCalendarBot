@@ -201,6 +201,7 @@ describe('editProposal callback wiring', () => {
       100,
       { title: 'New title' },
       {
+        source: 'proposal_accept',
         skipProposalExpiry: true,
         excludeUserIds: [200],
       },

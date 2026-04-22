@@ -41,6 +41,11 @@ export interface ParticipantHandlerDeps {
   editProposalRepo: EditProposalRepository;
   invitationRepo: InvitationRepository;
   notifyUser: (userId: number, text: string) => Promise<void>;
+  sendMessageWithButtons?: (
+    userId: number,
+    text: string,
+    buttons: { text: string; callbackData: string }[][],
+  ) => Promise<{ messageId: number; chatId: number } | null>;
   getUserLang: (userId: number) => Lang;
   getUserName: (userId: number) => string;
 }
@@ -93,9 +98,29 @@ export async function handleParticipantChange(
       const orgLang = deps.getUserLang(masterEvent.user_id);
       const changesText = formatChanges(sharedChanges, orgLang);
       const text = t(orgLang).sync.changeProposed(participantName, masterEvent.title, changesText);
-      await deps.notifyUser(masterEvent.user_id, text).catch((err) => {
-        syncLogger.error({ err, proposalId: proposal.id }, 'Failed to notify organizer about proposal');
-      });
+
+      if (deps.sendMessageWithButtons) {
+        const buttons = [
+          [
+            { text: t(orgLang).sync.acceptBtn, callbackData: `epr:accept:${proposal.id}` },
+            { text: t(orgLang).sync.rejectBtn, callbackData: `epr:reject:${proposal.id}` },
+          ],
+        ];
+        const result = await deps.sendMessageWithButtons(masterEvent.user_id, text, buttons).catch((err) => {
+          syncLogger.error({ err, proposalId: proposal.id }, 'Failed to send proposal with buttons');
+          return null;
+        });
+        if (result) {
+          deps.editProposalRepo.setMessageInfo(proposal.id, {
+            organizer_message_id: result.messageId,
+            organizer_chat_id: result.chatId,
+          });
+        }
+      } else {
+        await deps.notifyUser(masterEvent.user_id, text).catch((err) => {
+          syncLogger.error({ err, proposalId: proposal.id }, 'Failed to notify organizer about proposal');
+        });
+      }
 
       syncLogger.info(
         { proposalId: proposal.id, participantUserId, eventId: masterEvent.id },

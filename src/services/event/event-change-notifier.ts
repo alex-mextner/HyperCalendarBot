@@ -15,6 +15,7 @@ export type ChangeSource = 'bot' | 'google_sync' | 'proposal_accept';
 export interface ChangeNotifierOptions {
   skipProposalExpiry?: boolean;
   excludeUserIds?: number[];
+  source?: ChangeSource;
 }
 
 export interface EventChangeNotifierDeps {

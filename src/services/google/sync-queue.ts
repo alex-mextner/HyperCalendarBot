@@ -50,6 +50,11 @@ export interface ChangeNotifierSyncDeps {
   materializer: ReminderMaterializer;
   notifyUser: (userId: number, text: string) => Promise<void>;
   editMessage: (chatId: number, messageId: number, text: string) => Promise<void>;
+  sendMessageWithButtons?: (
+    userId: number,
+    text: string,
+    buttons: { text: string; callbackData: string }[][],
+  ) => Promise<{ messageId: number; chatId: number } | null>;
   getUserLang: (userId: number) => Lang;
   getUserName: (userId: number) => string;
 }
@@ -111,6 +116,7 @@ export function createGoogleSyncQueue(deps: GoogleSyncQueueDeps) {
         editProposalRepo: deps.changeNotifierDeps.editProposalRepo,
         invitationRepo: deps.changeNotifierDeps.invitationRepo,
         notifyUser: deps.changeNotifierDeps.notifyUser,
+        sendMessageWithButtons: deps.changeNotifierDeps.sendMessageWithButtons,
         getUserLang: deps.changeNotifierDeps.getUserLang,
         getUserName: deps.changeNotifierDeps.getUserName,
       }
