@@ -26,6 +26,10 @@ const sceneLogger = logger.child({ module: 'connect-telegram-scene' });
 
 export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
+// isOtpLikeText and isPhoneLikeText share a purpose: filter out "shaped-but-invalid"
+// input at the OTP / phone steps so a cancel click doesn't forward meaningless digit
+// soup to the AI. PHONE_LIKE_REGEX is a superset of OTP_LIKE_REGEX (adds '+', '(', ')').
+// If either invariant changes, update both.
 const OTP_LIKE_REGEX = /^[\d\s-]+$/;
 const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
 

@@ -179,6 +179,11 @@ describe('isPhoneLikeText', () => {
     expect(isPhoneLikeText('+7 (900) 123-45-67')).toBe(true);
   });
 
+  test('accepts single "+" — phone-shaped but invalid (caller rejects via PHONE_REGEX)', () => {
+    // Not a useful input, but it would be wrong to forward "+" to the AI on cancel.
+    expect(isPhoneLikeText('+')).toBe(true);
+  });
+
   test('rejects natural-language text', () => {
     expect(isPhoneLikeText('what is my calendar?')).toBe(false);
     expect(isPhoneLikeText('покажи события')).toBe(false);
