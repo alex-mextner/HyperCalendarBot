@@ -51,6 +51,8 @@ export async function handleParticipantChange(
   incomingLocal: LocalEventFromGoogleSnapshot & { google_etag: string | null },
   deps: ParticipantHandlerDeps,
 ): Promise<void> {
+  if (masterEvent.owner_type !== 'user') return;
+
   const masterSnapshot = snapshotFromCalendarEvent(masterEvent);
   const incomingSnapshot = snapshotFromGoogleLocal(incomingLocal);
   const allChanges = computeEventDiff(masterSnapshot, incomingSnapshot);

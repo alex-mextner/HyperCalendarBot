@@ -43,6 +43,7 @@ export interface GoogleEvent {
   etag?: string | null;
   status?: string | null;
   updated?: string | null;
+  recurringEventId?: string | null;
 }
 
 export interface LocalEventFromGoogle {

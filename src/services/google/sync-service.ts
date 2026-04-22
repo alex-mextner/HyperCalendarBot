@@ -270,6 +270,13 @@ export class SyncService {
       } else {
         const participantSync = this.participantSyncRepo?.getByUserAndGoogleEventId(userId, local.google_event_id);
         if (participantSync) {
+          if (gEvent.recurringEventId) {
+            syncLogger.debug(
+              { userId, googleEventId: local.google_event_id, recurringEventId: gEvent.recurringEventId },
+              'Skipping recurrence exception from participant (not supported in MVP)',
+            );
+            return;
+          }
           const masterEvent = this.eventRepo.findByIdUnfiltered(participantSync.event_id);
           if (masterEvent && this.participantHandlerDeps) {
             pendingNotification = () =>
