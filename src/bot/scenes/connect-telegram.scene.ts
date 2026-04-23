@@ -239,11 +239,19 @@ export function createConnectTelegramScene(
             registerConnectAttempt(userId);
             await context.answer();
             const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
-            await context.send(ct.enterPhone, { reply_markup: phoneKb });
-            // Reply-keyboard and inline keyboard cannot coexist on one message, so the
-            // cancel button ships as a separate inline message right after.
+            // Telegram persists the reply-keyboard at chat level (not per message),
+            // so we install it via a throwaway message and delete that message
+            // immediately. The "📱 Поделиться номером" button stays in the input area.
+            // This frees the visible prompt to carry the inline "Отменить авторизацию"
+            // button instead of shipping it as a separate second message.
+            const kbMsg = await context.send('…', { reply_markup: phoneKb });
+            kbMsg
+              .delete()
+              .catch((err: unknown) =>
+                sceneLogger.warn({ err, userId }, 'failed to delete throwaway reply-keyboard message'),
+              );
             const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
-            await context.send(ct.orCancelAuth, { reply_markup: cancelKb });
+            await context.send(ct.enterPhone, { reply_markup: cancelKb });
             await context.scene.step.next();
             return;
           }

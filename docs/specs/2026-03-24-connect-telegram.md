@@ -195,10 +195,15 @@ Session file → encrypt → store in DB → delete session file.
 
 ### Cancel-authorization Inline Button
 
-Every retryable prompt (`invalidPhone`, `invalidCode`, `invalid2fa`) and the initial
-prompts that have no reply keyboard (`enter2fa`) carry an inline `ct:cancel_auth` button.
-The phone-input step also posts a separate short inline message right after `enterPhone`,
-because `request_contact` uses a reply keyboard that cannot coexist with inline buttons.
+Every retryable prompt (`invalidPhone`, `invalidCode`, `invalid2fa`) and every initial
+prompt (`enterPhone`, `enter2fa`) carries an inline `ct:cancel_auth` button.
+The phone-input step needs both a reply-keyboard (`request_contact` = "📱 Поделиться
+номером") and an inline keyboard (cancel button). Because Telegram allows only one
+`reply_markup` per message, the bot installs the reply-keyboard via a throwaway
+message ("…") that it deletes immediately — Telegram persists reply-keyboards at
+chat level, so the button stays in the input area even after the source message is
+gone. The visible prompt ("Введи номер телефона…") then ships with the inline
+cancel button.
 
 When the user taps the button:
 
