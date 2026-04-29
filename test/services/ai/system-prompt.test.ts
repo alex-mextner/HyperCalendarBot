@@ -148,6 +148,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('authoritative clock');
   });
 
+  test('current local time includes day of week for AI calendar math', () => {
+    const prompt = buildSystemPrompt(ctx);
+    // Pattern: "YYYY-MM-DD Mon 14:00" — day name lets AI compute Monday of current week
+    expect(prompt).toMatch(/Current local time: \d{4}-\d{2}-\d{2} (Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{2}:\d{2}/);
+  });
+
   test('DM prompt has two event creation modes: create or ask', () => {
     ctx.isGroup = false;
     const prompt = buildSystemPrompt(ctx);
