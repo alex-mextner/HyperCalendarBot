@@ -2,7 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
-import { getDayRangeUtc } from '../../../utils/date.ts';
+import { getDayRangeUtc, getWeekRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
 import { renderDayImage } from '../../image/render-day.ts';
@@ -161,14 +161,7 @@ export async function handleRenderWeekImage(
     .toISOString()
     .slice(0, 10);
 
-  const weekStartDate = new Date(`${weekStartIso}T12:00:00Z`);
-  const weekEndDate = new Date(weekStartDate.getTime() + 6 * 86400000);
-  const startUtc = new Date(
-    Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate()),
-  ).toISOString();
-  const endUtc = new Date(
-    Date.UTC(weekEndDate.getUTCFullYear(), weekEndDate.getUTCMonth(), weekEndDate.getUTCDate(), 23, 59, 59, 999),
-  ).toISOString();
+  const { start: startUtc, end: endUtc } = getWeekRangeUtc(new Date(`${weekStartIso}T12:00:00Z`), ctx.user.timezone);
 
   const occurrences =
     scope === 'group'

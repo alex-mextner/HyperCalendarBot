@@ -107,4 +107,22 @@ describe('handleRenderWeekImage', () => {
     expect(result.output).toContain('2026-04-27');
     expect(result.output).not.toContain('2026-04-28');
   });
+
+  test('event query range uses timezone-local week boundaries', async () => {
+    // makeCtx default timezone is Europe/Moscow (UTC+3, no DST)
+    // Monday midnight Moscow = Sunday 21:00 UTC; events before UTC midnight are captured
+    const getEventsInRange = mock(() => []);
+    const ctx = makeCtx({
+      eventService: {
+        getEventsInRange,
+        getEventsInRangeForGroup: mock(() => []),
+      } as unknown as AgentContext['eventService'],
+    });
+    await handleRenderWeekImage(ctx, { week_start: '2026-04-27' });
+    expect(getEventsInRange).toHaveBeenCalledTimes(1);
+    const callArgs = getEventsInRange.mock.calls[0] as unknown as [number, string, string];
+    // Must start at Moscow Monday midnight = UTC Sunday 21:00, not UTC midnight
+    expect(callArgs[1]).toBe('2026-04-26T21:00:00.000Z');
+    expect(callArgs[2]).toBe('2026-05-03T20:59:59.999Z');
+  });
 });
