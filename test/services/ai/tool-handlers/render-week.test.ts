@@ -34,8 +34,9 @@ describe('handleRenderWeekImage', () => {
 
   test('output contains week start date and past-tense marker', async () => {
     const ctx = makeCtx();
-    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
-    expect(result.output).toContain('2026-04-07');
+    // 2026-04-06 is Monday
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-06' });
+    expect(result.output).toContain('2026-04-06');
     expect(result.output).toContain('отправлена');
   });
 
@@ -96,5 +97,14 @@ describe('handleRenderWeekImage', () => {
     const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-07' });
     expect(result.success).toBe(false);
     expect(result.error).toBeTruthy();
+  });
+
+  test('normalizes non-Monday week_start to Monday of same week', async () => {
+    // 2026-04-28 is Tuesday; Monday of that week is 2026-04-27
+    const ctx = makeCtx();
+    const result = await handleRenderWeekImage(ctx, { week_start: '2026-04-28' });
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('2026-04-27');
+    expect(result.output).not.toContain('2026-04-28');
   });
 });

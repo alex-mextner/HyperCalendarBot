@@ -1,3 +1,5 @@
+import { TZDate } from '@date-fns/tz';
+import { startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
@@ -152,7 +154,14 @@ export async function handleRenderWeekImage(
     return { success: false, error: 'Group context required for group scope' };
   }
 
-  const weekStartDate = new Date(`${input.week_start}T12:00:00Z`);
+  // Normalize to Monday of the week in the user's timezone — AI may send any weekday.
+  const weekStartIso = startOfWeek(new TZDate(new Date(`${input.week_start}T12:00:00Z`), ctx.user.timezone), {
+    weekStartsOn: 1,
+  })
+    .toISOString()
+    .slice(0, 10);
+
+  const weekStartDate = new Date(`${weekStartIso}T12:00:00Z`);
   const weekEndDate = new Date(weekStartDate.getTime() + 6 * 86400000);
   const startUtc = new Date(
     Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate()),
@@ -171,20 +180,13 @@ export async function handleRenderWeekImage(
   const tr = t(lang).aiTools.meta;
 
   try {
-    const buffer = await renderWeekImage(
-      ctx.renderService,
-      occurrences,
-      input.week_start,
-      ctx.user.timezone,
-      lang,
-      userId,
-    );
+    const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
     const file = new File([buffer], 'week.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
-      output: tr.weekImageSent(input.week_start),
+      output: tr.weekImageSent(weekStartIso),
       agentHint:
         'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
     };
