@@ -1,4 +1,5 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { TZDate } from '@date-fns/tz';
 import { handleWeek } from '../../../src/bot/commands/week.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -218,13 +219,14 @@ describe('handleWeek group context', () => {
     const eventService = {
       getEventsInRangeForGroup: mock(() => []),
     };
-    const groupRepo = { getTimezone: mock(() => 'Europe/Moscow') };
+    const GROUP_TZ = 'Europe/Moscow';
+    const groupRepo = { getTimezone: mock(() => GROUP_TZ) };
     const weatherService = {
       getWeekWeather: mock(() =>
         Promise.resolve({
           days: [
             {
-              date: new Date().toISOString().slice(0, 10),
+              date: new TZDate(new Date(), GROUP_TZ).toISOString().slice(0, 10),
               tempMin: -5,
               tempMax: 1,
               conditionCode: 600,
