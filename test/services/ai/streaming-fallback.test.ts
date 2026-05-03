@@ -108,44 +108,14 @@ describe('aiStreamRound — provider chain fallback', () => {
     // Each fake is recreated per test
   });
 
-  test('returns Gemini result on first success', async () => {
-    fakeGemini = buildFakeClient([
-      { kind: 'text', text: 'hello from Gemini' },
-      { kind: 'finish', reason: 'stop' },
-    ]);
-    fakeZai = buildFakeClient(() => {
-      throw new Error('z.ai should not be called');
-    });
-    fakeHf = buildFakeClient(() => {
-      throw new Error('hf should not be called');
-    });
-
-    const result = await aiStreamRound({
-      messages: [{ role: 'user', content: 'hi' }],
-      maxTokens: 100,
-    });
-
-    expect(result.text).toBe('hello from Gemini');
-    expect(result.providerUsed).toContain('Gemini');
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
-    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
-  });
-
-  test('falls through to z.ai on Gemini 500', async () => {
-    const apiError = new OpenAI.APIError(500, { error: { message: 'overloaded' } }, 'server error', new Headers());
-    fakeGemini = {
-      chat: {
-        completions: {
-          create: mock(async () => {
-            throw apiError;
-          }),
-        },
-      },
-    };
+  test('returns z.ai result on first success', async () => {
     fakeZai = buildFakeClient([
       { kind: 'text', text: 'hello from z.ai' },
       { kind: 'finish', reason: 'stop' },
     ]);
+    fakeGemini = buildFakeClient(() => {
+      throw new Error('gemini should not be called');
+    });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
     });
@@ -157,16 +127,23 @@ describe('aiStreamRound — provider chain fallback', () => {
 
     expect(result.text).toBe('hello from z.ai');
     expect(result.providerUsed).toContain('z.ai');
-    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
-  test('falls through on EmptyProviderResponseError (Gemini coding endpoint quirk)', async () => {
-    // Gemini returns 200 OK but no text and no tool calls — streaming adapter
-    // should throw EmptyProviderResponseError and chain should try z.ai.
-    fakeGemini = buildFakeClient([{ kind: 'finish', reason: 'stop' }]);
-    fakeZai = buildFakeClient([
-      { kind: 'text', text: 'z.ai to the rescue' },
+  test('falls through to Gemini on z.ai 500', async () => {
+    const apiError = new OpenAI.APIError(500, { error: { message: 'overloaded' } }, 'server error', new Headers());
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async () => {
+            throw apiError;
+          }),
+        },
+      },
+    };
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'hello from Gemini' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -178,8 +155,31 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('z.ai to the rescue');
-    expect(result.providerUsed).toContain('z.ai');
+    expect(result.text).toBe('hello from Gemini');
+    expect(result.providerUsed).toContain('Gemini');
+    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls through on EmptyProviderResponseError (z.ai coding endpoint quirk)', async () => {
+    // z.ai returns 200 OK but no text and no tool calls — streaming adapter
+    // should throw EmptyProviderResponseError and chain should try Gemini.
+    fakeZai = buildFakeClient([{ kind: 'finish', reason: 'stop' }]);
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'gemini to the rescue' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
+    fakeHf = buildFakeClient(() => {
+      throw new Error('hf should not be called');
+    });
+
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 100,
+    });
+
+    expect(result.text).toBe('gemini to the rescue');
+    expect(result.providerUsed).toContain('Gemini');
   });
 
   test('all three providers fail → throws last error', async () => {
@@ -225,7 +225,7 @@ describe('aiStreamRound — provider chain fallback', () => {
   test('4xx with body propagates immediately without fallthrough', async () => {
     // A real 400 with an error body means the request is bad — don't try next provider.
     const badRequest = new OpenAI.APIError(400, { error: { message: 'bad input' } }, 'bad input', new Headers());
-    fakeGemini = {
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -234,8 +234,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeZai = buildFakeClient(() => {
-      throw new Error('z.ai should not be called');
+    fakeGemini = buildFakeClient(() => {
+      throw new Error('gemini should not be called');
     });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
@@ -248,13 +248,13 @@ describe('aiStreamRound — provider chain fallback', () => {
       }),
     ).rejects.toMatchObject({ status: 400 });
 
-    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('400 with no body falls through to next provider', async () => {
-    // Gemini sometimes returns 400 with no body for transient issues — treat as retryable.
+    // Providers sometimes return 400 with no body for transient issues — treat as retryable.
     const noBody = new OpenAI.APIError(400, undefined, '400 status code (no body)', new Headers());
-    fakeGemini = {
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -263,8 +263,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeZai = buildFakeClient([
-      { kind: 'text', text: 'z.ai picked up' },
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'gemini picked up' },
       { kind: 'finish', reason: 'stop' },
     ]);
     fakeHf = buildFakeClient(() => {
@@ -276,14 +276,14 @@ describe('aiStreamRound — provider chain fallback', () => {
       maxTokens: 100,
     });
 
-    expect(result.text).toBe('z.ai picked up');
-    expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
+    expect(result.text).toBe('gemini picked up');
+    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('mid-stream failure after text emitted propagates, does NOT fall through', async () => {
-    // Gemini starts streaming, then the iterator throws. Since text was already
+    // z.ai starts streaming, then the iterator throws. Since text was already
     // sent to the user's Telegram message, we cannot switch providers.
-    fakeGemini = {
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -296,8 +296,8 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeZai = buildFakeClient(() => {
-      throw new Error('z.ai should not be called');
+    fakeGemini = buildFakeClient(() => {
+      throw new Error('gemini should not be called');
     });
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
@@ -315,13 +315,13 @@ describe('aiStreamRound — provider chain fallback', () => {
     ).rejects.toThrow();
 
     expect(deltas).toEqual(['partial ']);
-    expect(fakeZai.chat.completions.create).not.toHaveBeenCalled();
+    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
   });
 
   test('aggregates tool_calls across chunks even when provider omits index field', async () => {
     // HF Router / early Gemini historical bug: tool_call deltas arrive without `index`.
     // Without a fallback the Map collapses both chunks into the same slot.
-    fakeGemini = {
+    fakeZai = {
       chat: {
         completions: {
           create: mock(async () => {
@@ -354,7 +354,7 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeZai = buildFakeClient(() => {
+    fakeGemini = buildFakeClient(() => {
       throw new Error('unreachable');
     });
     fakeHf = buildFakeClient(() => {

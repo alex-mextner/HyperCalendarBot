@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): Gemini ${GEMINI_MODEL}      → z.ai ${ZAI_MODEL}      → HF ${HF_MODEL}
-//   FAST_CHAIN:          Gemini ${GEMINI_FAST_MODEL} → z.ai ${ZAI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -224,8 +224,8 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
-    streamingSlot(`Gemini (${cfg.GEMINI_MODEL})`, geminiClient, cfg.GEMINI_MODEL),
     streamingSlot(`z.ai (${cfg.ZAI_MODEL})`, zaiClient, cfg.ZAI_MODEL),
+    streamingSlot(`Gemini (${cfg.GEMINI_MODEL})`, geminiClient, cfg.GEMINI_MODEL),
     streamingSlot(`HF (${cfg.HF_MODEL})`, hfClient, cfg.HF_MODEL),
   ];
 }
@@ -233,8 +233,8 @@ function buildSmartChain(): ProviderSlot[] {
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return [
-    streamingSlot(`Gemini (${cfg.GEMINI_FAST_MODEL})`, geminiClient, cfg.GEMINI_FAST_MODEL),
     streamingSlot(`z.ai (${cfg.ZAI_FAST_MODEL})`, zaiClient, cfg.ZAI_FAST_MODEL),
+    streamingSlot(`Gemini (${cfg.GEMINI_FAST_MODEL})`, geminiClient, cfg.GEMINI_FAST_MODEL),
     streamingSlot(`HF (${cfg.HF_FAST_MODEL})`, hfClient, cfg.HF_FAST_MODEL),
   ];
 }
@@ -251,8 +251,8 @@ function buildFastChain(): ProviderSlot[] {
  * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
- *   fast=false → Gemini GEMINI_MODEL      → z.ai ZAI_MODEL      → HF HF_MODEL
- *   fast=true  → Gemini GEMINI_FAST_MODEL → z.ai ZAI_FAST_MODEL → HF HF_FAST_MODEL
+ *   fast=false → z.ai ZAI_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
+ *   fast=true  → z.ai ZAI_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL
  *
  * Fallback rules:
  * - Provider returns 5xx / timeout / 429  → try next
