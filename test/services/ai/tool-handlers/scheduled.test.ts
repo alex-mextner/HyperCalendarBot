@@ -114,7 +114,10 @@ describe('handleScheduleAiCallsList', () => {
 describe('handleScheduleAiCallCancel', () => {
   test('cancels an existing scheduled call', async () => {
     const ctx = makeCtx();
-    await handleScheduleAiCall(ctx, { message: 'To cancel', run_at: '2026-05-01T10:00:00Z' });
+    await handleScheduleAiCall(ctx, {
+      message: 'To cancel',
+      run_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
     const list = handleScheduleAiCallsList(ctx);
     const id = (list.data as { id: string }[])[0]?.id;
     expect(id).toBeDefined();
