@@ -76,8 +76,12 @@ let fakeGemini: any;
 // biome-ignore lint/suspicious/noExplicitAny: same reason
 let fakeHf: any;
 
+// biome-ignore lint/suspicious/noExplicitAny: fake client shapes vary per test
+let fakeGroq: any;
+
 mock.module('../../../src/services/ai/clients.ts', () => ({
   zaiClient: () => fakeZai,
+  groqClient: () => fakeGroq,
   hfClient: () => fakeHf,
   geminiClient: () => fakeGemini,
   resetClients: () => {},
@@ -100,6 +104,7 @@ const { aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
 describe('aiStreamRound — provider chain fallback', () => {
   beforeEach(() => {
     fakeZai = undefined;
+    fakeGroq = undefined;
     fakeGemini = undefined;
     fakeHf = undefined;
   });

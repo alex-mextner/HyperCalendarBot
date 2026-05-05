@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
-//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Groq ${GROQ_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
+//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -13,7 +13,7 @@ import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 import { alertProviderBalanceExhausted, isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
-import { geminiClient, hfClient, zaiClient } from './clients.ts';
+import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -223,20 +223,28 @@ function streamingSlot(name: string, getClient: () => OpenAI, model: string): Pr
 
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return [
-    streamingSlot(`z.ai (${cfg.ZAI_MODEL})`, zaiClient, cfg.ZAI_MODEL),
+  const chain: ProviderSlot[] = [streamingSlot(`z.ai (${cfg.ZAI_MODEL})`, zaiClient, cfg.ZAI_MODEL)];
+  if (cfg.GROQ_API_KEY && cfg.GROQ_MODEL) {
+    chain.push(streamingSlot(`Groq (${cfg.GROQ_MODEL})`, groqClient, cfg.GROQ_MODEL));
+  }
+  chain.push(
     streamingSlot(`Gemini (${cfg.GEMINI_MODEL})`, geminiClient, cfg.GEMINI_MODEL),
     streamingSlot(`HF (${cfg.HF_MODEL})`, hfClient, cfg.HF_MODEL),
-  ];
+  );
+  return chain;
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return [
-    streamingSlot(`z.ai (${cfg.ZAI_FAST_MODEL})`, zaiClient, cfg.ZAI_FAST_MODEL),
+  const chain: ProviderSlot[] = [streamingSlot(`z.ai (${cfg.ZAI_FAST_MODEL})`, zaiClient, cfg.ZAI_FAST_MODEL)];
+  if (cfg.GROQ_API_KEY && cfg.GROQ_FAST_MODEL) {
+    chain.push(streamingSlot(`Groq (${cfg.GROQ_FAST_MODEL})`, groqClient, cfg.GROQ_FAST_MODEL));
+  }
+  chain.push(
     streamingSlot(`Gemini (${cfg.GEMINI_FAST_MODEL})`, geminiClient, cfg.GEMINI_FAST_MODEL),
     streamingSlot(`HF (${cfg.HF_FAST_MODEL})`, hfClient, cfg.HF_FAST_MODEL),
-  ];
+  );
+  return chain;
 }
 
 // ── Public API ─────────────────────────────────────────────────────────────
@@ -251,8 +259,8 @@ function buildFastChain(): ProviderSlot[] {
  * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
- *   fast=false → z.ai ZAI_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
- *   fast=true  → z.ai ZAI_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL
+ *   fast=false → z.ai ZAI_MODEL      → Groq GROQ_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
+ *   fast=true  → z.ai ZAI_FAST_MODEL → Groq GROQ_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL
  *
  * Fallback rules:
  * - Provider returns 5xx / timeout / 429  → try next
