@@ -43,6 +43,62 @@ function formatToolInput(input: { [key: string]: unknown }): string {
 const MIN_FLUSH_DELTA = 20;
 const FLUSH_INTERVAL_MS = 3000;
 const MAX_MESSAGE_LENGTH = 4000;
+const FINAL_RATE_LIMIT_ATTEMPTS = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isObject(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === 'object' && value !== null;
+}
+
+function retryAfterValueMs(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value * 1000) : null;
+}
+
+function telegramRetryAfterMs(err: unknown): number | null {
+  if (!isObject(err)) {
+    const match = String(err).match(/retry after (\d+)/i);
+    return match ? Number(match[1]) * 1000 : null;
+  }
+
+  const directRetryAfter = retryAfterValueMs(err.retry_after);
+  if (directRetryAfter !== null) return directRetryAfter;
+
+  const payload = err.payload;
+  const payloadRetryAfter = isObject(payload) ? retryAfterValueMs(payload.retry_after) : null;
+  if (payloadRetryAfter !== null) return payloadRetryAfter;
+
+  const parameters = err.parameters;
+  const parametersRetryAfter = isObject(parameters) ? retryAfterValueMs(parameters.retry_after) : null;
+  if (parametersRetryAfter !== null) return parametersRetryAfter;
+
+  const message = typeof err.message === 'string' ? err.message : String(err);
+  const match = message.match(/retry after (\d+)/i);
+  return match ? Math.max(0, Number(match[1]) * 1000) : null;
+}
+
+function isTelegramRateLimit(err: unknown): boolean {
+  if (isObject(err) && err.code === 429) return true;
+  const message = isObject(err) && typeof err.message === 'string' ? err.message : String(err);
+  return message.includes('429') || message.includes('Too Many Requests');
+}
+
+async function withTelegramRateLimitRetry<T>(operation: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 1; attempt <= FINAL_RATE_LIMIT_ATTEMPTS; attempt++) {
+    try {
+      return await operation();
+    } catch (err) {
+      if (!isTelegramRateLimit(err) || attempt === FINAL_RATE_LIMIT_ATTEMPTS) throw err;
+
+      const retryAfterMs = telegramRetryAfterMs(err) ?? 1000;
+      aiLogger.warn({ err, retryAfterMs, attempt }, `${label} rate limited, retrying`);
+      if (retryAfterMs > 0) await sleep(retryAfterMs);
+    }
+  }
+  throw new Error(`${label} failed after rate-limit retries`);
+}
 
 export class TelegramStreamWriter {
   private messageId: number | null = null;
@@ -59,6 +115,13 @@ export class TelegramStreamWriter {
   private typingInterval: ReturnType<typeof setInterval> | null = null;
   /** Promise for the in-flight lazy placeholder creation (prevents races between flush/finalize) */
   private placeholderPromise: Promise<void> | null = null;
+  /** Serializes fire-and-forget flushes so Telegram edits cannot burst concurrently. */
+  private flushTail: Promise<void> | null = null;
+  private flushSeq = 0;
+  /** Telegram flood-wait deadline learned from a streaming edit. Finalize waits for it. */
+  private rateLimitedUntil = 0;
+  /** Once stream editing hits flood-wait, stop intermediate edits and only deliver final text. */
+  private streamRateLimited = false;
   /** Set by discard() so a pending flush knows to delete the message after creation. */
   private discarded = false;
 
@@ -118,6 +181,8 @@ export class TelegramStreamWriter {
     this.toolLabel = null;
     this.toolLines = [];
     this.pendingIndicators = [];
+    this.rateLimitedUntil = 0;
+    this.streamRateLimited = false;
   }
 
   appendText(chunk: string): void {
@@ -175,6 +240,20 @@ export class TelegramStreamWriter {
   }
 
   async flush(force: boolean): Promise<void> {
+    const previous = this.flushTail;
+    const seq = ++this.flushSeq;
+    const run = previous ? previous.catch(() => {}).then(() => this.doFlush(force)) : this.doFlush(force);
+    this.flushTail = run.finally(() => {
+      if (this.flushSeq === seq) {
+        this.flushTail = null;
+      }
+    });
+    await run;
+  }
+
+  private async doFlush(force: boolean): Promise<void> {
+    if (this.streamRateLimited) return;
+
     const delta = this.text.length - this.lastFlushedLength;
     const timeSinceFlush = Date.now() - this.lastFlushTime;
 
@@ -210,6 +289,7 @@ export class TelegramStreamWriter {
       if (!this.messageId || this.discarded) return;
     }
 
+    const flushedLength = this.text.length;
     let displayText = markdownToHtml(this.text) || '⏳';
     // Append "..." while still generating — removed on finalize
     if (displayText !== '⏳') {
@@ -229,25 +309,38 @@ export class TelegramStreamWriter {
 
     try {
       await this.sender.editMessageText(this.chatId, this.messageId, displayText, 'HTML');
-      this.lastFlushedLength = this.text.length;
+      this.lastFlushedLength = flushedLength;
       this.lastFlushTime = Date.now();
     } catch (error) {
       const errStr = String(error);
-      if (errStr.includes('429') || errStr.includes('Too Many Requests')) {
-        aiLogger.warn('Telegram rate limit hit, will retry on next flush');
+      if (isTelegramRateLimit(error)) {
+        const retryAfterMs = telegramRetryAfterMs(error) ?? 1000;
+        this.rateLimitedUntil = Math.max(this.rateLimitedUntil, Date.now() + retryAfterMs);
+        this.streamRateLimited = true;
+        this.lastFlushTime = Date.now();
+        aiLogger.warn(
+          { err: error, retryAfterMs },
+          'Telegram rate limit hit during stream edit, deferring to final edit',
+        );
         return;
       }
       if (errStr.includes('message is not modified')) {
         return;
       }
-      aiLogger.error({ error: errStr }, 'Failed to edit stream message');
+      aiLogger.error({ err: error }, 'Failed to edit stream message');
     }
   }
 
   async finalize(): Promise<void> {
     this.stopTypingLoop();
+    if (this.flushTail) await this.flushTail;
     // Wait for any in-flight placeholder creation from a concurrent flush
     if (this.placeholderPromise) await this.placeholderPromise;
+    const rateLimitDelayMs = this.rateLimitedUntil - Date.now();
+    if (rateLimitDelayMs > 0) {
+      aiLogger.warn({ retryAfterMs: rateLimitDelayMs }, 'Waiting for Telegram rate limit before final edit');
+      await sleep(rateLimitDelayMs);
+    }
     this.toolLabel = null;
     this.plainResponseText = this.text.trim();
 
@@ -299,14 +392,21 @@ export class TelegramStreamWriter {
     // rejects it (rate limit, transient error), log and move on. Never
     // downgrade to no parse_mode — that shows raw tags to the user.
     if (this.messageId) {
+      const messageId = this.messageId;
       try {
-        await this.sender.editMessageText(this.chatId, this.messageId, this.text, 'HTML');
+        await withTelegramRateLimitRetry(
+          () => this.sender.editMessageText(this.chatId, messageId, this.text, 'HTML'),
+          'Finalize edit',
+        );
       } catch (err) {
         aiLogger.error({ err }, 'Finalize edit failed');
       }
     } else if (this.text.trim()) {
       try {
-        const result = await this.sender.sendMessage(this.chatId, this.text, 'HTML');
+        const result = await withTelegramRateLimitRetry(
+          () => this.sender.sendMessage(this.chatId, this.text, 'HTML'),
+          'Finalize send',
+        );
         this.messageId = result.message_id;
       } catch (err) {
         aiLogger.error({ err }, 'Finalize send failed');
@@ -316,8 +416,12 @@ export class TelegramStreamWriter {
     // Remaining chunks: send as new messages
     for (let i = 1; i < chunks.length; i++) {
       try {
-        await this.sender.sendMessage(this.chatId, chunks[i]!, 'HTML');
-      } catch {
+        await withTelegramRateLimitRetry(
+          () => this.sender.sendMessage(this.chatId, chunks[i]!, 'HTML'),
+          'Finalize overflow send',
+        );
+      } catch (err) {
+        aiLogger.warn({ err }, 'Failed to send overflow chunk with HTML, retrying plain text');
         await this.sender.sendMessage(this.chatId, chunks[i]!).catch(() => {});
       }
     }

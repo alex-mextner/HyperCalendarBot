@@ -46,6 +46,30 @@ describe('TelegramStreamWriter', () => {
     expect(editMock).toHaveBeenCalledTimes(0);
   });
 
+  test('concurrent non-forced flushes coalesce to one Telegram edit', async () => {
+    let resolveEdit: (() => void) | null = null;
+    editMock = mock(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveEdit = resolve;
+        }),
+    );
+    sender.editMessageText = editMock;
+
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    writer.appendText('A'.repeat(30));
+
+    const flush1 = writer.flush(false);
+    const flush2 = writer.flush(false);
+    const flush3 = writer.flush(false);
+
+    resolveEdit!();
+    await Promise.all([flush1, flush2, flush3]);
+
+    expect(editMock).toHaveBeenCalledTimes(1);
+  });
+
   test('finalize always sends final edit', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();
@@ -84,6 +108,46 @@ describe('TelegramStreamWriter', () => {
     await writer.init();
     writer.appendText('A'.repeat(30));
     await writer.flush(true);
+  });
+
+  test('on stream 429 defers retry and sends only final text', async () => {
+    const error429 = { code: 429, message: 'Too Many Requests', payload: { retry_after: 0 } };
+    editMock = mock()
+      .mockImplementationOnce(() => Promise.reject(error429))
+      .mockImplementation(() => Promise.resolve());
+    sender.editMessageText = editMock;
+
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    writer.appendText('Partial');
+    await writer.flush(true);
+
+    writer.appendText(' intermediate');
+    await writer.flush(true);
+
+    writer.appendText(' final');
+    await writer.finalize();
+
+    expect(editMock).toHaveBeenCalledTimes(2);
+    expect(editMock.mock.calls[0]![2]).toBe('Partial...');
+    expect(editMock.mock.calls[1]![2]).toBe('Partial intermediate final');
+  });
+
+  test('finalize retries 429 using Telegram parameters.retry_after', async () => {
+    const error429 = { code: 429, message: 'Too Many Requests', parameters: { retry_after: 0 } };
+    editMock = mock()
+      .mockImplementationOnce(() => Promise.reject(error429))
+      .mockImplementation(() => Promise.resolve());
+    sender.editMessageText = editMock;
+
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    writer.appendText('Final response');
+    await writer.finalize();
+
+    expect(editMock).toHaveBeenCalledTimes(2);
+    expect(editMock.mock.calls[0]![2]).toBe('Final response');
+    expect(editMock.mock.calls[1]![2]).toBe('Final response');
   });
 
   test('does NOT downgrade to plain text on HTML parse error — always sends with HTML', async () => {
