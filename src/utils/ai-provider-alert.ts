@@ -25,13 +25,18 @@ export function initProviderAlerts(deps: AlertDeps): void {
 export function isBalanceExhausted(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const msg = error.message.toLowerCase();
+  // Per-minute TPM rate limits (Groq returns 413 with "tokens per minute" in body)
+  // are NOT balance exhaustion — exclude them explicitly so the chain falls through
+  // without alerting the admin.
+  if (msg.includes('tokens per minute') || msg.includes('request too large')) return false;
   return (
     msg.includes('insufficient balance') ||
     msg.includes('no resource package') ||
-    msg.includes('billing') ||
     msg.includes('quota exceeded') ||
     msg.includes('exceeded your current quota') ||
-    msg.includes('payment required')
+    msg.includes('credit balance is too low') ||
+    msg.includes('payment required') ||
+    msg.includes('account is not active')
   );
 }
 
