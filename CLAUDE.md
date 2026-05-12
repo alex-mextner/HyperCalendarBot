@@ -560,6 +560,37 @@ Use these MCP servers proactively whenever they can help:
 - When the user gives an instruction that applies beyond the current session, save it to memory AND consider whether it belongs in CLAUDE.md.
 - Check memory at the start of each session for context on ongoing work.
 
+## ralphex — Autonomous Plan Executor
+
+ralphex (`/opt/homebrew/bin/ralphex`) is an autonomous orchestrator that executes implementation plans
+via Claude Code, running checkboxes sequentially with tests/lint after each step and auto-commits.
+
+**Running a plan:**
+```bash
+ralphex docs/plans/YYYY-MM-DD-feature-name.md
+```
+
+**Key flags:**
+- `--tasks-only` — run tasks only, skip review phases
+- `--review` — skip tasks, run full multi-agent review pipeline
+- `--worktree` — run in isolated git worktree (safe for risky changes)
+- `--serve` — start web dashboard at localhost:8080 for real-time streaming
+- `--plan "description"` — interactively create a plan file
+- `--session-timeout=30m` — per Claude session timeout (default unlimited)
+- `--idle-timeout=5m` — kill session after N minutes of no output
+
+**Plan format:** standard markdown with `- [ ]` checkbox steps, same as writing-plans skill output.
+Plans live in `docs/plans/`. Do NOT use `docs/superpowers/plans/`.
+
+**Monitoring while ralphex runs:**
+```
+/loop 20 min — check ralphex progress
+```
+In the loop, check: `git log --oneline -5`, `bun test 2>&1 | tail -20`, `git diff --stat`.
+
+**Important:** ralphex manages its own Claude sessions. Don't run it while actively editing the same
+files in another terminal. Use `--worktree` if you need isolation.
+
 ## Documentation
 
 - Specs: `docs/specs/` — design documents and feature specifications
