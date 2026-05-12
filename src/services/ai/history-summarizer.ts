@@ -1,7 +1,7 @@
 import type OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
 import { estimateMessageListTokens } from '../../utils/token-estimate.ts';
-import type { StreamRoundOptions, StreamRoundResult } from './streaming.ts';
+import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from './streaming.ts';
 
 const histLogger = logger.child({ module: 'history-summarizer' });
 
@@ -11,14 +11,14 @@ const SUMMARY_CACHE_TTL_SECS = 86400;
 const RECENT_KEEP = 5;
 
 type MessageParam = OpenAI.ChatCompletionMessageParam;
-type StreamFn = (opts: StreamRoundOptions, callbacks: Record<string, unknown>) => Promise<StreamRoundResult>;
+type StreamFn = (opts: StreamRoundOptions, callbacks: StreamCallbacks) => Promise<StreamRoundResult>;
 
 interface RedisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, exMode?: string, ttl?: string): Promise<unknown>;
 }
 
-const perMsgCacheKey = (id: number) => `hist:sum:msg:${id}`;
+const perMsgCacheKey = (id: number, subKey: string) => `hist:sum:msg:${id}:${subKey}`;
 
 export class HistorySummarizer {
   constructor(
@@ -26,10 +26,10 @@ export class HistorySummarizer {
     private streamFn: StreamFn,
   ) {}
 
-  async condenseMessage(rowId: number, role: string, content: string): Promise<string> {
+  async condenseMessage(rowId: number, subKey: string, content: string): Promise<string> {
     if (content.length <= PER_MSG_CHARS_LIMIT) return content;
 
-    const cacheKey = perMsgCacheKey(rowId);
+    const cacheKey = perMsgCacheKey(rowId, subKey);
     if (this.redis) {
       const cached = await this.redis.get(cacheKey).catch(() => null);
       if (cached) return cached;
@@ -42,7 +42,7 @@ export class HistorySummarizer {
             {
               role: 'user',
               content:
-                `Summarize this ${role} message from a calendar bot conversation in 1-3 sentences. ` +
+                `Summarize this tool message from a calendar bot conversation in 1-3 sentences. ` +
                 `Keep all key facts: event names, times, dates, IDs, error messages. Reply with the summary only.\n\n` +
                 content.slice(0, 3000),
             },
@@ -77,8 +77,17 @@ export class HistorySummarizer {
 
     if (messages.length <= RECENT_KEEP) return messages;
 
-    const older = messages.slice(0, messages.length - RECENT_KEEP);
-    const recent = messages.slice(messages.length - RECENT_KEEP);
+    // Walk back from the default cut point until we land on a user message,
+    // so that recent never starts mid assistant+tool_calls block (which would
+    // produce orphaned tool messages that OpenAI rejects with 400).
+    let cutIdx = messages.length - RECENT_KEEP;
+    while (cutIdx > 0 && messages[cutIdx]?.role !== 'user') {
+      cutIdx--;
+    }
+    if (cutIdx === 0) return messages;
+
+    const older = messages.slice(0, cutIdx);
+    const recent = messages.slice(cutIdx);
 
     const olderText = older
       .map((m) => {

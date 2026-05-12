@@ -361,7 +361,8 @@ export class CalendarBotAgent {
 
       for (let msg of parsedMessages) {
         if (this.summarizer && msg.role === 'tool' && typeof msg.content === 'string') {
-          const condensed = await this.summarizer.condenseMessage(row.id, 'tool', msg.content);
+          const toolMsg = msg as OpenAI.ChatCompletionToolMessageParam;
+          const condensed = await this.summarizer.condenseMessage(row.id, toolMsg.tool_call_id, msg.content);
           if (condensed !== msg.content) {
             msg = { ...msg, content: condensed };
           }
