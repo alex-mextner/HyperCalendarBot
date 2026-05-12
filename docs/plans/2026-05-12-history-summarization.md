@@ -152,7 +152,7 @@ git commit -m "feat(utils): add token estimator for history budget management"
 
 The class accepts an optional `RedisLike` for caching and a `StreamFn` for the actual AI call. Summarization only triggers when content exceeds `PER_MSG_CHARS_LIMIT`. Failures fall back to truncation — never throw.
 
-- [ ] **Step 1: Write failing tests for condenseMessage**
+- [x] **Step 1: Write failing tests for condenseMessage**
 
 Create `test/services/ai/history-summarizer.test.ts`:
 
@@ -221,7 +221,7 @@ describe('HistorySummarizer.condenseMessage', () => {
 });
 ```
 
-- [ ] **Step 2: Run — verify fails**
+- [x] **Step 2: Run — verify fails**
 
 ```bash
 bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -15
@@ -229,7 +229,7 @@ bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -15
 
 Expected: Cannot find module or missing export FAIL.
 
-- [ ] **Step 3: Implement `src/services/ai/history-summarizer.ts`**
+- [x] **Step 3: Implement `src/services/ai/history-summarizer.ts`**
 
 ```typescript
 import type OpenAI from 'openai';
@@ -367,7 +367,7 @@ export class HistorySummarizer {
 }
 ```
 
-- [ ] **Step 4: Run — verify passes**
+- [x] **Step 4: Run — verify passes**
 
 ```bash
 bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -20
@@ -375,7 +375,7 @@ bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -20
 
 Expected: all 4 tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/services/ai/history-summarizer.ts test/services/ai/history-summarizer.test.ts
