@@ -55,6 +55,9 @@ export class HistorySummarizer {
       );
 
       const summary = result.text.trim();
+      if (!summary) {
+        return `${content.slice(0, PER_MSG_CHARS_LIMIT)}[…]`;
+      }
 
       if (this.redis) {
         await this.redis
@@ -84,14 +87,21 @@ export class HistorySummarizer {
     while (cutIdx > 0 && messages[cutIdx]?.role !== 'user') {
       cutIdx--;
     }
-    if (cutIdx === 0) return messages;
+    if (cutIdx === 0) {
+      histLogger.warn(
+        { total, budget: HISTORY_TOKEN_BUDGET },
+        'No valid cut point found — returning over-budget history',
+      );
+      return messages;
+    }
 
     const older = messages.slice(0, cutIdx);
     const recent = messages.slice(cutIdx);
 
     const olderText = older
       .map((m) => {
-        const content = typeof m.content === 'string' ? m.content.slice(0, 300) : '[structured message]';
+        const content =
+          typeof m.content === 'string' ? m.content.slice(0, PER_MSG_CHARS_LIMIT) : '[structured message]';
         return `[${m.role}]: ${content}`;
       })
       .join('\n');

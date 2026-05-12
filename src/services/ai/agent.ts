@@ -25,6 +25,10 @@ const TIMEOUT_MS = 300_000;
 
 type MessageParam = OpenAI.ChatCompletionMessageParam;
 
+function isToolMessage(msg: MessageParam): msg is OpenAI.ChatCompletionToolMessageParam {
+  return msg.role === 'tool';
+}
+
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
   const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
   return `[${local}] ${text}`;
@@ -360,9 +364,8 @@ export class CalendarBotAgent {
       const parsedMessages = parseHistoryRow(row, ctx.user.timezone);
 
       for (let msg of parsedMessages) {
-        if (this.summarizer && msg.role === 'tool' && typeof msg.content === 'string') {
-          const toolMsg = msg as OpenAI.ChatCompletionToolMessageParam;
-          const condensed = await this.summarizer.condenseMessage(row.id, toolMsg.tool_call_id, msg.content);
+        if (this.summarizer && isToolMessage(msg) && typeof msg.content === 'string') {
+          const condensed = await this.summarizer.condenseMessage(row.id, msg.tool_call_id, msg.content);
           if (condensed !== msg.content) {
             msg = { ...msg, content: condensed };
           }

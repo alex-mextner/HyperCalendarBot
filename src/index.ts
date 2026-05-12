@@ -1303,6 +1303,7 @@ async function shutdown(): Promise<void> {
   if (broadcastQueueCleanup) await broadcastQueueCleanup.close();
   if (callQueueCleanup) await callQueueCleanup.close();
   if (googleRedisClient) googleRedisClient.close();
+  summarizerRedis.close();
   if (webServerHandle) webServerHandle.stop();
   db.close();
 }
