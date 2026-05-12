@@ -33,7 +33,7 @@ Both layers fail gracefully (truncation / drop-to-recent) if the fast AI chain i
 - Create: `src/utils/token-estimate.ts`
 - Create: `test/utils/token-estimate.test.ts`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Create `test/utils/token-estimate.test.ts`:
 
@@ -85,7 +85,7 @@ describe('estimateMessageListTokens', () => {
 });
 ```
 
-- [ ] **Step 2: Run — verify fails**
+- [x] **Step 2: Run — verify fails**
 
 ```bash
 bun test test/utils/token-estimate.test.ts 2>&1 | tail -10
@@ -93,7 +93,7 @@ bun test test/utils/token-estimate.test.ts 2>&1 | tail -10
 
 Expected: Cannot find module or FAIL.
 
-- [ ] **Step 3: Implement `src/utils/token-estimate.ts`**
+- [x] **Step 3: Implement `src/utils/token-estimate.ts`**
 
 ```typescript
 import type OpenAI from 'openai';
@@ -127,7 +127,7 @@ export function estimateMessageListTokens(messages: MessageParam[]): number {
 }
 ```
 
-- [ ] **Step 4: Run — verify passes**
+- [x] **Step 4: Run — verify passes**
 
 ```bash
 bun test test/utils/token-estimate.test.ts 2>&1 | tail -10
@@ -135,7 +135,7 @@ bun test test/utils/token-estimate.test.ts 2>&1 | tail -10
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/token-estimate.ts test/utils/token-estimate.test.ts
