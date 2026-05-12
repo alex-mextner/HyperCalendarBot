@@ -2,6 +2,7 @@
 // Alerts the admin via Telegram when an AI provider runs out of balance.
 // Deduplicates by provider name with a configurable TTL (default 7 days).
 
+import OpenAI from 'openai';
 import { logger } from './logger.ts';
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -24,6 +25,9 @@ export function initProviderAlerts(deps: AlertDeps): void {
 /** Returns true if the error indicates an exhausted balance / billing issue. */
 export function isBalanceExhausted(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+  // HTTP 402 Payment Required is the canonical balance/billing signal — trust
+  // the status before any body-substring guesswork.
+  if (error instanceof OpenAI.APIError && error.status === 402) return true;
   const msg = error.message.toLowerCase();
   // Per-minute TPM rate limits (Groq returns 413 with "tokens per minute" in body)
   // are NOT balance exhaustion — exclude them explicitly so the chain falls through

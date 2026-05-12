@@ -1,8 +1,17 @@
 // test/utils/ai-provider-alert.test.ts
 import { describe, expect, test } from 'bun:test';
+import OpenAI from 'openai';
 import { isBalanceExhausted } from '../../src/utils/ai-provider-alert.ts';
 
+function makeApiError(status: number, body: string): InstanceType<typeof OpenAI.APIError> {
+  return new OpenAI.APIError(status, { error: { message: body } }, body, new Headers());
+}
+
 describe('isBalanceExhausted', () => {
+  test('true for HTTP 402 Payment Required (status-based, body-agnostic)', () => {
+    expect(isBalanceExhausted(makeApiError(402, 'whatever the body says'))).toBe(true);
+  });
+
   test('true for "insufficient balance"', () => {
     expect(isBalanceExhausted(new Error('Your account has insufficient balance for this request'))).toBe(true);
   });
