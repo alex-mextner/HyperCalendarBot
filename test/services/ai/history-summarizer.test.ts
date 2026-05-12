@@ -1,6 +1,9 @@
 import { describe, expect, mock, test } from 'bun:test';
+import type OpenAI from 'openai';
 import { HistorySummarizer, PER_MSG_CHARS_LIMIT } from '../../../src/services/ai/history-summarizer.ts';
 import type { StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+
+type MessageParam = OpenAI.ChatCompletionMessageParam;
 
 const shortContent = 'short message';
 const longContent = 'x'.repeat(PER_MSG_CHARS_LIMIT + 1);
@@ -61,5 +64,69 @@ describe('HistorySummarizer.condenseMessage', () => {
     expect(first).toBe('cached summary');
     expect(second).toBe('cached summary');
     expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+});
+
+// 350 chars per message = 100 tokens each
+const bigMsg = (role: 'user' | 'assistant'): MessageParam => ({
+  role,
+  content: 'x'.repeat(350),
+});
+
+describe('HistorySummarizer.condenseHistory', () => {
+  test('returns same reference when under budget', async () => {
+    const mockStream = mock(async () => makeStreamResult('unused'));
+    const s = new HistorySummarizer(null, mockStream);
+    const msgs: MessageParam[] = [
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'world' },
+    ];
+    const result = await s.condenseHistory(msgs);
+    expect(result).toBe(msgs);
+    expect(mockStream).not.toHaveBeenCalled();
+  });
+
+  test('collapses old messages into summary + keeps 5 recent', async () => {
+    const mockStream = mock(async () => makeStreamResult('• event A\n• event B'));
+    const s = new HistorySummarizer(null, mockStream);
+
+    // 80 messages × 100 tokens = 8000 tokens > HISTORY_TOKEN_BUDGET
+    const msgs: MessageParam[] = Array.from({ length: 80 }, (_, i) => bigMsg(i % 2 === 0 ? 'user' : 'assistant'));
+
+    const result = await s.condenseHistory(msgs);
+
+    expect(result.length).toBe(6); // 1 summary + 5 recent
+    const first = result[0];
+    expect(first!.role).toBe('user');
+    expect(typeof first!.content === 'string' && first!.content).toContain('[Earlier conversation summary]');
+    expect(mockStream).toHaveBeenCalledTimes(1);
+  });
+
+  test('falls back to 5 most recent when AI fails', async () => {
+    const mockStream = mock(async () => {
+      throw new Error('AI down');
+    });
+    const s = new HistorySummarizer(null, mockStream);
+
+    const msgs: MessageParam[] = Array.from({ length: 80 }, (_, i) => bigMsg(i % 2 === 0 ? 'user' : 'assistant'));
+
+    const result = await s.condenseHistory(msgs);
+    expect(result.length).toBe(5);
+    expect(result).toEqual(msgs.slice(-5));
+  });
+
+  test('does not condense when message count <= RECENT_KEEP', async () => {
+    const mockStream = mock(async () => makeStreamResult('unused'));
+    const s = new HistorySummarizer(null, mockStream);
+
+    // 5 massive messages — still only 5, can't split
+    const msgs: MessageParam[] = Array.from({ length: 5 }, () => ({
+      role: 'user' as const,
+      content: 'x'.repeat(350 * 100), // huge
+    }));
+
+    const result = await s.condenseHistory(msgs);
+    expect(result).toBe(msgs); // returned as-is, can't split further
+    expect(mockStream).not.toHaveBeenCalled();
   });
 });
