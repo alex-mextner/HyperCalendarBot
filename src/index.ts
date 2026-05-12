@@ -13,6 +13,8 @@ import { t } from './config/constants.ts';
 import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
+import { HistorySummarizer } from './services/ai/history-summarizer.ts';
+import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { initProviderAlerts } from './utils/ai-provider-alert.ts';
@@ -92,6 +94,16 @@ function onWorkerFailed(name: string): (job: { id?: string } | undefined, err: E
 }
 
 const aiDebugLogger = new AiDebugLogger(!!config.AI_DEBUG_LOGS, 'logs');
+
+const summarizerRedis = new Bun.RedisClient(config.REDIS_URL);
+const historySummarizer = new HistorySummarizer(
+  {
+    get: (key) => summarizerRedis.get(key),
+    set: (key, value, exMode, ttl) =>
+      exMode && ttl ? summarizerRedis.set(key, value, exMode, ttl) : summarizerRedis.set(key, value),
+  },
+  aiStreamRound,
+);
 
 if (config.AGENT_JWT_SECRET) {
   initPairingSecret(config.AGENT_JWT_SECRET);
@@ -439,7 +451,7 @@ if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !con
       sendMessage: (chatId, text, parseMode) => botRef.sendMessage(chatId, text, parseMode),
       editMessageText: (chatId, messageId, text, parseMode) => botRef.editMessage(chatId, messageId, text, parseMode),
     };
-    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger }, voiceSender);
+    const voiceAgent = new CalendarBotAgent({ debugLogger: aiDebugLogger, summarizer: historySummarizer }, voiceSender);
 
     const voiceMaterializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
     const voiceEventService = new EventService({
@@ -1005,7 +1017,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
   createBot(
     config.BOT_TOKEN,
     db,
-    { debugLogger: aiDebugLogger },
+    { debugLogger: aiDebugLogger, summarizer: historySummarizer },
     {
       googleDeps,
       renderService,
