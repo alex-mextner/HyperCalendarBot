@@ -115,6 +115,31 @@ describe('HistorySummarizer.condenseHistory', () => {
     expect(result).toEqual(msgs.slice(-5));
   });
 
+  test('formats non-string content as [structured message] in older segment', async () => {
+    const mockStream = mock(async () => makeStreamResult('• event A'));
+    const s = new HistorySummarizer(null, mockStream);
+
+    // First message is non-string (tool_calls) — will be in "older" segment
+    const toolCallMsg: MessageParam = {
+      role: 'assistant' as const,
+      content: null,
+      tool_calls: [{ id: 't1', type: 'function' as const, function: { name: 'get_events', arguments: '{}' } }],
+    } as MessageParam;
+
+    // 81 messages: toolCallMsg + 80 bigMsg — over budget, toolCallMsg ends up in "older"
+    const msgs: MessageParam[] = [
+      toolCallMsg,
+      ...Array.from({ length: 80 }, (_, i) => bigMsg(i % 2 === 0 ? 'user' : 'assistant')),
+    ];
+
+    const result = await s.condenseHistory(msgs);
+    expect(result.length).toBe(6); // 1 summary + 5 recent
+    expect(mockStream).toHaveBeenCalledTimes(1);
+    // verify [structured message] was included in the text sent to AI
+    const callArgs = mockStream.mock.calls[0] as unknown as [{ messages: Array<{ content: string }> }, unknown];
+    expect(callArgs[0].messages[0]!.content).toContain('[structured message]');
+  });
+
   test('does not condense when message count <= RECENT_KEEP', async () => {
     const mockStream = mock(async () => makeStreamResult('unused'));
     const s = new HistorySummarizer(null, mockStream);

@@ -42,4 +42,27 @@ describe('estimateMessageListTokens', () => {
   test('returns 0 for empty list', () => {
     expect(estimateMessageListTokens([])).toBe(0);
   });
+
+  test('handles array content blocks (multi-part message)', () => {
+    const msgs = [
+      {
+        role: 'user' as const,
+        content: [
+          { type: 'text' as const, text: 'a'.repeat(350) },
+          { type: 'text' as const, text: 'b'.repeat(350) },
+        ],
+      },
+    ];
+    expect(estimateMessageListTokens(msgs)).toBe(200);
+  });
+
+  test('handles array content with unknown block types', () => {
+    const msgs = [
+      {
+        role: 'user' as const,
+        content: [{ type: 'image_url' as const, image_url: { url: 'http://example.com/img.png' } }],
+      },
+    ];
+    expect(estimateMessageListTokens(msgs)).toBe(0);
+  });
 });
