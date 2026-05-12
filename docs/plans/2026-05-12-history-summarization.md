@@ -498,7 +498,7 @@ git commit -m "test(ai): add condenseHistory coverage — budget enforcement, fa
 - Modify: `src/services/ai/types.ts` — add `summarizer?` to `AgentConfig`
 - Modify: `src/services/ai/agent.ts` — store + call summarizer; make `buildMessages()` async
 
-- [ ] **Step 1: Add `summarizer` to AgentConfig in types.ts**
+- [x] **Step 1: Add `summarizer` to AgentConfig in types.ts**
 
 Find (around line 322):
 ```typescript
@@ -515,7 +515,7 @@ export interface AgentConfig {
 }
 ```
 
-- [ ] **Step 2: Add import and field to CalendarBotAgent**
+- [x] **Step 2: Add import and field to CalendarBotAgent**
 
 At the top of `src/services/ai/agent.ts`, add after existing imports:
 ```typescript
@@ -538,7 +538,7 @@ export class CalendarBotAgent {
   }
 ```
 
-- [ ] **Step 3: Make buildMessages() async; apply per-message condensation**
+- [x] **Step 3: Make buildMessages() async; apply per-message condensation**
 
 Change the method signature:
 ```typescript
@@ -574,7 +574,7 @@ for (let msg of parsedMessages) {
 }
 ```
 
-- [ ] **Step 4: Await buildMessages() and apply full-history condensation in run()**
+- [x] **Step 4: Await buildMessages() and apply full-history condensation in run()**
 
 In `run()`, find:
 ```typescript
@@ -591,7 +591,7 @@ const historyMessages = this.summarizer
   : rawHistoryMessages;
 ```
 
-- [ ] **Step 5: Find and update any test callers of buildMessages()**
+- [x] **Step 5: Find and update any test callers of buildMessages()**
 
 ```bash
 grep -n "buildMessages" test/services/ai/agent.test.ts 2>/dev/null | head -10
@@ -599,7 +599,7 @@ grep -n "buildMessages" test/services/ai/agent.test.ts 2>/dev/null | head -10
 
 For each direct `buildMessages()` call in tests, add `await`.
 
-- [ ] **Step 6: Type check**
+- [x] **Step 6: Type check**
 
 ```bash
 tsc --noEmit 2>&1 | head -30
@@ -607,7 +607,7 @@ tsc --noEmit 2>&1 | head -30
 
 Expected: zero errors.
 
-- [ ] **Step 7: Run full test suite**
+- [x] **Step 7: Run full test suite**
 
 ```bash
 bun test 2>&1 | tail -30
@@ -615,7 +615,7 @@ bun test 2>&1 | tail -30
 
 Expected: all tests PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/services/ai/types.ts src/services/ai/agent.ts

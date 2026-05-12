@@ -321,6 +321,7 @@ export interface ToolHandlerMeta {
 
 export interface AgentConfig {
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
+  summarizer?: import('./history-summarizer.ts').HistorySummarizer;
 }
 
 export interface TelegramSender {

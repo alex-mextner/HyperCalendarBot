@@ -263,7 +263,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(system!.content as string).toContain('calendar assistant');
   });
 
-  test('buildMessages uses per-chat history in group context', () => {
+  test('buildMessages uses per-chat history in group context', async () => {
     const GROUP_CHAT_ID = -1001234;
     ctx.chatHistory.save(USER_ID, 'user', 'personal message');
     ctx.chatHistory.save(USER_ID, 'user', 'group message', GROUP_CHAT_ID);
@@ -281,7 +281,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const agent = new CalendarBotAgent(config, sender);
     const personalHistory = ctx.chatHistory.getRecent(USER_ID);
-    const { messages } = agent.buildMessages(ctx, personalHistory);
+    const { messages } = await agent.buildMessages(ctx, personalHistory);
 
     expect(messages.length).toBe(3);
     expect(messages[0]!.content as string).toContain('group message');
@@ -599,7 +599,7 @@ describe('CalendarBotAgent.run()', () => {
     expect(hasCorrected).toBe(true);
   });
 
-  test('legacy Anthropic content-block assistant rows are flattened to readable text', () => {
+  test('legacy Anthropic content-block assistant rows are flattened to readable text', async () => {
     const legacyBlocks = JSON.stringify([
       { type: 'text', text: 'Hello from the old SDK' },
       { type: 'tool_use', id: 'x', name: 'get_events', input: {} },
@@ -609,7 +609,7 @@ describe('CalendarBotAgent.run()', () => {
 
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
-    const { messages } = agent.buildMessages(ctx, history);
+    const { messages } = await agent.buildMessages(ctx, history);
 
     const assistantMsg = messages.find((m) => m.role === 'assistant');
     expect(assistantMsg).toBeDefined();

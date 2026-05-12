@@ -8,6 +8,7 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
+import type { HistorySummarizer } from './history-summarizer.ts';
 import { validateResponse } from './response-validator.ts';
 import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
@@ -326,22 +327,24 @@ export class CalendarBotAgent {
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
   private streamImpl: typeof aiStreamRound;
+  private summarizer?: HistorySummarizer;
 
   constructor(config: AgentConfig, sender: TelegramSender, opts?: { streamImpl?: typeof aiStreamRound }) {
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
+    this.summarizer = config.summarizer;
   }
 
   getSender(): TelegramSender {
     return this.sender;
   }
 
-  buildMessages(
+  async buildMessages(
     ctx: AgentContext,
     history: ChatHistoryMessage[],
     caps?: UserCapabilities,
-  ): { systemPrompt: string; messages: MessageParam[] } {
+  ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
@@ -356,7 +359,14 @@ export class CalendarBotAgent {
     for (const row of relevantHistory) {
       const parsedMessages = parseHistoryRow(row, ctx.user.timezone);
 
-      for (const msg of parsedMessages) {
+      for (let msg of parsedMessages) {
+        if (this.summarizer && msg.role === 'tool' && typeof msg.content === 'string') {
+          const condensed = await this.summarizer.condenseMessage(row.id, 'tool', msg.content);
+          if (condensed !== msg.content) {
+            msg = { ...msg, content: condensed };
+          }
+        }
+
         // For group chats, inject sender name+id into plain text user messages
         // so the model can distinguish speakers.
         if (ctx.isGroup && ctx.groupChatId && msg.role === 'user' && typeof msg.content === 'string') {
@@ -402,7 +412,10 @@ export class CalendarBotAgent {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: historyMessages } = this.buildMessages(ctx, history, caps);
+    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, caps);
+    const historyMessages = this.summarizer
+      ? await this.summarizer.condenseHistory(rawHistoryMessages)
+      : rawHistoryMessages;
 
     const dbg: AiDebugRunContext | null =
       this.debugLogger?.createRunContext(
