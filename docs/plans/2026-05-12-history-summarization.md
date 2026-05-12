@@ -389,7 +389,7 @@ git commit -m "feat(ai): add HistorySummarizer — per-message and full-history 
 **Files:**
 - Modify: `test/services/ai/history-summarizer.test.ts`
 
-- [ ] **Step 1: Add failing tests for condenseHistory**
+- [x] **Step 1: Add failing tests for condenseHistory**
 
 Append to `test/services/ai/history-summarizer.test.ts`:
 
@@ -467,7 +467,7 @@ describe('HistorySummarizer.condenseHistory', () => {
 });
 ```
 
-- [ ] **Step 2: Run — verify all pass (condenseHistory already implemented)**
+- [x] **Step 2: Run — verify all pass (condenseHistory already implemented)**
 
 ```bash
 bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -20
@@ -475,7 +475,7 @@ bun test test/services/ai/history-summarizer.test.ts 2>&1 | tail -20
 
 Expected: all 8 tests PASS. If any fail, fix the implementation in `history-summarizer.ts`.
 
-- [ ] **Step 3: Run full suite — no regressions**
+- [x] **Step 3: Run full suite — no regressions**
 
 ```bash
 bun test 2>&1 | tail -20
@@ -483,7 +483,7 @@ bun test 2>&1 | tail -20
 
 Expected: all tests PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add test/services/ai/history-summarizer.test.ts
