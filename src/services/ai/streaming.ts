@@ -94,6 +94,10 @@ export function isRetryableError(error: unknown): boolean {
     // A real 400 always includes a body describing the error — treat no-body 400 as retryable
     // so the chain falls through to the next provider instead of propagating.
     if (error.status === 400 && error.message.includes('no body')) return true;
+    // 413 Request Too Large: Groq returns this for per-minute TPM rate limits
+    // ("on tokens per minute (TPM): Limit X, Requested Y"). The next provider in
+    // the chain may have more headroom, so fall through.
+    if (error.status === 413) return true;
     return error.status === 429 || error.status >= 500;
   }
   // "Request timed out." from the OpenAI SDK's built-in connection timeout

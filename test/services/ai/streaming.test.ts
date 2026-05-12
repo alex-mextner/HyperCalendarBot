@@ -28,6 +28,10 @@ describe('isRetryableError', () => {
     expect(isRetryableError(makeApiError(401))).toBe(false);
   });
 
+  test('true for 413 (Groq TPM rate limit — chain should fall through)', () => {
+    expect(isRetryableError(makeApiError(413))).toBe(true);
+  });
+
   test('true for errors with "timed out" message', () => {
     expect(isRetryableError(new Error('Request timed out after 60s'))).toBe(true);
   });
