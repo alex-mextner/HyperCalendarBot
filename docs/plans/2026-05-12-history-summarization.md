@@ -629,7 +629,7 @@ git commit -m "feat(ai): wire HistorySummarizer into CalendarBotAgent — per-me
 **Files:**
 - Modify: `src/index.ts` — create `HistorySummarizer` with a `Bun.RedisClient`, inject into agent
 
-- [ ] **Step 1: Find where CalendarBotAgent is constructed**
+- [x] **Step 1: Find where CalendarBotAgent is constructed**
 
 ```bash
 grep -n "new CalendarBotAgent\|CalendarBotAgent(" src/index.ts | head -5
@@ -637,14 +637,14 @@ grep -n "new CalendarBotAgent\|CalendarBotAgent(" src/index.ts | head -5
 
 Note the line numbers.
 
-- [ ] **Step 2: Add imports near other AI imports**
+- [x] **Step 2: Add imports near other AI imports**
 
 ```typescript
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 ```
 
-- [ ] **Step 3: Create the summarizer before agent construction**
+- [x] **Step 3: Create the summarizer before agent construction**
 
 Before the `new CalendarBotAgent(...)` call, add:
 
@@ -662,7 +662,7 @@ const historySummarizer = new HistorySummarizer(
 );
 ```
 
-- [ ] **Step 4: Pass to CalendarBotAgent**
+- [x] **Step 4: Pass to CalendarBotAgent**
 
 In the constructor call, add `summarizer`:
 ```typescript
@@ -674,7 +674,7 @@ const agent = new CalendarBotAgent(
 
 If there are multiple construction sites, add `summarizer` to each.
 
-- [ ] **Step 5: Type check + lint**
+- [x] **Step 5: Type check + lint**
 
 ```bash
 tsc --noEmit 2>&1 | head -20
@@ -683,7 +683,7 @@ bun run lint 2>&1 | tail -10
 
 Expected: zero errors, zero warnings.
 
-- [ ] **Step 6: Run full test suite**
+- [x] **Step 6: Run full test suite**
 
 ```bash
 bun test 2>&1 | tail -30
@@ -691,7 +691,7 @@ bun test 2>&1 | tail -30
 
 Expected: all tests PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add src/index.ts
