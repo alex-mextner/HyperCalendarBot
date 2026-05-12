@@ -95,4 +95,4 @@ export function handleGetHistory(ctx: AgentContext, input: GetHistoryInput): Too
 
   return { success: true, output: lines.join('\n') };
 }
-handleGetHistory.meta = { readonly: true, skipActionLog: true } satisfies ToolHandlerMeta;
+handleGetHistory.meta = { readonly: true, skipActionLog: true, skipPersist: true } satisfies ToolHandlerMeta;

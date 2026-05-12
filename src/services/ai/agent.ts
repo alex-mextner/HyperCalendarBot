@@ -13,7 +13,7 @@ import { validateResponse } from './response-validator.ts';
 import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool, SILENT_TOOLS } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -396,9 +396,13 @@ export class CalendarBotAgent {
     ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, assistantMessage, chatId);
   }
 
-  saveToolResults(ctx: AgentContext, toolResults: MessageParam[]): void {
+  saveToolResults(ctx: AgentContext, toolResults: MessageParam[], skipIds?: Set<string>): void {
+    const toSave = skipIds?.size
+      ? toolResults.filter((m) => !isToolMessage(m) || !skipIds.has(m.tool_call_id))
+      : toolResults;
+    if (toSave.length === 0) return;
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toolResults, chatId);
+    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toSave, chatId);
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
@@ -549,6 +553,7 @@ export class CalendarBotAgent {
         }
 
         const toolResultMessages: MessageParam[] = [];
+        const skipPersistIds = new Set<string>();
 
         for (const tc of result.toolCalls) {
           let input: { [key: string]: unknown };
@@ -577,6 +582,7 @@ export class CalendarBotAgent {
             allToolCalls.push({ name: tc.name, input });
             allToolResults.push({ success: true, output: DUPLICATE_MARKER });
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
+            if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
             continue;
           }
           if (!SILENT_TOOLS.has(tc.name)) {
@@ -607,11 +613,12 @@ export class CalendarBotAgent {
             tool_call_id: tc.id,
             content,
           });
+          if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
 
           if (toolResult.stopLoop) {
             writer.clearToolLabel();
             if (!ctx.supplementMode && toolResultMessages.length > 0) {
-              this.saveToolResults(ctx, toolResultMessages);
+              this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
             }
             writer.commitIntermediate();
             await writer.finalize();
@@ -638,7 +645,7 @@ export class CalendarBotAgent {
 
         writer.clearToolLabel();
         if (!ctx.supplementMode) {
-          this.saveToolResults(ctx, toolResultMessages);
+          this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
         }
         writer.commitIntermediate();
 
@@ -855,6 +862,7 @@ export class CalendarBotAgent {
       }
 
       const toolResultMessages: MessageParam[] = [];
+      const skipPersistIds = new Set<string>();
       let stopLoopTriggered = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
@@ -877,6 +885,7 @@ export class CalendarBotAgent {
           allToolCalls.push({ name: tc.name, input });
           allToolResults.push({ success: true, output: DUPLICATE_MARKER });
           toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
+          if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
           continue;
         }
         writer.setToolLabel(tc.name, input);
@@ -900,6 +909,7 @@ export class CalendarBotAgent {
           : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
 
         toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content });
+        if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
 
         if (toolResult.stopLoop) {
           stopLoopTriggered = true;
@@ -908,7 +918,7 @@ export class CalendarBotAgent {
       }
 
       if (!ctx.supplementMode && toolResultMessages.length > 0) {
-        this.saveToolResults(ctx, toolResultMessages);
+        this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
       }
       writer.clearToolLabel();
       writer.commitIntermediate();
