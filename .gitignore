@@ -50,6 +50,7 @@ lib/
 mtproto-session*
 .claude/worktrees/
 .claude/projects/
+.claude/scheduled_tasks.lock
 venv/
 packages/agent-macos/node_modules
 packages/agent-macos/dist

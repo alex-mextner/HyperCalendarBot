@@ -317,10 +317,17 @@ export interface ToolHandlerMeta {
   skipActionLog?: boolean;
   /** Tool always results in [SKIP] — no status message or tool label shown. */
   silent?: boolean;
+  /**
+   * Tool result must NOT be persisted to chat_history.
+   * Use for meta/query tools whose output is derived from history itself —
+   * storing their results would cause recursive embedding on subsequent calls.
+   */
+  skipPersist?: boolean;
 }
 
 export interface AgentConfig {
   debugLogger?: import('./debug-logger.ts').AiDebugLogger;
+  summarizer?: import('./history-summarizer.ts').HistorySummarizer;
 }
 
 export interface TelegramSender {

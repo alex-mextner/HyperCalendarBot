@@ -331,6 +331,11 @@ export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
 );
 
+/** Derived: tools whose results must NOT be saved to chat_history (meta/query tools). */
+export const SKIP_PERSIST_TOOLS = new Set(
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipPersist),
+);
+
 /** Maps tool names to feature keys for usage tracking. Only includes tools that map to a trackable feature. */
 const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   create_event: 'events_create',

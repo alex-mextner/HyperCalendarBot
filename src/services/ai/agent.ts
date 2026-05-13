@@ -8,11 +8,12 @@ import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
+import type { HistorySummarizer } from './history-summarizer.ts';
 import { validateResponse } from './response-validator.ts';
 import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
-import { executeTool, SILENT_TOOLS } from './tool-executor.ts';
+import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
 import { getToolDefinitions, type UserCapabilities } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
@@ -23,6 +24,10 @@ const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 300_000;
 
 type MessageParam = OpenAI.ChatCompletionMessageParam;
+
+function isToolMessage(msg: MessageParam): msg is OpenAI.ChatCompletionToolMessageParam {
+  return msg.role === 'tool';
+}
 
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
   const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
@@ -326,22 +331,24 @@ export class CalendarBotAgent {
   private sender: TelegramSender;
   private debugLogger?: AiDebugLogger;
   private streamImpl: typeof aiStreamRound;
+  private summarizer?: HistorySummarizer;
 
   constructor(config: AgentConfig, sender: TelegramSender, opts?: { streamImpl?: typeof aiStreamRound }) {
     this.sender = sender;
     this.debugLogger = config.debugLogger;
     this.streamImpl = opts?.streamImpl ?? aiStreamRound;
+    this.summarizer = config.summarizer;
   }
 
   getSender(): TelegramSender {
     return this.sender;
   }
 
-  buildMessages(
+  async buildMessages(
     ctx: AgentContext,
     history: ChatHistoryMessage[],
     caps?: UserCapabilities,
-  ): { systemPrompt: string; messages: MessageParam[] } {
+  ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
@@ -356,7 +363,14 @@ export class CalendarBotAgent {
     for (const row of relevantHistory) {
       const parsedMessages = parseHistoryRow(row, ctx.user.timezone);
 
-      for (const msg of parsedMessages) {
+      for (let msg of parsedMessages) {
+        if (this.summarizer && isToolMessage(msg) && typeof msg.content === 'string') {
+          const condensed = await this.summarizer.condenseMessage(row.id, msg.tool_call_id, msg.content);
+          if (condensed !== msg.content) {
+            msg = { ...msg, content: condensed };
+          }
+        }
+
         // For group chats, inject sender name+id into plain text user messages
         // so the model can distinguish speakers.
         if (ctx.isGroup && ctx.groupChatId && msg.role === 'user' && typeof msg.content === 'string') {
@@ -375,16 +389,45 @@ export class CalendarBotAgent {
     return { systemPrompt, messages: sanitizeMessages(messages) };
   }
 
-  saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam): void {
+  saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam, skipIds?: Set<string>): void {
+    let msgToSave = assistantMessage;
+    if (
+      skipIds?.size &&
+      'tool_calls' in assistantMessage &&
+      Array.isArray(assistantMessage.tool_calls) &&
+      assistantMessage.tool_calls.length > 0
+    ) {
+      const kept = assistantMessage.tool_calls.filter((tc) => !skipIds.has(tc.id));
+      if (kept.length !== assistantMessage.tool_calls.length) {
+        msgToSave =
+          kept.length > 0
+            ? { ...assistantMessage, tool_calls: kept }
+            : {
+                role: 'assistant',
+                content: typeof assistantMessage.content === 'string' ? assistantMessage.content : null,
+              };
+      }
+    }
+    // Skip persisting an empty assistant turn (no content, no tool_calls) — happens
+    // when all tool calls in this round are skip-persist (e.g. only get_history called).
+    const hasContent =
+      msgToSave.content && (typeof msgToSave.content !== 'string' || msgToSave.content.trim().length > 0);
+    const hasCalls =
+      'tool_calls' in msgToSave && Array.isArray(msgToSave.tool_calls) && msgToSave.tool_calls.length > 0;
+    if (!hasContent && !hasCalls) return;
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
     // The conversation logger stores the full JSON payload under role='assistant'.
     // We stringify manually here so parseHistoryRow can round-trip the value.
-    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, assistantMessage, chatId);
+    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, msgToSave, chatId);
   }
 
-  saveToolResults(ctx: AgentContext, toolResults: MessageParam[]): void {
+  saveToolResults(ctx: AgentContext, toolResults: MessageParam[], skipIds?: Set<string>): void {
+    const toSave = skipIds?.size
+      ? toolResults.filter((m) => !isToolMessage(m) || !skipIds.has(m.tool_call_id))
+      : toolResults;
+    if (toSave.length === 0) return;
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
-    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toolResults, chatId);
+    ctx.conversationLogger.logToolResults(ctx.user.telegram_id, toSave, chatId);
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
@@ -402,7 +445,10 @@ export class CalendarBotAgent {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
     };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: historyMessages } = this.buildMessages(ctx, history, caps);
+    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, caps);
+    const historyMessages = this.summarizer
+      ? await this.summarizer.condenseHistory(rawHistoryMessages)
+      : rawHistoryMessages;
 
     const dbg: AiDebugRunContext | null =
       this.debugLogger?.createRunContext(
@@ -526,9 +572,16 @@ export class CalendarBotAgent {
           break;
         }
 
+        // Tool call IDs that must not be persisted (meta/query tools like get_history).
+        // Computed upfront so saveAssistantTurn can strip them from the assistant message
+        // before writing to DB, keeping the persisted tool_calls / tool_results in sync.
+        const skipPersistIds = new Set(
+          result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+        );
+
         // Persist the assistant turn (text + tool_calls) before executing tools
         if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage);
+          this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
         }
 
         const toolResultMessages: MessageParam[] = [];
@@ -594,7 +647,7 @@ export class CalendarBotAgent {
           if (toolResult.stopLoop) {
             writer.clearToolLabel();
             if (!ctx.supplementMode && toolResultMessages.length > 0) {
-              this.saveToolResults(ctx, toolResultMessages);
+              this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
             }
             writer.commitIntermediate();
             await writer.finalize();
@@ -621,7 +674,7 @@ export class CalendarBotAgent {
 
         writer.clearToolLabel();
         if (!ctx.supplementMode) {
-          this.saveToolResults(ctx, toolResultMessages);
+          this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
         }
         writer.commitIntermediate();
 
@@ -833,8 +886,12 @@ export class CalendarBotAgent {
         return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
 
+      const skipPersistIds = new Set(
+        result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+      );
+
       if (!ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, result.assistantMessage);
+        this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
       }
 
       const toolResultMessages: MessageParam[] = [];
@@ -891,7 +948,7 @@ export class CalendarBotAgent {
       }
 
       if (!ctx.supplementMode && toolResultMessages.length > 0) {
-        this.saveToolResults(ctx, toolResultMessages);
+        this.saveToolResults(ctx, toolResultMessages, skipPersistIds);
       }
       writer.clearToolLabel();
       writer.commitIntermediate();

@@ -9,6 +9,7 @@ import { EventReminderRepository } from '../../../../src/database/repositories/e
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { SKIP_PERSIST_TOOLS } from '../../../../src/services/ai/tool-executor.ts';
 import { handleGetHistory } from '../../../../src/services/ai/tool-handlers/history.ts';
 import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
@@ -142,5 +143,24 @@ describe('handleGetHistory', () => {
     expect(result.success).toBe(true);
     expect(result.output).toContain('клиентом');
     expect(result.output).not.toContain('погода');
+  });
+
+  test('handleGetHistory.meta has skipPersist: true to prevent recursive embedding', () => {
+    expect(handleGetHistory.meta.skipPersist).toBe(true);
+  });
+
+  test('SKIP_PERSIST_TOOLS includes get_history', () => {
+    expect(SKIP_PERSIST_TOOLS.has('get_history')).toBe(true);
+  });
+
+  test('tool result rows stored by other tools are visible in get_history output', () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'создай встречу');
+    ctx.chatHistory.save(USER_ID, 'tool', 'Event created: Meeting (ID: 42)');
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify([{ type: 'text', text: 'Встреча создана' }]));
+
+    const result = handleGetHistory(ctx, {});
+    expect(result.success).toBe(true);
+    expect(result.output).toContain('[tool_result]');
+    expect(result.output).toContain('Event created: Meeting (ID: 42)');
   });
 });
