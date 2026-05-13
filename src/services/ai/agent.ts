@@ -389,11 +389,36 @@ export class CalendarBotAgent {
     return { systemPrompt, messages: sanitizeMessages(messages) };
   }
 
-  saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam): void {
+  saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam, skipIds?: Set<string>): void {
+    let msgToSave = assistantMessage;
+    if (
+      skipIds?.size &&
+      'tool_calls' in assistantMessage &&
+      Array.isArray(assistantMessage.tool_calls) &&
+      assistantMessage.tool_calls.length > 0
+    ) {
+      const kept = assistantMessage.tool_calls.filter((tc) => !skipIds.has(tc.id));
+      if (kept.length !== assistantMessage.tool_calls.length) {
+        msgToSave =
+          kept.length > 0
+            ? { ...assistantMessage, tool_calls: kept }
+            : {
+                role: 'assistant',
+                content: typeof assistantMessage.content === 'string' ? assistantMessage.content : null,
+              };
+      }
+    }
+    // Skip persisting an empty assistant turn (no content, no tool_calls) — happens
+    // when all tool calls in this round are skip-persist (e.g. only get_history called).
+    const hasContent =
+      msgToSave.content && (typeof msgToSave.content !== 'string' || msgToSave.content.trim().length > 0);
+    const hasCalls =
+      'tool_calls' in msgToSave && Array.isArray(msgToSave.tool_calls) && msgToSave.tool_calls.length > 0;
+    if (!hasContent && !hasCalls) return;
     const chatId = ctx.isGroup ? ctx.groupChatId : undefined;
     // The conversation logger stores the full JSON payload under role='assistant'.
     // We stringify manually here so parseHistoryRow can round-trip the value.
-    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, assistantMessage, chatId);
+    ctx.conversationLogger.logAiTurn(ctx.user.telegram_id, msgToSave, chatId);
   }
 
   saveToolResults(ctx: AgentContext, toolResults: MessageParam[], skipIds?: Set<string>): void {
@@ -547,13 +572,19 @@ export class CalendarBotAgent {
           break;
         }
 
+        // Tool call IDs that must not be persisted (meta/query tools like get_history).
+        // Computed upfront so saveAssistantTurn can strip them from the assistant message
+        // before writing to DB, keeping the persisted tool_calls / tool_results in sync.
+        const skipPersistIds = new Set(
+          result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+        );
+
         // Persist the assistant turn (text + tool_calls) before executing tools
         if (!ctx.supplementMode) {
-          this.saveAssistantTurn(ctx, result.assistantMessage);
+          this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
         }
 
         const toolResultMessages: MessageParam[] = [];
-        const skipPersistIds = new Set<string>();
 
         for (const tc of result.toolCalls) {
           let input: { [key: string]: unknown };
@@ -582,7 +613,6 @@ export class CalendarBotAgent {
             allToolCalls.push({ name: tc.name, input });
             allToolResults.push({ success: true, output: DUPLICATE_MARKER });
             toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
-            if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
             continue;
           }
           if (!SILENT_TOOLS.has(tc.name)) {
@@ -613,7 +643,6 @@ export class CalendarBotAgent {
             tool_call_id: tc.id,
             content,
           });
-          if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
 
           if (toolResult.stopLoop) {
             writer.clearToolLabel();
@@ -857,12 +886,15 @@ export class CalendarBotAgent {
         return { hitStopLoop: false, lastRoundText: result.text, lastRoundHadToolCalls: false };
       }
 
+      const skipPersistIds = new Set(
+        result.toolCalls.filter((tc) => SKIP_PERSIST_TOOLS.has(tc.name)).map((tc) => tc.id),
+      );
+
       if (!ctx.supplementMode) {
-        this.saveAssistantTurn(ctx, result.assistantMessage);
+        this.saveAssistantTurn(ctx, result.assistantMessage, skipPersistIds);
       }
 
       const toolResultMessages: MessageParam[] = [];
-      const skipPersistIds = new Set<string>();
       let stopLoopTriggered = false;
       for (const tc of result.toolCalls) {
         let input: { [key: string]: unknown };
@@ -885,7 +917,6 @@ export class CalendarBotAgent {
           allToolCalls.push({ name: tc.name, input });
           allToolResults.push({ success: true, output: DUPLICATE_MARKER });
           toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content: DUPLICATE_MARKER });
-          if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
           continue;
         }
         writer.setToolLabel(tc.name, input);
@@ -909,7 +940,6 @@ export class CalendarBotAgent {
           : `Error: ${toolResult.error ?? toolResult.output ?? 'Unknown error'}`;
 
         toolResultMessages.push({ role: 'tool', tool_call_id: tc.id, content });
-        if (SKIP_PERSIST_TOOLS.has(tc.name)) skipPersistIds.add(tc.id);
 
         if (toolResult.stopLoop) {
           stopLoopTriggered = true;
