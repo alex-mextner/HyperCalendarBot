@@ -38,12 +38,16 @@ export interface DeliverMessageParams {
   fallbackText: string;
   botSend: (recipientId: number, text: string, keyboard?: InlineKeyboard) => Promise<{ message_id: number }>;
   mtprotoSend?: (userId: number, text: string, username?: string) => Promise<boolean>;
+  /** When true, skip the deep-link fallback step (3) entirely. Used for group targets, where a
+   *  forward deep-link is meaningless (it resolves only in a user's private /start). */
+  suppressFallback?: boolean;
 }
 
 export async function deliverMessage(
   params: DeliverMessageParams,
 ): Promise<{ delivered: boolean; messageId?: number; fallbackSent?: boolean }> {
   const { targetId, targetUsername, text, keyboard, fallbackRecipientId, fallbackText, botSend, mtprotoSend } = params;
+  const { suppressFallback } = params;
 
   // 1. Bot API
   try {
@@ -64,6 +68,9 @@ export async function deliverMessage(
   }
 
   // 3. Deep link fallback to initiator
+  if (suppressFallback) {
+    return { delivered: false, fallbackSent: false };
+  }
   try {
     await botSend(fallbackRecipientId, fallbackText);
     return { delivered: false, fallbackSent: true };

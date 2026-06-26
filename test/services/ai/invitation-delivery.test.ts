@@ -195,6 +195,29 @@ describe('deliverInvitation', () => {
     expect(fallback!.text).toContain('t.me/TestBot');
   });
 
+  test('isGroupTarget + bot API fails → viaDeepLink false, no forward link sent to inviter', async () => {
+    const invId = createInvitation();
+    const sentMessages: { chatId: number; text: string }[] = [];
+    const sender = makeSender({
+      sendMessage: async (chatId, text) => {
+        sentMessages.push({ chatId, text });
+        return { message_id: 1 };
+      },
+      sendInvitation: async () => null,
+    });
+
+    const result = await deliverInvitation({
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      isGroupTarget: true,
+    });
+
+    // A forward deep-link is meaningless for a group target: it resolves in a USER's private
+    // /start and callbacks auth against the user's telegram_id, not the group. So no fallback
+    // is sent and the result is an honest non-delivery — never a "link sent" claim.
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(sentMessages.find((m) => m.chatId === INVITER_ID)).toBeUndefined();
+  });
+
   test('no deepLinkService → fallback without link, viaDeepLink false (no link existed)', async () => {
     const invId = createInvitation();
     const sentMessages: { chatId: number; text: string }[] = [];

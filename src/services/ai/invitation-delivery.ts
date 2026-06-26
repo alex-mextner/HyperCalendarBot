@@ -45,6 +45,11 @@ export interface DeliverInvitationParams {
   fallbackChatId: number;
   /** When false, MTProto is skipped entirely (Bot API → deep-link only). Default true. */
   allowMtproto?: boolean;
+  /** When true, the target is a group chat: the deep-link fallback is suppressed. A forward
+   *  invite link resolves only in a USER's private /start and authorizes against the user's
+   *  telegram_id, so it can never be accepted on behalf of a group — reporting "link sent" would
+   *  be a lie. On Bot-API failure the result is an honest non-delivery (viaDeepLink: false). */
+  isGroupTarget?: boolean;
   deps: InvitationDeliveryDeps;
 }
 
@@ -66,6 +71,7 @@ export async function deliverInvitation(
     inviterLang,
     fallbackChatId,
     allowMtproto = true,
+    isGroupTarget = false,
     deps,
   } = params;
   const { sender, invitationRepo, userRepo, deepLinkService: deepLinkSvc, botUsername } = deps;
@@ -178,6 +184,7 @@ export async function deliverInvitation(
         return sender.sendMessage(recipientId, msgText);
       },
       mtprotoSend: allowMtproto ? combinedMtprotoSend : undefined,
+      suppressFallback: isGroupTarget,
     });
 
     if (result.delivered && result.messageId !== undefined) {

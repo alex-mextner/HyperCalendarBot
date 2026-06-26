@@ -1053,8 +1053,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       const event = eventService.getEvent(eventId, user.telegram_id);
-      // Groups receive the invitation via Bot API only — no MTProto userbot delivery.
-      // The deep-link fallback goes to the inviter's private chat, not the group.
+      // Groups receive the invitation via Bot API only — no MTProto userbot delivery, and no
+      // deep-link fallback: a forward invite link resolves only in a user's private /start and
+      // can't be accepted on behalf of a group, so a failed delivery reports honest failure.
       const outcome = await deliverPickerInvitation(
         {
           eventId,
@@ -1062,6 +1063,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           inviteeId,
           fallbackChatId: user.telegram_id,
           allowMtproto: false,
+          isGroupTarget: true,
         },
         pickerInvitationDeps,
       );

@@ -84,6 +84,10 @@ export interface PickerInvitationParams {
   fallbackChatId: number;
   /** When false, MTProto is skipped (Bot API → deep-link only). Used for group targets. */
   allowMtproto?: boolean;
+  /** When true, the target is a group chat: the deep-link fallback is suppressed (a forward
+   *  invite link can't be accepted on behalf of a group), so a failed Bot-API delivery reports
+   *  an honest failure instead of a useless "link sent" status. */
+  isGroupTarget?: boolean;
 }
 
 /**
@@ -138,6 +142,7 @@ export async function deliverPickerInvitation(
     inviterLang: (params.inviter.language ?? 'en') as 'en' | 'ru',
     fallbackChatId: params.fallbackChatId,
     allowMtproto: params.allowMtproto ?? true,
+    isGroupTarget: params.isGroupTarget ?? false,
     deps: {
       sender: deps.sender,
       invitationRepo: deps.invitationRepo,

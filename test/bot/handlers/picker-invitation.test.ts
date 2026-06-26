@@ -244,6 +244,26 @@ describe('deliverPickerInvitation', () => {
     expect(outcome).toEqual({ kind: 'deeplink' });
   });
 
+  test('group target failed Bot-API delivery → failed (not deeplink), no forward link to inviter (#97)', async () => {
+    const sentToInviter: string[] = [];
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => null,
+      sendMessage: async (chatId, text) => {
+        if (chatId === INVITER_ID) sentToInviter.push(text);
+        return { message_id: 1 };
+      },
+    };
+    const outcome = await deliverPickerInvitation(
+      { eventId, inviter, inviteeId: GROUP_ID, fallbackChatId: INVITER_ID, allowMtproto: false, isGroupTarget: true },
+      makeDeps(sender),
+    );
+    // A forward deep-link cannot be accepted in a group, so the outcome must be an honest
+    // failure — never a deeplink — and no useless "forward this link" message is sent.
+    expect(outcome).toEqual({ kind: 'failed' });
+    expect(sentToInviter).toHaveLength(0);
+  });
+
   test('invitationService.sendInvitation throwing → error outcome, not a propagated throw (#96)', async () => {
     const svc = invitationServiceWith(() => {
       throw new Error('invitation service exploded');

@@ -103,6 +103,25 @@ test('deliverMessage: deep-link fallback delivered → fallbackSent true', async
   expect(result).toEqual({ delivered: false, fallbackSent: true });
 });
 
+test('deliverMessage: suppressFallback skips the deep-link fallback entirely', async () => {
+  const fakeSend = mock(async (id: number) => {
+    if (id === 100) throw new Error('403');
+    return { message_id: 1 };
+  });
+  const result = await deliverMessage({
+    targetId: 100,
+    text: 'hello',
+    fallbackRecipientId: 999,
+    fallbackText: 'fallback',
+    botSend: fakeSend,
+    suppressFallback: true,
+  });
+  expect(result).toEqual({ delivered: false, fallbackSent: false });
+  // Only the target was attempted — no fallback send to the initiator (999).
+  expect(fakeSend).toHaveBeenCalledTimes(1);
+  expect(fakeSend).toHaveBeenCalledWith(100, 'hello', undefined);
+});
+
 test('deliverMessage: deep-link fallback throws → fallbackSent false, error logged (not silent)', async () => {
   const warnSpy = spyOn(botLogger, 'warn').mockImplementation(() => {});
   const fakeSend = mock(async () => {
