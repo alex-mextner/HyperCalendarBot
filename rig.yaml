@@ -1,0 +1,38 @@
+# rig.yaml — REPO-LEVEL config only.
+# The machine-wide installs (skills, agent-hooks, git-hooks dispatcher, MCP, harness
+# auto-mode) live in the GLOBAL layer ~/.config/rig/config.yaml and are NOT repeated here.
+# This file holds only what is specific to THIS repo (CI gates, repo settings). The cascade
+# is by LOCATION: global is global, this committed file is the repo and overrides it.
+# Apply: rig apply.  Drift: rig status.
+#
+# This is a TypeScript/bun Telegram bot. It already ships its own deploy + image CI
+# (.github/workflows/deploy.yml, ci-image.yml) and a local lefthook biome/tsc gate, so the
+# rig `tests` gate (pytest-only) is intentionally NOT enabled here — these gates are the
+# language-agnostic security/hygiene + merge layer on top of the repo's own build/test CI.
+
+version: 1
+ci:
+  enabled: true
+  target: .github/workflows
+  all: false
+  items:
+    secret-scan:
+      enabled: true
+      tier: block
+    codeql:
+      enabled: true
+      tier: block
+      variant: selfgate
+    dependency-review:
+      enabled: true
+      tier: block
+    leftover-grep:
+      enabled: true
+      tier: block
+    review-threads:
+      enabled: true
+      tier: block
+    ship:
+      enabled: true
+      install_to: ~/bin
+      gh_alias: true
