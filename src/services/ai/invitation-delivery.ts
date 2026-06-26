@@ -28,6 +28,9 @@ export interface DeliverInvitationParams {
   eventId: number;
   inviteeId: number;
   inviteeUsername?: string;
+  /** Human display name for the invitee (e.g. the picker's firstName). Used to label the
+   *  inviter-facing fallback when the invitee has no DB row / username. */
+  inviteeName?: string;
   inviterId: number;
   inviterName: string;
   inviterUsername?: string;
@@ -53,6 +56,7 @@ export async function deliverInvitation(
     eventId,
     inviteeId,
     inviteeUsername,
+    inviteeName,
     inviterId,
     inviterName,
     inviterUsername,
@@ -102,8 +106,17 @@ export async function deliverInvitation(
   // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
   // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
   const inviterTr = t(inviterLang).aiTools.sharing;
+  // Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
+  // to the same inviter chat, concurrently — without a label the inviter can't tell which
+  // deep-link belongs to whom (could forward the wrong person's invite).
+  const inviteeLabel =
+    inviteeName ??
+    invitee?.first_name ??
+    (inviteeUsername ? `@${inviteeUsername}` : invitee?.username ? `@${invitee.username}` : `#${inviteeId}`);
   const fallbackMsg =
-    url !== null ? inviterTr.deliveryFallbackWithLink(eventTitle, url) : inviterTr.deliveryFallbackNoLink(eventTitle);
+    url !== null
+      ? inviterTr.deliveryFallbackWithLink(eventTitle, inviteeLabel, url)
+      : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
 
   // User-session MTProto: first-person text via user's own connected session
   const userFirstPersonText =

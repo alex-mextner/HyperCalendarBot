@@ -47,7 +47,7 @@ import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
 import { botLogger } from '../utils/logger.ts';
-import { escapeHtml, type ParseMode } from '../utils/telegram.ts';
+import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
@@ -84,10 +84,9 @@ import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
 import {
+  buildChatSharedResultText,
   deliverPickerInvitation,
-  type PickerDeliveryOutcome,
-  pickerAiLine,
-  pickerStatusLine,
+  deliverPickerInvitations,
 } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
@@ -1008,28 +1007,20 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // The deep-link fallback is a private invite link — it must reach the inviter's
       // PRIVATE chat, never the group the picker was opened in (would leak to all members).
       const fallbackChatId = user.telegram_id;
-      const statusLines: string[] = [];
-      const aiResultLines: string[] = [];
 
-      for (const shared of selected) {
-        const name = shared.firstName ?? shared.username ?? `id:${shared.userId}`;
-        // Save/update contact (deduplicates by telegram_id/username)
-        if (db.contacts) {
-          db.contacts.upsert(user.telegram_id, name, shared.username, shared.userId);
-        }
-        const outcome = await deliverPickerInvitation(
-          {
-            eventId,
-            inviter: user,
-            inviteeId: shared.userId,
-            inviteeUsername: shared.username,
-            fallbackChatId,
-          },
-          pickerInvitationDeps,
-        );
-        statusLines.push(pickerStatusLine(lang, name, outcome));
-        aiResultLines.push(pickerAiLine(name, shared.userId, outcome));
-      }
+      // Deliver to all selected invitees concurrently — a serial loop spawns Bot-API + MTProto
+      // per invitee and risks a Telegram webhook timeout. Per-invitee failures are isolated and
+      // the result lines preserve the input order.
+      const { statusLines, aiResultLines } = await deliverPickerInvitations(
+        {
+          eventId,
+          inviter: user,
+          invitees: selected.map((s) => ({ userId: s.userId, firstName: s.firstName, username: s.username })),
+          lang,
+          fallbackChatId,
+        },
+        pickerInvitationDeps,
+      );
 
       const resultText = `${t(lang).invite_picker_header}\n${statusLines.join('\n')}`;
       await ctx.send(resultText, {
@@ -1061,8 +1052,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       const event = eventService.getEvent(eventId, user.telegram_id);
-      // Escaped because the result is sent with parse_mode HTML (titles may contain <, &).
-      const groupLabel = escapeHtml(event?.title ?? `Event #${eventId}`);
       // Groups receive the invitation via Bot API only — no MTProto userbot delivery.
       // The deep-link fallback goes to the inviter's private chat, not the group.
       const outcome = await deliverPickerInvitation(
@@ -1075,14 +1064,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         },
         pickerInvitationDeps,
       );
-      // pickerStatusLine is escaping-agnostic; this message is HTML, so escape the raw
-      // error string (the InvitationService error) before it is interpolated.
-      const htmlSafeOutcome: PickerDeliveryOutcome =
-        outcome.kind === 'error' ? { kind: 'error', error: escapeHtml(outcome.error) } : outcome;
-      const resultText =
-        outcome.kind === 'delivered'
-          ? t(lang).invite_delivered(groupLabel)
-          : pickerStatusLine(lang, groupLabel, htmlSafeOutcome);
+      // The result is sent with parse_mode HTML; buildChatSharedResultText escapes the title
+      // and any error string before interpolation.
+      const resultText = buildChatSharedResultText(lang, event?.title ?? `Event #${eventId}`, outcome);
       await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     })
     // AI Assistant commands (not in setMyCommands — internal use only)

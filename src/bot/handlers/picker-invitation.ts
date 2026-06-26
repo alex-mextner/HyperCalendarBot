@@ -8,6 +8,10 @@ import type { TelegramSender } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
 import type { InvitationService } from '../../services/sharing/invitation-service.ts';
+import { botLogger } from '../../utils/logger.ts';
+import { escapeHtml } from '../../utils/telegram.ts';
+
+const deliveryLogger = botLogger.child({ module: 'picker-invitation' });
 
 /** Outcome of a picker-driven invitation delivery attempt (real Telegram delivery, not just DB row). */
 export type PickerDeliveryOutcome =
@@ -74,6 +78,8 @@ export interface PickerInvitationParams {
   inviter: User;
   inviteeId: number;
   inviteeUsername?: string;
+  /** Display name for the invitee (e.g. the picker's firstName) — labels the inviter fallback. */
+  inviteeName?: string;
   /** Where the deep-link fallback goes — always the inviter's private chat, never a group. */
   fallbackChatId: number;
   /** When false, MTProto is skipped (Bot API → deep-link only). Used for group targets. */
@@ -92,7 +98,18 @@ export async function deliverPickerInvitation(
   const { invitationService } = deps;
   if (!invitationService) return { kind: 'notConfigured' };
 
-  const inv = invitationService.sendInvitation(params.eventId, params.inviter.telegram_id, params.inviteeId);
+  let inv: ReturnType<InvitationService['sendInvitation']>;
+  try {
+    inv = invitationService.sendInvitation(params.eventId, params.inviter.telegram_id, params.inviteeId);
+  } catch (err) {
+    // A throw here (e.g. a DB error) must not abort the whole picker batch — report this
+    // invitee as an error and let the caller continue with the rest.
+    deliveryLogger.error(
+      { err, eventId: params.eventId, inviteeId: params.inviteeId },
+      'sendInvitation threw while creating picker invitation',
+    );
+    return { kind: 'error', error: 'invitation could not be created' };
+  }
   if (!inv.success || !inv.invitation) {
     return { kind: 'error', error: inv.error ?? 'unknown error' };
   }
@@ -106,6 +123,7 @@ export async function deliverPickerInvitation(
     eventId: params.eventId,
     inviteeId: params.inviteeId,
     inviteeUsername: params.inviteeUsername,
+    inviteeName: params.inviteeName,
     inviterId: params.inviter.telegram_id,
     inviterName: params.inviter.first_name ?? params.inviter.username ?? `User ${params.inviter.telegram_id}`,
     inviterUsername: params.inviter.username ?? undefined,
@@ -128,4 +146,94 @@ export async function deliverPickerInvitation(
   if (delivery.delivered) return { kind: 'delivered' };
   if (delivery.viaDeepLink) return { kind: 'deeplink' };
   return { kind: 'failed' };
+}
+
+/** One invitee selected from the picker modal. */
+export interface PickerBatchInvitee {
+  userId: number;
+  firstName?: string;
+  username?: string;
+}
+
+export interface PickerBatchParams {
+  eventId: number;
+  inviter: User;
+  invitees: PickerBatchInvitee[];
+  lang: 'en' | 'ru';
+  /** Where the deep-link fallback goes — always the inviter's private chat, never a group. */
+  fallbackChatId: number;
+}
+
+/** Result lines for one invitee, in the two flavors the caller needs. */
+interface PickerBatchLine {
+  statusLine: string;
+  aiResultLine: string;
+}
+
+function inviteeDisplayName(invitee: PickerBatchInvitee): string {
+  return invitee.firstName ?? invitee.username ?? `id:${invitee.userId}`;
+}
+
+async function deliverOneForBatch(
+  params: PickerBatchParams,
+  invitee: PickerBatchInvitee,
+  deps: PickerInvitationDeps,
+): Promise<PickerBatchLine> {
+  const name = inviteeDisplayName(invitee);
+  let outcome: PickerDeliveryOutcome;
+  try {
+    // Save/update contact (deduplicates by telegram_id/username).
+    deps.contactRepo?.upsert(params.inviter.telegram_id, name, invitee.username, invitee.userId);
+    outcome = await deliverPickerInvitation(
+      {
+        eventId: params.eventId,
+        inviter: params.inviter,
+        inviteeId: invitee.userId,
+        inviteeUsername: invitee.username,
+        inviteeName: name,
+        fallbackChatId: params.fallbackChatId,
+      },
+      deps,
+    );
+  } catch (err) {
+    // Isolate per-invitee failures so one bad invitee never aborts the rest of the batch.
+    deliveryLogger.error({ err, inviteeId: invitee.userId }, 'Picker invitation delivery threw');
+    outcome = { kind: 'error', error: 'delivery error' };
+  }
+  return {
+    statusLine: pickerStatusLine(params.lang, name, outcome),
+    aiResultLine: pickerAiLine(name, invitee.userId, outcome),
+  };
+}
+
+/**
+ * Deliver invitations to every picked invitee CONCURRENTLY (one webhook can carry many
+ * invitees; serial Bot-API + MTProto spawns would risk a Telegram webhook timeout). Each
+ * invitee is isolated — one failure does not abort the others — and the returned lines
+ * preserve the input invitee order.
+ */
+export async function deliverPickerInvitations(
+  params: PickerBatchParams,
+  deps: PickerInvitationDeps,
+): Promise<{ statusLines: string[]; aiResultLines: string[] }> {
+  const lines = await Promise.all(params.invitees.map((invitee) => deliverOneForBatch(params, invitee, deps)));
+  return {
+    statusLines: lines.map((line) => line.statusLine),
+    aiResultLines: lines.map((line) => line.aiResultLine),
+  };
+}
+
+/**
+ * Build the result message for a `chat_shared` (group invite) delivery. The message is sent
+ * with `parse_mode: 'HTML'`, so the event/group title AND any error string must be escaped
+ * here — `pickerStatusLine` is escaping-agnostic and interpolates them verbatim.
+ */
+export function buildChatSharedResultText(lang: 'en' | 'ru', title: string, outcome: PickerDeliveryOutcome): string {
+  const groupLabel = escapeHtml(title);
+  if (outcome.kind === 'delivered') {
+    return t(lang).invite_delivered(groupLabel);
+  }
+  const htmlSafeOutcome: PickerDeliveryOutcome =
+    outcome.kind === 'error' ? { kind: 'error', error: escapeHtml(outcome.error) } : outcome;
+  return pickerStatusLine(lang, groupLabel, htmlSafeOutcome);
 }

@@ -1,7 +1,9 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import {
+  buildChatSharedResultText,
   deliverPickerInvitation,
+  deliverPickerInvitations,
   type PickerDeliveryOutcome,
   type PickerInvitationDeps,
   pickerAiLine,
@@ -20,6 +22,12 @@ import type { TelegramSender } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { DeepLinkService } from '../../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
+
+/** Centralized test cast: build an InvitationService whose sendInvitation we control. */
+function invitationServiceWith(sendInvitation: InvitationService['sendInvitation']): InvitationService {
+  const partial: Pick<InvitationService, 'sendInvitation'> = { sendInvitation };
+  return partial as unknown as InvitationService;
+}
 
 const ALL_KINDS: PickerDeliveryOutcome[] = [
   { kind: 'delivered' },
@@ -223,5 +231,270 @@ describe('deliverPickerInvitation', () => {
     expect(mtprotoCalled).toBe(false);
     // Bot API failed, MTProto disabled → deep-link fallback path.
     expect(outcome).toEqual({ kind: 'deeplink' });
+  });
+
+  test('invitationService.sendInvitation throwing → error outcome, not a propagated throw (#96)', async () => {
+    const svc = invitationServiceWith(() => {
+      throw new Error('invitation service exploded');
+    });
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const outcome = await deliverPickerInvitation(
+      { eventId, inviter, inviteeId: INVITEE_ID, fallbackChatId: INVITER_ID },
+      makeDeps(sender, { invitationService: svc }),
+    );
+    expect(outcome.kind).toBe('error');
+  });
+});
+
+describe('deliverPickerInvitations (batch)', () => {
+  let db: Database;
+  let userRepo: UserRepository;
+  let contactRepo: ContactRepository;
+  let invitationRepo: InvitationRepository;
+  let eventRepo: EventRepository;
+  let eventService: EventService;
+  let invitationService: InvitationService;
+  let deepLinkService: DeepLinkService;
+  let inviter: User;
+  let eventId: number;
+
+  const SENDER_BASE: TelegramSender = {
+    sendMessage: async () => ({ message_id: 1 }),
+    editMessageText: async () => {},
+  };
+
+  function makeDeps(sender: TelegramSender, extra: Partial<PickerInvitationDeps> = {}): PickerInvitationDeps {
+    return {
+      sender,
+      invitationService,
+      eventService,
+      invitationRepo,
+      userRepo,
+      deepLinkService,
+      botUsername: 'TestBot',
+      contactRepo,
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    userRepo = new UserRepository(db);
+    contactRepo = new ContactRepository(db);
+    invitationRepo = new InvitationRepository(db);
+    eventRepo = new EventRepository(db);
+    eventService = new EventService({ eventRepo });
+    invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+    deepLinkService = new DeepLinkService(new DeepLinkRepository(db));
+    inviter = userRepo.create({ telegram_id: INVITER_ID, timezone: 'UTC', first_name: 'Alex' });
+    userRepo.create({ telegram_id: 201, timezone: 'UTC', first_name: 'Alice' });
+    userRepo.create({ telegram_id: 202, timezone: 'UTC', first_name: 'Bob' });
+    userRepo.create({ telegram_id: 203, timezone: 'UTC', first_name: 'Carol' });
+    const event = eventService.createEvent({
+      user_id: INVITER_ID,
+      title: 'Launch Party',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    eventId = event.id;
+  });
+
+  test('delivers concurrently and preserves input order of result lines', async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        inFlight -= 1;
+        return { message_id: 1 };
+      },
+    };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [
+          { userId: 201, firstName: 'Alice' },
+          { userId: 202, firstName: 'Bob' },
+          { userId: 203, firstName: 'Carol' },
+        ],
+      },
+      makeDeps(sender),
+    );
+    // Concurrency: with a serial loop only one send is ever in flight at a time.
+    expect(maxInFlight).toBeGreaterThan(1);
+    // Order preserved 1:1 with the input invitee list.
+    expect(result.statusLines).toHaveLength(3);
+    expect(result.statusLines[0]).toContain('Alice');
+    expect(result.statusLines[1]).toContain('Bob');
+    expect(result.statusLines[2]).toContain('Carol');
+    expect(result.aiResultLines[0]).toContain('Alice');
+    expect(result.aiResultLines[1]).toContain('Bob');
+    expect(result.aiResultLines[2]).toContain('Carol');
+  });
+
+  test('one invitee throwing in the invitation pipeline does not abort the batch (#96)', async () => {
+    const realSvc = invitationService;
+    const svc = invitationServiceWith((e, i, id, u) => {
+      if (id === 202) throw new Error('invitation service exploded');
+      return realSvc.sendInvitation(e, i, id, u);
+    });
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [
+          { userId: 201, firstName: 'Alice' },
+          { userId: 202, firstName: 'Bob' },
+          { userId: 203, firstName: 'Carol' },
+        ],
+      },
+      makeDeps(sender, { invitationService: svc }),
+    );
+    expect(result.statusLines).toHaveLength(3);
+    expect(result.statusLines[0]).toBe('✅ Alice');
+    expect(result.statusLines[2]).toBe('✅ Carol');
+    // The failing invitee still produces a (failure) line — its error did not abort the batch.
+    expect(result.statusLines[1]).toContain('Bob');
+    expect(result.aiResultLines[1]).toContain('invitation not created');
+  });
+
+  test('a throwing contact upsert for one invitee is isolated — others still deliver', async () => {
+    const realUpsert = contactRepo.upsert.bind(contactRepo);
+    spyOn(contactRepo, 'upsert').mockImplementation((userId, name, username, telegramId, preferredName) => {
+      if (telegramId === 202) throw new Error('contact write failed');
+      return realUpsert(userId, name, username, telegramId, preferredName);
+    });
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [
+          { userId: 201, firstName: 'Alice' },
+          { userId: 202, firstName: 'Bob' },
+          { userId: 203, firstName: 'Carol' },
+        ],
+      },
+      makeDeps(sender),
+    );
+    expect(result.statusLines).toHaveLength(3);
+    expect(result.statusLines[0]).toBe('✅ Alice');
+    expect(result.statusLines[2]).toBe('✅ Carol');
+    expect(result.statusLines[1]).toContain('Bob');
+  });
+
+  test('each failed invitee gets a deep-link fallback that names that invitee (no cross-wiring)', async () => {
+    const sentToInviter: string[] = [];
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      // Both invitees fail Bot API → each gets a private deep-link fallback to the inviter.
+      sendInvitation: async () => null,
+      sendMessage: async (chatId, text) => {
+        if (chatId === INVITER_ID) sentToInviter.push(text);
+        return { message_id: 1 };
+      },
+    };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [
+          { userId: 201, firstName: 'Alice' },
+          { userId: 202, firstName: 'Bob' },
+        ],
+      },
+      makeDeps(sender),
+    );
+    expect(result.statusLines).toHaveLength(2);
+    // Two distinct fallback messages, each identifying its own invitee — so the inviter can't
+    // forward Alice's link to Bob.
+    const aliceMsg = sentToInviter.find((m) => m.includes('Alice'));
+    const bobMsg = sentToInviter.find((m) => m.includes('Bob'));
+    expect(aliceMsg).toBeDefined();
+    expect(bobMsg).toBeDefined();
+    expect(aliceMsg).not.toContain('Bob');
+    expect(bobMsg).not.toContain('Alice');
+  });
+
+  test('fallback uses the picker display name even when the invitee has no DB row/username', async () => {
+    const NO_ROW_ID = 9001; // never created in userRepo, no username — only a picker firstName
+    const sentToInviter: string[] = [];
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => null,
+      sendMessage: async (chatId, text) => {
+        if (chatId === INVITER_ID) sentToInviter.push(text);
+        return { message_id: 1 };
+      },
+    };
+    const result = await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [{ userId: NO_ROW_ID, firstName: 'Zoe' }],
+      },
+      makeDeps(sender),
+    );
+    expect(result.statusLines).toHaveLength(1);
+    const fallback = sentToInviter.find((m) => m.includes('Zoe'));
+    expect(fallback).toBeDefined();
+    // Must NOT fall through to the numeric id placeholder.
+    expect(fallback).not.toContain(`#${NO_ROW_ID}`);
+  });
+
+  test('upserts each invitee as a contact', async () => {
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    await deliverPickerInvitations(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [{ userId: 201, firstName: 'Alice', username: 'alice_u' }],
+      },
+      makeDeps(sender),
+    );
+    const contact = contactRepo.findByTelegramId(INVITER_ID, 201);
+    expect(contact).not.toBeNull();
+    expect(contact!.name).toBe('Alice');
+  });
+});
+
+describe('buildChatSharedResultText', () => {
+  test('delivered → invite_delivered with the title HTML-escaped', () => {
+    const text = buildChatSharedResultText('en', 'Party <b>X</b> & Co', { kind: 'delivered' });
+    expect(text).toContain('Party &lt;b&gt;X&lt;/b&gt; &amp; Co');
+    // The injected angle brackets must be escaped, not passed through as live markup.
+    expect(text).not.toContain('<b>X</b>');
+  });
+
+  test('error → both the title and the error string are HTML-escaped', () => {
+    const text = buildChatSharedResultText('en', 'Title <i>', { kind: 'error', error: 'bad <script>' });
+    expect(text).toContain('Title &lt;i&gt;');
+    expect(text).toContain('bad &lt;script&gt;');
+    expect(text).not.toContain('<script>');
+  });
+
+  test('RU delivered uses the Russian string', () => {
+    const text = buildChatSharedResultText('ru', 'Вечеринка', { kind: 'delivered' });
+    expect(text).toContain('отправлено');
+    expect(text).toContain('Вечеринка');
   });
 });
