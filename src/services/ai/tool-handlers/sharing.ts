@@ -148,6 +148,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       inviterTimezone: ctx.user.timezone,
       event,
       lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
+      inviterLang: (ctx.user.language ?? 'en') as 'en' | 'ru',
       // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
@@ -206,7 +207,9 @@ export async function handleResendInvitation(
     return { success: false, error: `Cannot resend — status is "${invitation.status}".` };
   }
 
-  if (ctx.sender?.sendInvitation) {
+  // Guard on the sender object (mirrors handleSendInvitation); deliverInvitation itself
+  // reports non-delivery when the sender lacks the sendInvitation capability.
+  if (ctx.sender) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
     const delivery = await deliverInvitation({
       invitationId: invitation.id,
@@ -226,6 +229,7 @@ export async function handleResendInvitation(
       inviterTimezone: ctx.user.timezone,
       event,
       lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
+      inviterLang: (ctx.user.language ?? 'en') as 'en' | 'ru',
       // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).

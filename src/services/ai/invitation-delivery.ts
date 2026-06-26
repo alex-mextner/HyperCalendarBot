@@ -34,7 +34,10 @@ export interface DeliverInvitationParams {
   /** Inviter timezone — used to render first-person user-session invitation text. */
   inviterTimezone: string;
   event?: CalendarEvent | null;
+  /** Invitee-facing language — the invitation text and the MTProto invite shown to the invitee. */
   lang: 'en' | 'ru';
+  /** Inviter-facing language — the deep-link fallback/forwarding message sent to the inviter. */
+  inviterLang: 'en' | 'ru';
   /** Where to send the deep-link fallback (the inviter's chat). */
   fallbackChatId: number;
   /** When false, MTProto is skipped entirely (Bot API → deep-link only). Default true. */
@@ -56,6 +59,7 @@ export async function deliverInvitation(
     inviterTimezone,
     event,
     lang,
+    inviterLang,
     fallbackChatId,
     allowMtproto = true,
     deps,
@@ -95,8 +99,11 @@ export async function deliverInvitation(
   const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
   const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
   const tr = t(lang).aiTools.sharing;
+  // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
+  // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
+  const inviterTr = t(inviterLang).aiTools.sharing;
   const fallbackMsg =
-    url !== null ? tr.deliveryFallbackWithLink(eventTitle, url) : tr.deliveryFallbackNoLink(eventTitle);
+    url !== null ? inviterTr.deliveryFallbackWithLink(eventTitle, url) : inviterTr.deliveryFallbackNoLink(eventTitle);
 
   // User-session MTProto: first-person text via user's own connected session
   const userFirstPersonText =

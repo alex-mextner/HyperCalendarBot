@@ -57,6 +57,8 @@ describe('deliverInvitation', () => {
     deps: InvitationDeliveryDeps;
     event?: CalendarEvent | null;
     allowMtproto?: boolean;
+    lang?: 'en' | 'ru';
+    inviterLang?: 'en' | 'ru';
   }): DeliverInvitationParams {
     return {
       invitationId: opts.invitationId,
@@ -67,7 +69,8 @@ describe('deliverInvitation', () => {
       inviterUsername: 'alex',
       inviterTimezone: 'UTC',
       event: opts.event ?? null,
-      lang: 'en',
+      lang: opts.lang ?? 'en',
+      inviterLang: opts.inviterLang ?? opts.lang ?? 'en',
       fallbackChatId: INVITER_ID,
       allowMtproto: opts.allowMtproto,
       deps: opts.deps,
@@ -238,6 +241,36 @@ describe('deliverInvitation', () => {
     // claim of "link sent" can be made.
     expect(result).toEqual({ delivered: false, viaDeepLink: false });
     expect(mtprotoCalled).toBe(true);
+  });
+
+  test('fallback to inviter uses inviter language; invitee message uses invitee language', async () => {
+    const invId = createInvitation();
+    let inviteeText: string | undefined;
+    const sentToInviter: string[] = [];
+    const sender = makeSender({
+      sendInvitation: async (_id, text) => {
+        inviteeText = text;
+        return null;
+      },
+      sendMessage: async (chatId, text) => {
+        if (chatId === INVITER_ID) sentToInviter.push(text);
+        return { message_id: 1 };
+      },
+      sendAsUser: async () => false,
+    });
+
+    // Invitee speaks English, inviter speaks Russian. event:null → invitation_received text.
+    const result = await deliverInvitation(
+      baseParams({ invitationId: invId, deps: makeDeps(sender), event: null, lang: 'en', inviterLang: 'ru' }),
+    );
+
+    expect(result).toEqual({ delivered: false, viaDeepLink: true });
+    // The invitee-facing invitation stays in the invitee's language.
+    expect(inviteeText).toContain('invitation from');
+    // The fallback/forwarding message goes to the inviter and must be in the inviter's language.
+    const fallback = sentToInviter.join('\n');
+    expect(fallback).toContain('Перешлите ссылку получателю');
+    expect(fallback).not.toContain('Forward this link');
   });
 
   test('sendInvitation capability missing → not delivered, no deep link', async () => {

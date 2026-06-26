@@ -112,6 +112,7 @@ export async function deliverPickerInvitation(
     inviterTimezone: params.inviter.timezone,
     event,
     lang: inviteeLang,
+    inviterLang: (params.inviter.language ?? 'en') as 'en' | 'ru',
     fallbackChatId: params.fallbackChatId,
     allowMtproto: params.allowMtproto ?? true,
     deps: {

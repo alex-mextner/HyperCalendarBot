@@ -658,6 +658,27 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(false);
       expect(result.error).toContain('delivery');
     });
+
+    test('sender without sendInvitation capability → succeeds but reports delivery failed (consistent guard)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Capability Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      // A sender object is present but lacks sendInvitation — deliverInvitation tolerates this and
+      // reports non-delivery, mirroring handleSendInvitation's `if (ctx.sender)` guard.
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+        },
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+      expect(result.agentHint).toContain('failed');
+    });
   });
 
   // ── handleGetInvitationStatus ──
