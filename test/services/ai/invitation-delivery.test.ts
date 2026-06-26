@@ -298,16 +298,18 @@ describe('deliverInvitation', () => {
     expect(fallback).not.toContain('Forward this link');
   });
 
-  test('an unexpected throw inside the delivery chain degrades gracefully (no propagated throw)', async () => {
+  test('setMessageInfo throw after a successful send → still delivered (no false non-delivery, no duplicate)', async () => {
     const invId = createInvitation();
     const sender = makeSender({ sendInvitation: async () => ({ message_id: 42 }) });
-    // Force the post-delivery persistence to throw — the outer catch must swallow it safely
-    // (logging a sanitized error) and never propagate.
+    // The Bot API send SUCCEEDED; only persisting the message_id (a DB UPDATE) throws.
+    // The invitation was already delivered, so it MUST be reported delivered. Reporting
+    // non-delivery here would make the inviter retry → the invitee gets a DUPLICATE invitation.
+    // A lost message_id is a degraded-but-acceptable state; the persistence failure is logged.
     spyOn(invitationRepo, 'setMessageInfo').mockImplementation(() => {
       throw new Error('db write failed');
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
-    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(result).toEqual({ delivered: true, viaDeepLink: false });
   });
 
   test('regression: a fallback send that THROWS (inviter blocked the bot, 403) → honest viaDeepLink false', async () => {

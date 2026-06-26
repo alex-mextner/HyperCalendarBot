@@ -189,7 +189,17 @@ export async function deliverInvitation(
 
     if (result.delivered && result.messageId !== undefined) {
       deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via bot API');
-      invitationRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
+      try {
+        invitationRepo.setMessageInfo(invitationId, result.messageId, inviteeId);
+      } catch (err) {
+        // The invitation was already delivered via Bot API; only persisting the message_id
+        // (a DB UPDATE) failed. A lost message_id is a degraded-but-acceptable state. Reporting
+        // non-delivery here would make the inviter retry → the invitee gets a DUPLICATE invitation.
+        deliveryLogger.warn(
+          { invitationId, inviteeId, err: describeDeliveryError(err) },
+          'delivered but failed to persist message info',
+        );
+      }
       return { delivered: true, viaDeepLink: false };
     }
     if (result.delivered) {
