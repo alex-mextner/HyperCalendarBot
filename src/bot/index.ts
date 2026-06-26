@@ -1008,9 +1008,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // PRIVATE chat, never the group the picker was opened in (would leak to all members).
       const fallbackChatId = user.telegram_id;
 
-      // Deliver to all selected invitees concurrently — a serial loop spawns Bot-API + MTProto
-      // per invitee and risks a Telegram webhook timeout. Per-invitee failures are isolated and
-      // the result lines preserve the input order.
+      // Deliver to all selected invitees SERIALLY: each invitee's MTProto fallback spawns
+      // send-message.py against the shared non-WAL voice_caller.session, and concurrent spawns
+      // corrupt it (CLAUDE.md). Serial also avoids a 429 burst on the shared 1-CPU host.
+      // Per-invitee failures are isolated and the result lines preserve the input order.
       const { statusLines, aiResultLines } = await deliverPickerInvitations(
         {
           eventId,

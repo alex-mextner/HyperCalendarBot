@@ -301,7 +301,7 @@ describe('deliverPickerInvitations (batch)', () => {
     eventId = event.id;
   });
 
-  test('delivers concurrently and preserves input order of result lines', async () => {
+  test('delivers serially (never overlapping) and preserves input order of result lines', async () => {
     let inFlight = 0;
     let maxInFlight = 0;
     const sender: TelegramSender = {
@@ -328,8 +328,10 @@ describe('deliverPickerInvitations (batch)', () => {
       },
       makeDeps(sender),
     );
-    // Concurrency: with a serial loop only one send is ever in flight at a time.
-    expect(maxInFlight).toBeGreaterThan(1);
+    // Serial delivery is REQUIRED: each invitee's MTProto fallback spawns send-message.py
+    // against the shared non-WAL voice_caller.session; concurrent spawns corrupt it. So at
+    // most one send may ever be in flight at a time.
+    expect(maxInFlight).toBe(1);
     // Order preserved 1:1 with the input invitee list.
     expect(result.statusLines).toHaveLength(3);
     expect(result.statusLines[0]).toContain('Alice');

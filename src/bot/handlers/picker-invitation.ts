@@ -207,16 +207,21 @@ async function deliverOneForBatch(
 }
 
 /**
- * Deliver invitations to every picked invitee CONCURRENTLY (one webhook can carry many
- * invitees; serial Bot-API + MTProto spawns would risk a Telegram webhook timeout). Each
- * invitee is isolated — one failure does not abort the others — and the returned lines
- * preserve the input invitee order.
+ * Deliver invitations to every picked invitee SERIALLY (one at a time). Serial is REQUIRED:
+ * each invitee's MTProto fallback spawns scripts/send-message.py against the shared, non-WAL
+ * data/voice_caller.session, and concurrent spawns corrupt that session (see CLAUDE.md
+ * "voice_caller.session fragility"). Serial also avoids a 429 burst on the shared 1-CPU host.
+ * Each invitee is isolated — one failure does not abort the others — and the returned lines
+ * preserve the input invitee order. (Supersedes the #96 Promise.all parallelization.)
  */
 export async function deliverPickerInvitations(
   params: PickerBatchParams,
   deps: PickerInvitationDeps,
 ): Promise<{ statusLines: string[]; aiResultLines: string[] }> {
-  const lines = await Promise.all(params.invitees.map((invitee) => deliverOneForBatch(params, invitee, deps)));
+  const lines: PickerBatchLine[] = [];
+  for (const invitee of params.invitees) {
+    lines.push(await deliverOneForBatch(params, invitee, deps));
+  }
   return {
     statusLines: lines.map((line) => line.statusLine),
     aiResultLines: lines.map((line) => line.aiResultLine),
