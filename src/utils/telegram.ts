@@ -81,6 +81,7 @@ export function formatUtcOffset(timezone: string): string {
   const parts = formatter.formatToParts(d);
   const tzPart = parts.find((p) => p.type === 'timeZoneName');
   const raw = tzPart?.value ?? timezone;
-  // Normalize GMT+X to UTC+X
-  return raw.replace(/^GMT/, 'UTC');
+  // Normalize GMT+X to UTC+X, then collapse a zero offset (GMT+0 / GMT+00:00 on
+  // some ICU builds) to bare UTC so it never renders as 'UTC+0'.
+  return raw.replace(/^GMT/, 'UTC').replace(/^UTC[+-]0+(?::00)?$/, 'UTC');
 }

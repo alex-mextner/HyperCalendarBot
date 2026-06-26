@@ -174,4 +174,13 @@ describe('formatUtcOffset', () => {
     const result = formatUtcOffset('Asia/Kolkata');
     expect(result).toMatch(/^UTC\+5:30$/);
   });
+  test('collapses zero offset to bare UTC', () => {
+    // Some ICU builds render shortOffset for UTC as 'GMT+0' instead of 'GMT'.
+    // The result must be exactly 'UTC' regardless, never 'UTC+0' / 'UTC-0'.
+    expect(formatUtcOffset('Etc/UTC')).toBe('UTC');
+  });
+  test('keeps the offset for non-zero timezones', () => {
+    const result = formatUtcOffset('Europe/Belgrade');
+    expect(result).toMatch(/^UTC[+-]\d/);
+  });
 });
