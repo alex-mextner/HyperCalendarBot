@@ -100,7 +100,12 @@ export async function deliverPickerInvitation(
 
   let inv: ReturnType<InvitationService['sendInvitation']>;
   try {
-    inv = invitationService.sendInvitation(params.eventId, params.inviter.telegram_id, params.inviteeId);
+    inv = invitationService.sendInvitation(
+      params.eventId,
+      params.inviter.telegram_id,
+      params.inviteeId,
+      params.inviteeUsername,
+    );
   } catch (err) {
     // A throw here (e.g. a DB error) must not abort the whole picker batch — report this
     // invitee as an error and let the caller continue with the rest.

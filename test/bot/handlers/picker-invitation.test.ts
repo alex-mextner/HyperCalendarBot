@@ -179,6 +179,17 @@ describe('deliverPickerInvitation', () => {
     expect(outcome).toEqual({ kind: 'delivered' });
   });
 
+  test('persists the picker-supplied invitee_username on the created invitation row', async () => {
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 42 }) };
+    await deliverPickerInvitation(
+      { eventId, inviter, inviteeId: INVITEE_ID, inviteeUsername: 'invitee_handle', fallbackChatId: INVITER_ID },
+      makeDeps(sender),
+    );
+    const row = invitationRepo.findActiveByEventAndInvitee(eventId, INVITEE_ID);
+    expect(row).not.toBeNull();
+    expect(row!.invitee_username).toBe('invitee_handle');
+  });
+
   test('bot API fails, deep link available → deeplink, fallback sent to inviter private chat', async () => {
     const sentMessages: { chatId: number; text: string }[] = [];
     const sender: TelegramSender = {
