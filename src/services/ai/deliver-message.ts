@@ -2,9 +2,11 @@ import { type InlineKeyboard, TelegramError } from 'gramio';
 import { botLogger } from '../../utils/logger.ts';
 
 /** Strip any URL from a log string — a delivery error message could embed the invitation
- *  deep-link (`https://t.me/Bot?start=i_...`), and URLs are not useful diagnostics here. */
-function redactUrls(text: string): string {
-  return text.replace(/https?:\/\/\S+/gi, '[link redacted]');
+ *  deep-link (`https://t.me/Bot?start=i_...`), and URLs are not useful diagnostics here.
+ *  Also strips a scheme-less `t.me/...` token, since an invitation deep-link can appear
+ *  without an `https://` prefix. */
+export function redactUrls(text: string): string {
+  return text.replace(/https?:\/\/\S+/gi, '[link redacted]').replace(/\bt\.me\/\S+/gi, '[link redacted]');
 }
 
 /**
@@ -17,7 +19,7 @@ function redactUrls(text: string): string {
  * known scalar fields, never the raw error object, and redacts any URL from the message —
  * sanitized by default for every error type, not just GramIO's `TelegramError`.
  */
-function describeDeliveryError(err: unknown): { name: string; message: string; code?: number } {
+export function describeDeliveryError(err: unknown): { name: string; message: string; code?: number } {
   if (err instanceof TelegramError) {
     return { name: err.method, message: redactUrls(err.message), code: err.code };
   }

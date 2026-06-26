@@ -1,10 +1,59 @@
-import { afterEach, expect, mock, spyOn, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { TelegramError } from 'gramio';
-import { deliverMessage } from '../../../src/services/ai/deliver-message.ts';
+import { deliverMessage, describeDeliveryError, redactUrls } from '../../../src/services/ai/deliver-message.ts';
 import { botLogger } from '../../../src/utils/logger.ts';
 
 afterEach(() => {
   mock.restore();
+});
+
+describe('redactUrls', () => {
+  test('strips an https URL', () => {
+    expect(redactUrls('see https://t.me/TestBot?start=i_SECRET now')).toBe('see [link redacted] now');
+  });
+
+  test('strips a scheme-less t.me deep link', () => {
+    const out = redactUrls('forward t.me/TestBot?start=i_SECRET to them');
+    expect(out).not.toContain('t.me/TestBot');
+    expect(out).not.toContain('start=i_');
+    expect(out).toContain('[link redacted]');
+  });
+
+  test('leaves URL-free text untouched', () => {
+    expect(redactUrls('bot was blocked by the user')).toBe('bot was blocked by the user');
+  });
+});
+
+describe('describeDeliveryError', () => {
+  test('TelegramError → method as name, code populated, message redacted', () => {
+    const err = new TelegramError(
+      { ok: false, error_code: 403, description: 'Forbidden: bot blocked' },
+      'sendMessage',
+      { chat_id: 1, text: 'forward https://t.me/TestBot?start=i_SECRET' },
+    );
+    const out = describeDeliveryError(err);
+    expect(out.name).toBe('sendMessage');
+    expect(out.code).toBe(403);
+    expect(out.message).not.toContain('start=i_');
+  });
+
+  test('plain Error → name and message, no code', () => {
+    const out = describeDeliveryError(new TypeError('Bot API delivery failed'));
+    expect(out.name).toBe('TypeError');
+    expect(out.message).toBe('Bot API delivery failed');
+    expect(out.code).toBeUndefined();
+  });
+
+  test('plain Error message has any URL redacted', () => {
+    const out = describeDeliveryError(new Error('could not reach https://t.me/TestBot?start=i_X'));
+    expect(out.message).not.toContain('start=i_');
+    expect(out.message).toContain('[link redacted]');
+  });
+
+  test('non-error value → NonError sentinel', () => {
+    expect(describeDeliveryError('a bare string')).toEqual({ name: 'NonError', message: 'unknown delivery error' });
+    expect(describeDeliveryError(undefined)).toEqual({ name: 'NonError', message: 'unknown delivery error' });
+  });
 });
 
 test('deliverMessage: delivers via bot API on success', async () => {
