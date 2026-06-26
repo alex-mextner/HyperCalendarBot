@@ -17,6 +17,7 @@ import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/
 import {
   handleGetInvitationStatus,
   handleProposeEdit,
+  handleResendInvitation,
   handleSendInvitation,
   handleSetEventVisibility,
   handleShareAgenda,
@@ -40,6 +41,11 @@ function createTestDb() {
 
 const USER_ID = 100;
 const OTHER_USER_ID = 200;
+const GROUP_CHAT_ID = -1009999;
+
+function futureStartAt(): string {
+  return new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+}
 
 describe('sharing tool handlers', () => {
   let db: Database;
@@ -394,6 +400,42 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('Invitation');
     });
 
+    test('deep-link fallback goes to inviter private chat, never the group chatId (security #94)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const sentMessages: { chatId: number; text: string }[] = [];
+      const ctx = makeCtx({
+        // The bot was invoked from inside a group: ctx.chatId is the group, not the inviter.
+        chatId: GROUP_CHAT_ID,
+        sender: {
+          sendMessage: async (chatId, text) => {
+            sentMessages.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+          sendAsUser: async () => false,
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      // The private invitation deep-link must land in the inviter's private chat,
+      // NEVER in the group it was triggered from (would leak to all members).
+      const fallback = sentMessages.find((m) => m.text.includes('t.me/TestBot'));
+      expect(fallback).toBeDefined();
+      expect(fallback!.chatId).toBe(USER_ID);
+      expect(sentMessages.some((m) => m.chatId === GROUP_CHAT_ID)).toBe(false);
+    });
+
     test('returns error for duplicate invitation', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
@@ -563,6 +605,58 @@ describe('sharing tool handlers', () => {
       const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(false);
       expect(result.error).toBe('User has disabled invitations');
+    });
+  });
+
+  // ── handleResendInvitation ──
+
+  describe('handleResendInvitation', () => {
+    test('deep-link fallback goes to inviter private chat, never the group chatId (security #94)', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Resend Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      const sentMessages: { chatId: number; text: string }[] = [];
+      const ctx = makeCtx({
+        chatId: GROUP_CHAT_ID,
+        sender: {
+          sendMessage: async (chatId, text) => {
+            sentMessages.push({ chatId, text });
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async () => null,
+          sendAsUser: async () => false,
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      const fallback = sentMessages.find((m) => m.text.includes('t.me/TestBot'));
+      expect(fallback).toBeDefined();
+      expect(fallback!.chatId).toBe(USER_ID);
+      expect(sentMessages.some((m) => m.chatId === GROUP_CHAT_ID)).toBe(false);
+    });
+
+    test('returns error when delivery (sender) is not available', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Sender Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      const ctx = makeCtx({ sender: undefined });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('delivery');
     });
   });
 

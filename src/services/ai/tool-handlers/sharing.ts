@@ -148,7 +148,10 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       inviterTimezone: ctx.user.timezone,
       event,
       lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      fallbackChatId: ctx.chatId,
+      // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
+      // private chat, never ctx.chatId (which may be a group the bot was invoked from,
+      // leaking the invitee's personal invitation to every member).
+      fallbackChatId: ctx.user.telegram_id,
       deps: {
         sender: ctx.sender,
         invitationRepo: ctx.sharing.invitationRepo,
@@ -223,7 +226,10 @@ export async function handleResendInvitation(
       inviterTimezone: ctx.user.timezone,
       event,
       lang: (ctx.user.language ?? 'en') as 'en' | 'ru',
-      fallbackChatId: ctx.chatId,
+      // The deep-link fallback is a PRIVATE invite link — it must reach the inviter's
+      // private chat, never ctx.chatId (which may be a group the bot was invoked from,
+      // leaking the invitee's personal invitation to every member).
+      fallbackChatId: ctx.user.telegram_id,
       deps: {
         sender: ctx.sender,
         invitationRepo: ctx.sharing.invitationRepo,
