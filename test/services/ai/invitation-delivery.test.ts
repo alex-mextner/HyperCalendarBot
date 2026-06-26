@@ -192,7 +192,7 @@ describe('deliverInvitation', () => {
     expect(fallback!.text).toContain('t.me/TestBot');
   });
 
-  test('no deepLinkService → fallback without link, viaDeepLink still true', async () => {
+  test('no deepLinkService → fallback without link, viaDeepLink false (no link existed)', async () => {
     const invId = createInvitation();
     const sentMessages: { chatId: number; text: string }[] = [];
     const sender = makeSender({
@@ -210,10 +210,34 @@ describe('deliverInvitation', () => {
       }),
     );
 
-    expect(result).toEqual({ delivered: false, viaDeepLink: true });
+    // No deep link could be built → the fallback message has no link, so reporting
+    // "link sent" would be a lie. viaDeepLink must be false (→ honest "not delivered").
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
     const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
     expect(fallback).toBeDefined();
     expect(fallback!.text).not.toContain('t.me');
+  });
+
+  test('bot API + MTProto fail and deep-link fallback throws → not delivered, viaDeepLink false', async () => {
+    const invId = createInvitation();
+    let mtprotoCalled = false;
+    const sender = makeSender({
+      sendMessage: async () => {
+        throw new Error('inviter blocked the bot');
+      },
+      sendInvitation: async () => null,
+      sendAsUser: async () => {
+        mtprotoCalled = true;
+        return false;
+      },
+    });
+
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+
+    // The link existed but the fallback message never reached the inviter → no honest
+    // claim of "link sent" can be made.
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    expect(mtprotoCalled).toBe(true);
   });
 
   test('sendInvitation capability missing → not delivered, no deep link', async () => {

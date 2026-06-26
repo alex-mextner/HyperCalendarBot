@@ -12,7 +12,6 @@ import type { GoogleSyncRepository } from '../database/repositories/google-sync.
 import { IntentRepository } from '../database/repositories/intent.repository.ts';
 import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
-import { deliverInvitation } from '../services/ai/invitation-delivery.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
@@ -84,6 +83,12 @@ import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.ha
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
+import {
+  deliverPickerInvitation,
+  type PickerDeliveryOutcome,
+  pickerAiLine,
+  pickerStatusLine,
+} from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -151,48 +156,6 @@ export interface CreateBotOpts {
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
   changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
-}
-
-/** Outcome of a picker-driven invitation delivery attempt (real Telegram delivery, not just DB row). */
-type PickerDeliveryOutcome =
-  | { kind: 'delivered' }
-  | { kind: 'deeplink' }
-  | { kind: 'failed' }
-  | { kind: 'error'; error: string }
-  | { kind: 'notConfigured' };
-
-/** User-facing status line for one picker invitation, localized. */
-function pickerStatusLine(lang: 'en' | 'ru', name: string, outcome: PickerDeliveryOutcome): string {
-  const m = t(lang);
-  switch (outcome.kind) {
-    case 'delivered':
-      return m.invite_status_delivered(name);
-    case 'deeplink':
-      return m.invite_status_deeplink(name);
-    case 'failed':
-      return m.invite_status_failed(name);
-    case 'error':
-      return m.invite_status_error(name, outcome.error);
-    case 'notConfigured':
-      return m.invite_status_not_configured(name);
-  }
-}
-
-/** AI-facing (English) summary line describing the real delivery result for one invitee. */
-function pickerAiLine(name: string, userId: number, outcome: PickerDeliveryOutcome): string {
-  const head = `${name} (id:${userId})`;
-  switch (outcome.kind) {
-    case 'delivered':
-      return `${head}: delivered to the invitee`;
-    case 'deeplink':
-      return `${head}: could not reach the invitee — a forward link was sent to the inviter`;
-    case 'failed':
-      return `${head}: delivery failed`;
-    case 'error':
-      return `${head}: invitation not created (${outcome.error})`;
-    case 'notConfigured':
-      return `${head}: invitations not configured`;
-  }
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -377,50 +340,17 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
 
-  // Create one invitation + attempt real Telegram delivery (Bot API → MTProto → deep-link
-  // fallback). Used by the user/chat picker handlers so they report by actual delivery,
-  // not just by DB-row creation. allowMtproto=false disables MTProto (used for group targets).
-  const deliverPickerInvitation = async (params: {
-    eventId: number;
-    inviter: User;
-    inviteeId: number;
-    inviteeUsername?: string;
-    fallbackChatId: number;
-    allowMtproto?: boolean;
-  }): Promise<PickerDeliveryOutcome> => {
-    if (!invitationService) return { kind: 'notConfigured' };
-    const inv = invitationService.sendInvitation(params.eventId, params.inviter.telegram_id, params.inviteeId);
-    if (!inv.success || !inv.invitation) {
-      return { kind: 'error', error: inv.error ?? 'unknown error' };
-    }
-    const event = eventService.getEvent(params.eventId, params.inviter.telegram_id);
-    const inviteeUser = db.users.findByTelegramId(params.inviteeId);
-    const inviteeLang = (inviteeUser?.language ?? params.inviter.language ?? 'en') as 'en' | 'ru';
-    const delivery = await deliverInvitation({
-      invitationId: inv.invitation.id,
-      eventId: params.eventId,
-      inviteeId: params.inviteeId,
-      inviteeUsername: params.inviteeUsername,
-      inviterId: params.inviter.telegram_id,
-      inviterName: params.inviter.first_name ?? params.inviter.username ?? `User ${params.inviter.telegram_id}`,
-      inviterUsername: params.inviter.username ?? undefined,
-      inviterTimezone: params.inviter.timezone,
-      event,
-      lang: inviteeLang,
-      fallbackChatId: params.fallbackChatId,
-      allowMtproto: params.allowMtproto ?? true,
-      deps: {
-        sender: telegramSender,
-        invitationRepo: db.invitations,
-        userRepo: db.users,
-        deepLinkService,
-        botUsername: envConfig?.BOT_USERNAME,
-        contactRepo: db.contacts,
-      },
-    });
-    if (delivery.delivered) return { kind: 'delivered' };
-    if (delivery.viaDeepLink) return { kind: 'deeplink' };
-    return { kind: 'failed' };
+  // Shared deps for picker-driven invitation delivery (Bot API → MTProto → deep-link fallback),
+  // reporting by ACTUAL delivery, not just DB-row creation.
+  const pickerInvitationDeps = {
+    sender: telegramSender,
+    invitationService,
+    eventService,
+    invitationRepo: db.invitations,
+    userRepo: db.users,
+    deepLinkService,
+    botUsername: envConfig?.BOT_USERNAME,
+    contactRepo: db.contacts,
   };
 
   const triggerRepo = new TriggerRepository(db.db);
@@ -1075,7 +1005,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const selected = ctx.users;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       const chatId = ctx.chatId;
-      const fallbackChatId = chatId ?? user.telegram_id;
+      // The deep-link fallback is a private invite link — it must reach the inviter's
+      // PRIVATE chat, never the group the picker was opened in (would leak to all members).
+      const fallbackChatId = user.telegram_id;
       const statusLines: string[] = [];
       const aiResultLines: string[] = [];
 
@@ -1085,13 +1017,16 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         if (db.contacts) {
           db.contacts.upsert(user.telegram_id, name, shared.username, shared.userId);
         }
-        const outcome = await deliverPickerInvitation({
-          eventId,
-          inviter: user,
-          inviteeId: shared.userId,
-          inviteeUsername: shared.username,
-          fallbackChatId,
-        });
+        const outcome = await deliverPickerInvitation(
+          {
+            eventId,
+            inviter: user,
+            inviteeId: shared.userId,
+            inviteeUsername: shared.username,
+            fallbackChatId,
+          },
+          pickerInvitationDeps,
+        );
         statusLines.push(pickerStatusLine(lang, name, outcome));
         aiResultLines.push(pickerAiLine(name, shared.userId, outcome));
       }
@@ -1109,7 +1044,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           return parts.join(' ');
         })
         .join(', ');
-      const contextMsg = `[User picker result] Invitations were created and delivery was attempted — do NOT call send_invitation again for these people. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
+      const contextMsg = `[User picker result] Delivery was attempted for the selected people. Do NOT re-send for anyone already delivered or link-sent; for anyone whose result is an error (invitation not created) you MAY retry send_invitation. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
       if (chatId) {
         agent
@@ -1129,17 +1064,25 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // Escaped because the result is sent with parse_mode HTML (titles may contain <, &).
       const groupLabel = escapeHtml(event?.title ?? `Event #${eventId}`);
       // Groups receive the invitation via Bot API only — no MTProto userbot delivery.
-      const outcome = await deliverPickerInvitation({
-        eventId,
-        inviter: user,
-        inviteeId,
-        fallbackChatId: ctx.chatId ?? user.telegram_id,
-        allowMtproto: false,
-      });
+      // The deep-link fallback goes to the inviter's private chat, not the group.
+      const outcome = await deliverPickerInvitation(
+        {
+          eventId,
+          inviter: user,
+          inviteeId,
+          fallbackChatId: user.telegram_id,
+          allowMtproto: false,
+        },
+        pickerInvitationDeps,
+      );
+      // pickerStatusLine is escaping-agnostic; this message is HTML, so escape the raw
+      // error string (the InvitationService error) before it is interpolated.
+      const htmlSafeOutcome: PickerDeliveryOutcome =
+        outcome.kind === 'error' ? { kind: 'error', error: escapeHtml(outcome.error) } : outcome;
       const resultText =
         outcome.kind === 'delivered'
           ? t(lang).invite_delivered(groupLabel)
-          : pickerStatusLine(lang, groupLabel, outcome);
+          : pickerStatusLine(lang, groupLabel, htmlSafeOutcome);
       await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     })
     // AI Assistant commands (not in setMyCommands — internal use only)

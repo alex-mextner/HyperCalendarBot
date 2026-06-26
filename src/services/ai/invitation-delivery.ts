@@ -169,8 +169,14 @@ export async function deliverInvitation(
       deliveryLogger.info({ invitationId, inviteeId }, 'Delivered via MTProto');
       return { delivered: true, viaDeepLink: false };
     }
-    deliveryLogger.info({ invitationId, fallbackChatId }, 'Sending deep link fallback to inviter');
-    return { delivered: false, viaDeepLink: true };
+    // Only claim "link sent to inviter" when a real link existed AND the fallback
+    // message actually reached the inviter. Otherwise report honest non-delivery.
+    const linkSent = url !== null && result.fallbackSent === true;
+    deliveryLogger.info(
+      { invitationId, fallbackChatId, linkSent, hadLink: url !== null, fallbackSent: result.fallbackSent === true },
+      'Bot API + MTProto failed — deep-link fallback attempted',
+    );
+    return { delivered: false, viaDeepLink: linkSent };
   } catch (error) {
     deliveryLogger.error({ invitationId, inviteeId, err: error }, 'Delivery chain failed');
     return { delivered: false, viaDeepLink: false };
