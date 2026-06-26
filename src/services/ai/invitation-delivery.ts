@@ -79,95 +79,98 @@ export async function deliverInvitation(
     return { delivered: false, viaDeepLink: false };
   }
 
-  const eventTitle = event?.title ?? `Event #${eventId}`;
-  deliveryLogger.info(
-    { invitationId, inviteeId, inviteeUsername: inviteeUsername ?? 'NONE', eventTitle },
-    'Starting delivery chain',
-  );
-
-  const invitee = userRepo.findByTelegramId(inviteeId);
-  const text = event
-    ? formatInvitation(
-        event,
-        event.timezone,
-        lang,
-        inviterName,
-        inviterId,
-        inviterUsername,
-        invitee?.timezone ?? null,
-        !!invitee?.onboarding_completed,
-      )
-    : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
-
-  if (!deepLinkSvc || !botUsername) {
-    deliveryLogger.warn(
-      { invitationId, hasDeepLink: !!deepLinkSvc, hasBotUsername: !!botUsername },
-      'No fallback available — deepLinkService or botUsername missing',
-    );
-  }
-
-  const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
-  const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
-  const tr = t(lang).aiTools.sharing;
-  // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
-  // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
-  const inviterTr = t(inviterLang).aiTools.sharing;
-  // Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
-  // to the same inviter chat, concurrently — without a label the inviter can't tell which
-  // deep-link belongs to whom (could forward the wrong person's invite).
-  const inviteeLabel =
-    inviteeName ??
-    invitee?.first_name ??
-    (inviteeUsername ? `@${inviteeUsername}` : invitee?.username ? `@${invitee.username}` : `#${inviteeId}`);
-  const fallbackMsg =
-    url !== null
-      ? inviterTr.deliveryFallbackWithLink(eventTitle, inviteeLabel, url)
-      : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
-
-  // User-session MTProto: first-person text via user's own connected session
-  const userFirstPersonText =
-    event && url && sender.sendAsConnectedUser
-      ? buildUserSessionInvitationText({
-          event: {
-            title: event.title,
-            start_utc: event.start_at,
-            location: event.location,
-            description: event.description,
-          },
-          inviterTimezone,
-          deepLink: url,
-          lang,
-        })
-      : null;
-
-  const userMtprotoSend =
-    userFirstPersonText && sender.sendAsConnectedUser
-      ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
-          sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
-      : undefined;
-
-  // Admin MTProto: third-person text via admin session (existing fallback)
-  const mtprotoSend =
-    sender.sendAsUser && url !== null
-      ? (userId: number, _text: string, username?: string): Promise<boolean> => {
-          const mtprotoText = tr.mtprotoInvite(inviterName, eventTitle, url);
-          return sender.sendAsUser!(userId, mtprotoText, username);
-        }
-      : undefined;
-
-  // Combined: try user session first (first-person), fall back to admin session (third-person)
-  const combinedMtprotoSend =
-    userMtprotoSend || mtprotoSend
-      ? async (targetId: number, text: string, username?: string): Promise<boolean> => {
-          if (userMtprotoSend) {
-            const ok = await userMtprotoSend(targetId, text, username);
-            if (ok) return true;
-          }
-          return mtprotoSend ? mtprotoSend(targetId, text, username) : false;
-        }
-      : undefined;
-
+  // Setup (link creation, URL generation, message formatting) lives INSIDE the delivery try so a
+  // throw here (DB error building the deep link, formatter error) is contained and reported as an
+  // honest non-delivery — never propagated out of the handler after the invitation row was created.
   try {
+    const eventTitle = event?.title ?? `Event #${eventId}`;
+    deliveryLogger.info(
+      { invitationId, inviteeId, inviteeUsername: inviteeUsername ?? 'NONE', eventTitle },
+      'Starting delivery chain',
+    );
+
+    const invitee = userRepo.findByTelegramId(inviteeId);
+    const text = event
+      ? formatInvitation(
+          event,
+          event.timezone,
+          lang,
+          inviterName,
+          inviterId,
+          inviterUsername,
+          invitee?.timezone ?? null,
+          !!invitee?.onboarding_completed,
+        )
+      : t(lang).invitation_received(escapeHtml(eventTitle), escapeHtml(inviterName));
+
+    if (!deepLinkSvc || !botUsername) {
+      deliveryLogger.warn(
+        { invitationId, hasDeepLink: !!deepLinkSvc, hasBotUsername: !!botUsername },
+        'No fallback available — deepLinkService or botUsername missing',
+      );
+    }
+
+    const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
+    const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
+    const tr = t(lang).aiTools.sharing;
+    // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
+    // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
+    const inviterTr = t(inviterLang).aiTools.sharing;
+    // Identify the invitee in the fallback message: a batch sends one fallback per failed invitee
+    // to the same inviter chat, concurrently — without a label the inviter can't tell which
+    // deep-link belongs to whom (could forward the wrong person's invite).
+    const inviteeLabel =
+      inviteeName ??
+      invitee?.first_name ??
+      (inviteeUsername ? `@${inviteeUsername}` : invitee?.username ? `@${invitee.username}` : `#${inviteeId}`);
+    const fallbackMsg =
+      url !== null
+        ? inviterTr.deliveryFallbackWithLink(eventTitle, inviteeLabel, url)
+        : inviterTr.deliveryFallbackNoLink(eventTitle, inviteeLabel);
+
+    // User-session MTProto: first-person text via user's own connected session
+    const userFirstPersonText =
+      event && url && sender.sendAsConnectedUser
+        ? buildUserSessionInvitationText({
+            event: {
+              title: event.title,
+              start_utc: event.start_at,
+              location: event.location,
+              description: event.description,
+            },
+            inviterTimezone,
+            deepLink: url,
+            lang,
+          })
+        : null;
+
+    const userMtprotoSend =
+      userFirstPersonText && sender.sendAsConnectedUser
+        ? async (targetId: number, _text: string, username?: string): Promise<boolean> =>
+            sender.sendAsConnectedUser!(inviterId, targetId, userFirstPersonText, username, { invitationId })
+        : undefined;
+
+    // Admin MTProto: third-person text via admin session (existing fallback)
+    const mtprotoSend =
+      sender.sendAsUser && url !== null
+        ? (userId: number, _text: string, username?: string): Promise<boolean> => {
+            const mtprotoText = tr.mtprotoInvite(inviterName, eventTitle, url);
+            return sender.sendAsUser!(userId, mtprotoText, username);
+          }
+        : undefined;
+
+    // Combined: try user session first (first-person), fall back to admin session (third-person)
+    const combinedMtprotoSend =
+      userMtprotoSend || mtprotoSend
+        ? async (targetId: number, text: string, username?: string): Promise<boolean> => {
+            if (userMtprotoSend) {
+              const ok = await userMtprotoSend(targetId, text, username);
+              if (ok) return true;
+            }
+            return mtprotoSend ? mtprotoSend(targetId, text, username) : false;
+          }
+        : undefined;
+
     const result = await deliverMessage({
       targetId: inviteeId,
       targetUsername: inviteeUsername,

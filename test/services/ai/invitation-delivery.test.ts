@@ -312,6 +312,19 @@ describe('deliverInvitation', () => {
     expect(result).toEqual({ delivered: true, viaDeepLink: false });
   });
 
+  test('link/url setup throw → honest non-delivery, no propagated throw', async () => {
+    const invId = createInvitation();
+    const sender = makeSender({ sendInvitation: async () => ({ message_id: 42 }) });
+    // The deep-link setup runs before the send. If it throws (DB error, etc.) it must be
+    // contained inside the delivery try and surface as an honest non-delivery — never propagate
+    // out of the handler after the invitation row was already created.
+    spyOn(deepLinkService, 'createInvitationLink').mockImplementation(() => {
+      throw new Error('deep-link creation failed');
+    });
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+  });
+
   test('regression: a fallback send that THROWS (inviter blocked the bot, 403) → honest viaDeepLink false', async () => {
     // The fallback path relies on sender.sendMessage, which has NO internal try/catch and
     // THROWS on failure (it never resolves to a falsy value). So a failed fallback can only
