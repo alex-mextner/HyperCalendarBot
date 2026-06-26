@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
+import { TelegramError } from 'gramio';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
@@ -8,6 +9,7 @@ import { InvitationRepository } from '../../../src/database/repositories/invitat
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { CalendarEvent } from '../../../src/database/types.ts';
+import { deliverMessage } from '../../../src/services/ai/deliver-message.ts';
 import {
   type DeliverInvitationParams,
   deliverInvitation,
@@ -303,6 +305,41 @@ describe('deliverInvitation', () => {
     // (logging a sanitized error) and never propagate.
     spyOn(invitationRepo, 'setMessageInfo').mockImplementation(() => {
       throw new Error('db write failed');
+    });
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
+  });
+
+  test('regression: a fallback send that THROWS (inviter blocked the bot, 403) → honest viaDeepLink false', async () => {
+    // The fallback path relies on sender.sendMessage, which has NO internal try/catch and
+    // THROWS on failure (it never resolves to a falsy value). So a failed fallback can only
+    // surface as a thrown error → caught → fallbackSent:false → viaDeepLink:false. This pins
+    // that there is no false "link sent" claim when the inviter has blocked the bot.
+    const blocked403 = (): never => {
+      throw new TelegramError(
+        { ok: false, error_code: 403, description: 'Forbidden: bot was blocked by the user' },
+        'sendMessage',
+        { chat_id: INVITER_ID, text: 'forward https://t.me/TestBot?start=i_SECRET' },
+      );
+    };
+
+    // Level 1 — deliverMessage: a rejecting fallback botSend yields fallbackSent:false.
+    const dmResult = await deliverMessage({
+      targetId: INVITEE_ID,
+      text: 'hi',
+      fallbackRecipientId: INVITER_ID,
+      fallbackText: 'forward link',
+      botSend: async () => blocked403(),
+    });
+    expect(dmResult).toEqual({ delivered: false, fallbackSent: false });
+
+    // Level 2 — deliverInvitation: bot API + MTProto fail and the fallback to the inviter
+    // throws (403) → no honest "link sent" can be claimed.
+    const invId = createInvitation();
+    const sender = makeSender({
+      sendInvitation: async () => null,
+      sendAsUser: async () => false,
+      sendMessage: async () => blocked403(),
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
     expect(result).toEqual({ delivered: false, viaDeepLink: false });
