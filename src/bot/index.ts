@@ -12,13 +12,13 @@ import type { GoogleSyncRepository } from '../database/repositories/google-sync.
 import { IntentRepository } from '../database/repositories/intent.repository.ts';
 import type { CreateEventData, UpdateEventData, User } from '../database/types.ts';
 import { CalendarBotAgent } from '../services/ai/agent.ts';
+import { deliverInvitation } from '../services/ai/invitation-delivery.ts';
 import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
 import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
-import { formatInvitation } from '../services/event/formatters.ts';
 import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
@@ -151,6 +151,48 @@ export interface CreateBotOpts {
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
   changeNotifier?: import('../services/event/event-change-notifier.ts').EventChangeNotifier;
+}
+
+/** Outcome of a picker-driven invitation delivery attempt (real Telegram delivery, not just DB row). */
+type PickerDeliveryOutcome =
+  | { kind: 'delivered' }
+  | { kind: 'deeplink' }
+  | { kind: 'failed' }
+  | { kind: 'error'; error: string }
+  | { kind: 'notConfigured' };
+
+/** User-facing status line for one picker invitation, localized. */
+function pickerStatusLine(lang: 'en' | 'ru', name: string, outcome: PickerDeliveryOutcome): string {
+  const m = t(lang);
+  switch (outcome.kind) {
+    case 'delivered':
+      return m.invite_status_delivered(name);
+    case 'deeplink':
+      return m.invite_status_deeplink(name);
+    case 'failed':
+      return m.invite_status_failed(name);
+    case 'error':
+      return m.invite_status_error(name, outcome.error);
+    case 'notConfigured':
+      return m.invite_status_not_configured(name);
+  }
+}
+
+/** AI-facing (English) summary line describing the real delivery result for one invitee. */
+function pickerAiLine(name: string, userId: number, outcome: PickerDeliveryOutcome): string {
+  const head = `${name} (id:${userId})`;
+  switch (outcome.kind) {
+    case 'delivered':
+      return `${head}: delivered to the invitee`;
+    case 'deeplink':
+      return `${head}: could not reach the invitee — a forward link was sent to the inviter`;
+    case 'failed':
+      return `${head}: delivery failed`;
+    case 'error':
+      return `${head}: invitation not created (${outcome.error})`;
+    case 'notConfigured':
+      return `${head}: invitations not configured`;
+  }
 }
 
 export function createBot(token: string, db: DatabaseService, aiConfig: AgentConfig, opts: CreateBotOpts = {}) {
@@ -334,6 +376,53 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sendAsConnectedUser,
   });
   const agent = new CalendarBotAgent(aiConfig, telegramSender);
+
+  // Create one invitation + attempt real Telegram delivery (Bot API → MTProto → deep-link
+  // fallback). Used by the user/chat picker handlers so they report by actual delivery,
+  // not just by DB-row creation. allowMtproto=false disables MTProto (used for group targets).
+  const deliverPickerInvitation = async (params: {
+    eventId: number;
+    inviter: User;
+    inviteeId: number;
+    inviteeUsername?: string;
+    fallbackChatId: number;
+    allowMtproto?: boolean;
+  }): Promise<PickerDeliveryOutcome> => {
+    if (!invitationService) return { kind: 'notConfigured' };
+    const inv = invitationService.sendInvitation(params.eventId, params.inviter.telegram_id, params.inviteeId);
+    if (!inv.success || !inv.invitation) {
+      return { kind: 'error', error: inv.error ?? 'unknown error' };
+    }
+    const event = eventService.getEvent(params.eventId, params.inviter.telegram_id);
+    const inviteeUser = db.users.findByTelegramId(params.inviteeId);
+    const inviteeLang = (inviteeUser?.language ?? params.inviter.language ?? 'en') as 'en' | 'ru';
+    const delivery = await deliverInvitation({
+      invitationId: inv.invitation.id,
+      eventId: params.eventId,
+      inviteeId: params.inviteeId,
+      inviteeUsername: params.inviteeUsername,
+      inviterId: params.inviter.telegram_id,
+      inviterName: params.inviter.first_name ?? params.inviter.username ?? `User ${params.inviter.telegram_id}`,
+      inviterUsername: params.inviter.username ?? undefined,
+      inviterTimezone: params.inviter.timezone,
+      event,
+      lang: inviteeLang,
+      fallbackChatId: params.fallbackChatId,
+      allowMtproto: params.allowMtproto ?? true,
+      deps: {
+        sender: telegramSender,
+        invitationRepo: db.invitations,
+        userRepo: db.users,
+        deepLinkService,
+        botUsername: envConfig?.BOT_USERNAME,
+        contactRepo: db.contacts,
+      },
+    });
+    if (delivery.delivered) return { kind: 'delivered' };
+    if (delivery.viaDeepLink) return { kind: 'deeplink' };
+    return { kind: 'failed' };
+  };
+
   const triggerRepo = new TriggerRepository(db.db);
   const scheduleRepo = new ScheduledAiCallRepository(db.db);
   const groupMemberService = new GroupMemberService(db.groupMembers, db.users);
@@ -985,7 +1074,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const eventId = ctx.requestId;
       const selected = ctx.users;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
-      const results: string[] = [];
+      const chatId = ctx.chatId;
+      const fallbackChatId = chatId ?? user.telegram_id;
+      const statusLines: string[] = [];
+      const aiResultLines: string[] = [];
 
       for (const shared of selected) {
         const name = shared.firstName ?? shared.username ?? `id:${shared.userId}`;
@@ -993,44 +1085,22 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         if (db.contacts) {
           db.contacts.upsert(user.telegram_id, name, shared.username, shared.userId);
         }
-        // Send invitation + deliver Telegram notification
-        if (invitationService) {
-          const inv = invitationService.sendInvitation(eventId, user.telegram_id, shared.userId);
-          if (inv.success && inv.invitation) {
-            const event = eventService.getEvent(eventId, user.telegram_id);
-            const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
-            const inviteeUser = db.users.findByTelegramId(shared.userId);
-            const inviteeLang = (inviteeUser?.language ?? lang) as 'en' | 'ru';
-            const invText = event
-              ? formatInvitation(
-                  event,
-                  event.timezone,
-                  inviteeLang,
-                  inviterName,
-                  user.telegram_id,
-                  user.username ?? undefined,
-                  inviteeUser?.timezone ?? null,
-                  !!inviteeUser?.onboarding_completed,
-                )
-              : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
-            telegramSender.sendInvitation!(shared.userId, invText, inv.invitation.id)
-              .then((sent) => {
-                if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, shared.userId);
-              })
-              .catch(() => {});
-          }
-          results.push(inv.success ? `✅ ${name}` : `❌ ${name}: ${inv.error}`);
-        } else {
-          results.push(`❌ ${name}: invitations not configured`);
-        }
+        const outcome = await deliverPickerInvitation({
+          eventId,
+          inviter: user,
+          inviteeId: shared.userId,
+          inviteeUsername: shared.username,
+          fallbackChatId,
+        });
+        statusLines.push(pickerStatusLine(lang, name, outcome));
+        aiResultLines.push(pickerAiLine(name, shared.userId, outcome));
       }
 
-      const header = lang === 'ru' ? '📨 Приглашения:' : '📨 Invitations:';
-      const resultText = `${header}\n${results.join('\n')}`;
+      const resultText = `${t(lang).invite_picker_header}\n${statusLines.join('\n')}`;
       await ctx.send(resultText, {
         reply_markup: { remove_keyboard: true },
       });
-      // Build context for AI: who was requested + what happened
+      // Build context for AI: who was requested + what really happened
       const selectedDetails = selected
         .map((s) => {
           const name = s.firstName ?? s.username ?? `id:${s.userId}`;
@@ -1039,9 +1109,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           return parts.join(' ');
         })
         .join(', ');
-      const contextMsg = `[User picker result] Invitations already sent by the bot — do NOT call send_invitation. Selected: ${selectedDetails}. Results:\n${results.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
+      const contextMsg = `[User picker result] Invitations were created and delivery was attempted — do NOT call send_invitation again for these people. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
       // Trigger AI to acknowledge/continue
-      const chatId = ctx.chatId;
       if (chatId) {
         agent
           .run(buildAgentContextFactory(msgDeps)(user, chatId, contextMsg))
@@ -1056,36 +1125,22 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       const inviteeId = ctx.sharedChatId;
       if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
-      if (invitationService) {
-        const event = eventService.getEvent(eventId, user.telegram_id);
-        const inviterName = user.first_name ?? user.username ?? `User ${user.telegram_id}`;
-        const inv = invitationService.sendInvitation(eventId, user.telegram_id, inviteeId);
-        if (inv.success && inv.invitation) {
-          const inviteeUser = db.users.findByTelegramId(inviteeId);
-          const inviteeLang = (inviteeUser?.language ?? lang) as 'en' | 'ru';
-          const invText = event
-            ? formatInvitation(
-                event,
-                event.timezone,
-                inviteeLang,
-                inviterName,
-                user.telegram_id,
-                user.username ?? undefined,
-                inviteeUser?.timezone ?? null,
-                !!inviteeUser?.onboarding_completed,
-              )
-            : t(inviteeLang).invitation_received(`Event #${eventId}`, escapeHtml(inviterName));
-          telegramSender.sendInvitation!(inviteeId, invText, inv.invitation.id)
-            .then((sent) => {
-              if (sent) db.invitations.setMessageInfo(inv.invitation!.id, sent.message_id, inviteeId);
-            })
-            .catch((e) => botLogger.error({ err: e, inviteeId }, 'chat_shared invitation delivery failed'));
-        }
-        const resultText = inv.success
-          ? t(lang).invite_delivered(event?.title ?? `Event #${eventId}`)
-          : `❌ ${inv.error}`;
-        await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
-      }
+      const event = eventService.getEvent(eventId, user.telegram_id);
+      // Escaped because the result is sent with parse_mode HTML (titles may contain <, &).
+      const groupLabel = escapeHtml(event?.title ?? `Event #${eventId}`);
+      // Groups receive the invitation via Bot API only — no MTProto userbot delivery.
+      const outcome = await deliverPickerInvitation({
+        eventId,
+        inviter: user,
+        inviteeId,
+        fallbackChatId: ctx.chatId ?? user.telegram_id,
+        allowMtproto: false,
+      });
+      const resultText =
+        outcome.kind === 'delivered'
+          ? t(lang).invite_delivered(groupLabel)
+          : pickerStatusLine(lang, groupLabel, outcome);
+      await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     })
     // AI Assistant commands (not in setMyCommands — internal use only)
     .command('connect', (ctx) =>
