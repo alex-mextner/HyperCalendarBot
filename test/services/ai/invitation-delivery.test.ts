@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
@@ -294,6 +294,18 @@ describe('deliverInvitation', () => {
     const fallback = sentToInviter.join('\n');
     expect(fallback).toContain('Перешлите ссылку получателю');
     expect(fallback).not.toContain('Forward this link');
+  });
+
+  test('an unexpected throw inside the delivery chain degrades gracefully (no propagated throw)', async () => {
+    const invId = createInvitation();
+    const sender = makeSender({ sendInvitation: async () => ({ message_id: 42 }) });
+    // Force the post-delivery persistence to throw — the outer catch must swallow it safely
+    // (logging a sanitized error) and never propagate.
+    spyOn(invitationRepo, 'setMessageInfo').mockImplementation(() => {
+      throw new Error('db write failed');
+    });
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    expect(result).toEqual({ delivered: false, viaDeepLink: false });
   });
 
   test('sendInvitation capability missing → not delivered, no deep link', async () => {

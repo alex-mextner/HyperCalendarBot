@@ -103,6 +103,46 @@ test('deliverMessage: deep-link fallback delivered → fallbackSent true', async
   expect(result).toEqual({ delivered: false, fallbackSent: true });
 });
 
+test('deliverMessage: a Bot API failure is logged (not silently swallowed) before fallback', async () => {
+  const warnSpy = spyOn(botLogger, 'warn').mockImplementation(() => {});
+  const fakeSend = mock(async () => {
+    throw new Error('bot API down');
+  });
+  const fakeMtproto = mock(async () => true);
+  const result = await deliverMessage({
+    targetId: 100,
+    text: 'hello',
+    fallbackRecipientId: 999,
+    fallbackText: 'fallback',
+    botSend: fakeSend,
+    mtprotoSend: fakeMtproto,
+  });
+  expect(result).toEqual({ delivered: true });
+  expect(warnSpy).toHaveBeenCalled();
+  expect(JSON.stringify(warnSpy.mock.calls)).toContain('bot API down');
+});
+
+test('deliverMessage: an MTProto failure is logged (not silently swallowed) before fallback', async () => {
+  const warnSpy = spyOn(botLogger, 'warn').mockImplementation(() => {});
+  const fakeSend = mock(async (id: number) => {
+    if (id === 100) throw new Error('bot API down');
+    return { message_id: 1 };
+  });
+  const fakeMtproto = mock(async () => {
+    throw new Error('mtproto session corrupt');
+  });
+  const result = await deliverMessage({
+    targetId: 100,
+    text: 'hello',
+    fallbackRecipientId: 999,
+    fallbackText: 'fallback',
+    botSend: fakeSend,
+    mtprotoSend: fakeMtproto,
+  });
+  expect(result).toEqual({ delivered: false, fallbackSent: true });
+  expect(JSON.stringify(warnSpy.mock.calls)).toContain('mtproto session corrupt');
+});
+
 test('deliverMessage: suppressFallback skips the deep-link fallback entirely', async () => {
   const fakeSend = mock(async (id: number) => {
     if (id === 100) throw new Error('403');

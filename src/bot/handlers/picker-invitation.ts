@@ -190,10 +190,15 @@ async function deliverOneForBatch(
   deps: PickerInvitationDeps,
 ): Promise<PickerBatchLine> {
   const name = inviteeDisplayName(invitee);
+  // Save/update contact (deduplicates by telegram_id/username). This is a side effect — a write
+  // failure must NOT cancel the invitation delivery, so it gets its own try/catch.
+  try {
+    deps.contactRepo?.upsert(params.inviter.telegram_id, name, invitee.username, invitee.userId);
+  } catch (err) {
+    deliveryLogger.warn({ err, inviteeId: invitee.userId }, 'Contact upsert failed; delivering invitation anyway');
+  }
   let outcome: PickerDeliveryOutcome;
   try {
-    // Save/update contact (deduplicates by telegram_id/username).
-    deps.contactRepo?.upsert(params.inviter.telegram_id, name, invitee.username, invitee.userId);
     outcome = await deliverPickerInvitation(
       {
         eventId: params.eventId,

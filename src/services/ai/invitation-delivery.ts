@@ -8,7 +8,7 @@ import { escapeHtml } from '../../utils/telegram.ts';
 import { formatInvitation } from '../event/formatters.ts';
 import type { DeepLinkService } from '../sharing/deep-link-service.ts';
 import { buildUserSessionInvitationText } from '../telegram-session/invitation-text.ts';
-import { deliverMessage } from './deliver-message.ts';
+import { deliverMessage, describeDeliveryError } from './deliver-message.ts';
 import type { TelegramSender } from './types.ts';
 
 const deliveryLogger = botLogger.child({ module: 'invitation-delivery' });
@@ -205,7 +205,9 @@ export async function deliverInvitation(
     );
     return { delivered: false, viaDeepLink: linkSent };
   } catch (error) {
-    deliveryLogger.error({ invitationId, inviteeId, err: error }, 'Delivery chain failed');
+    // Sanitize: a thrown Telegram/API error can attach the full request body (incl. the deep
+    // link) as enumerable props; describeDeliveryError reads only safe scalar fields.
+    deliveryLogger.error({ invitationId, inviteeId, err: describeDeliveryError(error) }, 'Delivery chain failed');
     return { delivered: false, viaDeepLink: false };
   }
 }

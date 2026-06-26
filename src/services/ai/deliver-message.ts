@@ -53,8 +53,10 @@ export async function deliverMessage(
   try {
     const msg = await botSend(targetId, text, keyboard);
     return { delivered: true, messageId: msg.message_id };
-  } catch {
-    // continue to fallback
+  } catch (err) {
+    // Non-fatal: the recipient may simply not have started the bot. Fall through to MTProto /
+    // deep-link, but log so the failure is visible rather than silently swallowed.
+    botLogger.warn({ err: describeDeliveryError(err) }, 'Bot API delivery failed, trying fallback');
   }
 
   // 2. MTProto
@@ -62,8 +64,8 @@ export async function deliverMessage(
     try {
       const ok = await mtprotoSend(targetId, text, targetUsername);
       if (ok) return { delivered: true };
-    } catch {
-      // continue to fallback
+    } catch (err) {
+      botLogger.warn({ err: describeDeliveryError(err) }, 'MTProto delivery failed, trying fallback');
     }
   }
 

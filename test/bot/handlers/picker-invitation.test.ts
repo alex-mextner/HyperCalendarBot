@@ -402,7 +402,7 @@ describe('deliverPickerInvitations (batch)', () => {
     expect(result.aiResultLines[1]).toContain('invitation not created');
   });
 
-  test('a throwing contact upsert for one invitee is isolated — others still deliver', async () => {
+  test('a throwing contact upsert does NOT cancel that invitee delivery (side effect is isolated)', async () => {
     const realUpsert = contactRepo.upsert.bind(contactRepo);
     spyOn(contactRepo, 'upsert').mockImplementation((userId, name, username, telegramId, preferredName) => {
       if (telegramId === 202) throw new Error('contact write failed');
@@ -425,8 +425,9 @@ describe('deliverPickerInvitations (batch)', () => {
     );
     expect(result.statusLines).toHaveLength(3);
     expect(result.statusLines[0]).toBe('✅ Alice');
+    // The contact write is a side effect — its throw must NOT abort Bob's invitation delivery.
+    expect(result.statusLines[1]).toBe('✅ Bob');
     expect(result.statusLines[2]).toBe('✅ Carol');
-    expect(result.statusLines[1]).toContain('Bob');
   });
 
   test('each failed invitee gets a deep-link fallback that names that invitee (no cross-wiring)', async () => {
