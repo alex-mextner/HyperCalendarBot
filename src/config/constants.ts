@@ -208,6 +208,12 @@ export const MSG = {
     invite_timezone_note: (inviterName: string, tz: string) => `\n⏰ Time shown in ${inviterName}'s timezone (${tz})`,
     invite_resolve_not_found: (username: string) =>
       `@${username} not found on Telegram. Select the person from your contacts.`,
+    invite_picker_header: '📨 Invitations:',
+    invite_status_delivered: (name: string) => `✅ ${name}`,
+    invite_status_deeplink: (name: string) => `🔗 ${name} — link sent to you to forward`,
+    invite_status_failed: (name: string) => `❌ ${name} — not delivered`,
+    invite_status_error: (name: string, error: string) => `❌ ${name}: ${error}`,
+    invite_status_not_configured: (name: string) => `❌ ${name}: invitations not configured`,
     invitation_accepted: '✅ Invitation accepted',
     invitation_declined: '❌ Invitation declined',
     invitation_maybe: '🤔 Marked as maybe',
@@ -447,9 +453,10 @@ export const MSG = {
           `Visibility for "${title}" (id: ${id}) set to "${visibility}".`,
         editProposalSubmitted: (id: number) =>
           `Edit proposal submitted (id: ${id}). The event creator will be notified to accept or reject.`,
-        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
-          `⚠️ Could not deliver invitation for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
-        deliveryFallbackNoLink: (eventTitle: string) => `⚠️ Could not deliver invitation for "${eventTitle}" directly.`,
+        deliveryFallbackWithLink: (eventTitle: string, invitee: string, url: string) =>
+          `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly. Forward this link to the invitee: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
+          `⚠️ Could not deliver invitation to ${invitee} for "${eventTitle}" directly.`,
         mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
           `📅 ${inviterName} invites you to "${eventTitle}". Tap to respond: ${url}`,
         userSessionInvitation: (args: {
@@ -972,6 +979,12 @@ export const MSG = {
       `\n⏰ Время в часовом поясе ${inclineFirstname(inviterName, 'genitive')} (${tz})`,
     invite_resolve_not_found: (username: string) =>
       `@${username} не найден в Telegram. Выбери нужного человека из контактов.`,
+    invite_picker_header: '📨 Приглашения:',
+    invite_status_delivered: (name: string) => `✅ ${name}`,
+    invite_status_deeplink: (name: string) => `🔗 ${name} — ссылку отправил тебе для пересылки`,
+    invite_status_failed: (name: string) => `❌ ${name} — не доставлено`,
+    invite_status_error: (name: string, error: string) => `❌ ${name}: ${error}`,
+    invite_status_not_configured: (name: string) => `❌ ${name}: приглашения не настроены`,
     invitation_accepted: '✅ Приглашение принято',
     invitation_declined: '❌ Приглашение отклонено',
     invitation_maybe: '🤔 Отмечено как "возможно"',
@@ -1214,10 +1227,10 @@ export const MSG = {
           `Видимость «${title}» (id: ${id}) изменена на «${visibility}».`,
         editProposalSubmitted: (id: number) =>
           `Предложение изменений отправлено (id: ${id}). Создатель события получит уведомление.`,
-        deliveryFallbackWithLink: (eventTitle: string, url: string) =>
-          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
-        deliveryFallbackNoLink: (eventTitle: string) =>
-          `⚠️ Не удалось доставить приглашение на «${eventTitle}» напрямую.`,
+        deliveryFallbackWithLink: (eventTitle: string, invitee: string, url: string) =>
+          `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую. Перешлите ссылку получателю: ${url}`,
+        deliveryFallbackNoLink: (eventTitle: string, invitee: string) =>
+          `⚠️ Не удалось доставить приглашение для ${invitee} на «${eventTitle}» напрямую.`,
         mtprotoInvite: (inviterName: string, eventTitle: string, url: string) =>
           `📅 ${inviterName} приглашает вас на «${eventTitle}». Нажмите чтобы ответить: ${url}`,
         userSessionInvitation: (args: {
