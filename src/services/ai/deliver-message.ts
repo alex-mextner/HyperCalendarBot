@@ -1,12 +1,23 @@
 import { type InlineKeyboard, TelegramError } from 'gramio';
 import { botLogger } from '../../utils/logger.ts';
 
-/** Strip any URL from a log string — a delivery error message could embed the invitation
- *  deep-link (`https://t.me/Bot?start=i_...`), and URLs are not useful diagnostics here.
- *  Also strips a scheme-less `t.me/...` token, since an invitation deep-link can appear
- *  without an `https://` prefix. */
+/** Strip any URL or deep-link token from a log string. A delivery error message can embed an
+ *  invitation deep-link (`https://t.me/Bot?start=i_...`) in several shapes, none of which are
+ *  useful diagnostics and all of which would leak a working invite link through the logs:
+ *   - a full `https://`/`http://` URL;
+ *   - a scheme-less `t.me/...` token;
+ *   - an HTML-escaped / scheme-less form where the host or slash is mangled but the `start=`
+ *     param survives (the two URL regexes miss it);
+ *   - a bare deep-link code (`i_`/`s_`/`g_` + base64url, generated as 11 chars) with no URL
+ *     around it at all.
+ *  Kept conservative: only the `start=` param and the specific `[isg]_<base64url>` code shape are
+ *  matched, so ordinary prose and short `i_`/`s_` fragments survive untouched. */
 export function redactUrls(text: string): string {
-  return text.replace(/https?:\/\/\S+/gi, '[link redacted]').replace(/\bt\.me\/\S+/gi, '[link redacted]');
+  return text
+    .replace(/https?:\/\/\S+/gi, '[link redacted]')
+    .replace(/\bt\.me\/\S+/gi, '[link redacted]')
+    .replace(/start=\S+/gi, '[link redacted]')
+    .replace(/\b[isg]_[A-Za-z0-9_-]{8,}/g, '[link redacted]');
 }
 
 /**

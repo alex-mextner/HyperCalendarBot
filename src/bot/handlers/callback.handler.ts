@@ -5,7 +5,7 @@ import type { AnyScene } from '@gramio/scenes';
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
 import type { Lang } from '../../config/constants.ts';
-import { CB, t } from '../../config/constants.ts';
+import { CB, t, toLang } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { CallSettingsRepository } from '../../database/repositories/call-settings.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -1706,8 +1706,11 @@ export function createCallbackHandler(
       // channel. A group RSVP tap from such a sender can't be attributed to a person, so prompt
       // them to DM the bot instead of dropping the tap in silence.
       if (action === CB.GROUP_RSVP) {
+        // No dbUser means no resolved language; fall back to the tapper's Telegram client language
+        // (`from.languageCode`) when present, else English.
+        const hintLang = toLang(ctx.from?.languageCode);
         await ctx
-          .answer({ text: t('en').group_rsvp_start_hint, show_alert: true })
+          .answer({ text: t(hintLang).group_rsvp_start_hint, show_alert: true })
           .catch((e) => cmdLogger.debug({ err: e }, 'answer() group RSVP start hint'));
       }
       return;

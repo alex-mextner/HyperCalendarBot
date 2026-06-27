@@ -23,7 +23,7 @@ import {
   handleShareAgenda,
   handleShareEvent,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, InvitationKeyboardVariant } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
@@ -659,6 +659,54 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('delivery');
     });
 
+    test('resending a pending GROUP invitation uses the group RSVP keyboard and skips MTProto', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invitation stores the (negative) group chat id as invitee_id.
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      let variant: InvitationKeyboardVariant | undefined;
+      let groupRecipient: number | undefined;
+      let mtprotoCalled = false;
+      const sentToInviter: number[] = [];
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async (chatId) => {
+            sentToInviter.push(chatId);
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async (inviteeId, _text, _invId, _lang, v) => {
+            groupRecipient = inviteeId;
+            variant = v;
+            return null; // bot API delivery fails so the fallback path is exercised too
+          },
+          sendAsUser: async () => {
+            mtprotoCalled = true;
+            return true;
+          },
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      // The group RSVP keyboard variant is delivered to the group so members can respond for
+      // themselves — never the personal inv: keyboard (which authorizes a single invitee).
+      expect(groupRecipient).toBe(GROUP_CHAT_ID);
+      expect(variant).toEqual({ kind: 'group', eventId: event.id });
+      // allowMtproto:false → no MTProto userbot for a group, and the deep-link forward fallback is
+      // suppressed (a forward link can't be accepted on behalf of a group).
+      expect(mtprotoCalled).toBe(false);
+      expect(sentToInviter).toHaveLength(0);
+    });
+
     test('sender without sendInvitation capability → succeeds but reports delivery failed (consistent guard)', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
@@ -766,6 +814,71 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.output).toContain('accepted');
       expect(result.output).toContain(`${OTHER_USER_ID}`);
+    });
+
+    test('group invitation reflects per-member RSVP state instead of a stale "pending"', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Group invite: invitee_id is the negative group chat id; the row stays "pending" forever.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      // Two members RSVP'd via grsvp → recorded per-member in event_participants.
+      participantRepo.add(event.id, 301, 'accepted');
+      participantRepo.add(event.id, 302, 'declined');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('301');
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain('302');
+      expect(result.output).toContain('declined');
+      // The negative group chat id must NOT be shown as a stale per-invitee line.
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Empty Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('no member RSVPs yet');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test('a personal invitee with a participant row is not double-listed as a group member', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Mixed Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal accepted invite (also creates an event_participants row for OTHER_USER_ID).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      // Group invite + a distinct group member.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 303, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The distinct group member appears under the group breakdown.
+      expect(result.output).toContain('303');
+      // The personal invitee appears exactly once (its own invitee line), never also as a group member.
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
     });
 
     test('returns mixed pending and accepted', async () => {

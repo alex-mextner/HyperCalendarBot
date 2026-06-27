@@ -211,6 +211,11 @@ export async function handleResendInvitation(
   // reports non-delivery when the sender lacks the sendInvitation capability.
   if (ctx.sender) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
+    // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
+    // the group delivery mode (per-member RSVP keyboard, no MTProto, no deep-link forward) — exactly
+    // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
+    // (authorizes a single invitee, unusable in a group).
+    const isGroupTarget = invitation.invitee_id < 0;
     const delivery = await deliverInvitation({
       invitationId: invitation.id,
       eventId: invitation.event_id,
@@ -234,6 +239,8 @@ export async function handleResendInvitation(
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
+      allowMtproto: !isGroupTarget,
+      isGroupTarget,
       deps: {
         sender: ctx.sender,
         invitationRepo: ctx.sharing.invitationRepo,
@@ -257,6 +264,25 @@ export async function handleResendInvitation(
   return { success: false, error: 'Message delivery not available.' };
 }
 
+/**
+ * Per-member RSVP breakdown for an event that has at least one group invitation. The shared group
+ * invitation row stays "pending" forever, so the real responses live in event_participants. Personal
+ * invitees (already listed by their own invitation rows) are excluded so a member who both holds a
+ * personal invite and has a participant row is never double-counted. When an event is shared to more
+ * than one group, event_participants does not record which group a member came from, so the breakdown
+ * is reported once for the whole event rather than per group chat.
+ */
+function describeGroupRsvp(ctx: AgentContext, eventId: number, personalInviteeIds: Set<number>): string[] {
+  if (!ctx.participantRepo) {
+    return ['group invitation: members RSVP per-member (participant registry unavailable)'];
+  }
+  const members = ctx.participantRepo.getByEvent(eventId).filter((p) => !personalInviteeIds.has(p.user_id));
+  if (members.length === 0) {
+    return ['group invitation: no member RSVPs yet'];
+  }
+  return ['group invitation — per-member RSVP:', ...members.map((p) => `  member: ${p.user_id}, status: ${p.status}`)];
+}
+
 export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitationStatusInput): ToolResult {
   if (!ctx.sharing?.invitationRepo) {
     return { success: false, error: 'Invitations are not configured.' };
@@ -270,12 +296,25 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   const pending = ctx.sharing.invitationRepo.getPendingForEvent(input.event_id);
   const accepted = ctx.sharing.invitationRepo.getAcceptedForEvent(input.event_id);
 
+  // A group invitation stores the (negative) group chat id as invitee_id and never leaves
+  // "pending": members RSVP per-member into event_participants, not onto the shared invitation row.
+  // List personal invitees by their own rows, then append the real per-member group RSVPs so the
+  // group status reflects reality instead of a permanently stale "pending".
+  const personalInviteeIds = new Set<number>();
   const lines: string[] = [];
   for (const inv of accepted) {
+    if (inv.invitee_id < 0) continue;
+    personalInviteeIds.add(inv.invitee_id);
     lines.push(`invitee: ${inv.invitee_id}, status: accepted`);
   }
   for (const inv of pending) {
+    if (inv.invitee_id < 0) continue;
+    personalInviteeIds.add(inv.invitee_id);
     lines.push(`invitee: ${inv.invitee_id}, status: ${inv.status}`);
+  }
+  const hasGroupInvite = accepted.some((inv) => inv.invitee_id < 0) || pending.some((inv) => inv.invitee_id < 0);
+  if (hasGroupInvite) {
+    lines.push(...describeGroupRsvp(ctx, input.event_id, personalInviteeIds));
   }
 
   const lang = ctx.user.language;
