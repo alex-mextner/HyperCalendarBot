@@ -60,7 +60,7 @@ import { handleFeatureTourCallback } from '../commands/feature-tour.ts';
 import { handleHolidayCallback } from '../commands/holidays.ts';
 import { handleMonth } from '../commands/month.ts';
 import { handleSettingsCallback, pendingGroupTzInput } from '../commands/settings.ts';
-import { isGroup } from '../group-context.ts';
+import { getGroupId, isGroup } from '../group-context.ts';
 import { editFieldKeyboard, eventActionsKeyboard, inviteContactPickerKeyboard } from '../keyboards.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCallbackContext } from '../types.ts';
@@ -784,10 +784,10 @@ export function createCallbackHandler(
   });
 
   // Group RSVP — any member of a group event responds for themselves.
-  // Callback data: "grsvp:<eventId>:going|notgoing". There is no invitee_id check: a group
-  // invitation stores the group chat id as its invitee, so per-invitation authorization can
-  // never apply to an individual member. The event itself is the authorization boundary — the
-  // keyboard only exists on a message the bot delivered to that member's group.
+  // Callback data: "grsvp:<eventId>:going|notgoing". callback_data is forgeable, so it is NOT an
+  // authorization boundary: the RSVP is bound to the group whose message carried the button. The
+  // chat Telegram reports for that message is the real group id, and `recordGroupAttendance`
+  // requires an active invitation linking the event to that group before writing anything.
   dispatch.set(CB.GROUP_RSVP, async (ctx, _payload, parts, user) => {
     if (!invitationService) return;
     const lang = (user.language ?? 'en') as Lang;
@@ -798,10 +798,19 @@ export function createCallbackHandler(
       await ctx.answer();
       return;
     }
+    // Fail closed: a group RSVP can only originate from a group/supergroup message. Without a
+    // group chat id (private chat, channel, or no chat at all) the tap cannot be bound to a
+    // group, so we reject it and write nothing.
+    const groupChatId = getGroupId(ctx);
+    if (groupChatId === null) {
+      cmdLogger.warn({ userId: user.telegram_id, eventId }, 'Group RSVP tap outside a group chat');
+      await ctx.answer({ text: t(lang).group_rsvp_not_authorized });
+      return;
+    }
     const status = action === 'going' ? 'accepted' : 'declined';
-    const result = invitationService.recordGroupAttendance(eventId, user.telegram_id, status);
+    const result = invitationService.recordGroupAttendance(eventId, user.telegram_id, status, groupChatId);
     if (!result.success) {
-      await ctx.answer({ text: t(lang).group_rsvp_event_gone });
+      await ctx.answer({ text: t(lang).group_rsvp_not_authorized });
       return;
     }
     // Toast only — never edit the shared group message, or one member's tap would replace the

@@ -258,9 +258,10 @@ describe('InvitationService', () => {
       return { db, service, invRepo, eventRepo, participantRepo, event };
     }
 
+    const GROUP_ID = -100123;
+
     test('the old inv: path rejects a group invitee_id, recordGroupAttendance accepts it', () => {
       const { service, invRepo, participantRepo, event } = setupGroup();
-      const GROUP_ID = -100123;
       const MEMBER = 555;
       // The picker path stored the group chat id as the invitation invitee_id.
       const groupInvitation = invRepo.create({
@@ -276,17 +277,58 @@ describe('InvitationService', () => {
       expect(rejected.error).toContain('Not authorized');
 
       // The group RSVP path records the member directly against the event.
-      const recorded = service.recordGroupAttendance(event.id, MEMBER, 'accepted');
+      const recorded = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
       expect(recorded.success).toBe(true);
       const row = participantRepo.findByEventAndUser(event.id, MEMBER);
       expect(row).not.toBeNull();
       expect(row!.status).toBe('accepted');
     });
 
-    test('members RSVP independently — one row per member, no "already changed"', () => {
+    test('binds the RSVP to the inviting group — an arbitrary event id from another group is rejected (IDOR)', () => {
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      const OTHER_GROUP = -100999;
+      const MEMBER = 555;
+      const ATTACKER = 999;
+      // The event was genuinely group-invited to GROUP_ID only.
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+
+      // A real member of the invited group can RSVP.
+      const ok = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(ok.success).toBe(true);
+      expect(participantRepo.findByEventAndUser(event.id, MEMBER)!.status).toBe('accepted');
+
+      // An attacker substitutes this event id into a callback delivered in a DIFFERENT group
+      // that holds no invitation for it. Telegram supplies OTHER_GROUP as the real chat id, so
+      // the binding check fails and nothing is written.
+      const blocked = service.recordGroupAttendance(event.id, ATTACKER, 'accepted', OTHER_GROUP);
+      expect(blocked.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(event.id, ATTACKER)).toBeNull();
+    });
+
+    test('rejects a forged event id with no group invitation at all', () => {
       const { service, participantRepo, event } = setupGroup();
-      const a = service.recordGroupAttendance(event.id, 555, 'accepted');
-      const b = service.recordGroupAttendance(event.id, 777, 'declined');
+      const ATTACKER = 999;
+      // No invitation links this event to this group.
+      const result = service.recordGroupAttendance(event.id, ATTACKER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(event.id, ATTACKER)).toBeNull();
+    });
+
+    test('rejects when the group invitation is no longer active (declined/cancelled)', () => {
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      const MEMBER = 555;
+      const inv = invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      invRepo.updateStatus(inv.id, 'cancelled', 'pending');
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(event.id, MEMBER)).toBeNull();
+    });
+
+    test('members RSVP independently — one row per member, no "already changed"', () => {
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const a = service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
+      const b = service.recordGroupAttendance(event.id, 777, 'declined', GROUP_ID);
       expect(a.success).toBe(true);
       expect(b.success).toBe(true);
 
@@ -297,9 +339,10 @@ describe('InvitationService', () => {
     });
 
     test('a member can flip their answer (accepted -> declined updates the same row)', () => {
-      const { service, participantRepo, event } = setupGroup();
-      service.recordGroupAttendance(event.id, 555, 'accepted');
-      const flip = service.recordGroupAttendance(event.id, 555, 'declined');
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
+      const flip = service.recordGroupAttendance(event.id, 555, 'declined', GROUP_ID);
       expect(flip.success).toBe(true);
 
       const rows = participantRepo.getByEvent(event.id);
@@ -307,9 +350,9 @@ describe('InvitationService', () => {
       expect(participantRepo.findByEventAndUser(event.id, 555)!.status).toBe('declined');
     });
 
-    test('fails when the event no longer exists', () => {
+    test('fails when the event no longer exists (no invitation links it)', () => {
       const { service, participantRepo } = setupGroup();
-      const result = service.recordGroupAttendance(999999, 555, 'accepted');
+      const result = service.recordGroupAttendance(999999, 555, 'accepted', GROUP_ID);
       expect(result.success).toBe(false);
       expect(participantRepo.findByEventAndUser(999999, 555)).toBeNull();
     });
@@ -329,7 +372,8 @@ describe('InvitationService', () => {
         start_at: '2026-03-15T18:00:00Z',
         timezone: 'UTC',
       });
-      const result = service.recordGroupAttendance(event.id, 555, 'accepted');
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
       expect(result.success).toBe(false);
     });
   });

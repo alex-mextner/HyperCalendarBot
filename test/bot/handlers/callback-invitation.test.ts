@@ -12,6 +12,17 @@ function makeCtx(data: string, language: 'en' | 'ru' = 'en') {
   };
 }
 
+const GROUP_CHAT_ID = -100123;
+
+// A group RSVP tap arrives on a message the bot delivered into the group, so the callback chat
+// is the group itself. The personal `inv:` callbacks above run in private chats and ignore it.
+function makeGroupCtx(data: string, language: 'en' | 'ru' = 'en') {
+  return {
+    ...makeCtx(data, language),
+    chat: { type: 'supergroup', id: GROUP_CHAT_ID },
+  };
+}
+
 function makeHandler(invitationService: unknown) {
   return createCallbackHandler({} as never, {} as never, {} as never, {} as never, {
     invitationService: invitationService as never,
@@ -119,29 +130,29 @@ describe('invitation callbacks', () => {
 describe('group RSVP callbacks', () => {
   test('going records accepted attendance for the clicking member and toasts', async () => {
     const recordGroupAttendance = mock(() => ({ success: true }));
-    const ctx = makeCtx('grsvp:42:going');
+    const ctx = makeGroupCtx('grsvp:42:going');
     const handler = makeHandler({ recordGroupAttendance });
 
     await handler(ctx as never);
 
-    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'accepted');
+    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'accepted', GROUP_CHAT_ID);
     expect(ctx.answer).toHaveBeenCalledWith(t('en').group_rsvp_recorded);
   });
 
   test('notgoing records declined attendance for the clicking member and toasts', async () => {
     const recordGroupAttendance = mock(() => ({ success: true }));
-    const ctx = makeCtx('grsvp:42:notgoing');
+    const ctx = makeGroupCtx('grsvp:42:notgoing');
     const handler = makeHandler({ recordGroupAttendance });
 
     await handler(ctx as never);
 
-    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'declined');
+    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'declined', GROUP_CHAT_ID);
     expect(ctx.answer).toHaveBeenCalledWith(t('en').group_rsvp_removed);
   });
 
   test('uses the clicking member language for the toast', async () => {
     const recordGroupAttendance = mock(() => ({ success: true }));
-    const ctx = makeCtx('grsvp:42:going', 'ru');
+    const ctx = makeGroupCtx('grsvp:42:going', 'ru');
     const handler = makeHandler({ recordGroupAttendance });
 
     await handler(ctx as never);
@@ -149,15 +160,41 @@ describe('group RSVP callbacks', () => {
     expect(ctx.answer).toHaveBeenCalledWith(t('ru').group_rsvp_recorded);
   });
 
-  test('reports event-gone when the event no longer exists', async () => {
-    const recordGroupAttendance = mock(() => ({ success: false, error: 'Event not found' }));
+  test('rejects the RSVP and records nothing when the service denies authorization', async () => {
+    const recordGroupAttendance = mock(() => ({
+      success: false,
+      error: 'No active group invitation links this event to this chat',
+    }));
+    const ctx = makeGroupCtx('grsvp:42:going');
+    const handler = makeHandler({ recordGroupAttendance });
+
+    await handler(ctx as never);
+
+    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'accepted', GROUP_CHAT_ID);
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
+  });
+
+  test('fails closed without calling the service when the tap is not in a group chat', async () => {
+    const recordGroupAttendance = mock(() => ({ success: true }));
+    // Private chat — getGroupId returns null, so the RSVP cannot be bound to a group.
+    const ctx = { ...makeCtx('grsvp:42:going'), chat: { type: 'private', id: 200 } };
+    const handler = makeHandler({ recordGroupAttendance });
+
+    await handler(ctx as never);
+
+    expect(recordGroupAttendance).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
+  });
+
+  test('fails closed without calling the service when the callback carries no chat', async () => {
+    const recordGroupAttendance = mock(() => ({ success: true }));
     const ctx = makeCtx('grsvp:42:going');
     const handler = makeHandler({ recordGroupAttendance });
 
     await handler(ctx as never);
 
-    expect(recordGroupAttendance).toHaveBeenCalledWith(42, 200, 'accepted');
-    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_event_gone });
+    expect(recordGroupAttendance).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_not_authorized });
   });
 
   test('shows a /start hint and records nothing when the clicker has no dbUser', async () => {
