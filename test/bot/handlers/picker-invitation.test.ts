@@ -838,4 +838,46 @@ describe('runChatShareWithAck (reply-fast group invite)', () => {
     expect(outcome).toEqual({ kind: 'delivered' });
     expect(sends).toEqual([t('en').invite_group_sending, t('en').invite_delivered('Launch Party')]);
   });
+
+  test('a throw during delivery finalizes the ack with a failure instead of leaving "sending…"', async () => {
+    const sends: string[] = [];
+    let editedText: string | undefined;
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 42 }) };
+    // Force a throw OUTSIDE deliverInvitation's own try/catch: deliverPickerInvitation calls
+    // eventService.getEvent before delegating, so a throw there exercises the orchestrator's guard.
+    spyOn(eventService, 'getEvent').mockImplementation(() => {
+      throw new Error('db exploded mid-delivery');
+    });
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        sends.push(text);
+        return { message_id: 7 };
+      },
+      editAck: async (_id, text) => {
+        editedText = text;
+      },
+    };
+    const { outcome } = await runChatShareWithAck(
+      {
+        invitation: {
+          eventId,
+          inviter,
+          inviteeId: GROUP_ID,
+          fallbackChatId: INVITER_ID,
+          allowMtproto: false,
+          isGroupTarget: true,
+        },
+        lang: 'en',
+        title: 'Launch Party',
+      },
+      makeDeps(sender),
+      io,
+    );
+    // The throw is contained: an honest failure outcome, and the ack is edited away from "sending…"
+    // so the user is never left staring at the in-progress message.
+    expect(outcome.kind).toBe('error');
+    expect(sends).toEqual([t('en').invite_group_sending]);
+    expect(editedText).toBeDefined();
+    expect(editedText).not.toBe(t('en').invite_group_sending);
+  });
 });

@@ -323,7 +323,20 @@ export async function runChatShareWithAck(
   io: PickerAckIo,
 ): Promise<{ outcome: PickerDeliveryOutcome }> {
   const ack = await io.sendAck(t(params.lang).invite_group_sending);
-  const outcome = await deliverPickerInvitation(params.invitation, deps);
+  let outcome: PickerDeliveryOutcome;
+  try {
+    outcome = await deliverPickerInvitation(params.invitation, deps);
+  } catch (err) {
+    // Mirror the batch path's per-invitee guard: a throw must not leave the inviter stuck on the
+    // "sending…" ack — report an honest failure and finalize the ack with it. Sanitize the error:
+    // a thrown GramIO TelegramError attaches the request body (chat id, group title) as enumerable
+    // props that pino's `err` serializer would otherwise copy into the logs.
+    deliveryLogger.error(
+      { err: describeDeliveryError(err), eventId: params.invitation.eventId },
+      'Group invite delivery threw',
+    );
+    outcome = { kind: 'error', error: 'delivery error' };
+  }
   await finalizeAck(io, ack.message_id, buildChatSharedResultText(params.lang, params.title, outcome));
   return { outcome };
 }
