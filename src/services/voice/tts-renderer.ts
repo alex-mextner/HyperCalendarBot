@@ -15,7 +15,15 @@ interface ReminderSpeechInput {
 }
 
 function stripHtml(text: string): string {
-  return text.replace(/<[^>]*>/g, '');
+  // Strip tags to a fixpoint: one greedy, non-recursive pass can leave a partial or
+  // overlapping `<...>` sequence behind, so repeat until the string stops shrinking.
+  let stripped = text;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/<[^>]*>/g, '');
+  } while (stripped !== prev);
+  return stripped;
 }
 
 /**

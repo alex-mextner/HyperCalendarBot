@@ -3,7 +3,11 @@
 
 import { InferenceClient } from '@huggingface/inference';
 
-const HF_TOKEN = process.env.HF_TOKEN ?? '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';
+const HF_TOKEN = process.env.HF_TOKEN;
+if (!HF_TOKEN) {
+  console.error('Set HF_TOKEN (a HuggingFace access token) before running this script.');
+  process.exit(1);
+}
 const text = process.argv[2] ?? 'Hello! Your meeting tomorrow at 3 pm has been added to your calendar.';
 const outFile = '/tmp/kokoro-test.wav';
 

@@ -7,8 +7,15 @@ export function escapeHtml(text: string): string {
 
 /** Strip all HTML tags, decode &amp; &lt; &gt; &quot; back to plain characters. */
 export function stripHtml(html: string): string {
-  return html
-    .replace(/<[^>]*>/g, '')
+  // Strip tags to a fixpoint: one greedy, non-recursive pass can leave a partial or
+  // overlapping `<...>` sequence behind, so repeat until the string stops shrinking.
+  let stripped = html;
+  let prev: string;
+  do {
+    prev = stripped;
+    stripped = stripped.replace(/<[^>]*>/g, '');
+  } while (stripped !== prev);
+  return stripped
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
@@ -16,7 +23,9 @@ export function stripHtml(html: string): string {
 }
 
 export function escapeMarkdown(text: string): string {
-  return text.replace(/([_*`[\]])/g, '\\$1');
+  // Escape backslash too (and first within the class) so a literal `\` in the
+  // input can't neutralize the escaping of a following special character.
+  return text.replace(/([\\_*`[\]])/g, '\\$1');
 }
 
 export function markdownToHtml(text: string): string {

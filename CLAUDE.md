@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Universal mandatory behavior is NOT restated here.** Cross-project mandates — atomic
+> commits, TDD red-first, AI-review-before-commit, delegating non-trivial work to subagents,
+> the visual-proof cycle, dead-code investigation, secret-scanning, the green-CI-gated `gh ship`
+> merge gate — are installed machine-wide via the agent skills/hooks layer and the repo's
+> `rig.yaml` (CI gates in `.github/workflows/`). This file holds only **HyperCalendarBot-specific**
+> guidance (the bot pipeline, the strict TS/type rules, bot tone-of-voice, MTProto/Pyrogram,
+> deployment). Don't duplicate universal rules into this file.
+
 ## Shell Commands
 
 Never use absolute paths for common tools — they are on the shell PATH:
@@ -444,26 +452,17 @@ When renaming variables, constants, config keys, or any other interface:
 
 ## Debugging
 
-- Read error messages carefully — they often contain the exact solution.
-- Find similar working code in the same codebase. Compare working vs broken.
-- State a single hypothesis, make the smallest possible change to test it.
-- NEVER add multiple fixes at once. ALWAYS test after each change.
+Follow the universal `systematic-debugging` skill (reproduce, read the actual error, one
+hypothesis, smallest change, test after each). Project-specific tip:
+
 - **Library type limitations — clone and investigate**: when a dependency produces poor types,
   clone the library source into `~/xp/` and read the actual code before guessing or casting.
 
 ## Session Wrap-Up
 
-When summarising completed work or suggesting next steps, always scan the conversation history and memory
-for items that were explicitly deferred, noted as "pending", or silently dropped mid-discussion.
-Surface them as concrete suggestions — not vague hints. If something was discussed but not implemented,
-name it and ask whether to pick it up.
-
-After completing any task, answer these two questions out loud:
-
-1. **Всё ли сделано из того, что просили?** — go through the original request point by point.
-   Did any sub-task get quietly skipped? Was anything promised but not delivered?
-2. **Есть ли что улучшить, исправить или убрать?** — name specific things, not vague hints.
-   Open PRs not yet merged? Known limitations introduced? Stale comments or dead code noticed?
+Covered by the universal `task-completion-selfcheck` and `deferred-findings-tracking` skills:
+before reporting a task done, walk the original request point by point for silently-skipped
+sub-tasks, and file a tracking issue for any deferred finding rather than dropping it.
 
 ## Tone of Voice (bot messages)
 
@@ -546,7 +545,8 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 
 ## MCP Tools
 
-Use these MCP servers proactively whenever they can help:
+Use these MCP servers proactively whenever they can help (also surfaced via the universal
+`serena` / `semantic-code-search` skills):
 
 - **serena** — semantic code navigation and editing. Use `find_symbol`, `get_symbols_overview`,
   `find_referencing_symbols` over reading entire files.
@@ -555,10 +555,9 @@ Use these MCP servers proactively whenever they can help:
 
 ## Memory
 
-- **Actively save to memory**: every significant user instruction, decision, finding, or project state change.
-- **Regularly update CLAUDE.md**: when recurring patterns, new rules, or important conventions emerge from work sessions — add them here so they persist across all conversations.
-- When the user gives an instruction that applies beyond the current session, save it to memory AND consider whether it belongs in CLAUDE.md.
-- Check memory at the start of each session for context on ongoing work.
+- **Regularly update CLAUDE.md**: when recurring HyperCalendarBot patterns, new rules, or
+  conventions emerge — add them here so they persist across sessions. Agent memory itself lives
+  in the agent-tools MEMORY.md layer.
 
 ## ralphex — Autonomous Plan Executor
 

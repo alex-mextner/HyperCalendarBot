@@ -34,6 +34,22 @@ test('generatePairingCode matches format xxxx-xxxx', () => {
   expect(generatePairingCode()).toMatch(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
 });
 
+test('generatePairingCode always yields full length despite byte rejection', () => {
+  // Rejection sampling (drop biased bytes) must never short the code length.
+  for (let i = 0; i < 500; i++) {
+    expect(generatePairingCode()).toMatch(/^[a-z0-9]{4}-[a-z0-9]{4}$/);
+  }
+});
+
+test('generatePairingCode reaches across the whole alphabet', () => {
+  // Sanity that rejection sampling does not silently drop a slice of the alphabet.
+  const seen = new Set<string>();
+  for (let i = 0; i < 2000; i++) {
+    for (const ch of generatePairingCode().replace('-', '')) seen.add(ch);
+  }
+  expect(seen.size).toBe('abcdefghijklmnopqrstuvwxyz0123456789'.length);
+});
+
 test('issueAgentJwt + verifyAgentJwt roundtrip', async () => {
   const jwt = await issueAgentJwt(123456);
   const userId = await verifyAgentJwt(jwt);

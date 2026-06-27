@@ -24,10 +24,18 @@ const pendingConnections = new Map<string, PendingConnection>();
 
 export function generatePairingCode(): string {
   const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-  const rand = (n: number) =>
-    Array.from(crypto.getRandomValues(new Uint8Array(n)))
-      .map((b) => chars[b % chars.length])
-      .join('');
+  // Reject bytes in the biased tail so each char is uniformly distributed.
+  // 256 % 36 = 4, so bytes 252..255 would over-represent the first 4 chars.
+  const limit = 256 - (256 % chars.length);
+  const rand = (n: number): string => {
+    let out = '';
+    while (out.length < n) {
+      for (const b of crypto.getRandomValues(new Uint8Array(n - out.length))) {
+        if (b < limit) out += chars[b % chars.length];
+      }
+    }
+    return out;
+  };
   return `${rand(4)}-${rand(4)}`;
 }
 
