@@ -272,7 +272,18 @@ async function finalizeAck(io: PickerAckIo, messageId: number, finalText: string
       { err: describeDeliveryError(err), messageId },
       'Failed to edit picker ack message; sending the final status as a new message',
     );
-    await io.sendAck(finalText);
+    try {
+      await io.sendAck(finalText);
+    } catch (fallbackErr) {
+      // Double failure: the in-place edit AND the fresh re-send both failed (chat gone, 429 on
+      // both, etc.). Nothing more can reach the user, so swallow after logging — but sanitize the
+      // error first: a thrown GramIO TelegramError attaches the full request body (chat id, event
+      // title, invitee names) as enumerable props that pino's `err` serializer would copy verbatim.
+      deliveryLogger.error(
+        { err: describeDeliveryError(fallbackErr), messageId },
+        'Failed to send picker ack fallback message after an edit failure',
+      );
+    }
   }
 }
 
