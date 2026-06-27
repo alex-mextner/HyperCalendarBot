@@ -312,17 +312,47 @@ describe('deliverInvitation', () => {
     expect(result).toEqual({ delivered: true, viaDeepLink: false });
   });
 
-  test('link/url setup throw → honest non-delivery, no propagated throw', async () => {
+  test('createInvitationLink throws but Bot API succeeds → delivered, no deep link', async () => {
     const invId = createInvitation();
-    const sender = makeSender({ sendInvitation: async () => ({ message_id: 42 }) });
-    // The deep-link setup runs before the send. If it throws (DB error, etc.) it must be
-    // contained inside the delivery try and surface as an honest non-delivery — never propagate
-    // out of the handler after the invitation row was already created.
+    let sentInvId: number | undefined;
+    const sender = makeSender({
+      sendInvitation: async (_inviteeId, _text, invitationId) => {
+        sentInvId = invitationId;
+        return { message_id: 42 };
+      },
+    });
+    // Deep-link creation fails (DB error). The link is only needed by the MTProto/fallback path,
+    // so a creation failure must NOT block the primary Bot API send to a reachable invitee — the
+    // invitee who already started the bot still gets the invitation.
     spyOn(deepLinkService, 'createInvitationLink').mockImplementation(() => {
       throw new Error('deep-link creation failed');
     });
     const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    expect(sentInvId).toBe(invId);
+  });
+
+  test('createInvitationLink throws and Bot API fails → no-link fallback to inviter, viaDeepLink false', async () => {
+    const invId = createInvitation();
+    const sentMessages: { chatId: number; text: string }[] = [];
+    const sender = makeSender({
+      sendMessage: async (chatId, text) => {
+        sentMessages.push({ chatId, text });
+        return { message_id: 1 };
+      },
+      sendInvitation: async () => null,
+      sendAsUser: async () => false,
+    });
+    spyOn(deepLinkService, 'createInvitationLink').mockImplementation(() => {
+      throw new Error('deep-link creation failed');
+    });
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+    // No link could be built → MTProto (which needs the link) is skipped and the inviter fallback
+    // uses the no-link variant, so no honest "link sent" claim can be made.
     expect(result).toEqual({ delivered: false, viaDeepLink: false });
+    const fallback = sentMessages.find((m) => m.chatId === INVITER_ID);
+    expect(fallback).toBeDefined();
+    expect(fallback!.text).not.toContain('t.me');
   });
 
   test('regression: a fallback send that THROWS (inviter blocked the bot, 403) → honest viaDeepLink false', async () => {

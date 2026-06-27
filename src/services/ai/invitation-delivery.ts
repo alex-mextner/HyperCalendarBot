@@ -110,8 +110,21 @@ export async function deliverInvitation(
       );
     }
 
-    const link = deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
-    const url = link && botUsername ? deepLinkSvc!.generateUrl(link.code, botUsername) : null;
+    let url: string | null = null;
+    try {
+      const link =
+        deepLinkSvc && botUsername ? deepLinkSvc.createInvitationLink(invitationId, eventId, inviterId) : null;
+      url = link && deepLinkSvc && botUsername ? deepLinkSvc.generateUrl(link.code, botUsername) : null;
+    } catch (err) {
+      // The deep link is only used by the MTProto/fallback path. A creation failure must not block
+      // the primary Bot API send to a reachable invitee — degrade to no-link (Bot API still runs;
+      // the inviter fallback becomes the no-link variant; MTProto, which needs the link, is skipped).
+      deliveryLogger.warn(
+        { invitationId, inviteeId, err: describeDeliveryError(err) },
+        'deep-link creation failed; continuing without link',
+      );
+      url = null;
+    }
     const tr = t(lang).aiTools.sharing;
     // The fallback/forwarding message is sent to the INVITER, so it uses the inviter's language —
     // not the invitee's (`lang`), which drives the invitee-facing invitation and MTProto text.
