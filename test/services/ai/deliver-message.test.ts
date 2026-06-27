@@ -107,6 +107,30 @@ describe('describeDeliveryError', () => {
     expect(serialized).not.toContain('start=i_');
     expect(serialized).not.toContain('chat_id');
   });
+
+  test('TelegramError with a deep link in message/params → stack redacted, params/body never copied', () => {
+    const secretLink = 'https://t.me/TestBot?start=i_STACKLEAK01';
+    const err = new TelegramError(
+      { ok: false, error_code: 400, description: `Bad Request: ${secretLink}` },
+      'sendMessage',
+      { chat_id: 12345, text: `forward ${secretLink}` },
+    );
+    const out = describeDeliveryError(err);
+    // The stack is kept for debuggability, but V8 prepends `name: message` to its first line, so
+    // the deep link embedded in the description must be redacted out of the stack too.
+    expect(typeof out.stack).toBe('string');
+    expect(out.stack).not.toContain('start=i_');
+    expect(out.stack).not.toContain('t.me/TestBot');
+    expect(out.stack).toContain('[link redacted]');
+    // TelegramError attaches the request body (params/payload) as enumerable own props; the
+    // described object must read only safe scalar fields and never copy them.
+    expect(Object.keys(out)).not.toContain('params');
+    expect(Object.keys(out)).not.toContain('payload');
+    expect(Object.keys(out)).not.toContain('body');
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain('chat_id');
+    expect(serialized).not.toContain('start=i_');
+  });
 });
 
 test('deliverMessage: delivers via bot API on success', async () => {
