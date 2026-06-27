@@ -816,6 +816,71 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain(`${OTHER_USER_ID}`);
     });
 
+    test('group invitation reflects per-member RSVP state instead of a stale "pending"', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Group invite: invitee_id is the negative group chat id; the row stays "pending" forever.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      // Two members RSVP'd via grsvp → recorded per-member in event_participants.
+      participantRepo.add(event.id, 301, 'accepted');
+      participantRepo.add(event.id, 302, 'declined');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('301');
+      expect(result.output).toContain('accepted');
+      expect(result.output).toContain('302');
+      expect(result.output).toContain('declined');
+      // The negative group chat id must NOT be shown as a stale per-invitee line.
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test('group invitation with no responses yet notes per-member RSVP, not a stale pending line', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Empty Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('no member RSVPs yet');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+    });
+
+    test('a personal invitee with a participant row is not double-listed as a group member', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Mixed Group',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal accepted invite (also creates an event_participants row for OTHER_USER_ID).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      // Group invite + a distinct group member.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 303, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The distinct group member appears under the group breakdown.
+      expect(result.output).toContain('303');
+      // The personal invitee appears exactly once (its own invitee line), never also as a group member.
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+    });
+
     test('returns mixed pending and accepted', async () => {
       const thirdUser = 300;
       userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });
