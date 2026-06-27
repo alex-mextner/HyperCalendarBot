@@ -4,11 +4,15 @@ import {
   buildChatSharedResultText,
   deliverPickerInvitation,
   deliverPickerInvitations,
+  type PickerAckIo,
   type PickerDeliveryOutcome,
   type PickerInvitationDeps,
   pickerAiLine,
   pickerStatusLine,
+  runChatShareWithAck,
+  runPickerBatchWithAck,
 } from '../../../src/bot/handlers/picker-invitation.ts';
+import { t } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ContactRepository } from '../../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../../src/database/repositories/deep-link.repository.ts';
@@ -530,5 +534,282 @@ describe('buildChatSharedResultText', () => {
     const text = buildChatSharedResultText('ru', 'Вечеринка', { kind: 'delivered' });
     expect(text).toContain('отправлено');
     expect(text).toContain('Вечеринка');
+  });
+});
+
+describe('runPickerBatchWithAck (reply-fast ack)', () => {
+  let db: Database;
+  let userRepo: UserRepository;
+  let contactRepo: ContactRepository;
+  let invitationRepo: InvitationRepository;
+  let eventRepo: EventRepository;
+  let eventService: EventService;
+  let invitationService: InvitationService;
+  let deepLinkService: DeepLinkService;
+  let inviter: User;
+  let eventId: number;
+
+  const SENDER_BASE: TelegramSender = {
+    sendMessage: async () => ({ message_id: 1 }),
+    editMessageText: async () => {},
+  };
+
+  function makeDeps(sender: TelegramSender, extra: Partial<PickerInvitationDeps> = {}): PickerInvitationDeps {
+    return {
+      sender,
+      invitationService,
+      eventService,
+      invitationRepo,
+      userRepo,
+      deepLinkService,
+      botUsername: 'TestBot',
+      contactRepo,
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    userRepo = new UserRepository(db);
+    contactRepo = new ContactRepository(db);
+    invitationRepo = new InvitationRepository(db);
+    eventRepo = new EventRepository(db);
+    eventService = new EventService({ eventRepo });
+    invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+    deepLinkService = new DeepLinkService(new DeepLinkRepository(db));
+    inviter = userRepo.create({ telegram_id: INVITER_ID, timezone: 'UTC', first_name: 'Alex' });
+    userRepo.create({ telegram_id: 201, timezone: 'UTC', first_name: 'Alice' });
+    userRepo.create({ telegram_id: 202, timezone: 'UTC', first_name: 'Bob' });
+    const event = eventService.createEvent({
+      user_id: INVITER_ID,
+      title: 'Launch Party',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    eventId = event.id;
+  });
+
+  test('acks immediately, then delivers, then edits the ack in place with the final status', async () => {
+    const events: string[] = [];
+    let editedText = '';
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => {
+        events.push('deliver');
+        return { message_id: 1 };
+      },
+    };
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        events.push(`sendAck:${text}`);
+        return { message_id: 555 };
+      },
+      editAck: async (messageId, text) => {
+        events.push(`editAck:${messageId}`);
+        editedText = text;
+      },
+    };
+    const result = await runPickerBatchWithAck(
+      { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
+      makeDeps(sender),
+      io,
+    );
+    // Reply-fast: the "sending…" ack goes out BEFORE any delivery work, and the final status is
+    // an EDIT of that same message AFTER delivery completes — never a second fresh message.
+    expect(events).toEqual([`sendAck:${t('en').invite_picker_sending}`, 'deliver', 'editAck:555']);
+    expect(editedText).toBe(`${t('en').invite_picker_header}\n✅ Alice`);
+    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+  });
+
+  test('uses the Russian sending ack when lang is ru', async () => {
+    const sentTexts: string[] = [];
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        sentTexts.push(text);
+        return { message_id: 1 };
+      },
+      editAck: async () => {},
+    };
+    await runPickerBatchWithAck(
+      { eventId, inviter, lang: 'ru', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Алиса' }] },
+      makeDeps(sender),
+      io,
+    );
+    expect(sentTexts[0]).toBe(t('ru').invite_picker_sending);
+  });
+
+  test('returns the AI result lines verbatim from the serial delivery (pickerAiLine preserved)', async () => {
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const io: PickerAckIo = { sendAck: async () => ({ message_id: 1 }), editAck: async () => {} };
+    const result = await runPickerBatchWithAck(
+      {
+        eventId,
+        inviter,
+        lang: 'en',
+        fallbackChatId: INVITER_ID,
+        invitees: [
+          { userId: 201, firstName: 'Alice' },
+          { userId: 202, firstName: 'Bob' },
+        ],
+      },
+      makeDeps(sender),
+      io,
+    );
+    expect(result.aiResultLines).toEqual([
+      'Alice (id:201): delivered to the invitee',
+      'Bob (id:202): delivered to the invitee',
+    ]);
+  });
+
+  test('edit failure (deleted message / 429) falls back to sending the final status as a new message', async () => {
+    const sends: string[] = [];
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 1 }) };
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        sends.push(text);
+        return { message_id: 555 };
+      },
+      editAck: async () => {
+        throw new Error('message to edit not found');
+      },
+    };
+    const result = await runPickerBatchWithAck(
+      { eventId, inviter, lang: 'en', fallbackChatId: INVITER_ID, invitees: [{ userId: 201, firstName: 'Alice' }] },
+      makeDeps(sender),
+      io,
+    );
+    // The user must never be left staring at "sending…": when the edit fails, the final status is
+    // sent as a fresh message instead.
+    expect(sends).toEqual([t('en').invite_picker_sending, `${t('en').invite_picker_header}\n✅ Alice`]);
+    expect(result.aiResultLines).toEqual(['Alice (id:201): delivered to the invitee']);
+  });
+});
+
+describe('runChatShareWithAck (reply-fast group invite)', () => {
+  let db: Database;
+  let userRepo: UserRepository;
+  let contactRepo: ContactRepository;
+  let invitationRepo: InvitationRepository;
+  let eventRepo: EventRepository;
+  let eventService: EventService;
+  let invitationService: InvitationService;
+  let deepLinkService: DeepLinkService;
+  let inviter: User;
+  let eventId: number;
+
+  const SENDER_BASE: TelegramSender = {
+    sendMessage: async () => ({ message_id: 1 }),
+    editMessageText: async () => {},
+  };
+
+  function makeDeps(sender: TelegramSender, extra: Partial<PickerInvitationDeps> = {}): PickerInvitationDeps {
+    return {
+      sender,
+      invitationService,
+      eventService,
+      invitationRepo,
+      userRepo,
+      deepLinkService,
+      botUsername: 'TestBot',
+      contactRepo,
+      ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    db.exec('PRAGMA foreign_keys = ON');
+    runMigrations(db, migrations);
+    userRepo = new UserRepository(db);
+    contactRepo = new ContactRepository(db);
+    invitationRepo = new InvitationRepository(db);
+    eventRepo = new EventRepository(db);
+    eventService = new EventService({ eventRepo });
+    invitationService = new InvitationService(invitationRepo, eventRepo, new SharingSettingsRepository(db));
+    deepLinkService = new DeepLinkService(new DeepLinkRepository(db));
+    inviter = userRepo.create({ telegram_id: INVITER_ID, timezone: 'UTC', first_name: 'Alex' });
+    const event = eventService.createEvent({
+      user_id: INVITER_ID,
+      title: 'Launch Party',
+      start_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+      timezone: 'UTC',
+    });
+    eventId = event.id;
+  });
+
+  test('acks immediately, delivers, then edits with the localized group result', async () => {
+    const events: string[] = [];
+    let editedText = '';
+    const sender: TelegramSender = {
+      ...SENDER_BASE,
+      sendInvitation: async () => {
+        events.push('deliver');
+        return { message_id: 42 };
+      },
+    };
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        events.push(`sendAck:${text}`);
+        return { message_id: 7 };
+      },
+      editAck: async (messageId, text) => {
+        events.push(`editAck:${messageId}`);
+        editedText = text;
+      },
+    };
+    const { outcome } = await runChatShareWithAck(
+      {
+        invitation: {
+          eventId,
+          inviter,
+          inviteeId: GROUP_ID,
+          fallbackChatId: INVITER_ID,
+          allowMtproto: false,
+          isGroupTarget: true,
+        },
+        lang: 'en',
+        title: 'Launch Party',
+      },
+      makeDeps(sender),
+      io,
+    );
+    expect(outcome).toEqual({ kind: 'delivered' });
+    expect(events).toEqual([`sendAck:${t('en').invite_group_sending}`, 'deliver', 'editAck:7']);
+    expect(editedText).toBe(t('en').invite_delivered('Launch Party'));
+  });
+
+  test('edit failure falls back to sending the final group result as a new message', async () => {
+    const sends: string[] = [];
+    const sender: TelegramSender = { ...SENDER_BASE, sendInvitation: async () => ({ message_id: 42 }) };
+    const io: PickerAckIo = {
+      sendAck: async (text) => {
+        sends.push(text);
+        return { message_id: 7 };
+      },
+      editAck: async () => {
+        throw new Error('message to edit not found');
+      },
+    };
+    const { outcome } = await runChatShareWithAck(
+      {
+        invitation: {
+          eventId,
+          inviter,
+          inviteeId: GROUP_ID,
+          fallbackChatId: INVITER_ID,
+          allowMtproto: false,
+          isGroupTarget: true,
+        },
+        lang: 'en',
+        title: 'Launch Party',
+      },
+      makeDeps(sender),
+      io,
+    );
+    expect(outcome).toEqual({ kind: 'delivered' });
+    expect(sends).toEqual([t('en').invite_group_sending, t('en').invite_delivered('Launch Party')]);
   });
 });

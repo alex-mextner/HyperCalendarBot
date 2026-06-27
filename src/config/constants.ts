@@ -210,6 +210,8 @@ export const MSG = {
     invite_resolve_not_found: (username: string) =>
       `@${username} not found on Telegram. Select the person from your contacts.`,
     invite_picker_header: '📨 Invitations:',
+    invite_picker_sending: '📨 Sending invitations…',
+    invite_group_sending: '📨 Sending invitation…',
     invite_status_delivered: (name: string) => `✅ ${name}`,
     invite_status_deeplink: (name: string) => `🔗 ${name} — link sent to you to forward`,
     invite_status_failed: (name: string) => `❌ ${name} — not delivered`,
@@ -987,6 +989,8 @@ export const MSG = {
     invite_resolve_not_found: (username: string) =>
       `@${username} не найден в Telegram. Выбери нужного человека из контактов.`,
     invite_picker_header: '📨 Приглашения:',
+    invite_picker_sending: '📨 Отправляю приглашения…',
+    invite_group_sending: '📨 Отправляю приглашение…',
     invite_status_delivered: (name: string) => `✅ ${name}`,
     invite_status_deeplink: (name: string) => `🔗 ${name} — ссылку отправил тебе для пересылки`,
     invite_status_failed: (name: string) => `❌ ${name} — не доставлено`,
