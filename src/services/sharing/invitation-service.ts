@@ -61,6 +61,30 @@ export class InvitationService {
     return { success: true, invitation };
   }
 
+  /**
+   * Record one group member's RSVP directly against the event, bypassing the per-invitation
+   * authorization gate. A group invite stores the group chat id as the invitation `invitee_id`,
+   * so no single member can ever satisfy the `invitee_id === userId` check in `respondToInvitation`.
+   * `event_participants` is already per-user (`UNIQUE(event_id, user_id)`), so each member gets
+   * their own row and members never collide on a shared invitation status.
+   */
+  recordGroupAttendance(eventId: number, userId: number, status: 'accepted' | 'declined'): InvitationResult {
+    if (!this.participantRepo) {
+      return { success: false, error: 'Participant registry not available' };
+    }
+    const event = this.eventRepo.findByIdUnfiltered(eventId);
+    if (!event) {
+      return { success: false, error: 'Event not found' };
+    }
+    const existing = this.participantRepo.findByEventAndUser(eventId, userId);
+    if (existing) {
+      this.participantRepo.updateStatus(eventId, userId, status);
+    } else {
+      this.participantRepo.add(eventId, userId, status);
+    }
+    return { success: true };
+  }
+
   acceptInvitation(invitationId: number, userId: number): InvitationResult {
     return this.respondToInvitation(invitationId, userId, 'accepted');
   }

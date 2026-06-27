@@ -783,6 +783,32 @@ export function createCallbackHandler(
     }
   });
 
+  // Group RSVP — any member of a group event responds for themselves.
+  // Callback data: "grsvp:<eventId>:going|notgoing". There is no invitee_id check: a group
+  // invitation stores the group chat id as its invitee, so per-invitation authorization can
+  // never apply to an individual member. The event itself is the authorization boundary — the
+  // keyboard only exists on a message the bot delivered to that member's group.
+  dispatch.set(CB.GROUP_RSVP, async (ctx, _payload, parts, user) => {
+    if (!invitationService) return;
+    const lang = (user.language ?? 'en') as Lang;
+    const eventId = Number(parts[1]);
+    const action = parts[2];
+    if (!Number.isInteger(eventId) || (action !== 'going' && action !== 'notgoing')) {
+      cmdLogger.warn({ userId: user.telegram_id, data: parts.join(':') }, 'Malformed group RSVP callback');
+      await ctx.answer();
+      return;
+    }
+    const status = action === 'going' ? 'accepted' : 'declined';
+    const result = invitationService.recordGroupAttendance(eventId, user.telegram_id, status);
+    if (!result.success) {
+      await ctx.answer({ text: t(lang).group_rsvp_event_gone });
+      return;
+    }
+    // Toast only — never edit the shared group message, or one member's tap would replace the
+    // RSVP keyboard for everyone else in the chat.
+    await ctx.answer(action === 'going' ? t(lang).group_rsvp_recorded : t(lang).group_rsvp_removed);
+  });
+
   // Edit proposal accept/reject
   dispatch.set(CB.EDIT_PROPOSAL, async (ctx, _payload, parts, user) => {
     if (!editProposalDeps) return;
@@ -1660,11 +1686,23 @@ export function createCallbackHandler(
     const data = ctx.data as string;
     if (!data) return;
 
-    const user = ctx.dbUser;
-    if (!user) return;
     const parts = data.split(':');
     const action = parts[0]!;
     const payload = parts.slice(1).join(':');
+
+    const user = ctx.dbUser;
+    if (!user) {
+      // dbUser is created on the fly from the update's `from` (see createUserResolver), so it is
+      // absent only when the update carries no usable `from` — an anonymous group admin or a
+      // channel. A group RSVP tap from such a sender can't be attributed to a person, so prompt
+      // them to DM the bot instead of dropping the tap in silence.
+      if (action === CB.GROUP_RSVP) {
+        await ctx
+          .answer({ text: t('en').group_rsvp_start_hint, show_alert: true })
+          .catch((e) => cmdLogger.debug({ err: e }, 'answer() group RSVP start hint'));
+      }
+      return;
+    }
 
     try {
       const handler = dispatch.get(action);

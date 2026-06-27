@@ -62,6 +62,7 @@ export const CB = {
   IMG_DAILY: 'imd', // image daily: "imd:2026-03-11"
   IMG_WEEKLY: 'imw', // image weekly: "imw:2026-03-09"
   INVITATION_ACTION: 'inv',
+  GROUP_RSVP: 'grsvp',
   SHARE_CONFIRM: 'share_cf',
   SHARE_EVENT: 'share_evt',
   CALL_SETTINGS: 'csett',
@@ -228,6 +229,12 @@ export const MSG = {
       `📨 ${name} declined your invitation to "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} responded "maybe" to your invitation to "<b>${title}</b>" 🤔`,
+    group_rsvp_going_btn: '✅ Going',
+    group_rsvp_notgoing_btn: "❌ Can't make it",
+    group_rsvp_recorded: "You're going ✅",
+    group_rsvp_removed: "You're not going ❌",
+    group_rsvp_event_gone: 'This event is no longer available',
+    group_rsvp_start_hint: 'Open me in a private chat and press /start to RSVP',
     invite_propose_btn: 'Other time 🕐',
     invite_propose_ask: 'What time do you suggest?\nOr type: "tomorrow at 3pm"',
     invite_propose_plus30: '+30 min',
@@ -999,6 +1006,12 @@ export const MSG = {
       `📨 ${name} отклонил(а) приглашение на "<b>${title}</b>" ❌`,
     invitation_response_maybe: (name: string, title: string) =>
       `📨 ${name} ответил(а) "возможно" на приглашение "<b>${title}</b>" 🤔`,
+    group_rsvp_going_btn: '✅ Иду',
+    group_rsvp_notgoing_btn: '❌ Не иду',
+    group_rsvp_recorded: 'Ты идёшь ✅',
+    group_rsvp_removed: 'Ты не идёшь ❌',
+    group_rsvp_event_gone: 'Это событие больше недоступно',
+    group_rsvp_start_hint: 'Напиши мне в личку и нажми /start, чтобы ответить',
     invite_propose_btn: 'Другое время 🕐',
     invite_propose_ask: 'Какое время предлагаешь?\nИли напиши: "завтра в 15:00"',
     invite_propose_plus30: '+30 мин',

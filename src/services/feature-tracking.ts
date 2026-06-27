@@ -45,6 +45,7 @@ const CALLBACK_FEATURE_MAP: { [prefix: string]: FeatureKey } = {
   imd: 'month_view', // daily image
   imw: 'month_view', // weekly image
   inv: 'sharing', // invitation action
+  grsvp: 'sharing', // group invite per-member RSVP
   st: 'settings', // settings
   sec: 'secretary', // secretary
   epr: 'sharing', // edit proposal accept/reject

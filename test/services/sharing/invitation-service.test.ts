@@ -238,4 +238,99 @@ describe('InvitationService', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('recordGroupAttendance', () => {
+    function setupGroup() {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: INVITER });
+      const eventRepo = new EventRepository(db);
+      const invRepo = new InvitationRepository(db);
+      const settingsRepo = new SharingSettingsRepository(db);
+      const participantRepo = new ParticipantRepository(db);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const event = eventRepo.create({
+        user_id: INVITER,
+        title: 'Group Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: 'UTC',
+      });
+      return { db, service, invRepo, eventRepo, participantRepo, event };
+    }
+
+    test('the old inv: path rejects a group invitee_id, recordGroupAttendance accepts it', () => {
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      const GROUP_ID = -100123;
+      const MEMBER = 555;
+      // The picker path stored the group chat id as the invitation invitee_id.
+      const groupInvitation = invRepo.create({
+        event_id: event.id,
+        inviter_id: INVITER,
+        invitee_id: GROUP_ID,
+      });
+
+      // Regression: a member responding via the personal inv: path is never authorized,
+      // because invitee_id is the group id, not the member's telegram_id.
+      const rejected = service.acceptInvitation(groupInvitation.id, MEMBER);
+      expect(rejected.success).toBe(false);
+      expect(rejected.error).toContain('Not authorized');
+
+      // The group RSVP path records the member directly against the event.
+      const recorded = service.recordGroupAttendance(event.id, MEMBER, 'accepted');
+      expect(recorded.success).toBe(true);
+      const row = participantRepo.findByEventAndUser(event.id, MEMBER);
+      expect(row).not.toBeNull();
+      expect(row!.status).toBe('accepted');
+    });
+
+    test('members RSVP independently — one row per member, no "already changed"', () => {
+      const { service, participantRepo, event } = setupGroup();
+      const a = service.recordGroupAttendance(event.id, 555, 'accepted');
+      const b = service.recordGroupAttendance(event.id, 777, 'declined');
+      expect(a.success).toBe(true);
+      expect(b.success).toBe(true);
+
+      const rows = participantRepo.getByEvent(event.id);
+      expect(rows.length).toBe(2);
+      expect(participantRepo.findByEventAndUser(event.id, 555)!.status).toBe('accepted');
+      expect(participantRepo.findByEventAndUser(event.id, 777)!.status).toBe('declined');
+    });
+
+    test('a member can flip their answer (accepted -> declined updates the same row)', () => {
+      const { service, participantRepo, event } = setupGroup();
+      service.recordGroupAttendance(event.id, 555, 'accepted');
+      const flip = service.recordGroupAttendance(event.id, 555, 'declined');
+      expect(flip.success).toBe(true);
+
+      const rows = participantRepo.getByEvent(event.id);
+      expect(rows.length).toBe(1);
+      expect(participantRepo.findByEventAndUser(event.id, 555)!.status).toBe('declined');
+    });
+
+    test('fails when the event no longer exists', () => {
+      const { service, participantRepo } = setupGroup();
+      const result = service.recordGroupAttendance(999999, 555, 'accepted');
+      expect(result.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(999999, 555)).toBeNull();
+    });
+
+    test('fails when the participant registry is not wired', () => {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: INVITER });
+      const eventRepo = new EventRepository(db);
+      const invRepo = new InvitationRepository(db);
+      const settingsRepo = new SharingSettingsRepository(db);
+      // No participantRepo passed.
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo);
+      const event = eventRepo.create({
+        user_id: INVITER,
+        title: 'Group Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: 'UTC',
+      });
+      const result = service.recordGroupAttendance(event.id, 555, 'accepted');
+      expect(result.success).toBe(false);
+    });
+  });
 });
