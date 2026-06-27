@@ -18,15 +18,30 @@ export function redactUrls(text: string): string {
  * copy those into the logs, turning log access into a disclosure path. This reads ONLY
  * known scalar fields, never the raw error object, and redacts any URL from the message —
  * sanitized by default for every error type, not just GramIO's `TelegramError`.
+ *
+ * The `stack` is kept for debuggability (function names + file:line), but it is still run
+ * through `redactUrls`: V8 prepends the error message as the stack's first line, so a deep
+ * link embedded in the message would otherwise leak via the stack.
  */
-export function describeDeliveryError(err: unknown): { name: string; message: string; code?: number } {
+export interface DeliveryErrorInfo {
+  name: string;
+  message: string;
+  code?: number;
+  stack?: string;
+}
+
+export function describeDeliveryError(err: unknown): DeliveryErrorInfo {
   if (err instanceof TelegramError) {
-    return { name: err.method, message: redactUrls(err.message), code: err.code };
+    return { name: err.method, message: redactUrls(err.message), code: err.code, stack: redactStack(err) };
   }
   if (err instanceof Error) {
-    return { name: err.name, message: redactUrls(err.message) };
+    return { name: err.name, message: redactUrls(err.message), stack: redactStack(err) };
   }
   return { name: 'NonError', message: 'unknown delivery error' };
+}
+
+function redactStack(err: Error): string | undefined {
+  return err.stack ? redactUrls(err.stack) : undefined;
 }
 
 export interface DeliverMessageParams {

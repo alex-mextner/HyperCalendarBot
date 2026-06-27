@@ -50,9 +50,34 @@ describe('describeDeliveryError', () => {
     expect(out.message).toContain('[link redacted]');
   });
 
-  test('non-error value → NonError sentinel', () => {
+  test('non-error value → NonError sentinel (no stack)', () => {
     expect(describeDeliveryError('a bare string')).toEqual({ name: 'NonError', message: 'unknown delivery error' });
     expect(describeDeliveryError(undefined)).toEqual({ name: 'NonError', message: 'unknown delivery error' });
+  });
+
+  test('real Error → stack trace included for debuggability, any URL in it redacted', () => {
+    const out = describeDeliveryError(new Error('could not reach https://t.me/TestBot?start=i_SECRET'));
+    // The stack carries call frames (function names + file:line) so delivery failures stay debuggable.
+    expect(typeof out.stack).toBe('string');
+    expect(out.stack).toContain('at ');
+    // V8 prepends the message to the stack's first line, so the deep link must still be redacted.
+    expect(out.stack).not.toContain('start=i_');
+    expect(out.stack).not.toContain('t.me/TestBot');
+    expect(out.stack).toContain('[link redacted]');
+  });
+
+  test('Error carrying request-body props → stack present but params/body never copied', () => {
+    class WrappedApiError extends Error {
+      params = { chat_id: 999, text: 'forward https://t.me/TestBot?start=i_SECRET' };
+      body = 'forward https://t.me/TestBot?start=i_SECRET';
+    }
+    const out = describeDeliveryError(new WrappedApiError('upstream send failed'));
+    expect(out.message).toBe('upstream send failed');
+    expect(out.stack).toBeDefined();
+    // The whole described object must not leak the request body / deep link via any field.
+    const serialized = JSON.stringify(out);
+    expect(serialized).not.toContain('start=i_');
+    expect(serialized).not.toContain('chat_id');
   });
 });
 
