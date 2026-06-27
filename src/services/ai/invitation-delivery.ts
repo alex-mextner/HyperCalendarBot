@@ -193,7 +193,11 @@ export async function deliverInvitation(
       botSend: async (recipientId, msgText) => {
         if (recipientId === inviteeId) {
           if (!sender.sendInvitation) throw new Error('sendInvitation not available');
-          const sent = await sender.sendInvitation(recipientId, msgText, invitationId);
+          // A group target carries the per-member RSVP keyboard (grsvp:<eventId>:going|notgoing)
+          // so any member can respond for themselves; a personal target keeps the inv: keyboard.
+          const sent = isGroupTarget
+            ? await sender.sendInvitation(recipientId, msgText, invitationId, lang, { kind: 'group', eventId })
+            : await sender.sendInvitation(recipientId, msgText, invitationId);
           if (!sent) throw new Error('Bot API delivery failed');
           return sent;
         }

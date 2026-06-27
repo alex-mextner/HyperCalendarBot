@@ -61,6 +61,39 @@ export class InvitationService {
     return { success: true, invitation };
   }
 
+  /**
+   * Record one group member's RSVP directly against the event. A group invite stores the group
+   * chat id as the invitation `invitee_id`, so no single member can ever satisfy the
+   * `invitee_id === userId` check in `respondToInvitation`. Authorization is instead bound to the
+   * group: `groupChatId` is the chat Telegram reported for the message that carried the RSVP
+   * button — callback_data is forgeable, the chat id is not. An active invitation must link the
+   * event to that group; without one we write nothing, so a forged or substituted event id can
+   * never insert the caller into an arbitrary owner's event. `event_participants` is per-user
+   * (`UNIQUE(event_id, user_id)`), so each member gets their own row and members never collide on
+   * a shared invitation status.
+   */
+  recordGroupAttendance(
+    eventId: number,
+    userId: number,
+    status: 'accepted' | 'declined',
+    groupChatId: number,
+  ): InvitationResult {
+    if (!this.participantRepo) {
+      return { success: false, error: 'Participant registry not available' };
+    }
+    const groupInvitation = this.invRepo.findActiveByEventAndInvitee(eventId, groupChatId);
+    if (!groupInvitation) {
+      return { success: false, error: 'No active group invitation links this event to this chat' };
+    }
+    const existing = this.participantRepo.findByEventAndUser(eventId, userId);
+    if (existing) {
+      this.participantRepo.updateStatus(eventId, userId, status);
+    } else {
+      this.participantRepo.add(eventId, userId, status);
+    }
+    return { success: true };
+  }
+
   acceptInvitation(invitationId: number, userId: number): InvitationResult {
     return this.respondToInvitation(invitationId, userId, 'accepted');
   }

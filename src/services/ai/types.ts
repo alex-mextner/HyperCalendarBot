@@ -330,6 +330,16 @@ export interface AgentConfig {
   summarizer?: import('./history-summarizer.ts').HistorySummarizer;
 }
 
+/**
+ * Which RSVP keyboard an invitation message carries.
+ *  - `personal`: the per-invitation Accept/Decline/Maybe/Propose keyboard (`inv:` callbacks),
+ *    authorized against a single invitee.
+ *  - `group`: the per-member Going / Not going keyboard (`grsvp:` callbacks) for a group target,
+ *    where any member responds for themselves. Keyed by `eventId`, not the invitation id, because
+ *    the invitation row stores the group chat id as its invitee — useless for member RSVP.
+ */
+export type InvitationKeyboardVariant = { kind: 'personal' } | { kind: 'group'; eventId: number };
+
 export interface TelegramSender {
   sendMessage(chatId: number, text: string, parseMode?: ParseMode): Promise<{ message_id: number }>;
   sendMessageWithKeyboard?(
@@ -353,6 +363,7 @@ export interface TelegramSender {
     text: string,
     invitationId: number,
     lang?: string,
+    variant?: InvitationKeyboardVariant,
   ): Promise<{ message_id: number } | null>;
   sendEditProposal?(creatorId: number, text: string, proposalId: number): Promise<{ message_id: number } | null>;
   sendAsUser?(userId: number, text: string, username?: string): Promise<boolean>;
