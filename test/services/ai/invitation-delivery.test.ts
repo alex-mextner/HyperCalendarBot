@@ -16,7 +16,7 @@ import {
   type InvitationDeliveryDeps,
   lookupInviteeUsername,
 } from '../../../src/services/ai/invitation-delivery.ts';
-import type { TelegramSender } from '../../../src/services/ai/types.ts';
+import type { InvitationKeyboardVariant, TelegramSender } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { DeepLinkService } from '../../../src/services/sharing/deep-link-service.ts';
 
@@ -218,6 +218,50 @@ describe('deliverInvitation', () => {
     // is sent and the result is an honest non-delivery — never a "link sent" claim.
     expect(result).toEqual({ delivered: false, viaDeepLink: false });
     expect(sentMessages.find((m) => m.chatId === INVITER_ID)).toBeUndefined();
+  });
+
+  test('group target passes the per-member RSVP keyboard variant {kind:group, eventId} to sendInvitation', async () => {
+    const invId = createInvitation();
+    let variant: InvitationKeyboardVariant | undefined;
+    let sawLang: string | undefined;
+    const sender = makeSender({
+      sendInvitation: async (_inviteeId, _text, _invitationId, lang, v) => {
+        sawLang = lang;
+        variant = v;
+        return { message_id: 7 };
+      },
+    });
+
+    const result = await deliverInvitation({
+      ...baseParams({ invitationId: invId, deps: makeDeps(sender), allowMtproto: false }),
+      isGroupTarget: true,
+    });
+
+    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    // A group target must carry the grsvp per-member keyboard keyed by eventId (not the invitation
+    // id), so any member can respond for themselves — never the personal inv: keyboard.
+    expect(variant).toEqual({ kind: 'group', eventId: seedEvent.id });
+    expect(sawLang).toBe('en');
+  });
+
+  test('personal target passes no keyboard variant to sendInvitation', async () => {
+    const invId = createInvitation();
+    let argCount: number | undefined;
+    let variant: InvitationKeyboardVariant | undefined;
+    const sender = makeSender({
+      sendInvitation: async (...args) => {
+        argCount = args.length;
+        variant = args[4];
+        return { message_id: 8 };
+      },
+    });
+
+    const result = await deliverInvitation(baseParams({ invitationId: invId, deps: makeDeps(sender) }));
+
+    expect(result).toEqual({ delivered: true, viaDeepLink: false });
+    // The personal path calls sendInvitation with only (inviteeId, text, invitationId) — no variant.
+    expect(argCount).toBe(3);
+    expect(variant).toBeUndefined();
   });
 
   test('no deepLinkService → fallback without link, viaDeepLink false (no link existed)', async () => {

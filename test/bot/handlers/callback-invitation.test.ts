@@ -213,6 +213,30 @@ describe('group RSVP callbacks', () => {
     expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_start_hint, show_alert: true });
   });
 
+  test('rejects a non-numeric event id without calling the service (grsvp:abc:going)', async () => {
+    const recordGroupAttendance = mock(() => ({ success: true }));
+    const ctx = makeGroupCtx('grsvp:abc:going');
+    const handler = makeHandler({ recordGroupAttendance });
+
+    await handler(ctx as never);
+
+    // Number('abc') is NaN → the guard rejects before any write.
+    expect(recordGroupAttendance).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalled();
+  });
+
+  test('rejects an unknown action without calling the service (grsvp:42:bogus)', async () => {
+    const recordGroupAttendance = mock(() => ({ success: true }));
+    const ctx = makeGroupCtx('grsvp:42:bogus');
+    const handler = makeHandler({ recordGroupAttendance });
+
+    await handler(ctx as never);
+
+    // Only 'going'/'notgoing' are valid actions → anything else writes nothing.
+    expect(recordGroupAttendance).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalled();
+  });
+
   test('localizes the /start hint to the tapper language_code when there is no dbUser', async () => {
     const recordGroupAttendance = mock(() => ({ success: true }));
     const ctx = {
