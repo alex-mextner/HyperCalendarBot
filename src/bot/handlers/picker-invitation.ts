@@ -3,6 +3,7 @@ import type { ContactRepository } from '../../database/repositories/contact.repo
 import type { InvitationRepository } from '../../database/repositories/invitation.repository.ts';
 import type { UserRepository } from '../../database/repositories/user.repository.ts';
 import type { User } from '../../database/types.ts';
+import { describeDeliveryError } from '../../services/ai/deliver-message.ts';
 import { deliverInvitation } from '../../services/ai/invitation-delivery.ts';
 import type { TelegramSender } from '../../services/ai/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
@@ -241,6 +242,79 @@ export async function deliverPickerInvitations(
     statusLines: lines.map((line) => line.statusLine),
     aiResultLines: lines.map((line) => line.aiResultLine),
   };
+}
+
+/**
+ * Telegram I/O for the reply-fast ack pattern, injected so the orchestrators below stay
+ * unit-testable without a live GramIO context. `sendAck` posts an immediate "sending…" message
+ * (and, on an edit failure, the final status as a fresh message); `editAck` rewrites that message
+ * in place with the final status. Both must target the same chat AND use the same parse mode so the
+ * fallback re-send renders identically to the in-place edit.
+ */
+export interface PickerAckIo {
+  sendAck(text: string): Promise<{ message_id: number }>;
+  editAck(messageId: number, text: string): Promise<void>;
+}
+
+/**
+ * Edit the ack message in place with the final status. If the edit fails (the user deleted the
+ * message, a 429, etc.) fall back to sending the status as a new message — the user must never be
+ * left staring at "sending…". The failure is logged (never swallowed) through
+ * `describeDeliveryError`, since a thrown GramIO `TelegramError` attaches the full request body —
+ * the final status text, chat id, event title and invitee names — as enumerable props that pino's
+ * `err` serializer would otherwise copy into the logs.
+ */
+async function finalizeAck(io: PickerAckIo, messageId: number, finalText: string): Promise<void> {
+  try {
+    await io.editAck(messageId, finalText);
+  } catch (err) {
+    deliveryLogger.error(
+      { err: describeDeliveryError(err), messageId },
+      'Failed to edit picker ack message; sending the final status as a new message',
+    );
+    await io.sendAck(finalText);
+  }
+}
+
+/**
+ * Reply-fast batch delivery for the `users_shared` picker: ack immediately with "sending…",
+ * deliver to every invitee SERIALLY (see {@link deliverPickerInvitations}), then edit the ack in
+ * place with the per-invitee status. Returns the AI-facing result lines verbatim so the agent
+ * continuation can describe what actually happened.
+ */
+export async function runPickerBatchWithAck(
+  params: PickerBatchParams,
+  deps: PickerInvitationDeps,
+  io: PickerAckIo,
+): Promise<{ aiResultLines: string[] }> {
+  const m = t(params.lang);
+  const ack = await io.sendAck(m.invite_picker_sending);
+  const { statusLines, aiResultLines } = await deliverPickerInvitations(params, deps);
+  await finalizeAck(io, ack.message_id, `${m.invite_picker_header}\n${statusLines.join('\n')}`);
+  return { aiResultLines };
+}
+
+export interface ChatShareAckParams {
+  invitation: PickerInvitationParams;
+  lang: 'en' | 'ru';
+  /** Event title for the result message (HTML-escaped by {@link buildChatSharedResultText}). */
+  title: string;
+}
+
+/**
+ * Reply-fast group invite for the `chat_shared` picker: ack immediately with "sending…", deliver the
+ * single group invitation, then edit the ack in place with the localized result. Returns the
+ * delivery outcome for callers that need it.
+ */
+export async function runChatShareWithAck(
+  params: ChatShareAckParams,
+  deps: PickerInvitationDeps,
+  io: PickerAckIo,
+): Promise<{ outcome: PickerDeliveryOutcome }> {
+  const ack = await io.sendAck(t(params.lang).invite_group_sending);
+  const outcome = await deliverPickerInvitation(params.invitation, deps);
+  await finalizeAck(io, ack.message_id, buildChatSharedResultText(params.lang, params.title, outcome));
+  return { outcome };
 }
 
 /**

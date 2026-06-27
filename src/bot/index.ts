@@ -83,11 +83,7 @@ import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.ha
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
-import {
-  buildChatSharedResultText,
-  deliverPickerInvitation,
-  deliverPickerInvitations,
-} from './handlers/picker-invitation.ts';
+import { type PickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -1008,11 +1004,17 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       // PRIVATE chat, never the group the picker was opened in (would leak to all members).
       const fallbackChatId = user.telegram_id;
 
-      // Deliver to all selected invitees SERIALLY: each invitee's MTProto fallback spawns
-      // send-message.py against the shared non-WAL voice_caller.session, and concurrent spawns
-      // corrupt it (CLAUDE.md). Serial also avoids a 429 burst on the shared 1-CPU host.
-      // Per-invitee failures are isolated and the result lines preserve the input order.
-      const { statusLines, aiResultLines } = await deliverPickerInvitations(
+      // Reply-fast: ack immediately with "sending…", then deliver to all selected invitees
+      // SERIALLY (each invitee's MTProto fallback spawns send-message.py against the shared
+      // non-WAL voice_caller.session, and concurrent spawns corrupt it — CLAUDE.md; serial also
+      // avoids a 429 burst on the shared 1-CPU host), then edit the ack in place with the
+      // per-invitee status. Per-invitee failures are isolated and the lines preserve input order.
+      const pickerIo: PickerAckIo = {
+        sendAck: (text) =>
+          ctx.send(text, { reply_markup: { remove_keyboard: true } }).then((sent) => ({ message_id: sent.id })),
+        editAck: (messageId, text) => pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text),
+      };
+      const { aiResultLines } = await runPickerBatchWithAck(
         {
           eventId,
           inviter: user,
@@ -1021,12 +1023,8 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
           fallbackChatId,
         },
         pickerInvitationDeps,
+        pickerIo,
       );
-
-      const resultText = `${t(lang).invite_picker_header}\n${statusLines.join('\n')}`;
-      await ctx.send(resultText, {
-        reply_markup: { remove_keyboard: true },
-      });
       // Build context for AI: who was requested + what really happened
       const selectedDetails = selected
         .map((s) => {
@@ -1053,24 +1051,35 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       if (!eventId || !inviteeId) return;
       const lang = (user.language ?? 'en') as 'en' | 'ru';
       const event = eventService.getEvent(eventId, user.telegram_id);
+      // Reply-fast: ack immediately, deliver, then edit the ack in place with the final result.
+      // Both the ack and the edit use parse_mode HTML so the edit-failure fallback re-send renders
+      // identically; buildChatSharedResultText escapes the title and any error before interpolation.
+      const chatShareIo: PickerAckIo = {
+        sendAck: (text) =>
+          ctx
+            .send(text, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } })
+            .then((sent) => ({ message_id: sent.id })),
+        editAck: (messageId, text) => pickerInvitationDeps.sender.editMessageText(ctx.chatId, messageId, text, 'HTML'),
+      };
       // Groups receive the invitation via Bot API only — no MTProto userbot delivery, and no
       // deep-link fallback: a forward invite link resolves only in a user's private /start and
       // can't be accepted on behalf of a group, so a failed delivery reports honest failure.
-      const outcome = await deliverPickerInvitation(
+      await runChatShareWithAck(
         {
-          eventId,
-          inviter: user,
-          inviteeId,
-          fallbackChatId: user.telegram_id,
-          allowMtproto: false,
-          isGroupTarget: true,
+          invitation: {
+            eventId,
+            inviter: user,
+            inviteeId,
+            fallbackChatId: user.telegram_id,
+            allowMtproto: false,
+            isGroupTarget: true,
+          },
+          lang,
+          title: event?.title ?? `Event #${eventId}`,
         },
         pickerInvitationDeps,
+        chatShareIo,
       );
-      // The result is sent with parse_mode HTML; buildChatSharedResultText escapes the title
-      // and any error string before interpolation.
-      const resultText = buildChatSharedResultText(lang, event?.title ?? `Event #${eventId}`, outcome);
-      await ctx.send(resultText, { parse_mode: 'HTML', reply_markup: { remove_keyboard: true } });
     })
     // AI Assistant commands (not in setMyCommands — internal use only)
     .command('connect', (ctx) =>
