@@ -5,6 +5,7 @@ import {
   formatUtcOffset,
   markdownToHtml,
   splitMessage,
+  stripHtml,
   truncateMessage,
 } from '../../src/utils/telegram.ts';
 
@@ -67,6 +68,9 @@ describe('escapeMarkdown', () => {
   test('escapes square brackets', () => {
     expect(escapeMarkdown('[link](url)')).toBe('\\[link\\](url)');
   });
+  test('escapes a literal backslash so it cannot neutralize the next escape', () => {
+    expect(escapeMarkdown('a\\_b')).toBe('a\\\\\\_b');
+  });
   test('escapes multiple special characters together', () => {
     expect(escapeMarkdown('_bold_ and *italic* [link]')).toBe('\\_bold\\_ and \\*italic\\* \\[link\\]');
   });
@@ -75,6 +79,22 @@ describe('escapeMarkdown', () => {
   });
   test('returns empty string unchanged', () => {
     expect(escapeMarkdown('')).toBe('');
+  });
+});
+
+describe('stripHtml', () => {
+  test('removes simple tags and decodes entities', () => {
+    expect(stripHtml('<b>hi</b> &amp; bye')).toBe('hi & bye');
+  });
+  test('removes nested tags', () => {
+    expect(stripHtml('<b><i>x</i></b>')).toBe('x');
+  });
+  test('is idempotent (stable at the fixpoint)', () => {
+    const once = stripHtml('<a href="x">y</a>');
+    expect(stripHtml(once)).toBe(once);
+  });
+  test('returns plain text unchanged', () => {
+    expect(stripHtml('hello world')).toBe('hello world');
   });
 });
 

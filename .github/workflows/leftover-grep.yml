@@ -58,7 +58,11 @@ jobs:
         run: |
           # Fetch the PR head object into the local repo so `git diff` can reach it. We do
           # NOT check it out and NOT run anything from it — it's only diffed + grepped.
-          git fetch --no-tags --depth=1 origin "$HEAD_SHA"
+          # No --depth: leftover-grep.sh runs a three-dot `git diff base...HEAD`, which needs
+          # a merge base. A shallow (--depth=1) head has no reachable ancestry, so the diff
+          # dies with "no merge base" on fork PRs / heads not already present. The base was
+          # checked out at fetch-depth:0, so fetching the head's history here resolves it.
+          git fetch --no-tags origin "$HEAD_SHA"
 
       # codeql[actions/cache-poisoning/poisonable-step]
       # Justified: same as above — this step only runs the trusted BASE-branch gate script

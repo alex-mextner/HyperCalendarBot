@@ -8,6 +8,11 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: true
 
+# Least-privilege default for jobs that don't declare their own block (test,
+# notify-failure). Jobs needing more (build: packages:write) override per-job.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/hypercalendarbot
