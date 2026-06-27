@@ -79,9 +79,13 @@ export async function deliverInvitation(
     return { delivered: false, viaDeepLink: false };
   }
 
-  // Setup (link creation, URL generation, message formatting) lives INSIDE the delivery try so a
-  // throw here (DB error building the deep link, formatter error) is contained and reported as an
-  // honest non-delivery — never propagated out of the handler after the invitation row was created.
+  // The outer try guards every setup step after the invitation row was created, so nothing
+  // propagates out of the handler. Two failure modes differ:
+  //  - Deep-link creation has its OWN inner try/catch that recovers to url=null: the primary Bot
+  //    API send still runs (a reachable invitee is unaffected) and only the MTProto/deep-link path
+  //    degrades — it does NOT reach this outer catch.
+  //  - Any other setup/formatter throw (e.g. formatInvitation, message build) falls to the outer
+  //    catch below and is reported as an honest non-delivery.
   try {
     const eventTitle = event?.title ?? `Event #${eventId}`;
     deliveryLogger.info(
