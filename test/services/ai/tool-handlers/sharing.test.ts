@@ -23,7 +23,7 @@ import {
   handleShareAgenda,
   handleShareEvent,
 } from '../../../../src/services/ai/tool-handlers/sharing.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, InvitationKeyboardVariant } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import { DeepLinkService } from '../../../../src/services/sharing/deep-link-service.ts';
@@ -657,6 +657,54 @@ describe('sharing tool handlers', () => {
       const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
       expect(result.success).toBe(false);
       expect(result.error).toContain('delivery');
+    });
+
+    test('resending a pending GROUP invitation uses the group RSVP keyboard and skips MTProto', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Resend',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invitation stores the (negative) group chat id as invitee_id.
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      let variant: InvitationKeyboardVariant | undefined;
+      let groupRecipient: number | undefined;
+      let mtprotoCalled = false;
+      const sentToInviter: number[] = [];
+      const ctx = makeCtx({
+        sender: {
+          sendMessage: async (chatId) => {
+            sentToInviter.push(chatId);
+            return { message_id: 1 };
+          },
+          editMessageText: async () => {},
+          sendInvitation: async (inviteeId, _text, _invId, _lang, v) => {
+            groupRecipient = inviteeId;
+            variant = v;
+            return null; // bot API delivery fails so the fallback path is exercised too
+          },
+          sendAsUser: async () => {
+            mtprotoCalled = true;
+            return true;
+          },
+        },
+        deepLinkService,
+        botUsername: 'TestBot',
+      });
+      const result = await handleResendInvitation(ctx, { invitation_id: inv.id });
+      expect(result.success).toBe(true);
+
+      await flushPromises();
+
+      // The group RSVP keyboard variant is delivered to the group so members can respond for
+      // themselves — never the personal inv: keyboard (which authorizes a single invitee).
+      expect(groupRecipient).toBe(GROUP_CHAT_ID);
+      expect(variant).toEqual({ kind: 'group', eventId: event.id });
+      // allowMtproto:false → no MTProto userbot for a group, and the deep-link forward fallback is
+      // suppressed (a forward link can't be accepted on behalf of a group).
+      expect(mtprotoCalled).toBe(false);
+      expect(sentToInviter).toHaveLength(0);
     });
 
     test('sender without sendInvitation capability → succeeds but reports delivery failed (consistent guard)', async () => {

@@ -211,6 +211,11 @@ export async function handleResendInvitation(
   // reports non-delivery when the sender lacks the sendInvitation capability.
   if (ctx.sender) {
     const event = ctx.eventService.getEvent(invitation.event_id, ctx.user.telegram_id);
+    // A group invitation stores the (negative) group chat id as invitee_id. Resending it must use
+    // the group delivery mode (per-member RSVP keyboard, no MTProto, no deep-link forward) — exactly
+    // what the chat_shared picker does. Without this it would deliver the personal inv: keyboard
+    // (authorizes a single invitee, unusable in a group).
+    const isGroupTarget = invitation.invitee_id < 0;
     const delivery = await deliverInvitation({
       invitationId: invitation.id,
       eventId: invitation.event_id,
@@ -234,6 +239,8 @@ export async function handleResendInvitation(
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
+      allowMtproto: !isGroupTarget,
+      isGroupTarget,
       deps: {
         sender: ctx.sender,
         invitationRepo: ctx.sharing.invitationRepo,
