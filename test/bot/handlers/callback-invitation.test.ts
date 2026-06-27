@@ -212,6 +212,23 @@ describe('group RSVP callbacks', () => {
     expect(recordGroupAttendance).not.toHaveBeenCalled();
     expect(ctx.answer).toHaveBeenCalledWith({ text: t('en').group_rsvp_start_hint, show_alert: true });
   });
+
+  test('localizes the /start hint to the tapper language_code when there is no dbUser', async () => {
+    const recordGroupAttendance = mock(() => ({ success: true }));
+    const ctx = {
+      data: 'grsvp:42:going',
+      dbUser: undefined,
+      from: { languageCode: 'ru' },
+      answer: mock(() => Promise.resolve()),
+      editText: mock(() => Promise.resolve()),
+    };
+    const handler = makeHandler({ recordGroupAttendance });
+
+    await handler(ctx as never);
+
+    expect(recordGroupAttendance).not.toHaveBeenCalled();
+    expect(ctx.answer).toHaveBeenCalledWith({ text: t('ru').group_rsvp_start_hint, show_alert: true });
+  });
 });
 
 describe('inviter notification on response', () => {
