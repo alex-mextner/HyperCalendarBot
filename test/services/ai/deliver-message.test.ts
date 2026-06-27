@@ -22,6 +22,34 @@ describe('redactUrls', () => {
   test('leaves URL-free text untouched', () => {
     expect(redactUrls('bot was blocked by the user')).toBe('bot was blocked by the user');
   });
+
+  test('strips a deep link whose slash is HTML-escaped (scheme-less, host mangled) via start=', () => {
+    // escapeHtml does not touch ':'/'/', but other escapers turn '/' into '&#x2F;'. With the host
+    // mangled, neither the https:// nor the t.me/ regex matches — the surviving start= param still
+    // carries the invite code and must be redacted.
+    const out = redactUrls('forward t.me&#x2F;TestBot?start=i_SECRETCODE0 to them');
+    expect(out).not.toContain('start=i_');
+    expect(out).not.toContain('i_SECRETCODE0');
+    expect(out).toContain('[link redacted]');
+  });
+
+  test('strips a bare deep-link code with no URL or scheme around it', () => {
+    const out = redactUrls('invite code i_AbC1dEf2gH3 could not be created');
+    expect(out).not.toContain('i_AbC1dEf2gH3');
+    expect(out).toContain('[link redacted]');
+  });
+
+  test('strips bare s_ and g_ deep-link codes too', () => {
+    expect(redactUrls('shared link s_ZbCdEf12-_3 failed')).not.toContain('s_ZbCdEf12-_3');
+    expect(redactUrls('group link g_QwErTy78901 failed')).not.toContain('g_QwErTy78901');
+  });
+
+  test('does not over-redact ordinary text or short identifiers', () => {
+    expect(redactUrls('event id 12345 was not found')).toBe('event id 12345 was not found');
+    expect(redactUrls('chat not found')).toBe('chat not found');
+    // Short `i_`/`s_` fragments in prose are not deep-link codes and must survive.
+    expect(redactUrls('this is_ok and i_am fine')).toBe('this is_ok and i_am fine');
+  });
 });
 
 describe('describeDeliveryError', () => {
