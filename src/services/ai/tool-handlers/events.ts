@@ -479,10 +479,9 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     }
   }
 
-  // Fetch accepted participants once — used for both Google sync and the hint
-  const acceptedParticipants = ctx.participantRepo
-    ? ctx.participantRepo.getByEvent(event_id).filter((p) => p.status === 'accepted' && p.user_id !== userId)
-    : [];
+  // Fetch participants once — used for the accepted-push, the declined-skip, and the hint
+  const participants = ctx.participantRepo ? ctx.participantRepo.getByEvent(event_id) : [];
+  const acceptedParticipants = participants.filter((p) => p.status === 'accepted' && p.user_id !== userId);
 
   // Push update to all accepted participants' Google Calendars (parallel).
   // Concurrency note: SQLite ops inside scheduleParticipantPush are sync
@@ -507,12 +506,17 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     }
   }
 
-  // Push update to all group members' Google Calendars (parallel)
+  // Push update to all group members' Google Calendars (parallel).
+  // Group events are pushed to every active member by default; a declined RSVP
+  // ("Not going") is the opt-out, so members who explicitly declined are skipped
+  // — otherwise an edit would re-create the event they removed from their calendar.
+  // Members with no RSVP row are undecided, not declined, so they still receive it.
   if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
+    const declinedMemberIds = new Set(participants.filter((p) => p.status === 'declined').map((p) => p.user_id));
     const members = ctx.group.groupMemberRepo
       .getActiveMembers(ctx.groupChatId!)
-      .filter((m) => m.user_id !== ctx.user.telegram_id);
+      .filter((m) => m.user_id !== ctx.user.telegram_id && !declinedMemberIds.has(m.user_id));
     const results = await Promise.allSettled(members.map((m) => pushParticipant(m.user_id, updated.id, 'update')));
     for (let i = 0; i < results.length; i++) {
       if (results[i]!.status === 'rejected') {

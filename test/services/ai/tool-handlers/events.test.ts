@@ -4,7 +4,9 @@ import { migrations } from '../../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../../src/database/repositories/event-reminder.repository.ts';
+import { GoogleCalendarRepository } from '../../../../src/database/repositories/google-calendar.repository.ts';
 import { GroupChatRepository } from '../../../../src/database/repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from '../../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../../src/database/repositories/holiday.repository.ts';
 import { ParticipantRepository } from '../../../../src/database/repositories/participant.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
@@ -20,7 +22,7 @@ import {
   handleSnoozeEvent,
   handleUpdateEvent,
 } from '../../../../src/services/ai/tool-handlers/events.ts';
-import type { AgentContext } from '../../../../src/services/ai/types.ts';
+import type { AgentContext, GroupCapability } from '../../../../src/services/ai/types.ts';
 import { ConflictChecker } from '../../../../src/services/event/conflict-checker.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import type { GroupMemberService } from '../../../../src/services/group/member-service.ts';
@@ -866,6 +868,63 @@ describe('event tool handlers', () => {
       expect(captured.every((j) => j.text.includes('Test Group'))).toBe(true);
       expect(captured.every((j) => j.parseMode === 'HTML')).toBe(true);
       expect(captured.every((j) => j.origin.startsWith('group_event_updated:'))).toBe(true);
+    });
+
+    // Centralized partial-mock factory: the Google fanout path only touches
+    // groupMemberRepo, so the other GroupCapability members are supplied as a
+    // partial mock per the test-only cast exception in CLAUDE.md.
+    function makeGroupCapability(overrides: Partial<GroupCapability>): GroupCapability {
+      return overrides as unknown as GroupCapability;
+    }
+
+    test('handleUpdateEvent (group) skips declined members in Google fanout, pushes undecided members', async () => {
+      const DECLINED_MEMBER = 501;
+      const PENDING_MEMBER = 502;
+      const NO_ROW_MEMBER = 503;
+
+      const event = createGroupEvent('Quarterly Review', '2026-03-22T09:00:00Z');
+
+      const groupMemberRepo = new GroupMemberRepository(db);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, USER_ID);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, DECLINED_MEMBER);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, PENDING_MEMBER);
+      groupMemberRepo.upsert(GROUP_CHAT_ID, NO_ROW_MEMBER);
+
+      // RSVP state: one explicitly declined, one tapped-but-not-declined,
+      // one who never tapped anything (no participant row at all).
+      const participantRepo = new ParticipantRepository(db);
+      participantRepo.add(event.id, DECLINED_MEMBER, 'declined');
+      participantRepo.add(event.id, PENDING_MEMBER, 'pending');
+
+      const pushed: { userId: number; action: string }[] = [];
+      const scheduleParticipantPush = mock(
+        async (userId: number, _eventId: number, action: 'create' | 'update' | 'delete') => {
+          pushed.push({ userId, action });
+        },
+      );
+
+      const gCtx: AgentContext = {
+        ...makeGroupCtx(),
+        participantRepo,
+        group: makeGroupCapability({ groupMemberRepo }),
+        google: { googleCalendarRepo: new GoogleCalendarRepository(db), scheduleParticipantPush },
+      };
+
+      const result = await handleUpdateEvent(gCtx, {
+        event_id: event.id,
+        title: 'Quarterly Review Updated',
+        scope: 'group',
+      });
+
+      expect(result.success).toBe(true);
+      const updatedIds = pushed.filter((p) => p.action === 'update').map((p) => p.userId);
+      // Declined member's "Not going" must NOT be undone by an edit.
+      expect(updatedIds).not.toContain(DECLINED_MEMBER);
+      // Members who never declined still receive the edit.
+      expect(updatedIds).toContain(PENDING_MEMBER);
+      expect(updatedIds).toContain(NO_ROW_MEMBER);
+      // Organizer is never part of the member fanout.
+      expect(updatedIds).not.toContain(USER_ID);
     });
 
     test('handleCreateEvent uses invite link as clickable group link when available', async () => {
