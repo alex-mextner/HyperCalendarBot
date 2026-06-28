@@ -29,7 +29,6 @@ import type {
 import type { ParseMode } from '../../utils/telegram.ts';
 import type { BirthdayService } from '../birthday/birthday-service.ts';
 import type { ConversationLogger } from '../conversation-logger.ts';
-import type { ConflictChecker } from '../event/conflict-checker.ts';
 import type { EventService } from '../event/event-service.ts';
 import type { GroupMemberService } from '../group/member-service.ts';
 import type { HolidayService } from '../holiday/holiday-service.ts';
@@ -199,7 +198,6 @@ export interface AgentContext {
     options?: { reply_markup?: InlineKeyboard | TelegramInlineKeyboardMarkup; message_thread_id?: number },
   ) => Promise<TelegramMessage>;
   resolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
-  conflictChecker?: ConflictChecker;
   /** Events in a ±2-week window around now, preloaded for pattern detection. */
   recentEventsWindow?: EventOccurrence[];
   /** Contact directory (also used by sharing, but independently configurable). */

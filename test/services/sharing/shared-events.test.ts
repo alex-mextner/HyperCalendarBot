@@ -12,7 +12,6 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import type { User } from '../../../src/database/types.ts';
 import { handleDeleteEvent } from '../../../src/services/ai/tool-handlers/events.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
-import { ConflictChecker } from '../../../src/services/event/conflict-checker.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import type { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service.ts';
@@ -292,125 +291,6 @@ describe('acceptInvitation — adds participant', () => {
 
     const visible = eventRepo.getVisibleInRange(INVITEE, '2026-03-20T00:00:00Z', '2026-03-21T00:00:00Z');
     expect(visible).toHaveLength(0);
-  });
-});
-
-describe('acceptInvitation — conflict warnings', () => {
-  let db: Database;
-  let eventRepo: EventRepository;
-  let participantRepo: ParticipantRepository;
-  let invitationRepo: InvitationRepository;
-  let eventService: EventService;
-  let invitationService: InvitationService;
-
-  beforeEach(() => {
-    db = createTestDb();
-    const userRepo = new UserRepository(db);
-    eventRepo = new EventRepository(db);
-    participantRepo = new ParticipantRepository(db);
-    invitationRepo = new InvitationRepository(db);
-    const sharingSettings = new SharingSettingsRepository(db);
-    const conflictChecker = new ConflictChecker(eventRepo);
-    eventService = new EventService({ eventRepo });
-    invitationService = new InvitationService(
-      invitationRepo,
-      eventRepo,
-      sharingSettings,
-      participantRepo,
-      conflictChecker,
-    );
-    userRepo.create({ telegram_id: CREATOR, timezone: 'UTC' });
-    userRepo.create({ telegram_id: INVITEE, timezone: 'UTC' });
-  });
-
-  test('returns conflicts when accepted event overlaps with existing', async () => {
-    // Invitee has an existing event
-    eventService.createEvent({
-      user_id: INVITEE,
-      title: 'Existing Meeting',
-      start_at: '2026-03-20T10:00:00Z',
-      end_at: '2026-03-20T11:00:00Z',
-      timezone: 'UTC',
-    });
-    // Creator invites to overlapping event
-    const shared = eventService.createEvent({
-      user_id: CREATOR,
-      title: 'Shared Meeting',
-      start_at: '2026-03-20T10:30:00Z',
-      end_at: '2026-03-20T11:30:00Z',
-      timezone: 'UTC',
-    });
-    const inv = invitationRepo.create({ event_id: shared.id, inviter_id: CREATOR, invitee_id: INVITEE });
-
-    const result = invitationService.acceptInvitation(inv.id, INVITEE);
-    expect(result.success).toBe(true);
-    expect(result.conflicts).toBeDefined();
-    expect(result.conflicts).toHaveLength(1);
-    expect(result.conflicts![0]!.title).toBe('Existing Meeting');
-  });
-
-  test('returns no conflicts when no overlap', async () => {
-    eventService.createEvent({
-      user_id: INVITEE,
-      title: 'Morning',
-      start_at: '2026-03-20T08:00:00Z',
-      end_at: '2026-03-20T09:00:00Z',
-      timezone: 'UTC',
-    });
-    const shared = eventService.createEvent({
-      user_id: CREATOR,
-      title: 'Afternoon',
-      start_at: '2026-03-20T14:00:00Z',
-      end_at: '2026-03-20T15:00:00Z',
-      timezone: 'UTC',
-    });
-    const inv = invitationRepo.create({ event_id: shared.id, inviter_id: CREATOR, invitee_id: INVITEE });
-
-    const result = invitationService.acceptInvitation(inv.id, INVITEE);
-    expect(result.success).toBe(true);
-    expect(result.conflicts ?? []).toHaveLength(0);
-  });
-
-  test('conflicts exclude the accepted event itself', async () => {
-    const shared = eventService.createEvent({
-      user_id: CREATOR,
-      title: 'Accepted Event',
-      start_at: '2026-03-20T10:00:00Z',
-      end_at: '2026-03-20T11:00:00Z',
-      timezone: 'UTC',
-    });
-    const inv = invitationRepo.create({ event_id: shared.id, inviter_id: CREATOR, invitee_id: INVITEE });
-
-    const result = invitationService.acceptInvitation(inv.id, INVITEE);
-    expect(result.success).toBe(true);
-    // The accepted event itself should not appear as a conflict
-    expect(result.conflicts ?? []).toHaveLength(0);
-  });
-
-  test('still accepts invitation even with conflicts', async () => {
-    eventService.createEvent({
-      user_id: INVITEE,
-      title: 'Blocking',
-      start_at: '2026-03-20T10:00:00Z',
-      end_at: '2026-03-20T11:00:00Z',
-      timezone: 'UTC',
-    });
-    const shared = eventService.createEvent({
-      user_id: CREATOR,
-      title: 'Conflicting',
-      start_at: '2026-03-20T10:00:00Z',
-      end_at: '2026-03-20T11:00:00Z',
-      timezone: 'UTC',
-    });
-    const inv = invitationRepo.create({ event_id: shared.id, inviter_id: CREATOR, invitee_id: INVITEE });
-
-    const result = invitationService.acceptInvitation(inv.id, INVITEE);
-    expect(result.success).toBe(true);
-
-    // Participant was still added
-    const participant = participantRepo.findByEventAndUser(shared.id, INVITEE);
-    expect(participant).not.toBeNull();
-    expect(participant!.status).toBe('accepted');
   });
 });
 
@@ -746,15 +626,8 @@ describe('full shared event lifecycle', () => {
     eventReminderRepo = new EventReminderRepository(db);
     chatHistory = new ChatHistoryRepository(db);
     const sharingSettings = new SharingSettingsRepository(db);
-    const conflictChecker = new ConflictChecker(eventRepo);
     eventService = new EventService({ eventRepo });
-    invitationService = new InvitationService(
-      invitationRepo,
-      eventRepo,
-      sharingSettings,
-      participantRepo,
-      conflictChecker,
-    );
+    invitationService = new InvitationService(invitationRepo, eventRepo, sharingSettings, participantRepo);
     userRepo.create({ telegram_id: ALICE, timezone: 'UTC', first_name: 'Alice' });
     userRepo.create({ telegram_id: BOB, timezone: 'UTC', first_name: 'Bob' });
   });

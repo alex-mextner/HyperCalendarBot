@@ -394,7 +394,7 @@ describe('InvitationService', () => {
       const bus = new DomainEventBus();
       const rsvpEvents: DomainEventMap['myGroup.rsvp'][] = [];
       bus.on('myGroup.rsvp', (payload) => rsvpEvents.push(payload));
-      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo, undefined, bus);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo, bus);
       const event = eventRepo.create({
         user_id: INVITER,
         title: 'Group Party',
@@ -439,7 +439,7 @@ describe('InvitationService', () => {
       const rsvpEvents: DomainEventMap['myGroup.rsvp'][] = [];
       bus.on('myGroup.rsvp', (payload) => rsvpEvents.push(payload));
       // participantRepo intentionally omitted, bus still wired.
-      const service = new InvitationService(invRepo, eventRepo, settingsRepo, undefined, undefined, bus);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, undefined, bus);
       const event = eventRepo.create({
         user_id: INVITER,
         title: 'Group Party',

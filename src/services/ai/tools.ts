@@ -1138,7 +1138,7 @@ During a voice call the table is still sent to chat; you MUST mention it verball
   {
     name: 'add_trigger',
     description: `Add an event-driven trigger. When the specified topic fires (and optional condition is true), the action message is injected into the AI pipeline.
-Available topics: myCalendar.newEvent, myCalendar.updatedEvent, myCalendar.deletedEvent, myCalendar.conflictDetected, myCalendar.eventStarting, myInvitations.accepted, myInvitations.rejected, myGroup.newEvent.
+Available topics: myCalendar.newEvent, myCalendar.updatedEvent, myCalendar.deletedEvent, myCalendar.eventStarting, myInvitations.accepted, myInvitations.rejected, myGroup.newEvent.
 Condition is an expression using dot-notation on the event payload (e.g. "newEvent.title == \\"standup\\"").`,
     input_schema: {
       type: 'object' as const,

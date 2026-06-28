@@ -395,34 +395,6 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
         .catch((err) => logger.error({ err, eventId: event.id }, 'Background location verification failed'));
     }
 
-    if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
-      const conflicts = ctx.conflictChecker.checkConflicts(event, userId);
-      if (conflicts.length > 0) {
-        ctx.scheduled.domainEvents.emit('myCalendar.conflictDetected', {
-          userId: ctx.user.telegram_id,
-          event,
-          conflictsWith: conflicts[0]!,
-        });
-
-        const tz = ctx.user.timezone;
-        const conflictList = conflicts
-          .map((c) => {
-            const start = new TZDate(new Date(c.start_at), tz);
-            const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
-            const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
-            return `"${c.title}" (${timeRange})`;
-          })
-          .join(', ');
-
-        return {
-          success: true,
-          output: t(ctx.user.language).aiTools.events.eventCreated(parts.join(', ')),
-          agentHint: `⚠️ This event overlaps with: ${conflictList}. Warn the user about the overlap.`,
-          data: eventToSummary(event, ctx.user.timezone),
-        };
-      }
-    }
-
     const groupHint =
       scope === 'group'
         ? groupNotificationsQueued > 0
@@ -528,29 +500,6 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     }
   }
 
-  let conflictHint: string | undefined;
-  if (ctx.scheduled?.domainEvents && ctx.conflictChecker && scope !== 'group') {
-    const conflicts = ctx.conflictChecker.checkConflicts(updated, userId);
-    if (conflicts.length > 0) {
-      ctx.scheduled.domainEvents.emit('myCalendar.conflictDetected', {
-        userId: ctx.user.telegram_id,
-        event: updated,
-        conflictsWith: conflicts[0]!,
-      });
-
-      const tz = ctx.user.timezone;
-      const conflictList = conflicts
-        .map((c) => {
-          const start = new TZDate(new Date(c.start_at), tz);
-          const end = c.end_at ? new TZDate(new Date(c.end_at), tz) : null;
-          const timeRange = end ? `${format(start, 'HH:mm')}–${format(end, 'HH:mm')}` : format(start, 'HH:mm');
-          return `"${c.title}" (${timeRange})`;
-        })
-        .join(', ');
-      conflictHint = `⚠️ This event now overlaps with: ${conflictList}. Warn the user about the overlap.`;
-    }
-  }
-
   let output = t(ctx.user.language).aiTools.events.eventUpdated(parts.join(', '));
 
   if (acceptedParticipants.length > 0) {
@@ -570,9 +519,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
         ? `The group event is updated and ${groupNotificationsQueued} member notification(s) have been queued for delivery. Do NOT call update_event again with identical arguments.`
         : 'The group event is updated but no member notifications were queued (no registered members or broadcast queue unavailable). Do NOT call update_event again with identical arguments.'
       : undefined;
-  const mergedHint = [conflictHint, groupHint].filter(Boolean).join(' ') || undefined;
 
-  return { success: true, output, agentHint: mergedHint, data: eventToSummary(updated, ctx.user.timezone) };
+  return { success: true, output, agentHint: groupHint, data: eventToSummary(updated, ctx.user.timezone) };
 }
 
 export interface AttachPendingLocationInput {
