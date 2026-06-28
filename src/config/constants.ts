@@ -455,6 +455,14 @@ export const MSG = {
         noInvitations: (title: string) => `No invitations for event "${title}".`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Invitations for "${title}" (id: ${id}):\n${lines}`,
+        rsvpAttending: (count: number) => `attending (going): ${count}`,
+        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+          `invitee: ${userId}, status: ${status}${note}`,
+        rsvpMemberLine: (userId: number, status: string) => `  member: ${userId}, status: ${status}`,
+        rsvpPersonalInviteNote: (inviteStatus: string) => ` (personal invite: ${inviteStatus})`,
+        groupRsvpHeader: 'group invitation — per-member RSVP:',
+        groupRsvpNone: 'group invitation: no member RSVPs yet',
+        groupRsvpUnavailable: 'group invitation: members RSVP per-member (participant registry unavailable)',
         noEventsToShare: (period: string) => `No visible events to share for ${period}.`,
         agendaShared: (period: string, targetType: string, targetId: number, count: number, lines: string) =>
           `Agenda for ${period} shared with ${targetType} ${targetId} (${count} events):\n${lines}`,
@@ -1237,6 +1245,14 @@ export const MSG = {
         noInvitations: (title: string) => `Для события «${title}» нет приглашений.`,
         invitationsFor: (title: string, id: number, lines: string) =>
           `Приглашения для «${title}» (id: ${id}):\n${lines}`,
+        rsvpAttending: (count: number) => `идут (подтвердили): ${count}`,
+        rsvpInviteeLine: (userId: number, status: string, note: string) =>
+          `приглашённый: ${userId}, статус: ${status}${note}`,
+        rsvpMemberLine: (userId: number, status: string) => `  участник: ${userId}, статус: ${status}`,
+        rsvpPersonalInviteNote: (inviteStatus: string) => ` (личное приглашение: ${inviteStatus})`,
+        groupRsvpHeader: 'групповое приглашение — ответы участников:',
+        groupRsvpNone: 'групповое приглашение: ответов участников пока нет',
+        groupRsvpUnavailable: 'групповое приглашение: участники отвечают индивидуально (реестр участников недоступен)',
         noEventsToShare: (period: string) => `Нет видимых событий для публикации за ${period}.`,
         agendaShared: (period: string, targetType: string, targetId: number, count: number, lines: string) =>
           `Расписание (${period}) опубликовано для ${targetType} ${targetId} (${count} событий):\n${lines}`,

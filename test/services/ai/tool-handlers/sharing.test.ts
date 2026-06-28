@@ -907,6 +907,87 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
     });
 
+    test('#105: a declined-personal invitee who RSVPd going via the group appears once, going, counted', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Reunion',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite that the user DECLINED.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'pending');
+      // ...then they RSVP'd "going" via the GROUP invite → participant row = accepted (source of truth).
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Appears EXACTLY once across the whole output (no vanish, no double-list).
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+      // Authoritative status is the participant row (accepted/going), annotated with the contradicting invite.
+      expect(result.output).toContain('status: accepted');
+      expect(result.output).toContain('(personal invite: declined)');
+      // Not duplicated as a bare group member line.
+      expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
+      // Counted in the attending total (computed in code, not parsed from prose).
+      expect(result.output).toContain('attending (going): 1');
+    });
+
+    test('#104 (B-narrow): an accept-then-decline personal invitee shows as declined, not going', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Standup',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'accepted');
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The authoritative participant status (declined) is what's shown — no phantom "going".
+      expect(result.output).toContain('status: declined');
+      // Invite status equals participant status here, so there is no contradicting annotation.
+      expect(result.output).not.toContain('(personal invite:');
+      // Not counted as attending.
+      expect(result.output).toContain('attending (going): 0');
+    });
+
+    test('#110 (B-narrow): a user with both a personal invite and a participant row is counted once', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const distinctMember = 308;
+      userRepo.create({ telegram_id: distinctMember, timezone: 'UTC' });
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Workshop',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // OTHER accepted a personal invite AND has a participant row (also in the group).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      // Group invite + a distinct genuine group member who is going.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, distinctMember, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // OTHER appears exactly once (not double-counted across personal + group sections).
+      const occurrences = result.output!.split(String(OTHER_USER_ID)).length - 1;
+      expect(occurrences).toBe(1);
+      // Two distinct attendees, not three.
+      expect(result.output).toContain('attending (going): 2');
+      expect(result.output).toContain(`member: ${distinctMember}`);
+    });
+
     test('group invitation degrades safely when the participant repository is absent', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
