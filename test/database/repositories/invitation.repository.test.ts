@@ -91,6 +91,15 @@ describe('InvitationRepository', () => {
     expect(repo.getPendingForEvent(eventId)).toHaveLength(1);
   });
 
+  test('getByEvent returns every invitation row regardless of status', () => {
+    const declined = repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: INVITEE });
+    repo.updateStatus(declined.id, 'declined', 'pending');
+    repo.create({ event_id: eventId, inviter_id: INVITER, invitee_id: 300 });
+    const all = repo.getByEvent(eventId);
+    expect(all).toHaveLength(2);
+    expect(all.map((i) => i.status).sort()).toEqual(['declined', 'pending']);
+  });
+
   test('expirePastInvitations marks past-event invitations expired', () => {
     const pastEvent = new EventRepository(db).create({
       user_id: INVITER,

@@ -881,6 +881,51 @@ describe('sharing tool handlers', () => {
       expect(occurrences).toBe(1);
     });
 
+    test('an accept-then-decline personal invitee is not mislabeled as a group member', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dual Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite that was accepted and then declined: its invitation row ends as 'declined',
+      // so it is no longer in the accepted/pending sets, but the participant row remains.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.updateStatus(personalInv.id, 'declined', 'accepted');
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      // Group invite + a distinct genuine group member.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, 304, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The genuine group member is still shown.
+      expect(result.output).toContain('member: 304');
+      // The declined personal invitee must NOT appear as a group member.
+      expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
+    });
+
+    test('group invitation degrades safely when the participant repository is absent', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Registry',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invite exists, but the context has no participant repository injected.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx();
+      expect(ctx.participantRepo).toBeUndefined();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      // No throw, sensible degraded output, and no stale group-chat invitee/member lines.
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('participant registry unavailable');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+      expect(result.output).not.toContain('member:');
+    });
+
     test('returns mixed pending and accepted', async () => {
       const thirdUser = 300;
       userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });

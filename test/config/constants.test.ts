@@ -21,4 +21,19 @@ describe('toLang', () => {
   test('defaults to "en" for unknown language', () => {
     expect(toLang('de')).toBe('en');
   });
+
+  test('matches the primary subtag of an IETF tag', () => {
+    expect(toLang('ru-RU')).toBe('ru');
+    expect(toLang('en-US')).toBe('en');
+    expect(toLang('ru-BY')).toBe('ru');
+  });
+
+  test('is case-insensitive on the primary subtag', () => {
+    expect(toLang('RU')).toBe('ru');
+    expect(toLang('EN-GB')).toBe('en');
+  });
+
+  test('defaults to "en" for an unknown IETF tag', () => {
+    expect(toLang('de-DE')).toBe('en');
+  });
 });

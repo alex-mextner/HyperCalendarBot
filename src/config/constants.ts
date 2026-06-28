@@ -1667,9 +1667,11 @@ export const MSG = {
 export type Lang = keyof typeof MSG;
 export type Messages = (typeof MSG)[Lang];
 
-/** Validate a string to Lang, defaulting to 'en' for unknown values. */
+/** Validate a string to Lang, defaulting to 'en' for unknown values. Matches the primary subtag of
+ *  an IETF language tag, so 'ru-RU' / 'ru-BY' resolve to 'ru' rather than the default. */
 export function toLang(value: string | null | undefined): Lang {
-  if (value === 'ru' || value === 'en') return value;
+  const primary = value?.split('-')[0]?.toLowerCase();
+  if (primary === 'ru' || primary === 'en') return primary;
   return 'en';
 }
 

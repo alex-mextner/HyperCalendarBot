@@ -1,5 +1,5 @@
 import { t } from '../../../config/constants.ts';
-import type { Visibility } from '../../../database/types.ts';
+import type { Invitation, Visibility } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { deliverInvitation, lookupInviteeUsername } from '../invitation-delivery.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
@@ -266,15 +266,21 @@ export async function handleResendInvitation(
 
 /**
  * Per-member RSVP breakdown for an event that has at least one group invitation. The shared group
- * invitation row stays "pending" forever, so the real responses live in event_participants. Personal
- * invitees (already listed by their own invitation rows) are excluded so a member who both holds a
- * personal invite and has a participant row is never double-counted. When an event is shared to more
- * than one group, event_participants does not record which group a member came from, so the breakdown
- * is reported once for the whole event rather than per group chat.
+ * invitation row stays "pending" forever, so the real responses live in event_participants. Every
+ * personal invitee (any invitation status — including an accept-then-decline) is excluded so a member
+ * who holds a personal invite and a participant row is never mislabeled as a group member. The
+ * exclusion set is built from ALL invitation rows whose invitee_id is non-negative (group invites use
+ * the negative chat id). When an event is shared to more than one group, event_participants does not
+ * record which group a member came from, so the breakdown is reported once for the whole event rather
+ * than per group chat.
  */
-function describeGroupRsvp(ctx: AgentContext, eventId: number, personalInviteeIds: Set<number>): string[] {
+function describeGroupRsvp(ctx: AgentContext, eventId: number, invitations: Invitation[]): string[] {
   if (!ctx.participantRepo) {
     return ['group invitation: members RSVP per-member (participant registry unavailable)'];
+  }
+  const personalInviteeIds = new Set<number>();
+  for (const inv of invitations) {
+    if (inv.invitee_id >= 0) personalInviteeIds.add(inv.invitee_id);
   }
   const members = ctx.participantRepo.getByEvent(eventId).filter((p) => !personalInviteeIds.has(p.user_id));
   if (members.length === 0) {
@@ -300,21 +306,18 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   // "pending": members RSVP per-member into event_participants, not onto the shared invitation row.
   // List personal invitees by their own rows, then append the real per-member group RSVPs so the
   // group status reflects reality instead of a permanently stale "pending".
-  const personalInviteeIds = new Set<number>();
   const lines: string[] = [];
   for (const inv of accepted) {
     if (inv.invitee_id < 0) continue;
-    personalInviteeIds.add(inv.invitee_id);
     lines.push(`invitee: ${inv.invitee_id}, status: accepted`);
   }
   for (const inv of pending) {
     if (inv.invitee_id < 0) continue;
-    personalInviteeIds.add(inv.invitee_id);
     lines.push(`invitee: ${inv.invitee_id}, status: ${inv.status}`);
   }
   const hasGroupInvite = accepted.some((inv) => inv.invitee_id < 0) || pending.some((inv) => inv.invitee_id < 0);
   if (hasGroupInvite) {
-    lines.push(...describeGroupRsvp(ctx, input.event_id, personalInviteeIds));
+    lines.push(...describeGroupRsvp(ctx, input.event_id, ctx.sharing.invitationRepo.getByEvent(input.event_id)));
   }
 
   const lang = ctx.user.language;
