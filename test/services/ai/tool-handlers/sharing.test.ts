@@ -907,6 +907,25 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain(`member: ${OTHER_USER_ID}`);
     });
 
+    test('group invitation degrades safely when the participant repository is absent', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'No Registry',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // A group invite exists, but the context has no participant repository injected.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx();
+      expect(ctx.participantRepo).toBeUndefined();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      // No throw, sensible degraded output, and no stale group-chat invitee/member lines.
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('participant registry unavailable');
+      expect(result.output).not.toContain(`invitee: ${GROUP_CHAT_ID}`);
+      expect(result.output).not.toContain('member:');
+    });
+
     test('returns mixed pending and accepted', async () => {
       const thirdUser = 300;
       userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });
