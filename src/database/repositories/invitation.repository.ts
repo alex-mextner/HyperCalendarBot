@@ -101,6 +101,10 @@ export class InvitationRepository {
       .all(eventId) as Invitation[];
   }
 
+  getByEvent(eventId: number): Invitation[] {
+    return this.db.prepare('SELECT * FROM invitations WHERE event_id = ? ORDER BY id').all(eventId) as Invitation[];
+  }
+
   setMessageInfo(id: number, messageId: number, chatId: number): void {
     this.db.prepare('UPDATE invitations SET message_id = ?, chat_id = ? WHERE id = ?').run(messageId, chatId, id);
   }
