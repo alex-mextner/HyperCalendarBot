@@ -119,4 +119,27 @@ describe('createParticipantPushScheduler', () => {
     const [, jobData] = mockQueueAdd.mock.calls[0] as unknown as [string, { action: string }];
     expect(jobData.action).toBe('delete');
   });
+
+  test('re-toggle (going→notgoing→going) does not reuse a stable jobId — regression #107', async () => {
+    mockGetSyncState.mockReturnValue(makeActiveState());
+    const { syncRepo, participantSyncRepo, queue } = makeDeps();
+    const schedule = createParticipantPushScheduler(syncRepo, participantSyncRepo, queue);
+
+    // Same participant re-accepts the same event after a decline: two `create` enqueues.
+    await schedule(2, 10, 'create');
+    await schedule(2, 10, 'create');
+
+    type AddCall = [string, { type: string }, { jobId?: string }?];
+    const firstJobId = (mockQueueAdd.mock.calls[0] as unknown as AddCall)[2]?.jobId;
+    const secondJobId = (mockQueueAdd.mock.calls[1] as unknown as AddCall)[2]?.jobId;
+
+    // The google-sync queue retains completed jobs (removeOnComplete:1000), and BullMQ
+    // dedups on jobId even against retained completed jobs. A stable
+    // part-sync-<user>-<event>-<action> id makes the second create silently dropped → the
+    // event is never re-added to the member's Google Calendar. Either no jobId (auto-
+    // generated, always unique) or a unique one is required; the two creates must never
+    // share a fixed id.
+    const sharesStableId = firstJobId !== undefined && firstJobId === secondJobId;
+    expect(sharesStableId).toBe(false);
+  });
 });
