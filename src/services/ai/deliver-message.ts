@@ -10,14 +10,15 @@ import { botLogger } from '../../utils/logger.ts';
  *     param survives (the two URL regexes miss it);
  *   - a bare deep-link code (`i_`/`s_`/`g_` + base64url, generated as 11 chars) with no URL
  *     around it at all.
- *  Kept conservative: only the `start=` param and the specific `[isg]_<base64url>` code shape are
- *  matched, so ordinary prose and short `i_`/`s_` fragments survive untouched. */
+ *  Kept conservative: only the `start=` param and the specific `[isg]_<base64url>` code shape (at
+ *  least the 11 chars a real code carries) are matched, so ordinary prose and shorter `i_`/`s_`
+ *  fragments survive untouched. */
 export function redactUrls(text: string): string {
   return text
     .replace(/https?:\/\/\S+/gi, '[link redacted]')
     .replace(/\bt\.me\/\S+/gi, '[link redacted]')
     .replace(/start=\S+/gi, '[link redacted]')
-    .replace(/\b[isg]_[A-Za-z0-9_-]{8,}/g, '[link redacted]');
+    .replace(/\b[isg]_[A-Za-z0-9_-]{11,}/g, '[link redacted]');
 }
 
 /**

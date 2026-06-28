@@ -50,6 +50,17 @@ describe('redactUrls', () => {
     // Short `i_`/`s_` fragments in prose are not deep-link codes and must survive.
     expect(redactUrls('this is_ok and i_am fine')).toBe('this is_ok and i_am fine');
   });
+
+  test('does not redact generic 8-10 char i_/s_/g_ tokens, still redacts real 11-char codes', () => {
+    // Real deep-link codes are `[isg]_` + an 11-char base64url suffix (randomBytes(8)). Generic
+    // 8-10 char tokens after `i_`/`s_`/`g_` are not deep-link codes and must survive untouched.
+    expect(redactUrls('build i_AbC1dEf2 done')).toBe('build i_AbC1dEf2 done'); // 8-char suffix
+    expect(redactUrls('ref s_AbC1dEf2gH ok')).toBe('ref s_AbC1dEf2gH ok'); // 10-char suffix
+    // A real 11-char code is still redacted.
+    const real = redactUrls('code g_AbC1dEf2gH3 failed');
+    expect(real).not.toContain('g_AbC1dEf2gH3');
+    expect(real).toContain('[link redacted]');
+  });
 });
 
 describe('describeDeliveryError', () => {
