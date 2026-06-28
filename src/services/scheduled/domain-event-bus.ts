@@ -10,6 +10,11 @@ export type DomainEventMap = {
   'myInvitations.accepted': { userId: number; inviteeId: number; event: CalendarEvent };
   'myInvitations.rejected': { userId: number; inviteeId: number; event: CalendarEvent };
   'myGroup.newEvent': { userId: number; groupChatId: number; newEvent: CalendarEvent; createdBy: number };
+  // Internal plumbing topic: one group member's RSVP, used only to mirror their answer into their
+  // own Google Calendar. userId is the tapping member — deliberately kept OUT of ALL_TOPICS so it
+  // never reaches TriggerService (would fire user-defined automations) or the AI scheduled-call
+  // topic list.
+  'myGroup.rsvp': { userId: number; eventId: number; status: 'accepted' | 'declined' };
 };
 
 export type DomainEventTopic = keyof DomainEventMap;

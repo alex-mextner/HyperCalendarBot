@@ -7,6 +7,7 @@ import { ParticipantRepository } from '../../../src/database/repositories/partic
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository';
 import { UserRepository } from '../../../src/database/repositories/user.repository';
 import { runMigrations } from '../../../src/database/schema';
+import { DomainEventBus, type DomainEventMap } from '../../../src/services/scheduled/domain-event-bus.ts';
 import { InvitationService } from '../../../src/services/sharing/invitation-service';
 
 function createTestDb(): Database {
@@ -375,6 +376,93 @@ describe('InvitationService', () => {
       invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
       const result = service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
       expect(result.success).toBe(false);
+    });
+  });
+
+  describe('recordGroupAttendance Google sync (myGroup.rsvp)', () => {
+    const GROUP_ID = -100123;
+    const MEMBER = 555;
+
+    function setupGroupWithBus() {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: INVITER });
+      const eventRepo = new EventRepository(db);
+      const invRepo = new InvitationRepository(db);
+      const settingsRepo = new SharingSettingsRepository(db);
+      const participantRepo = new ParticipantRepository(db);
+      const bus = new DomainEventBus();
+      const rsvpEvents: DomainEventMap['myGroup.rsvp'][] = [];
+      bus.on('myGroup.rsvp', (payload) => rsvpEvents.push(payload));
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo, undefined, bus);
+      const event = eventRepo.create({
+        user_id: INVITER,
+        title: 'Group Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: 'UTC',
+      });
+      return { service, invRepo, participantRepo, event, rsvpEvents };
+    }
+
+    test('"going" with an active group invitation emits myGroup.rsvp accepted', () => {
+      const { service, invRepo, event, rsvpEvents } = setupGroupWithBus();
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(true);
+      expect(rsvpEvents).toEqual([{ userId: MEMBER, eventId: event.id, status: 'accepted' }]);
+    });
+
+    test('"notgoing" emits myGroup.rsvp declined', () => {
+      const { service, invRepo, event, rsvpEvents } = setupGroupWithBus();
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'declined', GROUP_ID);
+      expect(result.success).toBe(true);
+      expect(rsvpEvents).toEqual([{ userId: MEMBER, eventId: event.id, status: 'declined' }]);
+    });
+
+    test('no active group invitation: fails and does not emit', () => {
+      const { service, event, rsvpEvents } = setupGroupWithBus();
+      // No invitation links this event to the group.
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(rsvpEvents).toEqual([]);
+    });
+
+    test('no participant registry: fails and does not emit', () => {
+      const db = createTestDb();
+      const userRepo = new UserRepository(db);
+      userRepo.create({ telegram_id: INVITER });
+      const eventRepo = new EventRepository(db);
+      const invRepo = new InvitationRepository(db);
+      const settingsRepo = new SharingSettingsRepository(db);
+      const bus = new DomainEventBus();
+      const rsvpEvents: DomainEventMap['myGroup.rsvp'][] = [];
+      bus.on('myGroup.rsvp', (payload) => rsvpEvents.push(payload));
+      // participantRepo intentionally omitted, bus still wired.
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, undefined, undefined, bus);
+      const event = eventRepo.create({
+        user_id: INVITER,
+        title: 'Group Party',
+        start_at: '2026-03-15T18:00:00Z',
+        timezone: 'UTC',
+      });
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(rsvpEvents).toEqual([]);
+    });
+
+    test('repeated "going" stays accepted (idempotent) and still emits each time', () => {
+      const { service, invRepo, participantRepo, event, rsvpEvents } = setupGroupWithBus();
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      const second = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(second.success).toBe(true);
+      expect(participantRepo.findByEventAndUser(event.id, MEMBER)!.status).toBe('accepted');
+      expect(rsvpEvents).toEqual([
+        { userId: MEMBER, eventId: event.id, status: 'accepted' },
+        { userId: MEMBER, eventId: event.id, status: 'accepted' },
+      ]);
     });
   });
 });

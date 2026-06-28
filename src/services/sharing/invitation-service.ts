@@ -91,6 +91,9 @@ export class InvitationService {
     } else {
       this.participantRepo.add(eventId, userId, status);
     }
+    // Mirror this member's own answer into their own Google Calendar (gated downstream on their
+    // own active sync state): "going" adds the event, "not going" removes it.
+    this.domainEvents?.emit('myGroup.rsvp', { userId, eventId, status });
     return { success: true };
   }
 
