@@ -952,6 +952,11 @@ if (participantPushSchedulerRef) {
       );
     }
   });
+  domainEventBus.on('myGroup.rsvp', ({ userId, eventId, status }) => {
+    schedParticipant(userId, eventId, status === 'accepted' ? 'create' : 'delete').catch((err) =>
+      botLogger.error({ err, userId, eventId, status }, 'Failed to schedule group RSVP Google sync'),
+    );
+  });
 }
 
 // Location verification — requires GOOGLE_API_KEY + Redis for address cache
