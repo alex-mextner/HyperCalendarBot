@@ -420,16 +420,18 @@ interface ProposeEditInput {
 }
 
 export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInput): Promise<ToolResult> {
-  if (!ctx.participantRepo) {
-    return { success: false, error: 'Participants feature is not configured.' };
-  }
   if (!ctx.sharing?.editProposalRepo) {
     return { success: false, error: 'Edit proposals are not configured.' };
   }
 
-  const participant = ctx.participantRepo.findByEventAndUser(input.event_id, ctx.user.telegram_id);
-  if (!participant || participant.status !== 'accepted') {
-    return { success: false, error: 'You are not an accepted participant of this event.' };
+  const callerId = ctx.user.telegram_id;
+  const ownerId = ctx.eventService.getEventOwnerId(input.event_id);
+  const isOwner = ownerId === callerId;
+  const hasPersonalInvitation =
+    !isOwner && ctx.sharing.invitationRepo.findActiveOrRespondedByEventAndInvitee(input.event_id, callerId) !== null;
+
+  if (!isOwner && !hasPersonalInvitation) {
+    return { success: false, error: 'You are not invited to this event.' };
   }
 
   const proposal = ctx.sharing.editProposalRepo.create({

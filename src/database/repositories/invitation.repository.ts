@@ -49,6 +49,23 @@ export class InvitationRepository {
     );
   }
 
+  /**
+   * Returns the most recent non-revoked invitation row for this invitee and event.
+   * Includes pending, maybe, accepted, and declined — the invitee actively chose to respond.
+   * Excludes cancelled (inviter revoked) and expired (event has passed).
+   */
+  findActiveOrRespondedByEventAndInvitee(eventId: number, inviteeId: number): Invitation | null {
+    return (
+      (this.db
+        .prepare(
+          `SELECT * FROM invitations
+           WHERE event_id = ? AND invitee_id = ? AND status IN ('pending', 'maybe', 'accepted', 'declined')
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(eventId, inviteeId) as Invitation | null) ?? null
+    );
+  }
+
   countDeclined(eventId: number, inviteeId: number): number {
     const row = this.db
       .prepare("SELECT COUNT(*) as cnt FROM invitations WHERE event_id = ? AND invitee_id = ? AND status = 'declined'")

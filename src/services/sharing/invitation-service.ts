@@ -2,8 +2,7 @@ import type { EventRepository } from '../../database/repositories/event.reposito
 import type { InvitationRepository } from '../../database/repositories/invitation.repository';
 import type { ParticipantRepository } from '../../database/repositories/participant.repository';
 import type { SharingSettingsRepository } from '../../database/repositories/sharing-settings.repository';
-import type { CalendarEvent, Invitation, InvitationStatus } from '../../database/types';
-import type { ConflictChecker } from '../event/conflict-checker';
+import type { Invitation, InvitationStatus } from '../../database/types';
 import type { DomainEventBus } from '../scheduled/domain-event-bus.ts';
 
 const MAX_DECLINES = 3;
@@ -12,7 +11,6 @@ export interface InvitationResult {
   success: boolean;
   invitation?: Invitation;
   error?: string;
-  conflicts?: CalendarEvent[];
   proposedTime?: string;
 }
 
@@ -22,7 +20,6 @@ export class InvitationService {
     private eventRepo: EventRepository,
     private settingsRepo: SharingSettingsRepository,
     private participantRepo?: ParticipantRepository,
-    private conflictChecker?: ConflictChecker,
     private domainEvents?: DomainEventBus,
   ) {}
 
@@ -202,16 +199,6 @@ export class InvitationService {
     }
 
     const result: InvitationResult = { success: true, invitation: this.invRepo.findById(invitationId)! };
-
-    if (newStatus === 'accepted' && this.conflictChecker) {
-      const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);
-      if (event) {
-        const conflicts = this.conflictChecker.checkConflicts(event, userId);
-        if (conflicts.length > 0) {
-          result.conflicts = conflicts;
-        }
-      }
-    }
 
     if (this.domainEvents && (newStatus === 'accepted' || newStatus === 'declined')) {
       const event = this.eventRepo.findById(invitation.event_id, invitation.inviter_id);

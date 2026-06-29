@@ -16,7 +16,6 @@ import { createTelegramSender } from '../services/ai/telegram-sender.ts';
 import type { AgentConfig } from '../services/ai/types.ts';
 import { BirthdayService } from '../services/birthday/birthday-service.ts';
 import { ConversationLogger } from '../services/conversation-logger.ts';
-import { ConflictChecker } from '../services/event/conflict-checker.ts';
 import { EventService } from '../services/event/event-service.ts';
 import { findMostRecentEventWithExternalParticipants } from '../services/event/recent-external-events.ts';
 import { callbackPrefix, trackFeatureUsage } from '../services/feature-tracking.ts';
@@ -202,13 +201,11 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
 
   const deepLinkService = new DeepLinkService(db.deepLinks);
   const privacyService = new PrivacyService(db.sharingSettings);
-  const conflictChecker = new ConflictChecker(db.events);
   const invitationService = new InvitationService(
     db.invitations,
     db.events,
     db.sharingSettings,
     db.participants,
-    conflictChecker,
     domainEventBus,
   );
   const sharingService = new SharingService(
