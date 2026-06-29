@@ -1473,24 +1473,15 @@ describe('sharing tool handlers', () => {
   // ── handleProposeEdit ──
 
   describe('handleProposeEdit', () => {
-    test('returns error when participantRepo is missing', async () => {
-      const ctx = makeCtx({ participantRepo: undefined });
-      const result = await handleProposeEdit(ctx, { event_id: 1, changes: { title: 'New' } });
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('not configured');
-    });
-
     test('returns error when editProposalRepo is missing', async () => {
-      const participantRepo = new ParticipantRepository(db);
       const ctx = makeCtx({
-        participantRepo,
         sharing: {
           sharedEventRepo,
           invitationRepo,
           invitationService,
           sharingSettingsRepo,
           sharingService,
-          privacyService: privacyService,
+          privacyService,
           editProposalRepo: undefined as never,
         },
       });
@@ -1499,8 +1490,7 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not configured');
     });
 
-    test('returns error when user is not a participant', async () => {
-      const participantRepo = new ParticipantRepository(db);
+    test('returns error when caller has no invitation and is not the owner', async () => {
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
@@ -1508,6 +1498,36 @@ describe('sharing tool handlers', () => {
         start_at: '2026-03-20T10:00:00Z',
         timezone: 'UTC',
       });
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not invited');
+    });
+
+    // Regression: group RSVP creates an event_participants row, but that must NOT grant
+    // propose_edit access. Only a personal invitation (invitations table) or ownership does.
+    test('group RSVP member without personal invitation is denied', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Group Event',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      // Simulate group RSVP: participant row exists for USER_ID, but no invitation row.
+      participantRepo.add(event.id, USER_ID, 'accepted');
 
       const ctx = makeCtx({
         participantRepo,
@@ -1523,11 +1543,10 @@ describe('sharing tool handlers', () => {
       });
       const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Change' } });
       expect(result.success).toBe(false);
-      expect(result.error).toContain('not an accepted participant');
+      expect(result.error).toContain('not invited');
     });
 
-    test('stores proposal and returns success', async () => {
-      const participantRepo = new ParticipantRepository(db);
+    test('personal invitee can propose edit', async () => {
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
@@ -1535,10 +1554,9 @@ describe('sharing tool handlers', () => {
         start_at: '2026-03-20T10:00:00Z',
         timezone: 'UTC',
       });
-      participantRepo.add(event.id, USER_ID, 'accepted');
+      invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
 
       const ctx = makeCtx({
-        participantRepo,
         sharing: {
           sharedEventRepo,
           invitationRepo,
@@ -1564,8 +1582,125 @@ describe('sharing tool handlers', () => {
       expect(pending[0]!.reason).toBe('Conflict with another meeting');
     });
 
+    test('declined personal invitee can still propose edit', async () => {
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Declined But Can Propose',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+      invitationRepo.updateStatus(inv.id, 'declined', 'pending');
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Actually Let Me In' } });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('proposal submitted');
+    });
+
+    test('cancelled invitation does not grant propose_edit access', async () => {
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Cancelled Invite Event',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+      invitationRepo.updateStatus(inv.id, 'cancelled', 'pending');
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Sneaky Edit' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not invited');
+    });
+
+    // Regression: a newer cancelled row must supersede an older responded row.
+    // Without fetching the latest row first, the old declined row would still grant access.
+    test('re-invited-then-cancelled invitation does not grant propose_edit access', async () => {
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Re-invite Then Cancel',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      // First invitation: user declined.
+      const first = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+      invitationRepo.updateStatus(first.id, 'declined', 'pending');
+      // Second invitation (re-invite, 1 second later so created_at differs): inviter then cancels.
+      // Insert directly to control created_at and avoid the UNIQUE(event_id, invitee_id, created_at) collision.
+      const { lastInsertRowid } = db
+        .prepare(
+          `INSERT INTO invitations (event_id, inviter_id, invitee_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', datetime('now', '+1 second'), datetime('now', '+1 second'))`,
+        )
+        .run(event.id, OTHER_USER_ID, USER_ID);
+      invitationRepo.updateStatus(Number(lastInsertRowid), 'cancelled', 'pending');
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Sneaky Re-edit' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not invited');
+    });
+
+    test('event owner can propose edit without invitation', async () => {
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'My Own Event',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Updated Title' } });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('proposal submitted');
+    });
+
     test('sends notification to event creator when sender available', async () => {
-      const participantRepo = new ParticipantRepository(db);
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({
         user_id: OTHER_USER_ID,
@@ -1573,11 +1708,10 @@ describe('sharing tool handlers', () => {
         start_at: '2026-03-20T10:00:00Z',
         timezone: 'UTC',
       });
-      participantRepo.add(event.id, USER_ID, 'accepted');
+      invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
 
       let sentTo: number | undefined;
       const ctx = makeCtx({
-        participantRepo,
         sharing: {
           sharedEventRepo,
           invitationRepo,
