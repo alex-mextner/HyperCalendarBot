@@ -282,13 +282,13 @@ interface PersonalRsvpResult {
 
 /**
  * One line per personally-invited user. Status priority:
- * 1. If the invitation is currently 'pending' (fresh or re-invite), that status wins — a historical
- *    participant row from a prior RSVP cycle must not override an active invitation.
- * 2. Otherwise, the event_participants row is authoritative (synced to Google), falling back to the
- *    invitation status when no participant row exists yet.
- * When participant and invitation statuses conflict (e.g. declined personal invite but accepted via
- * group), the conflicting invite is shown as a note on the same line. A dead personal invite
- * (declined/cancelled/expired) with no participant row is skipped.
+ * 1. Positive participant RSVP (accepted/maybe) is always authoritative — it reflects a confirmed
+ *    response from any channel (personal or group) and must not be masked by a pending invite.
+ * 2. A pending invitation takes priority over stale negative/neutral participant rows (declined,
+ *    pending), treating them as superseded by a fresh re-invite.
+ * 3. Otherwise the event_participants row is authoritative, falling back to the invitation status.
+ * When participant and invitation statuses conflict, the invite is shown as a note on the same
+ * line. A dead personal invite (declined/cancelled/expired) with no participant row is skipped.
  */
 function buildPersonalRsvpLines(
   lang: Lang,
@@ -302,9 +302,13 @@ function buildPersonalRsvpLines(
     const participantStatus = participantByUser.get(userId);
     const inviteIsLive = inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe';
     if (participantStatus === undefined && !inviteIsLive) continue;
-    // A pending invitation is the current invite state; a historical participant row
-    // (prior RSVP from a previous acceptance or group flow) must not override it.
-    const status = inv.status === 'pending' ? inv.status : (participantStatus ?? inv.status);
+    // A pending re-invite overrides stale negative/neutral participant rows (declined,
+    // pending) but must NOT mask a confirmed RSVP (accepted/maybe) from another
+    // channel such as a group invite — that positive signal is always authoritative.
+    const status =
+      inv.status === 'pending' && participantStatus !== 'accepted' && participantStatus !== 'maybe'
+        ? inv.status
+        : (participantStatus ?? inv.status);
     const note =
       participantStatus !== undefined && participantStatus !== inv.status && inv.status !== 'pending'
         ? t(lang).aiTools.sharing.rsvpPersonalInviteNote(inv.status)

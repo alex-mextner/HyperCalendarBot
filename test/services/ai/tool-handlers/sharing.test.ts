@@ -1050,6 +1050,30 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain('attending (going): 1');
     });
 
+    test('P1-review: pending personal invite does not mask a confirmed group RSVP (accepted participant row wins)', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dual Channel Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Pending personal invite + group invite where the user accepted via group.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The positive group RSVP is authoritative — must not be masked by the pending personal invite.
+      expect(result.output).toContain('status: accepted');
+      expect(result.output).not.toContain('status: pending');
+      // Must be counted as attending.
+      expect(result.output).toContain('attending (going): 1');
+      // No spurious note about a pending invite when the confirmed RSVP is primary.
+      expect(result.output).not.toContain('(personal invite:');
+    });
+
     test('P1-bug-b: group section omits "no RSVPs yet" when all group respondents are deduped to personal section', async () => {
       const participantRepo = new ParticipantRepository(db);
       const event = eventService.createEvent({
