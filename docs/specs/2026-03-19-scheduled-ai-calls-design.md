@@ -80,7 +80,6 @@ type DomainEventMap = {
   'myCalendar.newEvent':         { userId: number; newEvent: CalendarEvent }
   'myCalendar.updatedEvent':     { userId: number; updatedEvent: CalendarEvent; oldEvent: CalendarEvent }
   'myCalendar.deletedEvent':     { userId: number; eventId: number; title: string }
-  'myCalendar.conflictDetected': { userId: number; event: CalendarEvent; conflictsWith: CalendarEvent }
   'myCalendar.eventStarting':    { userId: number; event: CalendarEvent }
   'myInvitations.accepted':      { userId: number; inviteeId: number; event: CalendarEvent }
   'myInvitations.rejected':      { userId: number; inviteeId: number; event: CalendarEvent }
@@ -99,13 +98,10 @@ type DomainEventMap = {
 | `myCalendar.newEvent` | `EventService.createEvent()` — new 9th optional param `domainEvents` |
 | `myCalendar.updatedEvent` | `EventService.updateEvent()` |
 | `myCalendar.deletedEvent` | `EventService.deleteEvent()` |
-| `myCalendar.conflictDetected` | `tool-handlers/events.ts` — after `create_event` / `update_event` tool call detects overlap via existing `ConflictChecker` |
 | `myCalendar.eventStarting` | `EventStartingChecker` BullMQ cron worker |
 | `myInvitations.accepted` | `InvitationService.accept()` |
 | `myInvitations.rejected` | `InvitationService.reject()` |
 | `myGroup.newEvent` | `EventService.createEvent()` when `owner_type === 'group'` |
-
-`conflictDetected` is emitted from the tool handler layer (not from `EventService`) because `ConflictChecker` is already instantiated separately in `src/bot/index.ts` and injected into tool handlers. This avoids adding `ConflictChecker` as a 10th dependency to `EventService`.
 
 ### `myCalendar.eventStarting` — deduplication
 
@@ -262,7 +258,6 @@ src/
 | `src/services/sharing/invitation-service.ts` | +optional `domainEvents?: DomainEventBus` param, emit `myInvitations.*` |
 | `src/services/ai/tools.ts` | +6 tool definitions |
 | `src/services/ai/tool-executor.ts` | route 6 new tool names |
-| `src/services/ai/tool-handlers/events.ts` | emit `myCalendar.conflictDetected` after conflict check |
 | `src/services/ai/types.ts` | +`scheduledCallService`, `triggerService` to `AgentContext` |
 | `src/bot/pipeline/ai-agent-layer.ts` | `agentContextBuilder` moved to `agent-context-factory.ts`, re-exported |
 | `src/bot/index.ts` | wire `DomainEventBus`, `TriggerService`, pass to `EventService` + `InvitationService` |
