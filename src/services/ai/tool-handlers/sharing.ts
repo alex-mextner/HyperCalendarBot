@@ -271,7 +271,7 @@ export async function handleResendInvitation(
 }
 
 function isRsvpAttending(status: ParticipantStatus | InvitationStatus): boolean {
-  return status === 'accepted' || status === 'maybe';
+  return status === 'accepted';
 }
 
 interface PersonalRsvpResult {
@@ -281,13 +281,14 @@ interface PersonalRsvpResult {
 }
 
 /**
- * One line per personally-invited user. The authoritative status is the event_participants row
- * (the source of truth synced to Google), falling back to the invitation status when the user has
- * not RSVP'd yet. When the participant row contradicts the invitation row (e.g. the user declined
- * the personal invite but RSVP'd "going" via the group), the contradicting invite is rendered as a
- * flat annotation on the same line — the user is neither excluded nor listed twice. A dead personal
- * invite (declined/cancelled/expired) with no participant row is skipped, matching the prior
- * accepted+pending-only listing.
+ * One line per personally-invited user. Status priority:
+ * 1. If the invitation is currently 'pending' (fresh or re-invite), that status wins — a historical
+ *    participant row from a prior RSVP cycle must not override an active invitation.
+ * 2. Otherwise, the event_participants row is authoritative (synced to Google), falling back to the
+ *    invitation status when no participant row exists yet.
+ * When participant and invitation statuses conflict (e.g. declined personal invite but accepted via
+ * group), the conflicting invite is shown as a note on the same line. A dead personal invite
+ * (declined/cancelled/expired) with no participant row is skipped.
  */
 function buildPersonalRsvpLines(
   lang: Lang,
@@ -301,9 +302,11 @@ function buildPersonalRsvpLines(
     const participantStatus = participantByUser.get(userId);
     const inviteIsLive = inv.status === 'pending' || inv.status === 'accepted' || inv.status === 'maybe';
     if (participantStatus === undefined && !inviteIsLive) continue;
-    const status = participantStatus ?? inv.status;
+    // A pending invitation is the current invite state; a historical participant row
+    // (prior RSVP from a previous acceptance or group flow) must not override it.
+    const status = inv.status === 'pending' ? inv.status : (participantStatus ?? inv.status);
     const note =
-      participantStatus !== undefined && participantStatus !== inv.status
+      participantStatus !== undefined && participantStatus !== inv.status && inv.status !== 'pending'
         ? t(lang).aiTools.sharing.rsvpPersonalInviteNote(inv.status)
         : '';
     lines.push(t(lang).aiTools.sharing.rsvpInviteeLine(userId, status, note));
@@ -337,7 +340,12 @@ function describeGroupRsvp(
   }
   const members = participantRows.filter((p) => !listedUserIds.has(p.user_id));
   if (members.length === 0) {
-    return { lines: [t(lang).aiTools.sharing.groupRsvpNone], members: [] };
+    // Only show "no RSVPs yet" when there are genuinely none. If all responders appear in
+    // the personal-invite section above (deduped), the group breakdown adds nothing.
+    if (participantRows.length === 0) {
+      return { lines: [t(lang).aiTools.sharing.groupRsvpNone], members: [] };
+    }
+    return { lines: [], members: [] };
   }
   return {
     lines: [
@@ -384,8 +392,15 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
   const lines = [...personal.lines];
   let attending = personal.attending;
   let listedCount = personal.listedUserIds.size;
+  // Group invite with no participant registry means group RSVPs are invisible; the
+  // attending count would be misleadingly low (personal invitees only).
+  let isGroupDegraded = false;
 
   if (hasGroupInvite) {
+    if (participantRows === null) {
+      isGroupDegraded = true;
+      botLogger.warn({ eventId: input.event_id }, 'group rsvp: participant repo absent, attending count suppressed');
+    }
     const group = describeGroupRsvp(lang, participantRows, personal.listedUserIds);
     lines.push(...group.lines);
     for (const member of group.members) {
@@ -394,7 +409,7 @@ export function handleGetInvitationStatus(ctx: AgentContext, input: GetInvitatio
     listedCount += group.members.length;
   }
 
-  if (listedCount > 0) {
+  if (listedCount > 0 && !isGroupDegraded) {
     lines.unshift(t(lang).aiTools.sharing.rsvpAttending(attending));
   }
 

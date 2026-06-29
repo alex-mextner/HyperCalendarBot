@@ -1007,6 +1007,94 @@ describe('sharing tool handlers', () => {
       expect(result.output).not.toContain('member:');
     });
 
+    test('P1-bug1: re-invited user with stale declined participant row shows as pending', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Reinvite Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Invitation is currently pending (re-invite), but there is a stale participant row
+      // with status 'declined' from a prior RSVP cycle.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'declined');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Pending invitation wins over stale participant row.
+      expect(result.output).toContain('status: pending');
+      expect(result.output).not.toContain('status: declined');
+      // No misleading "(personal invite: pending)" note while the invite itself is the primary.
+      expect(result.output).not.toContain('(personal invite:');
+      // pending is not "going"
+      expect(result.output).toContain('attending (going): 0');
+    });
+
+    test('P1-bug2: maybe RSVP is not counted in attending (going)', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Maybe Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'maybe');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('maybe');
+      // maybe is tentative, not "going"
+      expect(result.output).toContain('attending (going): 0');
+      expect(result.output).not.toContain('attending (going): 1');
+    });
+
+    test('P1-bug-b: group section omits "no RSVPs yet" when all group respondents are deduped to personal section', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dedup Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // OTHER_USER_ID has a personal invite (accepted) AND a group RSVP row.
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'accepted');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // OTHER_USER_ID RSVP'd — the "no member RSVPs yet" message must not appear.
+      expect(result.output).not.toContain('no member RSVPs yet');
+      // The user is still listed once in the personal section.
+      expect(result.output).toContain(`${OTHER_USER_ID}`);
+      expect(result.output).toContain('attending (going): 1');
+    });
+
+    test('P1-bug3: degraded mode with personal accepted invite does not render misleading attending count', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Degraded Count Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite is accepted — would show attending: 1 incorrectly (misses group RSVPs).
+      const personalInv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(personalInv.id, 'accepted', 'pending');
+      // Group invite exists but no participantRepo → degraded mode.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: GROUP_CHAT_ID });
+      const ctx = makeCtx(); // no participantRepo
+      expect(ctx.participantRepo).toBeUndefined();
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Attending line must be suppressed when group RSVPs are invisible.
+      expect(result.output).not.toContain('attending (going):');
+      // The unavailability notice must still be present.
+      expect(result.output).toContain('participant registry unavailable');
+    });
+
     test('returns mixed pending and accepted', async () => {
       const thirdUser = 300;
       userRepo.create({ telegram_id: thirdUser, timezone: 'UTC' });
