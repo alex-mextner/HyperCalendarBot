@@ -5,7 +5,6 @@ export type DomainEventMap = {
   'myCalendar.newEvent': { userId: number; newEvent: CalendarEvent };
   'myCalendar.updatedEvent': { userId: number; updatedEvent: CalendarEvent; oldEvent: CalendarEvent };
   'myCalendar.deletedEvent': { userId: number; eventId: number; title: string };
-  'myCalendar.conflictDetected': { userId: number; event: CalendarEvent; conflictsWith: CalendarEvent };
   'myCalendar.eventStarting': { userId: number; event: CalendarEvent };
   'myInvitations.accepted': { userId: number; inviteeId: number; event: CalendarEvent };
   'myInvitations.rejected': { userId: number; inviteeId: number; event: CalendarEvent };
@@ -23,7 +22,6 @@ export const ALL_TOPICS = Object.freeze([
   'myCalendar.newEvent',
   'myCalendar.updatedEvent',
   'myCalendar.deletedEvent',
-  'myCalendar.conflictDetected',
   'myCalendar.eventStarting',
   'myInvitations.accepted',
   'myInvitations.rejected',
