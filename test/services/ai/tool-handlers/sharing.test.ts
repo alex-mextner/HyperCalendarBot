@@ -1443,6 +1443,45 @@ describe('sharing tool handlers', () => {
       expect(result.error).toContain('not invited');
     });
 
+    // Regression: a newer cancelled row must supersede an older responded row.
+    // Without fetching the latest row first, the old declined row would still grant access.
+    test('re-invited-then-cancelled invitation does not grant propose_edit access', async () => {
+      const editProposalRepo = new EditProposalRepository(db);
+      const event = eventService.createEvent({
+        user_id: OTHER_USER_ID,
+        title: 'Re-invite Then Cancel',
+        start_at: '2026-03-20T10:00:00Z',
+        timezone: 'UTC',
+      });
+      // First invitation: user declined.
+      const first = invitationRepo.create({ event_id: event.id, inviter_id: OTHER_USER_ID, invitee_id: USER_ID });
+      invitationRepo.updateStatus(first.id, 'declined', 'pending');
+      // Second invitation (re-invite, 1 second later so created_at differs): inviter then cancels.
+      // Insert directly to control created_at and avoid the UNIQUE(event_id, invitee_id, created_at) collision.
+      const { lastInsertRowid } = db
+        .prepare(
+          `INSERT INTO invitations (event_id, inviter_id, invitee_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, 'pending', datetime('now', '+1 second'), datetime('now', '+1 second'))`,
+        )
+        .run(event.id, OTHER_USER_ID, USER_ID);
+      invitationRepo.updateStatus(Number(lastInsertRowid), 'cancelled', 'pending');
+
+      const ctx = makeCtx({
+        sharing: {
+          sharedEventRepo,
+          invitationRepo,
+          invitationService,
+          sharingSettingsRepo,
+          sharingService,
+          privacyService,
+          editProposalRepo,
+        },
+      });
+      const result = await handleProposeEdit(ctx, { event_id: event.id, changes: { title: 'Sneaky Re-edit' } });
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('not invited');
+    });
+
     test('event owner can propose edit without invitation', async () => {
       const editProposalRepo = new EditProposalRepository(db);
       const event = eventService.createEvent({

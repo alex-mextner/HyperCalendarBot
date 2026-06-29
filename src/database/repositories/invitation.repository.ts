@@ -50,20 +50,23 @@ export class InvitationRepository {
   }
 
   /**
-   * Returns the most recent non-revoked invitation row for this invitee and event.
-   * Includes pending, maybe, accepted, and declined — the invitee actively chose to respond.
-   * Excludes cancelled (inviter revoked) and expired (event has passed).
+   * Returns the most recent personal invitation for this invitee and event, if it authorizes access.
+   * Fetches the single latest row regardless of status, then rejects if it is cancelled or expired —
+   * a newer cancellation supersedes any older responded row (declined, accepted, etc.).
+   * Returns null when no invitation exists or when the latest row is cancelled/expired.
    */
   findActiveOrRespondedByEventAndInvitee(eventId: number, inviteeId: number): Invitation | null {
-    return (
-      (this.db
-        .prepare(
-          `SELECT * FROM invitations
-           WHERE event_id = ? AND invitee_id = ? AND status IN ('pending', 'maybe', 'accepted', 'declined')
-           ORDER BY created_at DESC LIMIT 1`,
-        )
-        .get(eventId, inviteeId) as Invitation | null) ?? null
-    );
+    const latest = this.db
+      .prepare(
+        `SELECT * FROM invitations
+         WHERE event_id = ? AND invitee_id = ?
+         ORDER BY created_at DESC LIMIT 1`,
+      )
+      .get(eventId, inviteeId) as Invitation | null;
+    if (!latest || latest.status === 'cancelled' || latest.status === 'expired') {
+      return null;
+    }
+    return latest;
   }
 
   countDeclined(eventId: number, inviteeId: number): number {
