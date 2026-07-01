@@ -1097,6 +1097,52 @@ describe('sharing tool handlers', () => {
       expect(result.output).toContain('attending (going): 1');
     });
 
+    test('P1-fix1: personal invitation with status maybe is shown but not counted as going', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Tentative Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Personal invite accepted as 'maybe' (tentative) — no participant row.
+      const inv = invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      invitationRepo.updateStatus(inv.id, 'maybe', 'pending');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // Status appears as maybe, not as going.
+      expect(result.output).toContain('status: maybe');
+      // maybe is tentative — must not be included in the attending count.
+      expect(result.output).toContain('attending (going): 0');
+      expect(result.output).not.toContain('attending (going): 1');
+    });
+
+    test('P1-fix2: pending invitation does not override a positive (maybe) participant row', async () => {
+      const participantRepo = new ParticipantRepository(db);
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Maybe Wins Event',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      // Pending personal invitation exists, but the participant row carries a confirmed
+      // tentative signal (maybe) from a prior group RSVP cycle. The positive participant
+      // status must win over the pending invitation — not be masked by it.
+      invitationRepo.create({ event_id: event.id, inviter_id: USER_ID, invitee_id: OTHER_USER_ID });
+      participantRepo.add(event.id, OTHER_USER_ID, 'maybe');
+      const ctx = makeCtx({ participantRepo });
+      const result = handleGetInvitationStatus(ctx, { event_id: event.id });
+      expect(result.success).toBe(true);
+      // The positive participant row (maybe) is authoritative — pending invitation must not override it.
+      expect(result.output).toContain('status: maybe');
+      expect(result.output).not.toContain('status: pending');
+      // No spurious annotation when the invitation is still pending (not a final negative response).
+      expect(result.output).not.toContain('(personal invite:');
+      // maybe is tentative, not going.
+      expect(result.output).toContain('attending (going): 0');
+    });
+
     test('P1-bug3: degraded mode with personal accepted invite does not render misleading attending count', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
