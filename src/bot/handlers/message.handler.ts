@@ -85,7 +85,7 @@ import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
-import { isGroupRelevant } from './group-message-filter.ts';
+import { isGroupRelevant, mentionsBot, startsWithCalendarAddress } from './group-message-filter.ts';
 
 interface SceneStorage {
   get(key: string): Promise<unknown>;
@@ -200,6 +200,8 @@ export interface MessageHandlerDeps {
   addressCache?: import('../../services/location/address-cache.ts').AddressCache;
   pendingGeoStore?: import('../../services/location/pending-geo-store.ts').PendingGeoStore;
   weatherService?: import('../../services/weather/weather-service.ts').WeatherService;
+  aiRetryQueue?: import('../../services/scheduled/types.ts').QueueAdapter;
+  aiRetryJobStore?: import('../../services/scheduled/types.ts').RetryJobStore;
 }
 
 // Steps that only accept button presses — text input on these steps routes to AI (Trigger 2).
@@ -866,6 +868,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     },
     intentLearner: deps.intentLearner,
     scenePauseService: deps.scenePauseService,
+    retryQueue: deps.aiRetryQueue,
+    retryJobStore: deps.aiRetryJobStore,
   });
 
   // Static layers that don't require per-message context
@@ -1028,6 +1032,8 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
     const chat = ctx.chat;
     const isGroup = chat.type === 'group' || chat.type === 'supergroup';
     let isGroupSessionMessage = false;
+    // DMs are always explicit; for groups, set to true below if reply/mention/address matched.
+    let wasExplicitInvocation = !isGroup;
 
     // Propose-time session: invitee typing a new time in response to an invite (private chats only)
     if (!isGroup && deps.proposeTimeSessions) {
@@ -1086,6 +1092,12 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
           return;
         }
       }
+
+      // Explicit invocation: reply to bot, @mention, direct address prefix ("Бот,", "Календарь,"),
+      // or any bot-mention inflection ("бота", "боту", etc.).
+      // Keyword-only matches and session continuation are NOT explicit.
+      const isExplicitMention = Boolean(botMention && text.includes(botMention));
+      wasExplicitInvocation = isReplyToBot || isExplicitMention || startsWithCalendarAddress(text) || mentionsBot(text);
     }
 
     // Build context info for group messages
@@ -1254,12 +1266,12 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
       sendTyping();
       const typingInterval = setInterval(sendTyping, 6000);
       try {
-        await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
+        await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId, wasExplicitInvocation);
       } finally {
         clearInterval(typingInterval);
       }
     } else {
-      await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId);
+      await runPipeline(ctx, messageText, layers, groupContext, incomingMsgId, wasExplicitInvocation);
     }
   };
 }

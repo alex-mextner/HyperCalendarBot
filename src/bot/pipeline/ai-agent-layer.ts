@@ -4,16 +4,26 @@ import { t } from '../../config/constants.ts';
 import type { CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
+import type { AiMessageJobData, RetryJobStore } from '../../services/scheduled/types.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import type { AgentContextBuilder } from '../agent-context-factory.ts';
 import type { BotCommandContext } from '../types.ts';
 import type { FeedbackThreadContext, GroupContext, PipelineResult } from './types.ts';
+
+/** Backoff delays for successive retry attempts (index = currentAttempt, 0-based). */
+const BACKOFF_DELAYS_MS = [30_000, 60_000, 120_000] as const;
+const MAX_RETRY_ATTEMPTS = BACKOFF_DELAYS_MS.length;
 
 export interface AgentLayerDeps {
   agent: CalendarBotAgent;
   agentContextBuilder: AgentContextBuilder;
   intentLearner?: IntentLearner;
   scenePauseService?: ScenePauseService;
+  retryQueue?: {
+    addDelayed(data: AiMessageJobData, delayMs: number): Promise<string>;
+    removeJobById(jobId: string): Promise<void>;
+  };
+  retryJobStore?: RetryJobStore;
 }
 
 export function createAiAgentLayer(deps: AgentLayerDeps) {
@@ -26,12 +36,37 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       incomingMessageId?: number;
       supplementMode?: boolean;
       supplementAutoResponse?: string;
+      wasExplicitInvocation?: boolean;
+      retryAttempt?: number;
     },
   ): Promise<PipelineResult> => {
     const user = ctx.dbUser;
     if (!user) return { handled: false };
     const chatId = ctx.chatId;
     if (!chatId) return { handled: false };
+
+    const currentAttempt = extra?.retryAttempt ?? 0;
+
+    // Cancel any pending retry when a fresh user message arrives
+    if (currentAttempt === 0 && deps.retryJobStore && deps.retryQueue) {
+      try {
+        const pendingJobId = await deps.retryJobStore.get(user.telegram_id);
+        if (pendingJobId) {
+          await deps.retryQueue
+            .removeJobById(pendingJobId)
+            .catch((err: unknown) =>
+              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to cancel pending retry job'),
+            );
+          await deps.retryJobStore
+            .del(user.telegram_id)
+            .catch((err: unknown) =>
+              cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to clear retry job store'),
+            );
+        }
+      } catch (err: unknown) {
+        cmdLogger.warn({ err, userId: user.telegram_id }, 'Failed to check pending retry job in store');
+      }
+    }
 
     const agentContext = deps.agentContextBuilder(
       user,
@@ -45,10 +80,35 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
       agentContext.feedback.feedbackContext = extra.feedbackContext;
     }
 
+    agentContext.retryAttempt = currentAttempt;
+
+    if (deps.retryQueue) {
+      const queue = deps.retryQueue;
+      const jobStore = deps.retryJobStore;
+      const lang = user.language as 'en' | 'ru';
+
+      agentContext.retryEnqueue = async (msg: string) => {
+        if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
+          // All retries exhausted — show graceful fail and clear Redis state
+          await ctx.send(t(lang).agent_give_up());
+          if (jobStore) await jobStore.del(user.telegram_id);
+          return;
+        }
+        const delay = BACKOFF_DELAYS_MS[currentAttempt]!;
+        const jobId = await queue.addDelayed(
+          { userId: user.telegram_id, message: msg, source: 'trigger', retryAttempt: currentAttempt + 1 },
+          delay,
+        );
+        if (jobStore) await jobStore.set(user.telegram_id, jobId);
+      };
+    }
+
     if (extra?.supplementMode) {
       agentContext.supplementMode = true;
       agentContext.supplementAutoResponse = extra.supplementAutoResponse;
     }
+
+    agentContext.wasExplicitInvocation = extra?.wasExplicitInvocation ?? true;
 
     if (deps.scenePauseService) {
       const pauseState = await deps.scenePauseService.get(user.telegram_id);

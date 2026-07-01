@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type OpenAI from 'openai';
+import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -8,7 +9,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { AssistantMessageCodec, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
@@ -225,12 +226,18 @@ describe('CalendarBotAgent.run()', () => {
     await agent.run(ctx);
 
     expect(sender.sendMessage).toHaveBeenCalledTimes(1); // init
-    expect(sender.editMessageText).toHaveBeenCalled(); // finalize with error text
+    expect(sender.editMessageText).toHaveBeenCalled(); // finalize with stall text
 
-    // Only the user row — assistant turn was never produced
+    // User row + stall message saved so the model can play along if the user reacts
     const history = ctx.chatHistory.getRecent(USER_ID);
-    expect(history.length).toBe(1);
+    expect(history.length).toBe(2);
     expect(history[0]!.role).toBe('user');
+    expect(history[1]!.role).toBe('assistant');
+    const parseResult = AssistantMessageCodec.safeParse(history[1]!.content);
+    expect(parseResult.success).toBe(true);
+    const stallContent = parseResult.success ? (parseResult.data.content ?? '') : '';
+    expect(stallContent).toBeTruthy();
+    expect(stallContent).not.toContain('An error occurred');
   });
 
   test('run() handles error with Russian language user', async () => {
@@ -242,7 +249,10 @@ describe('CalendarBotAgent.run()', () => {
 
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const lastEditText = editCalls[editCalls.length - 1]?.[2] as string;
-    expect(lastEditText).toContain('Произошла ошибка');
+    // Russian cute phrases are shown — verify non-empty, not English, contains Cyrillic
+    expect(lastEditText).toBeTruthy();
+    expect(lastEditText).not.toContain('An error occurred');
+    expect(/[а-яёА-ЯЁ]/.test(lastEditText)).toBe(true);
   });
 
   test('run() breaks loop when model returns text without tool calls', async () => {
@@ -724,6 +734,25 @@ describe('CalendarBotAgent.run()', () => {
     expect(realCallCount).toBe(1);
   });
 
+  test('run() error skips stall phrase and retry when wasExplicitInvocation is false', async () => {
+    const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('provider failed') }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    const retryEnqueue = mock(() => Promise.resolve());
+    ctx.wasExplicitInvocation = false;
+    ctx.retryEnqueue = retryEnqueue;
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    await agent.run(ctx);
+
+    // No retry queued for non-explicit invocation
+    expect(retryEnqueue).not.toHaveBeenCalled();
+    // No stall assistant turn saved — history has only the user message
+    const history = ctx.chatHistory.getRecent(USER_ID);
+    const assistantRows = history.filter((h) => h.role === 'assistant');
+    expect(assistantRows.length).toBe(0);
+  });
+
   test('different args with same tool name are NOT deduped', async () => {
     const { impl } = makeStreamImpl([
       {
@@ -795,7 +824,7 @@ describe('CalendarBotAgent.run()', () => {
 
   // ── Regression: error delivery guarantee ────────────────────────────────
 
-  test('run() catches stream error and delivers error message to user', async () => {
+  test('run() catches stream error and delivers stall phrase to user', async () => {
     const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
@@ -803,12 +832,15 @@ describe('CalendarBotAgent.run()', () => {
     const result = await agent.run(ctx);
 
     // REGRESSION: before the fix, an unhandled error could leave the user
-    // with just ⏳ and no response. Now the error message is appended.
+    // with just ⏳ and no response. On error, a stall phrase from the declared
+    // phrase set is appended (wasExplicitInvocation defaults to undefined, treated as explicit).
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const finalEdit = editCalls[editCalls.length - 1] as unknown[];
     const finalText = finalEdit[2] as string;
-    expect(finalText).toContain('⚠️');
-    expect(result.responseText).toContain('⚠️');
+    // The delivered text must be a member of the English stall-phrase set.
+    const allPhrases = [...EN_AGENT_ERROR_PHRASES, ...RU_AGENT_ERROR_PHRASES];
+    expect(allPhrases.some((phrase) => finalText.includes(phrase))).toBe(true);
+    expect(allPhrases.some((phrase) => result.responseText.includes(phrase))).toBe(true);
   });
 
   test('run() in group mode (noPlaceholder) handles error without leaving orphan messages', async () => {
@@ -819,36 +851,36 @@ describe('CalendarBotAgent.run()', () => {
 
     const result = await agent.run(ctx);
 
-    // In group mode (noPlaceholder), no ⏳ is sent. On error, the response
-    // should be delivered as a single message, not left unfinished.
+    // In group mode (noPlaceholder), no ⏳ is sent. On error, the stall phrase
+    // is delivered as a single message (no orphan ⏳ left behind).
     const sendCalls = (sender.sendMessage as ReturnType<typeof mock>).mock.calls;
-    // Should have sent exactly 1 message with the error
-    const sentTexts = sendCalls.map((c) => (c as unknown[])[1] as string);
-    const errorMessages = sentTexts.filter((t) => t.includes('⚠️'));
-    expect(errorMessages.length).toBe(1);
-    expect(result.responseText).toContain('⚠️');
+    expect(sendCalls.length).toBe(1);
+    const sentText = (sendCalls[0] as unknown[])[1] as string;
+    const allPhrases = [...EN_AGENT_ERROR_PHRASES, ...RU_AGENT_ERROR_PHRASES];
+    expect(allPhrases.some((phrase) => sentText.includes(phrase))).toBe(true);
+    expect(allPhrases.some((phrase) => result.responseText.includes(phrase))).toBe(true);
   });
 
-  test('agent catch block error message uses t() for both languages', async () => {
-    // Verify English error
+  test('agent catch block stall phrase is localized via t() for both languages', async () => {
+    // Verify English stall phrase comes from the English phrase set.
     const { impl: implEn } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agentEn = new CalendarBotAgent(config, sender, { streamImpl: implEn });
     ctx.user = { ...ctx.user, language: 'en' };
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
     const resultEn = await agentEn.run(ctx);
-    expect(resultEn.responseText).toContain('⚠️');
+    expect(
+      EN_AGENT_ERROR_PHRASES.some((phrase) => resultEn.responseText.includes(phrase)),
+      `EN responseText "${resultEn.responseText}" must contain an English stall phrase`,
+    ).toBe(true);
 
-    // Verify Russian error uses the same ⚠️ prefix (from t())
+    // Verify Russian stall phrase comes from the Russian phrase set.
     const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
     ctx.user = { ...ctx.user, language: 'ru' };
     const resultRu = await agentRu.run(ctx);
-    expect(resultRu.responseText).toContain('⚠️');
-
-    // Both must be different (localized), not the same hardcoded string
-    // Extract just the error part (after the ⚠️)
-    const enError = resultEn.responseText.split('⚠️')[1]!.trim();
-    const ruError = resultRu.responseText.split('⚠️')[1]!.trim();
-    expect(enError).not.toBe(ruError);
+    expect(
+      RU_AGENT_ERROR_PHRASES.some((phrase) => resultRu.responseText.includes(phrase)),
+      `RU responseText "${resultRu.responseText}" must contain a Russian stall phrase`,
+    ).toBe(true);
   });
 });

@@ -26,6 +26,7 @@ function makeCtx(overrides: Partial<AgentContext> = {}): AgentContext {
     addRepeat: mock(async () => {}),
     removeDelayed: mock(async () => {}),
     removeRepeat: mock(async () => {}),
+    removeJobById: mock(async () => {}),
   };
   const scheduledCallService = new ScheduledAiCallService(scheduleRepo, queue);
   return {

@@ -239,6 +239,15 @@ export interface AgentContext {
   preloadedAddressContext?: string;
   /** Preloaded pending geo coordinates for the user (set by agent before run if pin is fresh) */
   preloadedPendingGeo?: { latitude: number; longitude: number } | null;
+  /** When set, schedules a backoff retry of the current message. Delay is determined by retryAttempt. */
+  retryEnqueue?: (messageText: string) => Promise<void>;
+  /** True when the user explicitly addressed the bot (DM, @mention, "Бот,", reply to bot).
+   *  False for keyword-only or session-continuation group messages.
+   *  Stall phrases and retry queue fire only when true. */
+  wasExplicitInvocation?: boolean;
+  /** Retry attempt index: 0 or absent = original message, 1-3 = subsequent backoff retries.
+   *  Stall phrase is suppressed on attempts > 0. */
+  retryAttempt?: number;
 }
 
 export type TelegramSessionData =

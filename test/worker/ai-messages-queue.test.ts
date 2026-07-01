@@ -17,6 +17,7 @@ let capturedFailedHandler: FailedHandler = () => {};
 
 const mockQueueAdd = mock(async () => ({ id: 'job-123' }));
 const mockQueueGetDelayed = mock(async () => []);
+const mockQueueGetJob = mock(async () => null);
 const mockQueueRemoveRepeatable = mock(async () => {});
 const mockWorkerOn = mock((_event: string, handler: FailedHandler) => {
   capturedFailedHandler = handler;
@@ -32,6 +33,7 @@ mock.module('bullmq', () => ({
     }
     add = mockQueueAdd;
     getDelayed = mockQueueGetDelayed;
+    getJob = mockQueueGetJob;
     removeRepeatable = mockQueueRemoveRepeatable;
   },
   Worker: class MockWorker {
@@ -78,7 +80,7 @@ describe('SyntheticPipelineRunner', () => {
     const agentRun = mock(async () => {});
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
-    await runner.run(fakeUser, 'test message');
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'test message', source: 'trigger' });
 
     expect(intentRun).toHaveBeenCalledTimes(1);
     expect(agentRun).not.toHaveBeenCalled();
@@ -91,7 +93,7 @@ describe('SyntheticPipelineRunner', () => {
     const agentRun = mock(async () => {});
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
-    await runner.run(fakeUser, 'test message');
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'test message', source: 'trigger' });
 
     expect(intentRun).toHaveBeenCalledTimes(1);
     expect(agentRun).toHaveBeenCalledTimes(1);
@@ -106,7 +108,9 @@ describe('SyntheticPipelineRunner', () => {
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
     // Must not throw
-    await expect(runner.run(fakeUser, 'test')).resolves.toBeUndefined();
+    await expect(
+      runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'test', source: 'trigger' }),
+    ).resolves.toBeUndefined();
   });
 
   test('catches async errors from intentRun and does not rethrow', async () => {
@@ -118,7 +122,9 @@ describe('SyntheticPipelineRunner', () => {
     const agentRun = mock(async () => {});
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
-    await expect(runner.run(fakeUser, 'test')).resolves.toBeUndefined();
+    await expect(
+      runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'test', source: 'trigger' }),
+    ).resolves.toBeUndefined();
     expect(agentRun).not.toHaveBeenCalled();
   });
 
@@ -131,7 +137,9 @@ describe('SyntheticPipelineRunner', () => {
     });
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
-    await expect(runner.run(fakeUser, 'test')).resolves.toBeUndefined();
+    await expect(
+      runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'test', source: 'trigger' }),
+    ).resolves.toBeUndefined();
   });
 
   test('passes message to contextBuilder and intentRun', async () => {
@@ -141,10 +149,78 @@ describe('SyntheticPipelineRunner', () => {
     const agentRun = mock(async () => {});
 
     const runner = new SyntheticPipelineRunner({ contextBuilder, intentRun, agentRun });
-    await runner.run(fakeUser, 'remind me tomorrow');
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'remind me tomorrow', source: 'trigger' });
 
     expect(contextBuilder).toHaveBeenCalledWith(fakeUser, fakeUser.telegram_id, 'remind me tomorrow');
     expect(intentRun).toHaveBeenCalledWith(agentCtx, 'remind me tomorrow');
+  });
+
+  test('wires retryEnqueue on scheduled call at attempt=0', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+
+    expect(captured.ctx?.retryEnqueue).toBeFunction();
+  });
+
+  test('wires retryEnqueue on trigger call at attempt=0', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'trigger fired', source: 'trigger' });
+
+    expect(captured.ctx?.retryEnqueue).toBeFunction();
+  });
+
+  test('scheduled call at attempt=0: retryEnqueue queues with 30s delay', async () => {
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser } as unknown as AgentContext;
+    const contextBuilder = mock(() => agentCtx);
+    const intentRun = mock(async (ctx: AgentContext) => {
+      captured.ctx = ctx;
+      return { handled: false };
+    });
+    const agentRun = mock(async () => {});
+    const addDelayed = mock(async (_data: unknown, _delay: number): Promise<string> => 'job-1');
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder,
+      intentRun,
+      agentRun,
+      retryQueue: { addDelayed },
+    });
+    await runner.run(fakeUser, { userId: fakeUser.telegram_id, message: 'check calendar', source: 'scheduled' });
+    await captured.ctx!.retryEnqueue!('check calendar');
+
+    const [, delay] = addDelayed.mock.calls[0] as unknown as [unknown, number];
+    expect(delay).toBe(30_000);
+    const [jobData] = addDelayed.mock.calls[0] as unknown as [{ retryAttempt: number }, number];
+    expect(jobData.retryAttempt).toBe(1);
   });
 });
 

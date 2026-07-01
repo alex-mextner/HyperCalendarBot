@@ -50,5 +50,10 @@ export type PipelineLayer = (
     incomingMessageId?: number;
     supplementMode?: boolean;
     supplementAutoResponse?: string;
+    /** True when the user explicitly addressed the bot (DM, @mention, "Бот,", reply).
+     *  False for keyword-only or session-continuation group messages. */
+    wasExplicitInvocation?: boolean;
+    /** Retry attempt index passed from the queue job. Absent on original user messages. */
+    retryAttempt?: number;
   },
 ) => Promise<PipelineResult>;

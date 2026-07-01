@@ -13,7 +13,14 @@ function makeService() {
   const addRepeat = mock(async (_data: unknown, _cron: string) => {});
   const removeDelayed = mock(async (_scheduleId: string) => {});
   const removeRepeat = mock(async (_cron: string) => {});
-  const service = new ScheduledAiCallService(repo, { addDelayed, addRepeat, removeDelayed, removeRepeat });
+  const removeJobById = mock(async (_jobId: string) => {});
+  const service = new ScheduledAiCallService(repo, {
+    addDelayed,
+    addRepeat,
+    removeDelayed,
+    removeRepeat,
+    removeJobById,
+  });
   return { service, repo, addDelayed, addRepeat, removeDelayed, removeRepeat };
 }
 

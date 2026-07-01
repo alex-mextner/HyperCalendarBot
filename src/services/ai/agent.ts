@@ -159,7 +159,7 @@ const StoredToolResultArraySchema = z.array(
  */
 const LegacyAnthropicContentBlocksSchema = z.array(z.object({ type: z.string() }).passthrough());
 
-const AssistantMessageCodec = jsonCodec(StoredAssistantMessageSchema);
+export const AssistantMessageCodec = jsonCodec(StoredAssistantMessageSchema);
 const ToolResultsCodec = jsonCodec(StoredToolResultArraySchema);
 const LegacyAnthropicContentBlocksCodec = jsonCodec(LegacyAnthropicContentBlocksSchema);
 const ActivityEventCodec = jsonCodec(z.object({ kind: z.string() }).passthrough());
@@ -520,7 +520,8 @@ export class CalendarBotAgent {
 
         if (Date.now() - startTime > TIMEOUT_MS) {
           aiLogger.warn({ userId: ctx.user.telegram_id }, 'Agent timeout');
-          writer.appendText('\n\n⚠️ Timeout reached.');
+          const lang = ctx.user.language as 'en' | 'ru';
+          writer.appendText(`\n\n${t(lang).agent_timeout}`);
           break;
         }
 
@@ -537,6 +538,9 @@ export class CalendarBotAgent {
             // creating orphaned messages.
             writer.setToolLabel(name);
           },
+          onProviderSwitch: () => {
+            writer.resetBuffers();
+          },
         };
 
         const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
@@ -547,6 +551,7 @@ export class CalendarBotAgent {
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
+            userId: ctx.user.telegram_id,
           },
           callbacks,
         );
@@ -753,7 +758,22 @@ export class CalendarBotAgent {
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
-      writer.appendText(`\n\n${t(ctx.user.language).ai_processing_error}`);
+
+      // Show stall phrase only on the first failure of an explicit invocation
+      if (ctx.wasExplicitInvocation !== false && (ctx.retryAttempt ?? 0) === 0 && !ctx.supplementMode) {
+        const lang = ctx.user.language as 'en' | 'ru';
+        const stallMessage = t(lang).agent_error();
+        writer.appendText(`\n\n${stallMessage}`);
+        // Save to chat history so the model can see it and play along if the user reacts.
+        this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
+      }
+
+      // Enqueue next retry (or trigger graceful fail after max attempts)
+      if (ctx.retryEnqueue && !ctx.supplementMode && ctx.wasExplicitInvocation !== false) {
+        ctx.retryEnqueue(ctx.messageText).catch((err) => {
+          aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
+        });
+      }
     }
 
     const finalText = writer.getText().trim();

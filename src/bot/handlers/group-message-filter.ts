@@ -119,11 +119,11 @@ export function matchesKeywordFuzzy(text: string): boolean {
 const ADDRESS_TARGETS = ['календарь', 'calendar'];
 const ADDRESS_MAX_DISTANCE = 2;
 
-// Exact "календарь"/"calendar" words are already in keyword list.
-// This function handles typos only in the address prefix (e.g. "Каледарь,", "Calender,").
-function startsWithCalendarAddress(text: string): boolean {
+// Exact "календарь"/"calendar" words are already in the keyword list.
+// This function handles typos in the address prefix (e.g. "Каледарь,", "Calender,").
+// Bot-name direct address ("бот,", "bot,") is covered separately by mentionsBot().
+export function startsWithCalendarAddress(text: string): boolean {
   const firstWord = (text.trim().split(/[\s,!.?:]+/)[0] ?? '').toLowerCase();
-  if (firstWord.length < 5) return false;
   return ADDRESS_TARGETS.some((target) => levenshtein(firstWord, target) <= ADDRESS_MAX_DISTANCE);
 }
 

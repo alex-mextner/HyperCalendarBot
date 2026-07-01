@@ -1135,6 +1135,23 @@ if (config.REDIS_URL) {
   // Patch msgDeps so agentContextBuilder picks up the services
   msgDeps.scheduledCallService = scheduledCallService;
   msgDeps.triggerService = { repo: triggerRepo };
+  msgDeps.aiRetryQueue = aiMsgQueue;
+
+  // Redis store for pending retry job IDs — enables cancellation when user sends new message
+  const RETRY_JOB_TTL_S = 300; // 5 min covers max backoff (30s + 60s + 120s) + buffer
+  const retryRedis = new Bun.RedisClient(config.REDIS_URL);
+  const retryJobStore = {
+    async set(userId: number, jobId: string): Promise<void> {
+      await retryRedis.set(`retry:${userId}`, jobId, 'EX', RETRY_JOB_TTL_S);
+    },
+    async get(userId: number): Promise<string | null> {
+      return retryRedis.get(`retry:${userId}`);
+    },
+    async del(userId: number): Promise<void> {
+      await retryRedis.del(`retry:${userId}`);
+    },
+  };
+  msgDeps.aiRetryJobStore = retryJobStore;
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
   const syntheticRunner = new SyntheticPipelineRunner({
@@ -1171,6 +1188,8 @@ if (config.REDIS_URL) {
     agentRun: async (agentCtx) => {
       await agent.run(agentCtx);
     },
+    retryQueue: aiMsgQueue,
+    retryJobStore,
   });
 
   const aiWorker = createAiMessagesWorker(
