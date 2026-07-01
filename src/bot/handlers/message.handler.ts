@@ -85,7 +85,7 @@ import type { WorkflowSession, WorkflowSessionStore } from '../pipeline/types.ts
 import { CALLBACK_ONLY_STEP_INDICES } from '../scenes/add-event.scene.ts';
 import type { AddEventState, OnboardingState, TimezoneState } from '../scenes/types.ts';
 import type { BotCommandContext } from '../types.ts';
-import { isGroupRelevant, startsWithCalendarAddress } from './group-message-filter.ts';
+import { isGroupRelevant, mentionsBot, startsWithCalendarAddress } from './group-message-filter.ts';
 
 interface SceneStorage {
   get(key: string): Promise<unknown>;
@@ -1093,10 +1093,11 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
         }
       }
 
-      // Explicit invocation: reply to bot, @mention, or direct address prefix ("Бот,", "Календарь,").
+      // Explicit invocation: reply to bot, @mention, direct address prefix ("Бот,", "Календарь,"),
+      // or any bot-mention inflection ("бота", "боту", etc.).
       // Keyword-only matches and session continuation are NOT explicit.
       const isExplicitMention = Boolean(botMention && text.includes(botMention));
-      wasExplicitInvocation = isReplyToBot || isExplicitMention || startsWithCalendarAddress(text);
+      wasExplicitInvocation = isReplyToBot || isExplicitMention || startsWithCalendarAddress(text) || mentionsBot(text);
     }
 
     // Build context info for group messages

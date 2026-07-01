@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
 import type OpenAI from 'openai';
+import { EN_AGENT_ERROR_PHRASES, RU_AGENT_ERROR_PHRASES } from '../../../src/config/constants.ts';
 import { migrations } from '../../../src/database/migrations.ts';
 import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -831,14 +832,15 @@ describe('CalendarBotAgent.run()', () => {
     const result = await agent.run(ctx);
 
     // REGRESSION: before the fix, an unhandled error could leave the user
-    // with just ⏳ and no response. On error, a stall phrase is appended
-    // (wasExplicitInvocation defaults to undefined, treated as explicit).
+    // with just ⏳ and no response. On error, a stall phrase from the declared
+    // phrase set is appended (wasExplicitInvocation defaults to undefined, treated as explicit).
     const editCalls = (sender.editMessageText as ReturnType<typeof mock>).mock.calls;
     const finalEdit = editCalls[editCalls.length - 1] as unknown[];
     const finalText = finalEdit[2] as string;
-    // A stall phrase (not empty, not just ⏳) must be delivered.
-    expect(finalText.trim().length).toBeGreaterThan(0);
-    expect(result.responseText.trim().length).toBeGreaterThan(0);
+    // The delivered text must be a member of the English stall-phrase set.
+    const allPhrases = [...EN_AGENT_ERROR_PHRASES, ...RU_AGENT_ERROR_PHRASES];
+    expect(allPhrases.some((phrase) => finalText.includes(phrase))).toBe(true);
+    expect(allPhrases.some((phrase) => result.responseText.includes(phrase))).toBe(true);
   });
 
   test('run() in group mode (noPlaceholder) handles error without leaving orphan messages', async () => {
@@ -850,31 +852,35 @@ describe('CalendarBotAgent.run()', () => {
     const result = await agent.run(ctx);
 
     // In group mode (noPlaceholder), no ⏳ is sent. On error, the stall phrase
-    // should be delivered as a single message, not left unfinished.
+    // is delivered as a single message (no orphan ⏳ left behind).
     const sendCalls = (sender.sendMessage as ReturnType<typeof mock>).mock.calls;
     expect(sendCalls.length).toBe(1);
     const sentText = (sendCalls[0] as unknown[])[1] as string;
-    expect(sentText.trim().length).toBeGreaterThan(0);
-    expect(result.responseText.trim().length).toBeGreaterThan(0);
+    const allPhrases = [...EN_AGENT_ERROR_PHRASES, ...RU_AGENT_ERROR_PHRASES];
+    expect(allPhrases.some((phrase) => sentText.includes(phrase))).toBe(true);
+    expect(allPhrases.some((phrase) => result.responseText.includes(phrase))).toBe(true);
   });
 
   test('agent catch block stall phrase is localized via t() for both languages', async () => {
-    // Verify English stall phrase is from the English set
+    // Verify English stall phrase comes from the English phrase set.
     const { impl: implEn } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agentEn = new CalendarBotAgent(config, sender, { streamImpl: implEn });
     ctx.user = { ...ctx.user, language: 'en' };
     ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
     const resultEn = await agentEn.run(ctx);
-    expect(resultEn.responseText.trim().length).toBeGreaterThan(0);
+    expect(
+      EN_AGENT_ERROR_PHRASES.some((phrase) => resultEn.responseText.includes(phrase)),
+      `EN responseText "${resultEn.responseText}" must contain an English stall phrase`,
+    ).toBe(true);
 
-    // Verify Russian stall phrase is from the Russian set
+    // Verify Russian stall phrase comes from the Russian phrase set.
     const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
     ctx.user = { ...ctx.user, language: 'ru' };
     const resultRu = await agentRu.run(ctx);
-    expect(resultRu.responseText.trim().length).toBeGreaterThan(0);
-
-    // The two must be different — English and Russian phrases don't overlap.
-    expect(resultEn.responseText).not.toBe(resultRu.responseText);
+    expect(
+      RU_AGENT_ERROR_PHRASES.some((phrase) => resultRu.responseText.includes(phrase)),
+      `RU responseText "${resultRu.responseText}" must contain a Russian stall phrase`,
+    ).toBe(true);
   });
 });
