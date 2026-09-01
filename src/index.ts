@@ -17,7 +17,7 @@ import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
-import { initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
+import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
@@ -142,6 +142,7 @@ const webServerDeps: WebServerDeps = {
   // The cron watchdog polls /ready every two minutes, and this is what lets it
   // see a total provider outage. Process liveness alone never showed one.
   aiChainDown: isAiChainDown,
+  aiChainVerified: hasChainAnswered,
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;

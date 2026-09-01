@@ -521,6 +521,42 @@ describe('readiness endpoint', () => {
     }
   });
 
+  // A restarted process has an empty outage record, which is not the same as
+  // knowing the chain works. Answering a plain "ok" there would have the
+  // watchdog announce a recovery nobody verified — the likeliest moment for
+  // that being right after the admin restarts the bot in response to the alert.
+  test('says so when this process has no proof the chain works', async () => {
+    const deps = baseDeps({
+      healthCheck: mock(() => Promise.resolve()),
+      aiChainDown: () => false,
+      aiChainVerified: () => false,
+    });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok (unverified)');
+    } finally {
+      stop();
+    }
+  });
+
+  test('answers a plain ok once a provider has actually answered', async () => {
+    const deps = baseDeps({
+      healthCheck: mock(() => Promise.resolve()),
+      aiChainDown: () => false,
+      aiChainVerified: () => true,
+    });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok');
+    } finally {
+      stop();
+    }
+  });
+
   // The production wiring assigns several deps onto the same object after the
   // server is already running, so the server must read them per request rather
   // than capture them at construction. Without this test a defensive copy in

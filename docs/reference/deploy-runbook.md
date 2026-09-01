@@ -34,6 +34,14 @@ curl https://hypercal.invntrm.ru/health
 curl https://hypercal.invntrm.ru/ready
 ```
 
+`/ready` has three answers, and the body distinguishes the last two:
+
+| Response | Meaning |
+| --- | --- |
+| `503` | The bot cannot serve anyone: it has not started, Redis is unreachable, or every AI provider is failing (body says which). |
+| `200 ok` | A provider has answered in this process. The bot demonstrably works. |
+| `200 ok (unverified)` | The process is alive but has served nobody since it started, so it has no evidence either way. The watchdog treats this as "keep waiting", never as a recovery — a restart during an outage would otherwise look like the outage ending. |
+
 `logs/chats/{chatId}/{timestamp}.log` inside container contains detailed AI interaction logs:
 system prompt, history, tool calls, responses. Enabled via `AI_DEBUG_LOGS=true`.
 

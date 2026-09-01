@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
   ALERT_POLICY,
+  hasChainAnswered,
   initProviderAlerts,
   isAiChainDown,
   type ProviderFailure,
@@ -115,5 +116,33 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     clock += ALERT_POLICY.flapGuardMs + 1;
     reportAllProvidersFailed(DEAD);
     expect(isAiChainDown()).toBe(true);
+  });
+});
+
+// The in-memory record dies with the process, and the most likely reaction to a
+// "bot is down" alert is restarting the container. A fresh process therefore
+// knows nothing — which is not the same as knowing the chain is fine. Readiness
+// says so, and the watchdog script uses it to keep quiet instead of announcing a
+// recovery that nobody verified.
+describe('hasChainAnswered — whether this process has proof either way', () => {
+  beforeEach(() => {
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
+  });
+
+  test('a process that has served nobody yet has no proof', () => {
+    expect(hasChainAnswered()).toBe(false);
+  });
+
+  test('a provider answering is the proof', () => {
+    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    expect(hasChainAnswered()).toBe(true);
+  });
+
+  // Failures are not proof of anything but their own failure: the chain flag
+  // already carries that. What is missing after a restart is a success.
+  test('failures alone leave the process without proof', () => {
+    reportAllProvidersFailed(DEAD);
+    expect(hasChainAnswered()).toBe(false);
   });
 });

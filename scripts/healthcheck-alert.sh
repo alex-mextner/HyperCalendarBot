@@ -49,8 +49,14 @@ push_alert() {
   fi
 }
 
+# The body matters as much as the status: a bot that restarted since the last
+# check answers "ok (unverified)" — it is alive, but no provider has answered in
+# this process, so it cannot confirm the outage is over.
+BODY_FILE=$(mktemp)
+trap 'rm -f "$BODY_FILE"' EXIT
+
 probe_health() {
-  curl -s -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
+  curl -s -o "$BODY_FILE" -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
 }
 
 # Retry to avoid false positives during deploys (container swap ~10-15s).
@@ -74,7 +80,18 @@ HTTP status: <code>${HTTP_CODE}</code>"
   fi
 else
   if [[ -f "$STATE_FILE" ]]; then
-    rm -f "$STATE_FILE"
-    send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
+    # Announce recovery only on proof. The likeliest reaction to a DOWN alert is
+    # restarting the bot, and a restarted process starts with an empty outage
+    # record — announcing "recovered" on that would be reporting a recovery
+    # nobody verified, while every provider was still dead. Stay down and quiet
+    # until a real user request gets a real answer.
+    #
+    # The cost is a recovery message delayed until the first request after a
+    # plain crash-restart, where nothing was ever wrong with the providers. A
+    # late true message beats a prompt false one.
+    if [[ "$(cat "$BODY_FILE")" == "ok" ]]; then
+      rm -f "$STATE_FILE"
+      send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
+    fi
   fi
 fi

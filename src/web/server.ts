@@ -46,6 +46,13 @@ export interface WebServerDeps {
    * restart loop during the very incident this is meant to surface.
    */
   aiChainDown?: () => boolean;
+  /**
+   * True once some provider has answered in this process. A restarted process
+   * has an empty outage record, which is not proof that the chain works, so
+   * readiness says "ok (unverified)" until a provider has actually answered and
+   * the watchdog knows not to call that a recovery.
+   */
+  aiChainVerified?: () => boolean;
   // Admin alert queue — POST /admin/alerts to push, GET /admin/alerts/next to pop
   alertRepo?: AlertRepository;
   adminAlertToken?: string;
@@ -145,6 +152,7 @@ async function handleRequest(
       webLogger.error('AI provider chain is down — reporting not ready');
       return new Response('ai chain down', { status: 503 });
     }
+    if (deps.aiChainVerified?.() === false) return new Response('ok (unverified)');
     return new Response('ok');
   }
 

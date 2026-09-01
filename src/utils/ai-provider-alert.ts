@@ -229,6 +229,8 @@ export function initProviderAlerts(config: AlertDeps): void {
   outages.clear();
   sentAtMs.length = 0;
   heldBackCount = 0;
+  chainAnswered = false;
+  uninitializedReadWarned = false;
 }
 
 /** Test helper: drop all throttling state and the configured transport. */
@@ -238,6 +240,8 @@ export function resetProviderAlertState(): void {
   outages.clear();
   sentAtMs.length = 0;
   heldBackCount = 0;
+  chainAnswered = false;
+  uninitializedReadWarned = false;
 }
 
 // ── Outage state ───────────────────────────────────────────────────────────
@@ -263,6 +267,12 @@ const sentAtMs: number[] = [];
 let heldBackCount = 0;
 
 const CHAIN_KEY = 'chain:all-providers';
+
+// Set the first time any provider answers in this process. The outage map dies
+// with the process, so a fresh one cannot tell a working chain from one it has
+// simply never tried — see hasChainAnswered below.
+let chainAnswered = false;
+let uninitializedReadWarned = false;
 
 /** "Groq (llama-3.3-70b-versatile)" → "groq" — the model id must not split the dedup key. */
 function providerFamily(provider: string): string {
@@ -346,15 +356,37 @@ export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
  */
 export function isAiChainDown(): boolean {
   if (!deps) {
-    alertLogger.warn('Chain-down state read before initProviderAlerts — readiness cannot see provider outages');
+    if (!uninitializedReadWarned) {
+      uninitializedReadWarned = true;
+      alertLogger.warn('Chain-down state read before initProviderAlerts — readiness cannot see provider outages');
+    }
     return false;
   }
   const chain = outages.get(CHAIN_KEY);
   return chain !== undefined && chain.resolvedAt === null;
 }
 
+/**
+ * True once some provider has answered in this process — the only proof a
+ * working chain leaves behind.
+ *
+ * The outage record lives in memory and dies with the process, and the likeliest
+ * reaction to a "bot is down" alert is restarting the container. A restarted
+ * process therefore has an empty record, which is not the same as evidence that
+ * the chain is fine: without this distinction the readiness endpoint would
+ * answer a plain "ok" and the cron watchdog would announce a recovery nobody
+ * verified, while every provider was still dead.
+ *
+ * Failures are not the missing proof — the chain flag already carries those.
+ * What a restart loses is a success.
+ */
+export function hasChainAnswered(): boolean {
+  return chainAnswered;
+}
+
 /** Report that a provider answered successfully — closes its outages and the chain outage. */
 export function reportProviderRecovered(provider: string): void {
+  chainAnswered = true;
   if (!deps) return;
   const now = deps.now();
   const family = providerFamily(provider);
