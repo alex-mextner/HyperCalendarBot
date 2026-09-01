@@ -22,8 +22,8 @@
     "@types/keytar": "^4.4.2",
     "@types/node": "^22.0.0",
     "@types/ws": "^8.0.0",
-    "electron": "40.8.5",
-    "electron-builder": "^25.0.0",
+    "electron": "41.10.7",
+    "electron-builder": "^26.0.0",
     "typescript": "^5.0.0"
   },
   "build": {
