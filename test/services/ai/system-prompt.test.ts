@@ -449,6 +449,60 @@ describe('buildSystemPrompt', () => {
       expect(prompt).toContain('(+140 more occurrences not listed — call get_events for the full list)');
     });
 
+    /**
+     * Occurrences spread evenly across the real ±2-week window, oldest first —
+     * the order and shape getEventsInRange actually returns. Past and future
+     * carry different titles so the assertions can tell which half survived.
+     */
+    function spanningOccurrences(perSide: number): { window: EventOccurrence[] } {
+      const eventRepo = new EventRepository(db);
+      const past = eventRepo.create({
+        user_id: USER_ID,
+        title: 'Already happened',
+        start_at: new Date().toISOString(),
+        timezone: 'Europe/Kyiv',
+      });
+      const future = eventRepo.create({
+        user_id: USER_ID,
+        title: 'Still ahead',
+        start_at: new Date().toISOString(),
+        timezone: 'Europe/Kyiv',
+      });
+      const hour = 3_600_000;
+      const make = (event: typeof past, offset: number): EventOccurrence => ({
+        event,
+        occurrence_start: new Date(Date.now() + offset).toISOString(),
+        occurrence_end: null,
+        is_exception: false,
+      });
+      return {
+        window: [
+          ...Array.from({ length: perSide }, (_, i) => make(past, -(perSide - i) * hour)),
+          ...Array.from({ length: perSide }, (_, i) => make(future, (i + 1) * hour)),
+        ],
+      };
+    }
+
+    function scheduleSection(prompt: string): string {
+      return prompt.split('## Schedule Context')[1]?.split('\n## ')[0] ?? '';
+    }
+
+    // The window runs from two weeks ago to two weeks ahead and arrives sorted
+    // oldest-first, so taking the first sixty kept only the past: a heavy user
+    // got a "schedule context" with nothing from today onwards, which is the
+    // opposite of what the section is for.
+    test('keeps the occurrences nearest to now, not the oldest ones', () => {
+      ctx.recentEventsWindow = spanningOccurrences(100).window;
+      const section = scheduleSection(buildSystemPrompt(ctx));
+
+      const ahead = (section.match(/Still ahead/g) ?? []).length;
+      const behind = (section.match(/Already happened/g) ?? []).length;
+      expect(ahead + behind).toBe(60);
+      expect(ahead).toBe(30);
+      expect(behind).toBe(30);
+      expect(section).toContain('← today');
+    });
+
     test('the cap keeps a heavy window from dominating the prompt', () => {
       ctx.recentEventsWindow = occurrences(12);
       const small = buildSystemPrompt(ctx).length;

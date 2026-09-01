@@ -10,14 +10,23 @@
  * request, because several are legitimately possible (e.g. looking an event up
  * before editing it). A case fails when the model picks nothing from the list.
  */
-export interface DryRunCase {
+interface DryRunCaseBase {
   id: string;
   message: string;
   group?: boolean;
   history?: { role: 'user' | 'assistant'; content: string }[];
-  expectAnyOf: string[];
-  expectNoTools?: boolean;
 }
+
+/**
+ * A case either names the tools that would satisfy it, or expects the model to
+ * answer without calling anything. The split is a union rather than two
+ * optional fields because the combination in between — an empty expectation
+ * list with no "expect silence" flag — can never be satisfied, and a case
+ * written that way would sit permanently red while looking like a model miss.
+ */
+export type DryRunCase =
+  | (DryRunCaseBase & { expectAnyOf: [string, ...string[]]; expectNoTools?: false })
+  | (DryRunCaseBase & { expectNoTools: true; expectAnyOf?: never });
 
 export const DRYRUN_CASES: DryRunCase[] = [
   {
@@ -114,10 +123,17 @@ export const DRYRUN_CASES: DryRunCase[] = [
     expectAnyOf: ['get_free_slots', 'get_events', 'calculate'],
   },
   {
+    // The prompt used to spell out "to change a location, call update_event".
+    // That line was dropped as redundant with the tool's own description, so the
+    // harness has to prove the model still makes the connection without it.
+    id: 'change-event-location',
+    message: 'Поменяй место встречи на Кафе Времени',
+    expectAnyOf: ['update_event', 'search_events', 'get_events'],
+  },
+  {
     id: 'group-off-topic-date',
     message: 'Доставка будет 1 апреля',
     group: true,
-    expectAnyOf: [],
     expectNoTools: true,
   },
   {

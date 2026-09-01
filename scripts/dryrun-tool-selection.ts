@@ -137,7 +137,8 @@ interface CaseOutcome {
 
 function verdict(testCase: DryRunCase, tools: string[]): boolean {
   if (testCase.expectNoTools) return tools.length === 0;
-  return tools.some((name) => testCase.expectAnyOf.includes(name));
+  const expected = testCase.expectAnyOf;
+  return tools.some((name) => expected.includes(name));
 }
 
 /**

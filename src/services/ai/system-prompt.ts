@@ -13,10 +13,28 @@ import type { AgentContext } from './types.ts';
  */
 const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
 
+/**
+ * The occurrences closest to now, in chronological order.
+ *
+ * The window spans two weeks either side and arrives sorted oldest-first, so
+ * taking the first sixty kept only the past: a heavy user got a schedule
+ * context with nothing from today onwards, which is the opposite of what the
+ * section is for. Distance from now is what "nearest" has to mean here.
+ */
+function nearestOccurrences(events: EventOccurrence[], limit: number): EventOccurrence[] {
+  if (events.length <= limit) return events;
+  const now = Date.now();
+  const distance = (occ: EventOccurrence) => Math.abs(new Date(occ.occurrence_start).getTime() - now);
+  return [...events]
+    .sort((a, b) => distance(a) - distance(b))
+    .slice(0, limit)
+    .sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+}
+
 function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
   if (events.length === 0) return '(no events in this window)';
 
-  const shown = events.slice(0, EVENTS_WINDOW_MAX_OCCURRENCES);
+  const shown = nearestOccurrences(events, EVENTS_WINDOW_MAX_OCCURRENCES);
   const byDay = new Map<string, string[]>();
   const dayLabels = new Map<string, string>();
 

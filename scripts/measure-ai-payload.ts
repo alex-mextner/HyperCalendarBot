@@ -57,11 +57,11 @@ function buildBaseContext(): AgentContext {
 function buildVariants(base: AgentContext): Variant[] {
   return [
     { label: 'DM (default)', ctx: { ...base, inputMode: 'text' } },
-    { label: 'group', ctx: { ...base, isGroup: true, groupTitle: 'Team', groupChatId: -100 } },
+    { label: 'group', ctx: { ...base, inputMode: 'text', isGroup: true, groupTitle: 'Team', groupChatId: -100 } },
     { label: 'live_call', ctx: { ...base, inputMode: 'live_call' } },
     {
       label: 'supplement',
-      ctx: { ...base, supplementMode: true, supplementAutoResponse: 'Событие создано.' },
+      ctx: { ...base, inputMode: 'text', supplementMode: true, supplementAutoResponse: 'Событие создано.' },
     },
     { label: 'assistantEnabled', ctx: { ...base, inputMode: 'text' }, caps: { assistantEnabled: true } },
   ];

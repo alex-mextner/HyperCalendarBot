@@ -32,18 +32,23 @@ function toOpenAITool(t: ToolDefinition): OpenAI.ChatCompletionTool {
  * Calendar selector shared by every event-facing tool. Declared once: the whole
  * catalog travels with every request, so a property spelled out in fifteen tools
  * pays for its description fifteen times.
+ *
+ * Frozen because the sharing is by reference: fifteen schemas hold the same
+ * object, so anything that decorated one tool's copy — a provider adapter
+ * adding a default, a compact mode stripping descriptions — would silently
+ * rewrite all fifteen. Freezing turns that into a visible failure instead.
  */
-const scopeProperty = {
+const scopeProperty = Object.freeze({
   type: 'string',
-  enum: ['personal', 'group'],
+  enum: Object.freeze(['personal', 'group']),
   description: 'Default: "group" in groups, "personal" in DMs.',
-};
+});
 
 /** Secretary delegation target shared by every event-facing tool. */
-const ownerIdProperty = {
+const ownerIdProperty = Object.freeze({
   type: 'number',
   description: "Another user's calendar. Requires active secretary access to it.",
-};
+});
 
 const toolDefinitions: ToolDefinition[] = [
   {
@@ -110,7 +115,10 @@ const toolDefinitions: ToolDefinition[] = [
         start_at: { type: 'string', description: 'New start, ISO 8601 UTC. Optional.' },
         end_at: { type: 'string', description: 'New end, ISO 8601 UTC. null removes it. Optional.' },
         description: { type: 'string', description: 'New description. null removes it. Optional.' },
-        location: { type: 'string', description: 'New location. null removes it. Optional.' },
+        location: {
+          type: 'string',
+          description: 'New place or address for the event. null removes it. Optional.',
+        },
         location_abstract: {
           type: 'boolean',
           description: 'True when the new location is relative (see create_event). Skips geocoding. Default false.',
