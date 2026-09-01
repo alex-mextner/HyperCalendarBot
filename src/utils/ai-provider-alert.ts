@@ -42,10 +42,11 @@
 //    alert/recovery messages, a failure returning within 15 minutes of a recovery
 //    resumes the previous outage (escalation ladder intact) instead of alerting
 //    as brand new.
-//  * The chain-down flag the readiness endpoint reads expires after 15 minutes
-//    without a fresh failure. It is set by a failed user message and cleared by
-//    a successful one, so with no traffic there is no evidence either way and
-//    an expired flag is honest rather than stale.
+//  * The chain-down flag the readiness endpoint reads is the same open/closed
+//    record this file escalates on — never a second, separately-expiring copy.
+//    The cron watchdog that polls readiness has none of the throttling below,
+//    so any flag that could flip back without a provider answering would turn
+//    into an unthrottled stream of contradictory admin messages.
 //  * Hard ceiling of 6 admin messages per rolling hour. The message that fills
 //    the budget says so; anything held back afterwards is counted and reported in
 //    the next message that gets through, so nothing is dropped silently. A first
@@ -79,7 +80,6 @@ export const ALERT_POLICY = {
   flapGuardMs: 15 * MINUTE_MS,
   maxMessagesPerHour: 6,
   startupGraceMs: MINUTE_MS,
-  chainDownStaleMs: 15 * MINUTE_MS,
 } as const;
 
 // ── Failure classification ─────────────────────────────────────────────────
@@ -256,8 +256,6 @@ interface OutageState {
   suppressedSinceAlert: number;
   digestPending: boolean;
   resolvedAt: number | null;
-  /** When the most recent failure for this outage was reported. */
-  lastFailureAt: number;
 }
 
 const outages = new Map<string, OutageState>();
@@ -284,7 +282,6 @@ function newOutage(kind: OutageKind, provider: string, failureClass: ProviderFai
     suppressedSinceAlert: 0,
     digestPending: false,
     resolvedAt: null,
-    lastFailureAt: now,
   };
 }
 
@@ -333,20 +330,27 @@ export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
  * and never calls a provider: a watchdog polling every two minutes must not
  * spend quota to discover that quota is the problem.
  *
- * The evidence has a shelf life. A chain outage is only recorded when a user
- * message hits the dead chain, and only cleared when a later message succeeds,
- * so an idle bot has no evidence either way. Holding "down" indefinitely would
- * have the watchdog report an outage that ended by itself while nobody was
- * writing to the bot. A failure older than chainDownStaleMs therefore stops
- * counting, and the next failed message immediately re-arms it — under real
- * traffic, which is what an outage that matters looks like, the state never
- * goes stale.
+ * It answers from the same record the alerting layer escalates on, so the two
+ * can never disagree about whether the outage is open. That coherence is the
+ * whole design: an earlier version expired the flag after fifteen quiet
+ * minutes, reasoning that an idle bot has no evidence either way. Under
+ * sporadic traffic — a message every twenty minutes, an ordinary overnight
+ * pattern — that made readiness flip back and forth between messages, and the
+ * cron watchdog, which has none of the throttling documented at the top of this
+ * file, sent the admin alternating "down" and "recovered" messages all night.
+ *
+ * So the flag stays armed until a provider actually answers. During a long
+ * silence that answer may be stale, and that is the accepted cost: it produces
+ * at most one late alert, which the watchdog's own state file keeps from
+ * repeating, instead of a stream of contradictory ones.
  */
 export function isAiChainDown(): boolean {
-  if (!deps) return false;
+  if (!deps) {
+    alertLogger.warn('Chain-down state read before initProviderAlerts — readiness cannot see provider outages');
+    return false;
+  }
   const chain = outages.get(CHAIN_KEY);
-  if (chain === undefined || chain.resolvedAt !== null) return false;
-  return deps.now() - chain.lastFailureAt <= ALERT_POLICY.chainDownStaleMs;
+  return chain !== undefined && chain.resolvedAt === null;
 }
 
 /** Report that a provider answered successfully — closes its outages and the chain outage. */
@@ -384,7 +388,6 @@ function noteFailure(
   state.provider = provider;
   state.failures = failures;
   state.occurrences += 1;
-  state.lastFailureAt = now;
 
   if (withinStartupGrace) {
     alertLogger.warn(

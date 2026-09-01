@@ -16,7 +16,7 @@ const DEAD: ProviderFailure[] = [
   { provider: 'Gemini (models/gemini-2.5-flash)', status: 401, message: 'invalid key' },
 ];
 
-describe('isAiChainDown — what the health endpoint asks', () => {
+describe('isAiChainDown — what the readiness endpoint asks', () => {
   beforeEach(() => {
     resetProviderAlertState();
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
@@ -47,12 +47,16 @@ describe('isAiChainDown — what the health endpoint asks', () => {
     expect(isAiChainDown()).toBe(false);
   });
 
-  // A total chain failure is only recorded when a user message hits the dead
-  // chain, and it is only cleared when a later message succeeds. With no traffic
-  // in between there is no evidence either way — and holding "down" forever
-  // would have the two-minute watchdog report an outage that ended by itself
-  // while the bot sat idle overnight.
-  test('a chain failure nobody has retried since goes stale rather than staying down', () => {
+  // The flag stays armed until a provider actually answers, however long that
+  // takes. An earlier version expired it after fifteen quiet minutes, on the
+  // theory that an idle bot has no evidence either way. That theory cost more
+  // than it bought: with sporadic traffic — a message every twenty minutes or
+  // so, an ordinary overnight pattern — the readiness endpoint flipped back to
+  // ready between messages, and the cron watchdog, which has none of this
+  // module's throttling, sent the admin an alternating stream of "down" and
+  // "recovered" all night. One source of truth for "the outage is open" is
+  // worth more than a possibly-stale answer during silence.
+  test('stays down through a long silence, with no message to clear it', () => {
     let clock = 1_000_000;
     resetProviderAlertState();
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
@@ -61,27 +65,23 @@ describe('isAiChainDown — what the health endpoint asks', () => {
     reportAllProvidersFailed(DEAD);
     expect(isAiChainDown()).toBe(true);
 
-    clock += ALERT_POLICY.chainDownStaleMs - 1;
+    clock += 12 * 60 * 60 * 1000;
     expect(isAiChainDown()).toBe(true);
-
-    clock += 2;
-    expect(isAiChainDown()).toBe(false);
   });
 
-  // ...and a fresh failure re-arms it, so a genuine outage with live traffic
-  // never flickers healthy between two user messages.
-  test('a new failure after the stale window re-arms the chain', () => {
+  // The corollary: only a provider answering clears it, and that is the same
+  // event the alerting layer uses to close the outage, so the two never
+  // disagree about whether the chain is down.
+  test('a successful answer after a long silence clears it', () => {
     let clock = 1_000_000;
     resetProviderAlertState();
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
 
     clock += ALERT_POLICY.startupGraceMs + 1;
     reportAllProvidersFailed(DEAD);
-    clock += ALERT_POLICY.chainDownStaleMs + 1;
+    clock += 12 * 60 * 60 * 1000;
+    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
     expect(isAiChainDown()).toBe(false);
-
-    reportAllProvidersFailed(DEAD);
-    expect(isAiChainDown()).toBe(true);
   });
 
   // A provider that answers and then dies again inside the flap guard resumes
