@@ -11,7 +11,11 @@
 
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
-import { alertProviderBalanceExhausted, isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
+import {
+  reportAllProvidersFailed,
+  reportProviderFailure,
+  reportProviderRecovered,
+} from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, type ProviderId, resolveModelOverride } from './model-registry.ts';
@@ -443,7 +447,11 @@ export async function aiStreamRound(
   for (const slot of chain) {
     try {
       aiLogger.info({ provider: slot.label, model: slot.configuredModel, userId: options.userId }, 'Trying provider');
-      return await runSlot(slot, options, wrappedCallbacks);
+      const result = await runSlot(slot, options, wrappedCallbacks);
+      // A slot that answers settles any outstanding outage for it. The alert layer
+      // decides whether that is worth telling the admin about.
+      reportProviderRecovered(slot.label);
+      return result;
     } catch (error) {
       const failure = describeFailure(slot, error);
       failures.push(failure);
@@ -464,6 +472,8 @@ export async function aiStreamRound(
 
   const aggregate = new AllProvidersFailedError(failures);
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
+  // The loudest alert there is: nobody answered, so the user got nothing.
+  reportAllProvidersFailed(failures);
   throw aggregate;
 }
 
@@ -475,7 +485,7 @@ function reportSlotFailure(failure: ProviderFailure, error: unknown, userId: num
     aiLogger.error(context, 'Provider rejected the request — trying next provider');
   }
 
-  if (isBalanceExhausted(error)) {
-    alertProviderBalanceExhausted(failure.provider, failure.message);
-  }
+  // The alert layer classifies and throttles; a transient blip never reaches the
+  // admin on its own, so this is safe to call for every failure.
+  reportProviderFailure(failure);
 }

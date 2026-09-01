@@ -311,15 +311,6 @@ export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
   noteFailure(CHAIN_KEY, 'chain', 'all providers', 'transient', failures);
 }
 
-/**
- * Transitional entry point for the existing streaming.ts call site, which still
- * reports only balance exhaustion. Prefer `reportProviderFailure`, which covers
- * every failure class; this wrapper goes away once streaming.ts is rewired.
- */
-export function alertProviderBalanceExhausted(providerName: string, errorMessage: string): void {
-  reportProviderFailure({ provider: providerName, message: errorMessage });
-}
-
 /** Report that a provider answered successfully — closes its outages and the chain outage. */
 export function reportProviderRecovered(provider: string): void {
   if (!deps) return;

@@ -11,7 +11,7 @@ import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { validateResponse } from './response-validator.ts';
-import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
+import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
@@ -182,6 +182,12 @@ export function agentGiveUpMessage(userId: number, lang: Lang): string | null {
  * exactly the same way three minutes later.
  */
 function isHardOutage(error: unknown): boolean {
+  // The chain reports a total outage as one aggregate rather than rethrowing the
+  // last provider's error, so inspect the per-provider verdicts. If not one slot
+  // looked merely down, a retry three minutes later hits the same wall.
+  if (error instanceof AllProvidersFailedError) {
+    return error.failures.every((failure) => !failure.transient);
+  }
   if (isBalanceExhausted(error)) return true;
   return error instanceof OpenAI.APIError && (error.status === 401 || error.status === 403);
 }

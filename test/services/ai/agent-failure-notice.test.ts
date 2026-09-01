@@ -16,7 +16,12 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import { aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
-import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import {
+  AllProvidersFailedError,
+  type StreamCallbacks,
+  type StreamRoundOptions,
+  type StreamRoundResult,
+} from '../../../src/services/ai/streaming.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -143,6 +148,72 @@ describe('agent failure notices', () => {
     for (const phrase of RU_AGENT_ERROR_PHRASES) {
       expect(text).not.toContain(phrase);
     }
+  });
+
+  // Regression for the merge of the provider-failover work: the chain no longer
+  // rethrows the last provider's error, it throws an aggregate. A fully dead chain
+  // must still read as a hard outage, or the bot goes back to promising a comeback
+  // in exactly the scenario that started this — every provider down, user gets a
+  // cheerful "one second" and then silence.
+  test('every provider dead → honest message, not a comeback promise', async () => {
+    const dead = new AllProvidersFailedError([
+      { provider: 'z.ai (glm-5.1)', status: 429, message: 'Weekly/Monthly Limit Exhausted', transient: false },
+      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist', transient: false },
+      { provider: 'Gemini (models/gemini-2.5-flash)', status: 401, message: 'invalid key', transient: false },
+    ]);
+    const agent = new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(dead) });
+
+    await agent.run(ctx);
+
+    const text = probe.delivered().join('\n');
+    expect(text).toContain(t('ru').ai_degraded);
+    expect(text).toContain(RU_AI_COMMANDS_HINT);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
+  });
+
+  // Adversarial version of the case above. The previous test passes even without a
+  // fix, because the aggregate message happens to concatenate the words "Limit
+  // Exhausted" and the legacy check substring-matches them. Strip every quota-ish
+  // word and the accident disappears: a chain that is dead from deleted models and
+  // rejected keys carries no such phrase anywhere.
+  test('every provider dead with no quota wording → still an honest message', async () => {
+    const dead = new AllProvidersFailedError([
+      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist', transient: false },
+      {
+        provider: 'HF (meta-llama/Llama-3.3-70B-Instruct)',
+        status: 401,
+        message: 'Invalid username or password.',
+        transient: false,
+      },
+    ]);
+    const agent = new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(dead) });
+
+    await agent.run(ctx);
+
+    const text = probe.delivered().join('\n');
+    expect(text).toContain(t('ru').ai_degraded);
+    expect(text).toContain(RU_AI_COMMANDS_HINT);
+    for (const phrase of RU_AGENT_ERROR_PHRASES) {
+      expect(text).not.toContain(phrase);
+    }
+  });
+
+  // The mirror case: providers that are merely overloaded WILL come back, so the
+  // stall phrase is honest there and must survive.
+  test('whole chain transiently down → stall phrase, because a retry can still succeed', async () => {
+    const flaky = new AllProvidersFailedError([
+      { provider: 'z.ai (glm-5.1)', status: 503, message: 'overloaded', transient: true },
+      { provider: 'Gemini (models/gemini-2.5-flash)', status: 500, message: 'internal error', transient: true },
+    ]);
+    const agent = new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(flaky) });
+
+    await agent.run(ctx);
+
+    const text = probe.delivered().join('\n');
+    expect(RU_AGENT_ERROR_PHRASES.some((phrase) => text.includes(phrase))).toBe(true);
+    expect(text).not.toContain(t('ru').ai_degraded);
   });
 
   test('no retry mechanism wired → honest message instead of a promise it cannot keep', async () => {
