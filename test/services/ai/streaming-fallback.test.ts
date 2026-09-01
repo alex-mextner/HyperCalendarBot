@@ -99,7 +99,7 @@ mock.module('../../../src/config/env.ts', () => ({
   }),
 }));
 
-const { aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
+const { AllProvidersFailedError, aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
 
 describe('aiStreamRound — provider chain fallback', () => {
   beforeEach(() => {
@@ -187,7 +187,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(result.providerUsed).toContain('Gemini');
   });
 
-  test('all three providers fail → throws last error', async () => {
+  test('all three providers fail → throws an aggregate naming every provider', async () => {
     const err500 = new OpenAI.APIError(500, { error: { message: 'boom' } }, 'boom', new Headers());
     const err503 = new OpenAI.APIError(503, { error: { message: 'down' } }, 'down', new Headers());
     const err504 = new OpenAI.APIError(504, { error: { message: 'gateway' } }, 'gateway', new Headers());
@@ -219,16 +219,22 @@ describe('aiStreamRound — provider chain fallback', () => {
       },
     };
 
-    await expect(
-      aiStreamRound({
-        messages: [{ role: 'user', content: 'hi' }],
-        maxTokens: 100,
-      }),
-    ).rejects.toMatchObject({ status: 504 });
+    const error = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(AllProvidersFailedError);
+    if (!(error instanceof AllProvidersFailedError)) throw new Error('expected AllProvidersFailedError');
+    expect(error.failures.map((f) => f.status)).toEqual([500, 503, 504]);
+    expect(error.message).toContain('boom');
+    expect(error.message).toContain('gateway');
   });
 
-  test('4xx with body propagates immediately without fallthrough', async () => {
-    // A real 400 with an error body means the request is bad — don't try next provider.
+  test('4xx with a body falls through — one provider rejecting us never ends the chain', async () => {
+    // A real 400 with an error body says THIS provider cannot serve the request
+    // (bad tool template, unsupported parameter). Another provider still can, so
+    // the chain must continue — treating it as fatal took the bot down on 2026-09-01.
     const badRequest = new OpenAI.APIError(400, { error: { message: 'bad input' } }, 'bad input', new Headers());
     fakeZai = {
       chat: {
@@ -239,21 +245,21 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient(() => {
-      throw new Error('gemini should not be called');
-    });
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'gemini answered anyway' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
     });
 
-    await expect(
-      aiStreamRound({
-        messages: [{ role: 'user', content: 'hi' }],
-        maxTokens: 100,
-      }),
-    ).rejects.toMatchObject({ status: 400 });
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 100,
+    });
 
-    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(result.text).toBe('gemini answered anyway');
+    expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
   test('400 with no body falls through to next provider', async () => {
@@ -285,9 +291,10 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(fakeGemini.chat.completions.create).toHaveBeenCalledTimes(1);
   });
 
-  test('mid-stream failure after text emitted propagates, does NOT fall through', async () => {
-    // z.ai starts streaming, then the iterator throws. Since text was already
-    // sent to the user's Telegram message, we cannot switch providers.
+  test('mid-stream failure after text emitted discards the partial text and falls through', async () => {
+    // z.ai starts streaming, then the iterator throws. The partial text already
+    // shown to the user is discarded via onProviderSwitch and the next provider
+    // answers from scratch — a half-sent sentence is not a reason to fail the turn.
     fakeZai = {
       chat: {
         completions: {
@@ -301,26 +308,32 @@ describe('aiStreamRound — provider chain fallback', () => {
         },
       },
     };
-    fakeGemini = buildFakeClient(() => {
-      throw new Error('gemini should not be called');
-    });
+    fakeGemini = buildFakeClient([
+      { kind: 'text', text: 'full answer from Gemini' },
+      { kind: 'finish', reason: 'stop' },
+    ]);
     fakeHf = buildFakeClient(() => {
       throw new Error('hf should not be called');
     });
 
     const deltas: string[] = [];
-    await expect(
-      aiStreamRound(
-        {
-          messages: [{ role: 'user', content: 'hi' }],
-          maxTokens: 100,
+    let switched = 0;
+    const result = await aiStreamRound(
+      {
+        messages: [{ role: 'user', content: 'hi' }],
+        maxTokens: 100,
+      },
+      {
+        onTextDelta: (t) => deltas.push(t),
+        onProviderSwitch: () => {
+          switched += 1;
         },
-        { onTextDelta: (t) => deltas.push(t) },
-      ),
-    ).rejects.toThrow();
+      },
+    );
 
-    expect(deltas).toEqual(['partial ']);
-    expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+    expect(result.text).toBe('full answer from Gemini');
+    expect(deltas).toEqual(['partial ', 'full answer from Gemini']);
+    expect(switched).toBe(1);
   });
 
   test('aggregates tool_calls across chunks even when provider omits index field', async () => {
