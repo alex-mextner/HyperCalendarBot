@@ -160,4 +160,50 @@ describe('formatResponse', () => {
     expect(result).toContain('Conference');
     expect(result).toContain('14:00');
   });
+
+  describe('structured event data', () => {
+    // get_events returns machine-readable text for the AI agent plus structured data.
+    // The intent engine sends its result straight to the user, so it must render the data.
+    const rawToolOutput =
+      'id: 239, title: Английский, start: 2026-06-01T10:30:00.000Z, created_by: @someone\n' +
+      'id: 440, title: Созвон, start: 2026-06-01T14:00:00.000Z, created_by: @someone';
+
+    test('renders events from data instead of the raw tool output', () => {
+      const events = [
+        { id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false },
+        { id: 440, title: 'Созвон', date: '2026-06-01', time: '16:00', all_day: false },
+      ];
+      const result = formatResponse('text', rawToolOutput, 'Europe/Belgrade', 'ru', events);
+
+      expect(result).toContain('Английский');
+      expect(result).toContain('12:30');
+      expect(result).toContain('Созвон');
+      expect(result).not.toContain('id: 239');
+      expect(result).not.toContain('created_by');
+      expect(result).not.toContain('2026-06-01T10:30:00.000Z');
+    });
+
+    test('shows the date when events span more than one day', () => {
+      const events = [
+        { id: 1, title: 'Понедельник', date: '2026-06-01', time: '10:00', all_day: false },
+        { id: 2, title: 'Вторник', date: '2026-06-02', time: '11:00', all_day: false },
+      ];
+      const result = formatResponse('text', rawToolOutput, 'UTC', 'ru', events);
+
+      expect(result).toContain('2026-06-01');
+      expect(result).toContain('2026-06-02');
+    });
+
+    test('omits the time for all-day events', () => {
+      const events = [{ id: 3, title: 'Отпуск', date: '2026-06-01', all_day: true }];
+      const result = formatResponse('text', rawToolOutput, 'UTC', 'ru', events);
+
+      expect(result).toBe('Отпуск');
+    });
+
+    test('falls back to the tool output when there is no event data', () => {
+      expect(formatResponse('text', 'Нет событий', 'UTC', 'ru', [])).toBe('Нет событий');
+      expect(formatResponse('text', 'Нет событий', 'UTC', 'ru')).toBe('Нет событий');
+    });
+  });
 });

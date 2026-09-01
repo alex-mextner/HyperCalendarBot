@@ -90,6 +90,12 @@ function buildEventStepResults(userCtx: ExecutorUserContext): RuntimeStepResults
 interface ExecutorResult {
   success: boolean;
   response?: string;
+  /**
+   * Structured events behind `response`, when the last tool returned any. The
+   * formatter renders these instead of `response`, whose text form is written for
+   * the AI agent and would otherwise reach the user verbatim.
+   */
+  responseEvents?: EventSummary[];
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: StepResults;
@@ -140,6 +146,7 @@ async function runLevel1(
   i18n?: I18nMap,
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
+  let lastData: ToolResultData | undefined;
 
   const eventCtx = buildEventStepResults(userCtx);
 
@@ -151,9 +158,10 @@ async function runLevel1(
       return { success: false, response: result.error };
     }
     lastOutput = result.output;
+    lastData = result.data;
   }
 
-  return { success: true, response: lastOutput };
+  return { success: true, response: lastOutput, responseEvents: extractEventSummaries(lastData) };
 }
 
 /**
@@ -179,6 +187,17 @@ function extractEventSummary(data: ToolResultData): EventSummary | null {
     return first && isEventSummary(first) ? first : null;
   }
   return isEventSummary(data) ? data : null;
+}
+
+/** Every event in a list result, or undefined when the data is not a list of events. */
+function extractEventSummaries(data: ToolResultData | undefined): EventSummary[] | undefined {
+  if (data === undefined || !Array.isArray(data) || data.length === 0) return undefined;
+  const events: EventSummary[] = [];
+  for (const item of data) {
+    if (!isEventSummary(item)) return undefined;
+    events.push(item);
+  }
+  return events;
 }
 
 async function runLevel2(
@@ -235,6 +254,7 @@ async function runLevel2(
 
   let mentionedEventId: number | undefined;
   let lastToolOutput: string | undefined;
+  let lastToolData: ToolResultData | undefined;
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
@@ -297,6 +317,7 @@ async function runLevel2(
     }
 
     lastToolOutput = result.output;
+    lastToolData = result.data;
 
     // If result carries structured event data, update last_mentioned_event in-workflow
     // and track the ID for cross-request persistence via mentionedEventId.
@@ -324,7 +345,13 @@ async function runLevel2(
     }
   }
 
-  return { success: true, response: lastToolOutput, stepResults, mentionedEventId };
+  return {
+    success: true,
+    response: lastToolOutput,
+    responseEvents: extractEventSummaries(lastToolData),
+    stepResults,
+    mentionedEventId,
+  };
 }
 
 export class IntentExecutor {

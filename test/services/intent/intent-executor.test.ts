@@ -621,4 +621,49 @@ describe('IntentExecutor', () => {
     expect(calls).toEqual(['get_event']);
     expect(result.success).toBe(true);
   });
+
+  describe('responseEvents', () => {
+    // get_events writes its text output for the AI agent; the intent path shows the
+    // result to the user directly, so the structured data has to survive the executor.
+    const eventData = [
+      { id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false },
+      { id: 440, title: 'Созвон', date: '2026-06-01', time: '16:00', all_day: false },
+    ];
+
+    test('carries structured events from the last Level 2 step', async () => {
+      const workflow: Workflow = {
+        steps: [
+          { call: 'render_day_image', input: { date: '{{dates.today}}' } },
+          { call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } },
+        ],
+      };
+      const mockExecutor = (name: string) =>
+        name === 'get_events'
+          ? { success: true, output: 'id: 239, title: Английский', data: eventData }
+          : { success: true, output: 'image sent' };
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.responseEvents).toEqual(eventData);
+    });
+
+    test('carries structured events from the last Level 1 tool', async () => {
+      const workflow: Workflow = {
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+      };
+      const mockExecutor = () => ({ success: true, output: 'id: 239, title: Английский', data: eventData });
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.responseEvents).toEqual(eventData);
+    });
+
+    test('is undefined when the last tool returns no event list', async () => {
+      const workflow: Workflow = {
+        steps: [{ call: 'manage_settings', input: { action: 'get', category: 'timezone' } }],
+      };
+      const mockExecutor = () => ({ success: true, output: 'Часовой пояс: Europe/Moscow' });
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.responseEvents).toBeUndefined();
+    });
+  });
 });
