@@ -7,11 +7,15 @@
 // during an outage.
 //
 // These tests run the real script with a stubbed `curl`, so the assertions are
-// about what the admin receives, not about how the script is written.
+// about what the admin receives, not about how the script is written. The stub
+// answers with READINESS_BODY — the same literals the server returns — so a
+// change to those strings breaks these tests rather than silently breaking
+// recovery detection in production.
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { READINESS_BODY } from '../../src/web/server.ts';
 
 const SCRIPT = join(import.meta.dir, '../../scripts/healthcheck-alert.sh');
 
@@ -91,17 +95,17 @@ describe('healthcheck watchdog', () => {
   // is expensive: restarting brings back a process that failed to start, but it
   // does nothing for a dead provider chain except throw away the record of it.
   test('a chain outage alert says so and warns against restarting', async () => {
-    const sent = await poll('503', 'ai chain down');
+    const sent = await poll('503', READINESS_BODY.chainDown);
     expect(sent).toContain('DOWN');
-    expect(sent).toContain('ai chain down');
+    expect(sent).toContain(READINESS_BODY.chainDown);
     expect(sent).toContain('restart will not fix this');
     expect(consideredDown()).toBe(true);
   });
 
   test('one alert per outage, not one per poll', async () => {
-    await poll('503', 'ai chain down');
+    await poll('503', READINESS_BODY.chainDown);
     const before = readFileSync(join(work, 'sent.log'), 'utf8').split('\n').length;
-    await poll('503', 'ai chain down');
+    await poll('503', READINESS_BODY.chainDown);
     const after = readFileSync(join(work, 'sent.log'), 'utf8').split('\n').length;
     expect(after).toBe(before);
   });
@@ -110,18 +114,18 @@ describe('healthcheck watchdog', () => {
   // has no evidence about the providers. Announcing a recovery there would be
   // announcing one nobody verified.
   test('a restart that cannot vouch for the chain announces nothing', async () => {
-    await poll('503', 'ai chain down');
+    await poll('503', READINESS_BODY.chainDown);
     writeFileSync(join(work, 'sent.log'), '');
-    const sent = await poll('200', 'ok (unverified)');
+    const sent = await poll('200', READINESS_BODY.unverified);
     expect(sent.trim()).toBe('');
     expect(consideredDown()).toBe(true);
   });
 
   test('a real answer after that announces the recovery', async () => {
-    await poll('503', 'ai chain down');
-    await poll('200', 'ok (unverified)');
+    await poll('503', READINESS_BODY.chainDown);
+    await poll('200', READINESS_BODY.unverified);
     writeFileSync(join(work, 'sent.log'), '');
-    const sent = await poll('200', 'ok');
+    const sent = await poll('200', READINESS_BODY.ready);
     expect(sent).toContain('recovered');
     expect(consideredDown()).toBe(false);
   });
@@ -131,13 +135,13 @@ describe('healthcheck watchdog', () => {
   // later. The wait is bounded, and expiring it announces nothing — there is
   // still no proof to announce.
   test('the unverified wait is bounded, and expiring it stays silent', async () => {
-    await poll('503', 'ai chain down');
-    await poll('200', 'ok (unverified)');
+    await poll('503', READINESS_BODY.chainDown);
+    await poll('200', READINESS_BODY.unverified);
     expect(consideredDown()).toBe(true);
 
     ageUnverified(3600);
     writeFileSync(join(work, 'sent.log'), '');
-    const sent = await poll('200', 'ok (unverified)');
+    const sent = await poll('200', READINESS_BODY.unverified);
     expect(sent.trim()).toBe('');
     expect(consideredDown()).toBe(false);
   });
@@ -146,23 +150,46 @@ describe('healthcheck watchdog', () => {
   // an outage older than the window expired it on the very first unverified
   // answer — no waiting at all, in exactly the long outage it was built for.
   test('the wait starts when the bot came back, not when the outage did', async () => {
-    await poll('503', 'ai chain down');
+    await poll('503', READINESS_BODY.chainDown);
     writeFileSync(join(work, 'down'), '');
     Bun.spawnSync(['touch', '-t', '202001010000', join(work, 'down')]);
 
-    await poll('200', 'ok (unverified)');
+    await poll('200', READINESS_BODY.unverified);
     expect(consideredDown()).toBe(true);
   });
 
   test('a later outage re-arms alerting after the wait expired', async () => {
-    await poll('503', 'ai chain down');
-    await poll('200', 'ok (unverified)');
+    await poll('503', READINESS_BODY.chainDown);
+    await poll('200', READINESS_BODY.unverified);
     ageUnverified(3600);
-    await poll('200', 'ok (unverified)');
+    await poll('200', READINESS_BODY.unverified);
     writeFileSync(join(work, 'sent.log'), '');
 
     const sent = await poll('503', 'bot not started');
     expect(sent).toContain('DOWN');
     expect(sent).toContain('bot not started');
+  });
+
+  // A proxy answering 200 with its own page, or a changed contract, is not
+  // proof either — and it used to keep the down-state forever, suppressing
+  // every future alert. It gets the same bounded wait.
+  test('an answer this script does not recognise is bounded the same way', async () => {
+    await poll('503', READINESS_BODY.chainDown);
+    await poll('200', '<html>maintenance</html>');
+    expect(consideredDown()).toBe(true);
+
+    ageUnverified(3600);
+    writeFileSync(join(work, 'sent.log'), '');
+    const sent = await poll('200', '<html>maintenance</html>');
+    expect(sent.trim()).toBe('');
+    expect(consideredDown()).toBe(false);
+  });
+
+  // The reason is interpolated into an HTML message, so it must not be able to
+  // carry tags into the admin's alert.
+  test('the reason is escaped before it reaches the alert', async () => {
+    const sent = await poll('503', '<b>injected</b>');
+    expect(sent).toContain('&lt;b&gt;injected&lt;/b&gt;');
+    expect(sent).not.toContain('<b>injected</b>');
   });
 });

@@ -67,9 +67,10 @@ if (config.TELEGRAM_SESSION_MASTER_KEY) {
   }
 }
 
-if (config.BOT_ADMIN_ID) {
-  initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
-}
+// Unconditional: /ready reads the outage record this keeps, and whether an admin
+// chat is configured has nothing to do with whether the bot can answer people.
+// Without an admin the alerts are logged instead of sent.
+initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
 // When BOT_ADMIN_ID is absent (dev/test), still logs — just skips Telegram + alert queue.

@@ -109,6 +109,21 @@ function withSecurityHeaders(res: Response): Response {
 }
 
 /**
+ * The exact strings /ready answers with. scripts/healthcheck-alert.sh matches
+ * them character for character to decide whether a recovery is real, so they
+ * are a contract across two languages: exported here so the tests on both sides
+ * assert against one definition instead of two hand-copied ones.
+ */
+export const READINESS_BODY = {
+  /** A provider has answered in this process — the bot demonstrably works. */
+  ready: 'ok',
+  /** Alive, but has served nobody since it started, so it can vouch for nothing. */
+  unverified: 'ok (unverified)',
+  /** Every provider on the serving chain is failing. */
+  chainDown: 'ai chain down',
+} as const;
+
+/**
  * The checks both /health and /ready share: the process finished starting and
  * its own datastore answers. Returns the failing response, or undefined when
  * the process is live.
@@ -146,7 +161,7 @@ async function handleRequest(
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/ready')) {
     const notLive = await livenessFailure(deps);
     if (notLive) return notLive;
-    if (url.pathname === '/health') return new Response('ok');
+    if (url.pathname === '/health') return new Response(READINESS_BODY.ready);
     // A running process with a dead provider chain answers nobody. Reporting it
     // healthy is what let the 2026-09-01 outage run for hours unnoticed: the
     // two-minute cron watchdog saw "ok" the whole time. This lives on /ready
@@ -154,10 +169,10 @@ async function handleRequest(
     // provider — see the comment on aiChainDown in WebServerDeps.
     if (deps.aiChainDown()) {
       webLogger.error('AI provider chain is down — reporting not ready');
-      return new Response('ai chain down', { status: 503 });
+      return new Response(READINESS_BODY.chainDown, { status: 503 });
     }
-    if (!deps.aiChainVerified()) return new Response('ok (unverified)');
-    return new Response('ok');
+    if (!deps.aiChainVerified()) return new Response(READINESS_BODY.unverified);
+    return new Response(READINESS_BODY.ready);
   }
 
   if (req.method === 'GET' && url.pathname === '/oauth/google/callback') {

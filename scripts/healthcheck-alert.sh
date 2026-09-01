@@ -86,7 +86,9 @@ if [[ "$HTTP_CODE" != "200" ]]; then
   rm -f "$UNVERIFIED_FILE"
   if [[ ! -f "$STATE_FILE" ]]; then
     touch "$STATE_FILE"
-    REASON=$(head -c 200 "$BODY_FILE" 2>/dev/null || true)
+    # Escaped: it goes into an HTML message, and a proxy or a compromised
+    # endpoint should not be able to inject tags into the admin's alert.
+    REASON=$(head -c 200 "$BODY_FILE" 2>/dev/null | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' || true)
     # The body says which failure this is, and the right reaction differs: a
     # process that has not started comes back with a restart, while a dead
     # provider chain does not — restarting only throws away the evidence.
@@ -117,25 +119,24 @@ else
     if [[ "$BODY" == "ok" ]]; then
       rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
       send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
-    elif [[ "$BODY" == "ok (unverified)" ]]; then
-      # The bot is up but has served nobody since it started, so it cannot say
-      # whether the outage ended. Wait — but not forever: while this state file
-      # exists the DOWN branch stays silent, so an indefinite wait would swallow
-      # the alert for a *different* outage starting later. On a bot quiet enough
-      # to sit unverified this long, that silence is the worse failure.
+    else
+      # Anything that is not proof: the expected "not yet verified" answer, or a
+      # body this script does not know — a changed contract, or a proxy
+      # answering 200 with its own page. Both are treated the same way, because
+      # both mean the same thing here: no evidence the outage ended.
+      if [[ "$BODY" != "ok (unverified)" ]]; then
+        echo "$(date -u +%FT%TZ) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
+      fi
+      # Wait — but not forever. While this state file exists the DOWN branch
+      # stays silent, so an indefinite wait would swallow the alert for a
+      # *different* outage starting later. That silence is the worse failure,
+      # whether it comes from a quiet bot or from a broken contract.
       [[ -f "$UNVERIFIED_FILE" ]] || date +%s > "$UNVERIFIED_FILE"
       WAITED=$(( $(date +%s) - $(cat "$UNVERIFIED_FILE") ))
       if (( WAITED > UNVERIFIED_HOLD )); then
         rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
-        echo "$(date -u +%FT%TZ) dropping down-state after ${WAITED}s unverified; no recovery announced" >&2
+        echo "$(date -u +%FT%TZ) dropping down-state after ${WAITED}s without proof; no recovery announced" >&2
       fi
-    else
-      # Neither answer this script knows. Most likely the endpoint's contract
-      # changed and this branch stopped recognising a real recovery — which would
-      # keep the state file forever and suppress every future DOWN alert. Say so
-      # in the cron log rather than sitting in a silence that looks identical to
-      # a bot nobody has messaged yet.
-      echo "$(date -u +%FT%TZ) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
     fi
   fi
 fi

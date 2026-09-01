@@ -2,7 +2,7 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { AlertRepository } from '../../src/database/repositories/alert.repository.ts';
 import type { WebServerDeps } from '../../src/web/server.ts';
-import { startWebServer } from '../../src/web/server.ts';
+import { READINESS_BODY, startWebServer } from '../../src/web/server.ts';
 
 function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   return {
@@ -21,7 +21,7 @@ describe('health endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
-      expect(await res.text()).toBe('ok');
+      expect(await res.text()).toBe(READINESS_BODY.ready);
     } finally {
       stop();
     }
@@ -60,7 +60,7 @@ describe('health endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/health`);
       expect(res.status).toBe(200);
-      expect(await res.text()).toBe('ok');
+      expect(await res.text()).toBe(READINESS_BODY.ready);
     } finally {
       stop();
     }
@@ -493,7 +493,7 @@ describe('readiness endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/ready`);
       expect(res.status).toBe(503);
-      expect(await res.text()).toBe('ai chain down');
+      expect(await res.text()).toBe(READINESS_BODY.chainDown);
     } finally {
       stop();
     }
@@ -505,7 +505,7 @@ describe('readiness endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/ready`);
       expect(res.status).toBe(200);
-      expect(await res.text()).toBe('ok');
+      expect(await res.text()).toBe(READINESS_BODY.ready);
     } finally {
       stop();
     }
@@ -537,7 +537,7 @@ describe('readiness endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/ready`);
       expect(res.status).toBe(200);
-      expect(await res.text()).toBe('ok (unverified)');
+      expect(await res.text()).toBe(READINESS_BODY.unverified);
     } finally {
       stop();
     }
@@ -553,7 +553,7 @@ describe('readiness endpoint', () => {
     try {
       const res = await fetch(`http://localhost:${port}/ready`);
       expect(res.status).toBe(200);
-      expect(await res.text()).toBe('ok');
+      expect(await res.text()).toBe(READINESS_BODY.ready);
     } finally {
       stop();
     }
@@ -571,7 +571,7 @@ describe('readiness endpoint', () => {
       deps.aiChainDown = () => true;
       const res = await fetch(`http://localhost:${port}/ready`);
       expect(res.status).toBe(503);
-      expect(await res.text()).toBe('ai chain down');
+      expect(await res.text()).toBe(READINESS_BODY.chainDown);
     } finally {
       stop();
     }

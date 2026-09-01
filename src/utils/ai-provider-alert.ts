@@ -184,7 +184,12 @@ export function isBalanceExhausted(error: unknown): boolean {
 
 export interface AlertDeps {
   botToken: string;
-  adminId: number;
+  /**
+   * Absent when no admin is configured. The outage record is still kept — the
+   * readiness endpoint depends on it, and whether anyone is listening on
+   * Telegram is a separate question from whether the bot can serve people.
+   */
+  adminId?: number;
   /** Overridden in tests. Fire-and-forget: must not throw. */
   send?: (html: string) => void;
   /** Overridden in tests. */
@@ -202,6 +207,21 @@ interface ResolvedDeps {
 let deps: ResolvedDeps | null = null;
 let initializedAt = 0;
 
+/**
+ * The transport, or a log-only sink when no admin is configured. Alerts have
+ * nowhere to go then, but the state they are derived from must still be kept:
+ * readiness reads it, and a bot without an admin chat can still be unable to
+ * answer anyone.
+ */
+function adminSender(botToken: string, adminId: number | undefined): (html: string) => void {
+  if (adminId === undefined) {
+    return (html) => {
+      alertLogger.warn({ alert: html }, 'Provider alert with no admin configured — recorded, not sent');
+    };
+  }
+  return telegramSender(botToken, adminId);
+}
+
 function telegramSender(botToken: string, adminId: number): (html: string) => void {
   return (html) => {
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -217,7 +237,7 @@ function telegramSender(botToken: string, adminId: number): (html: string) => vo
 /** Call once at startup. Without it every report is a no-op (dev/test without an admin). */
 export function initProviderAlerts(config: AlertDeps): void {
   deps = {
-    send: config.send ?? telegramSender(config.botToken, config.adminId),
+    send: config.send ?? adminSender(config.botToken, config.adminId),
     now: config.now ?? Date.now,
     schedule:
       config.schedule ??

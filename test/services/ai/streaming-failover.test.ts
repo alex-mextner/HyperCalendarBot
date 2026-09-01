@@ -7,6 +7,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
+import {
+  hasChainAnswered,
+  initProviderAlerts,
+  isAiChainDown,
+  resetProviderAlertState,
+} from '../../../src/utils/ai-provider-alert.ts';
 
 // ── Fake provider clients ──────────────────────────────────────────────────
 
@@ -409,5 +415,76 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     await ask();
     await ask();
     expect(groq.modelsListCalls).toBe(2);
+  });
+});
+
+// Everything the readiness signal does rests on one ternary in aiStreamRound
+// deciding which chain a round belongs to. Invert it and a background
+// summariser answering on the fast chain clears a real outage on the chain that
+// talks to people — the 2026-09-01 blind spot, with every other test green.
+describe('the chain a round runs on reaches the alert layer', () => {
+  const DEAD = [{ kind: 'throw' as const, error: apiError(503, 'provider is down') }];
+
+  function askOn(chain: 'smart' | 'fast') {
+    return aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: chain === 'fast' });
+  }
+
+  function allProvidersAnswer(): void {
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'answer' }] });
+    groq = unusedProvider();
+    gemini = unusedProvider();
+    hf = unusedProvider();
+  }
+
+  function allProvidersDead(): void {
+    zai = makeProvider({ behaviors: DEAD });
+    groq = makeProvider({ behaviors: DEAD });
+    gemini = makeProvider({ behaviors: DEAD });
+    hf = makeProvider({ behaviors: DEAD });
+  }
+
+  beforeEach(() => {
+    resetModelRegistry();
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
+  });
+
+  afterEach(() => {
+    resetProviderAlertState();
+  });
+
+  test('a fast round answering is not proof a person can be served', async () => {
+    allProvidersAnswer();
+    await askOn('fast');
+    expect(hasChainAnswered()).toBe(false);
+  });
+
+  test('a smart round answering is', async () => {
+    allProvidersAnswer();
+    await askOn('smart');
+    expect(hasChainAnswered()).toBe(true);
+  });
+
+  test('a fast round failing everywhere leaves the bot ready', async () => {
+    allProvidersDead();
+    await expect(askOn('fast')).rejects.toThrow(AllProvidersFailedError);
+    expect(isAiChainDown()).toBe(false);
+  });
+
+  test('a smart round failing everywhere makes the bot unready', async () => {
+    allProvidersDead();
+    await expect(askOn('smart')).rejects.toThrow(AllProvidersFailedError);
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a fast round answering afterwards does not clear it', async () => {
+    allProvidersDead();
+    await expect(askOn('smart')).rejects.toThrow(AllProvidersFailedError);
+    allProvidersAnswer();
+    await askOn('fast');
+    expect(isAiChainDown()).toBe(true);
+
+    await askOn('smart');
+    expect(isAiChainDown()).toBe(false);
   });
 });

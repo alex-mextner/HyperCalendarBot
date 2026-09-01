@@ -217,3 +217,22 @@ describe('isAiChainDown — the two chains are tracked apart', () => {
     expect(sent.some((m) => m.includes('working again'))).toBe(true);
   });
 });
+
+// Regression: alerting used to initialise only when an admin chat was
+// configured, so a bot without BOT_ADMIN_ID discarded every provider failure
+// and readiness answered "fine" through a total outage. Whether anyone is
+// listening on Telegram is a different question from whether the bot works.
+describe('isAiChainDown — with no admin chat configured', () => {
+  beforeEach(() => {
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't' });
+  });
+
+  test('the outage is still recorded and readiness still reports it', () => {
+    expect(isAiChainDown()).toBe(false);
+    reportAllProvidersFailed(DEAD, 'smart');
+    expect(isAiChainDown()).toBe(true);
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    expect(isAiChainDown()).toBe(false);
+  });
+});
