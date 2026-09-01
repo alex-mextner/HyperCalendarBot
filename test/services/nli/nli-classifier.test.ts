@@ -111,4 +111,30 @@ describe('NliClassifier', () => {
     const headers = callArgs[1].headers as { [key: string]: string };
     expect(headers.Authorization).toBe('Bearer my-secret-token');
   });
+  // Regression: `api-inference.huggingface.co` was retired by HuggingFace and no
+  // longer resolves in DNS. Every request failed instantly, and because the
+  // classifier fails open, the group-chat filter silently stopped filtering —
+  // every group message was forwarded to the AI. Pin the live router endpoint.
+  test('calls the HuggingFace router endpoint, not the retired api-inference host', async () => {
+    const fetchMock = mock(() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            sequence: 'test',
+            labels: [CALENDAR_LABEL, 'general conversation chat smalltalk'],
+            scores: [0.8, 0.2],
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const classifier = new NliClassifier('test-token');
+    await classifier.isCalendarRelated('test');
+
+    const callArgs = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(callArgs[0]).toBe('https://router.huggingface.co/hf-inference/models/joeddav/xlm-roberta-large-xnli');
+    expect(callArgs[0]).not.toContain('api-inference.huggingface.co');
+  });
 });
