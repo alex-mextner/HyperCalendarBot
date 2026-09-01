@@ -42,6 +42,11 @@
 //    alert/recovery messages, a failure returning within 15 minutes of a recovery
 //    resumes the previous outage (escalation ladder intact) instead of alerting
 //    as brand new.
+//  * The chain-down flag the readiness endpoint reads is the same open/closed
+//    record this file escalates on — never a second, separately-expiring copy.
+//    The cron watchdog that polls readiness has none of the throttling below,
+//    so any flag that could flip back without a provider answering would turn
+//    into an unthrottled stream of contradictory admin messages.
 //  * Hard ceiling of 6 admin messages per rolling hour. The message that fills
 //    the budget says so; anything held back afterwards is counted and reported in
 //    the next message that gets through, so nothing is dropped silently. A first
@@ -179,7 +184,12 @@ export function isBalanceExhausted(error: unknown): boolean {
 
 export interface AlertDeps {
   botToken: string;
-  adminId: number;
+  /**
+   * Absent when no admin is configured. The outage record is still kept — the
+   * readiness endpoint depends on it, and whether anyone is listening on
+   * Telegram is a separate question from whether the bot can serve people.
+   */
+  adminId?: number;
   /** Overridden in tests. Fire-and-forget: must not throw. */
   send?: (html: string) => void;
   /** Overridden in tests. */
@@ -197,6 +207,26 @@ interface ResolvedDeps {
 let deps: ResolvedDeps | null = null;
 let initializedAt = 0;
 
+/**
+ * The transport, or a log-only sink when no admin is configured. Alerts have
+ * nowhere to go then, but the state they are derived from must still be kept:
+ * readiness reads it, and a bot without an admin chat can still be unable to
+ * answer anyone.
+ */
+function adminSender(botToken: string, adminId: number | undefined): (html: string) => void {
+  if (adminId === undefined) {
+    // The body is deliberately not logged: it is rendered from provider error
+    // messages, which are attacker- and vendor-controlled text on a path CodeQL
+    // traces back to the API keys. What went wrong is already logged at the
+    // failure site with the provider and status; this line only records that
+    // there was nobody to tell.
+    return () => {
+      alertLogger.warn('Provider alert not sent — no admin chat is configured');
+    };
+  }
+  return telegramSender(botToken, adminId);
+}
+
 function telegramSender(botToken: string, adminId: number): (html: string) => void {
   return (html) => {
     fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
@@ -212,7 +242,7 @@ function telegramSender(botToken: string, adminId: number): (html: string) => vo
 /** Call once at startup. Without it every report is a no-op (dev/test without an admin). */
 export function initProviderAlerts(config: AlertDeps): void {
   deps = {
-    send: config.send ?? telegramSender(config.botToken, config.adminId),
+    send: config.send ?? adminSender(config.botToken, config.adminId),
     now: config.now ?? Date.now,
     schedule:
       config.schedule ??
@@ -224,6 +254,8 @@ export function initProviderAlerts(config: AlertDeps): void {
   outages.clear();
   sentAtMs.length = 0;
   heldBackCount = 0;
+  chainAnswered = false;
+  uninitializedReadWarned = false;
 }
 
 /** Test helper: drop all throttling state and the configured transport. */
@@ -233,6 +265,8 @@ export function resetProviderAlertState(): void {
   outages.clear();
   sentAtMs.length = 0;
   heldBackCount = 0;
+  chainAnswered = false;
+  uninitializedReadWarned = false;
 }
 
 // ── Outage state ───────────────────────────────────────────────────────────
@@ -257,11 +291,41 @@ const outages = new Map<string, OutageState>();
 const sentAtMs: number[] = [];
 let heldBackCount = 0;
 
-const CHAIN_KEY = 'chain:all-providers';
+/**
+ * The bot runs two provider chains. The smart one answers people; the fast one
+ * does auxiliary work — resolving a city, translating for speech, summarising
+ * history, validating a response. They are configured with different models and
+ * fail independently, so they get separate outage records: a dead fast chain
+ * must not report the bot unable to serve anyone, and a fast answer must not
+ * clear an outage on the chain that actually talks to people.
+ */
+export type ProviderChainKind = 'smart' | 'fast';
+
+const CHAIN_KEYS: Record<ProviderChainKind, string> = {
+  smart: 'chain:all-providers:smart',
+  fast: 'chain:all-providers:fast',
+};
+const SERVING_CHAIN: ProviderChainKind = 'smart';
+
+// Set the first time any provider answers in this process. The outage map dies
+// with the process, so a fresh one cannot tell a working chain from one it has
+// simply never tried — see hasChainAnswered below.
+let chainAnswered = false;
+let uninitializedReadWarned = false;
 
 /** "Groq (llama-3.3-70b-versatile)" → "groq" — the model id must not split the dedup key. */
 function providerFamily(provider: string): string {
   return providerLabel(provider).toLowerCase();
+}
+
+/**
+ * The chain belongs in the key for the same reason it belongs in the chain key:
+ * the two chains run different models from the same providers, so a stale model
+ * on the smart chain and a healthy one on the fast chain are different problems
+ * — and an answer from one must not announce the other as working again.
+ */
+function providerKey(chain: ProviderChainKind, provider: string, failureClass: ProviderFailureClass): string {
+  return `provider:${chain}:${providerFamily(provider)}:${failureClass}`;
 }
 
 function newOutage(kind: OutageKind, provider: string, failureClass: ProviderFailureClass, now: number): OutageState {
@@ -295,10 +359,10 @@ function restartOutage(state: OutageState, now: number): void {
  * the chain handles them. Quota, auth and stale-model failures need a human, so
  * they alert under the throttling policy documented at the top of this file.
  */
-export function reportProviderFailure(failure: ProviderFailure): void {
+export function reportProviderFailure(failure: ProviderFailure, chain: ProviderChainKind): void {
   const failureClass = classifyProviderFailure(failure);
   if (failureClass === 'transient') return;
-  const key = `provider:${providerFamily(failure.provider)}:${failureClass}`;
+  const key = providerKey(chain, failure.provider, failureClass);
   noteFailure(key, 'provider', failure.provider, failureClass, [failure]);
 }
 
@@ -307,19 +371,85 @@ export function reportProviderFailure(failure: ProviderFailure): void {
  * This is the alert that matters most, so it escalates fastest and is never
  * dropped by the hourly ceiling.
  */
-export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
-  noteFailure(CHAIN_KEY, 'chain', 'all providers', 'transient', failures);
+export function reportAllProvidersFailed(failures: ProviderFailure[], chain: ProviderChainKind): void {
+  noteFailure(CHAIN_KEYS[chain], 'chain', `all ${chain} providers`, 'transient', failures);
 }
 
-/** Report that a provider answered successfully — closes its outages and the chain outage. */
-export function reportProviderRecovered(provider: string): void {
+/**
+ * True while the whole provider chain is failing and no provider has answered
+ * since. Read by the `/ready` endpoint, which the cron watchdog polls.
+ *
+ * On 2026-09-01 every provider was dead for hours. The process was running and
+ * Redis answered its ping, which is all the only endpoint of the day checked,
+ * so it reported "ok", the two-minute cron watchdog stayed quiet, and nothing
+ * was raised — while no user could get an answer. Liveness of the process is
+ * not health of the bot.
+ *
+ * This reads state the alerting layer already keeps, so the check costs nothing
+ * and never calls a provider: a watchdog polling every two minutes must not
+ * spend quota to discover that quota is the problem.
+ *
+ * It answers from the same record the alerting layer escalates on, so the two
+ * can never disagree about whether the outage is open. That coherence is the
+ * whole design: an earlier version expired the flag after fifteen quiet
+ * minutes, reasoning that an idle bot has no evidence either way. Under
+ * sporadic traffic — a message every twenty minutes, an ordinary overnight
+ * pattern — that made readiness flip back and forth between messages, and the
+ * cron watchdog, which has none of the throttling documented at the top of this
+ * file, sent the admin alternating "down" and "recovered" messages all night.
+ *
+ * So the flag stays armed until a provider actually answers. During a long
+ * silence that answer may be stale, and that is the accepted cost: it produces
+ * at most one late alert, which the watchdog's own state file keeps from
+ * repeating, instead of a stream of contradictory ones.
+ */
+export function isAiChainDown(): boolean {
+  if (!deps) {
+    if (!uninitializedReadWarned) {
+      uninitializedReadWarned = true;
+      alertLogger.warn('Chain-down state read before initProviderAlerts — readiness cannot see provider outages');
+    }
+    return false;
+  }
+  const chain = outages.get(CHAIN_KEYS[SERVING_CHAIN]);
+  return chain !== undefined && chain.resolvedAt === null;
+}
+
+/**
+ * True once some provider has answered in this process — the only proof a
+ * working chain leaves behind.
+ *
+ * The outage record lives in memory and dies with the process, and the likeliest
+ * reaction to a "bot is down" alert is restarting the container. A restarted
+ * process therefore has an empty record, which is not the same as evidence that
+ * the chain is fine: without this distinction the readiness endpoint would
+ * answer a plain "ok" and the cron watchdog would announce a recovery nobody
+ * verified, while every provider was still dead.
+ *
+ * Failures are not the missing proof — the chain flag already carries those.
+ * What a restart loses is a success.
+ */
+export function hasChainAnswered(): boolean {
+  return chainAnswered;
+}
+
+/**
+ * Report that a provider answered successfully. Called on EVERY success, not
+ * only after a failure — the readiness signal depends on it, because a success
+ * is the only proof a working chain leaves behind. Closes that provider's
+ * outages and its own chain's outage.
+ */
+export function reportProviderAnswered(provider: string, chain: ProviderChainKind): void {
   if (!deps) return;
+  if (chain === SERVING_CHAIN) chainAnswered = true;
   const now = deps.now();
-  const family = providerFamily(provider);
+  const providerPrefix = `provider:${chain}:${providerFamily(provider)}:`;
+  const chainKey = CHAIN_KEYS[chain];
   for (const [key, state] of outages) {
     if (state.resolvedAt !== null) continue;
-    const isThisProvider = state.kind === 'provider' && key.startsWith(`provider:${family}:`);
-    if (!isThisProvider && state.kind !== 'chain') continue;
+    const isThisProvider = state.kind === 'provider' && key.startsWith(providerPrefix);
+    const isThisChain = state.kind === 'chain' && key === chainKey;
+    if (!isThisProvider && !isThisChain) continue;
     resolveOutage(state, now);
   }
 }
@@ -333,17 +463,27 @@ function noteFailure(
 ): void {
   if (!deps) return;
   const now = deps.now();
-  if (now - initializedAt < ALERT_POLICY.startupGraceMs) {
-    alertLogger.warn({ provider, failureClass }, 'Provider failure inside startup grace window — not alerting');
-    return;
-  }
+  const withinStartupGrace = now - initializedAt < ALERT_POLICY.startupGraceMs;
 
+  // The outage is recorded even inside the grace window. The grace exists to
+  // stop a crash loop turning every restart into an alert burst — it must not
+  // also erase the state, or a process that restarts into an already-broken
+  // chain looks healthy for its first minute. That is not hypothetical: on
+  // 2026-09-01 the container was recreated while every provider was dead.
   const state = outages.get(key) ?? newOutage(kind, provider, failureClass, now);
   outages.set(key, state);
   applyFlapGuard(state, now);
   state.provider = provider;
   state.failures = failures;
   state.occurrences += 1;
+
+  if (withinStartupGrace) {
+    alertLogger.warn(
+      { provider, failureClass },
+      'Provider failure inside startup grace window — recorded, not alerting',
+    );
+    return;
+  }
 
   // An alert the ceiling held back must not count as announced, otherwise the
   // outage would silently move on to the escalation ladder having said nothing.

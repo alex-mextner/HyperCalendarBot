@@ -17,7 +17,7 @@ import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
-import { initProviderAlerts } from './utils/ai-provider-alert.ts';
+import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
@@ -67,9 +67,10 @@ if (config.TELEGRAM_SESSION_MASTER_KEY) {
   }
 }
 
-if (config.BOT_ADMIN_ID) {
-  initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
-}
+// Unconditional: /ready reads the outage record this keeps, and whether an admin
+// chat is configured has nothing to do with whether the bot can answer people.
+// Without an admin the alerts are logged instead of sent.
+initProviderAlerts({ botToken: config.BOT_TOKEN, adminId: config.BOT_ADMIN_ID });
 
 // Returns a BullMQ 'failed' handler: logs via pino, Telegrams the admin, pushes to alert queue.
 // When BOT_ADMIN_ID is absent (dev/test), still logs — just skips Telegram + alert queue.
@@ -139,6 +140,10 @@ const webServerDeps: WebServerDeps = {
   botStarted: false,
   alertRepo: db.alerts,
   adminAlertToken: config.ADMIN_ALERT_TOKEN,
+  // The cron watchdog polls /ready every two minutes, and this is what lets it
+  // see a total provider outage. Process liveness alone never showed one.
+  aiChainDown: isAiChainDown,
+  aiChainVerified: hasChainAnswered,
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;

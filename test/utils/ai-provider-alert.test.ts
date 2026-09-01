@@ -15,8 +15,8 @@ import {
   initProviderAlerts,
   isBalanceExhausted,
   reportAllProvidersFailed,
+  reportProviderAnswered,
   reportProviderFailure,
-  reportProviderRecovered,
   resetProviderAlertState,
 } from '../../src/utils/ai-provider-alert.ts';
 
@@ -187,18 +187,24 @@ describe('single-provider alerts', () => {
   beforeEach(setupAlerts);
 
   test('a transient failure alone never reaches the admin', () => {
-    reportProviderFailure({ provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' });
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' });
+    reportProviderFailure(
+      { provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' },
+      'smart',
+    );
+    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
     advance(ALERT_POLICY.digestWindowMs * 3);
     expect(sent).toEqual([]);
   });
 
   test('a stale Groq model id alerts once and names the env var to update', () => {
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('Groq');
     expect(sent[0]).toContain('GROQ_MODEL');
@@ -206,7 +212,7 @@ describe('single-provider alerts', () => {
   });
 
   test('a revoked Hugging Face token alerts and tells the operator to rotate HF_TOKEN', () => {
-    reportProviderFailure({ provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure({ provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('HF_TOKEN');
   });
@@ -222,7 +228,7 @@ describe('single-provider alerts', () => {
       now: () => clock,
       schedule: (fn, delayMs) => scheduled.push({ fn, runAt: clock + delayMs }),
     });
-    reportProviderFailure({ provider: 'HF (m)', status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure({ provider: 'HF (m)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -231,7 +237,7 @@ describe('burst coalescing and escalation', () => {
   beforeEach(setupAlerts);
 
   function failZai(): void {
-    reportProviderFailure({ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE });
+    reportProviderFailure({ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }, 'smart');
   }
 
   test('a burst of the same failure sends one alert plus one digest, not one per failure', () => {
@@ -276,19 +282,19 @@ describe('burst coalescing and escalation', () => {
     expect(sent).toHaveLength(1);
 
     advance(20 * 60_000);
-    reportProviderRecovered('z.ai (glm-4.6)');
+    reportProviderAnswered('z.ai (glm-4.6)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('z.ai');
     expect(sent[1]).toContain('again');
 
-    reportProviderRecovered('z.ai (glm-4.6)');
+    reportProviderAnswered('z.ai (glm-4.6)', 'smart');
     advance(ALERT_POLICY.digestWindowMs);
     expect(sent).toHaveLength(2);
   });
 
   test('a provider that never alerted recovers silently', () => {
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' });
-    reportProviderRecovered('Gemini (gemini-2.5-flash)');
+    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
+    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -304,7 +310,7 @@ describe('total chain outage', () => {
   ];
 
   test('one alert names every provider with its own reason and the action to take', () => {
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(1);
     const text = sent[0] ?? '';
     expect(text).toContain('z.ai');
@@ -320,20 +326,20 @@ describe('total chain outage', () => {
   });
 
   test('a repeated chain outage escalates instead of repeating every time', () => {
-    reportAllProvidersFailed(chainFailures);
-    reportAllProvidersFailed(chainFailures);
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
+    reportAllProvidersFailed(chainFailures, 'smart');
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(1);
 
     advance(ALERT_POLICY.chainEscalationMs[0] + 1000);
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(2);
   });
 
   test('any provider answering again clears the chain outage with one recovery notice', () => {
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     advance(60_000);
-    reportProviderRecovered('Gemini (gemini-2.5-flash)');
+    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('again');
   });
@@ -343,7 +349,10 @@ describe('hourly ceiling', () => {
   beforeEach(setupAlerts);
 
   function failProvider(index: number): void {
-    reportProviderFailure({ provider: `Provider${index} (model-${index})`, status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure(
+      { provider: `Provider${index} (model-${index})`, status: 401, message: HF_AUTH_MESSAGE },
+      'smart',
+    );
   }
 
   test('the ceiling-filling message says the ceiling was reached and later ones are held back', () => {
@@ -363,7 +372,7 @@ describe('hourly ceiling', () => {
       failProvider(i);
       advance(1000);
     }
-    reportAllProvidersFailed([{ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }]);
+    reportAllProvidersFailed([{ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }], 'smart');
     expect(sent).toHaveLength(ALERT_POLICY.maxMessagesPerHour + 1);
     expect(sent[ALERT_POLICY.maxMessagesPerHour]).toContain('All AI providers');
   });
@@ -374,19 +383,25 @@ describe('hourly ceiling', () => {
       advance(1000);
     }
     // This provider never got its alert out.
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(0);
 
     advance(60 * 60_000 + 1000); // the rolling hour window empties
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(1);
   });
 

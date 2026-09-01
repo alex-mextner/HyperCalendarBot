@@ -25,9 +25,22 @@ docker compose up -d --no-deps bot
 # Docker logs (pino JSON):
 ssh root@104.248.84.190 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --tail 100 bot'
 
-# Health check:
+# Liveness — process started and Redis answers:
 curl https://hypercal.invntrm.ru/health
+
+# Readiness — everything above, plus the AI provider chain is answering.
+# This is what the cron watchdog polls; a 503 here with a 200 on /health means
+# the bot is running but cannot answer anyone.
+curl https://hypercal.invntrm.ru/ready
 ```
+
+`/ready` has three answers, and the body distinguishes the last two:
+
+| Response | Meaning |
+| --- | --- |
+| `503` | The bot cannot serve anyone: it has not started, Redis is unreachable, or every AI provider is failing (body says which). |
+| `200 ok` | A provider has answered in this process. The bot demonstrably works. |
+| `200 ok (unverified)` | The process is alive but has served nobody since it started, so it has no evidence either way. The watchdog treats this as "keep waiting", never as a recovery — a restart during an outage would otherwise look like the outage ending. After thirty minutes of waiting it drops the down-state silently, without announcing a recovery, so a quiet bot cannot end up swallowing the alert for the next outage. Any other 200 body — a proxy's own page, a changed contract — is treated the same way and logged. |
 
 `logs/chats/{chatId}/{timestamp}.log` inside container contains detailed AI interaction logs:
 system prompt, history, tool calls, responses. Enabled via `AI_DEBUG_LOGS=true`.
