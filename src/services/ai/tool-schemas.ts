@@ -239,7 +239,9 @@ const shareEventSchema = z
 const sendInvitationSchema = z
   .object({
     event_id: z.number(),
-    invitee_id: z.number(),
+    // Either invitee_id or invitee_username is required; the handler resolves a
+    // username to an id and owns the "neither was provided" error.
+    invitee_id: z.number().optional(),
     invitee_username: z.string().optional(),
   })
   .passthrough();

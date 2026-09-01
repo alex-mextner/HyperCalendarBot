@@ -13,6 +13,7 @@ import { SharedEventRepository } from '../../../../src/database/repositories/sha
 import { SharingSettingsRepository } from '../../../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../../src/database/schema.ts';
+import { executeTool } from '../../../../src/services/ai/tool-executor.ts';
 import { handleManageSettings } from '../../../../src/services/ai/tool-handlers/settings.ts';
 import {
   handleGetInvitationStatus,
@@ -497,6 +498,36 @@ describe('sharing tool handlers', () => {
       expect(result.success).toBe(true);
       expect(result.stopLoop).toBe(true);
       expect(pickerPrompt).toContain('@nobody');
+    });
+
+    test('dispatches through executeTool when only invitee_username is provided', async () => {
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Dispatch Party',
+        start_at: futureStartAt(),
+        timezone: 'UTC',
+      });
+      const ctx = makeCtx({
+        resolveUsername: async () => ({ id: 300, firstName: 'Target', username: 'targetuser' }),
+      });
+
+      const result = await executeTool(ctx, 'send_invitation', {
+        event_id: event.id,
+        invitee_username: 'targetuser',
+      });
+
+      expect(result.success).toBe(true);
+      expect(invitationRepo.findActiveByEventAndInvitee(event.id, 300)).not.toBeNull();
+    });
+
+    test('names the offending field when executeTool rejects malformed input', async () => {
+      const ctx = makeCtx();
+      const result = await executeTool(ctx, 'send_invitation', { invitee_id: 300 });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('event_id');
+      // The wrapper already says "Invalid input" — the zod message must not repeat it.
+      expect(result.error).not.toContain('Invalid input: Invalid input');
     });
 
     test('returns error when neither invitee_id nor invitee_username provided', async () => {
