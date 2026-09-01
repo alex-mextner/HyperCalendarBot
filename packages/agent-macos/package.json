@@ -24,6 +24,7 @@
     "@types/ws": "^8.0.0",
     "electron": "41.10.7",
     "electron-builder": "^26.0.0",
+    "electron-builder-squirrel-windows": "^26.15.3",
     "typescript": "^5.0.0"
   },
   "build": {
