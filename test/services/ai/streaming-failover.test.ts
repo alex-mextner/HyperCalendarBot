@@ -4,7 +4,7 @@
 // healthy Gemini. Also covers the model auto-detection path that keeps the bot
 // alive when a provider deletes the model named in .env.
 
-import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 
@@ -39,6 +39,16 @@ interface FakeProviderOptions {
   liveModels?: string[];
   /** Make GET /v1/models reject. */
   modelsListError?: Error;
+}
+
+/**
+ * The chain only ever touches `chat.completions.create` and `models.list`, so
+ * the fakes implement just those. This is the one place the partial mock is
+ * presented as a full client — the repo permits that cast only inside a
+ * centralized factory, never inline at a call site.
+ */
+function asOpenAIClient(fake: FakeProvider['client']): OpenAI {
+  return fake as unknown as OpenAI;
 }
 
 function makeProvider(options: FakeProviderOptions): FakeProvider {
@@ -88,25 +98,24 @@ let groq: FakeProvider;
 let gemini: FakeProvider;
 let hf: FakeProvider;
 
-// Captured BEFORE the mock.module calls below, so afterAll can put the real
-// modules back. `mock.module` is process-global and outlives this file: without
-// this, whichever test file bun happens to load next gets the fakes. That is not
-// hypothetical — it turned CI red while the same suite stayed green on macOS,
-// because file discovery order differs between APFS and ext4.
-// RESTORE REAL MODULES
-const realClients = await import('../../../src/services/ai/clients.ts');
-const realEnv = await import('../../../src/config/env.ts');
+// Provider fakes are injected through the exported `providerClients` seam in
+// streaming.ts, and provider models come from real environment variables read
+// by loadConfig(). Deliberately NOT `mock.module`: that call is process-global
+// and outlives this file, so it handed these fakes to whichever test file bun
+// loaded next — which turned CI red in clients.test.ts on Linux while staying
+// green on macOS, because directory order differs between the two filesystems.
+const { providerClients } = await import('../../../src/services/ai/streaming.ts');
+const realProviderClients = { ...providerClients };
 
-mock.module('../../../src/services/ai/clients.ts', () => ({
-  zaiClient: () => zai.client,
-  groqClient: () => groq.client,
-  hfClient: () => hf.client,
-  geminiClient: () => gemini.client,
-  resetClients: () => {},
-}));
+const savedEnv = { ...process.env };
 
-mock.module('../../../src/config/env.ts', () => ({
-  loadConfig: () => ({
+beforeEach(() => {
+  // Env is set per test and restored after, so this file cannot change what
+  // another test file sees. Bun auto-loads .env, so real keys are present
+  // unless explicitly overridden here.
+  Object.assign(process.env, {
+    BOT_TOKEN: 'test-token',
+    REDIS_URL: 'redis://localhost:6379',
     ZAI_MODEL: 'glm-5.1',
     ZAI_FAST_MODEL: 'glm-5.1-air',
     GROQ_API_KEY: 'test-groq-key',
@@ -116,8 +125,17 @@ mock.module('../../../src/config/env.ts', () => ({
     GEMINI_FAST_MODEL: 'gemini-fast',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
-  }),
-}));
+  });
+  providerClients.zai = () => asOpenAIClient(zai.client);
+  providerClients.groq = () => asOpenAIClient(groq.client);
+  providerClients.gemini = () => asOpenAIClient(gemini.client);
+  providerClients.hf = () => asOpenAIClient(hf.client);
+});
+
+afterEach(() => {
+  process.env = { ...savedEnv };
+  Object.assign(providerClients, realProviderClients);
+});
 
 const { AllProvidersFailedError, aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
 
@@ -385,9 +403,4 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     await ask();
     expect(groq.modelsListCalls).toBe(2);
   });
-});
-
-afterAll(() => {
-  mock.module('../../../src/services/ai/clients.ts', () => realClients);
-  mock.module('../../../src/config/env.ts', () => realEnv);
 });

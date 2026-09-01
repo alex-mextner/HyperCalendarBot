@@ -319,28 +319,45 @@ function slotName(label: string, model: string): string {
 
 // ── Chains ─────────────────────────────────────────────────────────────────
 
+/**
+ * The client factory each slot uses, behind one indirection.
+ *
+ * This exists so tests can substitute fake providers by assigning to this
+ * object rather than replacing the whole clients module. `mock.module` is
+ * process-global and outlives the file that calls it, so a test that mocked
+ * `clients.ts` handed its fakes to whatever test file bun happened to load
+ * next — which broke `clients.test.ts` on Linux and not on macOS, purely
+ * because directory order differs between the two filesystems.
+ */
+export const providerClients = {
+  zai: zaiClient,
+  groq: groqClient,
+  gemini: geminiClient,
+  hf: hfClient,
+};
+
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', zaiClient, cfg.ZAI_MODEL)];
+  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_MODEL)];
   if (cfg.GROQ_API_KEY && cfg.GROQ_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', groqClient, cfg.GROQ_MODEL));
+    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_MODEL));
   }
   chain.push(
-    streamingSlot('Gemini', 'gemini', geminiClient, cfg.GEMINI_MODEL),
-    streamingSlot('HF', 'hf', hfClient, cfg.HF_MODEL),
+    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_MODEL),
+    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_MODEL),
   );
   return chain;
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', zaiClient, cfg.ZAI_FAST_MODEL)];
+  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_FAST_MODEL)];
   if (cfg.GROQ_API_KEY && cfg.GROQ_FAST_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', groqClient, cfg.GROQ_FAST_MODEL));
+    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_FAST_MODEL));
   }
   chain.push(
-    streamingSlot('Gemini', 'gemini', geminiClient, cfg.GEMINI_FAST_MODEL),
-    streamingSlot('HF', 'hf', hfClient, cfg.HF_FAST_MODEL),
+    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_FAST_MODEL),
+    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_FAST_MODEL),
   );
   return chain;
 }

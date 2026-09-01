@@ -1,10 +1,10 @@
 // test/services/ai/streaming-fallback.test.ts
 // Behavior tests for aiStreamRound: provider chain fallback, empty-response
-// quirk, mid-stream error propagation. Uses Bun's `mock.module` scoped to
-// this file (cleaned up in afterAll) to replace the cached OpenAI clients
-// inside streaming.ts without hitting the real network.
+// quirk, mid-stream error propagation. Fake providers are injected through the
+// `providerClients` seam exported by streaming.ts, so no network is touched and
+// no other test file is affected.
 
-import { afterAll, afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
 
 // Build a fake OpenAI client whose chat.completions.create returns a scripted
@@ -79,34 +79,42 @@ let fakeHf: any;
 // biome-ignore lint/suspicious/noExplicitAny: fake client shapes vary per test
 let fakeGroq: any;
 
-// Captured BEFORE the mock.module calls below, so afterAll can put the real
-// modules back. `mock.module` is process-global and outlives this file: without
-// this, whichever test file bun happens to load next gets the fakes. That is not
-// hypothetical — it turned CI red while the same suite stayed green on macOS,
-// because file discovery order differs between APFS and ext4.
-// RESTORE REAL MODULES
-const realClients = await import('../../../src/services/ai/clients.ts');
-const realEnv = await import('../../../src/config/env.ts');
+// Provider fakes are injected through the exported `providerClients` seam in
+// streaming.ts, and provider models come from real environment variables read
+// by loadConfig(). Deliberately NOT `mock.module`: that call is process-global
+// and outlives this file, so it handed these fakes to whichever test file bun
+// loaded next — which turned CI red in clients.test.ts on Linux while staying
+// green on macOS, because directory order differs between the two filesystems.
+const { providerClients } = await import('../../../src/services/ai/streaming.ts');
+const realProviderClients = { ...providerClients };
 
-mock.module('../../../src/services/ai/clients.ts', () => ({
-  zaiClient: () => fakeZai,
-  groqClient: () => fakeGroq,
-  hfClient: () => fakeHf,
-  geminiClient: () => fakeGemini,
-  resetClients: () => {},
-}));
+const savedEnv = { ...process.env };
 
-// Stub env.ts so loadConfig() doesn't throw on missing vars
-mock.module('../../../src/config/env.ts', () => ({
-  loadConfig: () => ({
+beforeEach(() => {
+  // Env is set per test and restored after, so this file cannot change what
+  // another test file sees. Bun auto-loads .env, so real keys are present
+  // unless explicitly overridden here.
+  Object.assign(process.env, {
+    BOT_TOKEN: 'test-token',
+    REDIS_URL: 'redis://localhost:6379',
     ZAI_MODEL: 'zai-main',
     ZAI_FAST_MODEL: 'zai-fast',
+    GROQ_API_KEY: '',
     GEMINI_MODEL: 'gemini-main',
     GEMINI_FAST_MODEL: 'gemini-fast',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
-  }),
-}));
+  });
+  providerClients.zai = () => fakeZai;
+  providerClients.groq = () => fakeGroq;
+  providerClients.gemini = () => fakeGemini;
+  providerClients.hf = () => fakeHf;
+});
+
+afterEach(() => {
+  process.env = { ...savedEnv };
+  Object.assign(providerClients, realProviderClients);
+});
 
 const { AllProvidersFailedError, aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
 
@@ -408,9 +416,4 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(result.toolCalls[0]!.name).toBe('get_events');
     expect(result.toolCalls[0]!.arguments).toBe('{"date":"2026-04-10"}');
   });
-});
-
-afterAll(() => {
-  mock.module('../../../src/services/ai/clients.ts', () => realClients);
-  mock.module('../../../src/config/env.ts', () => realEnv);
 });
