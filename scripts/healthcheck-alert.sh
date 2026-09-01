@@ -1,7 +1,9 @@
 #!/bin/bash
 # Polls the bot readiness endpoint every run (called by cron every 2 minutes).
 # Sends Telegram alerts to the admin on failure and recovery.
-# State file: /tmp/hypercal-down — present while bot is considered down.
+# State files: /tmp/hypercal-down — present while bot is considered down;
+# /tmp/hypercal-unverified-since — when the bot came back up but could not yet
+# confirm the outage is over.
 
 set -euo pipefail
 
@@ -12,6 +14,11 @@ HEALTH_URL="https://hypercal.invntrm.ru/ready"
 ALERT_URL="https://hypercal.invntrm.ru/admin/alerts"
 ENV_FILE="/opt/hypercal/.env"
 STATE_FILE="/tmp/hypercal-down"
+# When the unverified wait began. Separate from STATE_FILE because that one is
+# created when the outage starts, and the wait has to be measured from when the
+# bot came back up without proof — otherwise a long outage makes the wait expire
+# on its very first unverified answer.
+UNVERIFIED_FILE="/tmp/hypercal-unverified-since"
 TIMEOUT=10
 RETRY_COUNT=3
 RETRY_DELAY=15
@@ -75,12 +82,24 @@ while [[ "$HTTP_CODE" != "200" && $attempt -lt $RETRY_COUNT ]]; do
 done
 
 if [[ "$HTTP_CODE" != "200" ]]; then
+  # Any real failure ends an unverified wait: there is something to see again.
+  rm -f "$UNVERIFIED_FILE"
   if [[ ! -f "$STATE_FILE" ]]; then
     touch "$STATE_FILE"
-    MSG="HyperCalendarBot DOWN — health returned HTTP ${HTTP_CODE}"
+    REASON=$(head -c 200 "$BODY_FILE" 2>/dev/null || true)
+    # The body says which failure this is, and the right reaction differs: a
+    # process that has not started comes back with a restart, while a dead
+    # provider chain does not — restarting only throws away the evidence.
+    ADVICE=""
+    if [[ "$REASON" == "ai chain down" ]]; then
+      ADVICE="
+Every AI provider is failing. A restart will not fix this and clears the record — check provider quotas, keys and model ids first."
+    fi
+    MSG="HyperCalendarBot DOWN — readiness returned HTTP ${HTTP_CODE}${REASON:+ (${REASON})}"
     send_telegram "🚨 <b>HyperCalendarBot DOWN</b>
-Health: <code>${HEALTH_URL}</code>
-HTTP status: <code>${HTTP_CODE}</code>"
+Readiness: <code>${HEALTH_URL}</code>
+HTTP status: <code>${HTTP_CODE}</code>${REASON:+
+Reason: <code>${REASON}</code>}${ADVICE}"
     push_alert "$MSG"
   fi
 else
@@ -96,7 +115,7 @@ else
     # late true message beats a prompt false one.
     BODY=$(cat "$BODY_FILE")
     if [[ "$BODY" == "ok" ]]; then
-      rm -f "$STATE_FILE"
+      rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
       send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
     elif [[ "$BODY" == "ok (unverified)" ]]; then
       # The bot is up but has served nobody since it started, so it cannot say
@@ -104,10 +123,11 @@ else
       # exists the DOWN branch stays silent, so an indefinite wait would swallow
       # the alert for a *different* outage starting later. On a bot quiet enough
       # to sit unverified this long, that silence is the worse failure.
-      STATE_AGE=$(( $(date +%s) - $(stat -c %Y "$STATE_FILE" 2>/dev/null || stat -f %m "$STATE_FILE") ))
-      if (( STATE_AGE > UNVERIFIED_HOLD )); then
-        rm -f "$STATE_FILE"
-        echo "$(date -Is) dropping down-state after ${STATE_AGE}s unverified; no recovery announced" >&2
+      [[ -f "$UNVERIFIED_FILE" ]] || date +%s > "$UNVERIFIED_FILE"
+      WAITED=$(( $(date +%s) - $(cat "$UNVERIFIED_FILE") ))
+      if (( WAITED > UNVERIFIED_HOLD )); then
+        rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
+        echo "$(date -u +%FT%TZ) dropping down-state after ${WAITED}s unverified; no recovery announced" >&2
       fi
     else
       # Neither answer this script knows. Most likely the endpoint's contract
@@ -115,7 +135,7 @@ else
       # keep the state file forever and suppress every future DOWN alert. Say so
       # in the cron log rather than sitting in a silence that looks identical to
       # a bot nobody has messaged yet.
-      echo "$(date -Is) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
+      echo "$(date -u +%FT%TZ) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
     fi
   fi
 fi
