@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import {
+  ALERT_POLICY,
   initProviderAlerts,
   isAiChainDown,
   type ProviderFailure,
@@ -44,5 +45,42 @@ describe('isAiChainDown — what the health endpoint asks', () => {
   test('a single provider failing does not mark the chain down', () => {
     reportProviderFailure({ provider: 'z.ai (glm-5.1)', status: 429, message: 'overloaded' });
     expect(isAiChainDown()).toBe(false);
+  });
+
+  // A total chain failure is only recorded when a user message hits the dead
+  // chain, and it is only cleared when a later message succeeds. With no traffic
+  // in between there is no evidence either way — and holding "down" forever
+  // would have the two-minute watchdog report an outage that ended by itself
+  // while the bot sat idle overnight.
+  test('a chain failure nobody has retried since goes stale rather than staying down', () => {
+    let clock = 1_000_000;
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
+
+    clock += ALERT_POLICY.startupGraceMs + 1;
+    reportAllProvidersFailed(DEAD);
+    expect(isAiChainDown()).toBe(true);
+
+    clock += ALERT_POLICY.chainDownStaleMs - 1;
+    expect(isAiChainDown()).toBe(true);
+
+    clock += 2;
+    expect(isAiChainDown()).toBe(false);
+  });
+
+  // ...and a fresh failure re-arms it, so a genuine outage with live traffic
+  // never flickers healthy between two user messages.
+  test('a new failure after the stale window re-arms the chain', () => {
+    let clock = 1_000_000;
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
+
+    clock += ALERT_POLICY.startupGraceMs + 1;
+    reportAllProvidersFailed(DEAD);
+    clock += ALERT_POLICY.chainDownStaleMs + 1;
+    expect(isAiChainDown()).toBe(false);
+
+    reportAllProvidersFailed(DEAD);
+    expect(isAiChainDown()).toBe(true);
   });
 });
