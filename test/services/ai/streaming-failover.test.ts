@@ -4,7 +4,7 @@
 // healthy Gemini. Also covers the model auto-detection path that keeps the bot
 // alive when a provider deletes the model named in .env.
 
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
 
@@ -87,6 +87,15 @@ let zai: FakeProvider;
 let groq: FakeProvider;
 let gemini: FakeProvider;
 let hf: FakeProvider;
+
+// Captured BEFORE the mock.module calls below, so afterAll can put the real
+// modules back. `mock.module` is process-global and outlives this file: without
+// this, whichever test file bun happens to load next gets the fakes. That is not
+// hypothetical — it turned CI red while the same suite stayed green on macOS,
+// because file discovery order differs between APFS and ext4.
+// RESTORE REAL MODULES
+const realClients = await import('../../../src/services/ai/clients.ts');
+const realEnv = await import('../../../src/config/env.ts');
 
 mock.module('../../../src/services/ai/clients.ts', () => ({
   zaiClient: () => zai.client,
@@ -376,4 +385,9 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     await ask();
     expect(groq.modelsListCalls).toBe(2);
   });
+});
+
+afterAll(() => {
+  mock.module('../../../src/services/ai/clients.ts', () => realClients);
+  mock.module('../../../src/config/env.ts', () => realEnv);
 });
