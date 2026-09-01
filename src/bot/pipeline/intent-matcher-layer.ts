@@ -71,7 +71,10 @@ export function createIntentMatcherLayer(
         },
       );
       if (result.response) {
-        await ctx.send(result.response);
+        // Same formatting as a first-pass match: a resumed workflow can end in a tool
+        // whose text output is written for the AI agent, not for the user.
+        const format = intentRepo.getById(session.intentId)?.format ?? 'text';
+        await ctx.send(formatResponse(format, result.response, user.timezone, user.language, result.responseEvents));
       }
       return { handled: true };
     }

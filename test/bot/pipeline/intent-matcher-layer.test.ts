@@ -42,6 +42,7 @@ function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userI
 interface ExecutorResult {
   success: boolean;
   response?: string;
+  responseEvents?: { id: number; title: string; date: string; time?: string; all_day: boolean }[];
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: { [key: string]: unknown };
@@ -218,6 +219,37 @@ describe('createIntentMatcherLayer', () => {
     expect(ctx.send).toHaveBeenCalledWith('Created!');
     // Session must be deleted after use
     expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('formats structured events when a resumed workflow ends in get_events', async () => {
+    const userId = 71;
+    const workflow = { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'get_events' }] };
+    const executor = makeExecutor({
+      success: true,
+      response: 'id: 239, title: Английский, start: 2026-06-01T10:30:00.000Z, created_by: @someone',
+      responseEvents: [{ id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false }],
+    });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, userId, {
+      intentId: 3,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = callLayer(
+      makeMatcher(null),
+      makeIntentRepo({ id: 3, workflow: JSON.stringify(workflow), format: 'text', canonical_name: 'x' }),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+    await layer(ctx, 'да');
+
+    expect(ctx.send).toHaveBeenCalledWith('12:30  Английский');
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {
