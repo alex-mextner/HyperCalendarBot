@@ -4,6 +4,7 @@ import { createAiAgentLayer } from '../../../src/bot/pipeline/ai-agent-layer.ts'
 import type { BotCommandContext } from '../../../src/bot/types.ts';
 import type { User } from '../../../src/database/types.ts';
 import type { AgentRunResult, AgentToolCallRecord, AgentToolResultRecord } from '../../../src/services/ai/agent.ts';
+import { aiFailureNotices } from '../../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 
 /** Signature matching IntentLearner.analyze() for properly typed mock.calls access */
@@ -351,6 +352,37 @@ describe('retry / backoff', () => {
     const [sentText] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown as [string];
     expect(typeof sentText).toBe('string');
     expect(sentText.length).toBeGreaterThan(0);
+    expect(jobStoreDel).toHaveBeenCalledWith(1);
+  });
+
+  test('give-up after a promised comeback acknowledges the promise and lists the commands', async () => {
+    aiFailureNotices.reset();
+    // The bot told this user "one sec, be right back" on the first failure.
+    aiFailureNotices.decide(1, 'ru', { hardOutage: false, willRetry: true });
+
+    const { deps, captured } = makeRetrySetup();
+    const ctx = makeCtx();
+    await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+
+    const [sentText] = (ctx.send as ReturnType<typeof mock>).mock.calls[0] as unknown as [string];
+    expect(sentText).toContain('Обещал вернуться');
+    expect(sentText).toContain('/today');
+    expect(sentText).toContain('/help');
+  });
+
+  test('give-up stays quiet when the user was already told the AI is unavailable', async () => {
+    aiFailureNotices.reset();
+    // Hard outage: the bot already sent the honest notice with the command list.
+    aiFailureNotices.decide(1, 'ru', { hardOutage: true, willRetry: true });
+
+    const { deps, jobStoreDel, captured } = makeRetrySetup();
+    const ctx = makeCtx();
+    await createAiAgentLayer(deps)(ctx, 'msg', { retryAttempt: 3 });
+    await captured.ctx!.retryEnqueue!('retry msg');
+
+    expect(ctx.send).not.toHaveBeenCalled();
+    // The Redis retry state is still cleared even when nothing is sent.
     expect(jobStoreDel).toHaveBeenCalledWith(1);
   });
 
