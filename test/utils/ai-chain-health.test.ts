@@ -6,8 +6,8 @@ import {
   isAiChainDown,
   type ProviderFailure,
   reportAllProvidersFailed,
+  reportProviderAnswered,
   reportProviderFailure,
-  reportProviderRecovered,
   resetProviderAlertState,
 } from '../../src/utils/ai-provider-alert.ts';
 
@@ -31,13 +31,13 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
   // the process and Redis were both fine, so /health said "ok" and neither the
   // admin alert nor the automatic investigation ever fired.
   test('every provider dead → the chain reads as down', () => {
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     expect(isAiChainDown()).toBe(true);
   });
 
   test('a provider answering again clears it', () => {
-    reportAllProvidersFailed(DEAD);
-    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    reportAllProvidersFailed(DEAD, 'smart');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
@@ -63,7 +63,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
 
     clock += ALERT_POLICY.startupGraceMs + 1;
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     expect(isAiChainDown()).toBe(true);
 
     clock += 12 * 60 * 60 * 1000;
@@ -79,9 +79,9 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
 
     clock += ALERT_POLICY.startupGraceMs + 1;
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     clock += 12 * 60 * 60 * 1000;
-    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
@@ -95,12 +95,12 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
 
     clock += ALERT_POLICY.startupGraceMs + 1;
-    reportAllProvidersFailed(DEAD);
-    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    reportAllProvidersFailed(DEAD, 'smart');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
     expect(isAiChainDown()).toBe(false);
 
     clock += ALERT_POLICY.flapGuardMs - 1;
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     expect(isAiChainDown()).toBe(true);
   });
 
@@ -110,11 +110,11 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
     initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
 
     clock += ALERT_POLICY.startupGraceMs + 1;
-    reportAllProvidersFailed(DEAD);
-    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    reportAllProvidersFailed(DEAD, 'smart');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
 
     clock += ALERT_POLICY.flapGuardMs + 1;
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     expect(isAiChainDown()).toBe(true);
   });
 });
@@ -135,14 +135,53 @@ describe('hasChainAnswered — whether this process has proof either way', () =>
   });
 
   test('a provider answering is the proof', () => {
-    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
     expect(hasChainAnswered()).toBe(true);
   });
 
   // Failures are not proof of anything but their own failure: the chain flag
   // already carries that. What is missing after a restart is a success.
   test('failures alone leave the process without proof', () => {
-    reportAllProvidersFailed(DEAD);
+    reportAllProvidersFailed(DEAD, 'smart');
     expect(hasChainAnswered()).toBe(false);
+  });
+});
+
+// The bot runs two provider chains: the smart one answers people, the fast one
+// does auxiliary work — resolving a city, translating for speech, summarising
+// history, validating a response. Readiness is about whether a person can be
+// served, so only the smart chain decides it.
+describe('isAiChainDown — the two chains are tracked apart', () => {
+  beforeEach(() => {
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
+  });
+
+  test('the fast chain failing does not make the bot unready', () => {
+    reportAllProvidersFailed(DEAD, 'fast');
+    expect(isAiChainDown()).toBe(false);
+  });
+
+  // The dangerous direction: the smart chain is dead and nobody can be served,
+  // then some background summariser gets an answer out of the fast chain. If
+  // that cleared the outage, readiness would go green and the watchdog would
+  // announce a recovery — the exact blind spot this work exists to close.
+  test('a fast-chain answer does not clear a smart-chain outage', () => {
+    reportAllProvidersFailed(DEAD, 'smart');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'fast');
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a smart-chain answer clears it', () => {
+    reportAllProvidersFailed(DEAD, 'smart');
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    expect(isAiChainDown()).toBe(false);
+  });
+
+  test('only a smart-chain answer counts as proof the bot works', () => {
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'fast');
+    expect(hasChainAnswered()).toBe(false);
+    reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
+    expect(hasChainAnswered()).toBe(true);
   });
 });

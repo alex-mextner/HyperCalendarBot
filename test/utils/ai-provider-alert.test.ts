@@ -15,8 +15,8 @@ import {
   initProviderAlerts,
   isBalanceExhausted,
   reportAllProvidersFailed,
+  reportProviderAnswered,
   reportProviderFailure,
-  reportProviderRecovered,
   resetProviderAlertState,
 } from '../../src/utils/ai-provider-alert.ts';
 
@@ -276,19 +276,19 @@ describe('burst coalescing and escalation', () => {
     expect(sent).toHaveLength(1);
 
     advance(20 * 60_000);
-    reportProviderRecovered('z.ai (glm-4.6)');
+    reportProviderAnswered('z.ai (glm-4.6)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('z.ai');
     expect(sent[1]).toContain('again');
 
-    reportProviderRecovered('z.ai (glm-4.6)');
+    reportProviderAnswered('z.ai (glm-4.6)', 'smart');
     advance(ALERT_POLICY.digestWindowMs);
     expect(sent).toHaveLength(2);
   });
 
   test('a provider that never alerted recovers silently', () => {
     reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' });
-    reportProviderRecovered('Gemini (gemini-2.5-flash)');
+    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -304,7 +304,7 @@ describe('total chain outage', () => {
   ];
 
   test('one alert names every provider with its own reason and the action to take', () => {
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(1);
     const text = sent[0] ?? '';
     expect(text).toContain('z.ai');
@@ -320,20 +320,20 @@ describe('total chain outage', () => {
   });
 
   test('a repeated chain outage escalates instead of repeating every time', () => {
-    reportAllProvidersFailed(chainFailures);
-    reportAllProvidersFailed(chainFailures);
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
+    reportAllProvidersFailed(chainFailures, 'smart');
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(1);
 
     advance(ALERT_POLICY.chainEscalationMs[0] + 1000);
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     expect(sent).toHaveLength(2);
   });
 
   test('any provider answering again clears the chain outage with one recovery notice', () => {
-    reportAllProvidersFailed(chainFailures);
+    reportAllProvidersFailed(chainFailures, 'smart');
     advance(60_000);
-    reportProviderRecovered('Gemini (gemini-2.5-flash)');
+    reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
     expect(sent).toHaveLength(2);
     expect(sent[1]).toContain('again');
   });
@@ -363,7 +363,7 @@ describe('hourly ceiling', () => {
       failProvider(i);
       advance(1000);
     }
-    reportAllProvidersFailed([{ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }]);
+    reportAllProvidersFailed([{ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }], 'smart');
     expect(sent).toHaveLength(ALERT_POLICY.maxMessagesPerHour + 1);
     expect(sent[ALERT_POLICY.maxMessagesPerHour]).toContain('All AI providers');
   });

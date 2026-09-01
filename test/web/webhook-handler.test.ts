@@ -8,6 +8,8 @@ function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   return {
     config: { OAUTH_SERVER_PORT: 0 } as WebServerDeps['config'],
     userRepo: {} as WebServerDeps['userRepo'],
+    aiChainDown: () => false,
+    aiChainVerified: () => true,
     ...overrides,
   };
 }

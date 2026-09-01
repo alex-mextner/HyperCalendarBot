@@ -266,7 +266,21 @@ const outages = new Map<string, OutageState>();
 const sentAtMs: number[] = [];
 let heldBackCount = 0;
 
-const CHAIN_KEY = 'chain:all-providers';
+/**
+ * The bot runs two provider chains. The smart one answers people; the fast one
+ * does auxiliary work — resolving a city, translating for speech, summarising
+ * history, validating a response. They are configured with different models and
+ * fail independently, so they get separate outage records: a dead fast chain
+ * must not report the bot unable to serve anyone, and a fast answer must not
+ * clear an outage on the chain that actually talks to people.
+ */
+export type ProviderChainKind = 'smart' | 'fast';
+
+const CHAIN_KEYS: Record<ProviderChainKind, string> = {
+  smart: 'chain:all-providers:smart',
+  fast: 'chain:all-providers:fast',
+};
+const SERVING_CHAIN: ProviderChainKind = 'smart';
 
 // Set the first time any provider answers in this process. The outage map dies
 // with the process, so a fresh one cannot tell a working chain from one it has
@@ -322,8 +336,8 @@ export function reportProviderFailure(failure: ProviderFailure): void {
  * This is the alert that matters most, so it escalates fastest and is never
  * dropped by the hourly ceiling.
  */
-export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
-  noteFailure(CHAIN_KEY, 'chain', 'all providers', 'transient', failures);
+export function reportAllProvidersFailed(failures: ProviderFailure[], chain: ProviderChainKind): void {
+  noteFailure(CHAIN_KEYS[chain], 'chain', `all ${chain} providers`, 'transient', failures);
 }
 
 /**
@@ -362,7 +376,7 @@ export function isAiChainDown(): boolean {
     }
     return false;
   }
-  const chain = outages.get(CHAIN_KEY);
+  const chain = outages.get(CHAIN_KEYS[SERVING_CHAIN]);
   return chain !== undefined && chain.resolvedAt === null;
 }
 
@@ -384,16 +398,23 @@ export function hasChainAnswered(): boolean {
   return chainAnswered;
 }
 
-/** Report that a provider answered successfully — closes its outages and the chain outage. */
-export function reportProviderRecovered(provider: string): void {
-  chainAnswered = true;
+/**
+ * Report that a provider answered successfully. Called on EVERY success, not
+ * only after a failure — the readiness signal depends on it, because a success
+ * is the only proof a working chain leaves behind. Closes that provider's
+ * outages and its own chain's outage.
+ */
+export function reportProviderAnswered(provider: string, chain: ProviderChainKind): void {
+  if (chain === SERVING_CHAIN) chainAnswered = true;
   if (!deps) return;
   const now = deps.now();
   const family = providerFamily(provider);
+  const chainKey = CHAIN_KEYS[chain];
   for (const [key, state] of outages) {
     if (state.resolvedAt !== null) continue;
     const isThisProvider = state.kind === 'provider' && key.startsWith(`provider:${family}:`);
-    if (!isThisProvider && state.kind !== 'chain') continue;
+    const isThisChain = state.kind === 'chain' && key === chainKey;
+    if (!isThisProvider && !isThisChain) continue;
     resolveOutage(state, now);
   }
 }

@@ -38,6 +38,10 @@ export interface WebServerDeps {
   healthCheck?: () => Promise<void>;
   // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
   botStarted?: boolean;
+  // Required, unlike most of this interface: /ready exists to be strictly
+  // stronger than /health, and a caller that forgets to wire these would
+  // silently reproduce the blind spot the endpoint was added to close. The
+  // compiler is a better guard than a runtime warning.
   /**
    * True while the whole AI provider chain is failing. Read by /ready, never by
    * /health: a live process that cannot answer anyone is a real failure, but it
@@ -45,14 +49,14 @@ export interface WebServerDeps {
    * liveness probe. Putting it on /health would turn a provider outage into a
    * restart loop during the very incident this is meant to surface.
    */
-  aiChainDown?: () => boolean;
+  aiChainDown: () => boolean;
   /**
    * True once some provider has answered in this process. A restarted process
    * has an empty outage record, which is not proof that the chain works, so
    * readiness says "ok (unverified)" until a provider has actually answered and
    * the watchdog knows not to call that a recovery.
    */
-  aiChainVerified?: () => boolean;
+  aiChainVerified: () => boolean;
   // Admin alert queue — POST /admin/alerts to push, GET /admin/alerts/next to pop
   alertRepo?: AlertRepository;
   adminAlertToken?: string;
@@ -148,11 +152,11 @@ async function handleRequest(
     // two-minute cron watchdog saw "ok" the whole time. This lives on /ready
     // rather than /health because a restart cannot fix an outage at the
     // provider — see the comment on aiChainDown in WebServerDeps.
-    if (deps.aiChainDown?.() === true) {
+    if (deps.aiChainDown()) {
       webLogger.error('AI provider chain is down — reporting not ready');
       return new Response('ai chain down', { status: 503 });
     }
-    if (deps.aiChainVerified?.() === false) return new Response('ok (unverified)');
+    if (!deps.aiChainVerified()) return new Response('ok (unverified)');
     return new Response('ok');
   }
 

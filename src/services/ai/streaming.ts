@@ -12,9 +12,10 @@
 import OpenAI from 'openai';
 import { loadConfig } from '../../config/env.ts';
 import {
+  type ProviderChainKind,
   reportAllProvidersFailed,
+  reportProviderAnswered,
   reportProviderFailure,
-  reportProviderRecovered,
 } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
@@ -443,6 +444,7 @@ export async function aiStreamRound(
   options: StreamRoundOptions,
   callbacks: StreamCallbacks = {},
 ): Promise<StreamRoundResult> {
+  const chainKind: ProviderChainKind = options.fast ? 'fast' : 'smart';
   const chain = options.fast ? buildFastChain() : buildSmartChain();
   const failures: ProviderFailure[] = [];
   // Anything the caller has already shown the user for this round: streamed text
@@ -465,9 +467,10 @@ export async function aiStreamRound(
     try {
       aiLogger.info({ provider: slot.label, model: slot.configuredModel, userId: options.userId }, 'Trying provider');
       const result = await runSlot(slot, options, wrappedCallbacks);
-      // A slot that answers settles any outstanding outage for it. The alert layer
-      // decides whether that is worth telling the admin about.
-      reportProviderRecovered(slot.label);
+      // A slot that answers settles any outstanding outage for it and for its own
+      // chain. The alert layer decides whether that is worth telling the admin
+      // about.
+      reportProviderAnswered(slot.label, chainKind);
       return result;
     } catch (error) {
       const failure = describeFailure(slot, error);
@@ -490,7 +493,7 @@ export async function aiStreamRound(
   const aggregate = new AllProvidersFailedError(failures);
   aiLogger.error({ failures, userId: options.userId }, 'Every AI provider in the chain failed');
   // The loudest alert there is: nobody answered, so the user got nothing.
-  reportAllProvidersFailed(failures);
+  reportAllProvidersFailed(failures, chainKind);
   throw aggregate;
 }
 

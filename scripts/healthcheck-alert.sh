@@ -89,9 +89,17 @@ else
     # The cost is a recovery message delayed until the first request after a
     # plain crash-restart, where nothing was ever wrong with the providers. A
     # late true message beats a prompt false one.
-    if [[ "$(cat "$BODY_FILE")" == "ok" ]]; then
+    BODY=$(cat "$BODY_FILE")
+    if [[ "$BODY" == "ok" ]]; then
       rm -f "$STATE_FILE"
       send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
+    elif [[ "$BODY" != "ok (unverified)" ]]; then
+      # Neither answer this script knows. Most likely the endpoint's contract
+      # changed and this branch stopped recognising a real recovery — which would
+      # keep the state file forever and suppress every future DOWN alert. Say so
+      # in the cron log rather than sitting in a silence that looks identical to
+      # a bot nobody has messaged yet.
+      echo "$(date -Is) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
     fi
   fi
 fi
