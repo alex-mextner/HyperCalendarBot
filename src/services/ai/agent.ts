@@ -1,16 +1,17 @@
 import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
-import type OpenAI from 'openai';
+import OpenAI from 'openai';
 import { z } from 'zod';
-import { t } from '../../config/constants.ts';
+import { type Lang, t, toLang } from '../../config/constants.ts';
 import type { ChatHistoryMessage } from '../../database/types.ts';
+import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
 import { validateResponse } from './response-validator.ts';
-import { aiStreamRound, type StreamCallbacks } from './streaming.ts';
+import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
@@ -22,6 +23,174 @@ const aiLogger = logger.child({ module: 'ai-agent' });
 
 const MAX_ROUNDS = 15;
 const TIMEOUT_MS = 300_000;
+
+/**
+ * One apology covers a user for this long. A user who keeps writing during an
+ * outage gets at most one playful "one sec", then one honest "the AI is down,
+ * here is what still works", then silence — not five apologies in a row.
+ */
+const NOTICE_COOLDOWN_MS = 5 * 60_000;
+
+/** Records older than this are dropped so the map cannot grow without bound. */
+const NOTICE_RETENTION_MS = 60 * 60_000;
+
+/**
+ * Hard cap on tracked users. The age-based prune alone is not enough: a burst of
+ * failures across many distinct users inside one retention window would grow the
+ * map unchecked. Past the cap the least recently notified users are evicted —
+ * they simply lose the "don't repeat the same apology" memory.
+ */
+const MAX_TRACKED_USERS = 10_000;
+
+/**
+ * What the bot says to the user when a run fails.
+ *  - `stall`  — a playful "one sec, be right back". Only legitimate when a retry
+ *               is actually scheduled, because it promises a comeback.
+ *  - `honest` — the AI is unavailable, here are the commands that still work.
+ *               No promise, so nothing to break.
+ *  - `silent` — the user has already been told twice; say nothing.
+ */
+export type FailureNoticeKind = 'stall' | 'honest' | 'silent';
+
+export interface FailureNotice {
+  kind: FailureNoticeKind;
+  /** Empty for `silent`. */
+  text: string;
+}
+
+interface NoticeRecord {
+  kind: 'stall' | 'honest';
+  text: string;
+  sentAt: number;
+}
+
+export interface FailureNoticeOptions {
+  /** The provider chain is down for a known, non-transient reason. */
+  hardOutage: boolean;
+  /** A backoff retry will actually be scheduled — without it a promise is a lie. */
+  willRetry: boolean;
+  now?: number;
+}
+
+/**
+ * Per-user memory of what the bot last said about an AI failure.
+ *
+ * Lives at module scope (rather than on the agent instance) because the pieces
+ * that need it run in different places: the agent produces the notice, and the
+ * retry layers — bot pipeline and BullMQ worker — need to know afterwards
+ * whether a comeback was promised, so the give-up message can close that loop
+ * instead of arriving out of nowhere. State is in-memory only; after a restart
+ * the give-up simply does not reference a promise it can no longer verify.
+ */
+class AiFailureNoticeTracker {
+  private byUser = new Map<number, NoticeRecord>();
+
+  /** Decide what to tell the user about this failure, and remember it. */
+  decide(userId: number, lang: Lang, opts: FailureNoticeOptions): FailureNotice {
+    const now = opts.now ?? Date.now();
+    this.prune(now);
+    const previous = this.byUser.get(userId);
+    const withinCooldown = previous !== undefined && now - previous.sentAt < NOTICE_COOLDOWN_MS;
+
+    if (opts.hardOutage || !opts.willRetry) {
+      return this.record(userId, 'honest', t(lang).ai_degraded, now, withinCooldown && previous.kind === 'honest');
+    }
+    if (!withinCooldown) {
+      return this.record(userId, 'stall', t(lang).agent_error(previous?.text), now, false);
+    }
+    // A comeback was already promised and has not been delivered — repeating the
+    // promise is what makes the bot look like a broken record. Tell the truth.
+    if (previous.kind === 'stall') {
+      return this.record(userId, 'honest', t(lang).ai_degraded, now, false);
+    }
+    return { kind: 'silent', text: '' };
+  }
+
+  private record(
+    userId: number,
+    kind: 'stall' | 'honest',
+    text: string,
+    now: number,
+    alreadySaid: boolean,
+  ): FailureNotice {
+    if (alreadySaid) return { kind: 'silent', text: '' };
+    // Delete before set so Map iteration order tracks recency, not first sight.
+    this.byUser.delete(userId);
+    this.byUser.set(userId, { kind, text, sentAt: now });
+    this.evictOverflow();
+    return { kind, text };
+  }
+
+  /**
+   * Read and clear the outstanding notice for a user. Returns `stall` when the
+   * bot promised a comeback it still owes, `honest` when it already admitted the
+   * outage, `null` when it said nothing (or the process restarted).
+   */
+  takeNotice(userId: number): 'stall' | 'honest' | null {
+    const record = this.byUser.get(userId);
+    if (!record) return null;
+    this.byUser.delete(userId);
+    return record.kind;
+  }
+
+  /** The bot answered — any outstanding promise is settled. */
+  clear(userId: number): void {
+    this.byUser.delete(userId);
+  }
+
+  /** Test hook: drop all remembered notices. */
+  reset(): void {
+    this.byUser.clear();
+  }
+
+  private evictOverflow(): void {
+    while (this.byUser.size > MAX_TRACKED_USERS) {
+      const oldest = this.byUser.keys().next();
+      if (oldest.done) return;
+      this.byUser.delete(oldest.value);
+    }
+  }
+
+  /** Test hook: how many users are currently remembered. */
+  size(): number {
+    return this.byUser.size;
+  }
+
+  private prune(now: number): void {
+    for (const [userId, record] of this.byUser) {
+      if (now - record.sentAt > NOTICE_RETENTION_MS) this.byUser.delete(userId);
+    }
+  }
+}
+
+export const aiFailureNotices = new AiFailureNoticeTracker();
+
+/**
+ * The closing message once the retry budget is spent. It references the earlier
+ * "one sec" so the two messages read as one conversation. Returns null when the
+ * user was already told the AI is down — a second notice would only be noise.
+ */
+export function agentGiveUpMessage(userId: number, lang: Lang): string | null {
+  const notice = aiFailureNotices.takeNotice(userId);
+  if (notice === 'honest') return null;
+  return t(lang).agent_give_up(notice === 'stall');
+}
+
+/**
+ * A failure the retry budget cannot fix: exhausted balance/quota, or dead
+ * credentials. Promising a comeback for these is a lie — the retries will fail
+ * exactly the same way three minutes later.
+ */
+function isHardOutage(error: unknown): boolean {
+  // The chain reports a total outage as one aggregate rather than rethrowing the
+  // last provider's error, so inspect the per-provider verdicts. If not one slot
+  // looked merely down, a retry three minutes later hits the same wall.
+  if (error instanceof AllProvidersFailedError) {
+    return error.failures.every((failure) => !failure.transient);
+  }
+  if (isBalanceExhausted(error)) return true;
+  return error instanceof OpenAI.APIError && (error.status === 401 || error.status === 403);
+}
 
 type MessageParam = OpenAI.ChatCompletionMessageParam;
 
@@ -386,7 +555,46 @@ export class CalendarBotAgent {
       }
     }
 
+    // A backoff retry re-runs the original message, but nothing re-saves it to
+    // chat_history — the newest stored turn is the bot's own "one sec". Without
+    // this the model is asked to continue from its own stall phrase and has no
+    // idea which question it still owes an answer to.
+    if ((ctx.retryAttempt ?? 0) > 0 && ctx.messageText.trim().length > 0) {
+      const last = messages[messages.length - 1];
+      const alreadyAsked =
+        last?.role === 'user' && typeof last.content === 'string' && last.content.includes(ctx.messageText);
+      if (!alreadyAsked) {
+        messages.push({ role: 'user', content: ctx.messageText });
+      }
+    }
+
     return { systemPrompt, messages: sanitizeMessages(messages) };
+  }
+
+  /**
+   * Tell the user what happened when a run failed.
+   *
+   * Mid-chain retries stay quiet: the comeback was already promised on the first
+   * failure and repeating it every 30 seconds only adds noise. Everything else
+   * goes through the notice tracker, which decides between a playful stall, an
+   * honest "the AI is down, here is what still works", and silence.
+   */
+  private announceFailure(ctx: AgentContext, error: unknown, writer: TelegramStreamWriter): void {
+    if (ctx.supplementMode || ctx.wasExplicitInvocation === false) return;
+
+    const hardOutage = isHardOutage(error);
+    if ((ctx.retryAttempt ?? 0) > 0 && !hardOutage) return;
+
+    const notice = aiFailureNotices.decide(ctx.user.telegram_id, toLang(ctx.user.language), {
+      hardOutage,
+      willRetry: typeof ctx.retryEnqueue === 'function',
+    });
+    aiLogger.info({ userId: ctx.user.telegram_id, notice: notice.kind, hardOutage }, 'AI failure notice');
+    if (notice.kind === 'silent') return;
+
+    writer.appendText(`\n\n${notice.text}`);
+    // Save to chat history so the model can see it and play along if the user reacts.
+    this.saveAssistantTurn(ctx, { role: 'assistant', content: notice.text });
   }
 
   saveAssistantTurn(ctx: AgentContext, assistantMessage: MessageParam, skipIds?: Set<string>): void {
@@ -513,6 +721,7 @@ export class CalendarBotAgent {
     // Build the full message list once (system first, then the reconstructed history).
     const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
     let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
+    let runFailed = false;
 
     try {
       for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -758,15 +967,8 @@ export class CalendarBotAgent {
       }
     } catch (error) {
       aiLogger.error({ err: error, userId: ctx.user.telegram_id }, 'Agent error');
-
-      // Show stall phrase only on the first failure of an explicit invocation
-      if (ctx.wasExplicitInvocation !== false && (ctx.retryAttempt ?? 0) === 0 && !ctx.supplementMode) {
-        const lang = ctx.user.language as 'en' | 'ru';
-        const stallMessage = t(lang).agent_error();
-        writer.appendText(`\n\n${stallMessage}`);
-        // Save to chat history so the model can see it and play along if the user reacts.
-        this.saveAssistantTurn(ctx, { role: 'assistant', content: stallMessage });
-      }
+      runFailed = true;
+      this.announceFailure(ctx, error, writer);
 
       // Enqueue next retry (or trigger graceful fail after max attempts)
       if (ctx.retryEnqueue && !ctx.supplementMode && ctx.wasExplicitInvocation !== false) {
@@ -774,6 +976,11 @@ export class CalendarBotAgent {
           aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to handle retry enqueue');
         });
       }
+    }
+
+    if (!runFailed && !ctx.supplementMode) {
+      // The bot answered — any comeback it promised earlier is now settled.
+      aiFailureNotices.clear(ctx.user.telegram_id);
     }
 
     const finalText = writer.getText().trim();
@@ -794,7 +1001,9 @@ export class CalendarBotAgent {
       'Agent run complete',
     );
 
-    if (isSkipText(finalText)) {
+    // A failed run with nothing to show must not leave the ⏳ placeholder edited
+    // into a bare "..." — that is the silence the user reads as being ignored.
+    if (isSkipText(finalText) || (runFailed && finalText.length === 0)) {
       await writer.discard();
       return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
     }

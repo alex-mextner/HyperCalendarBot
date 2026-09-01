@@ -1,7 +1,7 @@
 // src/bot/pipeline/ai-agent-layer.ts
 
-import { t } from '../../config/constants.ts';
-import type { CalendarBotAgent } from '../../services/ai/agent.ts';
+import { t, toLang } from '../../config/constants.ts';
+import { agentGiveUpMessage, type CalendarBotAgent } from '../../services/ai/agent.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { AiMessageJobData, RetryJobStore } from '../../services/scheduled/types.ts';
@@ -85,12 +85,14 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
     if (deps.retryQueue) {
       const queue = deps.retryQueue;
       const jobStore = deps.retryJobStore;
-      const lang = user.language as 'en' | 'ru';
+      const lang = toLang(user.language);
 
       agentContext.retryEnqueue = async (msg: string) => {
         if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
-          // All retries exhausted — show graceful fail and clear Redis state
-          await ctx.send(t(lang).agent_give_up());
+          // All retries exhausted — close the loop on whatever the bot promised
+          // earlier, then clear Redis state.
+          const giveUp = agentGiveUpMessage(user.telegram_id, lang);
+          if (giveUp) await ctx.send(giveUp);
           if (jobStore) await jobStore.del(user.telegram_id);
           return;
         }
@@ -147,8 +149,7 @@ export function createAiAgentLayer(deps: AgentLayerDeps) {
         return { handled: true };
       }
       cmdLogger.error({ err: error, userId: user.telegram_id }, 'AI agent error');
-      const lang = user.language as 'en' | 'ru';
-      await ctx.send(t(lang).something_wrong);
+      await ctx.send(t(toLang(user.language)).something_wrong);
     }
 
     return { handled: true };

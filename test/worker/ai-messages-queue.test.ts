@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import type { User } from '../../src/database/types.ts';
+import { aiFailureNotices } from '../../src/services/ai/agent.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
 import { SyntheticPipelineRunner } from '../../src/worker/ai-messages-queue.ts';
 
@@ -427,6 +428,68 @@ describe('createAiMessagesWorker', () => {
     };
     await capturedProcessor(job as never);
     expect(onRunComplete).not.toHaveBeenCalled();
+  });
+
+  test('exhausted retry budget closes the loop on the earlier promise', async () => {
+    aiFailureNotices.reset();
+    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: false, willRetry: true });
+
+    const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser, sender: { sendMessage } } as unknown as AgentContext;
+    const jobStoreDel = mock(async () => {});
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async (ctx: AgentContext) => {
+        captured.ctx = ctx;
+        return { handled: false };
+      }),
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+      retryJobStore: { set: mock(async () => {}), get: mock(async () => null), del: jobStoreDel },
+    });
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'что у меня завтра?',
+      source: 'trigger',
+      retryAttempt: 3,
+    });
+    await captured.ctx!.retryEnqueue!('что у меня завтра?');
+
+    const [, text] = sendMessage.mock.calls[0] as unknown as [number, string];
+    // fakeUser.language is English, so the English give-up must render.
+    expect(text).toContain('Promised to come back');
+    expect(text).toContain('/today');
+    expect(jobStoreDel).toHaveBeenCalledWith(fakeUser.telegram_id);
+  });
+
+  test('exhausted retry budget sends nothing when the outage was already admitted', async () => {
+    aiFailureNotices.reset();
+    aiFailureNotices.decide(fakeUser.telegram_id, 'en', { hardOutage: true, willRetry: true });
+
+    const sendMessage = mock(async (_userId: number, _text: string) => ({ message_id: 1 }));
+    const captured: { ctx?: AgentContext } = {};
+    const agentCtx = { user: fakeUser, sender: { sendMessage } } as unknown as AgentContext;
+
+    const runner = new SyntheticPipelineRunner({
+      contextBuilder: mock(() => agentCtx),
+      intentRun: mock(async (ctx: AgentContext) => {
+        captured.ctx = ctx;
+        return { handled: false };
+      }),
+      agentRun: mock(async () => {}),
+      retryQueue: { addDelayed: mock(async () => 'job-1') },
+    });
+    await runner.run(fakeUser, {
+      userId: fakeUser.telegram_id,
+      message: 'что у меня завтра?',
+      source: 'trigger',
+      retryAttempt: 3,
+    });
+    await captured.ctx!.retryEnqueue!('что у меня завтра?');
+
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   test('failed handler logs error without throwing', () => {
