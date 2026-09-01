@@ -44,7 +44,7 @@ describe('isAiChainDown — what the readiness endpoint asks', () => {
   // One slot failing is normal — that is what the fallback chain is for, and it
   // must never take the whole bot's health down with it.
   test('a single provider failing does not mark the chain down', () => {
-    reportProviderFailure({ provider: 'z.ai (glm-5.1)', status: 429, message: 'overloaded' });
+    reportProviderFailure({ provider: 'z.ai (glm-5.1)', status: 429, message: 'overloaded' }, 'smart');
     expect(isAiChainDown()).toBe(false);
   });
 
@@ -183,5 +183,37 @@ describe('isAiChainDown — the two chains are tracked apart', () => {
     expect(hasChainAnswered()).toBe(false);
     reportProviderAnswered('Gemini (models/gemini-2.5-flash)', 'smart');
     expect(hasChainAnswered()).toBe(true);
+  });
+
+  // The same false recovery one level down. Groq runs a large model in the smart
+  // chain and a small one in the fast chain; the large one going stale is
+  // exactly the 2026-09-01 failure. If the small one answering closed that
+  // outage, the admin would be told Groq is working again while every
+  // conversation still failed on it.
+  test('a fast-chain answer does not announce the smart chain provider as working', () => {
+    const sent: string[] = [];
+    let clock = 1_000_000;
+    resetProviderAlertState();
+    initProviderAlerts({
+      botToken: 't',
+      adminId: 1,
+      now: () => clock,
+      send: async (text) => {
+        sent.push(text);
+      },
+    });
+    clock += ALERT_POLICY.startupGraceMs + 1;
+
+    reportProviderFailure(
+      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist' },
+      'smart',
+    );
+    expect(sent.some((m) => m.includes('Groq'))).toBe(true);
+
+    reportProviderAnswered('Groq (llama-3.1-8b-instant)', 'fast');
+    expect(sent.some((m) => m.includes('working again'))).toBe(false);
+
+    reportProviderAnswered('Groq (openai/gpt-oss-120b)', 'smart');
+    expect(sent.some((m) => m.includes('working again'))).toBe(true);
   });
 });

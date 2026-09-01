@@ -293,6 +293,16 @@ function providerFamily(provider: string): string {
   return providerLabel(provider).toLowerCase();
 }
 
+/**
+ * The chain belongs in the key for the same reason it belongs in the chain key:
+ * the two chains run different models from the same providers, so a stale model
+ * on the smart chain and a healthy one on the fast chain are different problems
+ * — and an answer from one must not announce the other as working again.
+ */
+function providerKey(chain: ProviderChainKind, provider: string, failureClass: ProviderFailureClass): string {
+  return `provider:${chain}:${providerFamily(provider)}:${failureClass}`;
+}
+
 function newOutage(kind: OutageKind, provider: string, failureClass: ProviderFailureClass, now: number): OutageState {
   return {
     kind,
@@ -324,10 +334,10 @@ function restartOutage(state: OutageState, now: number): void {
  * the chain handles them. Quota, auth and stale-model failures need a human, so
  * they alert under the throttling policy documented at the top of this file.
  */
-export function reportProviderFailure(failure: ProviderFailure): void {
+export function reportProviderFailure(failure: ProviderFailure, chain: ProviderChainKind): void {
   const failureClass = classifyProviderFailure(failure);
   if (failureClass === 'transient') return;
-  const key = `provider:${providerFamily(failure.provider)}:${failureClass}`;
+  const key = providerKey(chain, failure.provider, failureClass);
   noteFailure(key, 'provider', failure.provider, failureClass, [failure]);
 }
 
@@ -405,14 +415,14 @@ export function hasChainAnswered(): boolean {
  * outages and its own chain's outage.
  */
 export function reportProviderAnswered(provider: string, chain: ProviderChainKind): void {
-  if (chain === SERVING_CHAIN) chainAnswered = true;
   if (!deps) return;
+  if (chain === SERVING_CHAIN) chainAnswered = true;
   const now = deps.now();
-  const family = providerFamily(provider);
+  const providerPrefix = `provider:${chain}:${providerFamily(provider)}:`;
   const chainKey = CHAIN_KEYS[chain];
   for (const [key, state] of outages) {
     if (state.resolvedAt !== null) continue;
-    const isThisProvider = state.kind === 'provider' && key.startsWith(`provider:${family}:`);
+    const isThisProvider = state.kind === 'provider' && key.startsWith(providerPrefix);
     const isThisChain = state.kind === 'chain' && key === chainKey;
     if (!isThisProvider && !isThisChain) continue;
     resolveOutage(state, now);

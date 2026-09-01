@@ -475,7 +475,7 @@ export async function aiStreamRound(
     } catch (error) {
       const failure = describeFailure(slot, error);
       failures.push(failure);
-      reportSlotFailure(failure, error, options.userId);
+      reportSlotFailure(failure, error, options.userId, chainKind);
 
       if (partialOutputShown) {
         aiLogger.error(
@@ -497,7 +497,12 @@ export async function aiStreamRound(
   throw aggregate;
 }
 
-function reportSlotFailure(failure: ProviderFailure, error: unknown, userId: number | undefined): void {
+function reportSlotFailure(
+  failure: ProviderFailure,
+  error: unknown,
+  userId: number | undefined,
+  chain: ProviderChainKind,
+): void {
   const context = { err: error, provider: failure.provider, status: failure.status, userId };
   if (failure.transient) {
     aiLogger.warn(context, 'Provider temporarily unavailable — trying next provider');
@@ -507,5 +512,5 @@ function reportSlotFailure(failure: ProviderFailure, error: unknown, userId: num
 
   // The alert layer classifies and throttles; a transient blip never reaches the
   // admin on its own, so this is safe to call for every failure.
-  reportProviderFailure(failure);
+  reportProviderFailure(failure, chain);
 }

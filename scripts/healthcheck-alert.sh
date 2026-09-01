@@ -15,6 +15,11 @@ STATE_FILE="/tmp/hypercal-down"
 TIMEOUT=10
 RETRY_COUNT=3
 RETRY_DELAY=15
+# How long to keep the "down" state while the bot answers 200 but cannot confirm
+# the provider chain works. Past this the state is dropped WITHOUT announcing a
+# recovery: there is still no proof to announce, but keeping it would suppress
+# the alert for the next, unrelated outage.
+UNVERIFIED_HOLD=1800
 
 # Read secrets from .env
 BOT_TOKEN=$(grep -m1 "^BOT_TOKEN=" "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'")
@@ -93,7 +98,18 @@ else
     if [[ "$BODY" == "ok" ]]; then
       rm -f "$STATE_FILE"
       send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
-    elif [[ "$BODY" != "ok (unverified)" ]]; then
+    elif [[ "$BODY" == "ok (unverified)" ]]; then
+      # The bot is up but has served nobody since it started, so it cannot say
+      # whether the outage ended. Wait — but not forever: while this state file
+      # exists the DOWN branch stays silent, so an indefinite wait would swallow
+      # the alert for a *different* outage starting later. On a bot quiet enough
+      # to sit unverified this long, that silence is the worse failure.
+      STATE_AGE=$(( $(date +%s) - $(stat -c %Y "$STATE_FILE" 2>/dev/null || stat -f %m "$STATE_FILE") ))
+      if (( STATE_AGE > UNVERIFIED_HOLD )); then
+        rm -f "$STATE_FILE"
+        echo "$(date -Is) dropping down-state after ${STATE_AGE}s unverified; no recovery announced" >&2
+      fi
+    else
       # Neither answer this script knows. Most likely the endpoint's contract
       # changed and this branch stopped recognising a real recovery — which would
       # keep the state file forever and suppress every future DOWN alert. Say so

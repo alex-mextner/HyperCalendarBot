@@ -187,18 +187,24 @@ describe('single-provider alerts', () => {
   beforeEach(setupAlerts);
 
   test('a transient failure alone never reaches the admin', () => {
-    reportProviderFailure({ provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' });
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' });
+    reportProviderFailure(
+      { provider: 'Groq (llama-3.3-70b-versatile)', status: 429, message: 'try again in 2s' },
+      'smart',
+    );
+    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
     advance(ALERT_POLICY.digestWindowMs * 3);
     expect(sent).toEqual([]);
   });
 
   test('a stale Groq model id alerts once and names the env var to update', () => {
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('Groq');
     expect(sent[0]).toContain('GROQ_MODEL');
@@ -206,7 +212,7 @@ describe('single-provider alerts', () => {
   });
 
   test('a revoked Hugging Face token alerts and tells the operator to rotate HF_TOKEN', () => {
-    reportProviderFailure({ provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure({ provider: 'HF (Qwen/Qwen3-Coder)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toHaveLength(1);
     expect(sent[0]).toContain('HF_TOKEN');
   });
@@ -222,7 +228,7 @@ describe('single-provider alerts', () => {
       now: () => clock,
       schedule: (fn, delayMs) => scheduled.push({ fn, runAt: clock + delayMs }),
     });
-    reportProviderFailure({ provider: 'HF (m)', status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure({ provider: 'HF (m)', status: 401, message: HF_AUTH_MESSAGE }, 'smart');
     expect(sent).toEqual([]);
   });
 });
@@ -231,7 +237,7 @@ describe('burst coalescing and escalation', () => {
   beforeEach(setupAlerts);
 
   function failZai(): void {
-    reportProviderFailure({ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE });
+    reportProviderFailure({ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }, 'smart');
   }
 
   test('a burst of the same failure sends one alert plus one digest, not one per failure', () => {
@@ -287,7 +293,7 @@ describe('burst coalescing and escalation', () => {
   });
 
   test('a provider that never alerted recovers silently', () => {
-    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' });
+    reportProviderFailure({ provider: 'Gemini (gemini-2.5-flash)', status: 503, message: 'overloaded' }, 'smart');
     reportProviderAnswered('Gemini (gemini-2.5-flash)', 'smart');
     expect(sent).toEqual([]);
   });
@@ -343,7 +349,10 @@ describe('hourly ceiling', () => {
   beforeEach(setupAlerts);
 
   function failProvider(index: number): void {
-    reportProviderFailure({ provider: `Provider${index} (model-${index})`, status: 401, message: HF_AUTH_MESSAGE });
+    reportProviderFailure(
+      { provider: `Provider${index} (model-${index})`, status: 401, message: HF_AUTH_MESSAGE },
+      'smart',
+    );
   }
 
   test('the ceiling-filling message says the ceiling was reached and later ones are held back', () => {
@@ -374,19 +383,25 @@ describe('hourly ceiling', () => {
       advance(1000);
     }
     // This provider never got its alert out.
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(0);
 
     advance(60 * 60_000 + 1000); // the rolling hour window empties
-    reportProviderFailure({
-      provider: 'Groq (llama-3.3-70b-versatile)',
-      status: 404,
-      message: GROQ_MODEL_GONE_MESSAGE,
-    });
+    reportProviderFailure(
+      {
+        provider: 'Groq (llama-3.3-70b-versatile)',
+        status: 404,
+        message: GROQ_MODEL_GONE_MESSAGE,
+      },
+      'smart',
+    );
     expect(sent.filter((m) => m.includes('GROQ_MODEL'))).toHaveLength(1);
   });
 
