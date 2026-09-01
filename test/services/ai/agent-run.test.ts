@@ -9,7 +9,7 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
-import { AssistantMessageCodec, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
@@ -134,6 +134,9 @@ describe('CalendarBotAgent.run()', () => {
     // Module-level throttle state must be reset between tests so repeated
     // (tool, args) combinations across tests don't cross-contaminate.
     _resetToolThrottleForTest();
+    // Per-user stall/honest notices are rate limited at module scope — reset so
+    // one test's apology does not silence the next test's.
+    aiFailureNotices.reset();
     const db = createTestDb();
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
@@ -154,6 +157,9 @@ describe('CalendarBotAgent.run()', () => {
       conversationLogger: new ConversationLogger(chatHistoryRepo),
       userRepo,
       eventReminderRepo,
+      // A stall phrase promises a comeback, so the agent only sends one when a
+      // retry is actually scheduled. Wire a no-op enqueue for the error tests.
+      retryEnqueue: async () => {},
     };
     config = {};
     sender = {
@@ -873,7 +879,10 @@ describe('CalendarBotAgent.run()', () => {
       `EN responseText "${resultEn.responseText}" must contain an English stall phrase`,
     ).toBe(true);
 
-    // Verify Russian stall phrase comes from the Russian phrase set.
+    // Verify Russian stall phrase comes from the Russian phrase set. The
+    // notice tracker deliberately suppresses a second apology within the
+    // cooldown, so this second outage starts from a clean slate.
+    aiFailureNotices.reset();
     const { impl: implRu } = makeStreamImpl([{ kind: 'error', error: new Error('All providers failed') }]);
     const agentRu = new CalendarBotAgent(config, sender, { streamImpl: implRu });
     ctx.user = { ...ctx.user, language: 'ru' };

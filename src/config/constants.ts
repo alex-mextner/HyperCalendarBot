@@ -120,6 +120,27 @@ export const RU_AGENT_ERROR_PHRASES = [
   'Подожди немного, тут пришёл email на 15 страниц — надо быстро пробежать.',
 ] as const;
 
+/**
+ * Slash commands that keep working while the AI chain is down — they read the
+ * database directly and never call a model. Shown whenever the bot has to admit
+ * the smart part is unavailable. Kept to three so the whole notice fits a phone
+ * notification preview.
+ */
+export const EN_AI_COMMANDS_HINT =
+  "These still work:\n/today — today's schedule\n/add — create an event\n/help — all commands";
+export const RU_AI_COMMANDS_HINT =
+  'Пока работают команды:\n/today — расписание на сегодня\n/add — создать событие\n/help — все команды';
+
+/**
+ * Pick a stall phrase, avoiding `exclude` so the same apology is never sent
+ * twice in a row to the same user.
+ */
+function pickPhrase(phrases: readonly string[], exclude?: string): string {
+  const pool = exclude ? phrases.filter((phrase) => phrase !== exclude) : phrases;
+  const source = pool.length > 0 ? pool : phrases;
+  return source[Math.floor(Math.random() * source.length)]!;
+}
+
 // i18n messages
 export const MSG = {
   en: {
@@ -152,15 +173,12 @@ export const MSG = {
     confirm_delete: (title: string) => `Delete "${title}"?`,
     search_no_results: 'No events found.',
     something_wrong: 'Something went wrong. Try again or use /help.',
-    agent_error: () => EN_AGENT_ERROR_PHRASES[Math.floor(Math.random() * EN_AGENT_ERROR_PHRASES.length)]!,
-    agent_give_up: () => {
-      const phrases = [
-        "Can't right now — the devs are already on it.",
-        'Paws up. The devs are already on it.',
-        "I'm out of steam for today. Don't be mad — ping me later.",
-      ];
-      return phrases[Math.floor(Math.random() * phrases.length)]!;
-    },
+    agent_error: (exclude?: string) => pickPhrase(EN_AGENT_ERROR_PHRASES, exclude),
+    ai_degraded: `🔧 AI unavailable — I can't answer in my own words right now.\n\n${EN_AI_COMMANDS_HINT}`,
+    agent_give_up: (promised: boolean) =>
+      promised
+        ? `🔧 Promised to come back — and the AI is still down. Devs are on it.\n\n${EN_AI_COMMANDS_HINT}`
+        : `🔧 AI still down — devs are on it.\n\n${EN_AI_COMMANDS_HINT}`,
     agent_timeout: '⚠️ That took too long — timing out.',
     rate_limited: 'Slow down, too many messages.',
     add_title_prompt: "Let's create an event. What's the title?",
@@ -949,16 +967,13 @@ export const MSG = {
     event_updated: (title: string) => `✏️ Обновлено: "${title}"`,
     confirm_delete: (title: string) => `Удалить "${title}"?`,
     search_no_results: 'Ничего не найдено.',
-    something_wrong: 'Что-то пошло не так. Попробуйте ещё раз или /help.',
-    agent_error: () => RU_AGENT_ERROR_PHRASES[Math.floor(Math.random() * RU_AGENT_ERROR_PHRASES.length)]!,
-    agent_give_up: () => {
-      const phrases = [
-        'Нишмогла, разрабы уже смотрят в чём дело.',
-        'У меня лапки, разрабы уже смотрят в чём дело.',
-        'Чот я сегодня утомился уже, не серчайте — я пока вздремну, напишите попозже.',
-      ];
-      return phrases[Math.floor(Math.random() * phrases.length)]!;
-    },
+    something_wrong: 'Что-то пошло не так. Попробуй ещё раз или /help.',
+    agent_error: (exclude?: string) => pickPhrase(RU_AGENT_ERROR_PHRASES, exclude),
+    ai_degraded: `🔧 ИИ недоступен — своими словами ответить не смогу.\n\n${RU_AI_COMMANDS_HINT}`,
+    agent_give_up: (promised: boolean) =>
+      promised
+        ? `🔧 Обещал вернуться — но ИИ так и не поднялся. Разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`
+        : `🔧 ИИ всё ещё недоступен — разрабы уже смотрят.\n\n${RU_AI_COMMANDS_HINT}`,
     agent_timeout: '⚠️ Что-то долго думаю — прерываю.',
     rate_limited: 'Слишком много сообщений, подождите.',
     add_title_prompt: 'Создаём событие. Как назовём?',

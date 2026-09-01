@@ -1,8 +1,9 @@
 import type { ConnectionOptions } from 'bullmq';
 import { Queue, Worker } from 'bullmq';
 import type { AgentContextBuilder } from '../bot/agent-context-factory.ts';
-import { t } from '../config/constants.ts';
+import { toLang } from '../config/constants.ts';
 import type { User } from '../database/types.ts';
+import { agentGiveUpMessage } from '../services/ai/agent.ts';
 import type { AgentContext } from '../services/ai/types.ts';
 import type { AiMessageJobData, RetryJobStore } from '../services/scheduled/types.ts';
 import { logger } from '../utils/logger.ts';
@@ -35,11 +36,21 @@ export class SyntheticPipelineRunner {
       if (this.deps.retryQueue) {
         const queue = this.deps.retryQueue;
         const jobStore = this.deps.retryJobStore;
-        const lang = user.language as 'en' | 'ru';
+        const lang = toLang(user.language);
 
         agentCtx.retryEnqueue = async (msg: string) => {
           if (currentAttempt >= MAX_RETRY_ATTEMPTS) {
-            await agentCtx.sender?.sendMessage(user.telegram_id, t(lang).agent_give_up());
+            const giveUp = agentGiveUpMessage(user.telegram_id, lang);
+            if (giveUp) {
+              if (agentCtx.sender) {
+                await agentCtx.sender.sendMessage(user.telegram_id, giveUp);
+              } else {
+                queueLogger.warn(
+                  { userId: user.telegram_id },
+                  'Retry budget exhausted but no sender is available — give-up message not delivered',
+                );
+              }
+            }
             if (jobStore) await jobStore.del(user.telegram_id);
             return;
           }
