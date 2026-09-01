@@ -83,4 +83,37 @@ describe('isAiChainDown — what the health endpoint asks', () => {
     reportAllProvidersFailed(DEAD);
     expect(isAiChainDown()).toBe(true);
   });
+
+  // A provider that answers and then dies again inside the flap guard resumes
+  // the previous outage rather than opening a new one. The health signal has to
+  // come back with it — the recovery cleared it, and a resumed outage is still
+  // an outage no user can work around.
+  test('an outage resumed inside the flap guard reads as down again', () => {
+    let clock = 1_000_000;
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
+
+    clock += ALERT_POLICY.startupGraceMs + 1;
+    reportAllProvidersFailed(DEAD);
+    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+    expect(isAiChainDown()).toBe(false);
+
+    clock += ALERT_POLICY.flapGuardMs - 1;
+    reportAllProvidersFailed(DEAD);
+    expect(isAiChainDown()).toBe(true);
+  });
+
+  test('a failure long after a recovery opens a fresh outage and reads as down', () => {
+    let clock = 1_000_000;
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {}, now: () => clock });
+
+    clock += ALERT_POLICY.startupGraceMs + 1;
+    reportAllProvidersFailed(DEAD);
+    reportProviderRecovered('Gemini (models/gemini-2.5-flash)');
+
+    clock += ALERT_POLICY.flapGuardMs + 1;
+    reportAllProvidersFailed(DEAD);
+    expect(isAiChainDown()).toBe(true);
+  });
 });

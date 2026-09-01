@@ -1,11 +1,14 @@
 #!/bin/bash
-# Polls the bot health endpoint every run (called by cron every 2 minutes).
+# Polls the bot readiness endpoint every run (called by cron every 2 minutes).
 # Sends Telegram alerts to the admin on failure and recovery.
 # State file: /tmp/hypercal-down — present while bot is considered down.
 
 set -euo pipefail
 
-HEALTH_URL="https://hypercal.invntrm.ru/health"
+# /ready, not /health: /health is pure process liveness, while this watchdog has
+# to notice the failure users actually feel — a running bot whose whole AI
+# provider chain is dead answers nobody, and /health says "ok" throughout.
+HEALTH_URL="https://hypercal.invntrm.ru/ready"
 ALERT_URL="https://hypercal.invntrm.ru/admin/alerts"
 ENV_FILE="/opt/hypercal/.env"
 STATE_FILE="/tmp/hypercal-down"

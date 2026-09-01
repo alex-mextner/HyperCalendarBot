@@ -39,9 +39,11 @@ export interface WebServerDeps {
   // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
   botStarted?: boolean;
   /**
-   * True while the whole AI provider chain is failing. Injected so the endpoint
-   * reports the failure users actually feel — a live process that cannot answer
-   * anyone — instead of only process liveness.
+   * True while the whole AI provider chain is failing. Read by /ready, never by
+   * /health: a live process that cannot answer anyone is a real failure, but it
+   * is not one a restart fixes, and container orchestrators restart on a failing
+   * liveness probe. Putting it on /health would turn a provider outage into a
+   * restart loop during the very incident this is meant to surface.
    */
   aiChainDown?: () => boolean;
   // Admin alert queue — POST /admin/alerts to push, GET /admin/alerts/next to pop
@@ -95,6 +97,25 @@ function withSecurityHeaders(res: Response): Response {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+/**
+ * The checks both /health and /ready share: the process finished starting and
+ * its own datastore answers. Returns the failing response, or undefined when
+ * the process is live.
+ */
+async function livenessFailure(deps: WebServerDeps): Promise<Response | undefined> {
+  if (deps.botStarted === false) {
+    return new Response('bot not started', { status: 503 });
+  }
+  if (!deps.healthCheck) return undefined;
+  try {
+    await deps.healthCheck();
+    return undefined;
+  } catch (err) {
+    webLogger.warn({ err }, 'Health check failed');
+    return new Response('error', { status: 503 });
+  }
+}
+
 async function handleRequest(
   req: Request,
   url: URL,
@@ -111,23 +132,17 @@ async function handleRequest(
     return undefined;
   }
 
-  if (req.method === 'GET' && url.pathname === '/health') {
-    if (deps.botStarted === false) {
-      return new Response('bot not started', { status: 503 });
-    }
-    if (deps.healthCheck) {
-      try {
-        await deps.healthCheck();
-      } catch (err) {
-        webLogger.warn({ err }, 'Health check failed');
-        return new Response('error', { status: 503 });
-      }
-    }
+  if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/ready')) {
+    const notLive = await livenessFailure(deps);
+    if (notLive) return notLive;
+    if (url.pathname === '/health') return new Response('ok');
     // A running process with a dead provider chain answers nobody. Reporting it
     // healthy is what let the 2026-09-01 outage run for hours unnoticed: the
-    // two-minute cron watchdog saw "ok" the whole time.
+    // two-minute cron watchdog saw "ok" the whole time. This lives on /ready
+    // rather than /health because a restart cannot fix an outage at the
+    // provider — see the comment on aiChainDown in WebServerDeps.
     if (deps.aiChainDown?.() === true) {
-      webLogger.error('AI provider chain is down — reporting unhealthy');
+      webLogger.error('AI provider chain is down — reporting not ready');
       return new Response('ai chain down', { status: 503 });
     }
     return new Response('ok');

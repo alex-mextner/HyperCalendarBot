@@ -139,6 +139,9 @@ const webServerDeps: WebServerDeps = {
   botStarted: false,
   alertRepo: db.alerts,
   adminAlertToken: config.ADMIN_ALERT_TOKEN,
+  // The cron watchdog polls /ready every two minutes, and this is what lets it
+  // see a total provider outage. Process liveness alone never showed one.
+  aiChainDown: isAiChainDown,
 };
 const webServerHandle: { stop: () => void } | undefined = startWebServer(webServerDeps);
 let syncQueueCleanup: { close: () => Promise<void> } | undefined;
@@ -925,11 +928,6 @@ if (config.REDIS_URL) {
   eventMentionStore = new InMemoryEventMentionStore();
   botLogger.info('Event mention store: in-memory (no REDIS_URL)');
 }
-
-// Wired regardless of Redis: the cron watchdog polls /health every two minutes,
-// and this is what lets it see a total provider outage. Process liveness alone
-// never showed one.
-webServerDeps.aiChainDown = isAiChainDown;
 
 const domainEventBus = new DomainEventBus();
 

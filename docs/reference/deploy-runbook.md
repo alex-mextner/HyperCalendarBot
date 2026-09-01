@@ -25,8 +25,13 @@ docker compose up -d --no-deps bot
 # Docker logs (pino JSON):
 ssh root@104.248.84.190 'docker compose -f /opt/hypercal/docker-compose.yml logs -f --tail 100 bot'
 
-# Health check:
+# Liveness — process started and Redis answers:
 curl https://hypercal.invntrm.ru/health
+
+# Readiness — everything above, plus the AI provider chain is answering.
+# This is what the cron watchdog polls; a 503 here with a 200 on /health means
+# the bot is running but cannot answer anyone.
+curl https://hypercal.invntrm.ru/ready
 ```
 
 `logs/chats/{chatId}/{timestamp}.log` inside container contains detailed AI interaction logs:

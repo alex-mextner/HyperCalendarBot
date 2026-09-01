@@ -42,7 +42,7 @@
 //    alert/recovery messages, a failure returning within 15 minutes of a recovery
 //    resumes the previous outage (escalation ladder intact) instead of alerting
 //    as brand new.
-//  * The chain-down flag the health endpoint reads expires after 15 minutes
+//  * The chain-down flag the readiness endpoint reads expires after 15 minutes
 //    without a fresh failure. It is set by a failed user message and cleared by
 //    a successful one, so with no traffic there is no evidence either way and
 //    an expired flag is honest rather than stale.
@@ -321,12 +321,13 @@ export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
 
 /**
  * True while the whole provider chain is failing and no provider has answered
- * since. Read by the `/health` endpoint.
+ * since. Read by the `/ready` endpoint, which the cron watchdog polls.
  *
  * On 2026-09-01 every provider was dead for hours. The process was running and
- * Redis answered its ping, which is all `/health` checked, so it reported "ok",
- * the two-minute cron watchdog stayed quiet, and nothing was raised — while no
- * user could get an answer. Liveness of the process is not health of the bot.
+ * Redis answered its ping, which is all the only endpoint of the day checked,
+ * so it reported "ok", the two-minute cron watchdog stayed quiet, and nothing
+ * was raised — while no user could get an answer. Liveness of the process is
+ * not health of the bot.
  *
  * This reads state the alerting layer already keeps, so the check costs nothing
  * and never calls a provider: a watchdog polling every two minutes must not

@@ -48,23 +48,12 @@ describe('health endpoint', () => {
     }
   });
 
-  // Regression for the 2026-09-01 outage: every AI provider was dead for hours
-  // while the process ran and Redis answered, so /health said "ok" and the
-  // two-minute cron watchdog never raised anything. Liveness is not health.
-  test('returns 503 when the AI provider chain is down', async () => {
+  // /health stays pure liveness. Container orchestrators restart on a failing
+  // liveness probe, and a restart cannot fix an outage that lives at the
+  // provider — it would only produce a restart loop during the very incident
+  // this work exists to surface. The provider chain is asked about on /ready.
+  test('stays 200 while the AI provider chain is down', async () => {
     const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => true });
-    const { stop, port } = startWebServer(deps);
-    try {
-      const res = await fetch(`http://localhost:${port}/health`);
-      expect(res.status).toBe(503);
-      expect(await res.text()).toBe('ai chain down');
-    } finally {
-      stop();
-    }
-  });
-
-  test('stays 200 while the AI chain is healthy', async () => {
-    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => false });
     const { stop, port } = startWebServer(deps);
     try {
       const res = await fetch(`http://localhost:${port}/health`);
@@ -483,6 +472,68 @@ describe('admin alerts endpoints', () => {
         headers: { Authorization: 'Bearer secret-token' },
       });
       expect(res2.status).toBe(204);
+    } finally {
+      stop();
+    }
+  });
+});
+
+// The endpoint the two-minute cron watchdog polls. It answers "can this bot
+// serve a user right now", which is a strictly stronger question than /health's
+// "is this process alive".
+describe('readiness endpoint', () => {
+  // Regression for the 2026-09-01 outage: every AI provider was dead for hours
+  // while the process ran and Redis answered, so the only endpoint there was
+  // said "ok" and the watchdog never raised anything. Liveness is not health.
+  test('returns 503 when the AI provider chain is down', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => true });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('ai chain down');
+    } finally {
+      stop();
+    }
+  });
+
+  test('returns 200 while the AI chain is healthy', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => false });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok');
+    } finally {
+      stop();
+    }
+  });
+
+  test('reports the liveness failures too, so the watchdog needs only one probe', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.reject(new Error('redis down'))) });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('error');
+    } finally {
+      stop();
+    }
+  });
+
+  // The production wiring assigns several deps onto the same object after the
+  // server is already running, so the server must read them per request rather
+  // than capture them at construction. Without this test a defensive copy in
+  // startWebServer would silently drop the chain check from /ready.
+  test('picks up a chain check wired in after the server started', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()) });
+    const { stop, port } = startWebServer(deps);
+    try {
+      expect((await fetch(`http://localhost:${port}/ready`)).status).toBe(200);
+      deps.aiChainDown = () => true;
+      const res = await fetch(`http://localhost:${port}/ready`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('ai chain down');
     } finally {
       stop();
     }
