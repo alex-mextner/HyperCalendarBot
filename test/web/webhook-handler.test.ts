@@ -48,6 +48,33 @@ describe('health endpoint', () => {
     }
   });
 
+  // Regression for the 2026-09-01 outage: every AI provider was dead for hours
+  // while the process ran and Redis answered, so /health said "ok" and the
+  // two-minute cron watchdog never raised anything. Liveness is not health.
+  test('returns 503 when the AI provider chain is down', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => true });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/health`);
+      expect(res.status).toBe(503);
+      expect(await res.text()).toBe('ai chain down');
+    } finally {
+      stop();
+    }
+  });
+
+  test('stays 200 while the AI chain is healthy', async () => {
+    const deps = baseDeps({ healthCheck: mock(() => Promise.resolve()), aiChainDown: () => false });
+    const { stop, port } = startWebServer(deps);
+    try {
+      const res = await fetch(`http://localhost:${port}/health`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe('ok');
+    } finally {
+      stop();
+    }
+  });
+
   test('returns 503 when botStarted is false', async () => {
     const deps = baseDeps({ botStarted: false });
     const { stop, port } = startWebServer(deps);

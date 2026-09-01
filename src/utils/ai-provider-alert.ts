@@ -311,6 +311,24 @@ export function reportAllProvidersFailed(failures: ProviderFailure[]): void {
   noteFailure(CHAIN_KEY, 'chain', 'all providers', 'transient', failures);
 }
 
+/**
+ * True while the whole provider chain is failing and no provider has answered
+ * since. Read by the `/health` endpoint.
+ *
+ * On 2026-09-01 every provider was dead for hours. The process was running and
+ * Redis answered its ping, which is all `/health` checked, so it reported "ok",
+ * the two-minute cron watchdog stayed quiet, and nothing was raised — while no
+ * user could get an answer. Liveness of the process is not health of the bot.
+ *
+ * This reads state the alerting layer already keeps, so the check costs nothing
+ * and never calls a provider: a watchdog polling every two minutes must not
+ * spend quota to discover that quota is the problem.
+ */
+export function isAiChainDown(): boolean {
+  const chain = outages.get(CHAIN_KEY);
+  return chain !== undefined && chain.resolvedAt === null;
+}
+
 /** Report that a provider answered successfully — closes its outages and the chain outage. */
 export function reportProviderRecovered(provider: string): void {
   if (!deps) return;
@@ -333,17 +351,27 @@ function noteFailure(
 ): void {
   if (!deps) return;
   const now = deps.now();
-  if (now - initializedAt < ALERT_POLICY.startupGraceMs) {
-    alertLogger.warn({ provider, failureClass }, 'Provider failure inside startup grace window — not alerting');
-    return;
-  }
+  const withinStartupGrace = now - initializedAt < ALERT_POLICY.startupGraceMs;
 
+  // The outage is recorded even inside the grace window. The grace exists to
+  // stop a crash loop turning every restart into an alert burst — it must not
+  // also erase the state, or a process that restarts into an already-broken
+  // chain looks healthy for its first minute. That is not hypothetical: on
+  // 2026-09-01 the container was recreated while every provider was dead.
   const state = outages.get(key) ?? newOutage(kind, provider, failureClass, now);
   outages.set(key, state);
   applyFlapGuard(state, now);
   state.provider = provider;
   state.failures = failures;
   state.occurrences += 1;
+
+  if (withinStartupGrace) {
+    alertLogger.warn(
+      { provider, failureClass },
+      'Provider failure inside startup grace window — recorded, not alerting',
+    );
+    return;
+  }
 
   // An alert the ceiling held back must not count as announced, otherwise the
   // outage would silently move on to the escalation ladder having said nothing.

@@ -17,7 +17,7 @@ import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
-import { initProviderAlerts } from './utils/ai-provider-alert.ts';
+import { initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
@@ -925,6 +925,11 @@ if (config.REDIS_URL) {
   eventMentionStore = new InMemoryEventMentionStore();
   botLogger.info('Event mention store: in-memory (no REDIS_URL)');
 }
+
+// Wired regardless of Redis: the cron watchdog polls /health every two minutes,
+// and this is what lets it see a total provider outage. Process liveness alone
+// never showed one.
+webServerDeps.aiChainDown = isAiChainDown;
 
 const domainEventBus = new DomainEventBus();
 

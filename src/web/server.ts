@@ -38,6 +38,12 @@ export interface WebServerDeps {
   healthCheck?: () => Promise<void>;
   // Set to false during init, true once bot.onStart fires — health endpoint returns 503 until ready
   botStarted?: boolean;
+  /**
+   * True while the whole AI provider chain is failing. Injected so the endpoint
+   * reports the failure users actually feel — a live process that cannot answer
+   * anyone — instead of only process liveness.
+   */
+  aiChainDown?: () => boolean;
   // Admin alert queue — POST /admin/alerts to push, GET /admin/alerts/next to pop
   alertRepo?: AlertRepository;
   adminAlertToken?: string;
@@ -116,6 +122,13 @@ async function handleRequest(
         webLogger.warn({ err }, 'Health check failed');
         return new Response('error', { status: 503 });
       }
+    }
+    // A running process with a dead provider chain answers nobody. Reporting it
+    // healthy is what let the 2026-09-01 outage run for hours unnoticed: the
+    // two-minute cron watchdog saw "ok" the whole time.
+    if (deps.aiChainDown?.() === true) {
+      webLogger.error('AI provider chain is down — reporting unhealthy');
+      return new Response('ai chain down', { status: 503 });
     }
     return new Response('ok');
   }
