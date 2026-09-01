@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
-import { validateWorkflowVariables } from '../../../src/services/intent/workflow-validator.ts';
+import { validateWorkflowSteps, validateWorkflowVariables } from '../../../src/services/intent/workflow-validator.ts';
 
 describe('validateWorkflowVariables', () => {
   test('valid known variables pass', () => {
@@ -329,5 +329,69 @@ describe('validateWorkflowVariables', () => {
       ],
     };
     expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+});
+
+describe('validateWorkflowSteps', () => {
+  test('a workflow calling only real tools with complete input passes', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'render_day_image', input: { date: '{{dates.today}}', scope: '{{env.scope}}' } },
+        { call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('workflow-only steps are not treated as tools', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'Когда?' }, as: 'when' },
+        { call: 'respond', input: { message: 'Готово' } },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('a step calling a tool that does not exist is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'render_image', input: { period: 'month' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('render_image');
+  });
+
+  test('a missing required parameter is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'find_user', input: { query: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('username'))).toBe(true);
+  });
+
+  test('a parameter the tool does not accept is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'send_invitation', input: { telegram_id: '{{$1}}', scope: 'personal' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('telegram_id'))).toBe(true);
+    expect(errors.some((e) => e.includes('event_id'))).toBe(true);
+  });
+
+  test('Level 1 workflows are validated the same way', () => {
+    const workflow: Workflow = {
+      tools: [{ name: 'get_day_of_week_date', input: { day_name: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('get_day_of_week_date');
+  });
+
+  test('tools with free-form input schemas accept any parameters', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'bash_execute', input: { anything: 'goes' } }],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
   });
 });

@@ -117,7 +117,9 @@ describe('IntentLearner', () => {
     const intentPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня', 'events today'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      workflow: {
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+      },
       format: 'events_list',
     };
     const learner = buildLearner(makeStreamStub([`\`\`\`json\n${JSON.stringify(intentPayload)}\n\`\`\``]));
@@ -162,13 +164,17 @@ describe('IntentLearner', () => {
     const invalidPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{unknown_var}}' } }] },
+      workflow: {
+        tools: [{ name: 'get_events', input: { start_date: '{{unknown_var}}', end_date: '{{dates.today}}' } }],
+      },
       format: 'events_list',
     };
     const validPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      workflow: {
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+      },
       format: 'events_list',
     };
 
@@ -190,7 +196,7 @@ describe('IntentLearner', () => {
     const invalidPayload = {
       canonical_name: 'show_today',
       phrases: ['что сегодня'],
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{bad_var}}' } }] },
+      workflow: { tools: [{ name: 'get_events', input: { start_date: '{{bad_var}}', end_date: '{{dates.today}}' } }] },
       format: 'events_list',
     };
 
@@ -212,7 +218,9 @@ describe('IntentLearner', () => {
       canonical_name: 'show_today',
       phrases: ['что сегодня', 'events today'],
       pattern: null,
-      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      workflow: {
+        tools: [{ name: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+      },
       format: 'text',
     };
     const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));

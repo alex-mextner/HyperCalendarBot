@@ -1,5 +1,13 @@
+import { z } from 'zod';
+import { toolSchemas } from '../ai/tool-schemas.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 import type { Workflow } from './workflow-schema.ts';
+
+/** Step names the executor handles itself — they never reach the tool dispatcher. */
+const WORKFLOW_ONLY_STEPS = new Set(['respond', 'ask_user']);
+
+/** Tool schemas keyed by plain string, so an unknown step name is a lookup miss, not a type error. */
+const TOOL_SCHEMAS_BY_NAME = new Map<string, z.ZodType>(Object.entries(toolSchemas));
 
 /** Variables that the intent workflow executor can resolve. */
 const ALLOWED_VARS = new Set([
@@ -121,6 +129,76 @@ function extractStepOutputNames(workflow: Workflow): Set<string> {
     }
   }
   return names;
+}
+
+interface StepCall {
+  tool: string;
+  /** Parameter names the workflow passes to the tool. */
+  params: string[];
+}
+
+/** Collect every tool invocation in a workflow, from Level 1 `tools` or Level 2 `steps`. */
+function extractStepCalls(workflow: Workflow): StepCall[] {
+  if ('steps' in workflow) {
+    const calls: StepCall[] = [];
+    for (const step of workflow.steps) {
+      if (typeof step.call !== 'string') continue;
+      calls.push({ tool: step.call, params: Object.keys(step.input ?? {}) });
+    }
+    return calls;
+  }
+  return workflow.tools.map((tool) => ({ tool: tool.name, params: Object.keys(tool.input) }));
+}
+
+/**
+ * Check one step's arguments against the tool's schema.
+ *
+ * Only parameter names are checked, never value types: workflow inputs hold unresolved
+ * `{{template}}` strings that become numbers and booleans at execution time.
+ */
+function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
+  // Free-form schemas (assistant passthrough tools) accept any argument.
+  if (!(schema instanceof z.ZodObject)) return [];
+
+  const errors: string[] = [];
+  const shape = schema.shape;
+
+  for (const [field, fieldSchema] of Object.entries(shape)) {
+    const isOptional = fieldSchema.safeParse(undefined).success;
+    if (!isOptional && !call.params.includes(field)) {
+      errors.push(`step "${call.tool}": required parameter "${field}" is missing`);
+    }
+  }
+
+  for (const field of call.params) {
+    if (!(field in shape)) {
+      const accepted = Object.keys(shape).join(', ');
+      errors.push(`step "${call.tool}": unknown parameter "${field}" — accepted: ${accepted || '(none)'}`);
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Validate that every step calls a tool that exists and passes the arguments it declares.
+ * Returns a list of human-readable error strings (empty = valid).
+ */
+export function validateWorkflowSteps(workflow: Workflow): string[] {
+  const errors: string[] = [];
+
+  for (const call of extractStepCalls(workflow)) {
+    if (WORKFLOW_ONLY_STEPS.has(call.tool)) continue;
+
+    const schema = TOOL_SCHEMAS_BY_NAME.get(call.tool);
+    if (!schema) {
+      errors.push(`step "${call.tool}": no such tool`);
+      continue;
+    }
+    errors.push(...validateStepParams(call, schema));
+  }
+
+  return errors;
 }
 
 /**

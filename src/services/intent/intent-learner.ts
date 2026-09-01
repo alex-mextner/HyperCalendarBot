@@ -9,7 +9,7 @@ import { aiStreamRound } from '../ai/streaming.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
-import { validateWorkflowVariables } from './workflow-validator.ts';
+import { validateWorkflowSteps, validateWorkflowVariables } from './workflow-validator.ts';
 
 const LearnerResponseSchema = z.object({
   skip: z.boolean().optional(),
@@ -225,15 +225,18 @@ export class IntentLearner {
         return null;
       }
 
-      // Validate template variables in workflow
-      const varErrors = validateWorkflowVariables(workflowResult.data, parsed.pattern ?? null);
+      // Validate template variables and the tool calls themselves
+      const varErrors = [
+        ...validateWorkflowVariables(workflowResult.data, parsed.pattern ?? null),
+        ...validateWorkflowSteps(workflowResult.data),
+      ];
       if (varErrors.length > 0) {
-        cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow has invalid variables');
+        cmdLogger.warn({ attempt, errors: varErrors }, 'IntentLearner workflow is invalid');
 
         if (attempt < MAX_RETRIES) {
           // Feed the errors back and retry
           const errorFeedback = [
-            'The workflow contains invalid template variables. Fix them and return corrected JSON.',
+            'The workflow is invalid. Fix the errors below and return corrected JSON.',
             'Errors:',
             ...varErrors.map((e) => `- ${e}`),
           ].join('\n');
