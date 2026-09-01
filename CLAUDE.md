@@ -233,6 +233,15 @@ Optional features that depend on an env var must deactivate gracefully when the 
 
 - **Dependency versions always use `^`** (e.g. `"marked": "^15.0.12"`). Never pin exact versions — it makes routine upgrades a chore and diverges from ecosystem norms. Range `^` is mandatory; `~` and bare exact versions are not acceptable.
   **Exception**: `electron` in `packages/agent-macos/` must be pinned to an exact version (e.g. `"34.5.8"`). `electron-builder` rejects range versions (`^`) at build time and fails CI.
+- **`electron-builder-squirrel-windows` in `packages/agent-macos/` is not a Windows build.**
+  `app-builder-lib` declares it as a required peer dependency (no `peerDependenciesMeta`
+  marks it optional), so it is installed whether or not a Windows target is ever built.
+  Declaring it explicitly at the version `app-builder-lib` peer-pins is what keeps a single
+  coherent `app-builder-lib` / `builder-util` / `builder-util-runtime` set in the tree. Left
+  undeclared it resolves to whatever the lockfile last held — that is how a stale 25.1.8 kept
+  a vulnerable `app-builder-lib` 25 chain alive under an otherwise-upgraded electron-builder
+  26. Do not remove it in a dependency cleanup: it looks wrong for a macOS-only package and
+  is not.
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
