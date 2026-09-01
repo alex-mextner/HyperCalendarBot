@@ -215,8 +215,13 @@ let initializedAt = 0;
  */
 function adminSender(botToken: string, adminId: number | undefined): (html: string) => void {
   if (adminId === undefined) {
-    return (html) => {
-      alertLogger.warn({ alert: html }, 'Provider alert with no admin configured — recorded, not sent');
+    // The body is deliberately not logged: it is rendered from provider error
+    // messages, which are attacker- and vendor-controlled text on a path CodeQL
+    // traces back to the API keys. What went wrong is already logged at the
+    // failure site with the provider and status; this line only records that
+    // there was nobody to tell.
+    return () => {
+      alertLogger.warn('Provider alert not sent — no admin chat is configured');
     };
   }
   return telegramSender(botToken, adminId);
