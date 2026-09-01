@@ -2,7 +2,11 @@
 import { z } from 'zod';
 import { cmdLogger } from '../../utils/logger.ts';
 
-const HF_API_URL = 'https://api-inference.huggingface.co/models/joeddav/xlm-roberta-large-xnli';
+// HuggingFace retired the `api-inference.huggingface.co` host — it no longer
+// resolves in DNS. Requests failed instantly and, because this classifier fails
+// open, the group-chat filter stopped filtering: every group message reached the
+// AI. Inference now goes through the router.
+const HF_API_URL = 'https://router.huggingface.co/hf-inference/models/joeddav/xlm-roberta-large-xnli';
 const REQUEST_TIMEOUT_MS = 3000;
 const CALENDAR_CONFIDENCE_THRESHOLD = 0.4;
 
