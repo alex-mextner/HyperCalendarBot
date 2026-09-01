@@ -35,8 +35,7 @@
     "app-builder-lib": "^26.15.3",
     "builder-util-runtime": "^9.7.0",
     "js-yaml": "^4.3.0",
-    "ip-address": "^10.0.1",
-    "brace-expansion": "^2.1.4"
+    "ip-address": "^10.0.1"
   },
   "dependencies": {
     "@date-fns/tz": "^1.4.1",
