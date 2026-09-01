@@ -202,6 +202,15 @@ export function validateWorkflowSteps(workflow: Workflow): string[] {
 }
 
 /**
+ * Full validation for a workflow about to be stored: template variables and tool calls.
+ * Every path that persists a workflow must go through this, not one half of it.
+ * Returns a list of human-readable error strings (empty = valid).
+ */
+export function validateWorkflow(workflow: Workflow, pattern: string | null | undefined): string[] {
+  return [...validateWorkflowVariables(workflow, pattern), ...validateWorkflowSteps(workflow)];
+}
+
+/**
  * Validate that all {{expr}} references in a workflow are resolvable.
  * Returns a list of human-readable error strings (empty = valid).
  */

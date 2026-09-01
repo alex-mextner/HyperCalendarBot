@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
-import { validateWorkflowSteps, validateWorkflowVariables } from '../../../src/services/intent/workflow-validator.ts';
+import {
+  validateWorkflow,
+  validateWorkflowSteps,
+  validateWorkflowVariables,
+} from '../../../src/services/intent/workflow-validator.ts';
 
 describe('validateWorkflowVariables', () => {
   test('valid known variables pass', () => {
@@ -393,5 +397,34 @@ describe('validateWorkflowSteps', () => {
       steps: [{ call: 'bash_execute', input: { anything: 'goes' } }],
     };
     expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+});
+
+describe('validateWorkflow', () => {
+  test('accepts a workflow that is sound in both variables and tool calls', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+    };
+    expect(validateWorkflow(workflow, null)).toEqual([]);
+  });
+
+  test('reports variable errors and tool errors together', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'render_image', input: { period: '{{user.phone}}' } }],
+    };
+    const errors = validateWorkflow(workflow, null);
+
+    expect(errors.some((e) => e.includes('user.phone'))).toBe(true);
+    expect(errors.some((e) => e.includes('render_image'))).toBe(true);
+  });
+
+  test('catches a bad capture reference alongside a bad parameter', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'find_user', input: { query: '{{$2}}' } }],
+    };
+    const errors = validateWorkflow(workflow, '^(.+)$');
+
+    expect(errors.some((e) => e.includes('$2'))).toBe(true);
+    expect(errors.some((e) => e.includes('username'))).toBe(true);
   });
 });
