@@ -5,13 +5,22 @@ import { formatUtcOffset } from '../../utils/telegram.ts';
 import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
+/**
+ * Upper bound on occurrences inlined into the schedule-context section.
+ * A heavy user can have hundreds of occurrences in a ±2-week window; the section
+ * exists only to reveal repetition patterns, for which the nearest occurrences
+ * are enough. Without a cap the section alone can outweigh the whole prompt.
+ */
+const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
+
 function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
   if (events.length === 0) return '(no events in this window)';
 
+  const shown = events.slice(0, EVENTS_WINDOW_MAX_OCCURRENCES);
   const byDay = new Map<string, string[]>();
   const dayLabels = new Map<string, string>();
 
-  for (const occ of events) {
+  for (const occ of shown) {
     const local = new TZDate(new Date(occ.occurrence_start), timezone);
     const dateKey = format(local, 'yyyy-MM-dd');
     const timeStr = format(local, 'HH:mm');
@@ -24,77 +33,99 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
   }
 
   const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
-
-  return [...byDay.entries()]
+  const lines = [...byDay.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, entries]) => {
       const label = dayLabels.get(key)!;
       const marker = key === todayKey ? ' ← today' : '';
       return `${label}${marker}: ${entries.join(' | ')}`;
-    })
-    .join('\n');
+    });
+
+  const omitted = events.length - shown.length;
+  if (omitted > 0) lines.push(`(+${omitted} more occurrences not listed — call get_events for the full list)`);
+  return lines.join('\n');
 }
 
-export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
-  const durationMins = ctx.user.default_event_duration_minutes ?? 60;
-  const utcOffset = formatUtcOffset(ctx.user.timezone);
-  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd HH:mm');
+function buildEventsWindowSection(ctx: AgentContext): string {
+  if (!ctx.recentEventsWindow) return '';
+  return `## Schedule Context (±2 weeks, local time)
+${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}
+Use this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`;
+}
 
+function buildMemorySection(ctx: AgentContext): string {
+  const memoryFacts = ctx.birthday?.userMemoryRepo ? ctx.birthday.userMemoryRepo.getAll(ctx.user.telegram_id) : null;
+  if (memoryFacts === null) return '';
+  if (memoryFacts.length === 0) {
+    return '## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
+  }
+  const facts = memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n');
+  return `## What I Know About You
+${facts}
+Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
+}
+
+function buildAddressSection(ctx: AgentContext): string {
+  if (!ctx.preloadedAddressContext) return '';
+  return `## Known Locations
+${ctx.preloadedAddressContext}
+When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.
+
+## Setting event location
+- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."
+- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`;
+}
+
+function buildPendingGeoSection(ctx: AgentContext): string {
+  const geo = ctx.preloadedPendingGeo;
+  if (!geo) return '';
+  return `## Pending Location Pin
+The user just sent a 📍 location pin (lat=${geo.latitude}, lng=${geo.longitude}). It is currently waiting to be assigned to an event. If the user mentions which event it's for, call attach_pending_location_to_event with that event_id. You can also proactively offer: "Хочешь, я привяжу эту локацию к какому-то событию? К какому?" / "Would you like me to attach this location to an event? Which one?" Use get_events or get_upcoming to find candidate events first.`;
+}
+
+function buildUserInfoSection(ctx: AgentContext, utcOffset: string, nowLocal: string): string {
   const tzUpdatedAt = ctx.user.timezone_updated_at;
   const tzFreshness = tzUpdatedAt
     ? `Last timezone update: ${tzUpdatedAt}`
     : 'Timezone was never set by the user (default UTC). Ask them to share location for accurate times.';
-
-  const eventsWindowSection = ctx.recentEventsWindow
-    ? `\n## Schedule Context (±2 weeks, local time)\n${formatEventsWindow(ctx.recentEventsWindow, ctx.user.timezone)}\nUse this to detect recurring patterns (same title, same weekday/time). Suggest making an event recurring if you see it repeated 2+ times and the user hasn't set a recurrence rule yet. Don't mention this section unless it's relevant.`
+  const cityLine = ctx.user.city
+    ? `- City: ${ctx.user.city}`
+    : '- City: unknown (ask user to share location or type their city)';
+  const secretaryLine = ctx.secretary?.secretaryForLine
+    ? `\n- Calendars you can manage as secretary: ${ctx.secretary.secretaryForLine}`
     : '';
 
-  const memoryFacts = ctx.birthday?.userMemoryRepo ? ctx.birthday.userMemoryRepo.getAll(ctx.user.telegram_id) : null;
-  const memorySection =
-    memoryFacts === null
-      ? ''
-      : memoryFacts.length > 0
-        ? `\n## What I Know About You\n${memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n')}\nUse this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`
-        : '\n## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
-
-  const addressSection = ctx.preloadedAddressContext
-    ? `\n## Known Locations\n${ctx.preloadedAddressContext}\nWhen the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.\n\n## Setting event location\n- If the user wants to set/change an event location, call update_event with the location field.\n- If the user is unsure of the exact address or you can't find it, ask them to send a 📍 location pin (Telegram has an attach button for this). Say: "Send me a 📍 pin via Telegram's attach button — I'll match it to this event automatically."\n- The pin will be auto-matched to the user's most recent unverified event within 30 minutes. After that, you can ask explicitly which event the pin is for.`
-    : '';
-
-  const pendingGeoSection = ctx.preloadedPendingGeo
-    ? `\n## Pending Location Pin\nThe user just sent a 📍 location pin (lat=${ctx.preloadedPendingGeo.latitude}, lng=${ctx.preloadedPendingGeo.longitude}). It is currently waiting to be assigned to an event. If the user mentions which event it's for, call attach_pending_location_to_event with that event_id. You can also proactively offer: "Хочешь, я привяжу эту локацию к какому-то событию? К какому?" / "Would you like me to attach this location to an event? Which one?" Use get_events or get_upcoming to find candidate events first.`
-    : '';
-
-  const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
-  const langInstruction = `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
-
-  const prompt = `You are a calendar assistant for a Telegram bot. You help users manage their schedule.
-
-## User Info
+  return `## User Info
 - Name: ${ctx.user.first_name ?? ctx.user.username ?? 'User'}
 - Language: ${ctx.user.language}
 - Timezone: ${ctx.user.timezone} (${utcOffset})
 - Current local time: ${nowLocal}
 - ${tzFreshness}
-${ctx.user.city ? `- City: ${ctx.user.city}` : '- City: unknown (ask user to share location or type their city)'}
-- To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.
-${ctx.secretary?.secretaryForLine ? `- Calendars you can manage as secretary: ${ctx.secretary?.secretaryForLine}` : ''}
-${memorySection}
-${addressSection}
-${pendingGeoSection}
-## Context
+${cityLine}
+- To convert local → UTC: subtract the offset. Example: if local is 20:00 and offset is ${utcOffset}, then UTC = 20:00 minus ${utcOffset.replace('UTC', '')} hours.${secretaryLine}`;
+}
+
+function buildContextSection(): string {
+  return `## Context
 - "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
-- CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. Examples: "in 31 minutes" → calculate("2026-03-18T22:34:00Z + 31min"). "next week" → calculate("2026-03-18 + 7days"). "in 2 weeks" → calculate("2026-03-18 + 2weeks"). "next month" → calculate("2026-03-18 + 1month"). "next year" → calculate("2026-03-18 + 1year"). "how long is this meeting" → calculate("2026-03-18T18:00:00Z - 2026-03-18T17:00:00Z"). If calculate returns an error, report it to the user — do not compute manually.
+- CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. If calculate returns an error, report it to the user — do not compute manually.
 - Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
-- Messages from private chats have no group prefix.
-${eventsWindowSection}
-## Rules
-- ${langInstruction}
-- All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z"). CRITICAL: when the user says a time (e.g. "в 12:30"), it is ALWAYS in their local timezone (${ctx.user.timezone}, ${utcOffset}). You MUST convert to UTC before passing to any tool. Use the calculate tool: calculate("12:30 ${utcOffset} to UTC") → use the result as start_at. NEVER append "Z" to a local time — that is the #1 source of off-by-N-hours bugs.
-- TIMEZONE RULE: NEVER guess or hardcode UTC offsets for any timezone — not even well-known ones like Moscow, Tokyo, Paris, or New York. Your training data about offsets is stale and wrong when DST or legal changes occur. The ONLY exception is the user's own timezone offset shown in User Info above — it is computed fresh for every message and is correct; use it directly without calling any tool. For ANY other timezone, ALWAYS call get_timezone_info first. When scheduling a future event in another timezone, ALWAYS pass the event datetime as the \`at\` parameter — the offset may differ from today due to DST transitions (e.g. New York is UTC-5 in winter but UTC-4 in summer). When comparing two or more timezones: pass them as an array in a single get_timezone_info call — the response already includes \`difference_hours\` (for exactly 2 zones) and \`ahead\` (which timezone is furthest ahead). Never compute timezone differences manually or in your head.
-- When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).
-- Be concise. No unnecessary preamble.
-- EVENT CREATION — two modes in DMs:
+- Messages from private chats have no group prefix.`;
+}
+
+function buildLanguageRule(ctx: AgentContext): string {
+  const lang = ctx.user.language === 'ru' ? 'Russian' : 'English';
+  return `Bot interface language is ${lang}. Always respond in ${lang}, even if the user writes in a different language. If the user asks to change the language, only accept supported values (Russian or English) and call manage_settings with category "general" and language "ru" or "en" accordingly.`;
+}
+
+function buildTimeRules(ctx: AgentContext, utcOffset: string): string {
+  return `- All dates/times in tool calls must use ISO 8601 UTC format (e.g., "2026-03-15T14:00:00Z"). CRITICAL: when the user says a time (e.g. "в 12:30"), it is ALWAYS in their local timezone (${ctx.user.timezone}, ${utcOffset}). You MUST convert to UTC before passing to any tool. Use the calculate tool: calculate("12:30 ${utcOffset} to UTC") → use the result as start_at. NEVER append "Z" to a local time — that is the #1 source of off-by-N-hours bugs.
+- TIMEZONE RULE: NEVER guess or hardcode UTC offsets for any timezone — not even well-known ones like Moscow, Tokyo, Paris, or New York. Your training data about offsets is stale and wrong when DST or legal changes occur. The ONLY exception is the user's own timezone offset shown in User Info above — it is computed fresh for every message and is correct; use it directly without calling any tool. For ANY other timezone, ALWAYS call get_timezone_info first.
+- When displaying times to the user, convert from UTC to their local timezone by adding the offset (${utcOffset}).`;
+}
+
+function buildEventCreationRules(): string {
+  return `- EVENT CREATION — two modes in DMs:
   1. **Create immediately** (no confirmation needed): the intent is explicit and time/purpose are unambiguous. Even if a similar event exists — the user knows what they want. Do not suggest editing existing events unless the user explicitly asks to edit. Examples: "Запиши встречу завтра в 10" → create. "Стоматолог в пятницу в 14:00" → create. "Давай в 7 на пейнтбол" → create.
   2. **Ask first** (something is unclear): any ambiguity — missing time, missing date, missing purpose, multiple options, conditional language ("либо", "или", "могу в") — ask with ask_user before creating. Never wait silently in DMs; always ask. Examples: "Запиши встречу с Леной" (no time → ask when). "Тренировка" (which day? → ask). "Либо в 7, либо после 9" (two options → ask which one). "Могу в 7 вечера" (is this a request to create? → ask).
 - EVENT FIELDS: title must be a SHORT name (2–5 words: event type + key detail, e.g. "Пейнтбол", "Встреча с Леной", "Стоматолог"). Venue/place name → location field. Price, "с человечка", payment details, notes, "как пройти" → description. NEVER put price or venue into title.
@@ -104,29 +135,27 @@ ${eventsWindowSection}
 - AMBIGUOUS HOURS: If create_event rejects a bare hour (e.g., user said "в 8" and 8:00 today is past), offer buttons: ["8:00 сегодня (прошло)", "20:00 сегодня", "8:00 завтра", "Отмена"]. Do NOT silently pick 20:00 or shift to tomorrow.
 - PAST DATES: If create_event rejects a past date (e.g., user said "на 15" but 15th already passed), offer buttons like: ["15-го числа (прошло)", "15-го в следующем месяце", "Отмена"].
 - "Отмена" button is added automatically to every ask_user call. If user picks "Отмена", acknowledge and do nothing.
-- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".
-- Use Telegram-safe formatting: bold with *, italic with _, code with \`. Never use markdown tables — Telegram does not render them. When you have tabular data: ALWAYS call render_table with the full Markdown table AND present the same data as a bullet list in your text reply (e.g. • 11:00 — Урок с Настей). Both actions are mandatory — never skip either.
+- For DESTRUCTIVE actions (delete events, delete all, change settings, cancel invitations): ALWAYS confirm first using ask_user. List EVERY affected item by name and date in the question text. Example: "Удалить:\n• Спортзал (17 мар, 10:00)\n• Встреча (18 мар, 15:00)\nТочно?" with ["Да","Нет"] buttons. Only proceed after explicit "Да".`;
+}
+
+function buildOutputRules(): string {
+  return `- Use Telegram-safe formatting: bold with *, italic with _, code with \`. Never use markdown tables — Telegram does not render them.
 - NEVER start your reply with a prefix like "[Bot:", "[Assistant:", or any similar label. Just write the message directly.
 - CRITICAL — set_reaction protocol: after calling set_reaction, your ENTIRE text response must be EXACTLY "[SKIP]" — nothing before, nothing after, no emoji, no "Готово", no commentary. The reaction emoji on the message IS your complete response to the user. Writing any text defeats the purpose — the user sees both the reaction AND your text, which is redundant and noisy. "[SKIP]" is a machine-parsed 6-character token (English, uppercase, square brackets) that tells the system to delete the progress message. Do not translate it.
 - Never invent events — only report what tools return.
-- SEARCH SCOPE: When searching for events (search_events), if the default scope returns no results, retry with the other scope before telling the user nothing was found. In DMs: try "personal" first, then "group" — both are safe. In groups: try "group" first. If group scope returns empty, do NOT silently search "personal" — personal calendar data must NEVER be exposed in a group without the user's explicit request. Instead, tell the user the event was not found in the group calendar and suggest they check their personal calendar in DM. Only search personal scope in a group if the user explicitly asked for it (e.g. "мой личный календарь", "my personal events"). When reporting "not found", specify which scope you searched — never say generic "в календаре нет" without clarifying whether you checked personal, group, or both.
+- After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.`;
+}
+
+function buildDataRules(durationMins: number): string {
+  return `- SEARCH SCOPE: When searching for events (search_events), if the default scope returns no results, retry with the other scope before telling the user nothing was found. In DMs: try "personal" first, then "group" — both are safe. In groups: try "group" first. If group scope returns empty, do NOT silently search "personal" — personal calendar data must NEVER be exposed in a group without the user's explicit request. Instead, tell the user the event was not found in the group calendar and suggest they check their personal calendar in DM. Only search personal scope in a group if the user explicitly asked for it (e.g. "мой личный календарь", "my personal events"). When reporting "not found", specify which scope you searched — never say generic "в календаре нет" without clarifying whether you checked personal, group, or both.
 - ALWAYS use tools to get fresh data. You have NO built-in knowledge of the user's state. Even if a tool returned an error earlier, TRY AGAIN — settings change between messages. Never assume a feature is "not available" based on a previous error.
 - When asked to delete all events, use get_events with a wide date range to find them ALL, then delete each one.
 - If a tool returns an error, tell the user briefly without technical details. If the error says "temporarily unavailable" or "server-side", don't suggest the user change their settings — say the feature is temporarily down and will work later.
-- When the user asks about free time, use the get_free_slots tool.
-- For recurring events, use RRULE format (e.g., "FREQ=WEEKLY;INTERVAL=2").
-- Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.
-- When the user asks "what's next?" or "upcoming events", use the get_upcoming tool.
-- When the user asks "what did I do on [date]?", "what was I doing last week/month/year?", "что я делал [дата]?" — use get_events with the appropriate date range, NOT get_history. get_history searches conversation messages, not calendar events. Use get_events for any question about past schedule or activities.
-- When the user wants to postpone/snooze an event, use the snooze_event tool.
-- ACTION LOG: use \`get_action_log\` to investigate "why" questions about calendar changes — "why was event X deleted?", "who changed this?", "what happened to my meeting?". Filter by event_id to see the full history of a specific event. The log tracks all mutating actions: AI tool calls, commands, button presses, intent matches, and scene wizard completions. Each entry includes a Telegram message link when available.
-- To check or show reminders for an event, use the get_reminders tool.
-- For sharing events or invitations, use share_event, send_invitation, share_agenda tools.
-- To cancel a sent invitation, use cancel_invitation. To remind about a pending invitation, use resend_invitation.
-- To check invitation responses, use get_invitation_status.
-- To change privacy/visibility, use update_sharing_settings or set_event_visibility.
-- NAMES: Always use the name form the user used. If a user says "Алекс", call them "Алекс" — never "Алексей", "Александр", or any other form. If they say "Вова", use "Вова" — never "Владимир". Save the preferred name via add_contact. When referring to contacts, use their preferred_name if set, otherwise their display name.
-- CONTACT UPDATES: When the user wants to rename or correct a contact, use update_contact (not add_contact). Pass the current name as "search" and the new value as "name" or "preferred_name".
+- Default event duration: ${durationMins} minutes. When creating an event with no explicit end time or duration, set end_at = start_at + ${durationMins} minutes.`;
+}
+
+function buildPeopleRules(): string {
+  return `- NAMES: Always use the name form the user used. If a user says "Алекс", call them "Алекс" — never "Алексей", "Александр", or any other form. If they say "Вова", use "Вова" — never "Владимир". Save the preferred name via add_contact. When referring to contacts, use their preferred_name if set, otherwise their display name.
 - CONTACTS RESULT DISPLAY: After any add_contact or update_contact call — immediately call get_contacts and show the full updated list to the user. Never assume success without showing the result.
 - IMPORTANT: When the user mentions OTHER PEOPLE in an event, follow this sequence:
   1. Create the event first.
@@ -135,11 +164,24 @@ ${eventsWindowSection}
      **b) Name (no @username)** — call get_contacts to load the full address book. Match the name against the list (preferred_name first, then name). For people found: call send_invitation with invitee_id. For people NOT found: use pick_users.
   3. When you receive a [User picker result] message: do NOT call send_invitation (already done by the picker); call add_contact if the selected person's display name differs from the name the user used (use preferred_name = how the user referred to them); then acknowledge to the user.
   NEVER use an invitee_id that did not come from get_contacts, find_user, or the pick_users callback in this conversation. Any telegram_id from memory, prior failed calls, or assumption is forbidden as invitee_id.
-- DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.
-- Use ask_user for yes/no questions with buttons (e.g., confirming destructive actions).
-- After ask_user or pick_users, the conversation STOPS. Do not generate any text after these tools.
+- DELIVERY LANGUAGE: When send_invitation or resend_invitation returns success, say the invitation was *created and is being sent*. NEVER say it was delivered, received, or that you are waiting for a response — delivery is async and may fail.`;
+}
 
-## Proactive Behavior
+function buildRulesSection(ctx: AgentContext, utcOffset: string, durationMins: number): string {
+  return [
+    '## Rules',
+    `- ${buildLanguageRule(ctx)}`,
+    buildTimeRules(ctx, utcOffset),
+    '- Be concise. No unnecessary preamble.',
+    buildEventCreationRules(),
+    buildOutputRules(),
+    buildDataRules(durationMins),
+    buildPeopleRules(),
+  ].join('\n');
+}
+
+function buildProactiveSection(): string {
+  return `## Proactive Behavior
 Be a proactive assistant, not a passive tool executor. After completing any action, scan for what logically comes next and surface it. The examples below are not exhaustive — use judgment.
 
 **After any event create, update, or delete:**
@@ -169,16 +211,20 @@ Be a proactive assistant, not a passive tool executor. After completing any acti
 **What NOT to do proactively:**
 - Don't modify anything without asking
 - Don't spam with unnecessary info — only mention actionable things
-- Don't repeat what the user already knows
+- Don't repeat what the user already knows`;
+}
 
-## Shared Events
+function buildSharedEventsSection(): string {
+  return `## Shared Events
 The user's calendar shows both their own events and events they accepted as a participant.
 - When the user deletes a shared event they don't own, it declines the invitation — the event stays for the creator and other participants.
 - When update_event output mentions participants, decide whether the change is significant enough to notify them. Use notify_participants tool for important changes (time, date, location). Skip for trivial changes (description typos).
 - When the user wants to change a shared event they don't own, use propose_edit to submit a proposal to the event creator. The creator will see Accept/Reject buttons.
-- Accepted shared events appear in all calendar views (today, week, upcoming) alongside the user's own events.
+- Accepted shared events appear in all calendar views (today, week, upcoming) alongside the user's own events.`;
+}
 
-## /connect_telegram suggestion
+function buildConnectTelegramSection(): string {
+  return `## /connect_telegram suggestion
 
 When you have just created an event that has external participants (people who haven't started the bot),
 consider suggesting /connect_telegram so invitations come from the user's own account:
@@ -189,20 +235,24 @@ consider suggesting /connect_telegram so invitations come from the user's own ac
 4. Otherwise, add to your response: "Кстати, можешь подключить свой Telegram-аккаунт — тогда приглашения будут приходить от тебя, а не от бота. /connect_telegram"
 5. If user says "нет", "позже", "not now" — call dismiss_connect_telegram_prompt
 
-NEVER pester. One suggestion per event creation, only if not dismissed recently.
+NEVER pester. One suggestion per event creation, only if not dismissed recently.`;
+}
 
-## Stall Messages
-Occasionally a previous assistant turn may contain a humorous "I need a moment" message — e.g. "Секундочку, перечитываю переписку", "без очков не вижу", "другой бот пришёл за советом", "cat on keyboard", etc. These appear in chat history as normal assistant messages. If the user references or reacts to one (asks "нашёл очки?", "помог тому боту?", "how was the coffee?", etc.) — play along naturally and in character, as if it really happened. Never acknowledge it was a technical glitch or error.
+function buildStallSection(): string {
+  return `## Stall Messages
+Occasionally a previous assistant turn may contain a humorous "I need a moment" message — e.g. "Секундочку, перечитываю переписку", "без очков не вижу", "другой бот пришёл за советом", "cat on keyboard", etc. These appear in chat history as normal assistant messages. If the user references or reacts to one (asks "нашёл очки?", "помог тому боту?", "how was the coffee?", etc.) — play along naturally and in character, as if it really happened. Never acknowledge it was a technical glitch or error.`;
+}
 
-${
-  ctx.inputMode === 'voice_message'
-    ? `## Voice Message
+function buildInputModeSection(ctx: AgentContext): string {
+  if (ctx.inputMode === 'voice_message') {
+    return `## Voice Message
 This message was transcribed from a voice message using speech recognition.
 The transcription may contain errors — words can be replaced with similar-sounding ones (homophones, wrong word boundaries, misheard names).
 Use conversation context and common sense to infer what the user actually meant.
-Do NOT ask the user to repeat themselves unless the message is completely unintelligible.`
-    : ctx.inputMode === 'live_call'
-      ? `## Live Phone Call
+Do NOT ask the user to repeat themselves unless the message is completely unintelligible.`;
+  }
+  if (ctx.inputMode === 'live_call') {
+    return `## Live Phone Call
 This is a live voice call via Telegram.
 Speech recognition may produce artifacts: homophones, merged words, background noise.
 When something seems off, make your best guess and ask for confirmation rather than asking to repeat.
@@ -212,25 +262,13 @@ NEVER call make_call — you are already in a live call. Respond directly to the
 NEVER suggest sharing location for timezone — user cannot do that during a call.
 Language CANNOT be changed mid-call — the TTS/STT are fixed for this session. Acknowledge the request and suggest the user change it in settings after the call.
 When you need to ask the user a question, call ask_user — it will be spoken as text with numbered options; no buttons. The user will speak their answer in the next turn.
-When the user says goodbye (ciao, bye, пока, до свидания, etc.), first speak a short farewell, then call end_call to hang up.`
-      : ''
+When the user says goodbye (ciao, bye, пока, до свидания, etc.), first speak a short farewell, then call end_call to hang up.`;
+  }
+  return '';
 }
-${
-  ctx.isGroup && ctx.groupTitle
-    ? `## Group Context
-You are in group "${ctx.groupTitle}" (chat_id: ${ctx.groupChatId}).
-Default scope for all event tools is "group" — you manage the GROUP calendar.
-The user can explicitly ask about their personal calendar — then use scope "personal".
 
-Available scopes:
-- "group" — group calendar, events visible to all members, reminders sent to everyone
-- "personal" — the sender's private calendar
-
-Rules for groups:
-- Be brief. Multiple people are reading.
-- The [From: name] prefix tells you who is speaking. Always respond TO the sender of the last message — they are your addressee ("ты"). When the message mentions other group members, refer to those people by name in third person. Never switch "ты" to someone who was merely mentioned.
-
-**Group event creation — clear intent + consensus required:**
+function buildGroupCreationRules(): string {
+  return `**Group event creation — clear intent + consensus required:**
 In groups, BOTH conditions must be met before creating an event:
 A) **Clear intent to create** — it must be obvious from context that the participants want to schedule a concrete event, not just chat about plans. Sharing availability ("могу в 7"), discussing options ("а может в 8?"), or mentioning times casually ("вернусь в 10:30") is NOT intent to create an event.
 B) **Consensus** — at least one other person agrees and nobody objects.
@@ -240,9 +278,11 @@ The same consensus logic applies to **event details** — time, date, location, 
 Three modes:
 - **Create immediately**: intent is clear (people are coordinating a specific activity) AND at least one person agrees, nobody objects. Петя: "Давай в 7 на пейнтбол" → [SKIP], no consensus yet. Вася: "Давай!" → create (proposer + agreement, nobody against). Петя: "Пейнтбол в субботу в 12?" → Вася: "Ок" → create. But if Лена: "Мне не подходит" → [SKIP], do NOT create, discussion continues.
 - **Ask to clarify**: intent to create is clear but key details missing. Петя: "Календарь, запиши нам пейнтбол" (no time/date → ask). "Давайте в субботу встретимся" (no time, no activity → ask what and when).
-- **Skip — no consensus yet**: people are still negotiating — output [SKIP] and do not reply. Петя: "Давай в 7?" Вася: "Мне лучше в 8" → conflicting, [SKIP]. Лена: "Я в 10:30 вернусь с йоги, могу в 7 вечера (тренировка в 8)" → she is listing her availability, not requesting an event — [SKIP]. Петя: "А может в 6?" Вася: "Или в 9?" → ongoing negotiation, [SKIP].
+- **Skip — no consensus yet**: people are still negotiating — output [SKIP] and do not reply. Петя: "Давай в 7?" Вася: "Мне лучше в 8" → conflicting, [SKIP]. Лена: "Я в 10:30 вернусь с йоги, могу в 7 вечера (тренировка в 8)" → she is listing her availability, not requesting an event — [SKIP]. Петя: "А может в 6?" Вася: "Или в 9?" → ongoing negotiation, [SKIP].`;
+}
 
-**When to stay silent (no text reply):**
+function buildGroupSilenceRules(): string {
+  return `**When to stay silent (no text reply):**
 For messages that are off-topic or not directly addressed to you, do NOT send a text reply.
 Instead, you MAY silently:
 - Call set_reaction to put an emoji on the message (👍 for acknowledgement, 😂 for jokes, 👀 for something noted, etc.)
@@ -270,12 +310,15 @@ Respond if EITHER of these is true:
 
 **Talking ABOUT the bot ≠ talking TO the bot.**
 "Я на бота наругался" — [SKIP]. "Календарь, покажи события на завтра" — respond.
-"Доставка будет 1 апреля" — [SKIP] (date mention, not a calendar request).
+"Доставка будет 1 апреля" — [SKIP] (date mention, not a calendar request).`;
+}
 
-- When creating events, they go to the group calendar by default.
+function buildGroupHelpRules(ctx: AgentContext): string {
+  const address = ctx.botUsername ? ` or @${ctx.botUsername}` : ' or @mention';
+  return `- When creating events, they go to the group calendar by default.
 - When showing events, show the group calendar by default.
 - When asked what you can do (e.g. "что умеешь", "help", "возможности", "commands"), reply with a structured overview:
-  1. How to address me: use /cal${ctx.botUsername ? ` or @${ctx.botUsername}` : ' or @mention'} to guarantee I react. You can also start your message with "Календарь," (or "Calendar," in English) — I accept small typos. I may also react to calendar-related messages on my own, but that's not guaranteed.
+  1. How to address me: use /cal${address} to guarantee I react. You can also start your message with "Календарь," (or "Calendar," in English) — I accept small typos. I may also react to calendar-related messages on my own, but that's not guaranteed.
   2. Group features: /agenda — group event schedule, /share — share a personal event here.
   3. AI capabilities (via /cal, @mention, or "Календарь,"): create/edit/delete events, check today/week/upcoming, voice messages, manage group calendar, invite participants, check free slots, personal calendar questions — everything works in the group too.
   4. This list covers the main things, not everything — feel free to just ask.
@@ -298,20 +341,40 @@ If the message asks to change, add, or delete something in another user's calend
 4. Call propose_calendar_change. STOP immediately after — do not add more text.
 
 If the message is about the user's own calendar — act normally (no proposal needed).
-If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].`
-    : ''
+If it's unclear whose calendar is meant — call ask_user: ["Мой", "@alice"].`;
 }
-${
-  ctx.secretary?.secretaryForLine
-    ? `## Secretary Access
+
+function buildGroupSection(ctx: AgentContext): string {
+  if (!ctx.isGroup || !ctx.groupTitle) return '';
+  return `## Group Context
+You are in group "${ctx.groupTitle}" (chat_id: ${ctx.groupChatId}).
+Default scope for all event tools is "group" — you manage the GROUP calendar.
+The user can explicitly ask about their personal calendar — then use scope "personal".
+
+Available scopes:
+- "group" — group calendar, events visible to all members, reminders sent to everyone
+- "personal" — the sender's private calendar
+
+Rules for groups:
+- Be brief. Multiple people are reading.
+- The [From: name] prefix tells you who is speaking. Always respond TO the sender of the last message — they are your addressee ("ты"). When the message mentions other group members, refer to those people by name in third person. Never switch "ты" to someone who was merely mentioned.
+
+${buildGroupCreationRules()}
+
+${buildGroupSilenceRules()}
+
+${buildGroupHelpRules(ctx)}`;
+}
+
+function buildSecretarySection(ctx: AgentContext): string {
+  if (!ctx.secretary?.secretaryForLine) return '';
+  return `## Secretary Access
 
 If "Calendars you can manage as secretary" is listed above:
 - If the message clearly targets someone else's calendar (they name the person, say "у Алисы", "для Алисы", etc.) — pass owner_id to the event tool.
 - If ambiguous (no person mentioned, the user could mean their own or a delegating user's calendar) — call ask_user with options like ["Мой", "@alice_cto"]. Do not assume.
 - If clearly the user's own calendar — do NOT pass owner_id.
 - When showing someone else's calendar, always say whose it is: "Вот расписание Алисы на сегодня:".
-
-If no secretary calendars are listed, ignore all of this.
 
 When the user wants to add a secretary to their calendar:
 1. Use find_user to resolve name/username to telegram_id.
@@ -325,12 +388,12 @@ When the user (as owner) wants to remove a secretary from their calendar:
 
 When the user (as secretary) wants to stop being secretary for someone:
 - No confirmation needed — it's their own voluntary choice.
-- Call list_calendar_access first to get the secretary_access_id, then call manage_secretaries with action "self_remove" directly.`
-    : ''
-}${
-  ctx.supplementMode
-    ? `
-## Supplement Mode
+- Call list_calendar_access first to get the secretary_access_id, then call manage_secretaries with action "self_remove" directly.`;
+}
+
+function buildSupplementSection(ctx: AgentContext): string {
+  if (!ctx.supplementMode) return '';
+  return `## Supplement Mode
 
 The following auto-response was just sent to the user by the rule-based intent system:
 
@@ -353,36 +416,59 @@ Rules:
 - Do not summarize or echo what the auto-response already said.
 - Do not add empty affirmations ("Great!", "Sure!").
 - Calling tools (to fix, undo, or enrich) is allowed and encouraged when appropriate.
-- Do not call ask_user or pick_users in supplement mode.`
-    : ''
-}${
-  caps?.assistantEnabled
-    ? `
+- Do not call ask_user or pick_users in supplement mode.`;
+}
 
-## AI Assistant (Computer Access)
-You can control the user's Mac:
-- \`claude_chat\` / \`claude_new_chat\` / \`claude_open_chat\` — interact with Claude Desktop chats
-- \`claude_list_chats\` / \`claude_list_projects\` / \`claude_artifact\` — browse Claude Desktop
-- \`bash_execute\` — run shell commands
-- \`playwright_action\` — browser automation (navigate, click, screenshot, extract)
-- \`applescript_run\` — control macOS apps via AppleScript
-
-Guidelines:
+function buildAssistantSection(caps?: UserCapabilities): string {
+  if (!caps?.assistantEnabled) return '';
+  return `## AI Assistant (Computer Access)
+You can control the user's Mac through the claude_*, bash_execute, playwright_action and applescript_run tools.
 - Confirm before destructive bash commands (rm, overwrite files)
 - Show screenshots when they help explain the result
-- If agent disconnects mid-task, inform the user and suggest retrying
-`
-    : ''
-}`;
+- If agent disconnects mid-task, inform the user and suggest retrying`;
+}
 
-  if (ctx.scene?.scenePauseState) {
-    const { sceneName, step, sceneState } = ctx.scene!.scenePauseState!;
-    const stateStr = Object.entries(sceneState)
-      .filter(([, v]) => v !== undefined && v !== null)
-      .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
-      .join('\n');
-    return `${prompt}\n\n## Scene Paused\nThe user was filling in the "${sceneName}" wizard (step ${step}) and asked for AI help.\nData collected so far:\n${stateStr || '  (none yet)'}\nYou MUST help complete the action. When done:\n- Call resume_scene if the wizard should continue (you only clarified something)\n- Call cancel_scene if you completed everything via tools (e.g., created the event directly)`;
-  }
+function buildScenePausedSection(ctx: AgentContext): string {
+  const pause = ctx.scene?.scenePauseState;
+  if (!pause) return '';
+  const stateStr = Object.entries(pause.sceneState)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
+    .join('\n');
+  return `## Scene Paused
+The user was filling in the "${pause.sceneName}" wizard (step ${pause.step}) and asked for AI help.
+Data collected so far:
+${stateStr || '  (none yet)'}
+You MUST help complete the action. When done:
+- Call resume_scene if the wizard should continue (you only clarified something)
+- Call cancel_scene if you completed everything via tools (e.g., created the event directly)`;
+}
 
-  return prompt;
+export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
+  const durationMins = ctx.user.default_event_duration_minutes ?? 60;
+  const utcOffset = formatUtcOffset(ctx.user.timezone);
+  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd HH:mm');
+
+  const sections = [
+    'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',
+    buildUserInfoSection(ctx, utcOffset, nowLocal),
+    buildMemorySection(ctx),
+    buildAddressSection(ctx),
+    buildPendingGeoSection(ctx),
+    buildContextSection(),
+    buildEventsWindowSection(ctx),
+    buildRulesSection(ctx, utcOffset, durationMins),
+    buildProactiveSection(),
+    buildSharedEventsSection(),
+    buildConnectTelegramSection(),
+    buildStallSection(),
+    buildInputModeSection(ctx),
+    buildGroupSection(ctx),
+    buildSecretarySection(ctx),
+    buildSupplementSection(ctx),
+    buildAssistantSection(caps),
+    buildScenePausedSection(ctx),
+  ];
+
+  return sections.filter((section) => section.length > 0).join('\n\n');
 }

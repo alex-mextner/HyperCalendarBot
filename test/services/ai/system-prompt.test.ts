@@ -7,7 +7,9 @@ import { EventReminderRepository } from '../../../src/database/repositories/even
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
+import type { EventOccurrence } from '../../../src/database/types.ts';
 import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
+import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -80,19 +82,45 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('get_events');
   });
 
-  test('includes get_upcoming rule', () => {
+  /**
+   * Tools travel to the model in the `tools` array with their own descriptions.
+   * A prompt line that only says "for X, use tool Y" pays for that information a
+   * second time in every request. These tools must therefore be reachable through
+   * the catalog alone — the prompt keeps only guidance the schema cannot carry.
+   */
+  const TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG = [
+    'get_upcoming',
+    'snooze_event',
+    'get_reminders',
+    'get_free_slots',
+    'get_action_log',
+    'get_history',
+    'share_event',
+    'share_agenda',
+    'cancel_invitation',
+  ];
+
+  test('prompt does not restate what the tool catalog already describes', () => {
     const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('get_upcoming');
+    const restated = TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG.filter((name) => prompt.includes(name));
+    expect(restated).toEqual([]);
   });
 
-  test('includes snooze_event rule', () => {
-    const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('snooze_event');
+  test('every tool the prompt stopped naming is still offered in the tool catalog', () => {
+    const offered = getToolDefinitions('text')
+      .filter((t) => t.type === 'function')
+      .map((t) => t.function.name);
+    for (const name of TOOLS_DESCRIBED_ONLY_BY_THE_CATALOG) {
+      expect(offered).toContain(name);
+    }
   });
 
-  test('includes get_reminders rule', () => {
-    const prompt = buildSystemPrompt(ctx);
-    expect(prompt).toContain('get_reminders');
+  test('prompt does not name update_sharing_settings, which is not a tool', () => {
+    const offered = getToolDefinitions('text')
+      .filter((t) => t.type === 'function')
+      .map((t) => t.function.name);
+    expect(offered).not.toContain('update_sharing_settings');
+    expect(buildSystemPrompt(ctx)).not.toContain('update_sharing_settings');
   });
 
   test('includes UTC offset for timezone conversion', () => {
@@ -379,6 +407,60 @@ describe('buildSystemPrompt', () => {
     };
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).toContain('(none yet)');
+  });
+
+  describe('schedule context window', () => {
+    /** One stored event replayed at N distinct times — the shape a recurring event produces. */
+    function occurrences(count: number): EventOccurrence[] {
+      const eventRepo = new EventRepository(db);
+      const event = eventRepo.create({
+        user_id: USER_ID,
+        title: 'Standup',
+        start_at: '2026-03-16T08:00:00Z',
+        timezone: 'Europe/Kyiv',
+      });
+      return Array.from({ length: count }, (_, i) => {
+        const start = new Date(Date.UTC(2026, 2, 16, 8, 0, 0) + i * 3_600_000);
+        return {
+          event,
+          occurrence_start: start.toISOString(),
+          occurrence_end: null,
+          is_exception: false,
+        };
+      });
+    }
+
+    function listedOccurrences(prompt: string): number {
+      const section = prompt.split('## Schedule Context')[1]?.split('\n## ')[0] ?? '';
+      return (section.match(/Standup/g) ?? []).length;
+    }
+
+    test('lists every occurrence when the window is small', () => {
+      ctx.recentEventsWindow = occurrences(12);
+      const prompt = buildSystemPrompt(ctx);
+      expect(listedOccurrences(prompt)).toBe(12);
+      expect(prompt).not.toContain('more occurrences not listed');
+    });
+
+    test('caps a heavy window and says how many were left out', () => {
+      ctx.recentEventsWindow = occurrences(200);
+      const prompt = buildSystemPrompt(ctx);
+      expect(listedOccurrences(prompt)).toBe(60);
+      expect(prompt).toContain('(+140 more occurrences not listed — call get_events for the full list)');
+    });
+
+    test('the cap keeps a heavy window from dominating the prompt', () => {
+      ctx.recentEventsWindow = occurrences(12);
+      const small = buildSystemPrompt(ctx).length;
+      ctx.recentEventsWindow = occurrences(500);
+      const huge = buildSystemPrompt(ctx).length;
+      expect(huge - small).toBeLessThan(1500);
+    });
+
+    test('says so explicitly when the window is empty', () => {
+      ctx.recentEventsWindow = [];
+      expect(buildSystemPrompt(ctx)).toContain('(no events in this window)');
+    });
   });
 
   test('instructs AI that user times are local and must be converted to UTC', () => {
