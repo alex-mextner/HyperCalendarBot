@@ -92,16 +92,23 @@ const savedEnv = { ...process.env };
 
 beforeEach(() => {
   // Env is set per test and restored after, so this file cannot change what
-  // another test file sees. Bun auto-loads .env, so real keys are present
-  // unless explicitly overridden here.
+  // another test file sees. Every variable loadConfig() requires is listed
+  // here: locally Bun auto-loads .env and hides a missing one, but CI has no
+  // .env and loadConfig() throws.
   Object.assign(process.env, {
     BOT_TOKEN: 'test-token',
     REDIS_URL: 'redis://localhost:6379',
+    ZAI_API_KEY: 'zai-key',
+    ZAI_BASE_URL: 'https://zai.example/v1',
     ZAI_MODEL: 'zai-main',
     ZAI_FAST_MODEL: 'zai-fast',
     GROQ_API_KEY: '',
+    GEMINI_API_KEY: 'gemini-key',
+    GEMINI_BASE_URL: 'https://gemini.example/v1',
     GEMINI_MODEL: 'gemini-main',
     GEMINI_FAST_MODEL: 'gemini-fast',
+    HF_TOKEN: 'hf-token',
+    HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
   });
