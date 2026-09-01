@@ -1223,7 +1223,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                 cmdLogger.error({ err: err, userId: uid }, 'Failed to persist last mentioned event from intent');
               });
             },
-            deps.conversationLogger,
             deps.actionLogRepo,
           )
         : undefined;

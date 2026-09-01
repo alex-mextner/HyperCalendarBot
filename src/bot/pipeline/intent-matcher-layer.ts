@@ -3,7 +3,6 @@
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
-import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
@@ -28,7 +27,6 @@ export function createIntentMatcherLayer(
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
   onEventMentioned?: (userId: number, eventId: number) => void,
-  conversationLogger?: ConversationLogger,
   actionLogRepo?: ActionLogRepository,
 ) {
   return async (
@@ -169,8 +167,9 @@ export function createIntentMatcherLayer(
         user.language,
         result.responseEvents,
       );
+      // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
+      // the supplement agent reads the text from supplementAutoResponse, not from history.
       await ctx.send(formatted);
-      conversationLogger?.logBotResponse(userId, formatted, chatId);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 
