@@ -16,6 +16,11 @@ import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
  */
 const TOOL_CATALOG_CHAR_BUDGET = 36_000;
 const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
+/**
+ * Turning on computer access appends nine more tools, so that catalog is allowed
+ * to be larger — but only by those nine, not by unbounded description growth.
+ */
+const ASSISTANT_CATALOG_CHAR_BUDGET = 38_500;
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {
   return tools.filter((t) => t.type === 'function').map((t) => t.function.name);
@@ -45,6 +50,11 @@ describe('tool catalog budget', () => {
     for (const tools of variants) {
       expect(catalogJson(tools).length).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
     }
+  });
+
+  test('the computer-access catalog stays within its own budget', () => {
+    const chars = catalogJson(getToolDefinitions('text', { assistantEnabled: true })).length;
+    expect(chars).toBeLessThanOrEqual(ASSISTANT_CATALOG_CHAR_BUDGET);
   });
 
   test('no single tool is allowed to grow past 2 000 characters', () => {

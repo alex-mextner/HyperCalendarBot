@@ -1,10 +1,16 @@
 /**
- * Sends real, production-shaped user requests through the exact request shape the
- * agent builds (system prompt + tool catalog + one history turn) and reports which
- * tools each model picks.
+ * Sends production-shaped user requests to real models and reports which tools
+ * each one picks.
  *
- * Purpose: prove that shrinking tool descriptions or the system prompt does not
+ * Purpose: show that shrinking tool descriptions or the system prompt does not
  * change tool selection. Run it before a change and after it, then compare.
+ *
+ * The request is assembled the way the agent assembles one — the real system
+ * prompt, the real tool catalog, and history turns carrying the same local
+ * timestamp and group sender prefix the agent adds. It is not a replay of a
+ * stored conversation: history here is short and hand-built, so a passing run is
+ * evidence about tool choice for a request of this shape, not proof about a long
+ * production conversation.
  *
  *   bun run scripts/dryrun-tool-selection.ts                    # all providers
  *   DRYRUN_PROVIDERS=gemini bun run scripts/dryrun-tool-selection.ts
@@ -35,6 +41,8 @@ import { HolidayService } from '../src/services/holiday/holiday-service.ts';
 import { DRYRUN_CASES, type DryRunCase } from './dryrun-cases.ts';
 
 const TIMEZONE = 'Europe/Belgrade';
+const SENDER_NAME = 'Alex';
+const SENDER_ID = 1;
 /** Reasoning models spend completion tokens before the tool call; a tight cap
  *  truncates the turn and looks like "the model chose no tool". */
 const MAX_COMPLETION_TOKENS = 2048;
@@ -62,6 +70,12 @@ function providers(): ProviderSpec[] {
     },
     { name: 'hf', model: process.env.DRYRUN_MODEL_HF ?? cfg.HF_MODEL ?? '', client: hfClient },
   ];
+  const unknown = wanted.filter((name) => !all.some((p) => p.name === name));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Unknown provider(s) in DRYRUN_PROVIDERS: ${unknown.join(', ')}. Known: ${all.map((p) => p.name).join(', ')}`,
+    );
+  }
   return all.filter((p) => wanted.includes(p.name));
 }
 
@@ -71,9 +85,9 @@ function buildContext(testCase: DryRunCase): AgentContext {
   const userRepo = new UserRepository(db);
   const chatHistory = new ChatHistoryRepository(db);
   const user = userRepo.create({
-    telegram_id: 1,
+    telegram_id: SENDER_ID,
     username: 'dryrun',
-    first_name: 'Alex',
+    first_name: SENDER_NAME,
     timezone: TIMEZONE,
     language: 'ru',
   });
@@ -94,13 +108,21 @@ function buildContext(testCase: DryRunCase): AgentContext {
   return { ...base, isGroup: true, groupTitle: 'Друзья', groupChatId: -1001 };
 }
 
+/** Same prefixes the agent puts on a turn: local timestamp, then group sender. */
+function tagTurn(text: string, role: 'user' | 'assistant', group: boolean, minutesAgo: number): string {
+  const at = new TZDate(new Date(Date.now() - minutesAgo * 60_000), TIMEZONE);
+  const stamp = format(at, 'yyyy-MM-dd HH:mm:ss');
+  const sender = group && role === 'user' ? `[From: ${SENDER_NAME} (id:${SENDER_ID})] ` : '';
+  return `[${stamp}] ${sender}${text}`;
+}
+
 function buildMessages(testCase: DryRunCase): OpenAI.ChatCompletionMessageParam[] {
-  const stamp = format(new TZDate(new Date(), TIMEZONE), 'yyyy-MM-dd HH:mm');
-  const prefix = testCase.group ? '[Group: Друзья, From: Alex] ' : '';
-  const history = (testCase.history ?? []).map(
-    (turn): OpenAI.ChatCompletionMessageParam => ({ role: turn.role, content: turn.content }),
-  );
-  return [...history, { role: 'user', content: `[${stamp}] ${prefix}${testCase.message}` }];
+  const history = testCase.history ?? [];
+  const turns = history.map((turn, i): OpenAI.ChatCompletionMessageParam => {
+    const minutesAgo = (history.length - i) * 2;
+    return { role: turn.role, content: tagTurn(turn.content, turn.role, testCase.group === true, minutesAgo) };
+  });
+  return [...turns, { role: 'user', content: tagTurn(testCase.message, 'user', testCase.group === true, 0) }];
 }
 
 interface CaseOutcome {
