@@ -15,6 +15,17 @@ const SCRIPT = join(import.meta.dir, '../../ci/leftover-grep/leftover-grep.sh');
 /** Each case builds a repository and shells out to the gate — well past bun's 5s default. */
 const TIMEOUT_MS = 30_000;
 
+/** The host environment with every variable this gate reads removed. */
+function hostEnvWithoutGateConfig(): { [key: string]: string } {
+  const inherited: { [key: string]: string } = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value === undefined) continue;
+    if (/^(LEFTOVER_|CONSOLE_EXCLUDE$|ALLOW_CONSOLE$|TICKET_REGEX$)/.test(key)) continue;
+    inherited[key] = value;
+  }
+  return inherited;
+}
+
 interface Verdict {
   blocked: boolean;
   output: string;
@@ -55,7 +66,10 @@ async function gate(
 
     const proc = Bun.spawn(['bash', SCRIPT], {
       cwd: repo,
-      env: { ...process.env, LEFTOVER_BASE: base, ...env },
+      // Ambient configuration is stripped, not inherited: every knob this gate
+      // reads is documented and exportable, so a developer with ALLOW_CONSOLE=1
+      // in their shell would otherwise get different verdicts than CI.
+      env: { ...hostEnvWithoutGateConfig(), LEFTOVER_BASE: base, ...env },
       stdout: 'pipe',
       stderr: 'pipe',
     });

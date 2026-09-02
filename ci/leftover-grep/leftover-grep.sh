@@ -23,14 +23,19 @@
 #                        focused tests, debuggers and untracked TODOs still block.
 #                        Default: empty (the console rule applies everywhere).
 #   LEFTOVER_FULLTREE    "1" = always scan the whole tree, ignore the diff.
-#
-# Known limit: in diff mode a symlink is scanned as its own added line (the target
-# path), not as the file it points at, so a link from an unexcluded path into an
-# excluded one is not resolved. The full-tree scan follows links and is stricter.
 #   LEFTOVER_HEAD        head ref/SHA to diff against the base. Default HEAD. Under a
 #                        tamper-resistant pull_request_target setup this is the PR head SHA,
 #                        fetched as DATA — `git diff` + grep only READ those lines, they
 #                        never execute PR code — so the trusted base script still gates.
+#
+# Two behaviours worth knowing before you read a verdict:
+#   • A rename is scanned as a rewrite. A file MOVED between directories is read in
+#     full at its destination, because a rename carries no added lines and would
+#     otherwise arrive unscanned — including outside a CONSOLE_EXCLUDE path. The
+#     cost is that moving a file with pre-existing debt in it surfaces that debt.
+#   • In diff mode a symlink is scanned as its own added line, which is the target
+#     path, not the file it points at. The full-tree scan follows links, and is
+#     stricter for it.
 #
 # Usage: sh ci/leftover-grep/leftover-grep.sh
 set -euo pipefail
