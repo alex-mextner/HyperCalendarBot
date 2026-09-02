@@ -9,6 +9,12 @@
  * `expectAnyOf` lists every tool choice that is a correct first move for the
  * request, because several are legitimately possible (e.g. looking an event up
  * before editing it). A case fails when the model picks nothing from the list.
+ *
+ * Only the first move is judged — the harness reads one completion, not a whole
+ * conversation — so a tool that may only follow something else does not belong
+ * in a list here. Deleting is the clear case: the prompt requires enumerating
+ * the affected events and getting confirmation first, and accepting
+ * `delete_event` as an opening move would let that rule rot unnoticed.
  */
 interface DryRunCaseBase {
   id: string;
@@ -67,12 +73,12 @@ export const DRYRUN_CASES: DryRunCase[] = [
   {
     id: 'cancel-series-until-date',
     message: 'Отмени занятия английским до 18-го числа включительно',
-    expectAnyOf: ['search_events', 'get_events', 'ask_user', 'delete_event', 'calculate'],
+    expectAnyOf: ['search_events', 'get_events', 'ask_user', 'calculate'],
   },
   {
     id: 'delete-two-days',
     message: 'Удали все события на сегодня и завтра',
-    expectAnyOf: ['get_events', 'search_events', 'ask_user', 'delete_event', 'calculate'],
+    expectAnyOf: ['get_events', 'search_events', 'ask_user', 'calculate'],
   },
   {
     id: 'agenda-tomorrow',

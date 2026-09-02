@@ -36,9 +36,18 @@ const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
  * The catalog is the largest part of a request but not the whole of it: the
  * system prompt travels with it every time. Guarding only the catalog would let
  * the prompt grow back exactly what the catalog gave up, so the request as a
- * whole gets a budget too.
+ * whole gets a budget too — one per shape, because they legitimately differ. A
+ * group carries its consensus rules, computer access adds nine tools and their
+ * instructions, and budgeting only the smallest shape would leave the largest
+ * real requests free to grow.
  */
-const FULL_REQUEST_TOKEN_BUDGET = 15_000;
+const FULL_REQUEST_TOKEN_BUDGETS = {
+  direct: 15_000,
+  group: 17_300,
+  supplement: 15_200,
+  computerAccess: 15_800,
+  liveCall: 14_500,
+} as const;
 /**
  * Turning on computer access appends nine more tools, so that catalog is allowed
  * to be larger — but only by those nine, not by unbounded description growth.
@@ -54,7 +63,7 @@ function catalogJson(tools: OpenAI.ChatCompletionTool[]): string {
 }
 
 /** A context shaped like a real one-to-one chat, on an empty calendar. */
-function makeContext(): AgentContext {
+function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   const db = new Database(':memory:');
   db.exec('PRAGMA foreign_keys = ON');
   runMigrations(db, migrations);
@@ -78,6 +87,7 @@ function makeContext(): AgentContext {
     userRepo,
     eventReminderRepo: new EventReminderRepository(db),
     conversationLogger: new ConversationLogger(chatHistory),
+    ...overrides,
   };
 }
 
@@ -95,10 +105,38 @@ describe('tool catalog budget', () => {
   // A real request is the prompt and the catalog together, and they trade against
   // each other: text moved out of one can reappear in the other with both
   // per-part budgets still green.
-  test('a whole request stays within its token budget', () => {
-    const ctx = makeContext();
-    const request = buildSystemPrompt(ctx) + catalogJson(getToolDefinitions('text')) + ctx.messageText;
-    expect(estimateTokens(request)).toBeLessThanOrEqual(FULL_REQUEST_TOKEN_BUDGET);
+  test.each([
+    ['a direct message', () => makeContext(), () => getToolDefinitions('text'), FULL_REQUEST_TOKEN_BUDGETS.direct],
+    [
+      'a group chat',
+      () => makeContext({ isGroup: true, groupChatId: -100, groupTitle: 'Family' }),
+      () => getToolDefinitions('text'),
+      FULL_REQUEST_TOKEN_BUDGETS.group,
+    ],
+    [
+      'a supplement turn',
+      () => makeContext({ supplementMode: true }),
+      () => getToolDefinitions('text', undefined, true),
+      FULL_REQUEST_TOKEN_BUDGETS.supplement,
+    ],
+    [
+      'computer access',
+      () => makeContext(),
+      () => getToolDefinitions('text', { assistantEnabled: true }),
+      FULL_REQUEST_TOKEN_BUDGETS.computerAccess,
+    ],
+    [
+      'a live call',
+      () => makeContext({ inputMode: 'live_call' }),
+      () => getToolDefinitions('live_call'),
+      FULL_REQUEST_TOKEN_BUDGETS.liveCall,
+    ],
+  ])('a whole request stays within its token budget: %s', (_name, context, catalog, budget) => {
+    const ctx = context();
+    const tools = catalog();
+    const caps = { assistantEnabled: names(tools).includes('bash_execute') };
+    const request = buildSystemPrompt(ctx, caps) + catalogJson(tools) + ctx.messageText;
+    expect(estimateTokens(request)).toBeLessThanOrEqual(budget);
   });
 
   test('every other mode stays within the same budget', () => {

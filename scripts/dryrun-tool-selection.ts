@@ -253,6 +253,14 @@ async function main(): Promise<void> {
     await Bun.write(out, JSON.stringify(outcomes, null, 2));
     console.log(`\nwrote ${out}`);
   }
+  // A before/after comparison is usually scripted, and a run where every case
+  // failed printed its FAIL rows and then exited 0 — reported as a pass by
+  // anything reading the status rather than the output.
+  const failed = outcomes.filter((outcome) => !outcome.ok);
+  if (failed.length > 0) {
+    console.log(`\n${failed.length} of ${outcomes.length} case runs failed`);
+    process.exitCode = 1;
+  }
 }
 
 await main();
