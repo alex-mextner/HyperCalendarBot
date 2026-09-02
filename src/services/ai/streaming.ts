@@ -19,7 +19,13 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
-import { getModelOverride, isModelNotFoundError, type ProviderId, resolveModelOverride } from './model-registry.ts';
+import {
+  getModelOverride,
+  isModelNotFoundError,
+  PROVIDER_IDS,
+  type ProviderId,
+  resolveModelOverride,
+} from './model-registry.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -344,41 +350,62 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   hf: 'HF',
 };
 
+/** What a provider needs before it can be put in a chain. */
+interface ProviderAvailability {
+  model?: string;
+  apiKey?: string;
+}
+
 /**
  * Builds one chain in the configured order, skipping any provider whose key or
  * model is missing. Order is configuration rather than code because the reason
  * to change it arrives as an incident: a provider that answers 429 all week, or
  * one whose tier rejects a request this size on every single call. Both happened
  * on 2026-09-02, and both were a one-line change away from being routed around.
+ *
+ * An order that names only providers which turn out to be unconfigured would
+ * leave the bot with nothing to answer with — worse than ignoring the order — so
+ * that case falls back to every provider that IS configured, and says so loudly.
  */
-function buildChain(order: ProviderId[], models: Record<ProviderId, string | undefined>): ProviderSlot[] {
-  const chain: ProviderSlot[] = [];
-  for (const provider of order) {
-    const model = models[provider];
-    if (!model) continue;
-    if (provider === 'groq' && !loadConfig().GROQ_API_KEY) continue;
-    chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
-  }
-  return chain;
+function buildChain(order: ProviderId[], available: Record<ProviderId, ProviderAvailability>): ProviderSlot[] {
+  const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
+    const chain: ProviderSlot[] = [];
+    for (const provider of ids) {
+      const { model, apiKey } = available[provider];
+      if (!model || !apiKey) continue;
+      chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
+    }
+    return chain;
+  };
+
+  const configured = slotsFor(order);
+  if (configured.length > 0) return configured;
+
+  const fallback = slotsFor(PROVIDER_IDS);
+  aiLogger.error(
+    { order, usable: fallback.map((slot) => slot.provider) },
+    'Configured provider order named nothing that is configured — falling back to every configured provider',
+  );
+  return fallback;
 }
 
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return buildChain(cfg.AI_SMART_CHAIN, {
-    zai: cfg.ZAI_MODEL,
-    groq: cfg.GROQ_MODEL,
-    gemini: cfg.GEMINI_MODEL,
-    hf: cfg.HF_MODEL,
+    zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
+    groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
+    gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
+    hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN },
   });
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
   return buildChain(cfg.AI_FAST_CHAIN, {
-    zai: cfg.ZAI_FAST_MODEL,
-    groq: cfg.GROQ_FAST_MODEL,
-    gemini: cfg.GEMINI_FAST_MODEL,
-    hf: cfg.HF_FAST_MODEL,
+    zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
+    groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
+    gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },
+    hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN },
   });
 }
 

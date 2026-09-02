@@ -228,10 +228,14 @@ All `process.env.*` reads go through `src/config/env.ts` → `loadConfig()` and 
 When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) read and validate in `loadConfig()`, (3) use via `config.VAR_NAME` everywhere else.
 
 **Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list
-provider ids (`hf`, `zai`, `gemini`, `groq`) in the order they are tried. A provider whose
-model or key is missing is skipped, an unknown name is ignored with a warning, and an order
-naming nothing known falls back to the default. Reordering during an incident is an `.env`
-edit and a restart — do not hardcode a new order in `streaming.ts`.
+provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
+`src/services/ai/model-registry.ts`, which is the single source both the `ProviderId` type
+and the environment parser derive from — add a provider there and it is nameable at once.
+A provider whose model or key is missing is skipped, an unknown name is ignored with a
+warning, an order naming nothing known falls back to the default order, and an order whose
+providers are all unconfigured falls back to every provider that is configured (logged as
+an error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
+a new order in `streaming.ts`.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

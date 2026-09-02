@@ -1,8 +1,7 @@
 // src/config/env.ts
 import type { ProviderId } from '../services/ai/model-registry.ts';
+import { PROVIDER_IDS } from '../services/ai/model-registry.ts';
 import { logger } from '../utils/logger.ts';
-
-const PROVIDER_IDS: ProviderId[] = ['zai', 'groq', 'gemini', 'hf'];
 
 /**
  * Hugging Face first: it is the paid seat here, and the free tiers underneath it
@@ -27,7 +26,7 @@ function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
   for (const part of raw.split(',')) {
     const id = part.trim();
     if (!id) continue;
-    const known = PROVIDER_IDS.find((candidate) => candidate === id);
+    const known = PROVIDER_IDS.find((candidate): candidate is ProviderId => candidate === id);
     if (!known) {
       logger.warn({ name, id, known: PROVIDER_IDS }, 'Unknown provider in chain order — ignoring it');
       continue;
