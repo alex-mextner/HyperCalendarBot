@@ -115,7 +115,13 @@ describe('tool catalog budget', () => {
     ],
     [
       'a supplement turn',
-      () => makeContext({ supplementMode: true }),
+      () =>
+        makeContext({
+          supplementMode: true,
+          // Without it the section interpolates the string "undefined" and the
+          // measurement is of a prompt production never sends.
+          supplementAutoResponse: 'Записал встречу на завтра в 12:30.',
+        }),
       () => getToolDefinitions('text', undefined, true),
       FULL_REQUEST_TOKEN_BUDGETS.supplement,
     ],
