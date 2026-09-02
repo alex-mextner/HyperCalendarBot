@@ -90,6 +90,11 @@ while IFS=$'\t' read -r file ln text; do
   printf '%s' "$text" | grep -qE '^(<{7}|={7}|>{7})( |$)' && report BLOCK "$file" "$ln" "merge-marker" "$text"
   # console.log/debug
   if printf '%s' "$text" | grep -qE 'console\.(log|debug)\('; then
+    # Silent, not a WARN: on an excluded path these lines ARE the product, so
+    # every run would print the same dozen warnings and teach the reader to skim
+    # past all of them. Paths here are repo-root-relative in both modes (the diff
+    # branch strips the b/ prefix, the full-tree branch uses `git ls-files`), so
+    # an anchored pattern like ^scripts/ matches in both.
     if [ -n "$CONSOLE_EXCLUDE" ] && printf '%s' "$file" | grep -qE "$CONSOLE_EXCLUDE"; then
       :
     elif [ "$ALLOW_CONSOLE" = "1" ]; then report WARN "$file" "$ln" "console" "$text"
