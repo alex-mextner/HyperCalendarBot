@@ -38,6 +38,14 @@ function watchdogPath(): string {
   return new URL(watchdogUrl()).pathname;
 }
 
+/** The bodies a shell `case` branch accepts, unquoted and sorted. */
+function acceptedBodies(branch: string): string[] {
+  return branch
+    .split('|')
+    .map((pattern) => pattern.trim().replace(/^"|"$/g, ''))
+    .sort();
+}
+
 function matches(pattern: string, path: string): boolean {
   return pattern.endsWith('/*') ? path.startsWith(pattern.slice(0, -1)) : pattern === path;
 }
@@ -124,8 +132,16 @@ describe('Caddy routing', () => {
   test('the deploy accepts exactly the bodies the server answers with', () => {
     const branch = deployWorkflow.match(/^\s*(.+)\)\s*ROUTED="\$BODY"/m)?.[1];
     if (!branch) throw new Error('deploy.yml has no readiness case branch');
-    const accepted = branch.split('|').map((pattern) => pattern.trim().replace(/^"|"$/g, ''));
-    expect(accepted.sort()).toEqual([...Object.values(READINESS_BODY)].sort());
+    expect(acceptedBodies(branch)).toEqual([...Object.values(READINESS_BODY)].sort());
+  });
+
+  // The watchdog holds the same list, for the same reason: a 200 from anything
+  // but the bot is the blind state, not health. Three copies of one contract,
+  // so all three are compared against the one the server actually sends.
+  test('the watchdog accepts exactly the bodies the server answers with', () => {
+    const branch = watchdog.match(/^\s*(.+)\)\s*return 0\s*;;/m)?.[1];
+    if (!branch) throw new Error('healthcheck-alert.sh has no accepted-body case branch');
+    expect(acceptedBodies(branch)).toEqual([...Object.values(READINESS_BODY)].sort());
   });
 
   // Everything not matched gets a static 200, which is why an unrouted health
