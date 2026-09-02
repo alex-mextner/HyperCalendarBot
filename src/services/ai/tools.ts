@@ -1095,9 +1095,12 @@ const assistantToolDefinitions: ToolDefinition[] = [
 
 /**
  * The returned schemas are shared, not copied: fifteen tools reference the same
- * `scope` and `owner_id` objects, and they are frozen so a mutation is a visible
- * failure rather than a silent rewrite of all fifteen. Treat everything here as
- * read-only — serialize it, never normalize it in place.
+ * `scope` and `owner_id` objects. They are frozen, which stops one tool's copy
+ * from being edited into all fifteen — but freezing only throws in strict mode,
+ * so a sloppy-mode consumer's write is silently dropped instead. Either way the
+ * contract is the same: treat everything here as read-only. Serialize it, never
+ * normalize it in place. Every consumer in this repo passes it straight to a
+ * provider client, which serializes it.
  */
 export function getToolDefinitions(
   inputMode?: string,

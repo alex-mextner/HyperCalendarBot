@@ -8,6 +8,7 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { EventOccurrence } from '../../../src/database/types.ts';
+import { tagSender } from '../../../src/services/ai/agent.ts';
 import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
@@ -54,6 +55,17 @@ describe('buildSystemPrompt', () => {
       eventReminderRepo,
       conversationLogger: null as never,
     };
+  });
+
+  // The prompt tells the model what a group message looks like; the agent is
+  // what makes it look that way. They drifted apart once — the prompt described
+  // a "[Group: …]" prefix nothing produced — and nothing noticed.
+  test('describes the sender prefix the agent actually writes', () => {
+    const prompt = buildSystemPrompt(ctx);
+    const marker = tagSender('hello', 'Alex', 7).slice(0, '[From:'.length);
+    expect(marker).toBe('[From:');
+    expect(prompt).toContain(marker);
+    expect(prompt).not.toContain('[Group:');
   });
 
   test('includes user timezone', () => {

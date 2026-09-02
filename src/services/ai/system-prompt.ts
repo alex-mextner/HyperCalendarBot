@@ -127,7 +127,7 @@ function buildContextSection(): string {
   return `## Context
 - "Current local time" above is the authoritative clock. Each message includes a LOCAL timestamp in brackets, e.g. [2026-03-18 10:30] — already in the user's timezone, no conversion needed.
 - CALCULATE RULE: For ANY arithmetic — time, dates, durations, numbers — ALWAYS call the \`calculate\` tool. Never compute in your head. If calculate returns an error, report it to the user — do not compute manually.
-- Messages from group chats are prefixed with [Group: name, From: sender]. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
+- Messages from group chats are prefixed with [From: name (id:N)] after the timestamp. In groups, be brief and relevant — you were triggered by a calendar keyword or direct mention.
 - Messages from private chats have no group prefix.`;
 }
 
