@@ -138,6 +138,11 @@ beforeEach(() => {
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
+    // These tests are about what happens when a provider fails, not about which
+    // one is tried first, so they pin the order rather than inherit the default
+    // — which is configuration and will change again the next time a tier does.
+    AI_SMART_CHAIN: 'zai,groq,gemini,hf',
+    AI_FAST_CHAIN: 'zai,groq,gemini,hf',
   });
   providerClients.zai = () => asOpenAIClient(zai.client);
   providerClients.groq = () => asOpenAIClient(groq.client);
@@ -320,6 +325,42 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     });
 
     expect(result.text).toBe('answer from Gemini');
+  });
+});
+
+describe('provider order', () => {
+  // The order is the whole point of the configuration: a provider that answers
+  // 429 all week, or whose tier rejects every request of this size, must be
+  // routed around without a deploy.
+  test('tries providers in the configured order', async () => {
+    process.env.AI_SMART_CHAIN = 'gemini,hf,zai,groq';
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'rate limited') }] });
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    zai = unusedProvider();
+    groq = unusedProvider();
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+
+    expect(result.text).toBe('from hf');
+    expect(gemini.requestedModels).toEqual(['gemini-main']);
+    expect(hf.requestedModels).toEqual(['hf-main']);
+    expect(zai.requestedModels).toEqual([]);
+  });
+
+  // A name in the order is a preference, not a requirement: Groq is optional
+  // configuration and the chain has to hold together without it.
+  test('skips a provider that has no model configured', async () => {
+    process.env.AI_SMART_CHAIN = 'groq,hf';
+    process.env.GROQ_MODEL = '';
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    zai = unusedProvider();
+    groq = unusedProvider();
+    gemini = unusedProvider();
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+
+    expect(result.text).toBe('from hf');
+    expect(groq.requestedModels).toEqual([]);
   });
 });
 

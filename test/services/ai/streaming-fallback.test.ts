@@ -111,6 +111,10 @@ beforeEach(() => {
     HF_BASE_URL: 'https://hf.example/v1',
     HF_MODEL: 'hf-main',
     HF_FAST_MODEL: 'hf-fast',
+    // Pinned: these tests assert on the order failures come back in, which is
+    // configuration and changes whenever a provider's tier does.
+    AI_SMART_CHAIN: 'zai,groq,gemini,hf',
+    AI_FAST_CHAIN: 'zai,groq,gemini,hf',
   });
   providerClients.zai = () => fakeZai;
   providerClients.groq = () => fakeGroq;

@@ -337,30 +337,49 @@ export const providerClients = {
   hf: hfClient,
 };
 
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  zai: 'z.ai',
+  groq: 'Groq',
+  gemini: 'Gemini',
+  hf: 'HF',
+};
+
+/**
+ * Builds one chain in the configured order, skipping any provider whose key or
+ * model is missing. Order is configuration rather than code because the reason
+ * to change it arrives as an incident: a provider that answers 429 all week, or
+ * one whose tier rejects a request this size on every single call. Both happened
+ * on 2026-09-02, and both were a one-line change away from being routed around.
+ */
+function buildChain(order: ProviderId[], models: Record<ProviderId, string | undefined>): ProviderSlot[] {
+  const chain: ProviderSlot[] = [];
+  for (const provider of order) {
+    const model = models[provider];
+    if (!model) continue;
+    if (provider === 'groq' && !loadConfig().GROQ_API_KEY) continue;
+    chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
+  }
+  return chain;
+}
+
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_MODEL)];
-  if (cfg.GROQ_API_KEY && cfg.GROQ_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_MODEL));
-  }
-  chain.push(
-    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_MODEL),
-    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_MODEL),
-  );
-  return chain;
+  return buildChain(cfg.AI_SMART_CHAIN, {
+    zai: cfg.ZAI_MODEL,
+    groq: cfg.GROQ_MODEL,
+    gemini: cfg.GEMINI_MODEL,
+    hf: cfg.HF_MODEL,
+  });
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_FAST_MODEL)];
-  if (cfg.GROQ_API_KEY && cfg.GROQ_FAST_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_FAST_MODEL));
-  }
-  chain.push(
-    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_FAST_MODEL),
-    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_FAST_MODEL),
-  );
-  return chain;
+  return buildChain(cfg.AI_FAST_CHAIN, {
+    zai: cfg.ZAI_FAST_MODEL,
+    groq: cfg.GROQ_FAST_MODEL,
+    gemini: cfg.GEMINI_FAST_MODEL,
+    hf: cfg.HF_FAST_MODEL,
+  });
 }
 
 // ── Slot execution with live-model discovery ───────────────────────────────

@@ -1,5 +1,41 @@
 // src/config/env.ts
+import type { ProviderId } from '../services/ai/model-registry.ts';
 import { logger } from '../utils/logger.ts';
+
+const PROVIDER_IDS: ProviderId[] = ['zai', 'groq', 'gemini', 'hf'];
+
+/**
+ * Hugging Face first: it is the paid seat here, and the free tiers underneath it
+ * fail in ways retrying cannot fix — a weekly quota that is simply spent, or a
+ * per-minute token cap smaller than one request with the tool catalog in it.
+ */
+const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+/**
+ * The fast chain carries short requests (summaries, validation), which do fit in
+ * the small free tiers, so the cheap and quick providers come first there.
+ */
+const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'groq', 'hf', 'gemini'];
+
+function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed: ProviderId[] = [];
+  for (const part of raw.split(',')) {
+    const id = part.trim();
+    if (!id) continue;
+    const known = PROVIDER_IDS.find((candidate) => candidate === id);
+    if (!known) {
+      logger.warn({ name, id, known: PROVIDER_IDS }, 'Unknown provider in chain order — ignoring it');
+      continue;
+    }
+    if (!parsed.includes(known)) parsed.push(known);
+  }
+  if (parsed.length === 0) {
+    logger.warn({ name, raw, fallback }, 'Chain order named no known provider — using the default order');
+    return fallback;
+  }
+  return parsed;
+}
 
 export interface EnvConfig {
   BOT_TOKEN: string;
@@ -37,6 +73,15 @@ export interface EnvConfig {
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
+
+  /**
+   * The order providers are tried in, first to last, for the chain that answers
+   * users (SMART) and the one behind summarizing and validation (FAST). A
+   * provider whose model or key is missing is skipped, so a name here is a
+   * preference, not a requirement.
+   */
+  AI_SMART_CHAIN: ProviderId[];
+  AI_FAST_CHAIN: ProviderId[];
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;
@@ -145,6 +190,8 @@ export function loadConfig(): EnvConfig {
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
+    AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     BOT_ADMIN_ID,
     INTENT_LEARNER_DAILY_LIMIT,
     INLINE_BOT_TOKEN: process.env.INLINE_BOT_TOKEN || undefined,
