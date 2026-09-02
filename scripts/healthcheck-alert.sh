@@ -25,6 +25,11 @@ TIMEOUT=10
 # restarts, so a probe capped at the same 10s can never see the retry succeed —
 # it would time out at the exact moment the proxy answers, turning every deploy
 # into a timeout. Keep this above the proxy's retry window.
+#
+# Worst case for a whole run is RETRY_COUNT probes plus the delays between them:
+# 3x20 + 2x15 = 90s, inside the two-minute cron cadence. Raising any of these
+# three past that lets one run overlap the next, and two runs share the state
+# files above with no locking.
 PROBE_TIMEOUT=20
 RETRY_COUNT=3
 RETRY_DELAY=15

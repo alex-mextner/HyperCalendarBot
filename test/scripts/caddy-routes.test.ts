@@ -12,7 +12,7 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WebServerDeps } from '../../src/web/server.ts';
-import { startWebServer } from '../../src/web/server.ts';
+import { READINESS_BODY, startWebServer } from '../../src/web/server.ts';
 
 const ROOT = join(import.meta.dir, '../..');
 const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
@@ -106,6 +106,16 @@ describe('Caddy routing', () => {
   // the deploy checks the outcome against the very URL the watchdog will poll.
   test('the deploy verifies the URL the watchdog polls', () => {
     expect(deployWorkflow).toContain(watchdogUrl());
+  });
+
+  // The deploy decides "routed" by recognising the bodies the bot answers with.
+  // That list is a copy of the server's, and a copy that drifts fails every
+  // deploy for a routing problem that does not exist.
+  test('the deploy accepts exactly the bodies the server answers with', () => {
+    const branch = deployWorkflow.match(/^\s*(.+)\)\s*ROUTED="\$BODY"/m)?.[1];
+    if (!branch) throw new Error('deploy.yml has no readiness case branch');
+    const accepted = branch.split('|').map((pattern) => pattern.trim().replace(/^"|"$/g, ''));
+    expect(accepted.sort()).toEqual([...Object.values(READINESS_BODY)].sort());
   });
 
   // Everything not matched gets a static 200, which is why an unrouted health
