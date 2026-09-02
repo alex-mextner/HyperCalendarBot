@@ -1,21 +1,44 @@
+import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import type OpenAI from 'openai';
+import { migrations } from '../../../src/database/migrations.ts';
+import { ChatHistoryRepository } from '../../../src/database/repositories/chat-history.repository.ts';
+import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
+import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
+import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
+import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../../../src/services/ai/token-estimate.ts';
 import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
+import type { AgentContext } from '../../../src/services/ai/types.ts';
+import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
+import { EventService } from '../../../src/services/event/event-service.ts';
+import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 
 /**
  * The whole tool catalog is re-sent on every round of every message, so its size
- * is a hard operational limit, not a style preference: Groq's account tier caps a
- * request at 8 000 tokens per minute, and the catalog is the largest single part
- * of the request. These budgets sit just above the current measured size — they
- * exist to catch a tool being added back at its full verbose length, not to force
- * further shrinking.
+ * is an operational limit, not a style preference. These budgets sit just above
+ * the current sizes — they exist to catch a tool being added back at its full
+ * verbose length, not to force further shrinking.
  *
- * Measured with Groq's own accounting on 2026-09-01: the 62-tool catalog plus the
- * system prompt and one user turn is 9 723 tokens, down from 11 977.
+ * The token budgets are in `estimateTokens` units, which are NOT any provider's
+ * tokenizer: for this mix of JSON and Cyrillic the estimator reads high. The real
+ * number, from Groq's own accounting on 2026-09-01, is 9 723 tokens for the
+ * catalog plus the system prompt and one user turn, down from 11 977. Read the
+ * budgets as "no bigger than today", never as "fits in provider X" — Groq's tier
+ * caps a request at 8 000 tokens per minute, which even the reduced request does
+ * not fit, and no budget here changes that.
  */
 const TOOL_CATALOG_CHAR_BUDGET = 36_000;
 const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
+/**
+ * The catalog is the largest part of a request but not the whole of it: the
+ * system prompt travels with it every time. Guarding only the catalog would let
+ * the prompt grow back exactly what the catalog gave up, so the request as a
+ * whole gets a budget too.
+ */
+const FULL_REQUEST_TOKEN_BUDGET = 15_000;
 /**
  * Turning on computer access appends nine more tools, so that catalog is allowed
  * to be larger — but only by those nine, not by unbounded description growth.
@@ -30,6 +53,34 @@ function catalogJson(tools: OpenAI.ChatCompletionTool[]): string {
   return JSON.stringify(tools);
 }
 
+/** A context shaped like a real one-to-one chat, on an empty calendar. */
+function makeContext(): AgentContext {
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  const userRepo = new UserRepository(db);
+  const user = userRepo.create({
+    telegram_id: 123,
+    username: 'testuser',
+    first_name: 'Test',
+    timezone: 'Europe/Kyiv',
+    language: 'en',
+  });
+  const chatHistory = new ChatHistoryRepository(db);
+  return {
+    user,
+    chatId: 123,
+    messageText: 'Завтра 12:30 английский',
+    isGroup: false,
+    eventService: new EventService({ eventRepo: new EventRepository(db) }),
+    holidayService: new HolidayService(new HolidayRepository(db)),
+    chatHistory,
+    userRepo,
+    eventReminderRepo: new EventReminderRepository(db),
+    conversationLogger: new ConversationLogger(chatHistory),
+  };
+}
+
 describe('tool catalog budget', () => {
   test('the default catalog stays within its character budget', () => {
     const chars = catalogJson(getToolDefinitions('text')).length;
@@ -39,6 +90,15 @@ describe('tool catalog budget', () => {
   test('the default catalog stays within its token budget', () => {
     const tokens = estimateTokens(catalogJson(getToolDefinitions('text')));
     expect(tokens).toBeLessThanOrEqual(TOOL_CATALOG_TOKEN_BUDGET);
+  });
+
+  // A real request is the prompt and the catalog together, and they trade against
+  // each other: text moved out of one can reappear in the other with both
+  // per-part budgets still green.
+  test('a whole request stays within its token budget', () => {
+    const ctx = makeContext();
+    const request = buildSystemPrompt(ctx) + catalogJson(getToolDefinitions('text')) + ctx.messageText;
+    expect(estimateTokens(request)).toBeLessThanOrEqual(FULL_REQUEST_TOKEN_BUDGET);
   });
 
   test('every other mode stays within the same budget', () => {

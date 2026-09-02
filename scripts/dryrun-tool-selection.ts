@@ -129,14 +129,20 @@ interface CaseOutcome {
   id: string;
   provider: string;
   tools: string[];
+  text: string;
   promptTokens: number | null;
   finishReason: string | null;
   error: string | null;
   ok: boolean;
 }
 
-function verdict(testCase: DryRunCase, tools: string[]): boolean {
-  if (testCase.expectNoTools) return tools.length === 0;
+/** Tools the group prompt allows before [SKIP], because they produce no message. */
+const SILENT_TOOLS = ['set_reaction', 'remember_user_fact', 'send_feedback'];
+
+function verdict(testCase: DryRunCase, tools: string[], text: string): boolean {
+  if (testCase.expectSilence) {
+    return text.trim() === '[SKIP]' && tools.every((name) => SILENT_TOOLS.includes(name));
+  }
   const expected = testCase.expectAnyOf;
   return tools.some((name) => expected.includes(name));
 }
@@ -185,14 +191,16 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
     const res = await completeWithRetry(provider, request);
     const calls = res.choices[0]?.message.tool_calls ?? [];
     const tools = calls.map((c) => ('function' in c ? c.function.name : c.type));
+    const text = res.choices[0]?.message.content ?? '';
     return {
       id: testCase.id,
       provider: provider.name,
       tools,
+      text,
       promptTokens: res.usage?.prompt_tokens ?? null,
       finishReason: res.choices[0]?.finish_reason ?? null,
       error: null,
-      ok: verdict(testCase, tools),
+      ok: verdict(testCase, tools, text),
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -200,6 +208,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
       id: testCase.id,
       provider: provider.name,
       tools: [],
+      text: '',
       promptTokens: null,
       finishReason: null,
       error: message.slice(0, 160).replace(/\s+/g, ' '),
@@ -212,7 +221,8 @@ function report(outcomes: CaseOutcome[]): void {
   for (const o of outcomes) {
     const mark = o.ok ? 'ok  ' : 'FAIL';
     const reason = o.finishReason && o.finishReason !== 'tool_calls' ? ` [${o.finishReason}]` : '';
-    const detail = o.error ? `ERROR ${o.error}` : `${o.tools.join(',') || '(no tool calls)'}${reason}`;
+    const said = o.tools.length === 0 ? `"${o.text.trim().slice(0, 40)}"` : '';
+    const detail = o.error ? `ERROR ${o.error}` : `${o.tools.join(',') || said || '(no tool calls)'}${reason}`;
     console.log(`${mark} ${o.provider.padEnd(7)} ${o.id.padEnd(22)} ${detail}`);
   }
   const byProvider = new Map<string, { pass: number; total: number; tokens: number[] }>();

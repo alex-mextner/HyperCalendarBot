@@ -19,14 +19,19 @@ interface DryRunCaseBase {
 
 /**
  * A case either names the tools that would satisfy it, or expects the model to
- * answer without calling anything. The split is a union rather than two
- * optional fields because the combination in between — an empty expectation
- * list with no "expect silence" flag — can never be satisfied, and a case
- * written that way would sit permanently red while looking like a model miss.
+ * stay out of the conversation. The split is a union rather than two optional
+ * fields because the combination in between — an empty expectation list with no
+ * "expect silence" flag — can never be satisfied, and a case written that way
+ * would sit permanently red while looking like a model miss.
+ *
+ * Staying out is not the same as calling no tools: the group prompt asks for the
+ * exact text [SKIP], and it permits a few silent tools (a reaction, a
+ * remembered fact) before it. A reply that calls nothing but writes a sentence
+ * to the group is the failure this case exists to catch.
  */
 export type DryRunCase =
-  | (DryRunCaseBase & { expectAnyOf: [string, ...string[]]; expectNoTools?: false })
-  | (DryRunCaseBase & { expectNoTools: true; expectAnyOf?: never });
+  | (DryRunCaseBase & { expectAnyOf: [string, ...string[]]; expectSilence?: false })
+  | (DryRunCaseBase & { expectSilence: true; expectAnyOf?: never });
 
 export const DRYRUN_CASES: DryRunCase[] = [
   {
@@ -134,7 +139,7 @@ export const DRYRUN_CASES: DryRunCase[] = [
     id: 'group-off-topic-date',
     message: 'Доставка будет 1 апреля',
     group: true,
-    expectNoTools: true,
+    expectSilence: true,
   },
   {
     id: 'group-direct-agenda',
