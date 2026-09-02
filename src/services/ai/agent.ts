@@ -285,7 +285,12 @@ function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
 }
 
 /** Plain-text fallback for group-chat sender attribution. */
-function tagSender(content: string, name: string, userId: number): string {
+/**
+ * Exported so the system prompt's description of this prefix can be pinned to
+ * what it actually produces: the prompt used to tell the model to look for
+ * "[Group: name, From: sender]", which nothing has ever written.
+ */
+export function tagSender(content: string, name: string, userId: number): string {
   const senderTag = `[From: ${name} (id:${userId})] `;
   const tsPattern = /^(\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] )/;
   return tsPattern.test(content) ? content.replace(tsPattern, `$1${senderTag}`) : `${senderTag}${content}`;
