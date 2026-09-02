@@ -74,4 +74,8 @@ jobs:
           LEFTOVER_HEAD: ${{ github.event.pull_request.head.sha || inputs.head_sha }}
           # TICKET_REGEX: 'ABC-[0-9]+|#[0-9]+'   # your tracker's id format
           # ALLOW_CONSOLE: '0'
+          # scripts/ holds developer CLIs whose printed output is the whole point —
+          # a measurement table, a dry-run report. Only the console rule is lifted
+          # there; a focused test or an untracked TODO still fails the gate.
+          CONSOLE_EXCLUDE: '^scripts/'
         run: bash ci/leftover-grep/leftover-grep.sh

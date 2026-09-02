@@ -18,6 +18,10 @@
 #   TICKET_REGEX         what makes a TODO "tracked". Default: TODO/FIXME followed by
 #                        (ABC-123) or (#123) or a URL. Customize for your tracker.
 #   ALLOW_CONSOLE        "1" = console.log is a WARNING, not a failure (default: block).
+#   CONSOLE_EXCLUDE      ERE of paths where console output IS the interface (developer
+#                        CLIs, generators), so only the console rule is skipped there —
+#                        focused tests, debuggers and untracked TODOs still block.
+#                        Default: empty (the console rule applies everywhere).
 #   LEFTOVER_FULLTREE    "1" = always scan the whole tree, ignore the diff.
 #   LEFTOVER_HEAD        head ref/SHA to diff against the base. Default HEAD. Under a
 #                        tamper-resistant pull_request_target setup this is the PR head SHA,
@@ -33,6 +37,7 @@ LEFTOVER_INCLUDE="${LEFTOVER_INCLUDE:-\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|rb|java|
 LEFTOVER_EXCLUDE="${LEFTOVER_EXCLUDE:-(^|/)(node_modules|dist|build|out|vendor|\.git|coverage|__snapshots__)/|\.min\.(js|css)$|lock$}"
 TICKET_REGEX="${TICKET_REGEX:-[A-Z]+-[0-9]+|#[0-9]+|https?://}"
 ALLOW_CONSOLE="${ALLOW_CONSOLE:-0}"
+CONSOLE_EXCLUDE="${CONSOLE_EXCLUDE:-}"
 LEFTOVER_FULLTREE="${LEFTOVER_FULLTREE:-0}"
 
 # Resolve a base ref or empty (-> full-tree scan).
@@ -85,7 +90,10 @@ while IFS=$'\t' read -r file ln text; do
   printf '%s' "$text" | grep -qE '^(<{7}|={7}|>{7})( |$)' && report BLOCK "$file" "$ln" "merge-marker" "$text"
   # console.log/debug
   if printf '%s' "$text" | grep -qE 'console\.(log|debug)\('; then
-    [ "$ALLOW_CONSOLE" = "1" ] && report WARN "$file" "$ln" "console" "$text" || report BLOCK "$file" "$ln" "console" "$text"
+    if [ -n "$CONSOLE_EXCLUDE" ] && printf '%s' "$file" | grep -qE "$CONSOLE_EXCLUDE"; then
+      :
+    elif [ "$ALLOW_CONSOLE" = "1" ]; then report WARN "$file" "$ln" "console" "$text"
+    else report BLOCK "$file" "$ln" "console" "$text"; fi
   fi
   # TODO/FIXME without a tracker reference
   if printf '%s' "$text" | grep -qE '(TODO|FIXME)'; then
