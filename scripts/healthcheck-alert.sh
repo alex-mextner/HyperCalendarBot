@@ -20,6 +20,12 @@ STATE_FILE="/tmp/hypercal-down"
 # on its very first unverified answer.
 UNVERIFIED_FILE="/tmp/hypercal-unverified-since"
 TIMEOUT=10
+# The readiness probe gets its own, longer deadline. The reverse proxy holds a
+# request for up to lb_try_duration (10s in the Caddyfile) while a container
+# restarts, so a probe capped at the same 10s can never see the retry succeed —
+# it would time out at the exact moment the proxy answers, turning every deploy
+# into a timeout. Keep this above the proxy's retry window.
+PROBE_TIMEOUT=20
 RETRY_COUNT=3
 RETRY_DELAY=15
 # How long to keep the "down" state while the bot answers 200 but cannot confirm
@@ -68,7 +74,7 @@ BODY_FILE=$(mktemp)
 trap 'rm -f "$BODY_FILE"' EXIT
 
 probe_health() {
-  curl -s -o "$BODY_FILE" -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
+  curl -s -o "$BODY_FILE" -w "%{http_code}" --max-time "$PROBE_TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
 }
 
 # Retry to avoid false positives during deploys (container swap ~10-15s).

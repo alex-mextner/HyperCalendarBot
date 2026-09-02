@@ -35,18 +35,51 @@ function matches(pattern: string, path: string): boolean {
   return pattern.endsWith('/*') ? path.startsWith(pattern.slice(0, -1)) : pattern === path;
 }
 
+/** How long the proxy holds a request while the container restarts, in seconds. */
+function proxyRetryWindowSeconds(): number {
+  const value = caddyfile.match(/lb_try_duration\s+(\d+)s/)?.[1];
+  if (!value) throw new Error('Caddyfile has no lb_try_duration');
+  return Number(value);
+}
+
+/** How long the watchdog waits for a readiness answer, in seconds. */
+function probeTimeoutSeconds(): number {
+  const value = watchdog.match(/^PROBE_TIMEOUT=(\d+)/m)?.[1];
+  if (!value) throw new Error('healthcheck-alert.sh has no PROBE_TIMEOUT');
+  return Number(value);
+}
+
 describe('Caddy routing', () => {
   test('forwards the path the watchdog polls', () => {
     const path = watchdogPath();
     expect(proxiedPaths().some((pattern) => matches(pattern, path))).toBe(true);
   });
 
+  // Asserted against the route expression, not a bare quoted string: a comment
+  // or a leftover constant naming the path must not stand in for a live route.
   test('forwards both health endpoints the server answers', () => {
     const proxied = proxiedPaths();
     for (const path of ['/health', '/ready']) {
-      expect(server).toContain(`'${path}'`);
+      expect(server).toContain(`url.pathname === '${path}'`);
       expect(proxied.some((pattern) => matches(pattern, path))).toBe(true);
     }
+  });
+
+  // Caddy evaluates handle blocks top to bottom, so the catch-all swallows
+  // everything below it. Matching the right paths is worth nothing if the
+  // static page is reached first — that is the shape the outage had.
+  test('the bot handler is reached before the static page', () => {
+    const botHandler = caddyfile.indexOf('handle @bot {');
+    const staticHandler = caddyfile.indexOf('handle {');
+    expect(botHandler).toBeGreaterThan(-1);
+    expect(staticHandler).toBeGreaterThan(-1);
+    expect(botHandler).toBeLessThan(staticHandler);
+  });
+
+  // The proxy holds a request while the container restarts; a probe that gives
+  // up first turns every deploy into a timeout instead of a delayed answer.
+  test('the watchdog waits longer than the proxy retries', () => {
+    expect(probeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
   });
 
   // Everything not matched gets a static 200, which is why an unrouted health
