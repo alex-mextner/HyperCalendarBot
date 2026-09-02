@@ -20,6 +20,17 @@ STATE_FILE="/tmp/hypercal-down"
 # on its very first unverified answer.
 UNVERIFIED_FILE="/tmp/hypercal-unverified-since"
 TIMEOUT=10
+# The readiness probe gets its own, longer deadline. The reverse proxy holds a
+# request for up to lb_try_duration (10s in the Caddyfile) while a container
+# restarts, so a probe capped at the same 10s can never see the retry succeed —
+# it would time out at the exact moment the proxy answers, turning every deploy
+# into a timeout. Keep this above the proxy's retry window.
+#
+# Worst case for a whole run is RETRY_COUNT probes plus the delays between them:
+# 3x20 + 2x15 = 90s, inside the two-minute cron cadence. Raising any of these
+# three past that lets one run overlap the next, and two runs share the state
+# files above with no locking.
+PROBE_TIMEOUT=20
 RETRY_COUNT=3
 RETRY_DELAY=15
 # How long to keep the "down" state while the bot answers 200 but cannot confirm
@@ -68,20 +79,33 @@ BODY_FILE=$(mktemp)
 trap 'rm -f "$BODY_FILE"' EXIT
 
 probe_health() {
-  curl -s -o "$BODY_FILE" -w "%{http_code}" --max-time "$TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
+  curl -s -o "$BODY_FILE" -w "%{http_code}" --max-time "$PROBE_TIMEOUT" "$HEALTH_URL" 2>/dev/null || echo "000"
+}
+
+# A 200 alone proves nothing: the reverse proxy answers an unrouted path with a
+# static page, also 200. That is how this watchdog went blind once — it polled a
+# path the proxy never forwarded and read every poll as healthy. So a 200 counts
+# only when the body is one the bot itself produces; anything else is a failure,
+# whatever it says.
+answered_by_bot() {
+  [[ "$HTTP_CODE" == "200" ]] || return 1
+  case "$(cat "$BODY_FILE")" in
+    ok|"ok (unverified)"|"ai chain down") return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # Retry to avoid false positives during deploys (container swap ~10-15s).
 # Only alert if all attempts fail — a transient single 503 is not an outage.
 HTTP_CODE=$(probe_health)
 attempt=1
-while [[ "$HTTP_CODE" != "200" && $attempt -lt $RETRY_COUNT ]]; do
+while ! answered_by_bot && [[ $attempt -lt $RETRY_COUNT ]]; do
   sleep "$RETRY_DELAY"
   attempt=$((attempt + 1))
   HTTP_CODE=$(probe_health)
 done
 
-if [[ "$HTTP_CODE" != "200" ]]; then
+if ! answered_by_bot; then
   # Any real failure ends an unverified wait: there is something to see again.
   rm -f "$UNVERIFIED_FILE"
   if [[ ! -f "$STATE_FILE" ]]; then
@@ -96,6 +120,10 @@ if [[ "$HTTP_CODE" != "200" ]]; then
     if [[ "$REASON" == "ai chain down" ]]; then
       ADVICE="
 Every AI provider is failing. A restart will not fix this and clears the record — check provider quotas, keys and model ids first."
+    fi
+    if [[ "$HTTP_CODE" == "200" ]]; then
+      ADVICE="
+This is a 200 nobody in the bot wrote — the readiness path is answered by something else, most likely the reverse proxy's static page. Check that the path is still routed; while it is not, no outage can raise an alert."
     fi
     MSG="HyperCalendarBot DOWN — readiness returned HTTP ${HTTP_CODE}${REASON:+ (${REASON})}"
     send_telegram "🚨 <b>HyperCalendarBot DOWN</b>
@@ -120,13 +148,10 @@ else
       rm -f "$STATE_FILE" "$UNVERIFIED_FILE"
       send_telegram "✅ <b>HyperCalendarBot UP</b> — recovered"
     else
-      # Anything that is not proof: the expected "not yet verified" answer, or a
-      # body this script does not know — a changed contract, or a proxy
-      # answering 200 with its own page. Both are treated the same way, because
-      # both mean the same thing here: no evidence the outage ended.
-      if [[ "$BODY" != "ok (unverified)" ]]; then
-        echo "$(date -u +%FT%TZ) unexpected /ready body, recovery not recognised: ${BODY:0:120}" >&2
-      fi
+      # The bot answered, but not with proof: it is alive and has served nobody
+      # since it started, so it can vouch for nothing. A body from anywhere else
+      # never reaches here — that is a failure, handled above.
+      #
       # Wait — but not forever. While this state file exists the DOWN branch
       # stays silent, so an indefinite wait would swallow the alert for a
       # *different* outage starting later. That silence is the worse failure,

@@ -170,19 +170,24 @@ describe('healthcheck watchdog', () => {
     expect(sent).toContain('bot not started');
   });
 
-  // A proxy answering 200 with its own page, or a changed contract, is not
-  // proof either — and it used to keep the down-state forever, suppressing
-  // every future alert. It gets the same bounded wait.
-  test('an answer this script does not recognise is bounded the same way', async () => {
-    await poll('503', READINESS_BODY.chainDown);
-    await poll('200', '<html>maintenance</html>');
+  // The proxy answers an unrouted path with its own page, also 200 — the exact
+  // shape that made this watchdog blind once. A 200 nobody in the bot wrote is
+  // a failure, and it must alert from a healthy state, not only from a down one.
+  test('a 200 the bot did not write is an outage, not health', async () => {
+    const sent = await poll('200', 'HyperCalendarBot is running');
+    expect(sent).toContain('DOWN');
+    expect(sent).toContain('routed');
     expect(consideredDown()).toBe(true);
+  });
 
-    ageUnverified(3600);
+  // The same body while an outage is open must not read as a recovery either.
+  test('a 200 the bot did not write never ends an outage', async () => {
+    await poll('503', READINESS_BODY.chainDown);
     writeFileSync(join(work, 'sent.log'), '');
+
     const sent = await poll('200', '<html>maintenance</html>');
     expect(sent.trim()).toBe('');
-    expect(consideredDown()).toBe(false);
+    expect(consideredDown()).toBe(true);
   });
 
   // The reason is interpolated into an HTML message, so it must not be able to

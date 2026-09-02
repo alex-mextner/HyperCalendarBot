@@ -1,7 +1,7 @@
 hypercal.invntrm.ru {
 	# All bot API paths — retry during container restarts so clients see a delay, not 502.
 	# Caddy holds the connection and retries every 500ms for up to 10s.
-	@bot path /webhook/* /oauth/* /webhooks/* /ws/* /health /admin/*
+	@bot path /webhook/* /oauth/* /webhooks/* /ws/* /health /ready /admin/*
 	handle @bot {
 		reverse_proxy localhost:3001 {
 			lb_try_duration 10s
