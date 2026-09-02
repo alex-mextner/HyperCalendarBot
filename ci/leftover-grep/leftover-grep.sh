@@ -18,11 +18,24 @@
 #   TICKET_REGEX         what makes a TODO "tracked". Default: TODO/FIXME followed by
 #                        (ABC-123) or (#123) or a URL. Customize for your tracker.
 #   ALLOW_CONSOLE        "1" = console.log is a WARNING, not a failure (default: block).
+#   CONSOLE_EXCLUDE      ERE of paths where console output IS the interface (developer
+#                        CLIs, generators), so only the console rule is skipped there —
+#                        focused tests, debuggers and untracked task markers still block.
+#                        Default: empty (the console rule applies everywhere).
 #   LEFTOVER_FULLTREE    "1" = always scan the whole tree, ignore the diff.
 #   LEFTOVER_HEAD        head ref/SHA to diff against the base. Default HEAD. Under a
 #                        tamper-resistant pull_request_target setup this is the PR head SHA,
 #                        fetched as DATA — `git diff` + grep only READ those lines, they
 #                        never execute PR code — so the trusted base script still gates.
+#
+# Two behaviours worth knowing before you read a verdict:
+#   • A rename is scanned as a rewrite. A file MOVED between directories is read in
+#     full at its destination, because a rename carries no added lines and would
+#     otherwise arrive unscanned — including outside a CONSOLE_EXCLUDE path. The
+#     cost is that moving a file with pre-existing debt in it surfaces that debt.
+#   • In diff mode a symlink is scanned as its own added line, which is the target
+#     path, not the file it points at. The full-tree scan follows links, and is
+#     stricter for it.
 #
 # Usage: sh ci/leftover-grep/leftover-grep.sh
 set -euo pipefail
@@ -33,6 +46,7 @@ LEFTOVER_INCLUDE="${LEFTOVER_INCLUDE:-\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|rb|java|
 LEFTOVER_EXCLUDE="${LEFTOVER_EXCLUDE:-(^|/)(node_modules|dist|build|out|vendor|\.git|coverage|__snapshots__)/|\.min\.(js|css)$|lock$}"
 TICKET_REGEX="${TICKET_REGEX:-[A-Z]+-[0-9]+|#[0-9]+|https?://}"
 ALLOW_CONSOLE="${ALLOW_CONSOLE:-0}"
+CONSOLE_EXCLUDE="${CONSOLE_EXCLUDE:-}"
 LEFTOVER_FULLTREE="${LEFTOVER_FULLTREE:-0}"
 
 # Resolve a base ref or empty (-> full-tree scan).
@@ -48,9 +62,16 @@ emit_lines() {
   if [ -n "$base" ]; then
     # Parse `git diff` unified output, tracking the new-file line number, emitting only '+'
     # lines (added). Robust enough for a gate without extra deps.
-    git diff --no-color --unified=0 "$base...$LEFTOVER_HEAD" -- . \
+    # --no-renames: a rename carries no added lines, so a file MOVED out of a
+    # per-rule exclusion (a console-printing CLI moved from scripts/ into src/)
+    # would never be scanned at its new path. Split into a delete and an add, the
+    # destination is read in full and every rule applies to it there.
+    git diff --no-color --unified=0 --no-renames "$base...$LEFTOVER_HEAD" -- . \
       | awk '
-        /^\+\+\+ /      { f=$2; sub(/^b\//,"",f); next }
+        # substr, not $2: a path containing a space would be truncated at the
+        # space, and the truncated name matches no include pattern — the file
+        # would then skip EVERY rule, silently.
+        /^\+\+\+ /      { f=substr($0,5); sub(/^b\//,"",f); next }
         /^@@ /          { match($0, /\+[0-9]+/); ln=substr($0,RSTART+1,RLENGTH-1)+0; next }
         /^\+/ && f!=""  { t=substr($0,2); printf "%s\t%d\t%s\n", f, ln, t; ln++; next }
       '
@@ -85,7 +106,15 @@ while IFS=$'\t' read -r file ln text; do
   printf '%s' "$text" | grep -qE '^(<{7}|={7}|>{7})( |$)' && report BLOCK "$file" "$ln" "merge-marker" "$text"
   # console.log/debug
   if printf '%s' "$text" | grep -qE 'console\.(log|debug)\('; then
-    [ "$ALLOW_CONSOLE" = "1" ] && report WARN "$file" "$ln" "console" "$text" || report BLOCK "$file" "$ln" "console" "$text"
+    # Silent, not a WARN: on an excluded path these lines ARE the product, so
+    # every run would print the same dozen warnings and teach the reader to skim
+    # past all of them. Paths here are repo-root-relative in both modes (the diff
+    # branch strips the b/ prefix, the full-tree branch uses `git ls-files`), so
+    # an anchored pattern like ^scripts/ matches in both.
+    if [ -n "$CONSOLE_EXCLUDE" ] && printf '%s' "$file" | grep -qE "$CONSOLE_EXCLUDE"; then
+      :
+    elif [ "$ALLOW_CONSOLE" = "1" ]; then report WARN "$file" "$ln" "console" "$text"
+    else report BLOCK "$file" "$ln" "console" "$text"; fi
   fi
   # TODO/FIXME without a tracker reference
   if printf '%s' "$text" | grep -qE '(TODO|FIXME)'; then
