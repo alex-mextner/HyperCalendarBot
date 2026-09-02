@@ -1,6 +1,6 @@
 // src/config/env.ts
 import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
-import { logger } from '../utils/logger.ts';
+import { logger, logOnce } from '../utils/logger.ts';
 
 /**
  * Hugging Face first: it is the paid seat here, and the free tiers underneath it
@@ -18,19 +18,6 @@ export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq']
  */
 export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
 
-/**
- * loadConfig() runs per AI request, so an unchanged misconfiguration would
- * repeat its warning on every round of every message and bury the incident it
- * was meant to announce. Each distinct complaint is said once per process.
- */
-const chainComplaints = new Set<string>();
-
-function warnOnce(key: string, log: () => void): void {
-  if (chainComplaints.has(key)) return;
-  chainComplaints.add(key);
-  log();
-}
-
 function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
   const raw = process.env[name];
   if (!raw) return fallback;
@@ -40,7 +27,7 @@ function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
     if (!id) continue;
     const known = PROVIDER_IDS.find((candidate): candidate is ProviderId => candidate === id);
     if (!known) {
-      warnOnce(`${name}:unknown:${id}`, () =>
+      logOnce(`${name}:unknown:${id}`, () =>
         logger.warn({ name, id, known: PROVIDER_IDS }, 'Unknown provider in chain order — ignoring it'),
       );
       continue;
@@ -48,7 +35,7 @@ function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
     if (!parsed.includes(known)) parsed.push(known);
   }
   if (parsed.length === 0) {
-    warnOnce(`${name}:empty:${raw}`, () =>
+    logOnce(`${name}:empty:${raw}`, () =>
       logger.warn({ name, raw, fallback }, 'Chain order named no known provider — using the default order'),
     );
     return fallback;

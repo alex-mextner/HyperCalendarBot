@@ -17,7 +17,7 @@ import {
   reportProviderAnswered,
   reportProviderFailure,
 } from '../../utils/ai-provider-alert.ts';
-import { logger } from '../../utils/logger.ts';
+import { logger, logOnce } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import type { ProviderId } from './provider-ids.ts';
@@ -362,34 +362,27 @@ interface ProviderAvailability {
  * leave the bot with nothing to answer with — worse than ignoring the order — so
  * that case falls back to every provider that IS configured, and says so loudly.
  */
-/**
- * Chains are rebuilt per request, so a standing misconfiguration would repeat
- * its complaint on every round. Each distinct one is said once per process.
- */
-const chainComplaints = new Set<string>();
-
-function logOnce(key: string, log: () => void): void {
-  if (chainComplaints.has(key)) return;
-  chainComplaints.add(key);
-  log();
-}
-
 function buildChain(
+  kind: ProviderChainKind,
   order: ProviderId[],
   fallbackOrder: ProviderId[],
   available: Record<ProviderId, ProviderAvailability>,
 ): ProviderSlot[] {
+  // An optional provider missing from the DEFAULT order is the documented
+  // minimal deployment, not a mistake — Groq is in both defaults and plenty of
+  // installations have no Groq key. Only a provider the operator named
+  // themselves is worth a warning.
+  const wasChosen = order !== fallbackOrder;
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
     for (const provider of ids) {
       const { model, apiKey } = available[provider];
       if (!model || !apiKey) {
-        logOnce(`skip:${provider}:${!!model}:${!!apiKey}`, () =>
-          aiLogger.warn(
-            { provider, hasModel: !!model, hasKey: !!apiKey },
-            'Provider named in the chain is not configured — skipping it',
-          ),
-        );
+        logOnce(`skip:${kind}:${provider}:${!!model}:${!!apiKey}`, () => {
+          const detail = { chain: kind, provider, hasModel: !!model, hasKey: !!apiKey };
+          if (wasChosen) aiLogger.warn(detail, 'Provider named in the chain order is not configured — skipping it');
+          else aiLogger.debug(detail, 'Optional provider in the default chain order is not configured — skipping it');
+        });
         continue;
       }
       chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
@@ -409,14 +402,17 @@ function buildChain(
     // credentials and refuses to start without them, so at least three
     // providers always have both. Kept because that is a startup rule, not an
     // invariant of this function, and an empty chain fails every request.
-    logOnce(`none:${order.join(',')}`, () =>
-      aiLogger.error({ order }, 'No provider is configured with both a key and a model — every AI request will fail'),
+    logOnce(`none:${kind}:${order.join(',')}`, () =>
+      aiLogger.error(
+        { chain: kind, order },
+        'No provider is configured with both a key and a model — every AI request will fail',
+      ),
     );
     return fallback;
   }
-  logOnce(`fallback:${order.join(',')}`, () =>
+  logOnce(`fallback:${kind}:${order.join(',')}`, () =>
     aiLogger.error(
-      { order, usable: fallback.map((slot) => slot.provider) },
+      { chain: kind, order, usable: fallback.map((slot) => slot.provider) },
       'Configured provider order named nothing that is configured — falling back to the default order',
     ),
   );
@@ -425,7 +421,7 @@ function buildChain(
 
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain(cfg.AI_SMART_CHAIN, DEFAULT_SMART_CHAIN, {
+  return buildChain('smart', cfg.AI_SMART_CHAIN, DEFAULT_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
@@ -435,7 +431,7 @@ function buildSmartChain(): ProviderSlot[] {
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain(cfg.AI_FAST_CHAIN, DEFAULT_FAST_CHAIN, {
+  return buildChain('fast', cfg.AI_FAST_CHAIN, DEFAULT_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },
