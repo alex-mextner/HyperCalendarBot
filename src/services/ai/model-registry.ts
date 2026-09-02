@@ -11,6 +11,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import type { ProviderId } from './provider-ids.ts';
 
 const registryLogger = logger.child({ module: 'ai-model-registry' });
 
@@ -20,8 +21,6 @@ const OVERRIDE_TTL_MS = 30 * 60 * 1000;
 const NEGATIVE_TTL_MS = 5 * 60 * 1000;
 /** The models listing must never hold up a user request for long. */
 const PROBE_TIMEOUT_MS = 10_000;
-
-export type ProviderId = 'zai' | 'groq' | 'gemini' | 'hf';
 
 /**
  * The slice of the OpenAI client this module needs. Declared structurally so the

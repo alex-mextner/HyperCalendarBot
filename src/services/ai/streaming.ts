@@ -10,16 +10,17 @@
 // tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
-import { loadConfig } from '../../config/env.ts';
+import { type ChainOrder, loadConfig } from '../../config/env.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
   reportProviderAnswered,
   reportProviderFailure,
 } from '../../utils/ai-provider-alert.ts';
-import { logger } from '../../utils/logger.ts';
+import { logger, logOnce } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
-import { getModelOverride, isModelNotFoundError, type ProviderId, resolveModelOverride } from './model-registry.ts';
+import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import type { ProviderId } from './provider-ids.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -337,30 +338,112 @@ export const providerClients = {
   hf: hfClient,
 };
 
+const PROVIDER_LABELS: Record<ProviderId, string> = {
+  zai: 'z.ai',
+  groq: 'Groq',
+  gemini: 'Gemini',
+  hf: 'HF',
+};
+
+/**
+ * What a provider needs before it can be put in a chain. Both are optional
+ * because Groq's are: loadConfig requires the z.ai, Hugging Face and Gemini
+ * credentials and models at startup, so for those three the check always
+ * passes. Live-model discovery does not change that — it replaces a configured
+ * model that turned out to be dead, and has nothing to start from without one.
+ */
+interface ProviderAvailability {
+  model?: string;
+  apiKey?: string;
+}
+
+/**
+ * Builds one chain in the configured order, skipping any provider whose key or
+ * model is missing. Order is configuration rather than code because the reason
+ * to change it arrives as an incident: a provider that answers 429 all week, or
+ * one whose tier rejects a request this size on every single call. Both happened
+ * on 2026-09-02, and both were a one-line change away from being routed around.
+ *
+ * An order that names only providers which turn out to be unconfigured would
+ * leave the bot with nothing to answer with — worse than ignoring the order — so
+ * that case falls back to every provider that IS configured, and says so loudly.
+ */
+function buildChain(
+  kind: ProviderChainKind,
+  chain: ChainOrder,
+  available: Record<ProviderId, ProviderAvailability>,
+): ProviderSlot[] {
+  const { order, fallback: fallbackOrder } = chain;
+  // An optional provider missing from the DEFAULT order is the documented
+  // minimal deployment, not a mistake — Groq is in both defaults and plenty of
+  // installations have no Groq key. Only a provider the operator named
+  // themselves is worth a warning, and the config says which case this is
+  // rather than the code guessing from array identity.
+  const wasChosen = chain.fromEnv;
+  const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
+    const chain: ProviderSlot[] = [];
+    for (const provider of ids) {
+      const { model, apiKey } = available[provider];
+      if (!model || !apiKey) {
+        logOnce(`skip:${kind}:${provider}:${!!model}:${!!apiKey}`, () => {
+          const detail = { chain: kind, provider, hasModel: !!model, hasKey: !!apiKey };
+          if (wasChosen) aiLogger.warn(detail, 'Provider named in the chain order is not configured — skipping it');
+          else aiLogger.debug(detail, 'Optional provider in the default chain order is not configured — skipping it');
+        });
+        continue;
+      }
+      chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
+    }
+    return chain;
+  };
+
+  const configured = slotsFor(order);
+  if (configured.length > 0) return configured;
+
+  // The fallback walks the default order rather than the declaration order of
+  // the provider ids, so the preference this code is built around survives the
+  // one path where the configured order could not be honoured.
+  const fallback = slotsFor(fallbackOrder);
+  if (fallback.length === 0) {
+    // Not reachable today — loadConfig requires the z.ai, HF and Gemini
+    // credentials and refuses to start without them, so at least three
+    // providers always have both. Kept because that is a startup rule, not an
+    // invariant of this function, and an empty chain fails every request.
+    logOnce(`none:${kind}:${order.join(',')}`, () =>
+      aiLogger.error(
+        { chain: kind, order },
+        'No provider is configured with both a key and a model — every AI request will fail',
+      ),
+    );
+    return fallback;
+  }
+  logOnce(`fallback:${kind}:${order.join(',')}`, () =>
+    aiLogger.error(
+      { chain: kind, order, usable: fallback.map((slot) => slot.provider) },
+      'Configured provider order named nothing that is configured — falling back to the default order',
+    ),
+  );
+  return fallback;
+}
+
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_MODEL)];
-  if (cfg.GROQ_API_KEY && cfg.GROQ_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_MODEL));
-  }
-  chain.push(
-    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_MODEL),
-    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_MODEL),
-  );
-  return chain;
+  return buildChain('smart', cfg.AI_SMART_CHAIN, {
+    zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
+    groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
+    gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
+    hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN },
+  });
 }
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  const chain: ProviderSlot[] = [streamingSlot('z.ai', 'zai', providerClients.zai, cfg.ZAI_FAST_MODEL)];
-  if (cfg.GROQ_API_KEY && cfg.GROQ_FAST_MODEL) {
-    chain.push(streamingSlot('Groq', 'groq', providerClients.groq, cfg.GROQ_FAST_MODEL));
-  }
-  chain.push(
-    streamingSlot('Gemini', 'gemini', providerClients.gemini, cfg.GEMINI_FAST_MODEL),
-    streamingSlot('HF', 'hf', providerClients.hf, cfg.HF_FAST_MODEL),
-  );
-  return chain;
+  return buildChain('fast', cfg.AI_FAST_CHAIN, {
+    zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
+    groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
+    gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },
+    hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN },
+  });
 }
 
 // ── Slot execution with live-model discovery ───────────────────────────────

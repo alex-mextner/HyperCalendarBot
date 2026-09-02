@@ -1,6 +1,7 @@
 // test/config/env.test.ts
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { loadConfig } from '../../src/config/env.ts';
+import type { ProviderId } from '../../src/services/ai/provider-ids.ts';
 
 describe('loadConfig', () => {
   const originalEnv = { ...process.env };
@@ -35,6 +36,54 @@ describe('loadConfig', () => {
     process.env.BOT_TOKEN = 'test-token';
     process.env.REDIS_URL = 'redis://localhost:6379';
     setAiVars();
+  });
+
+  describe('provider chain order', () => {
+    const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+    const FAST_DEFAULT: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+
+    test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
+      const config = loadConfig();
+      expect(config.AI_SMART_CHAIN).toEqual({ order: SMART_DEFAULT, fromEnv: false, fallback: SMART_DEFAULT });
+      expect(config.AI_FAST_CHAIN).toEqual({ order: FAST_DEFAULT, fromEnv: false, fallback: FAST_DEFAULT });
+    });
+
+    // Each chain carries its own fallback, so one cannot be built with the
+    // other's default — the fast chain keeps Groq last for a reason.
+    test('the fast chain reads its own variable and keeps its own fallback', () => {
+      process.env.AI_FAST_CHAIN = 'gemini,zai';
+      const config = loadConfig();
+      expect(config.AI_FAST_CHAIN).toEqual({ order: ['gemini', 'zai'], fromEnv: true, fallback: FAST_DEFAULT });
+      expect(config.AI_SMART_CHAIN.order).toEqual(SMART_DEFAULT);
+    });
+
+    // The reason to reorder arrives as an incident, so it has to be doable
+    // without a deploy.
+    test('takes the order from the environment', () => {
+      process.env.AI_SMART_CHAIN = 'gemini, hf ,zai';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({
+        order: ['gemini', 'hf', 'zai'],
+        fromEnv: true,
+        fallback: SMART_DEFAULT,
+      });
+    });
+
+    test('drops a name it does not know rather than failing to start', () => {
+      process.env.AI_SMART_CHAIN = 'hf,openai,zai';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: SMART_DEFAULT });
+    });
+
+    test('ignores a repeated provider instead of trying it twice', () => {
+      process.env.AI_SMART_CHAIN = 'hf,zai,hf';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true, fallback: SMART_DEFAULT });
+    });
+
+    // An order naming nothing usable would leave the bot with no providers at
+    // all, which is worse than ignoring the typo.
+    test('falls back to the default when the order names nothing known', () => {
+      process.env.AI_SMART_CHAIN = 'openai, anthropic';
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: SMART_DEFAULT, fromEnv: false, fallback: SMART_DEFAULT });
+    });
   });
 
   test('throws if BOT_TOKEN is missing', () => {
