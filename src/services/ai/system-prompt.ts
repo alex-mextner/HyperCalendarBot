@@ -24,11 +24,14 @@ const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
 function nearestOccurrences(events: EventOccurrence[], limit: number): EventOccurrence[] {
   if (events.length <= limit) return events;
   const now = Date.now();
-  const distance = (occ: EventOccurrence) => Math.abs(new Date(occ.occurrence_start).getTime() - now);
+  const at = (occ: EventOccurrence) => new Date(occ.occurrence_start).getTime();
+  const distance = (occ: EventOccurrence) => Math.abs(at(occ) - now);
+  // Both sorts compare instants. Ordering the display by the raw string would
+  // agree with time only while every occurrence_start shares one ISO format.
   return [...events]
     .sort((a, b) => distance(a) - distance(b))
     .slice(0, limit)
-    .sort((a, b) => a.occurrence_start.localeCompare(b.occurrence_start));
+    .sort((a, b) => at(a) - at(b));
 }
 
 function formatEventsWindow(events: EventOccurrence[], timezone: string): string {
@@ -60,7 +63,12 @@ function formatEventsWindow(events: EventOccurrence[], timezone: string): string
     });
 
   const omitted = events.length - shown.length;
-  if (omitted > 0) lines.push(`(+${omitted} more occurrences not listed — call get_events for the full list)`);
+  // The listed ones are those nearest to now, so what is missing sits at both
+  // ends of the window. Saying so keeps the model from reading the note as "and
+  // then it continues" and concluding nothing happened before this.
+  if (omitted > 0) {
+    lines.push(`(+${omitted} more occurrences in this window, earlier and later — call get_events for the full list)`);
+  }
   return lines.join('\n');
 }
 

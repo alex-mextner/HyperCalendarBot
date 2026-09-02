@@ -458,7 +458,9 @@ describe('buildSystemPrompt', () => {
       ctx.recentEventsWindow = occurrences(200);
       const prompt = buildSystemPrompt(ctx);
       expect(listedOccurrences(prompt)).toBe(60);
-      expect(prompt).toContain('(+140 more occurrences not listed — call get_events for the full list)');
+      expect(prompt).toContain(
+        '(+140 more occurrences in this window, earlier and later — call get_events for the full list)',
+      );
     });
 
     /**

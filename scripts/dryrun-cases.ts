@@ -21,6 +21,13 @@ interface DryRunCaseBase {
   message: string;
   group?: boolean;
   history?: { role: 'user' | 'assistant'; content: string }[];
+  /**
+   * Known places for this user. The prompt's address section only exists when
+   * this does, so a case testing a rule that lived in that section has to set
+   * it — otherwise the before and after prompts are identical and the
+   * comparison proves nothing.
+   */
+  addressContext?: string;
 }
 
 /**
@@ -139,6 +146,7 @@ export const DRYRUN_CASES: DryRunCase[] = [
     // harness has to prove the model still makes the connection without it.
     id: 'change-event-location',
     message: 'Поменяй место встречи на Кафе Времени',
+    addressContext: 'Known places: Дом — Кнеза Милоша 12; Работа — Теразије 5.',
     expectAnyOf: ['update_event', 'search_events', 'get_events'],
   },
   // The three below cover prompt rules this branch deleted as redundant with the

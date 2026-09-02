@@ -103,6 +103,7 @@ function buildContext(testCase: DryRunCase): AgentContext {
     userRepo,
     eventReminderRepo: new EventReminderRepository(db),
     inputMode: 'text',
+    ...(testCase.addressContext ? { preloadedAddressContext: testCase.addressContext } : {}),
   };
   if (!testCase.group) return base;
   return { ...base, isGroup: true, groupTitle: 'Друзья', groupChatId: -1001 };
