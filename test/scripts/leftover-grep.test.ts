@@ -12,6 +12,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const SCRIPT = join(import.meta.dir, '../../ci/leftover-grep/leftover-grep.sh');
+/** Each case builds a repository and shells out to the gate — well past bun's 5s default. */
+const TIMEOUT_MS = 30_000;
 
 interface Verdict {
   blocked: boolean;
@@ -50,26 +52,56 @@ async function gate(path: string, added: string, env: { [key: string]: string } 
 }
 
 describe('leftover gate', () => {
-  test('blocks a console line by default, wherever it is', async () => {
-    const verdict = await gate('scripts/report.ts', "console.log('table');\n");
-    expect(verdict.blocked).toBe(true);
-    expect(verdict.output).toContain('console');
-  });
+  test(
+    'blocks a console line by default, wherever it is',
+    async () => {
+      const verdict = await gate('scripts/report.ts', "console.log('table');\n");
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('console');
+    },
+    TIMEOUT_MS,
+  );
 
-  test('allows a console line on an excluded path', async () => {
-    const verdict = await gate('scripts/report.ts', "console.log('table');\n", { CONSOLE_EXCLUDE: '^scripts/' });
-    expect(verdict.blocked).toBe(false);
-  });
+  test(
+    'allows a console line on an excluded path',
+    async () => {
+      const verdict = await gate('scripts/report.ts', "console.log('table');\n", { CONSOLE_EXCLUDE: '^scripts/' });
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
 
   // The exclusion lifts one rule, not the gate: a script is still code.
-  test('still blocks an untracked TODO on an excluded path', async () => {
-    const verdict = await gate('scripts/report.ts', '// TODO: come back to this\n', { CONSOLE_EXCLUDE: '^scripts/' });
-    expect(verdict.blocked).toBe(true);
-    expect(verdict.output).toContain('untracked-todo');
-  });
+  test(
+    'still blocks an untracked TODO on an excluded path',
+    async () => {
+      const verdict = await gate('scripts/report.ts', '// TODO: come back to this\n', { CONSOLE_EXCLUDE: '^scripts/' });
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('untracked-todo');
+    },
+    TIMEOUT_MS,
+  );
 
-  test('still blocks a console line outside the excluded path', async () => {
-    const verdict = await gate('src/handler.ts', "console.log('debug');\n", { CONSOLE_EXCLUDE: '^scripts/' });
-    expect(verdict.blocked).toBe(true);
-  });
+  test(
+    'still blocks a console line outside the excluded path',
+    async () => {
+      const verdict = await gate('src/handler.ts', "console.log('debug');\n", { CONSOLE_EXCLUDE: '^scripts/' });
+      expect(verdict.blocked).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  // The exclusion is anchored, so it only holds while both scan modes report a
+  // path the same way. The full-tree scan is the one that would drift.
+  test(
+    'the exclusion holds in a full-tree scan too',
+    async () => {
+      const verdict = await gate('scripts/report.ts', "console.log('table');\n", {
+        CONSOLE_EXCLUDE: '^scripts/',
+        LEFTOVER_FULLTREE: '1',
+      });
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
 });
