@@ -1093,6 +1093,12 @@ const assistantToolDefinitions: ToolDefinition[] = [
   },
 ];
 
+/**
+ * The returned schemas are shared, not copied: fifteen tools reference the same
+ * `scope` and `owner_id` objects, and they are frozen so a mutation is a visible
+ * failure rather than a silent rewrite of all fifteen. Treat everything here as
+ * read-only — serialize it, never normalize it in place.
+ */
 export function getToolDefinitions(
   inputMode?: string,
   caps?: UserCapabilities,

@@ -141,6 +141,27 @@ export const DRYRUN_CASES: DryRunCase[] = [
     message: 'Поменяй место встречи на Кафе Времени',
     expectAnyOf: ['update_event', 'search_events', 'get_events'],
   },
+  // The three below cover prompt rules this branch deleted as redundant with the
+  // tool descriptions. The premise was that the model still makes the connection
+  // from the description alone; these are what actually tests that premise.
+  {
+    // Dropped rule: "for tabular data ALWAYS call render_table".
+    id: 'tabular-comparison',
+    message: 'Сравни мои тарифы: Базовый 5 долларов, Про 15, Команда 40 — сделай таблицу',
+    expectAnyOf: ['render_table'],
+  },
+  {
+    // Dropped rule: "what did I DO" is calendar data, get_events, not get_history.
+    id: 'past-week-activity',
+    message: 'Что я делал на прошлой неделе?',
+    expectAnyOf: ['get_events', 'search_events', 'calculate'],
+  },
+  {
+    // Dropped rule: "to correct a contact use update_contact, not add_contact".
+    id: 'correct-contact-name',
+    message: 'У меня в контактах Бояна записана неправильно, её зовут Боjана',
+    expectAnyOf: ['update_contact', 'get_contacts', 'ask_user'],
+  },
   {
     id: 'group-off-topic-date',
     message: 'Доставка будет 1 апреля',
