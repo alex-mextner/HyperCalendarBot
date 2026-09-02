@@ -20,8 +20,17 @@ interface Verdict {
   output: string;
 }
 
-/** Runs the gate over one added file, on a fresh repo whose base commit is empty. */
-async function gate(path: string, added: string, env: { [key: string]: string } = {}): Promise<Verdict> {
+/**
+ * Runs the gate over one added file, on a fresh repo whose base commit is empty.
+ * `movedTo` instead commits the file at `path` in the base, then moves it there,
+ * so the diff the gate sees is a pure rename.
+ */
+async function gate(
+  path: string,
+  added: string,
+  env: { [key: string]: string } = {},
+  movedTo?: string,
+): Promise<Verdict> {
   const repo = mkdtempSync(join(tmpdir(), 'leftover-'));
   try {
     const git = (...args: string[]) =>
@@ -30,12 +39,18 @@ async function gate(path: string, added: string, env: { [key: string]: string } 
     await git('config', 'user.email', 'test@example.com');
     await git('config', 'user.name', 'test');
     writeFileSync(join(repo, 'README.md'), 'base\n');
+    if (movedTo !== undefined) {
+      mkdirSync(join(repo, path, '..'), { recursive: true });
+      writeFileSync(join(repo, path), added);
+    }
     await git('add', '.');
     await git('commit', '-qm', 'base');
     const base = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo }).stdout.toString().trim();
-    mkdirSync(join(repo, path, '..'), { recursive: true });
-    writeFileSync(join(repo, path), added);
-    await git('add', '.');
+    const destination = movedTo ?? path;
+    mkdirSync(join(repo, destination, '..'), { recursive: true });
+    if (movedTo !== undefined) await git('mv', path, movedTo);
+    else writeFileSync(join(repo, destination), added);
+    await git('add', '-A');
     await git('commit', '-qm', 'change');
 
     const proc = Bun.spawn(['bash', SCRIPT], {
@@ -87,6 +102,35 @@ describe('leftover gate', () => {
     async () => {
       const verdict = await gate('src/handler.ts', "console.log('debug');\n", { CONSOLE_EXCLUDE: '^scripts/' });
       expect(verdict.blocked).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  // A path the diff parser truncates matches no include pattern, so the file
+  // skips every rule rather than one — the quietest way for a gate to fail.
+  test(
+    'scans a path that contains a space',
+    async () => {
+      const verdict = await gate('src/report table.ts', '// TODO: come back to this\n');
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('untracked-todo');
+    },
+    TIMEOUT_MS,
+  );
+
+  // A move carries no added lines, so the destination would never be read — and
+  // the file lands somewhere the exclusion does not cover.
+  test(
+    'scans a file moved out of the excluded path',
+    async () => {
+      const verdict = await gate(
+        'scripts/report.ts',
+        "console.log('table');\n",
+        { CONSOLE_EXCLUDE: '^scripts/' },
+        'src/report.ts',
+      );
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('console');
     },
     TIMEOUT_MS,
   );

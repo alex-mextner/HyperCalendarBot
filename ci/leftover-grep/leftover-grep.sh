@@ -23,6 +23,10 @@
 #                        focused tests, debuggers and untracked TODOs still block.
 #                        Default: empty (the console rule applies everywhere).
 #   LEFTOVER_FULLTREE    "1" = always scan the whole tree, ignore the diff.
+#
+# Known limit: in diff mode a symlink is scanned as its own added line (the target
+# path), not as the file it points at, so a link from an unexcluded path into an
+# excluded one is not resolved. The full-tree scan follows links and is stricter.
 #   LEFTOVER_HEAD        head ref/SHA to diff against the base. Default HEAD. Under a
 #                        tamper-resistant pull_request_target setup this is the PR head SHA,
 #                        fetched as DATA — `git diff` + grep only READ those lines, they
@@ -53,9 +57,16 @@ emit_lines() {
   if [ -n "$base" ]; then
     # Parse `git diff` unified output, tracking the new-file line number, emitting only '+'
     # lines (added). Robust enough for a gate without extra deps.
-    git diff --no-color --unified=0 "$base...$LEFTOVER_HEAD" -- . \
+    # --no-renames: a rename carries no added lines, so a file MOVED out of a
+    # per-rule exclusion (a console-printing CLI moved from scripts/ into src/)
+    # would never be scanned at its new path. Split into a delete and an add, the
+    # destination is read in full and every rule applies to it there.
+    git diff --no-color --unified=0 --no-renames "$base...$LEFTOVER_HEAD" -- . \
       | awk '
-        /^\+\+\+ /      { f=$2; sub(/^b\//,"",f); next }
+        # substr, not $2: a path containing a space would be truncated at the
+        # space, and the truncated name matches no include pattern — the file
+        # would then skip EVERY rule, silently.
+        /^\+\+\+ /      { f=substr($0,5); sub(/^b\//,"",f); next }
         /^@@ /          { match($0, /\+[0-9]+/); ln=substr($0,RSTART+1,RLENGTH-1)+0; next }
         /^\+/ && f!=""  { t=substr($0,2); printf "%s\t%d\t%s\n", f, ln, t; ln++; next }
       '
