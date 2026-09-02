@@ -27,3 +27,12 @@ export function logOnce(key: string, say: () => void): void {
   alreadySaid.add(key);
   say();
 }
+
+/**
+ * Forgets what has been said. For tests: the set is process-global, so without
+ * this the first test to trigger a message silences it for every later one, and
+ * which test that is depends on execution order.
+ */
+export function resetLogOnce(): void {
+  alreadySaid.clear();
+}

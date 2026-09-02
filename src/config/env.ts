@@ -27,11 +27,17 @@ export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
 export interface ChainOrder {
   readonly order: ProviderId[];
   readonly fromEnv: boolean;
+  /**
+   * Where to fall back when nothing in `order` turns out to be configured. It
+   * travels with the order so the pairing cannot be got wrong: passing the fast
+   * chain with the smart chain's default would type-check otherwise.
+   */
+  readonly fallback: ProviderId[];
 }
 
 function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
   const raw = process.env[name];
-  if (!raw) return { order: fallback, fromEnv: false };
+  if (!raw) return { order: fallback, fromEnv: false, fallback };
   const parsed: ProviderId[] = [];
   for (const part of raw.split(',')) {
     const id = part.trim();
@@ -49,9 +55,9 @@ function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
     logOnce(`${name}:empty:${raw}`, () =>
       logger.warn({ name, raw, fallback }, 'Chain order named no known provider — using the default order'),
     );
-    return { order: fallback, fromEnv: false };
+    return { order: fallback, fromEnv: false, fallback };
   }
-  return { order: parsed, fromEnv: true };
+  return { order: parsed, fromEnv: true, fallback };
 }
 
 export interface EnvConfig {

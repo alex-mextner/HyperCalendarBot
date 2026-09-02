@@ -10,7 +10,7 @@
 // tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
-import { type ChainOrder, DEFAULT_FAST_CHAIN, DEFAULT_SMART_CHAIN, loadConfig } from '../../config/env.ts';
+import { type ChainOrder, loadConfig } from '../../config/env.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
@@ -345,7 +345,13 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   hf: 'HF',
 };
 
-/** What a provider needs before it can be put in a chain. */
+/**
+ * What a provider needs before it can be put in a chain. Both are optional
+ * because Groq's are: loadConfig requires the z.ai, Hugging Face and Gemini
+ * credentials and models at startup, so for those three the check always
+ * passes. Live-model discovery does not change that — it replaces a configured
+ * model that turned out to be dead, and has nothing to start from without one.
+ */
 interface ProviderAvailability {
   model?: string;
   apiKey?: string;
@@ -365,10 +371,9 @@ interface ProviderAvailability {
 function buildChain(
   kind: ProviderChainKind,
   chain: ChainOrder,
-  fallbackOrder: ProviderId[],
   available: Record<ProviderId, ProviderAvailability>,
 ): ProviderSlot[] {
-  const { order } = chain;
+  const { order, fallback: fallbackOrder } = chain;
   // An optional provider missing from the DEFAULT order is the documented
   // minimal deployment, not a mistake — Groq is in both defaults and plenty of
   // installations have no Groq key. Only a provider the operator named
@@ -423,7 +428,7 @@ function buildChain(
 
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain('smart', cfg.AI_SMART_CHAIN, DEFAULT_SMART_CHAIN, {
+  return buildChain('smart', cfg.AI_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
@@ -433,7 +438,7 @@ function buildSmartChain(): ProviderSlot[] {
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain('fast', cfg.AI_FAST_CHAIN, DEFAULT_FAST_CHAIN, {
+  return buildChain('fast', cfg.AI_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },

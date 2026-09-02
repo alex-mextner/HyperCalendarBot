@@ -13,6 +13,7 @@ import {
   isAiChainDown,
   resetProviderAlertState,
 } from '../../../src/utils/ai-provider-alert.ts';
+import { resetLogOnce } from '../../../src/utils/logger.ts';
 
 // ── Fake provider clients ──────────────────────────────────────────────────
 
@@ -144,6 +145,7 @@ beforeEach(() => {
     AI_SMART_CHAIN: 'zai,groq,gemini,hf',
     AI_FAST_CHAIN: 'zai,groq,gemini,hf',
   });
+  resetLogOnce();
   providerClients.zai = () => asOpenAIClient(zai.client);
   providerClients.groq = () => asOpenAIClient(groq.client);
   providerClients.gemini = () => asOpenAIClient(gemini.client);
