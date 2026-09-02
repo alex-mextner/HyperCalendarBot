@@ -379,6 +379,24 @@ describe('provider order', () => {
     expect(zai.requestedModels).toEqual([]);
   });
 
+  // The fast chain has its own default for a reason — Groq is last there because
+  // its empty 200s degrade summaries invisibly — so its fallback must be its own
+  // order, not the smart one and not the order the ids happen to be declared in.
+  test('the fast chain falls back to its own default order', async () => {
+    process.env.AI_FAST_CHAIN = 'groq';
+    process.env.GROQ_API_KEY = '';
+    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'from zai fast' }] });
+    hf = unusedProvider();
+    gemini = unusedProvider();
+    groq = unusedProvider();
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, fast: true }, {});
+
+    expect(result.text).toBe('from zai fast');
+    expect(zai.requestedModels).toEqual(['glm-5.1-air']);
+    expect(groq.requestedModels).toEqual([]);
+  });
+
   // A name in the order is a preference, not a requirement: Groq is optional
   // configuration and the chain has to hold together without it.
   test('skips a provider that has no model configured', async () => {

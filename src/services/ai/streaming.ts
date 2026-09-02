@@ -362,6 +362,18 @@ interface ProviderAvailability {
  * leave the bot with nothing to answer with — worse than ignoring the order — so
  * that case falls back to every provider that IS configured, and says so loudly.
  */
+/**
+ * Chains are rebuilt per request, so a standing misconfiguration would repeat
+ * its complaint on every round. Each distinct one is said once per process.
+ */
+const chainComplaints = new Set<string>();
+
+function logOnce(key: string, log: () => void): void {
+  if (chainComplaints.has(key)) return;
+  chainComplaints.add(key);
+  log();
+}
+
 function buildChain(
   order: ProviderId[],
   fallbackOrder: ProviderId[],
@@ -372,9 +384,11 @@ function buildChain(
     for (const provider of ids) {
       const { model, apiKey } = available[provider];
       if (!model || !apiKey) {
-        aiLogger.warn(
-          { provider, hasModel: !!model, hasKey: !!apiKey },
-          'Provider named in the chain is not configured — skipping it',
+        logOnce(`skip:${provider}:${!!model}:${!!apiKey}`, () =>
+          aiLogger.warn(
+            { provider, hasModel: !!model, hasKey: !!apiKey },
+            'Provider named in the chain is not configured — skipping it',
+          ),
         );
         continue;
       }
@@ -395,12 +409,16 @@ function buildChain(
     // credentials and refuses to start without them, so at least three
     // providers always have both. Kept because that is a startup rule, not an
     // invariant of this function, and an empty chain fails every request.
-    aiLogger.error({ order }, 'No provider is configured with both a key and a model — every AI request will fail');
+    logOnce(`none:${order.join(',')}`, () =>
+      aiLogger.error({ order }, 'No provider is configured with both a key and a model — every AI request will fail'),
+    );
     return fallback;
   }
-  aiLogger.error(
-    { order, usable: fallback.map((slot) => slot.provider) },
-    'Configured provider order named nothing that is configured — falling back to every configured provider',
+  logOnce(`fallback:${order.join(',')}`, () =>
+    aiLogger.error(
+      { order, usable: fallback.map((slot) => slot.provider) },
+      'Configured provider order named nothing that is configured — falling back to the default order',
+    ),
   );
   return fallback;
 }
