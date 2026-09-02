@@ -20,7 +20,7 @@
 #   ALLOW_CONSOLE        "1" = console.log is a WARNING, not a failure (default: block).
 #   CONSOLE_EXCLUDE      ERE of paths where console output IS the interface (developer
 #                        CLIs, generators), so only the console rule is skipped there —
-#                        focused tests, debuggers and untracked TODOs still block.
+#                        focused tests, debuggers and untracked task markers still block.
 #                        Default: empty (the console rule applies everywhere).
 #   LEFTOVER_FULLTREE    "1" = always scan the whole tree, ignore the diff.
 #   LEFTOVER_HEAD        head ref/SHA to diff against the base. Default HEAD. Under a

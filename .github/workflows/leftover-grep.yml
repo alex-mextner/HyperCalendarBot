@@ -76,6 +76,6 @@ jobs:
           # ALLOW_CONSOLE: '0'
           # scripts/ holds developer CLIs whose printed output is the whole point —
           # a measurement table, a dry-run report. Only the console rule is lifted
-          # there; a focused test or an untracked TODO still fails the gate.
+          # there; a focused test or an untracked task marker still fails the gate.
           CONSOLE_EXCLUDE: '^scripts/'
         run: bash ci/leftover-grep/leftover-grep.sh
