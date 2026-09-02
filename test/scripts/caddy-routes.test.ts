@@ -49,6 +49,13 @@ function proxyRetryWindowSeconds(): number {
   return Number(value);
 }
 
+/** How long the deploy's own readiness probe waits, in seconds. */
+function deployProbeTimeoutSeconds(): number {
+  const value = deployWorkflow.match(/curl -s --max-time (\d+) https:\/\/\S*\/ready/)?.[1];
+  if (!value) throw new Error('deploy.yml has no readiness probe');
+  return Number(value);
+}
+
 /** How long the watchdog waits for a readiness answer, in seconds. */
 function probeTimeoutSeconds(): number {
   const value = watchdog.match(/^PROBE_TIMEOUT=(\d+)/m)?.[1];
@@ -98,8 +105,11 @@ describe('Caddy routing', () => {
 
   // The proxy holds a request while the container restarts; a probe that gives
   // up first turns every deploy into a timeout instead of a delayed answer.
-  test('the watchdog waits longer than the proxy retries', () => {
+  // Both probes of the readiness path are held to it, the watchdog's and the
+  // deploy's — the invariant is the proxy's, not one script's.
+  test('every readiness probe waits longer than the proxy retries', () => {
     expect(probeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
+    expect(deployProbeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
   });
 
   // Routing is applied by a reload the deploy cannot fail on (shared server), so
