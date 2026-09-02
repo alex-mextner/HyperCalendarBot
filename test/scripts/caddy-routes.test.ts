@@ -17,6 +17,7 @@ import { startWebServer } from '../../src/web/server.ts';
 const ROOT = join(import.meta.dir, '../..');
 const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
 const watchdog = readFileSync(join(ROOT, 'scripts/healthcheck-alert.sh'), 'utf8');
+const deployWorkflow = readFileSync(join(ROOT, '.github/workflows/deploy.yml'), 'utf8');
 
 /** The paths the @bot matcher forwards to the bot. */
 function proxiedPaths(): string[] {
@@ -25,11 +26,16 @@ function proxiedPaths(): string[] {
   return matcher.trim().split(/\s+/);
 }
 
-/** The path the cron watchdog polls, taken from its own HEALTH_URL. */
-function watchdogPath(): string {
+/** The readiness URL the cron watchdog polls. */
+function watchdogUrl(): string {
   const url = watchdog.match(/^HEALTH_URL="([^"]+)"/m)?.[1];
   if (!url) throw new Error('healthcheck-alert.sh has no HEALTH_URL');
-  return new URL(url).pathname;
+  return url;
+}
+
+/** The path the cron watchdog polls, taken from its own HEALTH_URL. */
+function watchdogPath(): string {
+  return new URL(watchdogUrl()).pathname;
 }
 
 function matches(pattern: string, path: string): boolean {
@@ -94,6 +100,12 @@ describe('Caddy routing', () => {
   // up first turns every deploy into a timeout instead of a delayed answer.
   test('the watchdog waits longer than the proxy retries', () => {
     expect(probeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
+  });
+
+  // Routing is applied by a reload the deploy cannot fail on (shared server), so
+  // the deploy checks the outcome against the very URL the watchdog will poll.
+  test('the deploy verifies the URL the watchdog polls', () => {
+    expect(deployWorkflow).toContain(watchdogUrl());
   });
 
   // Everything not matched gets a static 200, which is why an unrouted health

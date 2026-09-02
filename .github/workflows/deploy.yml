@@ -193,6 +193,26 @@ jobs:
 
             docker compose up -d --no-deps bot
             caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
+
+            # The reload above cannot fail the deploy: this server is shared, and
+            # another project's broken config would take our deploy down with it.
+            # So check the outcome instead. An unrouted path does not 404 here —
+            # the proxy answers it with the static page, 200, which is what kept
+            # the watchdog blind while every check was green.
+            echo "🔎 Verifying the readiness path is routed to the bot..."
+            ROUTED=""
+            for _ in $(seq 1 10); do
+              BODY=$(curl -s --max-time 20 https://hypercal.invntrm.ru/ready || true)
+              case "$BODY" in
+                ok|"ok (unverified)"|"ai chain down") ROUTED="$BODY"; break ;;
+              esac
+              sleep 6
+            done
+            if [ -z "$ROUTED" ]; then
+              echo "❌ /ready is not reaching the bot — the watchdog would see this as healthy. Last body: ${BODY:-<empty>}"
+              exit 1
+            fi
+            echo "✅ /ready routed to the bot: $ROUTED"
       - name: Notify deploy success
         if: success()
         env:
