@@ -1,0 +1,75 @@
+// test/scripts/leftover-grep.test.ts
+//
+// The gate decides what cannot merge, so an exclusion added to it has to be
+// exactly as wide as intended: console output allowed under scripts/, every
+// other rule still blocking there, and nothing loosened outside it.
+//
+// These tests run the real gate against a throwaway git repository, so the
+// assertions are about its verdict, not about how it is written.
+import { describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+const SCRIPT = join(import.meta.dir, '../../ci/leftover-grep/leftover-grep.sh');
+
+interface Verdict {
+  blocked: boolean;
+  output: string;
+}
+
+/** Runs the gate over one added file, on a fresh repo whose base commit is empty. */
+async function gate(path: string, added: string, env: { [key: string]: string } = {}): Promise<Verdict> {
+  const repo = mkdtempSync(join(tmpdir(), 'leftover-'));
+  try {
+    const git = (...args: string[]) =>
+      Bun.spawn(['git', ...args], { cwd: repo, stdout: 'pipe', stderr: 'pipe' }).exited;
+    await git('init', '-q', '-b', 'main');
+    await git('config', 'user.email', 'test@example.com');
+    await git('config', 'user.name', 'test');
+    writeFileSync(join(repo, 'README.md'), 'base\n');
+    await git('add', '.');
+    await git('commit', '-qm', 'base');
+    const base = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo }).stdout.toString().trim();
+    mkdirSync(join(repo, path, '..'), { recursive: true });
+    writeFileSync(join(repo, path), added);
+    await git('add', '.');
+    await git('commit', '-qm', 'change');
+
+    const proc = Bun.spawn(['bash', SCRIPT], {
+      cwd: repo,
+      env: { ...process.env, LEFTOVER_BASE: base, ...env },
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const output = (await new Response(proc.stdout).text()) + (await new Response(proc.stderr).text());
+    return { blocked: (await proc.exited) !== 0, output };
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+}
+
+describe('leftover gate', () => {
+  test('blocks a console line by default, wherever it is', async () => {
+    const verdict = await gate('scripts/report.ts', "console.log('table');\n");
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.output).toContain('console');
+  });
+
+  test('allows a console line on an excluded path', async () => {
+    const verdict = await gate('scripts/report.ts', "console.log('table');\n", { CONSOLE_EXCLUDE: '^scripts/' });
+    expect(verdict.blocked).toBe(false);
+  });
+
+  // The exclusion lifts one rule, not the gate: a script is still code.
+  test('still blocks an untracked TODO on an excluded path', async () => {
+    const verdict = await gate('scripts/report.ts', '// TODO: come back to this\n', { CONSOLE_EXCLUDE: '^scripts/' });
+    expect(verdict.blocked).toBe(true);
+    expect(verdict.output).toContain('untracked-todo');
+  });
+
+  test('still blocks a console line outside the excluded path', async () => {
+    const verdict = await gate('src/handler.ts', "console.log('debug');\n", { CONSOLE_EXCLUDE: '^scripts/' });
+    expect(verdict.blocked).toBe(true);
+  });
+});
