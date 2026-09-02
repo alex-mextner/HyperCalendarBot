@@ -18,9 +18,20 @@ export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq']
  */
 export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
 
-function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
+/**
+ * A chain order together with where it came from. The source is carried rather
+ * than inferred, because the two cases warrant different noise: a provider the
+ * operator named and did not configure deserves a warning, while one that is
+ * merely absent from the default order is the documented minimal deployment.
+ */
+export interface ChainOrder {
+  readonly order: ProviderId[];
+  readonly fromEnv: boolean;
+}
+
+function parseChain(name: string, fallback: ProviderId[]): ChainOrder {
   const raw = process.env[name];
-  if (!raw) return fallback;
+  if (!raw) return { order: fallback, fromEnv: false };
   const parsed: ProviderId[] = [];
   for (const part of raw.split(',')) {
     const id = part.trim();
@@ -38,9 +49,9 @@ function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
     logOnce(`${name}:empty:${raw}`, () =>
       logger.warn({ name, raw, fallback }, 'Chain order named no known provider — using the default order'),
     );
-    return fallback;
+    return { order: fallback, fromEnv: false };
   }
-  return parsed;
+  return { order: parsed, fromEnv: true };
 }
 
 export interface EnvConfig {
@@ -86,8 +97,8 @@ export interface EnvConfig {
    * provider whose model or key is missing is skipped, so a name here is a
    * preference, not a requirement.
    */
-  AI_SMART_CHAIN: ProviderId[];
-  AI_FAST_CHAIN: ProviderId[];
+  AI_SMART_CHAIN: ChainOrder;
+  AI_FAST_CHAIN: ChainOrder;
   BOT_ADMIN_ID?: number;
   INTENT_LEARNER_DAILY_LIMIT: number;
   INLINE_BOT_TOKEN?: string;

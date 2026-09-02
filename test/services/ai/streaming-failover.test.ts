@@ -348,24 +348,10 @@ describe('provider order', () => {
   });
 
   // An order naming only unconfigured providers would leave the bot with
-  // nothing to answer with, which is worse than ignoring the order.
-  test('falls back to every configured provider when the order names none', async () => {
-    process.env.AI_SMART_CHAIN = 'groq';
-    process.env.GROQ_API_KEY = '';
-    zai = makeProvider({ behaviors: [{ kind: 'text', text: 'from zai' }] });
-    groq = unusedProvider();
-    gemini = unusedProvider();
-    hf = unusedProvider();
-
-    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
-
-    expect(result.text).toBe('from zai');
-    expect(groq.requestedModels).toEqual([]);
-  });
-
-  // The fallback has to keep the preference the default order encodes, not the
+  // nothing to answer with, which is worse than ignoring the order — and the
+  // fallback has to keep the preference the default order encodes, not the
   // order the provider ids happen to be declared in.
-  test('the fallback follows the default order, paid provider first', async () => {
+  test('an order naming nothing configured falls back to the default order', async () => {
     process.env.AI_SMART_CHAIN = 'groq';
     process.env.GROQ_API_KEY = '';
     hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });

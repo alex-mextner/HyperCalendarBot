@@ -40,32 +40,32 @@ describe('loadConfig', () => {
   describe('provider chain order', () => {
     test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
       const config = loadConfig();
-      expect(config.AI_SMART_CHAIN).toEqual(['hf', 'zai', 'gemini', 'groq']);
-      expect(config.AI_FAST_CHAIN).toEqual(['zai', 'hf', 'gemini', 'groq']);
+      expect(config.AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai', 'gemini', 'groq'], fromEnv: false });
+      expect(config.AI_FAST_CHAIN).toEqual({ order: ['zai', 'hf', 'gemini', 'groq'], fromEnv: false });
     });
 
     // The reason to reorder arrives as an incident, so it has to be doable
     // without a deploy.
     test('takes the order from the environment', () => {
       process.env.AI_SMART_CHAIN = 'gemini, hf ,zai';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual(['gemini', 'hf', 'zai']);
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['gemini', 'hf', 'zai'], fromEnv: true });
     });
 
     test('drops a name it does not know rather than failing to start', () => {
       process.env.AI_SMART_CHAIN = 'hf,openai,zai';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual(['hf', 'zai']);
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true });
     });
 
     test('ignores a repeated provider instead of trying it twice', () => {
       process.env.AI_SMART_CHAIN = 'hf,zai,hf';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual(['hf', 'zai']);
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai'], fromEnv: true });
     });
 
     // An order naming nothing usable would leave the bot with no providers at
     // all, which is worse than ignoring the typo.
     test('falls back to the default when the order names nothing known', () => {
       process.env.AI_SMART_CHAIN = 'openai, anthropic';
-      expect(loadConfig().AI_SMART_CHAIN).toEqual(['hf', 'zai', 'gemini', 'groq']);
+      expect(loadConfig().AI_SMART_CHAIN).toEqual({ order: ['hf', 'zai', 'gemini', 'groq'], fromEnv: false });
     });
   });
 

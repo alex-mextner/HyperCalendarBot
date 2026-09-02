@@ -10,7 +10,7 @@
 // tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
-import { DEFAULT_FAST_CHAIN, DEFAULT_SMART_CHAIN, loadConfig } from '../../config/env.ts';
+import { type ChainOrder, DEFAULT_FAST_CHAIN, DEFAULT_SMART_CHAIN, loadConfig } from '../../config/env.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
@@ -364,15 +364,17 @@ interface ProviderAvailability {
  */
 function buildChain(
   kind: ProviderChainKind,
-  order: ProviderId[],
+  chain: ChainOrder,
   fallbackOrder: ProviderId[],
   available: Record<ProviderId, ProviderAvailability>,
 ): ProviderSlot[] {
+  const { order } = chain;
   // An optional provider missing from the DEFAULT order is the documented
   // minimal deployment, not a mistake — Groq is in both defaults and plenty of
   // installations have no Groq key. Only a provider the operator named
-  // themselves is worth a warning.
-  const wasChosen = order !== fallbackOrder;
+  // themselves is worth a warning, and the config says which case this is
+  // rather than the code guessing from array identity.
+  const wasChosen = chain.fromEnv;
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
     for (const provider of ids) {
