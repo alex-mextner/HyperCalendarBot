@@ -10,7 +10,7 @@
 // tts-translation) omit callbacks — the full result is still returned either way.
 
 import OpenAI from 'openai';
-import { loadConfig } from '../../config/env.ts';
+import { DEFAULT_FAST_CHAIN, DEFAULT_SMART_CHAIN, loadConfig } from '../../config/env.ts';
 import {
   type ProviderChainKind,
   reportAllProvidersFailed,
@@ -19,13 +19,8 @@ import {
 } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
-import {
-  getModelOverride,
-  isModelNotFoundError,
-  PROVIDER_IDS,
-  type ProviderId,
-  resolveModelOverride,
-} from './model-registry.ts';
+import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import type { ProviderId } from './provider-ids.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -367,12 +362,22 @@ interface ProviderAvailability {
  * leave the bot with nothing to answer with — worse than ignoring the order — so
  * that case falls back to every provider that IS configured, and says so loudly.
  */
-function buildChain(order: ProviderId[], available: Record<ProviderId, ProviderAvailability>): ProviderSlot[] {
+function buildChain(
+  order: ProviderId[],
+  fallbackOrder: ProviderId[],
+  available: Record<ProviderId, ProviderAvailability>,
+): ProviderSlot[] {
   const slotsFor = (ids: readonly ProviderId[]): ProviderSlot[] => {
     const chain: ProviderSlot[] = [];
     for (const provider of ids) {
       const { model, apiKey } = available[provider];
-      if (!model || !apiKey) continue;
+      if (!model || !apiKey) {
+        aiLogger.warn(
+          { provider, hasModel: !!model, hasKey: !!apiKey },
+          'Provider named in the chain is not configured — skipping it',
+        );
+        continue;
+      }
       chain.push(streamingSlot(PROVIDER_LABELS[provider], provider, providerClients[provider], model));
     }
     return chain;
@@ -381,7 +386,18 @@ function buildChain(order: ProviderId[], available: Record<ProviderId, ProviderA
   const configured = slotsFor(order);
   if (configured.length > 0) return configured;
 
-  const fallback = slotsFor(PROVIDER_IDS);
+  // The fallback walks the default order rather than the declaration order of
+  // the provider ids, so the preference this code is built around survives the
+  // one path where the configured order could not be honoured.
+  const fallback = slotsFor(fallbackOrder);
+  if (fallback.length === 0) {
+    // Not reachable today — loadConfig requires the z.ai, HF and Gemini
+    // credentials and refuses to start without them, so at least three
+    // providers always have both. Kept because that is a startup rule, not an
+    // invariant of this function, and an empty chain fails every request.
+    aiLogger.error({ order }, 'No provider is configured with both a key and a model — every AI request will fail');
+    return fallback;
+  }
   aiLogger.error(
     { order, usable: fallback.map((slot) => slot.provider) },
     'Configured provider order named nothing that is configured — falling back to every configured provider',
@@ -391,7 +407,7 @@ function buildChain(order: ProviderId[], available: Record<ProviderId, ProviderA
 
 function buildSmartChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain(cfg.AI_SMART_CHAIN, {
+  return buildChain(cfg.AI_SMART_CHAIN, DEFAULT_SMART_CHAIN, {
     zai: { model: cfg.ZAI_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
@@ -401,7 +417,7 @@ function buildSmartChain(): ProviderSlot[] {
 
 function buildFastChain(): ProviderSlot[] {
   const cfg = loadConfig();
-  return buildChain(cfg.AI_FAST_CHAIN, {
+  return buildChain(cfg.AI_FAST_CHAIN, DEFAULT_FAST_CHAIN, {
     zai: { model: cfg.ZAI_FAST_MODEL, apiKey: cfg.ZAI_API_KEY },
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },

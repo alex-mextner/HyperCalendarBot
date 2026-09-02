@@ -11,6 +11,7 @@
 
 import OpenAI from 'openai';
 import { logger } from '../../utils/logger.ts';
+import type { ProviderId } from './provider-ids.ts';
 
 const registryLogger = logger.child({ module: 'ai-model-registry' });
 
@@ -20,16 +21,6 @@ const OVERRIDE_TTL_MS = 30 * 60 * 1000;
 const NEGATIVE_TTL_MS = 5 * 60 * 1000;
 /** The models listing must never hold up a user request for long. */
 const PROBE_TIMEOUT_MS = 10_000;
-
-/**
- * Every provider the bot can talk to, and the source the rest of the code
- * derives from: the chain order in the environment is validated against this
- * list, so a provider added here becomes nameable in AI_SMART_CHAIN with no
- * second edit — and one that is not here cannot be named by accident.
- */
-export const PROVIDER_IDS = ['zai', 'groq', 'gemini', 'hf'] as const;
-
-export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 /**
  * The slice of the OpenAI client this module needs. Declared structurally so the

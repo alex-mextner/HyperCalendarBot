@@ -1,6 +1,5 @@
 // src/config/env.ts
-import type { ProviderId } from '../services/ai/model-registry.ts';
-import { PROVIDER_IDS } from '../services/ai/model-registry.ts';
+import { PROVIDER_IDS, type ProviderId } from '../services/ai/provider-ids.ts';
 import { logger } from '../utils/logger.ts';
 
 /**
@@ -8,7 +7,7 @@ import { logger } from '../utils/logger.ts';
  * fail in ways retrying cannot fix — a weekly quota that is simply spent, or a
  * per-minute token cap smaller than one request with the tool catalog in it.
  */
-const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
 /**
  * The fast chain carries short requests (summaries, validation), which do fit in
  * the small free tiers, so the cheap and quick providers come first there. Groq
@@ -17,7 +16,7 @@ const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
  * invisible to the user but degrade the next answer — a summary that never
  * arrives means the history reaches the model bluntly truncated instead.
  */
-const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
 
 function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
   const raw = process.env[name];

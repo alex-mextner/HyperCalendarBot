@@ -363,6 +363,22 @@ describe('provider order', () => {
     expect(groq.requestedModels).toEqual([]);
   });
 
+  // The fallback has to keep the preference the default order encodes, not the
+  // order the provider ids happen to be declared in.
+  test('the fallback follows the default order, paid provider first', async () => {
+    process.env.AI_SMART_CHAIN = 'groq';
+    process.env.GROQ_API_KEY = '';
+    hf = makeProvider({ behaviors: [{ kind: 'text', text: 'from hf' }] });
+    zai = unusedProvider();
+    gemini = unusedProvider();
+    groq = unusedProvider();
+
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+
+    expect(result.text).toBe('from hf');
+    expect(zai.requestedModels).toEqual([]);
+  });
+
   // A name in the order is a preference, not a requirement: Groq is optional
   // configuration and the chain has to hold together without it.
   test('skips a provider that has no model configured', async () => {
