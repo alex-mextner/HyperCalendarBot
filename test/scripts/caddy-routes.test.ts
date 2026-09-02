@@ -11,11 +11,12 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { WebServerDeps } from '../../src/web/server.ts';
+import { startWebServer } from '../../src/web/server.ts';
 
 const ROOT = join(import.meta.dir, '../..');
 const caddyfile = readFileSync(join(ROOT, 'Caddyfile'), 'utf8');
 const watchdog = readFileSync(join(ROOT, 'scripts/healthcheck-alert.sh'), 'utf8');
-const server = readFileSync(join(ROOT, 'src/web/server.ts'), 'utf8');
 
 /** The paths the @bot matcher forwards to the bot. */
 function proxiedPaths(): string[] {
@@ -55,13 +56,26 @@ describe('Caddy routing', () => {
     expect(proxiedPaths().some((pattern) => matches(pattern, path))).toBe(true);
   });
 
-  // Asserted against the route expression, not a bare quoted string: a comment
-  // or a leftover constant naming the path must not stand in for a live route.
-  test('forwards both health endpoints the server answers', () => {
+  // The server leg is asserted by asking the running server, not by searching
+  // its source: a comment naming the path would satisfy a text search, and a
+  // text search would break on a rename that changed nothing about the route.
+  test('forwards both health endpoints the server answers', async () => {
     const proxied = proxiedPaths();
-    for (const path of ['/health', '/ready']) {
-      expect(server).toContain(`url.pathname === '${path}'`);
-      expect(proxied.some((pattern) => matches(pattern, path))).toBe(true);
+    const deps: WebServerDeps = {
+      config: { OAUTH_SERVER_PORT: 0 } as WebServerDeps['config'],
+      userRepo: {} as WebServerDeps['userRepo'],
+      aiChainDown: () => false,
+      aiChainVerified: () => true,
+    };
+    const { stop, port } = startWebServer(deps);
+    try {
+      for (const path of ['/health', '/ready']) {
+        const res = await fetch(`http://localhost:${port}${path}`);
+        expect(res.status).toBe(200);
+        expect(proxied.some((pattern) => matches(pattern, path))).toBe(true);
+      }
+    } finally {
+      stop();
     }
   });
 
