@@ -12,9 +12,13 @@ const PROVIDER_IDS: ProviderId[] = ['zai', 'groq', 'gemini', 'hf'];
 const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
 /**
  * The fast chain carries short requests (summaries, validation), which do fit in
- * the small free tiers, so the cheap and quick providers come first there.
+ * the small free tiers, so the cheap and quick providers come first there. Groq
+ * is last despite being the quickest: its small model answers 200 with no text
+ * and no tool calls often enough to be a liability on a path whose failures are
+ * invisible to the user but degrade the next answer — a summary that never
+ * arrives means the history reaches the model bluntly truncated instead.
  */
-const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'groq', 'hf', 'gemini'];
+const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
 
 function parseChain(name: string, fallback: ProviderId[]): ProviderId[] {
   const raw = process.env[name];

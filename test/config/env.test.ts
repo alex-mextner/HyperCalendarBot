@@ -41,7 +41,7 @@ describe('loadConfig', () => {
     test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
       const config = loadConfig();
       expect(config.AI_SMART_CHAIN).toEqual(['hf', 'zai', 'gemini', 'groq']);
-      expect(config.AI_FAST_CHAIN).toEqual(['zai', 'groq', 'hf', 'gemini']);
+      expect(config.AI_FAST_CHAIN).toEqual(['zai', 'hf', 'gemini', 'groq']);
     });
 
     // The reason to reorder arrives as an incident, so it has to be doable
