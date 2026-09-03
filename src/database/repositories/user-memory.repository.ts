@@ -6,10 +6,22 @@ export class UserMemoryRepository {
 
   private static readonly MAX_FACTS = 50;
 
+  /**
+   * The newest facts, back in the order they were learned.
+   *
+   * The limit has to be taken from the recent end: a user past fifty facts was
+   * otherwise served the fifty oldest forever, and everything learned after
+   * that never reached the prompt at all. `created_at` is stored to the second,
+   * so facts saved within one second tie — the id breaks it, being the order
+   * they were inserted in.
+   */
   getAll(userId: number): UserMemoryEntry[] {
-    return this.db
-      .prepare('SELECT * FROM user_memory WHERE user_id = ? ORDER BY created_at ASC LIMIT ?')
-      .all(userId, UserMemoryRepository.MAX_FACTS) as UserMemoryEntry[];
+    const newestFirst = this.db
+      .query<UserMemoryEntry, [number, number]>(
+        'SELECT id, user_id, content, created_at FROM user_memory WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
+      )
+      .all(userId, UserMemoryRepository.MAX_FACTS);
+    return newestFirst.reverse();
   }
 
   append(userId: number, content: string): void {

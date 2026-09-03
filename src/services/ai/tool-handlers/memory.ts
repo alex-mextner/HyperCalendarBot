@@ -1,4 +1,7 @@
+import { t } from '../../../config/constants.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
+import { collapseToOneLine } from '../../../utils/text.ts';
+import { MEMORY_FACT_MAX_CHARS } from '../prompt-sections.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 const TELEGRAM_REACTION_EMOJIS = new Set([
@@ -83,17 +86,31 @@ interface RememberUserFactInput {
 }
 
 export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFactInput): ToolResult {
+  // These refusals reach the user verbatim when a learned intent replays this
+  // step, so they are written for a person and go through t(lang) like every
+  // other string the bot can say.
+  const msg = t(ctx.user.language).aiTools.memory;
   if (!ctx.birthday?.userMemoryRepo) {
-    return { success: false, error: 'Memory storage not available' };
+    return { success: false, error: msg.storageUnavailable };
+  }
+
+  // Collapsed to a single line, not merely trimmed — see collapseToOneLine for
+  // what a fact carrying its own newlines would do to the prompt.
+  const content = collapseToOneLine(input.content);
+  if (content.length === 0) {
+    return { success: false, error: msg.empty };
+  }
+  if (content.length > MEMORY_FACT_MAX_CHARS) {
+    return { success: false, error: msg.tooLong(content.length, MEMORY_FACT_MAX_CHARS) };
   }
 
   if (input.type === 'append') {
-    ctx.birthday.userMemoryRepo.append(ctx.user.telegram_id, input.content);
+    ctx.birthday.userMemoryRepo.append(ctx.user.telegram_id, content);
   } else {
-    ctx.birthday.userMemoryRepo.rewrite(ctx.user.telegram_id, input.content);
+    ctx.birthday.userMemoryRepo.rewrite(ctx.user.telegram_id, content);
   }
 
-  return { success: true, output: 'fact saved' };
+  return { success: true, output: msg.saved };
 }
 
 export async function handleSetReaction(

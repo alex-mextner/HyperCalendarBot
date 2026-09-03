@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
 
 /**
  * Internal tool definition format — the shape we author tools in.
@@ -951,7 +952,10 @@ const toolDefinitions: ToolDefinition[] = [
           description:
             'append: add a fact (preferred). rewrite: DESTRUCTIVE, deletes every existing fact — only to correct wrong information or consolidate.',
         },
-        content: { type: 'string', description: 'The fact to remember. Be concise.' },
+        content: {
+          type: 'string',
+          description: `The fact to remember, at most ${MEMORY_FACT_MAX_CHARS} characters. One short sentence — save several facts rather than one long one.`,
+        },
       },
       required: ['type', 'content'],
     },

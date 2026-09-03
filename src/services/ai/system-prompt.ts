@@ -2,6 +2,8 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
+import { collapseToOneLine } from '../../utils/text.ts';
+import { MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
 import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
@@ -12,6 +14,13 @@ import type { AgentContext } from './types.ts';
  * are enough. Without a cap the section alone can outweigh the whole prompt.
  */
 const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
+/**
+ * A saved place has no length limit either, and the list of them is inlined
+ * whole. Capped in characters like the memory section, for the same reason:
+ * characters are what the request pays for. (The memory ceiling lives in
+ * prompt-sections.ts, shared with the write-side limit derived from it.)
+ */
+const ADDRESS_MAX_CHARS = 2_000;
 
 /**
  * The occurrences closest to now, in chronological order.
@@ -85,16 +94,75 @@ function buildMemorySection(ctx: AgentContext): string {
   if (memoryFacts.length === 0) {
     return '## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
   }
-  const facts = memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n');
+  // Kept from the end: an old fact is likelier to be stale than a recent one, so
+  // when something has to go it should be the one least likely to still be true.
+  //
+  // Collapsed here as well as at the write gate, because rows saved before that
+  // gate existed still hold their own newlines.
+  const lines = memoryFacts.map((f: { content: string }) => `- ${collapseToOneLine(f.content)}`);
+  // Offered newest-first so that is what survives the budget, then put back into
+  // the order they were learned in.
+  const shown = linesWithinBudget([...lines].reverse(), MEMORY_SECTION_MAX_CHARS).reverse();
+  // Counted within the page the repository returned, which is the newest fifty.
+  // Anything older than that is not "held back" but evicted, and there is no
+  // tool to fetch it with — a truer number would cost a COUNT on every message
+  // and change nothing the model can do.
+  const omitted = lines.length - shown.length;
+  // Nothing shown at all reads like a user the bot knows nothing about, which is
+  // the opposite of the truth. A fact bigger than the whole section is one the
+  // write side now refuses, so any of them still here predate that limit.
+  const body =
+    shown.length === 0
+      ? `(${omitted} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`
+      : shown.join('\n') + (omitted > 0 ? `\n(+${omitted} more kept but not shown here)` : '');
   return `## What I Know About You
-${facts}
+${body}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
+}
+
+/**
+ * The lines that fit the budget, in the order given, preferring the ones the
+ * caller put first.
+ *
+ * A line too big for what is left is skipped rather than ending the packing:
+ * stopping there would let one enormous entry take every small one behind it —
+ * a single 3 000-character fact emptying a section of forty-nine short ones, or
+ * one long frequent address hiding every recent place. Whole lines only, so
+ * nothing is shown as a fragment the model could read as a real address.
+ */
+function linesWithinBudget(lines: string[], budget: number): string[] {
+  const kept: string[] = [];
+  let left = budget;
+  for (const line of lines) {
+    if (line.length > left) continue;
+    left -= line.length + 1;
+    kept.push(line);
+  }
+  return kept;
 }
 
 function buildAddressSection(ctx: AgentContext): string {
   if (!ctx.preloadedAddressContext) return '';
+  // The builder lists the frequently used places first, then the recent ones,
+  // each block under a heading of its own — so the budget is spent in that
+  // order, and one long address is skipped rather than hiding every place
+  // listed after it. Only the entry lines are counted as places: the headings
+  // and the blank line between the blocks are not places the user could ask for.
+  // A heading is dropped rather than trusted: the builder writes its own, and a
+  // line that opens one here would have come from something a user typed — an
+  // event location is free text, and it would reach this list through the
+  // address cache. Would, because nothing in production fills this field yet:
+  // the preload was dropped in the migration off the Anthropic SDK (#160).
+  const lines = ctx.preloadedAddressContext.split('\n').filter((line) => !line.startsWith('#'));
+  const shown = linesWithinBudget(lines, ADDRESS_MAX_CHARS);
+  const isPlace = (line: string) => line.startsWith('- ');
+  const omitted = lines.filter(isPlace).length - shown.filter(isPlace).length;
+  const known = !shown.some(isPlace)
+    ? `(${omitted} saved, each too long to list here — ask the user for the address you need)`
+    : shown.join('\n') +
+      (omitted > 0 ? `\n(+${omitted} more not listed — ask the user if the one you need is missing)` : '');
   return `## Known Locations
-${ctx.preloadedAddressContext}
+${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.
 
 ## Setting event location
