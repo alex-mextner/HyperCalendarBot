@@ -414,10 +414,11 @@ export const MSG = {
     },
     aiTools: {
       memory: {
+        saved: 'Saved.',
         storageUnavailable: 'I cannot save anything right now — memory storage is unavailable.',
         empty: 'There was nothing to remember in that.',
         tooLong: (length: number, limit: number) =>
-          `That fact is too long to keep (${length} characters, limit ${limit}). Say the essence in one short sentence, or split it into several facts.`,
+          `That fact is too long to keep — length ${length}, limit ${limit}. Say the essence in one short sentence, or split it into several facts.`,
       },
       history: {
         notFound: 'No history found.',
@@ -1213,10 +1214,13 @@ export const MSG = {
     },
     aiTools: {
       memory: {
+        saved: 'Запомнил.',
         storageUnavailable: 'Сейчас не могу ничего запомнить — хранилище памяти недоступно.',
         empty: 'Запоминать тут нечего.',
+        // Numbers here name no noun on purpose: ruPlural lives in formatters.ts,
+        // which imports this file, so importing it back would close a cycle.
         tooLong: (length: number, limit: number) =>
-          `Этот факт слишком длинный, чтобы его хранить (${length} символов, лимит ${limit}). Скажи суть одним коротким предложением или раздели на несколько фактов.`,
+          `Этот факт слишком длинный, чтобы его хранить — длина ${length}, лимит ${limit}. Скажи суть одним коротким предложением или раздели на несколько фактов.`,
       },
       history: {
         notFound: 'История не найдена.',

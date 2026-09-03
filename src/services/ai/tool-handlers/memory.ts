@@ -107,7 +107,7 @@ export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFac
     ctx.birthday.userMemoryRepo.rewrite(ctx.user.telegram_id, content);
   }
 
-  return { success: true, output: 'fact saved' };
+  return { success: true, output: msg.saved };
 }
 
 export async function handleSetReaction(

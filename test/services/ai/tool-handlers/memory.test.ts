@@ -84,6 +84,20 @@ describe('handleRememberUserFact', () => {
     expect(result.error).toContain('3000');
   });
 
+  // The success line is replayed to the user by the same intent path as the
+  // refusals, so it cannot be the one English string left in the set. And no
+  // number in any of them governs a noun: 501 would need "символ", not "символов".
+  test('what it says on success is in the user language too, whatever the length', () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.user.language = 'ru';
+
+    const saved = handleRememberUserFact(ctx, { type: 'append', content: 'любит чай' });
+    const refused = handleRememberUserFact(ctx, { type: 'append', content: 'x'.repeat(501) });
+
+    expect(saved.output).toBe('Запомнил.');
+    expect(refused.error).not.toContain('501 символов');
+  });
+
   // rewrite is the destructive one: refusing it before it runs matters, or an
   // oversized rewrite would wipe every existing fact and save nothing in place.
   test('an oversized rewrite leaves the existing facts alone', () => {
