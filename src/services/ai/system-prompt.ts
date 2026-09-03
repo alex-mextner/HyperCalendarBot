@@ -112,13 +112,12 @@ function buildMemorySection(ctx: AgentContext): string {
   // Nothing shown at all reads like a user the bot knows nothing about, which is
   // the opposite of the truth. A fact bigger than the whole section is one the
   // write side now refuses, so any of them still here predate that limit.
-  const factWord = omitted === 1 ? 'fact' : 'facts';
   if (shown.length === 0) {
     return `## What I Know About You
-(${omitted} ${factWord} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
+(${omitted} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
   }
   const facts = shown.join('\n');
-  const more = omitted > 0 ? `\n(+${omitted} ${factWord} kept but not shown here)` : '';
+  const more = omitted > 0 ? `\n(+${omitted} more kept but not shown here)` : '';
   return `## What I Know About You
 ${facts}${more}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
@@ -147,17 +146,23 @@ function linesWithinBudget(lines: string[], budget: number): string[] {
 
 function buildAddressSection(ctx: AgentContext): string {
   if (!ctx.preloadedAddressContext) return '';
-  // The builder puts the places used most often first, so that is the order the
-  // budget is spent in — and one long address is skipped rather than hiding
-  // every place listed after it.
-  const entries = ctx.preloadedAddressContext.split('\n');
-  const shown = linesWithinBudget(entries, ADDRESS_MAX_CHARS);
-  const omitted = entries.length - shown.length;
-  const placeWord = omitted === 1 ? 'place' : 'places';
+  // The builder lists the frequently used places first, then the recent ones,
+  // each block under a heading of its own — so the budget is spent in that
+  // order, and one long address is skipped rather than hiding every place
+  // listed after it. Only the entry lines are counted as places: the headings
+  // and the blank line between the blocks are not places the user could ask for.
+  const lines = ctx.preloadedAddressContext.split('\n');
+  const shown = linesWithinBudget(lines, ADDRESS_MAX_CHARS);
+  const isPlace = (line: string) => line.startsWith('- ');
+  const omitted = lines.filter(isPlace).length - shown.filter(isPlace).length;
+  if (!shown.some(isPlace)) {
+    return `## Known Locations
+(${omitted} saved, each too long to list here — ask the user for the address you need)`;
+  }
   const known =
     omitted === 0
       ? shown.join('\n')
-      : `${shown.join('\n')}\n(${omitted} more ${placeWord} not listed — ask the user if the one you need is missing)`;
+      : `${shown.join('\n')}\n(+${omitted} more not listed — ask the user if the one you need is missing)`;
   return `## Known Locations
 ${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.

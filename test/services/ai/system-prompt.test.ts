@@ -564,7 +564,7 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt(withMemory(Array.from({ length: 40 }, (_, i) => `${i} ${long}`)));
       const listed = prompt.split('\n').filter((line) => line.includes(long)).length;
       expect(listed).toBeLessThan(40);
-      expect(prompt).toContain('facts kept but not shown here');
+      expect(prompt).toContain('more kept but not shown here');
     });
 
     // The newest facts are the ones likeliest to still be true. Enough of them
@@ -585,7 +585,7 @@ describe('buildSystemPrompt', () => {
     test('says the facts exist when none of them can be shown', () => {
       const prompt = buildSystemPrompt(withMemory(['z'.repeat(3_000), 'q'.repeat(3_000)]));
 
-      expect(prompt).toContain('2 facts saved, each too long to show here');
+      expect(prompt).toContain('2 saved, each too long to show here');
       expect(prompt).not.toContain('nothing yet');
     });
 
@@ -596,7 +596,7 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt(withMemory(facts));
       expect(prompt).toContain('- likes tea');
       expect(prompt).toContain('- lives in Belgrade');
-      expect(prompt).toContain('+1 fact kept but not shown here');
+      expect(prompt).toContain('+1 more kept but not shown here');
     });
 
     // Rows saved before the write gate existed still hold their own newlines,
@@ -611,50 +611,54 @@ describe('buildSystemPrompt', () => {
     test('a short memory is untouched', () => {
       const prompt = buildSystemPrompt(withMemory(['likes tea', 'lives in Belgrade']));
       expect(prompt).toContain('- likes tea');
-      expect(prompt).not.toContain('facts kept but not shown here');
+      expect(prompt).not.toContain('kept but not shown here');
     });
 
-    // Cut on a line boundary, so the last entry is a whole place rather than a
-    // fragment the model could read as an address.
-    test('caps the known places on a line boundary', () => {
-      const place = (i: number) => `Place ${i} — ${'street '.repeat(20)}`;
-      const context = Array.from({ length: 40 }, (_, i) => place(i)).join('\n');
+    // Shaped like what buildAddressContext emits: a heading, then one place per
+    // line, the frequently used block before the recent one.
+    function places(entries: string[]): string {
+      return ['Frequently used locations:', ...entries.map((entry) => `- ${entry}`)].join('\n');
+    }
+
+    // Whole entries only, so nothing is shown as a fragment the model could read
+    // as an address.
+    test('caps the known places, keeping every listed line whole', () => {
+      const context = places(Array.from({ length: 40 }, (_, i) => `Place ${i} — ${'street '.repeat(20)}`));
+
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
-      expect(prompt).toContain('more places not listed');
-      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(')[0] ?? '';
-      // Whole entries only: every line shown is one of the ones fed in.
+
+      expect(prompt).toContain('more not listed');
+      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(+')[0] ?? '';
       expect(shown.split('\n').every((line) => context.split('\n').includes(line))).toBe(true);
     });
 
     // An entry longer than the whole budget is left out rather than truncated:
     // half an address is worse than none, since the model would use it.
     test('an entry too long for the budget is left out, not cut in half', () => {
-      const oneLine = `Place — ${'street '.repeat(1_000)}`;
-
-      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: oneLine });
-
-      expect(prompt).toContain('1 more place not listed');
-      expect(prompt).not.toContain('street street');
-    });
-
-    // The builder puts the most-used places first, so an oversized one early in
-    // the list must not take every short entry behind it.
-    test('one oversized place does not hide the ones after it', () => {
-      const context = [`Frequent — ${'street '.repeat(1_000)}`, 'Home — Knez Mihailova 1', 'Gym — Bulevar 5'].join(
-        '\n',
-      );
+      const context = places([`Place — ${'street '.repeat(1_000)}`]);
 
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
 
-      expect(prompt).toContain('Home — Knez Mihailova 1');
-      expect(prompt).toContain('Gym — Bulevar 5');
-      expect(prompt).toContain('1 more place not listed');
+      expect(prompt).toContain('1 saved, each too long to list here');
+      expect(prompt).not.toContain('street street');
+    });
+
+    // The builder lists the most-used places first, so an oversized one early in
+    // the list must not take every short entry behind it.
+    test('one oversized place does not hide the ones after it', () => {
+      const context = places([`Frequent — ${'street '.repeat(1_000)}`, 'Home — Knez Mihailova 1', 'Gym — Bulevar 5']);
+
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
+
+      expect(prompt).toContain('- Home — Knez Mihailova 1');
+      expect(prompt).toContain('- Gym — Bulevar 5');
+      expect(prompt).toContain('+1 more not listed');
     });
 
     test('a short list of places is untouched', () => {
-      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: 'Home — Knez Mihailova 1' });
-      expect(prompt).toContain('Home — Knez Mihailova 1');
-      expect(prompt).not.toContain('more places not listed');
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: places(['Home — Knez Mihailova 1']) });
+      expect(prompt).toContain('- Home — Knez Mihailova 1');
+      expect(prompt).not.toContain('more not listed');
     });
   });
 });
