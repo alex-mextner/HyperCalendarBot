@@ -271,6 +271,11 @@ Optional features that depend on an env var must deactivate gracefully when the 
   fix the code that feeds it (e.g. return consistent shapes from derive functions) rather than casting.
   The only acceptable cast is `as Parameters<typeof apiMethod>[0]` at the GramIO bot API call site
   where the runtime accepts objects the static type rejects (InlineKeyboard vs raw TelegramMarkup).
+- **The bans below are enforced on added lines** by `ci/type-bans/type-bans.sh` (the
+  `type-bans` workflow), for the ones Biome cannot express: `as unknown as` in `src/`,
+  `as never`, `Record<string, unknown>` and `z.unknown()`. Biome covers `any`
+  (`noExplicitAny`) and `object` (`noRestrictedTypes`). Pre-existing occurrences are not
+  scanned — the gate exists to stop new ones.
 - **No `as unknown as ConcreteType`** — absolute ban, no exceptions. This double cast bypasses all
   TypeScript checks. If you think you need it, the types are wrong — fix them. GramIO `.derive()`
   types flow through `.on()` handlers; `Bun.serve()` accepts split branches without casts.
