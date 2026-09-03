@@ -120,6 +120,54 @@ describe('type-ban gate', () => {
     TIMEOUT_MS,
   );
 
+  // "w-as unknown as" lives inside an ordinary sentence, and a gate that blocks
+  // the sentence is a gate someone disables.
+  test(
+    'leaves the words alone inside a sentence',
+    async () => {
+      const prose = 'const note = "the provider status was unknown as of the last poll";\n';
+      const verdict = await gate('src/widget.ts', prose);
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  // A cast cannot live in a comment, and English can say anything there.
+  test(
+    'leaves comment lines alone',
+    async () => {
+      const comment = `// treat the empty set ${'as'} ${'never'}, per the spec\n`;
+      const verdict = await gate('src/widget.ts', comment);
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  // Chained through the bottom type, this used to fall between two patterns:
+  // not "as unknown as", and never followed by a bracket.
+  test(
+    'blocks a cast chained through the bottom type',
+    async () => {
+      const chained = `const x = value ${'as'} ${'never'} ${'as'} Widget;\n`;
+      const verdict = await gate('src/widget.ts', chained);
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('as-never');
+    },
+    TIMEOUT_MS,
+  );
+
+  // A limit, recorded so it surprises nobody: catching a construct the formatter
+  // wrapped across lines needs a parser, and this is a grep on purpose.
+  test(
+    'does not see a construct split across lines',
+    async () => {
+      const wrapped = `let bag: ${'Record'}<\n  string,\n  unknown\n> = {};\n`;
+      const verdict = await gate('src/widget.ts', wrapped);
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
   // Only TypeScript is in scope; a Python script naming the same construct is not.
   test(
     'ignores files it does not type-check',

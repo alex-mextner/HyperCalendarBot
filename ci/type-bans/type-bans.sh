@@ -20,6 +20,11 @@
 # Only ADDED lines are scanned, so pre-existing debt does not block anyone; the
 # repo has plenty of each and this gate is about not adding more.
 #
+# Two limits, both deliberate. Comment lines are skipped, because a cast cannot
+# live in one and English can. And the scan is line by line, so a construct the
+# formatter wrapped across lines is not seen: catching that needs a parser, and
+# this is a grep that has to stay readable by whoever it blocks.
+#
 # Knobs (env):
 #   TYPE_BANS_BASE   diff base. Default origin/main -> main -> full-tree scan.
 #   TYPE_BANS_HEAD   head ref/SHA to diff against the base. Default HEAD.
@@ -53,6 +58,10 @@ emit_lines() {
   fi
 }
 
+# `as` must start a word: without this, "w-as unknown as" inside a sentence reads
+# as the very cast this bans.
+WORD_START='(^|[^[:alnum:]_])'
+
 violations=0
 
 report() {
@@ -68,14 +77,21 @@ while IFS=$'\t' read -r file ln text; do
   printf '%s' "$file" | grep -qE "$INCLUDE" || continue
   printf '%s' "$file" | grep -qE "$EXCLUDE" && continue
 
+  # A comment cannot hold a cast, and English can say anything in one: "the
+  # status was unknown as of the last poll", "regard the empty set as never".
+  # Skipping comment lines removes the whole class of false alarms that would
+  # otherwise get this gate switched off.
+  printf '%s' "$text" | grep -qE '^[[:space:]]*(//|\*|/\*)' && continue
+
   # Only src/ — a test factory may present a partial mock as the real interface.
   if printf '%s' "$file" | grep -qE '^src/'; then
-    printf '%s' "$text" | grep -qE 'as[[:space:]]+unknown[[:space:]]+as[[:space:]]' \
+    printf '%s' "$text" | grep -qE "$WORD_START"'as[[:space:]]+unknown[[:space:]]+as[[:space:]]' \
       && report "$file" "$ln" "double-cast" "$text"
   fi
-  # A cast, not the English word: something must close the expression after it.
-  # `]` leads the bracket expression, where it is the one place it means itself.
-  printf '%s' "$text" | grep -qE 'as[[:space:]]+never[[:space:]]*[]);,}]' \
+  # Bounded on both sides. Requiring a closing bracket after it missed both
+  # `x as never` at the end of a line and `x as never as Foo`, which fell
+  # between this pattern and the one above.
+  printf '%s' "$text" | grep -qE "$WORD_START"'as[[:space:]]+never([^[:alnum:]_]|$)' \
     && report "$file" "$ln" "as-never" "$text"
   printf '%s' "$text" | grep -qE 'Record<[[:space:]]*string[[:space:]]*,[[:space:]]*unknown[[:space:]]*>' \
     && report "$file" "$ln" "record-string-unknown" "$text"
