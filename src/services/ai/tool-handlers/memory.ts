@@ -82,15 +82,37 @@ interface RememberUserFactInput {
   content: string;
 }
 
+/**
+ * A fact longer than this is refused rather than stored.
+ *
+ * The prompt section these are read back into is capped at 2 000 characters,
+ * and a fact that alone eats a quarter of it is skipped there — which would
+ * leave it in the table permanently invisible, unshowable and unfixable, since
+ * the model cannot rewrite what it never sees. Refusing costs the model one
+ * round and a shorter sentence; storing costs the user a dead row forever.
+ */
+const MAX_FACT_CHARS = 500;
+
 export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFactInput): ToolResult {
   if (!ctx.birthday?.userMemoryRepo) {
     return { success: false, error: 'Memory storage not available' };
   }
 
+  const content = input.content.trim();
+  if (content.length === 0) {
+    return { success: false, error: 'Nothing to remember — the fact is empty.' };
+  }
+  if (content.length > MAX_FACT_CHARS) {
+    return {
+      success: false,
+      error: `Fact too long (${content.length} characters, limit ${MAX_FACT_CHARS}). Keep the essence in one short sentence, or save it as several separate facts.`,
+    };
+  }
+
   if (input.type === 'append') {
-    ctx.birthday.userMemoryRepo.append(ctx.user.telegram_id, input.content);
+    ctx.birthday.userMemoryRepo.append(ctx.user.telegram_id, content);
   } else {
-    ctx.birthday.userMemoryRepo.rewrite(ctx.user.telegram_id, input.content);
+    ctx.birthday.userMemoryRepo.rewrite(ctx.user.telegram_id, content);
   }
 
   return { success: true, output: 'fact saved' };

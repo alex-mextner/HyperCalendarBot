@@ -60,6 +60,48 @@ describe('handleRememberUserFact', () => {
     expect(facts[0]!.content).toBe('New consolidated fact');
   });
 
+  // A fact too long to fit the prompt section would be skipped when read back,
+  // leaving a row nothing can ever show and the model can never rewrite.
+  test('refuses a fact too long to ever be shown, and stores nothing', () => {
+    const ctx = makeCtx(db, USER_ID);
+
+    const result = handleRememberUserFact(ctx, { type: 'append', content: 'x'.repeat(3_000) });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('500');
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(0);
+  });
+
+  // rewrite is the destructive one: refusing it before it runs matters, or an
+  // oversized rewrite would wipe every existing fact and save nothing in place.
+  test('an oversized rewrite leaves the existing facts alone', () => {
+    const ctx = makeCtx(db, USER_ID);
+    handleRememberUserFact(ctx, { type: 'append', content: 'likes tea' });
+
+    const result = handleRememberUserFact(ctx, { type: 'rewrite', content: 'y'.repeat(3_000) });
+
+    expect(result.success).toBe(false);
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID).map((f) => f.content)).toEqual(['likes tea']);
+  });
+
+  test('refuses a blank fact', () => {
+    const ctx = makeCtx(db, USER_ID);
+
+    const result = handleRememberUserFact(ctx, { type: 'append', content: '   \n  ' });
+
+    expect(result.success).toBe(false);
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(0);
+  });
+
+  test('a fact at the limit is stored', () => {
+    const ctx = makeCtx(db, USER_ID);
+
+    const result = handleRememberUserFact(ctx, { type: 'append', content: 'z'.repeat(500) });
+
+    expect(result.success).toBe(true);
+    expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(1);
+  });
+
   test('returns error when userMemoryRepo is not available', () => {
     const ctx = makeCtx(db, USER_ID);
     const ctxWithout = {
