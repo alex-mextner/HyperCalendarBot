@@ -7,9 +7,9 @@
 # `object` via noRestrictedTypes); the rest cannot be expressed as Biome rules,
 # so they are checked here instead:
 #
-#   • as unknown as X   — bypasses every check at once. Banned in src/; test
-#                         factories are allowed it (CLAUDE.md's one exception),
-#                         so only src/ is scanned for it.
+#   • as unknown as X   — bypasses every check at once. Banned in every shipping
+#                         src/ (the bot's and each package's); test factories are
+#                         allowed it, which is CLAUDE.md's one exception.
 #   • as never          — silences any type error by pretending a value is the
 #                         bottom type. Banned everywhere.
 #   • Record<string, unknown> — banned everywhere: a known shape wants an
@@ -44,7 +44,11 @@ elif git rev-parse --verify --quiet main >/dev/null 2>&1; then base="main"; fi
 # (file, lineno, text) for added lines, or every line when there is no base.
 emit_lines() {
   if [ -n "$base" ]; then
-    git diff --no-color --unified=0 --no-renames "$base...$TYPE_BANS_HEAD" -- . \
+    # Renames are followed, not split into a delete and an add: a moved file's
+    # contents are not new code, and treating them as added would fail a pure
+    # rename over debt that was already there — the one thing this gate promises
+    # not to do.
+    git diff --no-color --unified=0 "$base...$TYPE_BANS_HEAD" -- . \
       | awk '
         /^\+\+\+ / { f=substr($0,5); sub(/^b\//,"",f); next }
         /^@@ /     { match($0, /\+[0-9]+/); ln=substr($0,RSTART+1,RLENGTH-1)+0; next }
@@ -83,8 +87,10 @@ while IFS=$'\t' read -r file ln text; do
   # otherwise get this gate switched off.
   printf '%s' "$text" | grep -qE '^[[:space:]]*(//|\*|/\*)' && continue
 
-  # Only src/ — a test factory may present a partial mock as the real interface.
-  if printf '%s' "$file" | grep -qE '^src/'; then
+  # Any src/ that ships — the bot's own and each package's, since the deploy
+  # workflow compiles packages/agent-macos and uploads it. test/ stays exempt:
+  # a factory there may present a partial mock as the real interface.
+  if printf '%s' "$file" | grep -qE '(^|/)src/'; then
     printf '%s' "$text" | grep -qE "$WORD_START"'as[[:space:]]+unknown[[:space:]]+as[[:space:]]' \
       && report "$file" "$ln" "double-cast" "$text"
   fi
@@ -93,7 +99,9 @@ while IFS=$'\t' read -r file ln text; do
   # between this pattern and the one above.
   printf '%s' "$text" | grep -qE "$WORD_START"'as[[:space:]]+never([^[:alnum:]_]|$)' \
     && report "$file" "$ln" "as-never" "$text"
-  printf '%s' "$text" | grep -qE 'Record<[[:space:]]*string[[:space:]]*,[[:space:]]*unknown[[:space:]]*>' \
+  # Bounded before the name so MyRecord<string, unknown> is left alone, and
+  # tolerant of the spacing a formatter may leave around the brackets.
+  printf '%s' "$text" | grep -qE "$WORD_START"'Record[[:space:]]*<[[:space:]]*string[[:space:]]*,[[:space:]]*unknown[[:space:]]*>' \
     && report "$file" "$ln" "record-string-unknown" "$text"
   printf '%s' "$text" | grep -qE 'z\.unknown\(\)' \
     && report "$file" "$ln" "z-unknown" "$text"

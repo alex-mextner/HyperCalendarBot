@@ -168,6 +168,32 @@ describe('type-ban gate', () => {
     TIMEOUT_MS,
   );
 
+  // packages/agent-macos is compiled, packaged and uploaded by the deploy
+  // workflow, so its src/ ships as surely as the bot's.
+  test(
+    'covers a package that ships, not only the top-level src',
+    async () => {
+      const verdict = await gate('packages/agent-macos/src/main.ts', DOUBLE_CAST);
+      expect(verdict.blocked).toBe(true);
+      expect(verdict.output).toContain('double-cast');
+    },
+    TIMEOUT_MS,
+  );
+
+  // A custom type whose name happens to end in the banned one is not the banned
+  // one, and a formatter's spacing does not change what a type is.
+  test(
+    'tells the banned dictionary apart from a custom type',
+    async () => {
+      const custom = `let value: My${'Record'}<string, unknown> = load();\n`;
+      expect((await gate('src/widget.ts', custom)).blocked).toBe(false);
+
+      const spaced = `let bag: ${'Record'} < string , unknown > = {};\n`;
+      expect((await gate('src/widget.ts', spaced)).blocked).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
   // Only TypeScript is in scope; a Python script naming the same construct is not.
   test(
     'ignores files it does not type-check',
