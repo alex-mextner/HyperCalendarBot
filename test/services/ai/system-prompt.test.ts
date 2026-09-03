@@ -621,19 +621,34 @@ describe('buildSystemPrompt', () => {
       const context = Array.from({ length: 40 }, (_, i) => place(i)).join('\n');
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
       expect(prompt).toContain('more places not listed');
-      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(more places')[0] ?? '';
-      // Whole entries only: the last line shown is one of the ones fed in.
+      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(')[0] ?? '';
+      // Whole entries only: every line shown is one of the ones fed in.
       expect(shown.split('\n').every((line) => context.split('\n').includes(line))).toBe(true);
     });
 
-    // A single entry longer than the whole budget has no line break to cut on,
-    // and the -1 that answers for one would have kept the entire string.
-    test('caps a single oversized entry that has no line break', () => {
+    // An entry longer than the whole budget is left out rather than truncated:
+    // half an address is worse than none, since the model would use it.
+    test('an entry too long for the budget is left out, not cut in half', () => {
       const oneLine = `Place — ${'street '.repeat(1_000)}`;
+
       const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: oneLine });
-      expect(prompt).toContain('more places not listed');
-      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(more places')[0] ?? '';
-      expect(shown.length).toBeLessThanOrEqual(2_000);
+
+      expect(prompt).toContain('1 more place not listed');
+      expect(prompt).not.toContain('street street');
+    });
+
+    // The builder puts the most-used places first, so an oversized one early in
+    // the list must not take every short entry behind it.
+    test('one oversized place does not hide the ones after it', () => {
+      const context = [`Frequent — ${'street '.repeat(1_000)}`, 'Home — Knez Mihailova 1', 'Gym — Bulevar 5'].join(
+        '\n',
+      );
+
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
+
+      expect(prompt).toContain('Home — Knez Mihailova 1');
+      expect(prompt).toContain('Gym — Bulevar 5');
+      expect(prompt).toContain('1 more place not listed');
     });
 
     test('a short list of places is untouched', () => {

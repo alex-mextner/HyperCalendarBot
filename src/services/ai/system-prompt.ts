@@ -101,16 +101,9 @@ function buildMemorySection(ctx: AgentContext): string {
   // "## Schedule Context" on a line of its own reads to the model as the start
   // of a section rather than as something the user said.
   const lines = memoryFacts.map((f: { content: string }) => `- ${f.content.replace(/\s+/g, ' ')}`);
-  const shown: string[] = [];
-  let budget = MEMORY_SECTION_MAX_CHARS;
-  for (const line of [...lines].reverse()) {
-    // Skipped, not stopped on: one enormous fact used to end the loop on its
-    // first turn and take forty-nine perfectly small ones with it, leaving a
-    // section that showed nothing while claiming the rest were merely older.
-    if (line.length > budget) continue;
-    budget -= line.length + 1;
-    shown.unshift(line);
-  }
+  // Offered newest-first so that is what survives the budget, then put back into
+  // the order they were learned in.
+  const shown = linesWithinBudget([...lines].reverse(), MEMORY_SECTION_MAX_CHARS).reverse();
   // Counted within the page the repository returned, which is the newest fifty.
   // Anything older than that is not "held back" but evicted, and there is no
   // tool to fetch it with — a truer number would cost a COUNT on every message
@@ -132,27 +125,39 @@ Use this to personalize responses. Call remember_user_fact when you learn someth
 }
 
 /**
- * Cuts at the last line break inside the budget, or at the budget itself when
- * there is no break at a positive index — a context whose first entry is longer
- * than the whole budget has no boundary to cut on, and `lastIndexOf` answers
- * that with -1, which as a slice end would have kept everything but the final
- * character. A break at index 0 is the same case wearing a leading blank line:
- * nothing whole fits either way, and a truncated prefix says more than an empty
- * section does.
+ * The lines that fit the budget, in the order given, preferring the ones the
+ * caller put first.
+ *
+ * A line too big for what is left is skipped rather than ending the packing:
+ * stopping there would let one enormous entry take every small one behind it —
+ * a single 3 000-character fact emptying a section of forty-nine short ones, or
+ * one long frequent address hiding every recent place. Whole lines only, so
+ * nothing is shown as a fragment the model could read as a real address.
  */
-function cutAtLineBoundary(text: string, budget: number): string {
-  const boundary = text.lastIndexOf('\n', budget);
-  return text.slice(0, boundary > 0 ? boundary : budget);
+function linesWithinBudget(lines: string[], budget: number): string[] {
+  const kept: string[] = [];
+  let left = budget;
+  for (const line of lines) {
+    if (line.length > left) continue;
+    left -= line.length + 1;
+    kept.push(line);
+  }
+  return kept;
 }
 
 function buildAddressSection(ctx: AgentContext): string {
   if (!ctx.preloadedAddressContext) return '';
-  // Cut on a line boundary so the last entry is whole rather than a fragment the
-  // model might read as an address.
+  // The builder puts the places used most often first, so that is the order the
+  // budget is spent in — and one long address is skipped rather than hiding
+  // every place listed after it.
+  const entries = ctx.preloadedAddressContext.split('\n');
+  const shown = linesWithinBudget(entries, ADDRESS_MAX_CHARS);
+  const omitted = entries.length - shown.length;
+  const placeWord = omitted === 1 ? 'place' : 'places';
   const known =
-    ctx.preloadedAddressContext.length <= ADDRESS_MAX_CHARS
-      ? ctx.preloadedAddressContext
-      : `${cutAtLineBoundary(ctx.preloadedAddressContext, ADDRESS_MAX_CHARS)}\n(more places not listed — ask the user if the one you need is missing)`;
+    omitted === 0
+      ? shown.join('\n')
+      : `${shown.join('\n')}\n(${omitted} more ${placeWord} not listed — ask the user if the one you need is missing)`;
   return `## Known Locations
 ${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.
