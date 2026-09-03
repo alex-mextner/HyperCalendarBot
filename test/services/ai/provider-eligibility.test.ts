@@ -42,6 +42,24 @@ describe('what a failure implies', () => {
     expect(block?.untilMs).toBe(NOW + 90_000);
   });
 
+  // The SDK types these as fetch Headers, but the errors this repo logs from
+  // production serialize as a plain object. Reading only one shape would drop
+  // the provider's own answer and fall back to guessing.
+  test('a Retry-After sent as a plain object is read too', () => {
+    const block = noteFailureForEligibility('zai', 429, 'Rate limit reached', { 'retry-after': '45' }, NOW);
+    expect(block?.untilMs).toBe(NOW + 45_000);
+  });
+
+  // Two blocks with different scopes coexist: the shorter one used to overwrite
+  // the longer, and the size rejection came back a request later.
+  test('a brief quota block does not cut a standing size block short', () => {
+    noteFailureForEligibility('groq', 413, GROQ_TOO_LARGE, undefined, NOW);
+    noteFailureForEligibility('groq', 429, 'Rate limit reached', undefined, NOW);
+
+    expect(isBlocked('groq', false, NOW + 5 * 60 * 1000)).toBe(false);
+    expect(isBlocked('groq', true, NOW + 5 * 60 * 1000)).toBe(true);
+  });
+
   // A rate limit with no stated end gets the short block: guessing long is the
   // expensive mistake.
   test('a rate limit with no stated end gets two minutes', () => {

@@ -45,13 +45,31 @@ interface Block {
   reason: string;
 }
 
-const blocks = new Map<ProviderId, Block>();
+/**
+ * One deadline per scope, not one per provider. A provider can be out of quota
+ * for two minutes and rejecting tool-sized requests for an hour at the same
+ * time; keeping a single record meant the shorter block overwrote the longer
+ * one, and the size rejection came back a request later.
+ */
+type ProviderBlocks = { [scope in BlockScope]?: Block };
 
-/** Seconds in a `Retry-After` header, when the provider sent a sane one. */
+const blocks = new Map<ProviderId, ProviderBlocks>();
+
+/**
+ * Seconds in a `Retry-After` header, when the provider sent a sane one.
+ *
+ * Both shapes are read. The SDK types this as a fetch `Headers`, but the errors
+ * this repo logs from production serialize as a plain object, and a header read
+ * that quietly returns nothing would leave every rate limit on the two-minute
+ * guess while the provider was telling us exactly when to come back.
+ */
 function retryAfterMs(headers: unknown): number | null {
   if (typeof headers !== 'object' || headers === null) return null;
-  const value = 'get' in headers && typeof headers.get === 'function' ? headers.get('retry-after') : undefined;
-  const seconds = Number(value);
+  const raw =
+    'get' in headers && typeof headers.get === 'function'
+      ? headers.get('retry-after')
+      : (headers as { [key: string]: unknown })['retry-after'];
+  const seconds = Number(raw);
   if (!Number.isFinite(seconds) || seconds <= 0) return null;
   return seconds * 1000;
 }
@@ -113,7 +131,11 @@ export function noteFailureForEligibility(
   }
 
   if (!block) return null;
-  blocks.set(provider, block);
+  const existing = blocks.get(provider) ?? {};
+  const current = existing[block.scope];
+  // A longer standing block is never shortened by a newer, briefer one.
+  if (current && current.untilMs > block.untilMs) return current;
+  blocks.set(provider, { ...existing, [block.scope]: block });
   eligibilityLogger.info(
     { provider, scope: block.scope, seconds: Math.round((block.untilMs - now) / 1000), reason: block.reason },
     'Provider benched — skipping it until the block expires',
@@ -121,20 +143,25 @@ export function noteFailureForEligibility(
   return block;
 }
 
-/** Clears any block: the provider just answered, so whatever it said is over. */
+/** Clears every block: the provider just answered, so whatever it said is over. */
 export function clearBlock(provider: ProviderId): void {
   blocks.delete(provider);
 }
 
+function activeBlock(provider: ProviderId, scope: BlockScope, now: number): Block | undefined {
+  const block = blocks.get(provider)?.[scope];
+  if (!block) return undefined;
+  if (block.untilMs > now) return block;
+  const rest = { ...blocks.get(provider) };
+  delete rest[scope];
+  blocks.set(provider, rest);
+  return undefined;
+}
+
 /** True when a request of this shape should skip the provider right now. */
 export function isBlocked(provider: ProviderId, hasTools: boolean, now: number = Date.now()): boolean {
-  const block = blocks.get(provider);
-  if (!block) return false;
-  if (block.untilMs <= now) {
-    blocks.delete(provider);
-    return false;
-  }
-  return block.scope === 'all' || hasTools;
+  if (activeBlock(provider, 'all', now)) return true;
+  return hasTools && activeBlock(provider, 'with-tools', now) !== undefined;
 }
 
 /** For tests: forget every block. */
