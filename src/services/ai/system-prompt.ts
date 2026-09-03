@@ -106,6 +106,10 @@ function buildMemorySection(ctx: AgentContext): string {
     budget -= line.length + 1;
     shown.unshift(line);
   }
+  // Counted within the page the repository returned, which is the newest fifty.
+  // Anything older than that is not "held back" but evicted, and there is no
+  // tool to fetch it with — a truer number would cost a COUNT on every message
+  // and change nothing the model can do.
   const omitted = lines.length - shown.length;
   // Nothing shown at all reads like a user the bot knows nothing about, which is
   // the opposite of the truth. A fact bigger than the whole section is one the

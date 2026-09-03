@@ -93,7 +93,11 @@ export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFac
     return { success: false, error: msg.storageUnavailable };
   }
 
-  const content = input.content.trim();
+  // Collapsed to a single line, not merely trimmed: the section renders one
+  // fact per line, so a fact carrying its own newlines could forge a heading
+  // like "## Schedule Context" inside the system prompt and would break the
+  // one-line-per-fact accounting the cap depends on.
+  const content = input.content.replace(/\s+/g, ' ').trim();
   if (content.length === 0) {
     return { success: false, error: msg.empty };
   }
