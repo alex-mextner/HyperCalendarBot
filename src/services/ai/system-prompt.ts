@@ -95,7 +95,12 @@ function buildMemorySection(ctx: AgentContext): string {
   }
   // Kept from the end: an old fact is likelier to be stale than a recent one, so
   // when something has to go it should be the one least likely to still be true.
-  const lines = memoryFacts.map((f: { content: string }) => `- ${f.content}`);
+  //
+  // Collapsed to one line here as well as at the write gate, because rows saved
+  // before that gate existed still hold their own newlines — and a fact holding
+  // "## Schedule Context" on a line of its own reads to the model as the start
+  // of a section rather than as something the user said.
+  const lines = memoryFacts.map((f: { content: string }) => `- ${f.content.replace(/\s+/g, ' ')}`);
   const shown: string[] = [];
   let budget = MEMORY_SECTION_MAX_CHARS;
   for (const line of [...lines].reverse()) {
@@ -114,12 +119,13 @@ function buildMemorySection(ctx: AgentContext): string {
   // Nothing shown at all reads like a user the bot knows nothing about, which is
   // the opposite of the truth. A fact bigger than the whole section is one the
   // write side now refuses, so any of them still here predate that limit.
+  const factWord = omitted === 1 ? 'fact' : 'facts';
   if (shown.length === 0) {
     return `## What I Know About You
-(${omitted} facts saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
+(${omitted} ${factWord} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
   }
   const facts = shown.join('\n');
-  const more = omitted > 0 ? `\n(+${omitted} facts kept but not shown here)` : '';
+  const more = omitted > 0 ? `\n(+${omitted} ${factWord} kept but not shown here)` : '';
   return `## What I Know About You
 ${facts}${more}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;

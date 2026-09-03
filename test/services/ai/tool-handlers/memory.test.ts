@@ -95,7 +95,7 @@ describe('handleRememberUserFact', () => {
     const refused = handleRememberUserFact(ctx, { type: 'append', content: 'x'.repeat(501) });
 
     expect(saved.output).toBe('Запомнил.');
-    expect(refused.error).not.toContain('501 символов');
+    expect(refused.error).toContain('длина 501');
   });
 
   // rewrite is the destructive one: refusing it before it runs matters, or an
