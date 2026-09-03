@@ -26,8 +26,12 @@ interface Verdict {
   output: string;
 }
 
-/** Runs the gate over one added file, on a fresh repo whose base commit is empty. */
-async function gate(path: string, added: string): Promise<Verdict> {
+/**
+ * Runs the gate over one added file, on a fresh repo whose base commit is empty.
+ * `movedTo` instead commits the file at `path` in the base and moves it there,
+ * so the diff the gate sees is a pure rename.
+ */
+async function gate(path: string, added: string, movedTo?: string): Promise<Verdict> {
   const repo = mkdtempSync(join(tmpdir(), 'type-bans-'));
   try {
     const git = (...args: string[]) =>
@@ -36,11 +40,17 @@ async function gate(path: string, added: string): Promise<Verdict> {
     await git('config', 'user.email', 'test@example.com');
     await git('config', 'user.name', 'test');
     writeFileSync(join(repo, 'README.md'), 'base\n');
+    if (movedTo !== undefined) {
+      mkdirSync(join(repo, path, '..'), { recursive: true });
+      writeFileSync(join(repo, path), added);
+    }
     await git('add', '.');
     await git('commit', '-qm', 'base');
     const base = Bun.spawnSync(['git', 'rev-parse', 'HEAD'], { cwd: repo }).stdout.toString().trim();
-    mkdirSync(join(repo, path, '..'), { recursive: true });
-    writeFileSync(join(repo, path), added);
+    const destination = movedTo ?? path;
+    mkdirSync(join(repo, destination, '..'), { recursive: true });
+    if (movedTo !== undefined) await git('mv', path, movedTo);
+    else writeFileSync(join(repo, destination), added);
     await git('add', '-A');
     await git('commit', '-qm', 'change');
 
@@ -190,6 +200,62 @@ describe('type-ban gate', () => {
 
       const spaced = `let bag: ${'Record'} < string , unknown > = {};\n`;
       expect((await gate('src/widget.ts', spaced)).blocked).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  // Moving a file does not write its contents anew, and failing an honest
+  // rename over debt that was already there is the one thing this gate says it
+  // will not do.
+  test(
+    'stays quiet when a file carrying old debt is only moved',
+    async () => {
+      const verdict = await gate('src/old/widget.ts', BOTTOM_CAST, 'src/new/widget.ts');
+      expect(verdict.blocked).toBe(false);
+    },
+    TIMEOUT_MS,
+  );
+
+  // A comment can open a line that goes on to hold a cast; skipping the whole
+  // line would be a one-character way past every ban.
+  test(
+    'still reads code that follows a comment on the same line',
+    async () => {
+      const mixed = `/* fine */ send(payload ${'as'} ${'never'});\n`;
+      const verdict = await gate('src/widget.ts', mixed);
+      expect(verdict.blocked).toBe(true);
+    },
+    TIMEOUT_MS,
+  );
+
+  // Degrading quietly is how a gate ends up scanning the base branch instead of
+  // the pull request, and then either failing everything or passing everything.
+  test(
+    'refuses to run when its base cannot be resolved',
+    async () => {
+      const repo = mkdtempSync(join(tmpdir(), 'type-bans-'));
+      try {
+        const git = (...args: string[]) =>
+          Bun.spawn(['git', ...args], { cwd: repo, stdout: 'pipe', stderr: 'pipe' }).exited;
+        await git('init', '-q', '-b', 'main');
+        await git('config', 'user.email', 'test@example.com');
+        await git('config', 'user.name', 'test');
+        writeFileSync(join(repo, 'README.md'), 'base\n');
+        await git('add', '.');
+        await git('commit', '-qm', 'base');
+
+        const proc = Bun.spawn(['bash', SCRIPT], {
+          cwd: repo,
+          env: { ...process.env, TYPE_BANS_BASE: 'origin/nope' },
+          stdout: 'pipe',
+          stderr: 'pipe',
+        });
+        const output = await new Response(proc.stderr).text();
+        expect(await proc.exited).not.toBe(0);
+        expect(output).toContain('cannot resolve base');
+      } finally {
+        rmSync(repo, { recursive: true, force: true });
+      }
     },
     TIMEOUT_MS,
   );

@@ -26,8 +26,10 @@
 # this is a grep that has to stay readable by whoever it blocks.
 #
 # Knobs (env):
-#   TYPE_BANS_BASE   diff base. Default origin/main -> main -> full-tree scan.
-#   TYPE_BANS_HEAD   head ref/SHA to diff against the base. Default HEAD.
+#   TYPE_BANS_BASE      diff base. Default origin/main. Unresolvable is a hard
+#                       error, never a quieter scan of something else.
+#   TYPE_BANS_HEAD      head ref/SHA to diff against the base. Default HEAD.
+#   TYPE_BANS_FULLTREE  "1" = scan every tracked file instead of a diff (local use).
 #
 # Usage: bash ci/type-bans/type-bans.sh
 set -euo pipefail
@@ -37,9 +39,22 @@ TYPE_BANS_HEAD="${TYPE_BANS_HEAD:-HEAD}"
 INCLUDE='\.(ts|tsx|mts|cts)$'
 EXCLUDE='(^|/)(node_modules|dist|build|coverage)/'
 
+# A merge-blocking gate must not degrade quietly. If the configured base cannot
+# be resolved, the diff would be taken against something else — under
+# pull_request_target the checkout is the BASE branch, so a full-tree fallback
+# would scan the base and either fail every PR on old debt or pass green having
+# never read the PR at all. Fail loudly instead. The whole-tree scan stays
+# available for local use, but only when asked for by name.
 base=""
-if git rev-parse --verify --quiet "$TYPE_BANS_BASE" >/dev/null 2>&1; then base="$TYPE_BANS_BASE"
-elif git rev-parse --verify --quiet main >/dev/null 2>&1; then base="main"; fi
+if [ "${TYPE_BANS_FULLTREE:-0}" != "1" ]; then
+  if git rev-parse --verify --quiet "$TYPE_BANS_BASE" >/dev/null 2>&1; then
+    base="$TYPE_BANS_BASE"
+  else
+    echo "[type-bans] cannot resolve base '$TYPE_BANS_BASE' — refusing to scan something else." >&2
+    echo "[type-bans] set TYPE_BANS_BASE to a ref that exists, or TYPE_BANS_FULLTREE=1 to scan the whole tree." >&2
+    exit 2
+  fi
+fi
 
 # (file, lineno, text) for added lines, or every line when there is no base.
 emit_lines() {
@@ -85,7 +100,10 @@ while IFS=$'\t' read -r file ln text; do
   # status was unknown as of the last poll", "regard the empty set as never".
   # Skipping comment lines removes the whole class of false alarms that would
   # otherwise get this gate switched off.
-  printf '%s' "$text" | grep -qE '^[[:space:]]*(//|\*|/\*)' && continue
+  # A whole line of comment only: `/* ok */ send(x as never);` starts with a
+  # comment and ends with a cast, and skipping it would be a one-character
+  # bypass of every ban below.
+  printf '%s' "$text" | grep -qE '^[[:space:]]*(//|\*([^/]|$)|/\*[^*]*\*/[[:space:]]*$)' && continue
 
   # Any src/ that ships — the bot's own and each package's, since the deploy
   # workflow compiles packages/agent-macos and uploads it. test/ stays exempt:
