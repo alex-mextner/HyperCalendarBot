@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import OpenAI from 'openai';
 import { resetModelRegistry } from '../../../src/services/ai/model-registry.ts';
+import { resetEligibility } from '../../../src/services/ai/provider-eligibility.ts';
 import {
   hasChainAnswered,
   initProviderAlerts,
@@ -146,6 +147,7 @@ beforeEach(() => {
     AI_FAST_CHAIN: 'zai,groq,gemini,hf',
   });
   resetLogOnce();
+  resetEligibility();
   providerClients.zai = () => asOpenAIClient(zai.client);
   providerClients.groq = () => asOpenAIClient(groq.client);
   providerClients.gemini = () => asOpenAIClient(gemini.client);
@@ -327,6 +329,92 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     });
 
     expect(result.text).toBe('answer from Gemini');
+  });
+});
+
+describe('benching a provider that said it is out', () => {
+  beforeEach(() => {
+    resetProviderAlertState();
+    initProviderAlerts({ botToken: 't', adminId: 1, send: async () => {} });
+  });
+
+  afterEach(() => {
+    resetProviderAlertState();
+  });
+
+  // The waste this exists to remove: z.ai answered 429 to every request for a
+  // day, and the chain asked it again on every round of every message.
+  test('a spent quota is not asked again on the next request', async () => {
+    zai = makeProvider({
+      behaviors: [{ kind: 'throw', error: apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow') }],
+    });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    groq = unusedProvider();
+    hf = unusedProvider();
+
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+
+    expect(zai.requestedModels).toHaveLength(1);
+    expect(gemini.requestedModels).toHaveLength(2);
+  });
+
+  // Groq's tier cannot take a request carrying the tool catalog, but the short
+  // summaries on the fast chain fit — benching it for everything would throw
+  // away the one thing it is still good for.
+  test('a size rejection benches only the requests that carry tools', async () => {
+    groq = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: apiError(413, 'Request too large ... tokens per minute (TPM): Limit 8000') },
+        { kind: 'text', text: 'from groq' },
+      ],
+    });
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(429, 'Rate limit reached') }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'text', text: 'from gemini' }] });
+    hf = unusedProvider();
+    process.env.AI_SMART_CHAIN = 'groq,gemini';
+
+    const tools = [{ type: 'function' as const, function: { name: 'get_events', description: 'x', parameters: {} } }];
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
+    const withTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100, tools }, {});
+    expect(withTools.text).toBe('from gemini');
+    expect(groq.requestedModels).toHaveLength(1);
+
+    const withoutTools = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+    expect(withoutTools.text).toBe('from groq');
+  });
+
+  // A memory of past failure must never turn into silence: if everything is
+  // benched, everything is tried anyway.
+  test('a chain where everything is benched is still attempted', async () => {
+    const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
+    zai = makeProvider({
+      behaviors: [
+        { kind: 'throw', error: spent },
+        { kind: 'text', text: 'from zai' },
+      ],
+    });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
+    const second = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {});
+
+    expect(second.text).toBe('from zai');
+  });
+
+  // The bench suppresses calls, not observations: a chain that answers nobody
+  // must still read as down.
+  test('a benched chain still reports the outage', async () => {
+    const spent = apiError(429, 'Weekly/Monthly Limit Exhausted, resets tomorrow');
+    zai = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    gemini = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+    hf = makeProvider({ behaviors: [{ kind: 'throw', error: spent }] });
+
+    await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 }, {}).catch(() => null);
+    expect(isAiChainDown()).toBe(true);
   });
 });
 

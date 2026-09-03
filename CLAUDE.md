@@ -229,8 +229,9 @@ When adding a new env var: (1) add it to `EnvConfig` interface in `env.ts`, (2) 
 
 **Provider order is configuration, not code**: `AI_SMART_CHAIN` and `AI_FAST_CHAIN` list
 provider ids in the order they are tried. The ids come from `PROVIDER_IDS` in
-`src/services/ai/model-registry.ts`, which is the single source both the `ProviderId` type
-and the environment parser derive from — add a provider there and it is nameable at once.
+`src/services/ai/provider-ids.ts` — a leaf module that imports nothing, so both the config
+layer and the AI layer can derive from it without a cycle. Add a provider there and it is
+nameable at once.
 A provider whose model or key is missing is skipped and the skip is logged — in practice
 that means Groq, since `loadConfig()` requires the z.ai, Hugging Face and Gemini credentials
 and refuses to start without them. An unknown name is ignored with a warning, an order
@@ -238,6 +239,17 @@ naming nothing known falls back to the default order, and an order whose provide
 unconfigured falls back to the default order over whatever IS configured (logged as an
 error). Reordering during an incident is an `.env` edit and a restart — do not hardcode
 a new order in `streaming.ts`.
+
+**A provider that says it is out is benched, not retried**: `src/services/ai/provider-eligibility.ts`
+remembers "this provider is out until T" from the two failures that state it — a spent quota
+(429, with the stated reset or `Retry-After`, trusted up to an hour) and a request rejected
+for its size (413, and only when the request carried the tool catalog, which is the fixed
+floor no retry shrinks; without it the size came from the conversation and says nothing about
+the next request). Blocks are keyed by provider AND chain, because the two chains run
+different models and fail independently.
+A bench suppresses calls, never observations: the outage records the readiness endpoint and
+the admin alerting read are written exactly as before, and a chain where every provider is
+benched is attempted anyway rather than answering nobody.
 
 Optional features that depend on an env var must deactivate gracefully when the var is absent — never throw at startup. Validate at the point of use, not at startup.
 

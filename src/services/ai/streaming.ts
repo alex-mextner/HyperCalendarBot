@@ -20,6 +20,7 @@ import {
 import { logger, logOnce } from '../../utils/logger.ts';
 import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
+import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
@@ -546,7 +547,18 @@ export async function aiStreamRound(
     },
   };
 
-  for (const slot of chain) {
+  // A provider that said it is out until T is skipped — unless every provider in
+  // the chain is, in which case they are all tried anyway. A wasted round trip
+  // beats no answer, and this is the one place a memory of past failure could
+  // turn into silence.
+  const hasTools = (options.tools?.length ?? 0) > 0;
+  const eligible = chain.filter((slot) => !isBlocked(slot.provider, chainKind, hasTools));
+  const attempts = eligible.length > 0 ? eligible : chain;
+  if (eligible.length === 0 && chain.length > 0) {
+    aiLogger.warn({ chain: chainKind }, 'Every provider is benched — trying them anyway rather than answering nobody');
+  }
+
+  for (const slot of attempts) {
     try {
       aiLogger.info({ provider: slot.label, model: slot.configuredModel, userId: options.userId }, 'Trying provider');
       const result = await runSlot(slot, options, wrappedCallbacks);
@@ -554,11 +566,22 @@ export async function aiStreamRound(
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
       reportProviderAnswered(slot.label, chainKind);
+      clearBlock(slot.provider, chainKind, hasTools);
       return result;
     } catch (error) {
       const failure = describeFailure(slot, error);
       failures.push(failure);
       reportSlotFailure(failure, error, options.userId, chainKind);
+      // Recorded after the alerting, never instead of it: a bench suppresses
+      // calls, and the outage records must keep saying what actually happened.
+      noteFailureForEligibility(
+        slot.provider,
+        chainKind,
+        hasTools,
+        failure.status,
+        failure.message,
+        error instanceof OpenAI.APIError ? error.headers : undefined,
+      );
 
       if (partialOutputShown) {
         aiLogger.error(
