@@ -12,6 +12,18 @@ import type { AgentContext } from './types.ts';
  * are enough. Without a cap the section alone can outweigh the whole prompt.
  */
 const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
+/**
+ * The prompt is re-sent whole on every round of every message, so anything it
+ * inlines from a user's own data has to have a ceiling. The schedule window got
+ * one because a heavy calendar could outweigh the rest of the prompt; memory and
+ * known places are the same risk by another route.
+ *
+ * The repository already returns at most fifty facts, so the count is bounded —
+ * but a fact's text is not, and fifty long ones are as heavy as five hundred
+ * short. Both of these cap the characters, which is what the request pays for.
+ */
+const MEMORY_MAX_CHARS = 2_000;
+const ADDRESS_MAX_CHARS = 2_000;
 
 /**
  * The occurrences closest to now, in chronological order.
@@ -85,16 +97,34 @@ function buildMemorySection(ctx: AgentContext): string {
   if (memoryFacts.length === 0) {
     return '## What I Know About You\n(nothing yet — call remember_user_fact to save facts as you learn them)';
   }
-  const facts = memoryFacts.map((f: { content: string }) => `- ${f.content}`).join('\n');
+  // Kept from the end: an old fact is likelier to be stale than a recent one, so
+  // when something has to go it should be the one least likely to still be true.
+  const lines = memoryFacts.map((f: { content: string }) => `- ${f.content}`);
+  const shown: string[] = [];
+  let budget = MEMORY_MAX_CHARS;
+  for (const line of [...lines].reverse()) {
+    if (budget - line.length < 0) break;
+    budget -= line.length + 1;
+    shown.unshift(line);
+  }
+  const omitted = lines.length - shown.length;
+  const facts = shown.join('\n');
+  const more = omitted > 0 ? `\n(+${omitted} older facts kept but not shown here)` : '';
   return `## What I Know About You
-${facts}
+${facts}${more}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
 }
 
 function buildAddressSection(ctx: AgentContext): string {
   if (!ctx.preloadedAddressContext) return '';
+  // Cut on a line boundary so the last entry is whole rather than a fragment the
+  // model might read as an address.
+  const known =
+    ctx.preloadedAddressContext.length <= ADDRESS_MAX_CHARS
+      ? ctx.preloadedAddressContext
+      : `${ctx.preloadedAddressContext.slice(0, ctx.preloadedAddressContext.lastIndexOf('\n', ADDRESS_MAX_CHARS))}\n(more places not listed — ask the user if the one you need is missing)`;
   return `## Known Locations
-${ctx.preloadedAddressContext}
+${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.
 
 ## Setting event location

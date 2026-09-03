@@ -543,4 +543,59 @@ describe('buildSystemPrompt', () => {
     const prompt = buildSystemPrompt(ctx);
     expect(prompt).not.toContain('pass the LITERAL date/time');
   });
+
+  // Everything the prompt inlines from a user's own data is re-sent on every
+  // round of every message, so each such section needs a ceiling. The schedule
+  // window has one; these two are the same risk by another route.
+  describe("sections built from the user's own data", () => {
+    /**
+     * The prompt reads exactly two things off this capability, and the repo
+     * permits the partial-mock cast inside a factory like this one.
+     */
+    function withMemory(facts: string[]): AgentContext {
+      const birthday = {
+        userMemoryRepo: { getAll: () => facts.map((content) => ({ content })) },
+      } as unknown as AgentContext['birthday'];
+      return { ...ctx, birthday };
+    }
+
+    test('caps the remembered facts by size and says how many are held back', () => {
+      const long = 'x'.repeat(200);
+      const prompt = buildSystemPrompt(withMemory(Array.from({ length: 40 }, (_, i) => `${i} ${long}`)));
+      const listed = prompt.split('\n').filter((line) => line.includes(long)).length;
+      expect(listed).toBeLessThan(40);
+      expect(prompt).toContain('older facts kept but not shown here');
+    });
+
+    // The newest facts are the ones likeliest to still be true.
+    test('keeps the newest facts when it has to choose', () => {
+      const long = 'y'.repeat(300);
+      const prompt = buildSystemPrompt(withMemory([`oldest ${long}`, `middle ${long}`, `newest ${long}`]));
+      expect(prompt).toContain(`newest ${long}`);
+    });
+
+    test('a short memory is untouched', () => {
+      const prompt = buildSystemPrompt(withMemory(['likes tea', 'lives in Belgrade']));
+      expect(prompt).toContain('- likes tea');
+      expect(prompt).not.toContain('older facts kept');
+    });
+
+    // Cut on a line boundary, so the last entry is a whole place rather than a
+    // fragment the model could read as an address.
+    test('caps the known places on a line boundary', () => {
+      const place = (i: number) => `Place ${i} — ${'street '.repeat(20)}`;
+      const context = Array.from({ length: 40 }, (_, i) => place(i)).join('\n');
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: context });
+      expect(prompt).toContain('more places not listed');
+      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(more places')[0] ?? '';
+      // Whole entries only: the last line shown is one of the ones fed in.
+      expect(shown.split('\n').every((line) => context.split('\n').includes(line))).toBe(true);
+    });
+
+    test('a short list of places is untouched', () => {
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: 'Home — Knez Mihailova 1' });
+      expect(prompt).toContain('Home — Knez Mihailova 1');
+      expect(prompt).not.toContain('more places not listed');
+    });
+  });
 });
