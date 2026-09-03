@@ -1,9 +1,8 @@
-// test/database/repositories/user-memory.repository.test.ts
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { migrations } from '../../../src/database/migrations';
-import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository';
-import { runMigrations } from '../../../src/database/schema';
+import { migrations } from '../../../src/database/migrations.ts';
+import { UserMemoryRepository } from '../../../src/database/repositories/user-memory.repository.ts';
+import { runMigrations } from '../../../src/database/schema.ts';
 
 const USER_ID = 4242;
 const OTHER_USER_ID = 777;

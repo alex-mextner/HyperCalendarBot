@@ -2,6 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
+import { MEMORY_SECTION_MAX_CHARS } from './memory-limits.ts';
 import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
@@ -21,8 +22,9 @@ const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
  * The repository already returns at most fifty facts, so the count is bounded —
  * but a fact's text is not, and fifty long ones are as heavy as five hundred
  * short. Both of these cap the characters, which is what the request pays for.
+ * The memory ceiling lives in a leaf module it shares with the write-side limit
+ * that is derived from it.
  */
-const MEMORY_MAX_CHARS = 2_000;
 const ADDRESS_MAX_CHARS = 2_000;
 
 /**
@@ -101,7 +103,7 @@ function buildMemorySection(ctx: AgentContext): string {
   // when something has to go it should be the one least likely to still be true.
   const lines = memoryFacts.map((f: { content: string }) => `- ${f.content}`);
   const shown: string[] = [];
-  let budget = MEMORY_MAX_CHARS;
+  let budget = MEMORY_SECTION_MAX_CHARS;
   for (const line of [...lines].reverse()) {
     // Skipped, not stopped on: one enormous fact used to end the loop on its
     // first turn and take forty-nine perfectly small ones with it, leaving a
@@ -120,9 +122,12 @@ Use this to personalize responses. Call remember_user_fact when you learn someth
 
 /**
  * Cuts at the last line break inside the budget, or at the budget itself when
- * there is none — a context whose first entry is longer than the whole budget
- * has no boundary to cut on, and `lastIndexOf` answers that with -1, which as a
- * slice end would have kept everything but the final character.
+ * there is no break at a positive index — a context whose first entry is longer
+ * than the whole budget has no boundary to cut on, and `lastIndexOf` answers
+ * that with -1, which as a slice end would have kept everything but the final
+ * character. A break at index 0 is the same case wearing a leading blank line:
+ * nothing whole fits either way, and a truncated prefix says more than an empty
+ * section does.
  */
 function cutAtLineBoundary(text: string, budget: number): string {
   const boundary = text.lastIndexOf('\n', budget);

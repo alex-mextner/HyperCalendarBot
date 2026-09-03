@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import { MEMORY_FACT_MAX_CHARS } from './memory-limits.ts';
 
 /**
  * Internal tool definition format — the shape we author tools in.
@@ -953,8 +954,7 @@ const toolDefinitions: ToolDefinition[] = [
         },
         content: {
           type: 'string',
-          description:
-            'The fact to remember, at most 500 characters. One short sentence — save several facts rather than one long one.',
+          description: `The fact to remember, at most ${MEMORY_FACT_MAX_CHARS} characters. One short sentence — save several facts rather than one long one.`,
         },
       },
       required: ['type', 'content'],
