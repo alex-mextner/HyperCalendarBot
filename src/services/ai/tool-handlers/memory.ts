@@ -1,6 +1,6 @@
 import { t } from '../../../config/constants.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
-import { MEMORY_FACT_MAX_CHARS } from '../memory-limits.ts';
+import { collapseToOneLine, MEMORY_FACT_MAX_CHARS } from '../prompt-sections.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 const TELEGRAM_REACTION_EMOJIS = new Set([
@@ -93,11 +93,9 @@ export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFac
     return { success: false, error: msg.storageUnavailable };
   }
 
-  // Collapsed to a single line, not merely trimmed: the section renders one
-  // fact per line, so a fact carrying its own newlines could forge a heading
-  // like "## Schedule Context" inside the system prompt and would break the
-  // one-line-per-fact accounting the cap depends on.
-  const content = input.content.replace(/\s+/g, ' ').trim();
+  // Collapsed to a single line, not merely trimmed — see collapseToOneLine for
+  // what a fact carrying its own newlines would do to the prompt.
+  const content = collapseToOneLine(input.content);
   if (content.length === 0) {
     return { success: false, error: msg.empty };
   }

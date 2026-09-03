@@ -2,7 +2,7 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
-import { MEMORY_SECTION_MAX_CHARS } from './memory-limits.ts';
+import { collapseToOneLine, MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
 import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
@@ -17,7 +17,7 @@ const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
  * A saved place has no length limit either, and the list of them is inlined
  * whole. Capped in characters like the memory section, for the same reason:
  * characters are what the request pays for. (The memory ceiling lives in
- * memory-limits.ts, shared with the write-side limit derived from it.)
+ * prompt-sections.ts, shared with the write-side limit derived from it.)
  */
 const ADDRESS_MAX_CHARS = 2_000;
 
@@ -96,11 +96,9 @@ function buildMemorySection(ctx: AgentContext): string {
   // Kept from the end: an old fact is likelier to be stale than a recent one, so
   // when something has to go it should be the one least likely to still be true.
   //
-  // Collapsed to one line here as well as at the write gate, because rows saved
-  // before that gate existed still hold their own newlines — and a fact holding
-  // "## Schedule Context" on a line of its own reads to the model as the start
-  // of a section rather than as something the user said.
-  const lines = memoryFacts.map((f: { content: string }) => `- ${f.content.replace(/\s+/g, ' ')}`);
+  // Collapsed here as well as at the write gate, because rows saved before that
+  // gate existed still hold their own newlines.
+  const lines = memoryFacts.map((f: { content: string }) => `- ${collapseToOneLine(f.content)}`);
   // Offered newest-first so that is what survives the budget, then put back into
   // the order they were learned in.
   const shown = linesWithinBudget([...lines].reverse(), MEMORY_SECTION_MAX_CHARS).reverse();
@@ -151,7 +149,10 @@ function buildAddressSection(ctx: AgentContext): string {
   // order, and one long address is skipped rather than hiding every place
   // listed after it. Only the entry lines are counted as places: the headings
   // and the blank line between the blocks are not places the user could ask for.
-  const lines = ctx.preloadedAddressContext.split('\n');
+  // A heading is dropped rather than trusted: the builder writes its own, and a
+  // line that opens one here came from something a user typed — an event
+  // location is free text, and it reaches this list through the address cache.
+  const lines = ctx.preloadedAddressContext.split('\n').filter((line) => !line.startsWith('#'));
   const shown = linesWithinBudget(lines, ADDRESS_MAX_CHARS);
   const isPlace = (line: string) => line.startsWith('- ');
   const omitted = lines.filter(isPlace).length - shown.filter(isPlace).length;

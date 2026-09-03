@@ -1,5 +1,5 @@
 import type OpenAI from 'openai';
-import { MEMORY_FACT_MAX_CHARS } from './memory-limits.ts';
+import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
 
 /**
  * Internal tool definition format — the shape we author tools in.

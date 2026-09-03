@@ -1,4 +1,5 @@
 // src/services/location/address-context.ts
+import { collapseToOneLine } from '../ai/prompt-sections.ts';
 import type { AddressCache } from './address-cache.ts';
 
 /**
@@ -15,7 +16,7 @@ export async function buildAddressContext(addressCache: AddressCache, userId: nu
   if (frequent.length > 0) {
     lines.push('Frequently used locations:');
     for (const f of frequent.slice(0, 15)) {
-      lines.push(`- ${f.resolvedAddress} (used ${f.count}x)`);
+      lines.push(`- ${collapseToOneLine(f.resolvedAddress)} (used ${f.count}x)`);
     }
   }
 
@@ -25,7 +26,7 @@ export async function buildAddressContext(addressCache: AddressCache, userId: nu
     const seen = new Set(frequent.map((f) => f.resolvedAddress));
     for (const r of recent.slice(0, 15)) {
       if (seen.has(r.resolvedAddress)) continue;
-      lines.push(`- "${r.input}" → ${r.resolvedAddress}`);
+      lines.push(`- "${collapseToOneLine(r.input)}" → ${collapseToOneLine(r.resolvedAddress)}`);
       seen.add(r.resolvedAddress);
     }
   }
