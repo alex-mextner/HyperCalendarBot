@@ -564,7 +564,7 @@ describe('buildSystemPrompt', () => {
       const prompt = buildSystemPrompt(withMemory(Array.from({ length: 40 }, (_, i) => `${i} ${long}`)));
       const listed = prompt.split('\n').filter((line) => line.includes(long)).length;
       expect(listed).toBeLessThan(40);
-      expect(prompt).toContain('older facts kept but not shown here');
+      expect(prompt).toContain('facts kept but not shown here');
     });
 
     // The newest facts are the ones likeliest to still be true.
@@ -574,10 +574,20 @@ describe('buildSystemPrompt', () => {
       expect(prompt).toContain(`newest ${long}`);
     });
 
+    // One enormous fact used to end the loop on its first turn and take every
+    // small one with it, leaving a section that showed nothing.
+    test('one oversized fact does not take the rest with it', () => {
+      const facts = ['likes tea', 'lives in Belgrade', 'z'.repeat(3_000)];
+      const prompt = buildSystemPrompt(withMemory(facts));
+      expect(prompt).toContain('- likes tea');
+      expect(prompt).toContain('- lives in Belgrade');
+      expect(prompt).toContain('+1 facts kept but not shown here');
+    });
+
     test('a short memory is untouched', () => {
       const prompt = buildSystemPrompt(withMemory(['likes tea', 'lives in Belgrade']));
       expect(prompt).toContain('- likes tea');
-      expect(prompt).not.toContain('older facts kept');
+      expect(prompt).not.toContain('facts kept but not shown here');
     });
 
     // Cut on a line boundary, so the last entry is a whole place rather than a
@@ -590,6 +600,16 @@ describe('buildSystemPrompt', () => {
       const shown = prompt.split('## Known Locations\n')[1]?.split('\n(more places')[0] ?? '';
       // Whole entries only: the last line shown is one of the ones fed in.
       expect(shown.split('\n').every((line) => context.split('\n').includes(line))).toBe(true);
+    });
+
+    // A single entry longer than the whole budget has no line break to cut on,
+    // and the -1 that answers for one would have kept the entire string.
+    test('caps a single oversized entry that has no line break', () => {
+      const oneLine = `Place — ${'street '.repeat(1_000)}`;
+      const prompt = buildSystemPrompt({ ...ctx, preloadedAddressContext: oneLine });
+      expect(prompt).toContain('more places not listed');
+      const shown = prompt.split('## Known Locations\n')[1]?.split('\n(more places')[0] ?? '';
+      expect(shown.length).toBeLessThanOrEqual(2_000);
     });
 
     test('a short list of places is untouched', () => {

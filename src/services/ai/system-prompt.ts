@@ -103,16 +103,30 @@ function buildMemorySection(ctx: AgentContext): string {
   const shown: string[] = [];
   let budget = MEMORY_MAX_CHARS;
   for (const line of [...lines].reverse()) {
-    if (budget - line.length < 0) break;
+    // Skipped, not stopped on: one enormous fact used to end the loop on its
+    // first turn and take forty-nine perfectly small ones with it, leaving a
+    // section that showed nothing while claiming the rest were merely older.
+    if (line.length > budget) continue;
     budget -= line.length + 1;
     shown.unshift(line);
   }
   const omitted = lines.length - shown.length;
   const facts = shown.join('\n');
-  const more = omitted > 0 ? `\n(+${omitted} older facts kept but not shown here)` : '';
+  const more = omitted > 0 ? `\n(+${omitted} facts kept but not shown here)` : '';
   return `## What I Know About You
 ${facts}${more}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
+}
+
+/**
+ * Cuts at the last line break inside the budget, or at the budget itself when
+ * there is none — a context whose first entry is longer than the whole budget
+ * has no boundary to cut on, and `lastIndexOf` answers that with -1, which as a
+ * slice end would have kept everything but the final character.
+ */
+function cutAtLineBoundary(text: string, budget: number): string {
+  const boundary = text.lastIndexOf('\n', budget);
+  return text.slice(0, boundary > 0 ? boundary : budget);
 }
 
 function buildAddressSection(ctx: AgentContext): string {
@@ -122,7 +136,7 @@ function buildAddressSection(ctx: AgentContext): string {
   const known =
     ctx.preloadedAddressContext.length <= ADDRESS_MAX_CHARS
       ? ctx.preloadedAddressContext
-      : `${ctx.preloadedAddressContext.slice(0, ctx.preloadedAddressContext.lastIndexOf('\n', ADDRESS_MAX_CHARS))}\n(more places not listed — ask the user if the one you need is missing)`;
+      : `${cutAtLineBoundary(ctx.preloadedAddressContext, ADDRESS_MAX_CHARS)}\n(more places not listed — ask the user if the one you need is missing)`;
   return `## Known Locations
 ${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.
