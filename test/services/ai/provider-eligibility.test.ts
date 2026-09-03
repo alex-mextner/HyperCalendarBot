@@ -138,6 +138,25 @@ describe('what a block does not cover', () => {
     expect(isBlocked('groq', 'smart', true, NOW + 60_000)).toBe(true);
   });
 
+  // Error bodies echo the request and quote the provider's own rate-limit
+  // documentation, so the words alone must not bench anything when the status
+  // already says what kind of failure this is.
+  test('the status decides, not words echoed in the body', () => {
+    const echoed = 'Internal Server Error — see our rate limit documentation';
+    expect(noteFailureForEligibility('hf', 'smart', true, 500, echoed, undefined, NOW)).toBeNull();
+    expect(
+      noteFailureForEligibility('hf', 'smart', true, 400, 'Request too large, said the echo', undefined, NOW),
+    ).toBeNull();
+    expect(isBlocked('hf', 'smart', true, NOW + 1000)).toBe(false);
+  });
+
+  // Wire casing survives serialization, so a lowercase-only lookup would find
+  // nothing on exactly the shape the plain-object branch exists to read.
+  test('a Retry-After keeps its meaning in any casing', () => {
+    const block = noteFailureForEligibility('zai', 'smart', false, 429, 'Rate limit', { 'Retry-After': '30' }, NOW);
+    expect(block?.untilMs).toBe(NOW + 30_000);
+  });
+
   // The header carries either seconds or an HTTP date; a date through Number()
   // is NaN, which would silently become the two-minute guess.
   test('an HTTP-date Retry-After is honoured', () => {

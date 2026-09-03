@@ -71,6 +71,18 @@ function blockKey(provider: ProviderId, chain: ProviderChainKind): BlockKey {
 }
 
 /**
+ * A header from a plain object, whatever case it was serialized in. Wire casing
+ * survives serialization, so looking only for the lowercase name would find
+ * nothing on exactly the shape this branch exists to read.
+ */
+function plainHeader(headers: object, name: string): unknown {
+  for (const [key, value] of Object.entries(headers)) {
+    if (key.toLowerCase() === name) return value;
+  }
+  return undefined;
+}
+
+/**
  * Seconds in a `Retry-After` header, when the provider sent a sane one.
  *
  * Both shapes are read. The SDK types this as a fetch `Headers`, but the errors
@@ -83,7 +95,7 @@ function retryAfterMs(headers: unknown, now: number): number | null {
   const raw =
     'get' in headers && typeof headers.get === 'function'
       ? headers.get('retry-after')
-      : (headers as { [key: string]: unknown })['retry-after'];
+      : plainHeader(headers, 'retry-after');
   if (raw === null || raw === undefined) return null;
   const seconds = Number(raw);
   if (Number.isFinite(seconds)) return seconds > 0 ? seconds * 1000 : null;
@@ -111,14 +123,24 @@ function statedResetMs(message: string, now: number): number | null {
   return duration > 0 ? duration : null;
 }
 
+/**
+ * The status decides when there is one. Error bodies echo the request and quote
+ * the provider's own rate-limit documentation, so a 500 mentioning "rate limit"
+ * would otherwise bench a provider that is merely having a bad minute — and the
+ * text is partly ours, which makes it a bench a user could trigger.
+ */
+function saysWithoutStatus(status: number | undefined, message: string, pattern: RegExp): boolean {
+  return status === undefined && pattern.test(message);
+}
+
 /** True when the provider said the request itself is too large for its tier. */
 export function isRequestTooLarge(status: number | undefined, message: string): boolean {
-  return status === 413 || /request too large/i.test(message);
+  return status === 413 || saysWithoutStatus(status, message, /request too large/i);
 }
 
 /** True when the provider said its quota or rate limit is spent. */
 export function isQuotaExhausted(status: number | undefined, message: string): boolean {
-  return status === 429 || /rate limit|limit exhausted/i.test(message);
+  return status === 429 || saysWithoutStatus(status, message, /rate limit|limit exhausted/i);
 }
 
 /**
