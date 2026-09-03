@@ -30,15 +30,15 @@ describe('what a failure implies', () => {
   // The stated reset is a day away; trusting it literally would bench the
   // provider past any point where a stale memory is still evidence.
   test('a stated reset is trusted only up to an hour', () => {
-    const block = noteFailureForEligibility('zai', 429, ZAI_QUOTA, undefined, NOW);
+    const block = noteFailureForEligibility('zai', 'smart', false, 429, ZAI_QUOTA, undefined, NOW);
     expect(block?.scope).toBe('all');
     expect(block?.untilMs).toBe(NOW + 60 * 60 * 1000);
-    expect(isBlocked('zai', false, NOW + 59 * 60 * 1000)).toBe(true);
-    expect(isBlocked('zai', false, NOW + 61 * 60 * 1000)).toBe(false);
+    expect(isBlocked('zai', 'smart', false, NOW + 59 * 60 * 1000)).toBe(true);
+    expect(isBlocked('zai', 'smart', false, NOW + 61 * 60 * 1000)).toBe(false);
   });
 
   test('a Retry-After header wins over the prose', () => {
-    const block = noteFailureForEligibility('zai', 429, ZAI_QUOTA, headersWith('90'), NOW);
+    const block = noteFailureForEligibility('zai', 'smart', false, 429, ZAI_QUOTA, headersWith('90'), NOW);
     expect(block?.untilMs).toBe(NOW + 90_000);
   });
 
@@ -46,54 +46,105 @@ describe('what a failure implies', () => {
   // production serialize as a plain object. Reading only one shape would drop
   // the provider's own answer and fall back to guessing.
   test('a Retry-After sent as a plain object is read too', () => {
-    const block = noteFailureForEligibility('zai', 429, 'Rate limit reached', { 'retry-after': '45' }, NOW);
+    const block = noteFailureForEligibility(
+      'zai',
+      'smart',
+      false,
+      429,
+      'Rate limit reached',
+      { 'retry-after': '45' },
+      NOW,
+    );
     expect(block?.untilMs).toBe(NOW + 45_000);
   });
 
   // Two blocks with different scopes coexist: the shorter one used to overwrite
   // the longer, and the size rejection came back a request later.
   test('a brief quota block does not cut a standing size block short', () => {
-    noteFailureForEligibility('groq', 413, GROQ_TOO_LARGE, undefined, NOW);
-    noteFailureForEligibility('groq', 429, 'Rate limit reached', undefined, NOW);
+    noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
+    noteFailureForEligibility('groq', 'smart', false, 429, 'Rate limit reached', undefined, NOW);
 
-    expect(isBlocked('groq', false, NOW + 5 * 60 * 1000)).toBe(false);
-    expect(isBlocked('groq', true, NOW + 5 * 60 * 1000)).toBe(true);
+    expect(isBlocked('groq', 'smart', false, NOW + 5 * 60 * 1000)).toBe(false);
+    expect(isBlocked('groq', 'smart', true, NOW + 5 * 60 * 1000)).toBe(true);
   });
 
   // A rate limit with no stated end gets the short block: guessing long is the
   // expensive mistake.
   test('a rate limit with no stated end gets two minutes', () => {
-    const block = noteFailureForEligibility('gemini', 429, 'Rate limit reached for requests', undefined, NOW);
+    const block = noteFailureForEligibility(
+      'gemini',
+      'smart',
+      false,
+      429,
+      'Rate limit reached for requests',
+      undefined,
+      NOW,
+    );
     expect(block?.untilMs).toBe(NOW + 2 * 60 * 1000);
   });
 
   // A reset time already in the past says nothing about the future.
   test('a stated reset in the past falls back to the short block', () => {
     const stale = 'Limit Exhausted. Your limit will reset at 2026-09-01 10:00:00';
-    const block = noteFailureForEligibility('zai', 429, stale, undefined, NOW);
+    const block = noteFailureForEligibility('zai', 'smart', false, 429, stale, undefined, NOW);
     expect(block?.untilMs).toBe(NOW + 2 * 60 * 1000);
   });
 
   // The tier cannot grow a request; the catalog cannot shrink without a deploy.
   test('a size rejection blocks only the requests that carry tools', () => {
-    const block = noteFailureForEligibility('groq', 413, GROQ_TOO_LARGE, undefined, NOW);
+    const block = noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
     expect(block?.scope).toBe('with-tools');
-    expect(isBlocked('groq', true, NOW + 60_000)).toBe(true);
-    expect(isBlocked('groq', false, NOW + 60_000)).toBe(false);
+    expect(isBlocked('groq', 'smart', true, NOW + 60_000)).toBe(true);
+    expect(isBlocked('groq', 'smart', false, NOW + 60_000)).toBe(false);
   });
 
   // Everything else is worth retrying at once — benching on a 500 would turn a
   // blip into an outage of our own making.
   test('a transient failure benches nobody', () => {
-    expect(noteFailureForEligibility('hf', 500, 'Internal Server Error', undefined, NOW)).toBeNull();
-    expect(noteFailureForEligibility('hf', 404, 'model does not exist', undefined, NOW)).toBeNull();
-    expect(isBlocked('hf', true, NOW)).toBe(false);
+    expect(noteFailureForEligibility('hf', 'smart', true, 500, 'Internal Server Error', undefined, NOW)).toBeNull();
+    expect(noteFailureForEligibility('hf', 'smart', true, 404, 'model does not exist', undefined, NOW)).toBeNull();
+    expect(isBlocked('hf', 'smart', true, NOW)).toBe(false);
   });
 
   test('an answer ends the block', () => {
-    noteFailureForEligibility('zai', 429, ZAI_QUOTA, undefined, NOW);
-    clearBlock('zai');
-    expect(isBlocked('zai', false, NOW + 1000)).toBe(false);
+    noteFailureForEligibility('zai', 'smart', false, 429, ZAI_QUOTA, undefined, NOW);
+    clearBlock('zai', 'smart', true);
+    expect(isBlocked('zai', 'smart', false, NOW + 1000)).toBe(false);
+  });
+});
+
+describe('what a block does not cover', () => {
+  // The two chains run different models of the same provider and fail
+  // independently — a background summary hitting a per-minute limit must not
+  // bench the model that answers people.
+  test('a block on one chain leaves the other alone', () => {
+    noteFailureForEligibility('zai', 'fast', false, 429, 'Rate limit reached', undefined, NOW);
+    expect(isBlocked('zai', 'fast', false, NOW + 1000)).toBe(true);
+    expect(isBlocked('zai', 'smart', false, NOW + 1000)).toBe(false);
+  });
+
+  // A request that was too large without the catalog was too large for its own
+  // reasons; the next one may be short.
+  test('a size rejection without tools benches nobody', () => {
+    expect(noteFailureForEligibility('groq', 'fast', false, 413, GROQ_TOO_LARGE, undefined, NOW)).toBeNull();
+    expect(isBlocked('groq', 'fast', false, NOW + 1000)).toBe(false);
+  });
+
+  // A short request getting through says nothing about whether the catalog
+  // fits, and ordinary summary traffic must not wipe that evidence.
+  test('a success without tools leaves the size block standing', () => {
+    noteFailureForEligibility('groq', 'smart', true, 413, GROQ_TOO_LARGE, undefined, NOW);
+    clearBlock('groq', 'smart', false);
+    expect(isBlocked('groq', 'smart', true, NOW + 60_000)).toBe(true);
+  });
+
+  // The header carries either seconds or an HTTP date; a date through Number()
+  // is NaN, which would silently become the two-minute guess.
+  test('an HTTP-date Retry-After is honoured', () => {
+    const at = new Date(NOW + 10 * 60 * 1000).toUTCString();
+    const block = noteFailureForEligibility('zai', 'smart', false, 429, 'Rate limit', { 'retry-after': at }, NOW);
+    expect(block).not.toBeNull();
+    expect(block?.untilMs).toBeGreaterThan(NOW + 8 * 60 * 1000);
   });
 });
 

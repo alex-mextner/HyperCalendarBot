@@ -20,6 +20,7 @@
 //   • A block never empties the chain. If every provider is blocked the request
 //     is attempted anyway — a wasted round trip beats no answer at all.
 
+import type { ProviderChainKind } from '../../utils/ai-provider-alert.ts';
 import { logger } from '../../utils/logger.ts';
 import type { ProviderId } from './provider-ids.ts';
 
@@ -53,7 +54,21 @@ interface Block {
  */
 type ProviderBlocks = { [scope in BlockScope]?: Block };
 
-const blocks = new Map<ProviderId, ProviderBlocks>();
+/**
+ * Keyed by provider AND chain, because the two chains talk to different models
+ * of the same provider and fail independently — the alerting layer already
+ * treats them apart. A per-minute limit hit by a background summary must not
+ * bench the model that answers people; when the same account-wide quota does
+ * apply to both, the other chain learns it from its own next request, at the
+ * cost of one round trip.
+ */
+type BlockKey = `${ProviderId}:${ProviderChainKind}`;
+
+const blocks = new Map<BlockKey, ProviderBlocks>();
+
+function blockKey(provider: ProviderId, chain: ProviderChainKind): BlockKey {
+  return `${provider}:${chain}`;
+}
 
 /**
  * Seconds in a `Retry-After` header, when the provider sent a sane one.
@@ -63,15 +78,21 @@ const blocks = new Map<ProviderId, ProviderBlocks>();
  * that quietly returns nothing would leave every rate limit on the two-minute
  * guess while the provider was telling us exactly when to come back.
  */
-function retryAfterMs(headers: unknown): number | null {
+function retryAfterMs(headers: unknown, now: number): number | null {
   if (typeof headers !== 'object' || headers === null) return null;
   const raw =
     'get' in headers && typeof headers.get === 'function'
       ? headers.get('retry-after')
       : (headers as { [key: string]: unknown })['retry-after'];
+  if (raw === null || raw === undefined) return null;
   const seconds = Number(raw);
-  if (!Number.isFinite(seconds) || seconds <= 0) return null;
-  return seconds * 1000;
+  if (Number.isFinite(seconds)) return seconds > 0 ? seconds * 1000 : null;
+  // The header legally carries either a delay in seconds or an HTTP date, and
+  // a date through Number() is NaN — which would silently become the guess.
+  const at = Date.parse(String(raw));
+  if (Number.isNaN(at)) return null;
+  const duration = at - now;
+  return duration > 0 ? duration : null;
 }
 
 /**
@@ -107,6 +128,8 @@ export function isQuotaExhausted(status: number | undefined, message: string): b
  */
 export function noteFailureForEligibility(
   provider: ProviderId,
+  chain: ProviderChainKind,
+  hasTools: boolean,
   status: number | undefined,
   message: string,
   headers: unknown,
@@ -114,14 +137,18 @@ export function noteFailureForEligibility(
 ): Block | null {
   let block: Block | null = null;
 
+  // Only a request carrying the catalog earns a size block. The catalog is a
+  // fixed floor that no retry shrinks; a request that was too large without it
+  // was too large because of its history, and the next one may not be.
   if (isRequestTooLarge(status, message)) {
+    if (!hasTools) return null;
     block = {
       untilMs: now + TOO_LARGE_BLOCK_MS,
       scope: 'with-tools',
-      reason: 'the request was too large for this tier',
+      reason: 'the tool catalog does not fit this tier',
     };
   } else if (isQuotaExhausted(status, message)) {
-    const stated = retryAfterMs(headers) ?? statedResetMs(message, now);
+    const stated = retryAfterMs(headers, now) ?? statedResetMs(message, now);
     const duration = stated === null ? VAGUE_BLOCK_MS : Math.min(stated, MAX_BLOCK_MS);
     block = {
       untilMs: now + duration,
@@ -131,37 +158,64 @@ export function noteFailureForEligibility(
   }
 
   if (!block) return null;
-  const existing = blocks.get(provider) ?? {};
+  const key = blockKey(provider, chain);
+  const existing = blocks.get(key) ?? {};
   const current = existing[block.scope];
   // A longer standing block is never shortened by a newer, briefer one.
   if (current && current.untilMs > block.untilMs) return current;
-  blocks.set(provider, { ...existing, [block.scope]: block });
+  blocks.set(key, { ...existing, [block.scope]: block });
   eligibilityLogger.info(
-    { provider, scope: block.scope, seconds: Math.round((block.untilMs - now) / 1000), reason: block.reason },
+    {
+      provider,
+      chain,
+      scope: block.scope,
+      seconds: Math.round((block.untilMs - now) / 1000),
+      reason: block.reason,
+    },
     'Provider benched — skipping it until the block expires',
   );
   return block;
 }
 
-/** Clears every block: the provider just answered, so whatever it said is over. */
-export function clearBlock(provider: ProviderId): void {
-  blocks.delete(provider);
+/**
+ * Clears what this answer actually disproves. A short request getting through
+ * says nothing about whether the catalog fits, so it must not erase a size
+ * block — otherwise ordinary summary traffic wipes the evidence and the next
+ * user round pays the same guaranteed rejection.
+ */
+export function clearBlock(provider: ProviderId, chain: ProviderChainKind, hasTools: boolean): void {
+  const key = blockKey(provider, chain);
+  const existing = blocks.get(key);
+  if (!existing) return;
+  if (hasTools) {
+    blocks.delete(key);
+    return;
+  }
+  const { all, ...rest } = existing;
+  void all;
+  blocks.set(key, rest);
 }
 
-function activeBlock(provider: ProviderId, scope: BlockScope, now: number): Block | undefined {
-  const block = blocks.get(provider)?.[scope];
+function activeBlock(key: BlockKey, scope: BlockScope, now: number): Block | undefined {
+  const block = blocks.get(key)?.[scope];
   if (!block) return undefined;
   if (block.untilMs > now) return block;
-  const rest = { ...blocks.get(provider) };
+  const rest = { ...blocks.get(key) };
   delete rest[scope];
-  blocks.set(provider, rest);
+  blocks.set(key, rest);
   return undefined;
 }
 
 /** True when a request of this shape should skip the provider right now. */
-export function isBlocked(provider: ProviderId, hasTools: boolean, now: number = Date.now()): boolean {
-  if (activeBlock(provider, 'all', now)) return true;
-  return hasTools && activeBlock(provider, 'with-tools', now) !== undefined;
+export function isBlocked(
+  provider: ProviderId,
+  chain: ProviderChainKind,
+  hasTools: boolean,
+  now: number = Date.now(),
+): boolean {
+  const key = blockKey(provider, chain);
+  if (activeBlock(key, 'all', now)) return true;
+  return hasTools && activeBlock(key, 'with-tools', now) !== undefined;
 }
 
 /** For tests: forget every block. */

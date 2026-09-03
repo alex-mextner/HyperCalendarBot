@@ -552,7 +552,7 @@ export async function aiStreamRound(
   // beats no answer, and this is the one place a memory of past failure could
   // turn into silence.
   const hasTools = (options.tools?.length ?? 0) > 0;
-  const eligible = chain.filter((slot) => !isBlocked(slot.provider, hasTools));
+  const eligible = chain.filter((slot) => !isBlocked(slot.provider, chainKind, hasTools));
   const attempts = eligible.length > 0 ? eligible : chain;
   if (eligible.length === 0 && chain.length > 0) {
     aiLogger.warn({ chain: chainKind }, 'Every provider is benched — trying them anyway rather than answering nobody');
@@ -566,7 +566,7 @@ export async function aiStreamRound(
       // chain. The alert layer decides whether that is worth telling the admin
       // about.
       reportProviderAnswered(slot.label, chainKind);
-      clearBlock(slot.provider);
+      clearBlock(slot.provider, chainKind, hasTools);
       return result;
     } catch (error) {
       const failure = describeFailure(slot, error);
@@ -576,6 +576,8 @@ export async function aiStreamRound(
       // calls, and the outage records must keep saying what actually happened.
       noteFailureForEligibility(
         slot.provider,
+        chainKind,
+        hasTools,
         failure.status,
         failure.message,
         error instanceof OpenAI.APIError ? error.headers : undefined,

@@ -243,7 +243,10 @@ a new order in `streaming.ts`.
 **A provider that says it is out is benched, not retried**: `src/services/ai/provider-eligibility.ts`
 remembers "this provider is out until T" from the two failures that state it — a spent quota
 (429, with the stated reset or `Retry-After`, trusted up to an hour) and a request rejected
-for its size (413, which benches only requests carrying tools, since short ones still fit).
+for its size (413, and only when the request carried the tool catalog, which is the fixed
+floor no retry shrinks; without it the size came from the conversation and says nothing about
+the next request). Blocks are keyed by provider AND chain, because the two chains run
+different models and fail independently.
 A bench suppresses calls, never observations: the outage records the readiness endpoint and
 the admin alerting read are written exactly as before, and a chain where every provider is
 benched is attempted anyway rather than answering nobody.
