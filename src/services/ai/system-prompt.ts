@@ -14,16 +14,10 @@ import type { AgentContext } from './types.ts';
  */
 const EVENTS_WINDOW_MAX_OCCURRENCES = 60;
 /**
- * The prompt is re-sent whole on every round of every message, so anything it
- * inlines from a user's own data has to have a ceiling. The schedule window got
- * one because a heavy calendar could outweigh the rest of the prompt; memory and
- * known places are the same risk by another route.
- *
- * The repository already returns at most fifty facts, so the count is bounded —
- * but a fact's text is not, and fifty long ones are as heavy as five hundred
- * short. Both of these cap the characters, which is what the request pays for.
- * The memory ceiling lives in a leaf module it shares with the write-side limit
- * that is derived from it.
+ * A saved place has no length limit either, and the list of them is inlined
+ * whole. Capped in characters like the memory section, for the same reason:
+ * characters are what the request pays for. (The memory ceiling lives in
+ * memory-limits.ts, shared with the write-side limit derived from it.)
  */
 const ADDRESS_MAX_CHARS = 2_000;
 
@@ -113,6 +107,13 @@ function buildMemorySection(ctx: AgentContext): string {
     shown.unshift(line);
   }
   const omitted = lines.length - shown.length;
+  // Nothing shown at all reads like a user the bot knows nothing about, which is
+  // the opposite of the truth. A fact bigger than the whole section is one the
+  // write side now refuses, so any of them still here predate that limit.
+  if (shown.length === 0) {
+    return `## What I Know About You
+(${omitted} facts saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
+  }
   const facts = shown.join('\n');
   const more = omitted > 0 ? `\n(+${omitted} facts kept but not shown here)` : '';
   return `## What I Know About You

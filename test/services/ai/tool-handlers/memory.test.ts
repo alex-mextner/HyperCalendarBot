@@ -72,6 +72,18 @@ describe('handleRememberUserFact', () => {
     expect(ctx.birthday!.userMemoryRepo!.getAll(USER_ID)).toHaveLength(0);
   });
 
+  // A learned intent replaying this step sends the error to the user verbatim,
+  // so it has to be in their language rather than the model's.
+  test('the refusal is written in the user language', () => {
+    const ctx = makeCtx(db, USER_ID);
+    ctx.user.language = 'ru';
+
+    const result = handleRememberUserFact(ctx, { type: 'append', content: 'x'.repeat(3_000) });
+
+    expect(result.error).toContain('слишком длинный');
+    expect(result.error).toContain('3000');
+  });
+
   // rewrite is the destructive one: refusing it before it runs matters, or an
   // oversized rewrite would wipe every existing fact and save nothing in place.
   test('an oversized rewrite leaves the existing facts alone', () => {

@@ -12,4 +12,4 @@
  * fact is capped at a quarter of the section.
  */
 export const MEMORY_SECTION_MAX_CHARS = 2_000;
-export const MEMORY_FACT_MAX_CHARS = 500;
+export const MEMORY_FACT_MAX_CHARS = MEMORY_SECTION_MAX_CHARS / 4;

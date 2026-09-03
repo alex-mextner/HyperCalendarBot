@@ -1,3 +1,4 @@
+import { t } from '../../../config/constants.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
 import { MEMORY_FACT_MAX_CHARS } from '../memory-limits.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
@@ -84,19 +85,20 @@ interface RememberUserFactInput {
 }
 
 export function handleRememberUserFact(ctx: AgentContext, input: RememberUserFactInput): ToolResult {
+  // These refusals reach the user verbatim when a learned intent replays this
+  // step, so they are written for a person and go through t(lang) like every
+  // other string the bot can say.
+  const msg = t(ctx.user.language).aiTools.memory;
   if (!ctx.birthday?.userMemoryRepo) {
-    return { success: false, error: 'Memory storage not available' };
+    return { success: false, error: msg.storageUnavailable };
   }
 
   const content = input.content.trim();
   if (content.length === 0) {
-    return { success: false, error: 'Nothing to remember — the fact is empty.' };
+    return { success: false, error: msg.empty };
   }
   if (content.length > MEMORY_FACT_MAX_CHARS) {
-    return {
-      success: false,
-      error: `Fact too long (${content.length} characters, limit ${MEMORY_FACT_MAX_CHARS}). Keep the essence in one short sentence, or save it as several separate facts.`,
-    };
+    return { success: false, error: msg.tooLong(content.length, MEMORY_FACT_MAX_CHARS) };
   }
 
   if (input.type === 'append') {

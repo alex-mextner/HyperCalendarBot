@@ -580,6 +580,15 @@ describe('buildSystemPrompt', () => {
       expect(prompt).not.toContain(`fact0 ${long}`);
     });
 
+    // Showing nothing reads like a user the bot knows nothing about, which is
+    // the opposite of the truth when every fact is merely too big to print.
+    test('says the facts exist when none of them can be shown', () => {
+      const prompt = buildSystemPrompt(withMemory(['z'.repeat(3_000), 'q'.repeat(3_000)]));
+
+      expect(prompt).toContain('2 facts saved, each too long to show here');
+      expect(prompt).not.toContain('nothing yet');
+    });
+
     // One enormous fact used to end the loop on its first turn and take every
     // small one with it, leaving a section that showed nothing.
     test('one oversized fact does not take the rest with it', () => {
