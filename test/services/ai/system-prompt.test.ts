@@ -567,11 +567,17 @@ describe('buildSystemPrompt', () => {
       expect(prompt).toContain('facts kept but not shown here');
     });
 
-    // The newest facts are the ones likeliest to still be true.
+    // The newest facts are the ones likeliest to still be true. Enough of them
+    // to actually overflow the budget, so the choice is real: fed a list that
+    // fits, this passes with no cap at all and proves nothing.
     test('keeps the newest facts when it has to choose', () => {
       const long = 'y'.repeat(300);
-      const prompt = buildSystemPrompt(withMemory([`oldest ${long}`, `middle ${long}`, `newest ${long}`]));
-      expect(prompt).toContain(`newest ${long}`);
+      const facts = Array.from({ length: 10 }, (_, i) => `fact${i} ${long}`);
+
+      const prompt = buildSystemPrompt(withMemory(facts));
+
+      expect(prompt).toContain(`fact9 ${long}`);
+      expect(prompt).not.toContain(`fact0 ${long}`);
     });
 
     // One enormous fact used to end the loop on its first turn and take every
