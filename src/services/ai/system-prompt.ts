@@ -2,7 +2,8 @@ import { TZDate } from '@date-fns/tz';
 import { format } from 'date-fns';
 import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
-import { collapseToOneLine, MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
+import { collapseToOneLine } from '../../utils/text.ts';
+import { MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
 import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
@@ -110,14 +111,12 @@ function buildMemorySection(ctx: AgentContext): string {
   // Nothing shown at all reads like a user the bot knows nothing about, which is
   // the opposite of the truth. A fact bigger than the whole section is one the
   // write side now refuses, so any of them still here predate that limit.
-  if (shown.length === 0) {
-    return `## What I Know About You
-(${omitted} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`;
-  }
-  const facts = shown.join('\n');
-  const more = omitted > 0 ? `\n(+${omitted} more kept but not shown here)` : '';
+  const body =
+    shown.length === 0
+      ? `(${omitted} saved, each too long to show here — ask the user to restate the one you need, then save it shorter)`
+      : shown.join('\n') + (omitted > 0 ? `\n(+${omitted} more kept but not shown here)` : '');
   return `## What I Know About You
-${facts}${more}
+${body}
 Use this to personalize responses. Call remember_user_fact when you learn something new or when an existing fact becomes outdated.`;
 }
 
@@ -150,20 +149,18 @@ function buildAddressSection(ctx: AgentContext): string {
   // listed after it. Only the entry lines are counted as places: the headings
   // and the blank line between the blocks are not places the user could ask for.
   // A heading is dropped rather than trusted: the builder writes its own, and a
-  // line that opens one here came from something a user typed — an event
-  // location is free text, and it reaches this list through the address cache.
+  // line that opens one here would have come from something a user typed — an
+  // event location is free text, and it would reach this list through the
+  // address cache. Would, because nothing in production fills this field yet:
+  // the preload was dropped in the migration off the Anthropic SDK (#160).
   const lines = ctx.preloadedAddressContext.split('\n').filter((line) => !line.startsWith('#'));
   const shown = linesWithinBudget(lines, ADDRESS_MAX_CHARS);
   const isPlace = (line: string) => line.startsWith('- ');
   const omitted = lines.filter(isPlace).length - shown.filter(isPlace).length;
-  if (!shown.some(isPlace)) {
-    return `## Known Locations
-(${omitted} saved, each too long to list here — ask the user for the address you need)`;
-  }
-  const known =
-    omitted === 0
-      ? shown.join('\n')
-      : `${shown.join('\n')}\n(+${omitted} more not listed — ask the user if the one you need is missing)`;
+  const known = !shown.some(isPlace)
+    ? `(${omitted} saved, each too long to list here — ask the user for the address you need)`
+    : shown.join('\n') +
+      (omitted > 0 ? `\n(+${omitted} more not listed — ask the user if the one you need is missing)` : '');
   return `## Known Locations
 ${known}
 When the user mentions a location, check this list first. If a match is found, use the resolved address and Google Maps URL. Location is auto-verified after event creation — the user may be asked to confirm. If the user sends a 📍 pin, it may be for an event location or a city update.

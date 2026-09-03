@@ -1,6 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import { cmdLogger } from '../../../utils/logger.ts';
-import { collapseToOneLine, MEMORY_FACT_MAX_CHARS } from '../prompt-sections.ts';
+import { collapseToOneLine } from '../../../utils/text.ts';
+import { MEMORY_FACT_MAX_CHARS } from '../prompt-sections.ts';
 import type { AgentContext, ToolResult } from '../types.ts';
 
 const TELEGRAM_REACTION_EMOJIS = new Set([

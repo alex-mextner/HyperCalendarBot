@@ -1,5 +1,5 @@
 // src/services/location/address-context.ts
-import { collapseToOneLine } from '../ai/prompt-sections.ts';
+import { collapseToOneLine } from '../../utils/text.ts';
 import type { AddressCache } from './address-cache.ts';
 
 /**
