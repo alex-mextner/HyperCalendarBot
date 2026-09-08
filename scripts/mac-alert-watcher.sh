@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Mac alert watcher — polls /admin/alerts/next and launches Claude in a new Terminal window.
+# Mac alert watcher — polls /admin/alerts/next and launches omp in a new Terminal window.
 #
 # One-time install (registers as macOS LaunchAgent — auto-starts on login):
 #   ADMIN_ALERT_TOKEN=<token> ./scripts/mac-alert-watcher.sh --install
@@ -80,11 +80,11 @@ ENDPOINT="${ALERT_ENDPOINT:-https://hypercal.invntrm.ru/admin/alerts/next}"
 INTERVAL="${ALERT_POLL_INTERVAL:-30}"
 TERMINAL="${ALERT_TERMINAL:-terminal}"
 
-# --- Session lock: prevents spawning multiple Claude sessions concurrently ---
-LOCK_FILE="/tmp/hypercal-claude-session.lock"
+# --- Session lock: prevents spawning multiple omp sessions concurrently ---
+LOCK_FILE="/tmp/hypercal-omp-session.lock"
 MAX_SESSION_SECONDS="${MAX_SESSION_SECONDS:-900}"  # 15 min — stale lock threshold
 COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-300}"         # 5 min — wait after session ends before starting a new one
-COOLDOWN_FILE="/tmp/hypercal-claude-session.done"
+COOLDOWN_FILE="/tmp/hypercal-omp-session.done"
 
 is_session_active() {
   if [[ ! -f "$LOCK_FILE" ]]; then
@@ -123,7 +123,7 @@ open_in_terminal() {
   tmpscript=$(mktemp /tmp/hypercal-XXXXXX)
 
   # Build a structured prompt: invoke the debugging skill, provide context,
-  # and instruct Claude to send a Telegram report when done.
+  # and instruct omp to send a Telegram report when done.
   local prompt
   prompt=$(printf '%s' "\
 Use the /systematic-debugging skill to investigate this alert.
@@ -160,15 +160,19 @@ brief description
 Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \\~ \\\` \\> \\# \\+ \\- \\= \\| \\{ \\} \\. \\!
 " "$text" "$PROJECT_DIR")
 
-  CLAUDE_BIN="${CLAUDE_BIN:-$(command -v claude 2>/dev/null || echo "${HOME}/.local/bin/claude")}"
+  # LaunchAgents run with a minimal PATH (no Homebrew) — command -v alone won't find omp.
+  OMP_BIN="${OMP_BIN:-$(command -v omp 2>/dev/null || echo /opt/homebrew/bin/omp)}"
+  if [[ ! -x "$OMP_BIN" ]]; then
+    OMP_BIN="${HOME}/.local/bin/omp"
+  fi
   # Create the lock BEFORE launching — prevents races during Terminal startup
   date +%s > "$LOCK_FILE"
   echo "[watcher] lock acquired: $LOCK_FILE"
 
   # printf %q produces shell-safe escaping for the prompt argument
-  # No exec — shell must survive to clean up the lockfile after Claude exits.
-  printf '#!/bin/sh\ncd %q\n%q --dangerously-skip-permissions --permission-mode bypassPermissions %q\nrm -f %q\ndate +%%s > %q\necho "[claude-session] done — lock released, cooldown started"\n' \
-    "$PROJECT_DIR" "$CLAUDE_BIN" "$prompt" "$LOCK_FILE" "$COOLDOWN_FILE" > "$tmpscript"
+  # No exec — shell must survive to clean up the lockfile after omp exits.
+  printf '#!/bin/sh\ncd %q\n%q -p --auto-approve --no-session --cwd %q -- %q\nrm -f %q\ndate +%%s > %q\necho "[omp-session] done — lock released, cooldown started"\n' \
+    "$PROJECT_DIR" "$OMP_BIN" "$PROJECT_DIR" "$prompt" "$LOCK_FILE" "$COOLDOWN_FILE" > "$tmpscript"
   chmod +x "$tmpscript"
 
   # Open the script file directly — Terminal/iTerm2 execute it in a new window.
@@ -185,8 +189,7 @@ Escape all MarkdownV2 special chars in dynamic values: \\_ \\* \\[ \\] \\( \\) \
 }
 
 while true; do
-  # Skip polling entirely if a Claude session is already running or in cooldown.
-  # This prevents consuming alerts from the queue that would be wasted.
+  # Skip polling entirely if an omp session is already running or in cooldown.
   if is_session_active; then
     sleep "$INTERVAL"
     continue

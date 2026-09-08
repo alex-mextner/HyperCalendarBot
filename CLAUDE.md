@@ -577,7 +577,7 @@ Full runbook: `docs/reference/deploy-runbook.md` (Docker, Dockerfile, bun lockfi
 - **Domain**: `hypercal.invntrm.ru` (Caddy auto-TLS)
 - **Caddy config**: CI deploys repo's `Caddyfile` to `/opt/hypercal/Caddyfile` and runs `caddy reload`.
 - **Cron**: `0 3 * * *` backup, `*/2 * * * *` healthcheck (both log to `/opt/hypercal/logs/`).
-- **Alerts**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN. CI `notify-failure` does the same.
+- **Alerts**: `healthcheck-alert.sh` posts to `/admin/alerts` on DOWN. CI `notify-failure` does the same. `scripts/mac-alert-watcher.sh` (Mac LaunchAgent) polls `/admin/alerts/next` and launches `omp` in a new Terminal window to auto-investigate.
 - **Never renumber existing migrations** — only append new ones at the end.
 - **Shared server**: never `pm2 delete all`, `docker system prune`, or kill PIDs without checking. Port 3001 = HyperCalendarBot.
 
