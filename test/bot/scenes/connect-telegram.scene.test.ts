@@ -2,12 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import {
   CODE_REGEX,
   isConnectCooldownActive,
+  isOtpLikeText,
+  isPhoneLikeText,
   normalizeOtpCode,
   normalizePhone,
   PHONE_REGEX,
   pendingStepTransitions,
   registerConnectAttempt,
 } from '../../../src/bot/scenes/connect-telegram.scene.ts';
+import { t } from '../../../src/config/constants.ts';
 import { SessionBridge } from '../../../src/services/telegram-session/session-bridge.ts';
 
 describe('connect-telegram scene helpers', () => {
@@ -131,5 +134,90 @@ describe('normalizeOtpCode', () => {
   test('letters are not stripped (result fails CODE_REGEX)', () => {
     const normalized = normalizeOtpCode('1a2b3');
     expect(CODE_REGEX.test(normalized)).toBe(false);
+  });
+});
+
+describe('isOtpLikeText', () => {
+  test('accepts plain digits', () => {
+    expect(isOtpLikeText('12345')).toBe(true);
+    expect(isOtpLikeText('1234')).toBe(true);
+  });
+
+  test('accepts digits with spaces and dashes', () => {
+    expect(isOtpLikeText('1 2 3 4 5')).toBe(true);
+    expect(isOtpLikeText('123-45')).toBe(true);
+    expect(isOtpLikeText('1 2-3 4 5')).toBe(true);
+    expect(isOtpLikeText('12 345')).toBe(true);
+  });
+
+  test('rejects natural-language text with no digits', () => {
+    expect(isOtpLikeText('what is my calendar?')).toBe(false);
+    expect(isOtpLikeText('покажи события')).toBe(false);
+  });
+
+  test('rejects text with 1-2 digits embedded in prose', () => {
+    expect(isOtpLikeText('meet me at 5')).toBe(false);
+    expect(isOtpLikeText('call in 10 minutes')).toBe(false);
+  });
+
+  test('blocks text with 3+ digits — may itself contain the authentication code', () => {
+    // The OTP prompt only ever wants a 5-digit code, so anything with that many
+    // digits embedded in prose must never be forwarded to the AI on cancel.
+    expect(isOtpLikeText('code is 12345')).toBe(true);
+    expect(isOtpLikeText('код: 12345')).toBe(true);
+    expect(isOtpLikeText('1a2b3')).toBe(true);
+    expect(isOtpLikeText('123 abc')).toBe(true);
+  });
+});
+
+describe('isPhoneLikeText', () => {
+  test('accepts digit-only strings', () => {
+    expect(isPhoneLikeText('12345')).toBe(true);
+    expect(isPhoneLikeText('79001234567')).toBe(true);
+  });
+
+  test('accepts phone-shaped strings with separators', () => {
+    expect(isPhoneLikeText('+79001234567')).toBe(true);
+    expect(isPhoneLikeText('+7 900 123 45 67')).toBe(true);
+    expect(isPhoneLikeText('+7-900-123-45-67')).toBe(true);
+    expect(isPhoneLikeText('+7 (900) 123-45-67')).toBe(true);
+  });
+
+  test('accepts single "+" — phone-shaped but invalid (caller rejects via PHONE_REGEX)', () => {
+    // Not a useful input, but it would be wrong to forward "+" to the AI on cancel.
+    expect(isPhoneLikeText('+')).toBe(true);
+  });
+
+  test('rejects natural-language text', () => {
+    expect(isPhoneLikeText('what is my calendar?')).toBe(false);
+    expect(isPhoneLikeText('покажи события')).toBe(false);
+    expect(isPhoneLikeText('call me at +79001234567')).toBe(false);
+  });
+
+  test('rejects strings with letters', () => {
+    expect(isPhoneLikeText('+7900abc1234')).toBe(false);
+    expect(isPhoneLikeText('phone')).toBe(false);
+  });
+
+  test('rejects empty string', () => {
+    expect(isPhoneLikeText('')).toBe(false);
+  });
+});
+
+describe('cancel-authorization i18n', () => {
+  test('EN connectTelegram exposes new cancel strings', () => {
+    const ct = t('en').connectTelegram;
+    expect(ct.btnCancelAuth).toBe('Cancel authorization');
+    expect(ct.authCancelled).toBe('Authorization cancelled.');
+    expect(ct.authCancelledAnswering).toContain('Authorization cancelled');
+    expect(ct.authCancelledAnswering).toContain('Answering');
+  });
+
+  test('RU connectTelegram exposes new cancel strings', () => {
+    const ct = t('ru').connectTelegram;
+    expect(ct.btnCancelAuth).toBe('Отменить авторизацию');
+    expect(ct.authCancelled).toBe('Авторизация отменена.');
+    expect(ct.authCancelledAnswering).toContain('Авторизация отменена');
+    expect(ct.authCancelledAnswering).toContain('Отвечаю');
   });
 });

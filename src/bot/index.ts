@@ -33,7 +33,6 @@ import { NotificationPreferencesService } from '../services/notification/prefere
 import { ScenePauseService } from '../services/scene-pause.ts';
 import type { DomainEventBus } from '../services/scheduled/domain-event-bus.ts';
 import { ScheduledAiCallRepository } from '../services/scheduled/scheduled-ai-call.repository.ts';
-import type { ScheduledAiCallService } from '../services/scheduled/scheduled-ai-call.service.ts';
 import { TriggerRepository } from '../services/scheduled/trigger.repository.ts';
 import type { AiMessageJobData } from '../services/scheduled/types.ts';
 import { DeepLinkService } from '../services/sharing/deep-link-service.ts';
@@ -81,14 +80,14 @@ import { isGroup } from './group-context.ts';
 import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.handler.ts';
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
-import { buildAgentContextFactory, createMessageHandler } from './handlers/message.handler.ts';
+import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
 import { type PickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
 import { createUserResolver, createUserResolverComposer } from './middleware/user-resolver.ts';
 import { runWithChatId } from './scenes/chat-scoped-storage.ts';
-import { createScenesPlugin } from './scenes/index.ts';
+import { createScenesPlugin, createScopedSceneStorage } from './scenes/index.ts';
 import type { SceneKvStorage } from './scenes/types.ts';
 
 export interface GoogleBotDeps {
@@ -215,44 +214,18 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const inlineService = new InlineService(eventService, privacyService);
   const userComposer = createUserResolverComposer(db);
   const googleSchedulePush = googleDeps?.schedulePush;
-  // Late-bound: sendAsConnectedUser is created after bot init,
-  // but only called at scene runtime (in callback handlers).
-  let sendAsConnectedUserRef:
-    | ((
-        inviterId: number,
-        targetId: number,
-        text: string,
-        username?: string,
-        meta?: { invitationId?: number },
-      ) => Promise<boolean>)
-    | undefined;
 
-  const scenesSetup = createScenesPlugin(
-    db,
-    eventService,
-    token,
-    userComposer,
-    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
-    !!googleDeps,
-    prefsService,
-    holidayService,
-    googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
-    {
-      invitationService,
-      sendAsConnectedUser: (inviterId, targetId, text, username, meta) => {
-        if (!sendAsConnectedUserRef) return Promise.resolve(false);
-        return sendAsConnectedUserRef(inviterId, targetId, text, username, meta);
-      },
-      deepLinkService,
-      botUsername: envConfig?.BOT_USERNAME,
-    },
-  );
+  // Build the scene storage up-front so it can be shared with msgDeps (via sceneStorage)
+  // BEFORE the scene plugin itself is constructed. The plugin is built at the bottom of
+  // this function — by that point agent + msgDeps exist, and we pass a real forwardToAi
+  // closure with no late-bound refs.
+  const scopedStorage = createScopedSceneStorage(db);
 
   const intentRepo = new IntentRepository(db.db);
   const feedbackRepo = new FeedbackRepository(db.db);
   const calendarProposalRepo = new CalendarProposalRepository(db.db);
   const conversationLogger = new ConversationLogger(db.chatHistory);
-  const kvStorage = scenesSetup.storage as SceneKvStorage;
+  const kvStorage = scopedStorage as SceneKvStorage;
   const scenePauseService = new ScenePauseService(kvStorage);
   const intentMatcher = new IntentMatcher();
   const intentExecutor = new IntentExecutor();
@@ -324,8 +297,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
       })
     : undefined;
 
-  sendAsConnectedUserRef = sendAsConnectedUser;
-
   const telegramSender = createTelegramSender(bot, {
     sendAsUser: mtprotoSendAsUser,
     sendAsConnectedUser,
@@ -371,7 +342,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   // Written in logging middleware, read in buildAgentContextFactory.
   const chatHistoryIds = new Map<number, number>();
 
-  const msgDeps = {
+  const msgDeps: MessageHandlerDeps = {
     agent,
     eventService,
     holidayService,
@@ -417,7 +388,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     googleSchedulePush: googleDeps?.schedulePush,
     googleScheduleParticipantPush: googleDeps?.scheduleParticipantPush,
     deepLinkService,
-    sceneStorage: scenesSetup.storage,
+    sceneStorage: scopedStorage,
     botUsername: envConfig?.BOT_USERNAME,
     botId: Number(token.split(':')[0]),
     groupSessions,
@@ -479,11 +450,12 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     chatHistoryIds,
     agentRegistry,
     agentDispatcher,
-    onboardingScene: scenesSetup.scenes.onboardingScene,
-    scheduledCallService: undefined as ScheduledAiCallService | undefined,
-    triggerService: undefined as { repo: typeof triggerRepo } | undefined,
-    aiRetryQueue: undefined as import('../services/scheduled/types.ts').QueueAdapter | undefined,
-    aiRetryJobStore: undefined as import('../services/scheduled/types.ts').RetryJobStore | undefined,
+    // Assigned below, after the scenes plugin is built.
+    onboardingScene: undefined,
+    scheduledCallService: undefined,
+    triggerService: undefined,
+    aiRetryQueue: undefined,
+    aiRetryJobStore: undefined,
     domainEvents: domainEventBus,
     editMessage: async (chatId: number, messageId: number, text: string) => {
       await bot.api
@@ -518,6 +490,40 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     pendingGeoStore,
     weatherService,
   };
+
+  // Now that agent and msgDeps are fully built, construct the scene plugin with real
+  // closures for sendAsConnectedUser and forwardToAi — no late-bound refs.
+  // INVARIANT: nothing may read msgDeps.onboardingScene between the msgDeps literal
+  // above and the `msgDeps.onboardingScene = ...` assignment below. Only handlers
+  // registered on `bot` read it, and they cannot fire until createBot() returns.
+  const scenesSetup = createScenesPlugin(
+    db,
+    eventService,
+    token,
+    userComposer,
+    { TELEGRAM_SESSION_MASTER_KEY: envConfig?.TELEGRAM_SESSION_MASTER_KEY },
+    scopedStorage,
+    !!googleDeps,
+    prefsService,
+    holidayService,
+    googleSchedulePush ? (userId: number, eventId: number) => googleSchedulePush(userId, eventId, 'create') : undefined,
+    {
+      invitationService,
+      sendAsConnectedUser,
+      deepLinkService,
+      botUsername: envConfig?.BOT_USERNAME,
+      forwardToAi: async (userId: number, chatId: number, text: string) => {
+        const user = db.users.findByTelegramId(userId);
+        if (!user) return;
+        await agent.run(buildAgentContextFactory(msgDeps)(user, chatId, text));
+      },
+    },
+  );
+
+  // Fill in the one scene reference msgDeps needs now that scenes exist.
+  // NOTE: msgDeps is frozen in src/index.ts after scheduledCallService and triggerService
+  // are wired — this is the last in-createBot() mutation.
+  msgDeps.onboardingScene = scenesSetup.scenes.onboardingScene;
 
   // AI Assistant commands (not in setMyCommands — internal use only)
   const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');

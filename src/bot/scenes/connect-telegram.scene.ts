@@ -26,6 +26,29 @@ const sceneLogger = logger.child({ module: 'connect-telegram-scene' });
 
 export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
+// isOtpLikeText and isPhoneLikeText share a purpose: filter out "shaped-but-invalid"
+// input at the OTP / phone steps so a cancel click doesn't forward meaningless digit
+// soup — or a leaked authentication code — to the AI. PHONE_LIKE_REGEX is a superset
+// of OTP_LIKE_REGEX (adds '+', '(', ')'). If either invariant changes, update both.
+const OTP_LIKE_REGEX = /^[\d\s-]+$/;
+const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
+
+/**
+ * True if the text is OTP-shaped (digits/spaces/dashes only) OR embeds 3+ digit
+ * characters anywhere. The OTP prompt's whole purpose is collecting a 5-digit code,
+ * so any text with that many digits — "Code: 12345", "код 12345" — may itself BE
+ * (or contain) the real authentication code and must never be forwarded to the AI.
+ */
+export function isOtpLikeText(text: string): boolean {
+  if (OTP_LIKE_REGEX.test(text)) return true;
+  const digitCount = (text.match(/\d/g) ?? []).length;
+  return digitCount >= 3;
+}
+
+/** True if the text looks like a phone attempt (digits, '+', spaces, dashes, parens only). */
+export function isPhoneLikeText(text: string): boolean {
+  return PHONE_LIKE_REGEX.test(text);
+}
 
 const CONNECT_COOLDOWN_MS = 60_000;
 const connectAttempts = new Map<number, number>();
@@ -66,6 +89,8 @@ export interface ConnectTelegramState {
   sessionPath?: string;
   codeAttempts?: number;
   passwordAttempts?: number;
+  /** Last non-OTP-shaped text the user sent at the OTP step — forwarded to AI on cancel. */
+  pendingForwardText?: string;
 }
 
 /** Encrypt phone for safe storage in scene state (SQLite). */
@@ -92,6 +117,7 @@ const CB_CONNECT = `${CB_PREFIX}:connect`;
 const CB_CANCEL = `${CB_PREFIX}:cancel`;
 const CB_RECONNECT = `${CB_PREFIX}:reconnect`;
 const CB_SKIP_PENDING = `${CB_PREFIX}:skip_pending`;
+const CB_CANCEL_AUTH = `${CB_PREFIX}:cancel_auth`;
 
 export interface ConnectTelegramDeps {
   eventRepo: EventRepository;
@@ -107,6 +133,50 @@ export interface ConnectTelegramDeps {
   ) => Promise<boolean>;
   deepLinkService?: DeepLinkService;
   botUsername?: string;
+  /** Hand off a user message to the AI agent (used when cancelling auth to keep a conversation going). */
+  forwardToAi?: (userId: number, chatId: number, text: string) => Promise<void>;
+}
+
+// --- Cancel-authorization helper ---
+
+interface CancelAuthContext {
+  answer: () => Promise<unknown>;
+  send: (text: string, options?: { reply_markup?: InlineKeyboard | { remove_keyboard: true } }) => Promise<unknown>;
+  from: { id: number };
+  chatId: number | bigint | undefined;
+  scene: {
+    state: ConnectTelegramState;
+    exit: () => Promise<boolean> | boolean;
+  };
+}
+
+/**
+ * Handle the "Cancel authorization" inline button.
+ * Kills the live MTProto auth process, cleans up the temp session file, removes the
+ * leftover phone-share reply keyboard, exits the scene, and — if the user's last
+ * input was natural-language (stashed in `pendingForwardText`) — hands it off to the AI.
+ */
+async function handleCancelAuth(
+  context: CancelAuthContext,
+  ct: ReturnType<typeof t>['connectTelegram'],
+  deps: ConnectTelegramDeps | undefined,
+): Promise<void> {
+  await context.answer();
+  const userId = context.from.id;
+  const { sessionPath, pendingForwardText } = context.scene.state;
+  SessionBridge.removeLiveAuthHandle(userId);
+  if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
+  const chatId = context.chatId;
+  if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
+    await context.send(ct.authCancelledAnswering, { reply_markup: { remove_keyboard: true } });
+    await context.scene.exit();
+    deps
+      .forwardToAi(userId, Number(chatId), pendingForwardText)
+      .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
+    return;
+  }
+  await context.send(ct.authCancelled, { reply_markup: { remove_keyboard: true } });
+  await context.scene.exit();
 }
 
 // --- Scene factory ---
@@ -178,7 +248,19 @@ export function createConnectTelegramScene(
             registerConnectAttempt(userId);
             await context.answer();
             const phoneKb = new Keyboard().requestContact(ct.btnSharePhone).resized().oneTime();
-            await context.send(ct.enterPhone, { reply_markup: phoneKb });
+            // Telegram persists the reply-keyboard at chat level (not per message),
+            // so we install it via a throwaway message and delete that message
+            // immediately. The "📱 Поделиться номером" button stays in the input area.
+            // This frees the visible prompt to carry the inline "Отменить авторизацию"
+            // button instead of shipping it as a separate second message.
+            const kbMsg = await context.send('…', { reply_markup: phoneKb });
+            kbMsg
+              .delete()
+              .catch((err: unknown) =>
+                sceneLogger.warn({ err, userId }, 'failed to delete throwaway reply-keyboard message'),
+              );
+            const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+            await context.send(ct.enterPhone, { reply_markup: cancelKb });
             await context.scene.step.next();
             return;
           }
@@ -186,11 +268,19 @@ export function createConnectTelegramScene(
       })
 
       // Step 1: Phone number
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
         const { lang } = context;
         const l = lang ?? 'en';
         const userId = context.from.id;
         const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await handleCancelAuth(context, ct, deps);
+          }
+          return;
+        }
+
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!masterKeyHex) {
           await context.send(ct.featureUnavailable);
@@ -205,7 +295,12 @@ export function createConnectTelegramScene(
         const phone = phoneInput ? normalizePhone(phoneInput) : undefined;
 
         if (!phone || !PHONE_REGEX.test(phone)) {
-          await context.send(ct.invalidPhone);
+          // Stash non-phone-shaped text so cancel can forward it to the AI.
+          // Pure digits/+/spaces/dashes/parens are phone-shaped — nothing worth forwarding.
+          const forwardText = raw && !isPhoneLikeText(raw) ? raw : undefined;
+          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
+          const invalidKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidPhone, { reply_markup: invalidKb });
           return;
         }
 
@@ -251,6 +346,9 @@ export function createConnectTelegramScene(
             encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
             sessionPath,
             codeAttempts: 0,
+            // A stale pendingForwardText from an earlier invalid-phone attempt must not
+            // leak into a cancel click at the OTP step that follows.
+            pendingForwardText: undefined,
           },
           { step: undefined },
         );
@@ -260,16 +358,24 @@ export function createConnectTelegramScene(
       })
 
       // Step 2: OTP code
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
+        const { lang } = context;
+        const l = lang ?? 'en';
+        const userId = context.from.id;
+        const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await handleCancelAuth(context, ct, deps);
+          }
+          return;
+        }
+
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: contact shares are never OTP codes
         // onNext in compose() persists the step unconditionally after all middleware runs
         if (guardHit || context.contact) return;
 
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
         const text = context.text?.trim();
         const { encryptedPhoneHex, sessionPath, codeAttempts } = context.scene.state;
 
@@ -284,7 +390,11 @@ export function createConnectTelegramScene(
         // Normalize: user enters "1 2 3 4 5" or "12-345" to avoid Telegram anti-phishing
         const code = text ? normalizeOtpCode(text) : undefined;
         if (!code || !CODE_REGEX.test(code)) {
-          await context.send(ct.invalidCode);
+          // Save the non-OTP-shaped text for AI forwarding on cancel; pure digits/spaces/dashes go nowhere
+          const forwardText = text && !isOtpLikeText(text) ? text : undefined;
+          await context.scene.update({ pendingForwardText: forwardText }, { step: undefined });
+          const kb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidCode, { reply_markup: kb });
           return;
         }
 
@@ -325,7 +435,10 @@ export function createConnectTelegramScene(
             return;
           }
 
-          await context.send(ct.invalidCode);
+          // Valid-shape OTP rejected by Telegram — nothing worth forwarding, just offer to bail out
+          await context.scene.update({ pendingForwardText: undefined }, { step: undefined });
+          const retryKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.invalidCode, { reply_markup: retryKb });
           return;
         }
 
@@ -338,8 +451,11 @@ export function createConnectTelegramScene(
         }
 
         if (result.data.status === '2fa_required') {
-          await context.send(ct.enter2fa);
-          await context.scene.update({ passwordAttempts: 0 }, { step: undefined });
+          const enter2faKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
+          await context.send(ct.enter2fa, { reply_markup: enter2faKb });
+          // Clear pendingForwardText so a stale natural-language input from step 2
+          // does not leak into a cancel click at step 3.
+          await context.scene.update({ passwordAttempts: 0, pendingForwardText: undefined }, { step: undefined });
           pendingStepTransitions.add(userId);
           await context.scene.step.next();
           return;
@@ -354,19 +470,28 @@ export function createConnectTelegramScene(
       })
 
       // Step 3: 2FA password
-      .step('message', async (context) => {
+      .step(['message', 'callback_query'], async (context) => {
+        const { lang } = context;
+        const l = lang ?? 'en';
+        const userId = context.from.id;
+        const ct = t(l).connectTelegram;
+
+        if (context.is('callback_query')) {
+          if (context.data === CB_CANCEL_AUTH) {
+            await handleCancelAuth(context, ct, deps);
+          }
+          return;
+        }
+
         const guardHit = pendingStepTransitions.delete(context.from.id);
         // Fallback: if text looks like an OTP code (digits with optional spaces/dashes), it's re-processing
         const trimmed = context.text?.trim();
         const maybeOtp = trimmed ? normalizeOtpCode(trimmed) : undefined;
         if (guardHit || (maybeOtp && CODE_REGEX.test(maybeOtp))) return;
 
-        const { lang } = context;
-        const l = lang ?? 'en';
-        const userId = context.from.id;
-        const ct = t(l).connectTelegram;
         const text = context.text?.trim();
         const { encryptedPhoneHex, sessionPath, passwordAttempts } = context.scene.state;
+        const cancelKb = new InlineKeyboard().text(ct.btnCancelAuth, CB_CANCEL_AUTH);
 
         const masterKeyHex = config.TELEGRAM_SESSION_MASTER_KEY;
         if (!encryptedPhoneHex || !sessionPath || !masterKeyHex) {
@@ -377,7 +502,7 @@ export function createConnectTelegramScene(
         }
 
         if (!text) {
-          await context.send(ct.invalid2fa);
+          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
           return;
         }
 
@@ -415,7 +540,7 @@ export function createConnectTelegramScene(
             return;
           }
 
-          await context.send(ct.invalid2fa);
+          await context.send(ct.invalid2fa, { reply_markup: cancelKb });
           return;
         }
 

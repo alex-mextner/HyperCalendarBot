@@ -1137,7 +1137,8 @@ if (config.REDIS_URL) {
   // ScheduledAiCallService — manages BullMQ delayed/repeat jobs
   const scheduledCallService = new ScheduledAiCallService(scheduleRepo, aiMsgQueue);
 
-  // Patch msgDeps so agentContextBuilder picks up the services
+  // Patch msgDeps so agentContextBuilder picks up the services. msgDeps is frozen
+  // below (outside the REDIS_URL guard) so the lock applies in dev-without-Redis too.
   msgDeps.scheduledCallService = scheduledCallService;
   msgDeps.triggerService = { repo: triggerRepo };
   msgDeps.aiRetryQueue = aiMsgQueue;
@@ -1170,7 +1171,7 @@ if (config.REDIS_URL) {
     intentRun: async (agentCtx, message) => {
       const match = intentMatcher.match(message);
       if (!match) return { handled: false };
-      const intent = msgDeps.intentRepo.getById(match.intentId);
+      const intent = msgDeps.intentRepo?.getById(match.intentId);
       if (!intent) return { handled: false };
       const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
       if (!workflowResult.success) return { handled: false };
@@ -1246,6 +1247,13 @@ if (config.REDIS_URL) {
 
   botLogger.info('Scheduled AI calls + trigger system initialized');
 }
+
+// Freeze msgDeps after all potential mutation sites (onboardingScene in createBot,
+// scheduledCallService/triggerService in the REDIS_URL block above). All downstream
+// consumers — AI agent context builder, pipeline layers, scene forwardToAi closure —
+// capture msgDeps by reference, so locking it here prevents accidental late writes
+// from silently reshaping what those closures see.
+Object.freeze(msgDeps);
 
 // Register bot commands in Telegram menu — both languages
 const COMMANDS_EN = [

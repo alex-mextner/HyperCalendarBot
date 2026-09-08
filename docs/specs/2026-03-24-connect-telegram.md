@@ -186,12 +186,38 @@ Session file → encrypt → store in DB → delete session file.
 
 | Error | Response |
 |-------|----------|
-| `PhoneNumberInvalid` | "Неверный номер. Попробуй ещё раз." |
-| `PhoneCodeInvalid` | "Неверный код. Попробуй ещё раз." (3 attempts max) |
+| `PhoneNumberInvalid` | "Неверный формат. Используй международный формат: +79001234567" + inline "Отменить авторизацию" |
+| `PhoneCodeInvalid` | "Неверный код. Введи 5 цифр через пробелы или дефисы…" + inline "Отменить авторизацию" (3 attempts max) |
 | `PhoneCodeExpired` | "Код истёк. Начни заново: /connect_telegram" |
 | `SessionPasswordNeeded` | Go to Step 4 |
-| `PasswordHashInvalid` | "Неверный пароль. Попробуй ещё раз." (3 attempts max) |
+| `PasswordHashInvalid` | "Неверный пароль. Попробуй ещё раз." + inline "Отменить авторизацию" (3 attempts max) |
 | `FloodWait` | "Telegram ограничил запросы. Попробуй через {n} минут." |
+
+### Cancel-authorization Inline Button
+
+Every retryable prompt (`invalidPhone`, `invalidCode`, `invalid2fa`) and every initial
+prompt (`enterPhone`, `enter2fa`) carries an inline `ct:cancel_auth` button.
+The phone-input step needs both a reply-keyboard (`request_contact` = "📱 Поделиться
+номером") and an inline keyboard (cancel button). Because Telegram allows only one
+`reply_markup` per message, the bot installs the reply-keyboard via a throwaway
+message ("…") that it deletes immediately — Telegram persists reply-keyboards at
+chat level, so the button stays in the input area even after the source message is
+gone. The visible prompt ("Введи номер телефона…") then ships with the inline
+cancel button.
+
+When the user taps the button:
+
+1. Acknowledge the callback and clean up the temp session file if present.
+2. If the user's last input at the OTP/phone step was **natural-language text** (non-OTP-shaped
+   / non-phone-shaped), the bot replies "Авторизация отменена. Отвечаю…" and hands the
+   original message off to the AI agent — the conversation continues where it was.
+3. Otherwise the bot replies with the plain "Авторизация отменена." and exits.
+
+`pendingForwardText` (scene state) tracks the last natural-language input and is explicitly
+cleared when:
+- user enters a valid-shape code (to avoid leaking stale input into 2FA cancel),
+- 2FA prompt is shown,
+- OTP code is digits-only but rejected by Telegram.
 
 ---
 
