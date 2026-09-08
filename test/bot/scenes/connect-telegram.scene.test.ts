@@ -150,19 +150,23 @@ describe('isOtpLikeText', () => {
     expect(isOtpLikeText('12 345')).toBe(true);
   });
 
-  test('rejects natural-language text', () => {
+  test('rejects natural-language text with no digits', () => {
     expect(isOtpLikeText('what is my calendar?')).toBe(false);
     expect(isOtpLikeText('покажи события')).toBe(false);
-    expect(isOtpLikeText('code is 12345')).toBe(false);
   });
 
-  test('rejects text with letters among digits', () => {
-    expect(isOtpLikeText('1a2b3')).toBe(false);
-    expect(isOtpLikeText('123 abc')).toBe(false);
+  test('rejects text with 1-2 digits embedded in prose', () => {
+    expect(isOtpLikeText('meet me at 5')).toBe(false);
+    expect(isOtpLikeText('call in 10 minutes')).toBe(false);
   });
 
-  test('rejects empty string', () => {
-    expect(isOtpLikeText('')).toBe(false);
+  test('blocks text with 3+ digits — may itself contain the authentication code', () => {
+    // The OTP prompt only ever wants a 5-digit code, so anything with that many
+    // digits embedded in prose must never be forwarded to the AI on cancel.
+    expect(isOtpLikeText('code is 12345')).toBe(true);
+    expect(isOtpLikeText('код: 12345')).toBe(true);
+    expect(isOtpLikeText('1a2b3')).toBe(true);
+    expect(isOtpLikeText('123 abc')).toBe(true);
   });
 });
 

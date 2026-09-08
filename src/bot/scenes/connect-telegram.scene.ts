@@ -28,14 +28,21 @@ export const PHONE_REGEX = /^\+\d{7,15}$/;
 export const CODE_REGEX = /^\d{5}$/;
 // isOtpLikeText and isPhoneLikeText share a purpose: filter out "shaped-but-invalid"
 // input at the OTP / phone steps so a cancel click doesn't forward meaningless digit
-// soup to the AI. PHONE_LIKE_REGEX is a superset of OTP_LIKE_REGEX (adds '+', '(', ')').
-// If either invariant changes, update both.
+// soup — or a leaked authentication code — to the AI. PHONE_LIKE_REGEX is a superset
+// of OTP_LIKE_REGEX (adds '+', '(', ')'). If either invariant changes, update both.
 const OTP_LIKE_REGEX = /^[\d\s-]+$/;
 const PHONE_LIKE_REGEX = /^[+\d\s\-()]+$/;
 
-/** True if the text contains only digits, spaces and dashes (an OTP-shaped string). */
+/**
+ * True if the text is OTP-shaped (digits/spaces/dashes only) OR embeds 3+ digit
+ * characters anywhere. The OTP prompt's whole purpose is collecting a 5-digit code,
+ * so any text with that many digits — "Code: 12345", "код 12345" — may itself BE
+ * (or contain) the real authentication code and must never be forwarded to the AI.
+ */
 export function isOtpLikeText(text: string): boolean {
-  return OTP_LIKE_REGEX.test(text);
+  if (OTP_LIKE_REGEX.test(text)) return true;
+  const digitCount = (text.match(/\d/g) ?? []).length;
+  return digitCount >= 3;
 }
 
 /** True if the text looks like a phone attempt (digits, '+', spaces, dashes, parens only). */
@@ -134,7 +141,7 @@ export interface ConnectTelegramDeps {
 
 interface CancelAuthContext {
   answer: () => Promise<unknown>;
-  send: (text: string, options?: { reply_markup?: InlineKeyboard }) => Promise<unknown>;
+  send: (text: string, options?: { reply_markup?: InlineKeyboard | { remove_keyboard: true } }) => Promise<unknown>;
   from: { id: number };
   chatId: number | bigint | undefined;
   scene: {
@@ -145,8 +152,9 @@ interface CancelAuthContext {
 
 /**
  * Handle the "Cancel authorization" inline button.
- * Cleans up the temp session file, exits the scene, and — if the user's last input
- * was natural-language (stashed in `pendingForwardText`) — hands it off to the AI.
+ * Kills the live MTProto auth process, cleans up the temp session file, removes the
+ * leftover phone-share reply keyboard, exits the scene, and — if the user's last
+ * input was natural-language (stashed in `pendingForwardText`) — hands it off to the AI.
  */
 async function handleCancelAuth(
   context: CancelAuthContext,
@@ -156,17 +164,18 @@ async function handleCancelAuth(
   await context.answer();
   const userId = context.from.id;
   const { sessionPath, pendingForwardText } = context.scene.state;
+  SessionBridge.removeLiveAuthHandle(userId);
   if (sessionPath) await SessionBridge.cleanupTempFile(sessionPath);
   const chatId = context.chatId;
   if (pendingForwardText && chatId !== undefined && deps?.forwardToAi) {
-    await context.send(ct.authCancelledAnswering);
+    await context.send(ct.authCancelledAnswering, { reply_markup: { remove_keyboard: true } });
     await context.scene.exit();
     deps
       .forwardToAi(userId, Number(chatId), pendingForwardText)
       .catch((err) => sceneLogger.warn({ err, userId }, 'forwardToAi after cancel failed'));
     return;
   }
-  await context.send(ct.authCancelled);
+  await context.send(ct.authCancelled, { reply_markup: { remove_keyboard: true } });
   await context.scene.exit();
 }
 
@@ -337,6 +346,9 @@ export function createConnectTelegramScene(
             encryptedPhoneHex: encryptPhoneForState(phone, masterKeyHex),
             sessionPath,
             codeAttempts: 0,
+            // A stale pendingForwardText from an earlier invalid-phone attempt must not
+            // leak into a cancel click at the OTP step that follows.
+            pendingForwardText: undefined,
           },
           { step: undefined },
         );

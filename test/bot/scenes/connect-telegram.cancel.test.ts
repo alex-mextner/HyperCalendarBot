@@ -122,15 +122,21 @@ function makeScene(deps?: Partial<ConnectTelegramDeps>) {
 describe('connect-telegram: Cancel authorization button', () => {
   let cleanupSpy: ReturnType<typeof mock<(p: string) => Promise<void>>>;
   let originalCleanup: typeof SessionBridge.cleanupTempFile;
+  let killSpy: ReturnType<typeof mock<(userId: number) => void>>;
+  let originalKill: typeof SessionBridge.removeLiveAuthHandle;
 
   beforeEach(() => {
     cleanupSpy = mock(() => Promise.resolve());
     originalCleanup = SessionBridge.cleanupTempFile;
     SessionBridge.cleanupTempFile = cleanupSpy as unknown as typeof SessionBridge.cleanupTempFile;
+    killSpy = mock(() => undefined);
+    originalKill = SessionBridge.removeLiveAuthHandle;
+    SessionBridge.removeLiveAuthHandle = killSpy as unknown as typeof SessionBridge.removeLiveAuthHandle;
   });
 
   afterEach(() => {
     SessionBridge.cleanupTempFile = originalCleanup;
+    SessionBridge.removeLiveAuthHandle = originalKill;
   });
 
   test('exits and forwards pending text to AI when non-OTP text was entered', async () => {
@@ -153,13 +159,15 @@ describe('connect-telegram: Cancel authorization button', () => {
     await otpStep(ctx, NOOP_NEXT);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(killSpy).toHaveBeenCalledWith(123);
     expect(cleanupSpy).toHaveBeenCalledWith('/tmp/fake.session');
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
     // send called once with the "Answering..." variant before exit
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const sendArgs = ctx.send.mock.calls[0] as unknown as [string, unknown?];
+    const sendArgs = ctx.send.mock.calls[0] as unknown as [string, { reply_markup?: { remove_keyboard?: boolean } }?];
     expect(sendArgs[0]).toContain('Авторизация отменена');
     expect(sendArgs[0]).toContain('Отвечаю');
+    expect(sendArgs[1]?.reply_markup).toEqual({ remove_keyboard: true });
     // AI handoff fires with original text
     // Wait a microtask so the fire-and-forget promise resolves
     await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -188,11 +196,16 @@ describe('connect-telegram: Cancel authorization button', () => {
     await otpStep(ctx, NOOP_NEXT);
 
     expect(ctx.answer).toHaveBeenCalledTimes(1);
+    expect(killSpy).toHaveBeenCalledTimes(1);
     expect(cleanupSpy).toHaveBeenCalledTimes(1);
     expect(ctx.scene.exit).toHaveBeenCalledTimes(1);
     expect(ctx.send).toHaveBeenCalledTimes(1);
-    const text = ctx.send.mock.calls[0]![0] as string;
+    const [text, opts] = ctx.send.mock.calls[0] as unknown as [
+      string,
+      { reply_markup?: { remove_keyboard?: boolean } }?,
+    ];
     expect(text).toBe('Авторизация отменена.');
+    expect(opts?.reply_markup).toEqual({ remove_keyboard: true });
     expect(forwardToAi).not.toHaveBeenCalled();
   });
 
@@ -257,6 +270,41 @@ describe('connect-telegram: Cancel authorization button', () => {
 
     expect(ctx.scene.state.pendingForwardText).toBeUndefined();
     expect(ctx.send).toHaveBeenCalledTimes(1);
+  });
+
+  test('invalidCode shown for text embedding a code-shaped digit run does not stash it for forwarding', async () => {
+    // Regression test: "Code: 12345" is not pure-digit-shaped, but it embeds enough
+    // digits to be (or contain) the real authentication code. Cancelling here must
+    // never hand this text to the AI.
+    const forwardToAi = mock(() => Promise.resolve());
+    const scene = makeScene({ forwardToAi });
+    const otpStep = getStepFns(scene)[2]!;
+
+    const rejectCtx = makeCtx({
+      activeType: 'message',
+      text: 'Code: 12345',
+      state: {
+        encryptedPhoneHex: 'abcd',
+        sessionPath: '/tmp/fake.session',
+      },
+    });
+
+    await otpStep(rejectCtx, NOOP_NEXT);
+
+    expect(rejectCtx.scene.state.pendingForwardText).toBeUndefined();
+
+    // Cancelling right after must fall back to the plain message, never forwarding —
+    // reuse the same (now-updated) scene state the reject step left behind.
+    const cancelCtx = makeCtx({
+      activeType: 'callback_query',
+      data: 'ct:cancel_auth',
+      state: rejectCtx.scene.state,
+    });
+
+    await otpStep(cancelCtx, NOOP_NEXT);
+
+    expect(forwardToAi).not.toHaveBeenCalled();
+    expect(cancelCtx.send.mock.calls[0]![0]).toBe('Авторизация отменена.');
   });
 
   test('2FA step also handles Cancel authorization callback', async () => {
@@ -449,5 +497,38 @@ describe('connect-telegram: Cancel authorization button', () => {
 
     // Digit-only input is phone-shaped; nothing worth forwarding to AI.
     expect(ctx.scene.state.pendingForwardText).toBeUndefined();
+  });
+
+  test('valid phone acceptance clears stale pendingForwardText from an earlier invalid attempt', async () => {
+    const originalReserve = SessionBridge.reserveEmptySessionPath;
+    const originalSpawn = SessionBridge.spawnSendAndSign;
+    SessionBridge.reserveEmptySessionPath = mock(
+      () => '/tmp/new.session',
+    ) as unknown as typeof SessionBridge.reserveEmptySessionPath;
+    SessionBridge.spawnSendAndSign = mock(() =>
+      Promise.resolve({ success: true, data: { phone_code_hash: 'hash123' } }),
+    ) as unknown as typeof SessionBridge.spawnSendAndSign;
+
+    try {
+      const scene = makeScene();
+      const phoneStep = getStepFns(scene)[1]!;
+
+      const ctx = makeCtx({
+        activeType: 'message',
+        text: '+79001234567',
+        stepId: 1,
+        state: { pendingForwardText: 'stale text from an earlier invalid attempt' },
+      });
+
+      await phoneStep(ctx, NOOP_NEXT);
+
+      // A phone number successfully accepted must not carry a stale conversational
+      // message forward — otherwise a cancel click at the next (OTP) step would
+      // forward it, even though the user has moved past that earlier attempt.
+      expect(ctx.scene.state.pendingForwardText).toBeUndefined();
+    } finally {
+      SessionBridge.reserveEmptySessionPath = originalReserve;
+      SessionBridge.spawnSendAndSign = originalSpawn;
+    }
   });
 });
