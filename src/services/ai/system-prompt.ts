@@ -541,7 +541,7 @@ You MUST help complete the action. When done:
 export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
-  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd HH:mm');
+  const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd EEE HH:mm');
 
   const sections = [
     'You are a calendar assistant for a Telegram bot. You help users manage their schedule.',

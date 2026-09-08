@@ -1,6 +1,8 @@
+import { TZDate } from '@date-fns/tz';
+import { startOfWeek } from 'date-fns';
 import { t } from '../../../config/constants.ts';
 import { autoPin } from '../../../utils/auto-pin.ts';
-import { getDayRangeUtc } from '../../../utils/date.ts';
+import { getDayRangeUtc, getWeekRangeUtc } from '../../../utils/date.ts';
 import { logger } from '../../../utils/logger.ts';
 import { getTheme } from '../../../worker/templates/themes.ts';
 import { renderDayImage } from '../../image/render-day.ts';
@@ -152,39 +154,52 @@ export async function handleRenderWeekImage(
     return { success: false, error: 'Group context required for group scope' };
   }
 
-  const weekStartDate = new Date(`${input.week_start}T12:00:00Z`);
-  const weekEndDate = new Date(weekStartDate.getTime() + 6 * 86400000);
-  const startUtc = new Date(
-    Date.UTC(weekStartDate.getUTCFullYear(), weekStartDate.getUTCMonth(), weekStartDate.getUTCDate()),
-  ).toISOString();
-  const endUtc = new Date(
-    Date.UTC(weekEndDate.getUTCFullYear(), weekEndDate.getUTCMonth(), weekEndDate.getUTCDate(), 23, 59, 59, 999),
-  ).toISOString();
+  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
+  const tr = t(lang).aiTools.meta;
+
+  // Normalize to Monday of the week in the user's timezone — AI may send any weekday.
+  // Parse week_start via the year/month/day component TZDate constructor, which builds the wall
+  // clock time directly in the user's timezone. Anchoring the string at UTC (or host-local) noon
+  // first and then converting would shift the local calendar day forward in UTC+12/+13/+14 zones,
+  // turning a Sunday input into local Monday and resolving startOfWeek to next week's Monday.
+  const weekStartMatch = input.week_start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!weekStartMatch) {
+    return { success: false, error: tr.weekImageFailed(input.week_start) };
+  }
+  const [, weekStartYearStr, weekStartMonthStr, weekStartDayStr] = weekStartMatch;
+  const weekStartYear = Number(weekStartYearStr);
+  const weekStartMonth = Number(weekStartMonthStr);
+  const weekStartDay = Number(weekStartDayStr);
+  const weekStartDate = new TZDate(weekStartYear, weekStartMonth - 1, weekStartDay, 12, ctx.user.timezone);
+  // Reject overflow (e.g. month 13, Feb 30): the TZDate/native Date constructor rolls invalid
+  // components into the next month/year instead of throwing, so verify the built date's
+  // components still match what was supplied rather than trust the roll-over silently.
+  if (
+    weekStartDate.getFullYear() !== weekStartYear ||
+    weekStartDate.getMonth() !== weekStartMonth - 1 ||
+    weekStartDate.getDate() !== weekStartDay
+  ) {
+    return { success: false, error: tr.weekImageFailed(input.week_start) };
+  }
+  const weekStartIso = startOfWeek(weekStartDate, { weekStartsOn: 1 }).toISOString().slice(0, 10);
+
+  const { start: startUtc, end: endUtc } = getWeekRangeUtc(new Date(`${weekStartIso}T12:00:00Z`), ctx.user.timezone);
 
   const occurrences =
     scope === 'group'
       ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startUtc, endUtc)
       : ctx.eventService.getEventsInRange(userId, startUtc, endUtc);
 
-  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
-  const tr = t(lang).aiTools.meta;
 
   try {
-    const buffer = await renderWeekImage(
-      ctx.renderService,
-      occurrences,
-      input.week_start,
-      ctx.user.timezone,
-      lang,
-      userId,
-    );
+    const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
     const file = new File([buffer], 'week.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
       success: true,
-      output: tr.weekImageSent(input.week_start),
+      output: tr.weekImageSent(weekStartIso),
       agentHint:
         'The weekly image has already been delivered to the chat. Do NOT call render_week_image again with identical arguments in this turn.',
     };
