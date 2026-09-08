@@ -59,7 +59,7 @@ send_telegram() {
     -o /dev/null
 }
 
-# Post to alert queue so mac-alert-watcher triggers Claude investigation
+# Post to alert queue so mac-alert-watcher triggers an omp investigation
 push_alert() {
   local text="$1"
   if [[ -n "$ADMIN_ALERT_TOKEN" ]]; then
