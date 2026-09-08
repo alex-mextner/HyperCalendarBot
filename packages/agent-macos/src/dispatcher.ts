@@ -3,6 +3,7 @@ import { bashExecute } from './actions/bash';
 import { claudeChat, getArtifact, getOrgId, listChats, listProjects } from './actions/claude-bridge';
 import { type PlaywrightAction, playwrightAction } from './actions/playwright';
 import type { AgentCommand, AgentResponse } from './protocol';
+import { clampTimeoutMs, MAX_TIMEOUT_MS } from './timeout-clamp';
 
 type SendResponse = (resp: AgentResponse) => void;
 
@@ -56,10 +57,11 @@ export async function dispatch(cmd: AgentCommand, sendResponse: SendResponse): P
         const result = await new Promise<{ response: string; conversationId: string }>(
           (resolve, reject) => {
             if (timeout_ms) {
+              const effectiveTimeoutMs = clampTimeoutMs(timeout_ms, MAX_TIMEOUT_MS);
               timer = setTimeout(() => {
                 timedOut = true;
                 reject(new Error('claude_chat timed out'));
-              }, timeout_ms);
+              }, effectiveTimeoutMs);
             }
 
             claudeChat(message, chat_id, (chunk) => {
