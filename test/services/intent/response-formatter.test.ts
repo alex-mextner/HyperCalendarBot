@@ -198,7 +198,27 @@ describe('formatResponse', () => {
       const events = [{ id: 3, title: 'Отпуск', date: '2026-06-01', all_day: true }];
       const result = formatResponse('text', rawToolOutput, 'UTC', 'ru', events);
 
-      expect(result).toBe('Отпуск');
+      expect(result).toContain('Отпуск');
+      expect(result).not.toMatch(/\d{2}:\d{2}/);
+    });
+
+    test('omits the date for an event happening today', () => {
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const events = [{ id: 5, title: 'Обед', date: todayIso, time: '13:00', all_day: false }];
+      const result = formatResponse('text', rawToolOutput, 'UTC', 'ru', events);
+
+      expect(result).toBe('13:00  Обед');
+    });
+
+    test('shows the date for a single future event outside today', () => {
+      // get_upcoming and search_events can return one event weeks away; without the
+      // date the user has no way to tell when it happens.
+      const events = [{ id: 6, title: 'Конференция', date: '2026-12-25', time: '09:00', all_day: false }];
+      const result = formatResponse('text', rawToolOutput, 'UTC', 'ru', events);
+
+      expect(result).toContain('2026-12-25');
+      expect(result).toContain('09:00');
+      expect(result).toContain('Конференция');
     });
 
     test('falls back to the tool output when there is no event data', () => {

@@ -249,7 +249,7 @@ describe('createIntentMatcherLayer', () => {
     );
     await layer(ctx, 'да');
 
-    expect(ctx.send).toHaveBeenCalledWith('12:30  Английский');
+    expect(ctx.send).toHaveBeenCalledWith('2026-06-01 12:30  Английский');
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {

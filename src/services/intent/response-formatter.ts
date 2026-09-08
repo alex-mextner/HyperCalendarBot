@@ -1,3 +1,5 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { z } from 'zod';
 import { formatTime } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
@@ -13,14 +15,17 @@ const HolidaysCodec = jsonCodec(z.array(z.object({ name: z.string(), date: z.str
 const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /**
- * Render events the user can read: `HH:MM  Title`, prefixed with the date when the
- * set spans more than one day. All-day events carry no time.
+ * Render events the user can read: `HH:MM  Title`, prefixed with the date whenever
+ * that event does not fall on today (in the user's timezone). A single result from
+ * `get_upcoming` or `search_events` can land weeks away, so "does the set span more
+ * than one day" is not enough — a lone future event needs its date too. All-day
+ * events carry no time.
  */
-function formatEventSummaries(events: EventSummary[]): string {
-  const spansDays = new Set(events.map((e) => e.date)).size > 1;
+function formatEventSummaries(events: EventSummary[], timezone: string): string {
+  const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
   return events
     .map((event) => {
-      const date = spansDays ? event.date : '';
+      const date = event.date === todayKey ? '' : event.date;
       const time = event.all_day ? '' : (event.time ?? '');
       return `${date} ${time}  ${event.title}`.trim();
     })
@@ -45,7 +50,7 @@ export function formatResponse(
   events?: EventSummary[],
 ): string {
   if (events !== undefined && events.length > 0) {
-    return formatEventSummaries(events);
+    return formatEventSummaries(events, timezone);
   }
   try {
     switch (format) {
