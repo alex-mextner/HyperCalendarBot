@@ -157,6 +157,12 @@ async function runLevel1(
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
       return { success: false, response: result.error };
     }
+    if (result.stopLoop) {
+      // The tool handed control to something outside this workflow (e.g. a Telegram user
+      // picker) instead of completing the requested action. Report exactly what happened
+      // and stop — running the remaining tools would misreport an unfinished action as done.
+      return { success: true, response: result.output, responseEvents: extractEventSummaries(result.data) };
+    }
     lastOutput = result.output;
     lastData = result.data;
   }
@@ -189,9 +195,14 @@ function extractEventSummary(data: ToolResultData): EventSummary | null {
   return isEventSummary(data) ? data : null;
 }
 
-/** Every event in a list result, or undefined when the data is not a list of events. */
+/**
+ * Every event behind a result: a list of events, or a single event (e.g. get_event's result,
+ * which is not array-wrapped). Undefined when the data holds no event at all.
+ */
 function extractEventSummaries(data: ToolResultData | undefined): EventSummary[] | undefined {
-  if (data === undefined || !Array.isArray(data) || data.length === 0) return undefined;
+  if (data === undefined) return undefined;
+  if (!Array.isArray(data)) return isEventSummary(data) ? [data] : undefined;
+  if (data.length === 0) return undefined;
   const events: EventSummary[] = [];
   for (const item of data) {
     if (!isEventSummary(item)) return undefined;
@@ -314,6 +325,18 @@ async function runLevel2(
     if (!result.success) {
       cmdLogger.warn({ step: step.call, error: result.error }, 'Intent L2 tool step failed');
       return { success: false, response: result.error };
+    }
+
+    if (result.stopLoop) {
+      // The tool handed control to something outside this workflow (e.g. a Telegram user
+      // picker) instead of completing the requested action. Report exactly what happened
+      // and stop — running a later `respond` step would misreport an unfinished action as done.
+      return {
+        success: true,
+        response: result.output,
+        responseEvents: extractEventSummaries(result.data),
+        mentionedEventId,
+      };
     }
 
     lastToolOutput = result.output;

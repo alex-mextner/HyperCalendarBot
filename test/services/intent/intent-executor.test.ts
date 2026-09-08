@@ -665,5 +665,63 @@ describe('IntentExecutor', () => {
       const result = await executor.run(workflow, {}, userCtx, mockExecutor);
       expect(result.responseEvents).toBeUndefined();
     });
+
+    test('carries a single event from get_event, which returns one summary rather than a list', async () => {
+      // get_event's data is a bare EventSummary, not array-wrapped like get_events/get_upcoming.
+      const singleEvent = { id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false };
+      const workflow: Workflow = {
+        steps: [{ call: 'get_event', input: { event_id: '{{$1}}' } }],
+      };
+      const mockExecutor = () => ({ success: true, output: 'id: 239, title: Английский', data: singleEvent });
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+      expect(result.responseEvents).toEqual([singleEvent]);
+    });
+  });
+
+  describe('stopLoop', () => {
+    // A tool like pick_users hands control to something outside the workflow (a Telegram
+    // picker) instead of completing the requested action. The executor must report exactly
+    // that and stop, not run later steps as if the action succeeded.
+    test('Level 2: stops at a stopLoop tool instead of running a later respond step', async () => {
+      const calls: string[] = [];
+      const workflow: Workflow = {
+        steps: [
+          { call: 'send_invitation', input: { event_id: '{{$1}}', invitee_username: '{{$2}}' } },
+          { call: 'respond', input: { message: 'Пригласил!' } },
+        ],
+      };
+      const mockExecutor = (name: string) => {
+        calls.push(name);
+        return { success: true, output: 'Выбери пользователя из списка', stopLoop: true };
+      };
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+
+      expect(calls).toEqual(['send_invitation']);
+      expect(result.success).toBe(true);
+      expect(result.response).toBe('Выбери пользователя из списка');
+    });
+
+    test('Level 1: stops at a stopLoop tool instead of running the next tool', async () => {
+      const calls: string[] = [];
+      const workflow: Workflow = {
+        tools: [
+          { name: 'send_invitation', input: { event_id: '{{$1}}', invitee_username: '{{$2}}' } },
+          { name: 'get_events', input: { start_date: '{{dates.today}}' } },
+        ],
+        format: 'text',
+      };
+      const mockExecutor = (name: string) => {
+        calls.push(name);
+        return { success: true, output: 'Выбери пользователя из списка', stopLoop: true };
+      };
+
+      const result = await executor.run(workflow, {}, userCtx, mockExecutor);
+
+      expect(calls).toEqual(['send_invitation']);
+      expect(result.success).toBe(true);
+      expect(result.response).toBe('Выбери пользователя из списка');
+    });
   });
 });
