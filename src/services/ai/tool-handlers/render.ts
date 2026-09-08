@@ -154,12 +154,34 @@ export async function handleRenderWeekImage(
     return { success: false, error: 'Group context required for group scope' };
   }
 
+  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
+  const tr = t(lang).aiTools.meta;
+
   // Normalize to Monday of the week in the user's timezone — AI may send any weekday.
-  const weekStartIso = startOfWeek(new TZDate(new Date(`${input.week_start}T12:00:00Z`), ctx.user.timezone), {
-    weekStartsOn: 1,
-  })
-    .toISOString()
-    .slice(0, 10);
+  // Parse week_start via the year/month/day component TZDate constructor, which builds the wall
+  // clock time directly in the user's timezone. Anchoring the string at UTC (or host-local) noon
+  // first and then converting would shift the local calendar day forward in UTC+12/+13/+14 zones,
+  // turning a Sunday input into local Monday and resolving startOfWeek to next week's Monday.
+  const weekStartMatch = input.week_start.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!weekStartMatch) {
+    return { success: false, error: tr.weekImageFailed(input.week_start) };
+  }
+  const [, weekStartYearStr, weekStartMonthStr, weekStartDayStr] = weekStartMatch;
+  const weekStartYear = Number(weekStartYearStr);
+  const weekStartMonth = Number(weekStartMonthStr);
+  const weekStartDay = Number(weekStartDayStr);
+  const weekStartDate = new TZDate(weekStartYear, weekStartMonth - 1, weekStartDay, 12, ctx.user.timezone);
+  // Reject overflow (e.g. month 13, Feb 30): the TZDate/native Date constructor rolls invalid
+  // components into the next month/year instead of throwing, so verify the built date's
+  // components still match what was supplied rather than trust the roll-over silently.
+  if (
+    weekStartDate.getFullYear() !== weekStartYear ||
+    weekStartDate.getMonth() !== weekStartMonth - 1 ||
+    weekStartDate.getDate() !== weekStartDay
+  ) {
+    return { success: false, error: tr.weekImageFailed(input.week_start) };
+  }
+  const weekStartIso = startOfWeek(weekStartDate, { weekStartsOn: 1 }).toISOString().slice(0, 10);
 
   const { start: startUtc, end: endUtc } = getWeekRangeUtc(new Date(`${weekStartIso}T12:00:00Z`), ctx.user.timezone);
 
@@ -168,9 +190,7 @@ export async function handleRenderWeekImage(
       ? ctx.eventService.getEventsInRangeForGroup(ctx.groupChatId!, startUtc, endUtc)
       : ctx.eventService.getEventsInRange(userId, startUtc, endUtc);
 
-  const lang = (ctx.user.language ?? 'en') as 'ru' | 'en';
   const sender = ctx.sender;
-  const tr = t(lang).aiTools.meta;
 
   try {
     const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
