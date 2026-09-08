@@ -500,6 +500,36 @@ describe('sharing tool handlers', () => {
       expect(pickerPrompt).toContain('@nobody');
     });
 
+    test("routes the picker to the inviter's private chat, not a group ctx.chatId", async () => {
+      // The picker prompt names the invitee's @username; sending it to ctx.chatId when that
+      // is a group would leak who is being invited to every member (agent-tools#163 finding).
+      const event = eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Group Picker Party',
+        start_at: '2026-03-20T18:00:00Z',
+        timezone: 'UTC',
+      });
+      let pickerChatId: number | undefined;
+      const ctx = makeCtx({
+        chatId: GROUP_CHAT_ID,
+        resolveUsername: async () => null,
+        sender: {
+          sendMessage: async () => ({ message_id: 1 }),
+          editMessageText: async () => {},
+          sendUserPicker: async (chatId: number) => {
+            pickerChatId = chatId;
+            return { message_id: 1 };
+          },
+        },
+      });
+      const result = await handleSendInvitation(ctx, {
+        event_id: event.id,
+        invitee_username: 'nobody',
+      });
+      expect(result.success).toBe(true);
+      expect(pickerChatId).toBe(USER_ID);
+    });
+
     test('dispatches through executeTool when only invitee_username is provided', async () => {
       const event = eventService.createEvent({
         user_id: USER_ID,
