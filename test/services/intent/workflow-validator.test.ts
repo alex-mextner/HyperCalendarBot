@@ -357,6 +357,57 @@ describe('validateWorkflowSteps', () => {
     expect(validateWorkflowSteps(workflow)).toEqual([]);
   });
 
+  test('ask_user without a question is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'ask_user', input: { quetion: 'When?' }, as: 'when' }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('question'))).toBe(true);
+  });
+
+  test('call: respond without input.message is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'respond', input: {} }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('message'))).toBe(true);
+  });
+
+  test('a literal value that does not match the field type is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '5' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('limit'))).toBe(true);
+  });
+
+  test('a template value is exempt from the field type check', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '{{$1}}' } }],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('send_invitation with neither invitee_id nor invitee_username is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'send_invitation', input: { event_id: '{{tool_outputs.event.id}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('invitee_id') && e.includes('invitee_username'))).toBe(true);
+  });
+
+  test('send_invitation with only invitee_username passes', () => {
+    const workflow: Workflow = {
+      steps: [
+        {
+          call: 'send_invitation',
+          input: { event_id: '{{tool_outputs.event.id}}', invitee_username: '{{$1}}' },
+        },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
   test('a step calling a tool that does not exist is rejected', () => {
     const workflow: Workflow = {
       steps: [{ call: 'render_image', input: { period: 'month' } }],
@@ -364,6 +415,23 @@ describe('validateWorkflowSteps', () => {
     const errors = validateWorkflowSteps(workflow);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain('render_image');
+  });
+
+  test('inherited Object.prototype names are not mistaken for real tools', () => {
+    for (const call of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+      const workflow: Workflow = { steps: [{ call, input: {} }] };
+      const errors = validateWorkflowSteps(workflow);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('no such tool');
+    }
+  });
+
+  test('a parameter named after an inherited Object.prototype member is rejected, not crashed on', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_events', input: { toString: 'x' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('unknown parameter "toString"'))).toBe(true);
   });
 
   test('a missing required parameter is rejected', () => {

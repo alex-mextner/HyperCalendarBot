@@ -3,11 +3,34 @@ import { toolSchemas } from '../ai/tool-schemas.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 import type { Workflow } from './workflow-schema.ts';
 
-/** Step names the executor handles itself — they never reach the tool dispatcher. */
-const WORKFLOW_ONLY_STEPS = new Set(['respond', 'ask_user']);
-
 /** Tool schemas keyed by plain string, so an unknown step name is a lookup miss, not a type error. */
-const TOOL_SCHEMAS_BY_NAME = new Map<string, z.ZodType>(Object.entries(toolSchemas));
+const TOOL_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...toolSchemas };
+
+/**
+ * Step types the executor handles itself — they never reach the tool dispatcher, so they use
+ * their own minimal schemas instead of any AI-facing `toolSchemas` entry of the same name.
+ */
+const WORKFLOW_ONLY_SCHEMAS: Record<string, z.ZodType> = {
+  ask_user: z.object({ question: z.string().min(1) }).passthrough(),
+  respond: z.object({ message: z.string().min(1) }).passthrough(),
+};
+
+/** Every step type a workflow may call, tool or workflow-only, keyed by name. */
+const STEP_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...TOOL_SCHEMAS_BY_NAME, ...WORKFLOW_ONLY_SCHEMAS };
+
+/**
+ * Tools where at least one field in each listed group must be present. The underlying
+ * handler requires one of them and fails deterministically at runtime otherwise, so a
+ * workflow missing every field in a group must never be stored.
+ */
+const REQUIRED_ANY_OF: Record<string, string[][]> = {
+  send_invitation: [['invitee_id', 'invitee_username']],
+};
+
+/** Look up a key in a static record, ignoring inherited properties like "toString" or "constructor". */
+function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
 
 /** Variables that the intent workflow executor can resolve. */
 const ALLOWED_VARS = new Set([
@@ -133,8 +156,8 @@ function extractStepOutputNames(workflow: Workflow): Set<string> {
 
 interface StepCall {
   tool: string;
-  /** Parameter names the workflow passes to the tool. */
-  params: string[];
+  /** Raw argument values the workflow passes to the tool — always strings until resolved at runtime. */
+  input: Record<string, string>;
 }
 
 /** Collect every tool invocation in a workflow, from Level 1 `tools` or Level 2 `steps`. */
@@ -143,18 +166,24 @@ function extractStepCalls(workflow: Workflow): StepCall[] {
     const calls: StepCall[] = [];
     for (const step of workflow.steps) {
       if (typeof step.call !== 'string') continue;
-      calls.push({ tool: step.call, params: Object.keys(step.input ?? {}) });
+      calls.push({ tool: step.call, input: step.input ?? {} });
     }
     return calls;
   }
-  return workflow.tools.map((tool) => ({ tool: tool.name, params: Object.keys(tool.input) }));
+  return workflow.tools.map((tool) => ({ tool: tool.name, input: tool.input }));
+}
+
+/** Whether a raw input value still holds an unresolved {{...}} template expression. */
+function isTemplateValue(value: string): boolean {
+  return value.includes('{{');
 }
 
 /**
- * Check one step's arguments against the tool's schema.
- *
- * Only parameter names are checked, never value types: workflow inputs hold unresolved
- * `{{template}}` strings that become numbers and booleans at execution time.
+ * Check one step's arguments against the tool's schema: every required field is present,
+ * every supplied field is known, and every literal (non-template) value matches the field's
+ * type. Template values (e.g. "{{$1}}") are exempt from the type check — resolveVariables
+ * only preserves the concrete resolved type for a bare single-variable template; every other
+ * shape (mixed text, filters) becomes a string at execution time.
  */
 function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
   // Free-form schemas (assistant passthrough tools) accept any argument.
@@ -162,18 +191,35 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
 
   const errors: string[] = [];
   const shape = schema.shape;
+  const paramNames = Object.keys(call.input);
 
   for (const [field, fieldSchema] of Object.entries(shape)) {
     const isOptional = fieldSchema.safeParse(undefined).success;
-    if (!isOptional && !call.params.includes(field)) {
+    if (!isOptional && !paramNames.includes(field)) {
       errors.push(`step "${call.tool}": required parameter "${field}" is missing`);
     }
   }
 
-  for (const field of call.params) {
-    if (!(field in shape)) {
+  for (const field of paramNames) {
+    const fieldSchema = getOwn(shape, field);
+    if (!fieldSchema) {
       const accepted = Object.keys(shape).join(', ');
       errors.push(`step "${call.tool}": unknown parameter "${field}" — accepted: ${accepted || '(none)'}`);
+      continue;
+    }
+
+    const value = call.input[field]!;
+    if (isTemplateValue(value)) continue;
+    if (!fieldSchema.safeParse(value).success) {
+      errors.push(`step "${call.tool}": parameter "${field}" value "${value}" does not match the expected type`);
+    }
+  }
+
+  for (const group of getOwn(REQUIRED_ANY_OF, call.tool) ?? []) {
+    if (!group.some((field) => paramNames.includes(field))) {
+      errors.push(
+        `step "${call.tool}": at least one of ${group.map((field) => `"${field}"`).join(' or ')} is required`,
+      );
     }
   }
 
@@ -181,16 +227,14 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
 }
 
 /**
- * Validate that every step calls a tool that exists and passes the arguments it declares.
- * Returns a list of human-readable error strings (empty = valid).
+ * Validate that every step calls a known tool (or workflow-only step) and passes arguments
+ * that match its schema. Returns a list of human-readable error strings (empty = valid).
  */
 export function validateWorkflowSteps(workflow: Workflow): string[] {
   const errors: string[] = [];
 
   for (const call of extractStepCalls(workflow)) {
-    if (WORKFLOW_ONLY_STEPS.has(call.tool)) continue;
-
-    const schema = TOOL_SCHEMAS_BY_NAME.get(call.tool);
+    const schema = getOwn(STEP_SCHEMAS_BY_NAME, call.tool);
     if (!schema) {
       errors.push(`step "${call.tool}": no such tool`);
       continue;
