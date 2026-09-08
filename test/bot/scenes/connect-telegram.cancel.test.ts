@@ -18,10 +18,11 @@ const mockComposer = createUserResolverComposer(mockDb);
 type GramioFn = (ctx: MockCtx, next: () => Promise<void>) => Promise<void>;
 
 function getStepFns(scene: ReturnType<typeof createConnectTelegramScene>): GramioFn[] {
-  const inner = (scene as unknown as Record<string, unknown>)['~'] as Record<string, unknown>;
-  const composer = inner.composer as Record<string, unknown>;
-  const composerInner = composer['~'] as Record<string, unknown>;
-  const middlewares = composerInner.middlewares as Array<Record<string, unknown>>;
+  type DynamicShape = { [key: string]: unknown };
+  const inner = (scene as unknown as DynamicShape)['~'] as DynamicShape;
+  const composer = inner.composer as DynamicShape;
+  const composerInner = composer['~'] as DynamicShape;
+  const middlewares = composerInner.middlewares as DynamicShape[];
   return middlewares.slice(1).map((m) => m.fn as GramioFn);
 }
 
