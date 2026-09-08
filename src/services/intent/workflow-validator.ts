@@ -27,6 +27,17 @@ const REQUIRED_ANY_OF: Record<string, string[][]> = {
   send_invitation: [['invitee_id', 'invitee_username']],
 };
 
+/**
+ * Assistant tools that run arbitrary code/commands/browser actions on a user's connected
+ * Mac agent. Their schemas are free-form (\`z.record\`), so validateStepParams cannot check
+ * their arguments at all — exempting them from the type check the way other free-form
+ * schemas are exempted would let an approved learned/edited workflow store a fixed
+ * dangerous command that later runs on WHOEVER's phrase matches the intent, not just the
+ * person who taught it (a confused-deputy: the admin approves believing the validator
+ * already ruled out unsafe tool calls). Never storable in a workflow, no exceptions.
+ */
+const DENIED_TOOLS = new Set(['bash_execute', 'playwright_action', 'applescript_run']);
+
 /** Look up a key in a static record, ignoring inherited properties like "toString" or "constructor". */
 function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
   return Object.hasOwn(record, key) ? record[key] : undefined;
@@ -179,11 +190,23 @@ function isTemplateValue(value: string): boolean {
 }
 
 /**
+ * Whether a value is a bare regex-capture-group reference like "{{$1}}" — no surrounding
+ * text, no filter. `resolveVar` returns capture groups straight out of `captures`, which is
+ * typed `Record<string, string>`, so this shape is provably a string at runtime, unlike a
+ * bare dot-path template (e.g. "{{tool_outputs.event.id}}") whose resolved type depends on
+ * an earlier tool's output and cannot be known statically.
+ */
+function isBareCaptureTemplate(value: string): boolean {
+  return /^\{\{\$\d+\}\}$/.test(value);
+}
+
+/**
  * Check one step's arguments against the tool's schema: every required field is present,
  * every supplied field is known, and every literal (non-template) value matches the field's
- * type. Template values (e.g. "{{$1}}") are exempt from the type check — resolveVariables
- * only preserves the concrete resolved type for a bare single-variable template; every other
- * shape (mixed text, filters) becomes a string at execution time.
+ * type. A bare capture-group template ("{{$1}}") is checked too, since it always resolves to
+ * a string — a workflow binding it to a non-string field (e.g. a numeric `limit`) is
+ * guaranteed to fail at dispatch. Every other template shape (dot-path variables, mixed text,
+ * filters) is exempt: its resolved type cannot be determined before the workflow runs.
  */
 function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
   // Free-form schemas (assistant passthrough tools) accept any argument.
@@ -209,7 +232,7 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
     }
 
     const value = call.input[field]!;
-    if (isTemplateValue(value)) continue;
+    if (isTemplateValue(value) && !isBareCaptureTemplate(value)) continue;
     if (!fieldSchema.safeParse(value).success) {
       errors.push(`step "${call.tool}": parameter "${field}" value "${value}" does not match the expected type`);
     }
@@ -234,6 +257,12 @@ export function validateWorkflowSteps(workflow: Workflow): string[] {
   const errors: string[] = [];
 
   for (const call of extractStepCalls(workflow)) {
+    if (DENIED_TOOLS.has(call.tool)) {
+      errors.push(
+        `step "${call.tool}": this tool cannot be used in a stored workflow — it runs unsandboxed on whoever the intent matches`,
+      );
+      continue;
+    }
     const schema = getOwn(STEP_SCHEMAS_BY_NAME, call.tool);
     if (!schema) {
       errors.push(`step "${call.tool}": no such tool`);

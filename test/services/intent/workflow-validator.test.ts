@@ -381,9 +381,17 @@ describe('validateWorkflowSteps', () => {
     expect(errors.some((e) => e.includes('limit'))).toBe(true);
   });
 
-  test('a template value is exempt from the field type check', () => {
+  test('a bare capture-group template is checked against the field type — captures are always strings', () => {
     const workflow: Workflow = {
       steps: [{ call: 'get_upcoming', input: { limit: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('limit'))).toBe(true);
+  });
+
+  test('a dot-path template is exempt from the field type check — its resolved type is not known statically', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '{{tool_outputs.count.value}}' } }],
     };
     expect(validateWorkflowSteps(workflow)).toEqual([]);
   });
@@ -462,9 +470,21 @@ describe('validateWorkflowSteps', () => {
 
   test('tools with free-form input schemas accept any parameters', () => {
     const workflow: Workflow = {
-      steps: [{ call: 'bash_execute', input: { anything: 'goes' } }],
+      steps: [{ call: 'claude_chat', input: { anything: 'goes' } }],
     };
     expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('bash_execute, playwright_action, and applescript_run are never storable in a workflow', () => {
+    // These grant arbitrary code/command execution and have free-form schemas the validator
+    // cannot type-check, so a stored workflow calling them would run unsandboxed on whoever
+    // the intent later matches, not just the person who taught it.
+    for (const call of ['bash_execute', 'playwright_action', 'applescript_run']) {
+      const workflow: Workflow = { steps: [{ call, input: { command: 'anything' } }] };
+      const errors = validateWorkflowSteps(workflow);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain(call);
+    }
   });
 });
 
