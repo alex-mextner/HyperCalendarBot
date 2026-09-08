@@ -51,6 +51,7 @@ import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
+import { validateWorkflow } from '../../services/intent/workflow-validator.ts';
 import type { NliClassifier } from '../../services/nli/nli-classifier.ts';
 import type { ScenePauseService } from '../../services/scene-pause.ts';
 import type { DeepLinkService } from '../../services/sharing/deep-link-service.ts';
@@ -607,11 +608,12 @@ async function handleIntentEditInstruction(
 
   const StringArrayCodec = jsonCodec(z.array(z.string()));
   const WorkflowCodec = jsonCodec(WorkflowSchema);
+  const currentWorkflow = WorkflowCodec.parse(intent.workflow);
   const currentJson = JSON.stringify({
     phrases: StringArrayCodec.parse(intent.phrases),
     trigger_words: StringArrayCodec.parse(intent.trigger_words),
     pattern: intent.pattern,
-    workflow: WorkflowCodec.parse(intent.workflow),
+    workflow: currentWorkflow,
     format: intent.format,
   });
 
@@ -661,6 +663,19 @@ async function handleIntentEditInstruction(
 
   try {
     if (!updated) throw lastError;
+
+    // Validate the combination that would be stored. A pattern-only edit still needs
+    // checking: the retained workflow's {{$1}} references depend on that pattern's groups.
+    if (updated.workflow !== undefined || updated.pattern !== undefined) {
+      const effectiveWorkflow = updated.workflow ?? currentWorkflow;
+      const effectivePattern = updated.pattern !== undefined ? updated.pattern : intent.pattern;
+      const errors = validateWorkflow(effectiveWorkflow, effectivePattern);
+      if (errors.length > 0) {
+        cmdLogger.warn({ intentId: session.intentId, errors }, 'Admin intent edit produced an invalid workflow');
+        await ctx.send(`❌ Edit rejected — the new workflow is invalid:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+        return;
+      }
+    }
 
     intentRepo.update(session.intentId, {
       ...(updated.phrases !== undefined && { phrases: JSON.stringify(updated.phrases) }),
@@ -1223,7 +1238,6 @@ export function createMessageHandler(deps: MessageHandlerDeps) {
                 cmdLogger.error({ err: err, userId: uid }, 'Failed to persist last mentioned event from intent');
               });
             },
-            deps.conversationLogger,
             deps.actionLogRepo,
           )
         : undefined;

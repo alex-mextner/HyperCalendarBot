@@ -1,6 +1,9 @@
+import { TZDate } from '@date-fns/tz';
+import { format } from 'date-fns';
 import { z } from 'zod';
 import { formatTime } from '../../utils/date.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
+import type { EventSummary } from './variable-resolver.ts';
 
 const TextMapCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 const EventsListCodec = jsonCodec(
@@ -12,14 +15,43 @@ const HolidaysCodec = jsonCodec(z.array(z.object({ name: z.string(), date: z.str
 const SettingsCodec = jsonCodec(z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])));
 
 /**
+ * Render events the user can read: `HH:MM  Title`, prefixed with the date whenever
+ * that event does not fall on today (in the user's timezone). A single result from
+ * `get_upcoming` or `search_events` can land weeks away, so "does the set span more
+ * than one day" is not enough — a lone future event needs its date too. All-day
+ * events carry no time.
+ */
+function formatEventSummaries(events: EventSummary[], timezone: string): string {
+  const todayKey = format(new TZDate(new Date(), timezone), 'yyyy-MM-dd');
+  return events
+    .map((event) => {
+      const date = event.date === todayKey ? '' : event.date;
+      const time = event.all_day ? '' : (event.time ?? '');
+      return `${date} ${time}  ${event.title}`.trim();
+    })
+    .join('\n');
+}
+
+/**
  * Format tool output into a user-friendly response string.
  * @param format - format type name
  * @param toolOutput - raw tool output string (often JSON)
  * @param timezone - user timezone (IANA)
  * @param language - user language ('en' or 'ru')
+ * @param events - structured events from the tool result; preferred over parsing toolOutput,
+ *                 whose text form is written for the AI agent and is not fit to show a user
  * @returns formatted string for display
  */
-export function formatResponse(format: string, toolOutput: string, timezone: string, language: string): string {
+export function formatResponse(
+  format: string,
+  toolOutput: string,
+  timezone: string,
+  language: string,
+  events?: EventSummary[],
+): string {
+  if (events !== undefined && events.length > 0) {
+    return formatEventSummaries(events, timezone);
+  }
   try {
     switch (format) {
       case 'text':

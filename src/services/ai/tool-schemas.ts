@@ -239,10 +239,13 @@ const shareEventSchema = z
 const sendInvitationSchema = z
   .object({
     event_id: z.number(),
-    invitee_id: z.number(),
+    invitee_id: z.number().optional(),
     invitee_username: z.string().optional(),
   })
-  .passthrough();
+  .passthrough()
+  .refine((value) => value.invitee_id !== undefined || value.invitee_username !== undefined, {
+    message: 'Either invitee_id or invitee_username must be provided',
+  });
 
 const getInvitationStatusSchema = z.object({ event_id: z.number() }).passthrough();
 

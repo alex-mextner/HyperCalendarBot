@@ -3,7 +3,6 @@
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { IntentRepository } from '../../database/repositories/intent.repository.ts';
 import type { ToolResult } from '../../services/ai/types.ts';
-import type { ConversationLogger } from '../../services/conversation-logger.ts';
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
 import { formatResponse } from '../../services/intent/response-formatter.ts';
@@ -28,7 +27,6 @@ export function createIntentMatcherLayer(
     timezone: string,
   ) => Promise<{ lastAddedEvent?: EventSummary; lastMentionedEvent?: EventSummary }>,
   onEventMentioned?: (userId: number, eventId: number) => void,
-  conversationLogger?: ConversationLogger,
   actionLogRepo?: ActionLogRepository,
 ) {
   return async (
@@ -73,7 +71,10 @@ export function createIntentMatcherLayer(
         },
       );
       if (result.response) {
-        await ctx.send(result.response);
+        // Same formatting as a first-pass match: a resumed workflow can end in a tool
+        // whose text output is written for the AI agent, not for the user.
+        const format = intentRepo.getById(session.intentId)?.format ?? 'text';
+        await ctx.send(formatResponse(format, result.response, user.timezone, user.language, result.responseEvents));
       }
       return { handled: true };
     }
@@ -162,9 +163,16 @@ export function createIntentMatcherLayer(
 
     // 8. Format and send response
     if (result.response) {
-      const formatted = formatResponse(intent.format, result.response, user.timezone, user.language);
+      const formatted = formatResponse(
+        intent.format,
+        result.response,
+        user.timezone,
+        user.language,
+        result.responseEvents,
+      );
+      // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
+      // the supplement agent reads the text from supplementAutoResponse, not from history.
       await ctx.send(formatted);
-      conversationLogger?.logBotResponse(userId, formatted, chatId);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 

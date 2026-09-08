@@ -1,5 +1,47 @@
+import { z } from 'zod';
+import { toolSchemas } from '../ai/tool-schemas.ts';
 import { type FilterCall, KNOWN_FILTERS, parseFilterChain } from './filter-parser.ts';
 import type { Workflow } from './workflow-schema.ts';
+
+/** Tool schemas keyed by plain string, so an unknown step name is a lookup miss, not a type error. */
+const TOOL_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...toolSchemas };
+
+/**
+ * Step types the executor handles itself — they never reach the tool dispatcher, so they use
+ * their own minimal schemas instead of any AI-facing `toolSchemas` entry of the same name.
+ */
+const WORKFLOW_ONLY_SCHEMAS: Record<string, z.ZodType> = {
+  ask_user: z.object({ question: z.string().min(1) }).passthrough(),
+  respond: z.object({ message: z.string().min(1) }).passthrough(),
+};
+
+/** Every step type a workflow may call, tool or workflow-only, keyed by name. */
+const STEP_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...TOOL_SCHEMAS_BY_NAME, ...WORKFLOW_ONLY_SCHEMAS };
+
+/**
+ * Tools where at least one field in each listed group must be present. The underlying
+ * handler requires one of them and fails deterministically at runtime otherwise, so a
+ * workflow missing every field in a group must never be stored.
+ */
+const REQUIRED_ANY_OF: Record<string, string[][]> = {
+  send_invitation: [['invitee_id', 'invitee_username']],
+};
+
+/**
+ * Assistant tools that run arbitrary code/commands/browser actions on a user's connected
+ * Mac agent. Their schemas are free-form (\`z.record\`), so validateStepParams cannot check
+ * their arguments at all — exempting them from the type check the way other free-form
+ * schemas are exempted would let an approved learned/edited workflow store a fixed
+ * dangerous command that later runs on WHOEVER's phrase matches the intent, not just the
+ * person who taught it (a confused-deputy: the admin approves believing the validator
+ * already ruled out unsafe tool calls). Never storable in a workflow, no exceptions.
+ */
+const DENIED_TOOLS = new Set(['bash_execute', 'playwright_action', 'applescript_run']);
+
+/** Look up a key in a static record, ignoring inherited properties like "toString" or "constructor". */
+function getOwn<T>(record: Record<string, T>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
 
 /** Variables that the intent workflow executor can resolve. */
 const ALLOWED_VARS = new Set([
@@ -121,6 +163,124 @@ function extractStepOutputNames(workflow: Workflow): Set<string> {
     }
   }
   return names;
+}
+
+interface StepCall {
+  tool: string;
+  /** Raw argument values the workflow passes to the tool — always strings until resolved at runtime. */
+  input: Record<string, string>;
+}
+
+/** Collect every tool invocation in a workflow, from Level 1 `tools` or Level 2 `steps`. */
+function extractStepCalls(workflow: Workflow): StepCall[] {
+  if ('steps' in workflow) {
+    const calls: StepCall[] = [];
+    for (const step of workflow.steps) {
+      if (typeof step.call !== 'string') continue;
+      calls.push({ tool: step.call, input: step.input ?? {} });
+    }
+    return calls;
+  }
+  return workflow.tools.map((tool) => ({ tool: tool.name, input: tool.input }));
+}
+
+/** Whether a raw input value still holds an unresolved {{...}} template expression. */
+function isTemplateValue(value: string): boolean {
+  return value.includes('{{');
+}
+
+/**
+ * Whether a value is a bare regex-capture-group reference like "{{$1}}" — no surrounding
+ * text, no filter. `resolveVar` returns capture groups straight out of `captures`, which is
+ * typed `Record<string, string>`, so this shape is provably a string at runtime, unlike a
+ * bare dot-path template (e.g. "{{tool_outputs.event.id}}") whose resolved type depends on
+ * an earlier tool's output and cannot be known statically.
+ */
+function isBareCaptureTemplate(value: string): boolean {
+  return /^\{\{\$\d+\}\}$/.test(value);
+}
+
+/**
+ * Check one step's arguments against the tool's schema: every required field is present,
+ * every supplied field is known, and every literal (non-template) value matches the field's
+ * type. A bare capture-group template ("{{$1}}") is checked too, since it always resolves to
+ * a string — a workflow binding it to a non-string field (e.g. a numeric `limit`) is
+ * guaranteed to fail at dispatch. Every other template shape (dot-path variables, mixed text,
+ * filters) is exempt: its resolved type cannot be determined before the workflow runs.
+ */
+function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
+  // Free-form schemas (assistant passthrough tools) accept any argument.
+  if (!(schema instanceof z.ZodObject)) return [];
+
+  const errors: string[] = [];
+  const shape = schema.shape;
+  const paramNames = Object.keys(call.input);
+
+  for (const [field, fieldSchema] of Object.entries(shape)) {
+    const isOptional = fieldSchema.safeParse(undefined).success;
+    if (!isOptional && !paramNames.includes(field)) {
+      errors.push(`step "${call.tool}": required parameter "${field}" is missing`);
+    }
+  }
+
+  for (const field of paramNames) {
+    const fieldSchema = getOwn(shape, field);
+    if (!fieldSchema) {
+      const accepted = Object.keys(shape).join(', ');
+      errors.push(`step "${call.tool}": unknown parameter "${field}" — accepted: ${accepted || '(none)'}`);
+      continue;
+    }
+
+    const value = call.input[field]!;
+    if (isTemplateValue(value) && !isBareCaptureTemplate(value)) continue;
+    if (!fieldSchema.safeParse(value).success) {
+      errors.push(`step "${call.tool}": parameter "${field}" value "${value}" does not match the expected type`);
+    }
+  }
+
+  for (const group of getOwn(REQUIRED_ANY_OF, call.tool) ?? []) {
+    if (!group.some((field) => paramNames.includes(field))) {
+      errors.push(
+        `step "${call.tool}": at least one of ${group.map((field) => `"${field}"`).join(' or ')} is required`,
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Validate that every step calls a known tool (or workflow-only step) and passes arguments
+ * that match its schema. Returns a list of human-readable error strings (empty = valid).
+ */
+export function validateWorkflowSteps(workflow: Workflow): string[] {
+  const errors: string[] = [];
+
+  for (const call of extractStepCalls(workflow)) {
+    if (DENIED_TOOLS.has(call.tool)) {
+      errors.push(
+        `step "${call.tool}": this tool cannot be used in a stored workflow — it runs unsandboxed on whoever the intent matches`,
+      );
+      continue;
+    }
+    const schema = getOwn(STEP_SCHEMAS_BY_NAME, call.tool);
+    if (!schema) {
+      errors.push(`step "${call.tool}": no such tool`);
+      continue;
+    }
+    errors.push(...validateStepParams(call, schema));
+  }
+
+  return errors;
+}
+
+/**
+ * Full validation for a workflow about to be stored: template variables and tool calls.
+ * Every path that persists a workflow must go through this, not one half of it.
+ * Returns a list of human-readable error strings (empty = valid).
+ */
+export function validateWorkflow(workflow: Workflow, pattern: string | null | undefined): string[] {
+  return [...validateWorkflowVariables(workflow, pattern), ...validateWorkflowSteps(workflow)];
 }
 
 /**
