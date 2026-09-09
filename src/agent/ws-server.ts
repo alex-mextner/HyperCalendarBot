@@ -1,5 +1,6 @@
 // src/agent/ws-server.ts
 import type { ServerWebSocket } from 'bun';
+import type { OauthTokenStore } from '../services/ai/oauth-token-store.ts';
 import { jsonCodec } from '../utils/json-codec.ts';
 import { logger } from '../utils/logger.ts';
 import type { AgentDispatcher } from './dispatcher.ts';
@@ -22,7 +23,11 @@ export function upgradeAgentWs(
   return server.upgrade(req, { data: { userId: null, _token: token } });
 }
 
-export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentDispatcher) {
+export function createAgentWsHandler(
+  registry: AgentRegistry,
+  dispatcher: AgentDispatcher,
+  oauthTokenStore?: OauthTokenStore,
+) {
   return {
     async open(ws: ServerWebSocket<WsData>) {
       if (ws.data._token) {
@@ -86,6 +91,13 @@ export function createAgentWsHandler(registry: AgentRegistry, dispatcher: AgentD
       if (msg.type === 'chunk' || msg.type === 'done' || msg.type === 'error') {
         agentLogger.debug({ userId: ws.data.userId, type: msg.type, id: msg.id }, 'Agent response');
         dispatcher.handleResponse(msg);
+        return;
+      }
+
+      if (msg.type === 'anthropic_oauth_token') {
+        if (!ws.data.userId) return;
+        agentLogger.debug({ userId: ws.data.userId }, 'Anthropic OAuth token received from agent');
+        oauthTokenStore?.updateTokens(ws.data.userId, msg.accessToken, msg.refreshToken, msg.expiresAt);
       }
     },
 
