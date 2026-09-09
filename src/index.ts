@@ -14,6 +14,7 @@ import { loadConfig } from './config/env.ts';
 import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
+import { OauthTokenStore } from './services/ai/oauth-token-store.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
 import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
@@ -132,7 +133,9 @@ const botRef: {
 let googleDeps: GoogleBotDeps | undefined;
 
 // Mutable deps — Google fields are filled in once GOOGLE_CLIENT_ID is confirmed
+const oauthTokenStore = new OauthTokenStore(db.agentOauthTokens, config.ENCRYPTION_KEY);
 const webServerDeps: WebServerDeps = {
+  oauthTokenStore,
   config,
   userRepo: db.users,
   agentRegistry,
