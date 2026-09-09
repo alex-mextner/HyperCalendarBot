@@ -1,5 +1,5 @@
 // src/services/ai/clients.ts
-// OpenAI SDK clients for all AI providers (z.ai, Groq, Gemini, HuggingFace Router).
+// OpenAI SDK clients for all AI providers (z.ai, Groq, Gemini, HuggingFace Router, MiMo).
 // All use the same OpenAI SDK — only baseURL and apiKey differ.
 // Base URLs and API keys are loaded from env via loadConfig() — no hardcoded values.
 
@@ -13,6 +13,7 @@ let zai: OpenAI | null = null;
 let groq: OpenAI | null = null;
 let hf: OpenAI | null = null;
 let gemini: OpenAI | null = null;
+let mimo: OpenAI | null = null;
 
 export function zaiClient(): OpenAI {
   if (!zai) {
@@ -38,6 +39,19 @@ export function groqClient(): OpenAI {
     });
   }
   return groq;
+}
+
+export function mimoClient(): OpenAI {
+  if (!mimo) {
+    const cfg = loadConfig();
+    mimo = new OpenAI({
+      apiKey: cfg.MIMO_API_KEY!,
+      baseURL: 'https://opencode.ai/zen/v1',
+      timeout: DEFAULT_TIMEOUT_MS,
+      maxRetries: 0,
+    });
+  }
+  return mimo;
 }
 
 export function hfClient(): OpenAI {
@@ -72,4 +86,5 @@ export function resetClients(): void {
   groq = null;
   hf = null;
   gemini = null;
+  mimo = null;
 }

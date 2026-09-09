@@ -6,17 +6,20 @@ import { logger, logOnce } from '../utils/logger.ts';
  * Hugging Face first: it is the paid seat here, and the free tiers underneath it
  * fail in ways retrying cannot fix — a weekly quota that is simply spent, or a
  * per-minute token cap smaller than one request with the tool catalog in it.
+ * MiMo trails Groq at the very end: an optional last-resort backup with no
+ * verified-live model preferences of its own yet.
  */
-export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
+export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq', 'mimo'];
 /**
  * The fast chain carries short requests (summaries, validation), which do fit in
  * the small free tiers, so the cheap and quick providers come first there. Groq
  * is last despite being the quickest: its small model answers 200 with no text
  * and no tool calls often enough to be a liability on a path whose failures are
  * invisible to the user but degrade the next answer — a summary that never
- * arrives means the history reaches the model bluntly truncated instead.
+ * arrives means the history reaches the model bluntly truncated instead. MiMo
+ * is last of all, the optional backup behind everything else.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq', 'mimo'];
 
 /**
  * A chain order together with where it came from. The source is carried rather
@@ -96,6 +99,9 @@ export interface EnvConfig {
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
+  MIMO_API_KEY?: string;
+  MIMO_MODEL?: string;
+  MIMO_FAST_MODEL?: string;
 
   /**
    * The order providers are tried in, first to last, for the chain that answers
@@ -213,6 +219,9 @@ export function loadConfig(): EnvConfig {
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,
+    MIMO_API_KEY: process.env.MIMO_API_KEY || undefined,
+    MIMO_MODEL: process.env.MIMO_MODEL || undefined,
+    MIMO_FAST_MODEL: process.env.MIMO_FAST_MODEL || undefined,
     AI_SMART_CHAIN: parseChain('AI_SMART_CHAIN', DEFAULT_SMART_CHAIN),
     AI_FAST_CHAIN: parseChain('AI_FAST_CHAIN', DEFAULT_FAST_CHAIN),
     BOT_ADMIN_ID,

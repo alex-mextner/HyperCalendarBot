@@ -1,7 +1,7 @@
 // test/services/ai/clients.test.ts
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import OpenAI from 'openai';
-import { geminiClient, hfClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
+import { geminiClient, hfClient, mimoClient, resetClients, zaiClient } from '../../../src/services/ai/clients.ts';
 
 const originalEnv = { ...process.env };
 
@@ -22,6 +22,7 @@ beforeEach(() => {
   process.env.GEMINI_BASE_URL = 'https://gemini.example/v1/';
   process.env.GEMINI_MODEL = 'gemini-main';
   process.env.GEMINI_FAST_MODEL = 'gemini-fast';
+  process.env.MIMO_API_KEY = 'mimo-key';
 });
 
 afterEach(() => {
@@ -51,10 +52,18 @@ test('geminiClient returns an OpenAI instance wired to GEMINI env vars', () => {
   expect(client.baseURL).toBe('https://gemini.example/v1/');
 });
 
+test('mimoClient returns an OpenAI instance wired to the fixed MiMo endpoint', () => {
+  const client = mimoClient();
+  expect(client).toBeInstanceOf(OpenAI);
+  expect(client.apiKey).toBe('mimo-key');
+  expect(client.baseURL).toBe('https://opencode.ai/zen/v1');
+});
+
 test('each factory returns the same singleton on repeat calls', () => {
   expect(zaiClient()).toBe(zaiClient());
   expect(hfClient()).toBe(hfClient());
   expect(geminiClient()).toBe(geminiClient());
+  expect(mimoClient()).toBe(mimoClient());
 });
 
 test('resetClients clears the singletons so new instances are built', () => {
@@ -64,11 +73,15 @@ test('resetClients clears the singletons so new instances are built', () => {
   expect(secondZai).not.toBe(firstZai);
 });
 
-test('the three providers are independent singletons', () => {
+test('the four providers are independent singletons', () => {
   const z = zaiClient();
   const h = hfClient();
   const g = geminiClient();
+  const m = mimoClient();
   expect(z).not.toBe(h);
   expect(h).not.toBe(g);
   expect(z).not.toBe(g);
+  expect(m).not.toBe(z);
+  expect(m).not.toBe(h);
+  expect(m).not.toBe(g);
 });
