@@ -94,6 +94,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-exist',
       google_etag: '"old-etag"',
       is_cancelled: false,
+      color: null,
     });
 
     const api = createMockApi({
@@ -148,6 +149,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-del',
       google_etag: '"e1"',
       is_cancelled: false,
+      color: null,
     });
 
     const api = createMockApi({
@@ -403,6 +405,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-conflict',
       google_etag: '"old"',
       is_cancelled: false,
+      color: null,
     });
 
     // Mark as pending_push to trigger conflict resolution
@@ -457,6 +460,7 @@ describe('SyncService — extended coverage', () => {
       google_event_id: 'g-local-wins',
       google_etag: '"old"',
       is_cancelled: false,
+      color: null,
     });
 
     const existing = eventRepo.findByGoogleEventId(1, 'cal-1', 'g-local-wins')!;

@@ -1049,4 +1049,10 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '062_events_color',
+    up: (db) => {
+      db.exec('ALTER TABLE events ADD COLUMN color TEXT DEFAULT NULL');
+    },
+  },
 ];
