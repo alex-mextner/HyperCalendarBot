@@ -16,7 +16,7 @@ export class TranscriptionService {
     const startMs = Date.now();
 
     const form = new FormData();
-    form.append('file', new Blob([audioBuffer], { type: 'audio/ogg' }), 'voice.ogg');
+    form.append('file', new Blob([new Uint8Array(audioBuffer)], { type: 'audio/ogg' }), 'voice.ogg');
     form.append('model', WHISPER_MODEL);
     form.append('response_format', 'json');
 

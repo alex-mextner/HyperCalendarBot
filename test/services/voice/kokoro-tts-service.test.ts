@@ -32,7 +32,7 @@ function makeOggStub(): Buffer {
 
 test('synthesize converts WAV from HF API to OGG Opus buffer', async () => {
   const wavBuffer = makeWavBuffer();
-  const fakeBlob = new Blob([wavBuffer], { type: 'audio/wav' });
+  const fakeBlob = new Blob([new Uint8Array(wavBuffer)], { type: 'audio/wav' });
 
   const spawnFfmpeg = mock((cmd: string[], _opts: { stderr: 'pipe' }) => {
     // Stub: pretend ffmpeg succeeded. The service then reads tmpOgg

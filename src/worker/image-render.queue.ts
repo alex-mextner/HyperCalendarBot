@@ -45,7 +45,6 @@ export async function processRenderJob(job: ImageRenderJob): Promise<ImageRender
   try {
     await page.setContent(html, { waitUntil: 'load' });
 
-    // @ts-expect-error — page.evaluate callback runs in browser scope; document is unavailable in Node types
     const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 800);
 
     await page.setViewportSize({ width: 1080, height });

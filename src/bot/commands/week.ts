@@ -91,7 +91,7 @@ export async function handleWeek(
         user.telegram_id,
         weatherByDate,
       );
-      const file = new File([buffer], 'week.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'week.png', { type: 'image/png' });
       await ctx.sendPhoto(file);
     } catch (err) {
       imageLogger.error({ err }, 'Render failed');

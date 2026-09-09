@@ -218,7 +218,7 @@ export async function handleMonth(
         data,
         userId: user.telegram_id,
       });
-      const file = new File([buffer], 'month.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'month.png', { type: 'image/png' });
       const sent = await ctx.sendPhoto(file);
       autoPin(user.telegram_id, sent.id, {
         pinChatMessage: (chatId, messageId, options) =>

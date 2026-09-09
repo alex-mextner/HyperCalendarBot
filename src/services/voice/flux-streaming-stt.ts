@@ -45,7 +45,9 @@ export class FluxStreamingSTT {
     });
     const url = `wss://api.deepgram.com/v2/listen?${params}`;
     const createWs =
-      this.deps.createWs ?? ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } }));
+      this.deps.createWs ??
+      // @ts-expect-error — Bun's WebSocket accepts a headers option at runtime; DOM lib's WebSocket type doesn't declare it
+      ((u) => new WebSocket(u, { headers: { Authorization: `Token ${this.apiKey}` } }));
     this.ws = createWs(url);
 
     this.ws.onmessage = (event: MessageEvent) => {

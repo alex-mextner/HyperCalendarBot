@@ -405,7 +405,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     sendVoice:
       sileroTts || kokoroTts || fallbackTts
         ? async (chatId: number, audio: Buffer) => {
-            const file = new File([audio], 'reply.ogg', { type: 'audio/ogg' });
+            const file = new File([new Uint8Array(audio)], 'reply.ogg', { type: 'audio/ogg' });
             await bot.api.sendVoice({ chat_id: chatId, voice: file });
           }
         : undefined,
@@ -934,7 +934,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                 sileroTts,
                 kokoroTts,
                 sendVoice: async (chatId: number, audio: Buffer) => {
-                  const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
+                  const file = new File([new Uint8Array(audio)], 'message.mp3', { type: 'audio/mpeg' });
                   await bot.api.sendVoice({ chat_id: chatId, voice: file });
                 },
                 stressDictionary,

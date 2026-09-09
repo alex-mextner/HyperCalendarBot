@@ -88,7 +88,7 @@ export async function handleTomorrow(
         user.telegram_id,
         holidays,
       );
-      const file = new File([buffer], 'tomorrow.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'tomorrow.png', { type: 'image/png' });
       await ctx.sendPhoto(file);
     } catch (err) {
       imageLogger.error({ err }, 'Render failed');

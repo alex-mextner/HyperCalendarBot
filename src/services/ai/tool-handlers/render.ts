@@ -77,7 +77,7 @@ export async function handleRenderDayImage(
       userId,
       holidays,
     );
-    const file = new File([buffer], 'day.png', { type: 'image/png' });
+    const file = new File([new Uint8Array(buffer)], 'day.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
@@ -116,7 +116,7 @@ export async function handleRenderTable(
       },
       userId: ctx.user.telegram_id,
     });
-    const file = new File([buffer], 'table.png', { type: 'image/png' });
+    const file = new File([new Uint8Array(buffer)], 'table.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
 
@@ -194,7 +194,7 @@ export async function handleRenderWeekImage(
 
   try {
     const buffer = await renderWeekImage(ctx.renderService, occurrences, weekStartIso, ctx.user.timezone, lang, userId);
-    const file = new File([buffer], 'week.png', { type: 'image/png' });
+    const file = new File([new Uint8Array(buffer)], 'week.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
     return {
@@ -249,7 +249,7 @@ export async function handleRenderMonthImage(
 
   try {
     const buffer = await renderMonthImage(ctx.renderService, occurrences, year, month, ctx.user.timezone, lang, userId);
-    const file = new File([buffer], 'month.png', { type: 'image/png' });
+    const file = new File([new Uint8Array(buffer)], 'month.png', { type: 'image/png' });
     const sent = await sender.sendPhoto!(ctx.chatId, file);
     schedulePinFireAndForget(ctx, sent.message_id);
     return {

@@ -468,7 +468,7 @@ export function createCallbackHandler(
         data: imgData,
         userId: user.telegram_id,
       });
-      const file = new File([buffer], 'agenda.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'agenda.png', { type: 'image/png' });
       if (ctx.message) {
         const sent = await ctx.message.sendPhoto(file);
         if (!sent) return;
@@ -544,7 +544,7 @@ export function createCallbackHandler(
         data: imgData,
         userId: user.telegram_id,
       });
-      const file = new File([buffer], 'week.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'week.png', { type: 'image/png' });
       if (ctx.message) {
         const sent = await ctx.message.sendPhoto(file);
         if (!sent) return;
@@ -2080,7 +2080,7 @@ async function notifyInviter(
       locale,
     )
       .then((buffer) => {
-        const photo = new File([buffer], 'conflict.png', { type: 'image/png' });
+        const photo = new File([new Uint8Array(buffer)], 'conflict.png', { type: 'image/png' });
         return sendPhoto(invitation.inviter_id, photo);
       })
       .catch((err) => {

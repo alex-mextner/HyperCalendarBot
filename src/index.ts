@@ -1081,7 +1081,7 @@ botRef.editMessage = async (chatId, messageId, text, parseMode) => {
   });
 };
 botRef.sendVoice = async (telegramId, audio) => {
-  const file = new File([audio], 'message.mp3', { type: 'audio/mpeg' });
+  const file = new File([new Uint8Array(audio)], 'message.mp3', { type: 'audio/mpeg' });
   await bot.api.sendVoice({ chat_id: telegramId, voice: file });
 };
 // Broadcast worker — created after botRef is patched so sendMessage is the real implementation.

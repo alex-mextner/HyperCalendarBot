@@ -88,7 +88,7 @@ export async function handleToday(
         user.telegram_id,
         holidays,
       );
-      const file = new File([buffer], 'today.png', { type: 'image/png' });
+      const file = new File([new Uint8Array(buffer)], 'today.png', { type: 'image/png' });
       const sent = await ctx.sendPhoto(file);
       autoPin(user.telegram_id, sent.id, {
         pinChatMessage: (chatId, messageId, options) =>
