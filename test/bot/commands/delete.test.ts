@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleDelete } from '../../../src/bot/commands/delete.ts';
+import { EVENT_PICKER_PAGE_SIZE } from '../../../src/bot/keyboards.ts';
 import type { CalendarEvent } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -66,7 +67,7 @@ describe('handleDelete group context', () => {
       }),
     };
     await handleDelete(ctx as never, eventService as never, groupRepo as never);
-    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, EVENT_PICKER_PAGE_SIZE + 1);
     expect(eventService.getUpcoming).not.toHaveBeenCalled();
     // Keyboard callback data must contain the real event id, not 'undefined'
     const kb = JSON.stringify(sentOpts.reply_markup ?? '');
@@ -141,6 +142,59 @@ describe('handleDelete', () => {
     const args = ctx.send.mock.calls[0] as unknown[];
     expect(args[0]).toContain('Which event to delete');
     expect(args[1]).toHaveProperty('reply_markup');
+  });
+
+  test('over-fetches by one to detect more pages', async () => {
+    const { handleDelete } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCommandCtx();
+    const eventService = { getUpcoming: mock(() => []) };
+
+    await handleDelete(ctx as never, eventService as never);
+
+    expect(eventService.getUpcoming).toHaveBeenCalledWith(100, EVENT_PICKER_PAGE_SIZE + 1);
+  });
+
+  test('exactly 10 events: no forward pagination button', async () => {
+    const { handleDelete } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 10 }, (_, i) => makeEvent({ id: i + 1 }));
+    const eventService = { getUpcoming: mock(() => events) };
+
+    await handleDelete(ctx as never, eventService as never);
+
+    const kb = JSON.stringify((ctx.send.mock.calls[0] as unknown[])[1]);
+    expect(kb).not.toContain('▶️');
+  });
+
+  test('exactly 11 events (one over the page): shows forward pagination button', async () => {
+    const { handleDelete } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 11 }, (_, i) => makeEvent({ id: i + 1 }));
+    const eventService = { getUpcoming: mock(() => events) };
+
+    await handleDelete(ctx as never, eventService as never);
+
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    // only 10 event rows rendered even though 11 were fetched
+    expect((kb.match(/"ed:\d+"/g) ?? []).length).toBe(10);
+  });
+
+  test('25 events: over-fetch respects the requested limit and renders only the first page', async () => {
+    const { handleDelete } = await import('../../../src/bot/commands/delete.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 25 }, (_, i) => makeEvent({ id: i + 1 }));
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const eventService = { getUpcoming };
+
+    await handleDelete(ctx as never, eventService as never);
+
+    expect(getUpcoming).toHaveBeenCalledWith(100, EVENT_PICKER_PAGE_SIZE + 1);
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    expect(kb).not.toContain('◀️');
   });
 });
 

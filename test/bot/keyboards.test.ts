@@ -4,6 +4,7 @@ import {
   clearReplyKeyboard,
   countryKeyboard,
   deleteConfirmKeyboard,
+  EVENT_PICKER_MAX_PAGE,
   editFieldKeyboard,
   eventActionsKeyboard,
   eventActionsKeyboardOcc,
@@ -23,6 +24,7 @@ import {
   notifyMorningKeyboard,
   notifyQuietKeyboard,
   notifyReminderIntervalsKeyboard,
+  parseEventPickerPage,
   recurrenceEndKeyboard,
   recurrenceKeyboard,
   recurrenceScopeKeyboard,
@@ -165,7 +167,7 @@ describe('eventPickerKeyboard', () => {
     expect(buttons[0]?.callback_data).toBe('ev:1');
   });
 
-  test('limits to 10 events max', () => {
+  test('renders all given events without an internal cap — caller is responsible for slicing', () => {
     const events = Array.from({ length: 15 }, (_, i) => ({
       id: i + 1,
       title: `Event ${i + 1}`,
@@ -174,7 +176,7 @@ describe('eventPickerKeyboard', () => {
     }));
     const kb = eventPickerKeyboard(events as never, 'UTC', 'ev');
     const buttons = kbData(kb).flat();
-    expect(buttons.length).toBe(11); // 10 events + cancel
+    expect(buttons.length).toBe(16); // 15 events + cancel, no truncation
   });
 
   test('empty events list shows only cancel', () => {
@@ -182,6 +184,117 @@ describe('eventPickerKeyboard', () => {
     const buttons = kbData(kb).flat();
     expect(buttons.length).toBe(1);
     expect(buttons[0]?.text).toBe('Cancel');
+  });
+});
+
+describe('eventPickerKeyboard pagination', () => {
+  const events = Array.from({ length: 3 }, (_, i) => ({
+    id: i + 1,
+    title: `Event ${i + 1}`,
+    start_at: '2026-03-15T10:00:00Z',
+    end_at: null,
+  }));
+
+  test('no pagination row when pagination is undefined', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev');
+    const buttons = kbData(kb).flat();
+    expect(buttons.length).toBe(4); // 3 events + cancel, no pagination row
+  });
+
+  test('no pagination row when page=0 and hasMore=false', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 0,
+      hasMore: false,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons.length).toBe(4);
+  });
+
+  test('renders only ▶️ on the first page when hasMore', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 0,
+      hasMore: true,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons.some((b) => b.text === '◀️')).toBe(false);
+    const next = buttons.find((b) => b.text === '▶️');
+    expect(next?.callback_data).toBe('ev:page:1');
+    const pageLabel = buttons.find((b) => b.text === '1');
+    expect(pageLabel?.callback_data).toBe('ev:noop');
+  });
+
+  test('renders only ◀️ on the last page when there is no more', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 1,
+      hasMore: false,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons.some((b) => b.text === '▶️')).toBe(false);
+    const prev = buttons.find((b) => b.text === '◀️');
+    expect(prev?.callback_data).toBe('ev:page:0');
+    expect(buttons.some((b) => b.text === '2')).toBe(true);
+  });
+
+  test('renders both arrows on a middle page', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 1,
+      hasMore: true,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons.some((b) => b.text === '◀️')).toBe(true);
+    expect(buttons.some((b) => b.text === '▶️')).toBe(true);
+    expect(buttons.some((b) => b.text === '2')).toBe(true);
+  });
+
+  test('cancel button remains after the pagination row', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 1,
+      hasMore: true,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons[buttons.length - 1]?.text).toBe('Cancel');
+  });
+
+  test('numbers buttons across pages: page 1 starts at 11', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: 1,
+      hasMore: false,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const texts = kbData(kb)
+      .flat()
+      .map((b) => b.text);
+    expect(texts.slice(0, 3).map((text) => text.split('.')[0])).toEqual(['11', '12', '13']);
+  });
+
+  test('no ▶️ past the last reachable page even when more events exist', () => {
+    const kb = eventPickerKeyboard(events as never, 'UTC', 'ev', 'en', {
+      page: EVENT_PICKER_MAX_PAGE,
+      hasMore: true,
+      onPage: (p) => `ev:page:${p}`,
+    });
+    const buttons = kbData(kb).flat();
+    expect(buttons.some((b) => b.text === '▶️')).toBe(false);
+    expect(buttons.some((b) => b.text === '◀️')).toBe(true);
+  });
+});
+
+describe('parseEventPickerPage', () => {
+  test('accepts in-range integers', () => {
+    expect(parseEventPickerPage('0')).toBe(0);
+    expect(parseEventPickerPage('7')).toBe(7);
+    expect(parseEventPickerPage(String(EVENT_PICKER_MAX_PAGE))).toBe(EVENT_PICKER_MAX_PAGE);
+  });
+
+  test('rejects anything else', () => {
+    for (const raw of ['', '-1', 'abc', '1.5', '1e3', ' 1', String(EVENT_PICKER_MAX_PAGE + 1), '99999']) {
+      expect(parseEventPickerPage(raw)).toBeNull();
+    }
   });
 });
 

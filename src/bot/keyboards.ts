@@ -116,17 +116,41 @@ export function deleteConfirmKeyboard(eventId: number, lang: 'en' | 'ru'): Inlin
     .text(lang === 'ru' ? 'Отмена' : 'Cancel', `${CB.EVENT_DELETE}:cancel`);
 }
 
+export const EVENT_PICKER_PAGE_SIZE = 10;
+/** Last reachable picker page: bounds the over-fetch a forged page callback can trigger. */
+export const EVENT_PICKER_MAX_PAGE = 49;
+
+/** Parse the `N` of a `page:N` picker callback; null for anything but an in-range integer. */
+export function parseEventPickerPage(raw: string): number | null {
+  if (!/^\d{1,3}$/.test(raw)) return null;
+  const page = Number(raw);
+  return page <= EVENT_PICKER_MAX_PAGE ? page : null;
+}
+
+/**
+ * One button per event, numbered across pages (page 2 starts at 11) so the
+ * buttons match the numbered list text. With `pagination`, a ◀️ N ▶️ row is
+ * added when there is more than one page.
+ */
 export function eventPickerKeyboard(
   events: CalendarEvent[],
   timezone: string,
   prefix: string,
   lang: 'en' | 'ru' = 'en',
+  pagination?: { page: number; hasMore: boolean; onPage: (page: number) => string },
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
-  for (let i = 0; i < events.length && i < 10; i++) {
-    const e = events[i]!;
+  const offset = (pagination?.page ?? 0) * EVENT_PICKER_PAGE_SIZE;
+  for (const [i, e] of events.entries()) {
     const time = formatTime(e.start_at, timezone);
-    kb.text(`${i + 1}. ${time} ${e.title.slice(0, 20)}`, `${prefix}:${e.id}`).row();
+    kb.text(`${offset + i + 1}. ${time} ${e.title.slice(0, 20)}`, `${prefix}:${e.id}`).row();
+  }
+  if (pagination && (pagination.page > 0 || pagination.hasMore)) {
+    const { page, hasMore, onPage } = pagination;
+    if (page > 0) kb.text('◀️', onPage(page - 1));
+    kb.text(`${page + 1}`, `${prefix}:noop`);
+    if (hasMore && page < EVENT_PICKER_MAX_PAGE) kb.text('▶️', onPage(page + 1));
+    kb.row();
   }
   kb.text(lang === 'ru' ? 'Отмена' : 'Cancel', `${prefix}:cancel`);
   return kb;

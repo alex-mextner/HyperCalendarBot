@@ -5,7 +5,12 @@ import type { GroupChatRepository } from '../../database/repositories/group-chat
 import type { User } from '../../database/types.ts';
 import type { EventService } from '../../services/event/event-service.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
-import { deleteConfirmKeyboard, eventPickerKeyboard, recurrenceScopeKeyboard } from '../keyboards.ts';
+import {
+  deleteConfirmKeyboard,
+  EVENT_PICKER_PAGE_SIZE,
+  eventPickerKeyboard,
+  recurrenceScopeKeyboard,
+} from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export async function handleDelete(
@@ -27,27 +32,39 @@ export async function handleDelete(
       );
       return;
     }
-    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+    const occurrences = eventService.getUpcomingForGroup(groupId, EVENT_PICKER_PAGE_SIZE + 1);
     if (occurrences.length === 0) {
       await ctx.send(t(lang).no_events);
       return;
     }
     const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
+    const hasMore = events.length > EVENT_PICKER_PAGE_SIZE;
+    const pageItems = events.slice(0, EVENT_PICKER_PAGE_SIZE);
     await ctx.send(t(lang).delete_pick, {
-      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_DELETE, lang),
+      reply_markup: eventPickerKeyboard(pageItems, timezone, CB.EVENT_DELETE, lang, {
+        page: 0,
+        hasMore,
+        onPage: (p) => `${CB.EVENT_DELETE}:page:${p}`,
+      }),
     });
     return;
   }
 
-  const upcoming = eventService.getUpcoming(user.telegram_id, 10);
+  const upcoming = eventService.getUpcoming(user.telegram_id, EVENT_PICKER_PAGE_SIZE + 1);
 
   if (upcoming.length === 0) {
     await ctx.send(t(lang).no_events);
     return;
   }
 
+  const hasMore = upcoming.length > EVENT_PICKER_PAGE_SIZE;
+  const pageItems = upcoming.slice(0, EVENT_PICKER_PAGE_SIZE);
   await ctx.send(t(lang).delete_pick, {
-    reply_markup: eventPickerKeyboard(upcoming, user.timezone, CB.EVENT_DELETE, lang),
+    reply_markup: eventPickerKeyboard(pageItems, user.timezone, CB.EVENT_DELETE, lang, {
+      page: 0,
+      hasMore,
+      onPage: (p) => `${CB.EVENT_DELETE}:page:${p}`,
+    }),
   });
 }
 
