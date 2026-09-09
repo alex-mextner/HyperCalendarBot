@@ -204,6 +204,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     db.sharingSettings,
     db.participants,
     domainEventBus,
+    db.groupMembers,
   );
   const sharingService = new SharingService(
     (userId, startUtc, endUtc) => eventService.getEventsInRange(userId, startUtc, endUtc),
