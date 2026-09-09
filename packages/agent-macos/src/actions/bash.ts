@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { clampTimeoutMs } from '../timeout-clamp';
 
 const MAX_OUTPUT_BYTES = 50 * 1024;
 const SIGKILL_DELAY_MS = 5_000;
@@ -20,6 +21,7 @@ function truncate(buf: Buffer): { text: string; truncated: boolean } {
 }
 
 export function bashExecute(command: string, timeoutMs = 60_000): Promise<BashResult> {
+  const effectiveTimeoutMs = clampTimeoutMs(timeoutMs, 60_000);
   return new Promise((resolve) => {
     const proc = spawn('/bin/bash', ['-c', command], { env: process.env });
 
@@ -36,7 +38,7 @@ export function bashExecute(command: string, timeoutMs = 60_000): Promise<BashRe
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
       }, SIGKILL_DELAY_MS);
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
 
     proc.on('close', (code) => {
       clearTimeout(killTimer);

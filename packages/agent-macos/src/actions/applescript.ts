@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { clampTimeoutMs } from '../timeout-clamp';
 
 export interface ApplescriptResult {
   output: string;
@@ -6,6 +7,7 @@ export interface ApplescriptResult {
 }
 
 export function applescriptRun(script: string, timeoutMs = 30_000): Promise<ApplescriptResult> {
+  const effectiveTimeoutMs = clampTimeoutMs(timeoutMs, 30_000);
   return new Promise((resolve) => {
     const proc = spawn('osascript', ['-e', script]);
 
@@ -22,7 +24,7 @@ export function applescriptRun(script: string, timeoutMs = 30_000): Promise<Appl
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
       }, 5_000);
-    }, timeoutMs);
+    }, effectiveTimeoutMs);
 
     proc.on('close', (code) => {
       clearTimeout(killTimer);
