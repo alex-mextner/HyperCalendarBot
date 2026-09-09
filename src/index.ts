@@ -1140,6 +1140,13 @@ if (config.REDIS_URL) {
 
   // Patch msgDeps so agentContextBuilder picks up the services. msgDeps is frozen
   // below (outside the REDIS_URL guard) so the lock applies in dev-without-Redis too.
+  // INVARIANT: createMessageHandler(msgDeps) is invoked fresh on every incoming message
+  // (see bot/index.ts's terminal `.on('message', ...)` handler) rather than memoized once
+  // at bot-construction time, so it always reads aiRetryQueue/aiRetryJobStore's current
+  // value off this same mutable object — including messages that arrive before this
+  // REDIS_URL block runs. Memoizing createMessageHandler's result at construction time
+  // would capture these fields' pre-assignment (undefined) values and silently disable
+  // retry cancellation for the life of the process.
   msgDeps.scheduledCallService = scheduledCallService;
   msgDeps.triggerService = { repo: triggerRepo };
   msgDeps.aiRetryQueue = aiMsgQueue;
