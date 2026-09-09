@@ -168,6 +168,11 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
         contactRepo: ctx.contactRepo,
       },
     });
+  } else {
+    deliveryLogger.warn(
+      { invitationId: invitation.id, inviteeId },
+      'Invitation delivery skipped: sender not configured',
+    );
   }
 
   return {
@@ -556,9 +561,17 @@ export async function handleProposeEdit(ctx: AgentContext, input: ProposeEditInp
         ownerNotified = false;
       }
     } else {
+      deliveryLogger.warn(
+        { proposalId: proposal.id, eventId: input.event_id },
+        'Edit proposal owner notification skipped: event has no resolvable owner',
+      );
       ownerNotified = false;
     }
   } else {
+    deliveryLogger.warn(
+      { proposalId: proposal.id },
+      'Edit proposal owner notification skipped: sendEditProposal capability not configured',
+    );
     ownerNotified = false;
   }
 

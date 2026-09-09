@@ -92,3 +92,77 @@ test('propose: creates proposal and returns awaiting_confirmation', async () => 
   expect(output.status).toBe('awaiting_confirmation');
   expect(mockCreate).toHaveBeenCalled();
 });
+
+test('propose: sender not configured → dmDelivered false, status reflects DM failure', async () => {
+  // Regression: deliverProposalDm used to return void, so a missing ctx.sender
+  // silently left dmDelivered=true even though nothing was sent.
+  const mockCreate = mock(() => ({ id: 43, status: 'pending', target_id: 2 }));
+  const result = await handleProposeCalendarChange(
+    makeCtx({
+      secretary: {
+        calendarProposalRepo: {
+          create: mockCreate,
+          setDmMessageId: mock(() => {}),
+          setGroupMessageId: mock(() => {}),
+        } as never,
+        secretaryRepo: {} as never,
+        secretaryForLine: undefined,
+      },
+      group: {
+        checkGroupMembership: mock(async () => true),
+        groupChatRepo: {} as never,
+        groupMemberRepo: {} as never,
+        groupMemberService: {} as never,
+      },
+      sender: undefined,
+    }),
+    {
+      target_telegram_id: 2,
+      action: 'create',
+      summary: 'добавить Ретро',
+      event: { title: 'Ретро', start_at: '2099-03-20T13:00:00Z', end_at: '2099-03-20T14:00:00Z', timezone: 'UTC' },
+    },
+  );
+  expect(result.success).toBe(true);
+  const output = JSON.parse(result.output as string) as { status: string };
+  expect(output.status).toBe('awaiting_confirmation_dm_failed');
+});
+
+test('propose: sender configured but delivery fails entirely → dmDelivered false', async () => {
+  // Regression: deliverProposalDm used to unconditionally `return true` once ctx.sender
+  // existed, even when deliverMessage() reported delivered:false (bot API, MTProto, and the
+  // deep-link fallback all failed). The status must reflect the real delivery outcome.
+  const mockCreate = mock(() => ({ id: 44, status: 'pending', target_id: 2 }));
+  const failingSend = mock(async () => {
+    throw new Error('delivery unavailable');
+  });
+  const result = await handleProposeCalendarChange(
+    makeCtx({
+      secretary: {
+        calendarProposalRepo: {
+          create: mockCreate,
+          setDmMessageId: mock(() => {}),
+          setGroupMessageId: mock(() => {}),
+        } as never,
+        secretaryRepo: {} as never,
+        secretaryForLine: undefined,
+      },
+      group: {
+        checkGroupMembership: mock(async () => true),
+        groupChatRepo: {} as never,
+        groupMemberRepo: {} as never,
+        groupMemberService: {} as never,
+      },
+      sender: { sendMessage: failingSend, sendAsUser: undefined } as never,
+    }),
+    {
+      target_telegram_id: 2,
+      action: 'create',
+      summary: 'добавить Ретро',
+      event: { title: 'Ретро', start_at: '2099-03-20T13:00:00Z', end_at: '2099-03-20T14:00:00Z', timezone: 'UTC' },
+    },
+  );
+  expect(result.success).toBe(true);
+  const output = JSON.parse(result.output as string) as { status: string };
+  expect(output.status).toBe('awaiting_confirmation_dm_failed');
+});
