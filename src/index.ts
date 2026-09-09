@@ -15,13 +15,13 @@ import { createDatabase } from './database/index.ts';
 import { AiDebugLogger } from './services/ai/debug-logger.ts';
 import { HistorySummarizer } from './services/ai/history-summarizer.ts';
 import { aiStreamRound } from './services/ai/streaming.ts';
-import { type Workflow, WorkflowSchema } from './services/intent/workflow-schema.ts';
 import { DomainEventBus } from './services/scheduled/domain-event-bus.ts';
 import { hasChainAnswered, initProviderAlerts, isAiChainDown } from './utils/ai-provider-alert.ts';
 import { jsonCodec } from './utils/json-codec.ts';
 import { botLogger } from './utils/logger.ts';
 import { makeWorkerFailureHandler } from './utils/worker-alert.ts';
 import { startWebServer, type WebServerDeps } from './web/server.ts';
+import { createSyntheticIntentRun } from './worker/synthetic-intent-runner.ts';
 
 // Filled in after db + config are initialized — best-effort, push() is synchronous
 let pushCrashAlert: ((msg: string) => void) | undefined;
@@ -1168,29 +1168,12 @@ if (config.REDIS_URL) {
       }
       return ctx;
     },
-    intentRun: async (agentCtx, message) => {
-      const match = intentMatcher.match(message);
-      if (!match) return { handled: false };
-      const intent = msgDeps.intentRepo?.getById(match.intentId);
-      if (!intent) return { handled: false };
-      const workflowResult = jsonCodec(WorkflowSchema).safeParse(intent.workflow);
-      if (!workflowResult.success) return { handled: false };
-      const workflow: Workflow = workflowResult.data;
-      const userCtx = {
-        userId: agentCtx.user.telegram_id,
-        language: agentCtx.user.language,
-        timezone: agentCtx.user.timezone,
-        username: agentCtx.user.username ?? undefined,
-        firstName: agentCtx.user.first_name ?? undefined,
-      };
-      const result = await intentExecutor.run(workflow, match.captures, userCtx, (toolName: string, input: unknown) =>
-        executeTool(agentCtx, toolName, input),
-      );
-      if (result.response && agentCtx.sender) {
-        await agentCtx.sender.sendMessage(agentCtx.user.telegram_id, result.response);
-      }
-      return { handled: true, response: result.response };
-    },
+    intentRun: createSyntheticIntentRun({
+      intentMatcher,
+      intentRepo: msgDeps.intentRepo,
+      intentExecutor,
+      executeTool,
+    }),
     agentRun: async (agentCtx) => {
       await agent.run(agentCtx);
     },
