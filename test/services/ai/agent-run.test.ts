@@ -12,11 +12,13 @@ import { runMigrations } from '../../../src/database/schema.ts';
 import { AssistantMessageCodec, aiFailureNotices, CalendarBotAgent } from '../../../src/services/ai/agent.ts';
 import type { AiDebugLogger } from '../../../src/services/ai/debug-logger.ts';
 import type { StreamCallbacks, StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
+import { buildSystemPrompt } from '../../../src/services/ai/system-prompt.ts';
 import { _resetToolThrottleForTest } from '../../../src/services/ai/tool-executor.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
+import type { AddressCache } from '../../../src/services/location/address-cache.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -891,5 +893,84 @@ describe('CalendarBotAgent.run()', () => {
       RU_AGENT_ERROR_PHRASES.some((phrase) => resultRu.responseText.includes(phrase)),
       `RU responseText "${resultRu.responseText}" must contain a Russian stall phrase`,
     ).toBe(true);
+  });
+});
+
+describe('known-location preload (#160)', () => {
+  let ctx: AgentContext;
+  let config: AgentConfig;
+  let sender: TelegramSender;
+  const USER_ID = 789;
+
+  beforeEach(() => {
+    _resetToolThrottleForTest();
+    aiFailureNotices.reset();
+    const db = createTestDb();
+    const userRepo = new UserRepository(db);
+    const eventRepo = new EventRepository(db);
+    const eventReminderRepo = new EventReminderRepository(db);
+    const chatHistoryRepo = new ChatHistoryRepository(db);
+    const holidayRepo = new HolidayRepository(db);
+    userRepo.create({ telegram_id: USER_ID, timezone: 'UTC', language: 'en' });
+    const eventService = new EventService({ eventRepo });
+    const holidayService = new HolidayService(holidayRepo);
+    ctx = {
+      user: userRepo.findByTelegramId(USER_ID)!,
+      chatId: USER_ID,
+      messageText: 'Where should we meet?',
+      isGroup: false,
+      eventService,
+      holidayService,
+      chatHistory: chatHistoryRepo,
+      conversationLogger: new ConversationLogger(chatHistoryRepo),
+      userRepo,
+      eventReminderRepo,
+      retryEnqueue: async () => {},
+    };
+    config = {};
+    sender = {
+      sendMessage: mock(() => Promise.resolve({ message_id: 42 })),
+      editMessageText: mock(() => Promise.resolve()),
+    };
+  });
+
+  test('run() preloads the address cache into ctx so the system prompt lists saved addresses', async () => {
+    const resolvedAddress = 'Кофемания, ул. Большая Никитская, 12, Москва';
+    ctx.addressCache = {
+      getAddressContext: async () => ({
+        recent: [],
+        frequent: [{ resolvedAddress, count: 3, googleMapsUrl: '', lastUsed: Date.now() }],
+      }),
+    } as unknown as AddressCache;
+
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'Sure, let me know when.' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    await agent.run(ctx);
+
+    expect(ctx.preloadedAddressContext).toBeTruthy();
+    expect(ctx.preloadedAddressContext).toContain(resolvedAddress);
+
+    const prompt = buildSystemPrompt(ctx);
+    expect(prompt).toContain('## Known Locations');
+    expect(prompt).toContain(resolvedAddress);
+  });
+
+  test('run() swallows an address cache failure without breaking message delivery', async () => {
+    ctx.addressCache = {
+      getAddressContext: async () => {
+        throw new Error('Redis unavailable');
+      },
+    } as unknown as AddressCache;
+
+    const { impl } = makeStreamImpl([{ kind: 'text', text: 'Sure, let me know when.' }]);
+    const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
+
+    const result = await agent.run(ctx);
+
+    expect(ctx.preloadedAddressContext).toBeUndefined();
+    expect(sender.sendMessage).toHaveBeenCalledTimes(1);
+    expect(sender.editMessageText).toHaveBeenCalled();
+    expect(result.responseText).toBe('Sure, let me know when.');
   });
 });

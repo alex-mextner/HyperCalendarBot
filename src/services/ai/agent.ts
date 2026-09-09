@@ -7,6 +7,7 @@ import type { ChatHistoryMessage } from '../../database/types.ts';
 import { isBalanceExhausted } from '../../utils/ai-provider-alert.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { logger } from '../../utils/logger.ts';
+import { buildAddressContext } from '../location/address-context.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
@@ -653,6 +654,17 @@ export class CalendarBotAgent {
       },
       'Agent run started',
     );
+
+    // Preload address context (async) before building the system prompt (sync).
+    // Restores the preload dropped in the OpenAI SDK migration (#160); a Maps/Redis
+    // outage here must never break the message, so failures are logged and swallowed.
+    if (ctx.addressCache && !ctx.preloadedAddressContext) {
+      try {
+        ctx.preloadedAddressContext = await buildAddressContext(ctx.addressCache, ctx.user.telegram_id);
+      } catch (err) {
+        aiLogger.warn({ err, userId: ctx.user.telegram_id }, 'Failed to preload address context');
+      }
+    }
 
     const caps: UserCapabilities = {
       assistantEnabled: Boolean(ctx.user.assistant_enabled),
