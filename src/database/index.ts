@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { dbLogger } from '../utils/logger.ts';
 import { migrations } from './migrations.ts';
 import { ActionLogRepository } from './repositories/action-log.repository.ts';
+import { AgentOauthTokenRepository } from './repositories/agent-oauth-token.repository.ts';
 import { AlertRepository } from './repositories/alert.repository.ts';
 import { BirthdayMetadataRepository } from './repositories/birthday-metadata.repository.ts';
 import { CalendarProposalRepository } from './repositories/calendar-proposal.repository.ts';
@@ -70,6 +71,7 @@ export class DatabaseService {
   readonly featureUsage: FeatureUsageRepository;
   readonly participantGoogleSync: ParticipantGoogleSyncRepository;
   readonly telegramSessions: TelegramSessionRepository;
+  readonly agentOauthTokens: AgentOauthTokenRepository;
 
   constructor(dbPath: string) {
     mkdirSync(dirname(dbPath), { recursive: true });
@@ -117,6 +119,7 @@ export class DatabaseService {
     this.featureUsage = new FeatureUsageRepository(this.db);
     this.participantGoogleSync = new ParticipantGoogleSyncRepository(this.db);
     this.telegramSessions = new TelegramSessionRepository(this.db);
+    this.agentOauthTokens = new AgentOauthTokenRepository(this.db);
   }
 
   close(): void {

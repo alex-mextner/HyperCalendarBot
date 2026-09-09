@@ -1049,4 +1049,18 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '062_create_agent_oauth_tokens',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE agent_oauth_tokens (
+          user_id           INTEGER PRIMARY KEY REFERENCES users(telegram_id) ON DELETE CASCADE,
+          access_token_enc  TEXT NOT NULL,
+          refresh_token_enc TEXT NOT NULL,
+          expires_at        INTEGER NOT NULL,
+          updated_at        TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
 ];
