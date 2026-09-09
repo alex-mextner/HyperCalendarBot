@@ -64,4 +64,12 @@ export class GroupMemberRepository {
       .prepare('SELECT * FROM group_members WHERE chat_id = ? AND user_id = ?')
       .get(chatId, userId) as GroupMember | null;
   }
+
+  isActiveMember(chatId: number, userId: number): boolean {
+    return (
+      this.db
+        .prepare('SELECT 1 FROM group_members WHERE chat_id = ? AND user_id = ? AND left_at IS NULL')
+        .get(chatId, userId) != null
+    );
+  }
 }
