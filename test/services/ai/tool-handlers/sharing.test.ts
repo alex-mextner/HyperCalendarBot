@@ -389,6 +389,9 @@ describe('sharing tool handlers', () => {
     });
 
     test('still succeeds when sender is not available (no delivery)', async () => {
+      // Regression (issue #51): a missing ctx.sender skipped delivery entirely without
+      // logging or a clear signal — the AI/user only saw a generic "invitation created"
+      // message with no indication that Telegram delivery never happened.
       const event = eventService.createEvent({
         user_id: USER_ID,
         title: 'No Sender Party',
@@ -399,6 +402,7 @@ describe('sharing tool handlers', () => {
       const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: OTHER_USER_ID });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Invitation');
+      expect(result.agentHint).toContain('delivery failed entirely');
     });
 
     test('deep-link fallback goes to inviter private chat, never the group chatId (security #94)', async () => {

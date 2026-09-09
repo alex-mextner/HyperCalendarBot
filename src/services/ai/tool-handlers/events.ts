@@ -124,7 +124,18 @@ async function enqueueGroupNotifications(
   event: CalendarEvent,
   action: 'created' | 'updated',
 ): Promise<number> {
-  if (!ctx.groupChatId || !ctx.group?.groupMemberService || !ctx.broadcast) return 0;
+  if (!ctx.groupChatId || !ctx.group?.groupMemberService || !ctx.broadcast) {
+    eventsLogger.warn(
+      {
+        eventId: event.id,
+        hasGroupChatId: Boolean(ctx.groupChatId),
+        hasGroupMemberService: Boolean(ctx.group?.groupMemberService),
+        hasBroadcast: Boolean(ctx.broadcast),
+      },
+      'Group event notifications skipped: required dependency not configured',
+    );
+    return 0;
+  }
   const groupChat = ctx.group.groupChatRepo.findByChatId(ctx.groupChatId);
   const groupLabel = ctx.groupTitle ?? groupChat?.title ?? String(ctx.groupChatId);
   const inviteLink = groupChat?.invite_link ?? null;

@@ -520,6 +520,23 @@ describe('event tool handlers', () => {
       expect(events[0]!.event.created_by).toBe(USER_ID);
     });
 
+    test('handleCreateEvent with scope=group and no group capability: event saved, agentHint flags skipped notifications', async () => {
+      // Regression (issue #51): enqueueGroupNotifications silently returned 0 when
+      // ctx.group/ctx.broadcast were missing, with no logging and only an existing
+      // agentHint to signal the degradation. This locks the degraded-but-honest outcome.
+      const gCtx = makeGroupCtx();
+      expect(gCtx.group).toBeUndefined();
+      expect(gCtx.broadcast).toBeUndefined();
+      const result = await handleCreateEvent(gCtx, {
+        title: 'No Broadcast Meeting',
+        start_at: '2026-03-16T14:00:00Z',
+        scope: 'group',
+        force: true,
+      });
+      expect(result.success).toBe(true);
+      expect(result.agentHint).toContain('no member notifications were queued');
+    });
+
     test('handleUpdateEvent with scope=group updates group event', async () => {
       const event = createGroupEvent('Old Group Title', '2026-03-15T10:00:00Z');
       const gCtx = makeGroupCtx();
