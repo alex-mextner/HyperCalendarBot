@@ -81,7 +81,12 @@ import { createCallbackHandler, parseAiBtnPayload } from './handlers/callback.ha
 import { createChatMemberHandler } from './handlers/chat-member.handler.ts';
 import { createInlineHandler } from './handlers/inline.handler.ts';
 import { buildAgentContextFactory, createMessageHandler, type MessageHandlerDeps } from './handlers/message.handler.ts';
-import { type PickerAckIo, runChatShareWithAck, runPickerBatchWithAck } from './handlers/picker-invitation.ts';
+import {
+  buildPickerContinuationMessage,
+  type PickerAckIo,
+  runChatShareWithAck,
+  runPickerBatchWithAck,
+} from './handlers/picker-invitation.ts';
 import { createCallbackFallback } from './middleware/callback-fallback.ts';
 import { RateLimiter } from './middleware/rate-limiter.ts';
 import { createSceneCommandEscape } from './middleware/scene-command-escape.ts';
@@ -1030,16 +1035,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         pickerInvitationDeps,
         pickerIo,
       );
-      // Build context for AI: who was requested + what really happened
-      const selectedDetails = selected
-        .map((s) => {
-          const name = s.firstName ?? s.username ?? `id:${s.userId}`;
-          const parts = [name, `id:${s.userId}`];
-          if (s.username) parts.push(`@${s.username}`);
-          return parts.join(' ');
-        })
-        .join(', ');
-      const contextMsg = `[User picker result] Delivery was attempted for the selected people. Do NOT re-send for anyone already delivered or link-sent; for anyone whose result is an error (invitation not created) you MAY retry send_invitation. Selected: ${selectedDetails}. Delivery results:\n${aiResultLines.join('\n')}\nIf the selected person's display name differs from how the user originally referred to them, call add_contact with preferred_name = the name the user used.`;
+      // Build context for AI: who was requested + what really happened. Selected people's own
+      // Telegram profile text is untrusted third-party data — see #95 — so the message-building
+      // (JSON-quoting the untrusted fields) lives in buildPickerContinuationMessage, not inline here.
+      const contextMsg = buildPickerContinuationMessage(selected, aiResultLines);
       // Trigger AI to acknowledge/continue
       if (chatId) {
         agent
