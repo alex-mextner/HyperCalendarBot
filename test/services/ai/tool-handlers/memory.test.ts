@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { t } from '../../../../src/config/constants.ts';
 import { migrations } from '../../../../src/database/migrations.ts';
 import { UserRepository } from '../../../../src/database/repositories/user.repository.ts';
 import { UserMemoryRepository } from '../../../../src/database/repositories/user-memory.repository.ts';
@@ -192,7 +193,7 @@ describe('handleSetReaction', () => {
     const result = await handleSetReaction(ctx, { message_id: 1, emoji: '👀' });
 
     expect(result.success).toBe(false);
-    expect(result.error).toBe('Reactions not available');
+    expect(result.error).toBe(t(ctx.user.language).aiTools.reaction.notAvailable);
   });
 
   test('returns error when sender is absent', async () => {
@@ -268,6 +269,6 @@ describe('handleSetReaction', () => {
     } as Partial<AgentContext['sender']> as AgentContext['sender'];
     const result = await handleSetReaction(ctx, { emoji: '👍' });
     expect(result.success).toBe(false);
-    expect(result.error).toContain('message_id');
+    expect(result.error).toBe(t(ctx.user.language).aiTools.reaction.noMessageTarget);
   });
 });
