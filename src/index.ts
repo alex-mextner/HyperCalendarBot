@@ -1125,6 +1125,7 @@ if (config.REDIS_URL) {
   );
   const { EventStartingChecker } = await import('./worker/event-starting-checker.ts');
   const { executeTool } = await import('./services/ai/tool-executor.ts');
+  const { createRedisRetryJobStore } = await import('./services/scheduled/retry-job-store.ts');
   const { Queue, Worker } = await import('bullmq');
 
   const redisConnection = { url: config.REDIS_URL };
@@ -1144,19 +1145,8 @@ if (config.REDIS_URL) {
   msgDeps.aiRetryQueue = aiMsgQueue;
 
   // Redis store for pending retry job IDs — enables cancellation when user sends new message
-  const RETRY_JOB_TTL_S = 300; // 5 min covers max backoff (30s + 60s + 120s) + buffer
   const retryRedis = new Bun.RedisClient(config.REDIS_URL);
-  const retryJobStore = {
-    async set(userId: number, jobId: string): Promise<void> {
-      await retryRedis.set(`retry:${userId}`, jobId, 'EX', RETRY_JOB_TTL_S);
-    },
-    async get(userId: number): Promise<string | null> {
-      return retryRedis.get(`retry:${userId}`);
-    },
-    async del(userId: number): Promise<void> {
-      await retryRedis.del(`retry:${userId}`);
-    },
-  };
+  const retryJobStore = createRedisRetryJobStore(retryRedis);
   msgDeps.aiRetryJobStore = retryJobStore;
 
   // SyntheticPipelineRunner — runs IntentMatcher → AiAgent without GramIO context
