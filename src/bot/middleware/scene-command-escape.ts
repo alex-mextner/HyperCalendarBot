@@ -1,6 +1,7 @@
 // src/bot/middleware/scene-command-escape.ts
 
 import type { Next } from 'gramio';
+import { t } from '../../config/constants.ts';
 import type { User } from '../../database/types.ts';
 
 interface SceneData {
@@ -53,7 +54,7 @@ export function createSceneCommandEscape(storage: Storage) {
     await storage.delete(key);
 
     const lang = (ctx.dbUser?.language ?? 'en') as 'en' | 'ru';
-    const message = SCENE_CANCEL_MESSAGES[sceneData.name]?.[lang] ?? (lang === 'ru' ? 'Отменено.' : 'Cancelled.');
+    const message = SCENE_CANCEL_MESSAGES[sceneData.name]?.[lang] ?? t(lang).cancelled;
 
     await ctx.send(message, { reply_markup: { remove_keyboard: true } });
 
