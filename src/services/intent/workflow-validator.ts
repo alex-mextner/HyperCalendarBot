@@ -200,6 +200,10 @@ export function validateWorkflowVariables(workflow: Workflow, pattern: string | 
               `no step with as: "${outputName}" found`,
           );
         }
+      } else if (stepOutputNames.has(varName.split('.')[0]!)) {
+        // Step outputs are also accessible by their bare "as" name (not just tool_outputs.<name>)
+        // — storeResult() in intent-executor.ts writes both stepResults[name] and
+        // stepResults.tool_outputs[name]. See extractStepOutputNames's own doc comment.
       } else if (!ALLOWED_VARS.has(varName)) {
         errors.push(
           `${loc}{{${expr}}} — unknown variable "${varName}"; allowed: ${[...ALLOWED_VARS].join(', ')}, ` +

@@ -312,6 +312,37 @@ describe('validateWorkflowVariables', () => {
     expect(validateWorkflowVariables(workflow, '^через (\\d+) минут')).toEqual([]);
   });
 
+  test('{{found_user}} bare name (not tool_outputs.-prefixed) is valid — storeResult() writes both', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'find_user', input: { username: '{{$1}}' }, as: 'found_user' },
+        { call: 'send_invitation', input: { invitee_id: '{{found_user.telegram_id}}' } },
+      ],
+    };
+    expect(validateWorkflowVariables(workflow, '^@(\\w+)$')).toEqual([]);
+  });
+
+  test('{{missing_step}} bare name is rejected when no step defines that name', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'create_event', input: { invitee_id: '{{missing_step.id}}' } }],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('unknown variable "missing_step.id"');
+  });
+
+  test('{{confirm}} bare name is rejected for an ask_user step — only ask.confirm/tool_outputs.confirm resolve it', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'Подтверди?' }, as: 'confirm' },
+        { call: 'delete_event', input: { id: '{{confirm}}' } },
+      ],
+    };
+    const errors = validateWorkflowVariables(workflow, null);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('unknown variable "confirm"');
+  });
+
   test('{{tool_outputs.missing}} is rejected when no step defines that name', () => {
     const workflow = {
       steps: [{ call: 'create_event', input: { invitee_id: '{{tool_outputs.missing.id}}' } }],

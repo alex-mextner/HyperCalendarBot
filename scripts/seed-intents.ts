@@ -1,18 +1,41 @@
-// scripts/seed-intents.ts — seed standard intents into calendar.db
+// scripts/seed-intents.ts — seed standard + domain intents into calendar.db
 // Run: bun scripts/seed-intents.ts
 
 import { Database } from 'bun:sqlite';
+import { getToolDefinitions } from '../src/services/ai/tools.ts';
+import type { Workflow } from '../src/services/intent/workflow-schema.ts';
+import { WorkflowSchema } from '../src/services/intent/workflow-schema.ts';
+import { validateWorkflowVariables } from '../src/services/intent/workflow-validator.ts';
+import { contactsIntents } from './seed-intents-contacts.ts';
+import { eventDeletionIntents } from './seed-intents-event-deletion.ts';
+import { eventEditingIntents } from './seed-intents-event-editing.ts';
+import { eventQueryingIntents } from './seed-intents-event-querying.ts';
+import { freeBusyIntents } from './seed-intents-free-busy.ts';
+import { googleCalendarIntents } from './seed-intents-google-calendar.ts';
+import { holidaysAndInfoIntents } from './seed-intents-holidays-and-info.ts';
+import { remindersIntents } from './seed-intents-reminders.ts';
+import { reschedulingIntents } from './seed-intents-rescheduling.ts';
+import { settingsIntents } from './seed-intents-settings.ts';
+import { sharingSecretaryIntents } from './seed-intents-sharing-secretary.ts';
+import { timezoneIntents } from './seed-intents-timezone.ts';
 
-const db = new Database('data/calendar.db');
-
-const intents: Array<{
+/**
+ * Shared shape every scripts/seed-intents-<domain>.ts file's exported array structurally
+ * matches. Each domain file declares its own local `SeedIntent` (some narrower — `pattern:
+ * string` rather than `string | null` — since every entry they define has a concrete
+ * pattern); this is the union that covers all of them, used only for the merged array below.
+ */
+export interface SeedIntent {
   canonical_name: string;
-  pattern: string;
+  pattern: string | null;
   workflow: object;
   phrases: string[];
   trigger_words: string[];
   source_message: string;
-}> = [
+  format?: string;
+}
+
+export const inlineIntents: SeedIntent[] = [
   // ─── show_today ─────────────────────────────────────────────────────────────
   {
     canonical_name: 'show_today',
@@ -135,40 +158,181 @@ const intents: Array<{
   },
 ];
 
-const upsert = db.prepare(`
-  INSERT INTO intents (canonical_name, phrases, trigger_words, pattern, workflow, format, status, source_message, created_at)
-  VALUES (?, ?, ?, ?, ?, 'text', 'approved', ?, datetime('now'))
-  ON CONFLICT(canonical_name) DO UPDATE SET
-    phrases       = excluded.phrases,
-    trigger_words = excluded.trigger_words,
-    pattern       = excluded.pattern,
-    workflow      = excluded.workflow,
-    format        = 'text',
-    status        = 'approved'
-`);
+export const domainIntents: SeedIntent[] = [
+  ...eventDeletionIntents,
+  ...eventQueryingIntents,
+  ...reschedulingIntents,
+  ...remindersIntents,
+  ...holidaysAndInfoIntents,
+  ...googleCalendarIntents,
+  ...sharingSecretaryIntents,
+  ...timezoneIntents,
+  ...settingsIntents,
+  ...contactsIntents,
+  ...freeBusyIntents,
+  ...eventEditingIntents,
+];
 
-let added = 0;
-let updated = 0;
+const allIntents: SeedIntent[] = [...inlineIntents, ...domainIntents];
 
-for (const intent of intents) {
-  const existing = db.query('SELECT id FROM intents WHERE canonical_name = ?').get(intent.canonical_name);
-  upsert.run(
-    intent.canonical_name,
-    JSON.stringify(intent.phrases),
-    JSON.stringify(intent.trigger_words),
-    intent.pattern,
-    JSON.stringify(intent.workflow),
-    intent.source_message,
-  );
-  if (existing) {
-    console.log(`↺  updated: ${intent.canonical_name}`);
-    updated++;
-  } else {
-    console.log(`+  added:   ${intent.canonical_name}`);
-    added++;
-  }
+// ── Validate before inserting anything ──────────────────────────────────────
+
+const realToolNames = new Set(
+  getToolDefinitions()
+    .filter((t) => t.type === 'function')
+    .map((t) => t.function.name),
+);
+const RESERVED_CALLS: Record<string, true> = { respond: true, ask_user: true };
+
+interface RawToolEntry {
+  name?: unknown;
+}
+interface RawStepEntry {
+  call?: unknown;
 }
 
-console.log(`\nDone: ${added} added, ${updated} updated.`);
-const total = (db.query('SELECT COUNT(*) as n FROM intents').get() as { n: number }).n;
-console.log(`Total intents in DB: ${total}`);
+function collectToolCalls(workflow: object): string[] {
+  const calls: string[] = [];
+  if ('tools' in workflow && Array.isArray(workflow.tools)) {
+    for (const entry of workflow.tools as RawToolEntry[]) {
+      if (typeof entry.name === 'string') calls.push(entry.name);
+    }
+  }
+  if ('steps' in workflow && Array.isArray(workflow.steps)) {
+    for (const entry of workflow.steps as RawStepEntry[]) {
+      if (typeof entry.call === 'string') calls.push(entry.call);
+    }
+  }
+  return calls;
+}
+
+/** Structural checks that must hold for every seeded intent regardless of DSL level gate. */
+function structuralErrors(intent: SeedIntent): string[] {
+  const errors: string[] = [];
+  if (intent.pattern !== null) {
+    try {
+      new RegExp(intent.pattern, 'i');
+    } catch (e) {
+      errors.push(`regex does not compile: ${String(e)}`);
+    }
+  }
+  for (const call of collectToolCalls(intent.workflow)) {
+    if (!RESERVED_CALLS[call] && !realToolNames.has(call)) {
+      errors.push(`unknown tool "${call}"`);
+    }
+  }
+  // validateWorkflowVariables only walks {{}} template strings recursively — it doesn't
+  // care whether the workflow itself passes WorkflowSchema, so run it on the raw object.
+  const varErrors = validateWorkflowVariables(intent.workflow as Workflow, intent.pattern);
+  errors.push(...varErrors);
+  return errors;
+}
+
+if (import.meta.main) {
+  const db = new Database('data/calendar.db');
+
+  function queryCount(sql: string): number {
+    const row = db.query(sql).get() as { n: number } | null;
+    return row?.n ?? 0;
+  }
+
+  // Canonical-name uniqueness within the combined new set (catches a copy-paste collision
+  // across domain files). Collision against pre-existing DB rows is NOT checked here: this
+  // script is an idempotent upsert (ON CONFLICT DO UPDATE), so re-running it after a prior
+  // successful seed will always find its own previously-inserted rows already present — that
+  // is the intended steady state, not a bug. The one-time check against the ORIGINAL 22-row
+  // baseline (16 approved, 6 rejected) that predates any of these domain files was done
+  // separately before this script first ran and confirmed zero collisions.
+  const namesSeen = new Map<string, number>();
+  for (const intent of allIntents) {
+    namesSeen.set(intent.canonical_name, (namesSeen.get(intent.canonical_name) ?? 0) + 1);
+  }
+  const duplicatesWithinNewSet = [...namesSeen.entries()].filter(([, count]) => count > 1).map(([name]) => name);
+
+  if (duplicatesWithinNewSet.length > 0) {
+    console.error('FATAL: duplicate canonical_name within the combined seed set:', duplicatesWithinNewSet);
+    process.exit(1);
+  }
+
+  // A workflow that fails WorkflowSchema is dead in production: both real callers
+  // (src/bot/pipeline/intent-matcher-layer.ts and the SyntheticPipelineRunner wiring in
+  // src/index.ts) parse the stored workflow through WorkflowSchema before ever calling
+  // IntentExecutor.run(), so a match against one of these would always fall through to the
+  // AI agent (logging an error every time) rather than ever taking the fast intent path.
+  // ToolInputSchema (z.record(string, string)) can't express manage_settings's legitimately
+  // object-shaped `updates` field — tracked as a deferred finding, not fixed here (out of
+  // scope for this seeding pass). Skip inserting these rather than seed permanently-dead rows.
+  const seedable: SeedIntent[] = [];
+  const deadWorkflow: SeedIntent[] = [];
+  let hadStructuralError = false;
+
+  for (const intent of allIntents) {
+    const errors = structuralErrors(intent);
+    if (errors.length > 0) {
+      console.error(`FATAL: ${intent.canonical_name} has structural errors:`, errors);
+      hadStructuralError = true;
+      continue;
+    }
+    if (WorkflowSchema.safeParse(intent.workflow).success) {
+      seedable.push(intent);
+    } else {
+      deadWorkflow.push(intent);
+    }
+  }
+
+  if (hadStructuralError) {
+    process.exit(1);
+  }
+
+  if (deadWorkflow.length > 0) {
+    console.log(
+      `\nSkipping ${deadWorkflow.length} intent(s) whose workflow fails WorkflowSchema (would never fire as an intent — see comment above):`,
+    );
+    for (const intent of deadWorkflow) console.log(`  - ${intent.canonical_name}`);
+  }
+
+  // ── Seed ──────────────────────────────────────────────────────────────────
+
+  const beforeApproved = queryCount("SELECT COUNT(*) as n FROM intents WHERE status = 'approved'");
+
+  const upsert = db.prepare(`
+    INSERT INTO intents (canonical_name, phrases, trigger_words, pattern, workflow, format, status, source_message, created_at)
+    VALUES (?, ?, ?, ?, ?, 'text', 'approved', ?, datetime('now'))
+    ON CONFLICT(canonical_name) DO UPDATE SET
+      phrases       = excluded.phrases,
+      trigger_words = excluded.trigger_words,
+      pattern       = excluded.pattern,
+      workflow      = excluded.workflow,
+      format        = 'text',
+      status        = 'approved'
+  `);
+
+  let added = 0;
+  let updated = 0;
+
+  for (const intent of seedable) {
+    const existing = db.query('SELECT id FROM intents WHERE canonical_name = ?').get(intent.canonical_name);
+    upsert.run(
+      intent.canonical_name,
+      JSON.stringify(intent.phrases),
+      JSON.stringify(intent.trigger_words),
+      intent.pattern,
+      JSON.stringify(intent.workflow),
+      intent.source_message,
+    );
+    if (existing) {
+      console.log(`↺  updated: ${intent.canonical_name}`);
+      updated++;
+    } else {
+      console.log(`+  added:   ${intent.canonical_name}`);
+      added++;
+    }
+  }
+
+  const afterApproved = queryCount("SELECT COUNT(*) as n FROM intents WHERE status = 'approved'");
+
+  console.log(`\nDone: ${added} added, ${updated} updated, ${deadWorkflow.length} skipped (dead workflow).`);
+  console.log(`Approved intents before: ${beforeApproved}, after: ${afterApproved}`);
+  const total = queryCount('SELECT COUNT(*) as n FROM intents');
+  console.log(`Total intents in DB (all statuses): ${total}`);
+}
