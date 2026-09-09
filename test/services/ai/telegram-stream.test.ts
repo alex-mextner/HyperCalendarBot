@@ -223,6 +223,74 @@ describe('TelegramStreamWriter', () => {
     expect(text).toMatch(/blockquote>\n\n.*Готово/s);
   });
 
+  test('discardIncompleteRound keeps prior committed execution log but drops the failed round', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    // Round 1: tool activity gets committed into the execution log
+    writer.appendText('Looking up events...');
+    writer.setToolLabel('get_events');
+    writer.markToolResult(true);
+    writer.commitIntermediate();
+
+    // Round 2: a provider starts streaming, then dies mid-stream
+    writer.appendText('partial from dying provider');
+    writer.setToolLabel('search_events');
+    writer.discardIncompleteRound();
+
+    // Round 2 retried by the next provider, completes normally
+    writer.appendText('final answer from next provider');
+    await writer.finalize();
+
+    const text = editMock.mock.calls[editMock.mock.calls.length - 1]![2] as string;
+    expect(text).toContain('Looking up events');
+    expect(text).toContain('✅');
+    expect(text).toContain('final answer from next provider');
+    expect(text).not.toContain('partial from dying provider');
+  });
+
+  test('discardIncompleteRound is safe when nothing has ever been committed (round 1 failover)', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+
+    // First provider attempt on round 1 dies mid-stream before commitIntermediate()
+    // has ever run — intermediateChunks and toolLines are still their initial [].
+    writer.appendText('partial from dying provider');
+    writer.setToolLabel('get_events');
+    expect(() => writer.discardIncompleteRound()).not.toThrow();
+    expect(writer.getText()).toBe('');
+
+    // Next provider retries round 1 from scratch and completes normally.
+    writer.setToolLabel('get_events');
+    writer.markToolResult(true);
+    writer.commitIntermediate();
+    writer.appendText('final answer');
+    await writer.finalize();
+
+    const text = editMock.mock.calls[editMock.mock.calls.length - 1]![2] as string;
+    expect(text).not.toContain('partial from dying provider');
+    expect(text).toContain('final answer');
+    expect(text).toContain('✅');
+  });
+
+  test('resetBuffers wipes committed intermediate chunks too (validator-rejection retry)', async () => {
+    const writer = new TelegramStreamWriter(sender, 123);
+    await writer.init();
+    writer.appendText('Rejected round with tool calls');
+    writer.setToolLabel('get_events');
+    writer.markToolResult(true);
+    writer.commitIntermediate();
+
+    writer.resetBuffers();
+
+    writer.appendText('Clean retry answer');
+    await writer.finalize();
+
+    const text = editMock.mock.calls[editMock.mock.calls.length - 1]![2] as string;
+    expect(text).not.toContain('Rejected round with tool calls');
+    expect(text).not.toContain('blockquote');
+    expect(text).toContain('Clean retry answer');
+  });
+
   test('finalize without tools has no blockquote', async () => {
     const writer = new TelegramStreamWriter(sender, 123);
     await writer.init();

@@ -224,6 +224,83 @@ describe('CalendarBotAgent.run()', () => {
     expect(history[3]!.role).toBe('assistant');
   });
 
+  test('mid-round provider failover preserves prior committed execution log (regression for #124)', async () => {
+    // Round 1: a normal tool call that commits its activity into the execution
+    // log via commitIntermediate() before round 2 ever runs.
+    const toolInput = { start_date: '2026-03-15', end_date: '2026-03-15' };
+    let round = 0;
+    const impl = async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}) => {
+      if (isValidatorCall(opts)) {
+        return {
+          text: 'APPROVE',
+          toolCalls: [],
+          finishReason: 'stop' as const,
+          assistantMessage: { role: 'assistant', content: 'APPROVE' } as OpenAI.ChatCompletionMessageParam,
+          providerUsed: 'mock-validator',
+        };
+      }
+      round++;
+      if (round === 1) {
+        cbs.onToolCallStart?.('get_events');
+        const msg: OpenAI.ChatCompletionMessageParam = {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'call-1', type: 'function', function: { name: 'get_events', arguments: JSON.stringify(toolInput) } },
+          ],
+        };
+        return {
+          text: '',
+          toolCalls: [{ id: 'call-1', name: 'get_events', arguments: JSON.stringify(toolInput) }],
+          finishReason: 'tool_calls' as const,
+          assistantMessage: msg,
+          providerUsed: 'mock',
+        };
+      }
+
+      // Round 2: the provider dies mid-stream after showing partial output —
+      // aiStreamRound (streaming.ts) fires onProviderSwitch and falls back to
+      // the next provider, which completes the round normally.
+      cbs.onTextDelta?.('partial from dying provider');
+      cbs.onProviderSwitch?.();
+      cbs.onTextDelta?.('final answer from next provider');
+      const finalText = 'final answer from next provider';
+      return {
+        text: finalText,
+        toolCalls: [],
+        finishReason: 'stop' as const,
+        assistantMessage: { role: 'assistant', content: finalText } as OpenAI.ChatCompletionMessageParam,
+        providerUsed: 'mock',
+      };
+    };
+
+    // Track edited text directly instead of casting the mock to read .mock.calls.
+    const editedTexts: string[] = [];
+    const failoverSender: TelegramSender = {
+      sendMessage: () => Promise.resolve({ message_id: 42 }),
+      editMessageText: (_chatId, _messageId, text) => {
+        editedTexts.push(text);
+        return Promise.resolve();
+      },
+    };
+
+    const agent = new CalendarBotAgent(config, failoverSender, { streamImpl: impl });
+    ctx.chatHistory.save(USER_ID, 'user', ctx.messageText);
+
+    await agent.run(ctx);
+
+    const lastEditText = editedTexts[editedTexts.length - 1]!;
+
+    // Round 1's committed tool activity must survive the round-2 failover —
+    // the old resetBuffers() call here wiped intermediateChunks, losing it.
+    expect(lastEditText).toContain('Execution log');
+    expect(lastEditText).toContain('Events');
+    // Round 2's final answer (from the surviving provider) must be present...
+    expect(lastEditText).toContain('final answer from next provider');
+    // ...but the discarded in-flight partial from the dying provider must not.
+    expect(lastEditText).not.toContain('partial from dying provider');
+  });
+
   test('run() handles streaming errors and sends error message in user language', async () => {
     const { impl } = makeStreamImpl([{ kind: 'error', error: new Error('all providers failed') }]);
     const agent = new CalendarBotAgent(config, sender, { streamImpl: impl });
