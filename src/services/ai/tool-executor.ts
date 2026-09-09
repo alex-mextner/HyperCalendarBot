@@ -1,3 +1,4 @@
+import type { z } from 'zod';
 import type { AgentCommand } from '../../agent/protocol.ts';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
@@ -498,15 +499,33 @@ function summarizeInput(toolName: string, input: ToolInputMap[ToolName]): string
   return toolName;
 }
 
+/** Zod prefixes invalid_type messages with this; the caller's own wrapper already says it. */
+const ZOD_INVALID_INPUT_PREFIX = 'Invalid input: ';
+
+/**
+ * Render zod issues as `field: reason` pairs.
+ *
+ * Naming the field matters: without it the model cannot tell which argument it got
+ * wrong and retries the same call with the same broken arguments.
+ */
+function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
+  return issues
+    .map((issue) => {
+      const reason = issue.message.startsWith(ZOD_INVALID_INPUT_PREFIX)
+        ? issue.message.slice(ZOD_INVALID_INPUT_PREFIX.length)
+        : issue.message;
+      const field = issue.path.join('.');
+      return field ? `${field}: ${reason}` : reason;
+    })
+    .join(', ');
+}
+
 async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
   const schema = toolSchemas[toolName];
   if (schema) {
     const result = schema.safeParse(input);
     if (!result.success) {
-      return {
-        success: false,
-        error: `Invalid input: ${result.error.issues.map((i) => i.message).join(', ')}`,
-      };
+      return { success: false, error: `Invalid input: ${describeIssues(result.error.issues)}` };
     }
     input = result.data as ToolInputMap[ToolName];
   }

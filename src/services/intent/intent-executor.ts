@@ -90,6 +90,12 @@ function buildEventStepResults(userCtx: ExecutorUserContext): RuntimeStepResults
 interface ExecutorResult {
   success: boolean;
   response?: string;
+  /**
+   * Structured events behind `response`, when the last tool returned any. The
+   * formatter renders these instead of `response`, whose text form is written for
+   * the AI agent and would otherwise reach the user verbatim.
+   */
+  responseEvents?: EventSummary[];
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: StepResults;
@@ -140,6 +146,7 @@ async function runLevel1(
   i18n?: I18nMap,
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
+  let lastData: ToolResultData | undefined;
 
   const eventCtx = buildEventStepResults(userCtx);
 
@@ -150,10 +157,17 @@ async function runLevel1(
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
       return { success: false, response: result.error };
     }
+    if (result.stopLoop) {
+      // The tool handed control to something outside this workflow (e.g. a Telegram user
+      // picker) instead of completing the requested action. Report exactly what happened
+      // and stop — running the remaining tools would misreport an unfinished action as done.
+      return { success: true, response: result.output, responseEvents: extractEventSummaries(result.data) };
+    }
     lastOutput = result.output;
+    lastData = result.data;
   }
 
-  return { success: true, response: lastOutput };
+  return { success: true, response: lastOutput, responseEvents: extractEventSummaries(lastData) };
 }
 
 /**
@@ -179,6 +193,22 @@ function extractEventSummary(data: ToolResultData): EventSummary | null {
     return first && isEventSummary(first) ? first : null;
   }
   return isEventSummary(data) ? data : null;
+}
+
+/**
+ * Every event behind a result: a list of events, or a single event (e.g. get_event's result,
+ * which is not array-wrapped). Undefined when the data holds no event at all.
+ */
+function extractEventSummaries(data: ToolResultData | undefined): EventSummary[] | undefined {
+  if (data === undefined) return undefined;
+  if (!Array.isArray(data)) return isEventSummary(data) ? [data] : undefined;
+  if (data.length === 0) return undefined;
+  const events: EventSummary[] = [];
+  for (const item of data) {
+    if (!isEventSummary(item)) return undefined;
+    events.push(item);
+  }
+  return events;
 }
 
 async function runLevel2(
@@ -235,6 +265,7 @@ async function runLevel2(
 
   let mentionedEventId: number | undefined;
   let lastToolOutput: string | undefined;
+  let lastToolData: ToolResultData | undefined;
 
   for (let i = startIndex; i < steps.length; i++) {
     const step = steps[i];
@@ -296,7 +327,20 @@ async function runLevel2(
       return { success: false, response: result.error };
     }
 
+    if (result.stopLoop) {
+      // The tool handed control to something outside this workflow (e.g. a Telegram user
+      // picker) instead of completing the requested action. Report exactly what happened
+      // and stop — running a later `respond` step would misreport an unfinished action as done.
+      return {
+        success: true,
+        response: result.output,
+        responseEvents: extractEventSummaries(result.data),
+        mentionedEventId,
+      };
+    }
+
     lastToolOutput = result.output;
+    lastToolData = result.data;
 
     // If result carries structured event data, update last_mentioned_event in-workflow
     // and track the ID for cross-request persistence via mentionedEventId.
@@ -324,7 +368,13 @@ async function runLevel2(
     }
   }
 
-  return { success: true, response: lastToolOutput, stepResults, mentionedEventId };
+  return {
+    success: true,
+    response: lastToolOutput,
+    responseEvents: extractEventSummaries(lastToolData),
+    stepResults,
+    mentionedEventId,
+  };
 }
 
 export class IntentExecutor {

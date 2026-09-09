@@ -42,6 +42,7 @@ function makeWorkflowStore(): WorkflowSessionStore & { has(chatId: number, userI
 interface ExecutorResult {
   success: boolean;
   response?: string;
+  responseEvents?: { id: number; title: string; date: string; time?: string; all_day: boolean }[];
   suspended?: boolean;
   suspendedAt?: number;
   stepResults?: { [key: string]: unknown };
@@ -112,9 +113,6 @@ function callLayer(
   toolExecutor: ReturnType<typeof makeToolExecutor>,
   sessions: ReturnType<typeof makeWorkflowStore>,
   notifyAdmin?: (text: string) => Promise<void>,
-  _unused1?: undefined,
-  _unused2?: undefined,
-  convLogger?: { logBotResponse: ReturnType<typeof mock> },
 ) {
   return createIntentMatcherLayer(
     matcher as unknown as Parameters<typeof createIntentMatcherLayer>[0],
@@ -123,9 +121,6 @@ function callLayer(
     toolExecutor,
     sessions,
     notifyAdmin,
-    _unused1,
-    _unused2,
-    convLogger as unknown as Parameters<typeof createIntentMatcherLayer>[8],
   );
 }
 
@@ -224,6 +219,37 @@ describe('createIntentMatcherLayer', () => {
     expect(ctx.send).toHaveBeenCalledWith('Created!');
     // Session must be deleted after use
     expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('formats structured events when a resumed workflow ends in get_events', async () => {
+    const userId = 71;
+    const workflow = { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'get_events' }] };
+    const executor = makeExecutor({
+      success: true,
+      response: 'id: 239, title: Английский, start: 2026-06-01T10:30:00.000Z, created_by: @someone',
+      responseEvents: [{ id: 239, title: 'Английский', date: '2026-06-01', time: '12:30', all_day: false }],
+    });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, userId, {
+      intentId: 3,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = callLayer(
+      makeMatcher(null),
+      makeIntentRepo({ id: 3, workflow: JSON.stringify(workflow), format: 'text', canonical_name: 'x' }),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+    );
+    await layer(ctx, 'да');
+
+    expect(ctx.send).toHaveBeenCalledWith('2026-06-01 12:30  Английский');
   });
 
   test('ignores expired workflow session and falls through to matcher', async () => {
@@ -407,31 +433,18 @@ describe('needsSupplement', () => {
     expect('needsSupplement' in result).toBe(true);
   });
 
-  test('logs bot response to conversationLogger before returning needsSupplement', async () => {
+  test('hands the sent text to the supplement run', async () => {
     const matcher = makeMatcher({ intentId: 1, captures: {} });
     const repo = makeIntentRepo({ id: 1, workflow: '{"steps":[]}', format: 'text', canonical_name: 'test' });
     const executor = makeExecutor({ success: true, response: 'Готово!' });
-    const logBotResponse = mock((_userId: number, _text: string, _chatId?: number) => {});
 
-    const layer = callLayer(
-      matcher,
-      repo,
-      executor,
-      makeToolExecutor(),
-      makeWorkflowStore(),
-      undefined,
-      undefined,
-      undefined,
-      { logBotResponse },
-    );
+    const layer = callLayer(matcher, repo, executor, makeToolExecutor(), makeWorkflowStore());
     const ctx = makeCtx();
-    await layer(ctx, 'покажи события');
+    const result = await layer(ctx, 'покажи события');
 
-    expect(logBotResponse).toHaveBeenCalledTimes(1);
-    const callArgs = logBotResponse.mock.calls[0]!;
-    expect(callArgs[0]).toBe(ctx.dbUser!.telegram_id);
-    expect(callArgs[1]).toBe('Готово!');
-    expect(callArgs[2]).toBe(ctx.chatId);
+    // The supplement agent reads the auto-response from here, not from chat history.
+    expect(result).toMatchObject({ needsSupplement: true, supplementAutoResponse: 'Готово!' });
+    expect(ctx.send).toHaveBeenCalledWith('Готово!');
   });
 
   test('suspended intent (ask_user) does NOT return needsSupplement', async () => {

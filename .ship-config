@@ -1,0 +1,1 @@
+SHIP_LOCAL_TEST_CMD=bun test

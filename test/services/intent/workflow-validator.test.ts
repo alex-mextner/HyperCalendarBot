@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Workflow } from '../../../src/services/intent/workflow-schema.ts';
-import { validateWorkflowVariables } from '../../../src/services/intent/workflow-validator.ts';
+import {
+  validateWorkflow,
+  validateWorkflowSteps,
+  validateWorkflowVariables,
+} from '../../../src/services/intent/workflow-validator.ts';
 
 describe('validateWorkflowVariables', () => {
   test('valid known variables pass', () => {
@@ -360,5 +364,186 @@ describe('validateWorkflowVariables', () => {
       ],
     };
     expect(validateWorkflowVariables(workflow, null)).toEqual([]);
+  });
+});
+
+describe('validateWorkflowSteps', () => {
+  test('a workflow calling only real tools with complete input passes', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'render_day_image', input: { date: '{{dates.today}}', scope: '{{env.scope}}' } },
+        { call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('workflow-only steps are not treated as tools', () => {
+    const workflow: Workflow = {
+      steps: [
+        { call: 'ask_user', input: { question: 'Когда?' }, as: 'when' },
+        { call: 'respond', input: { message: 'Готово' } },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('ask_user without a question is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'ask_user', input: { quetion: 'When?' }, as: 'when' }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('question'))).toBe(true);
+  });
+
+  test('call: respond without input.message is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'respond', input: {} }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('message'))).toBe(true);
+  });
+
+  test('a literal value that does not match the field type is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '5' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('limit'))).toBe(true);
+  });
+
+  test('a bare capture-group template is checked against the field type — captures are always strings', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('limit'))).toBe(true);
+  });
+
+  test('a dot-path template is exempt from the field type check — its resolved type is not known statically', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_upcoming', input: { limit: '{{tool_outputs.count.value}}' } }],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('send_invitation with neither invitee_id nor invitee_username is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'send_invitation', input: { event_id: '{{tool_outputs.event.id}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('invitee_id') && e.includes('invitee_username'))).toBe(true);
+  });
+
+  test('send_invitation with only invitee_username passes', () => {
+    const workflow: Workflow = {
+      steps: [
+        {
+          call: 'send_invitation',
+          input: { event_id: '{{tool_outputs.event.id}}', invitee_username: '{{$1}}' },
+        },
+      ],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('a step calling a tool that does not exist is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'render_image', input: { period: 'month' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('render_image');
+  });
+
+  test('inherited Object.prototype names are not mistaken for real tools', () => {
+    for (const call of ['toString', 'constructor', 'hasOwnProperty', '__proto__']) {
+      const workflow: Workflow = { steps: [{ call, input: {} }] };
+      const errors = validateWorkflowSteps(workflow);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('no such tool');
+    }
+  });
+
+  test('a parameter named after an inherited Object.prototype member is rejected, not crashed on', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_events', input: { toString: 'x' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('unknown parameter "toString"'))).toBe(true);
+  });
+
+  test('a missing required parameter is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'find_user', input: { query: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('username'))).toBe(true);
+  });
+
+  test('a parameter the tool does not accept is rejected', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'send_invitation', input: { telegram_id: '{{$1}}', scope: 'personal' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors.some((e) => e.includes('telegram_id'))).toBe(true);
+    expect(errors.some((e) => e.includes('event_id'))).toBe(true);
+  });
+
+  test('Level 1 workflows are validated the same way', () => {
+    const workflow: Workflow = {
+      tools: [{ name: 'get_day_of_week_date', input: { day_name: '{{$1}}' } }],
+    };
+    const errors = validateWorkflowSteps(workflow);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('get_day_of_week_date');
+  });
+
+  test('tools with free-form input schemas accept any parameters', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'claude_chat', input: { anything: 'goes' } }],
+    };
+    expect(validateWorkflowSteps(workflow)).toEqual([]);
+  });
+
+  test('bash_execute, playwright_action, and applescript_run are never storable in a workflow', () => {
+    // These grant arbitrary code/command execution and have free-form schemas the validator
+    // cannot type-check, so a stored workflow calling them would run unsandboxed on whoever
+    // the intent later matches, not just the person who taught it.
+    for (const call of ['bash_execute', 'playwright_action', 'applescript_run']) {
+      const workflow: Workflow = { steps: [{ call, input: { command: 'anything' } }] };
+      const errors = validateWorkflowSteps(workflow);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain(call);
+    }
+  });
+});
+
+describe('validateWorkflow', () => {
+  test('accepts a workflow that is sound in both variables and tool calls', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'get_events', input: { start_date: '{{dates.today}}', end_date: '{{dates.today}}' } }],
+    };
+    expect(validateWorkflow(workflow, null)).toEqual([]);
+  });
+
+  test('reports variable errors and tool errors together', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'render_image', input: { period: '{{user.phone}}' } }],
+    };
+    const errors = validateWorkflow(workflow, null);
+
+    expect(errors.some((e) => e.includes('user.phone'))).toBe(true);
+    expect(errors.some((e) => e.includes('render_image'))).toBe(true);
+  });
+
+  test('catches a bad capture reference alongside a bad parameter', () => {
+    const workflow: Workflow = {
+      steps: [{ call: 'find_user', input: { query: '{{$2}}' } }],
+    };
+    const errors = validateWorkflow(workflow, '^(.+)$');
+
+    expect(errors.some((e) => e.includes('$2'))).toBe(true);
+    expect(errors.some((e) => e.includes('username'))).toBe(true);
   });
 });

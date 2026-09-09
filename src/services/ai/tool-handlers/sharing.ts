@@ -88,9 +88,12 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     try {
       const resolved = await ctx.resolveUsername(inviteeUsername);
       if (!resolved) {
-        // Username not found — open user picker automatically
+        // Username not found — open user picker automatically. Route it to the inviter's
+        // private chat, never ctx.chatId: the same reasoning as fallbackChatId below —
+        // ctx.chatId may be a group the bot was invoked from, and the picker prompt names
+        // the invitee's @username, which would otherwise leak to every group member.
         const prompt = t(ctx.user.language).invite_resolve_not_found(inviteeUsername);
-        return handlePickUsers(ctx, { event_id: input.event_id, prompt });
+        return handlePickUsers({ ...ctx, chatId: ctx.user.telegram_id }, { event_id: input.event_id, prompt });
       }
       inviteeId = resolved.id;
       resolvedFirstName = resolved.firstName;

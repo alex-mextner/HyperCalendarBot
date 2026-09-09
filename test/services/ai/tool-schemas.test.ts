@@ -200,6 +200,19 @@ describe('toolSchemas', () => {
     expect(invalidAction.success).toBe(false);
   });
 
+  test('send_invitation schema requires an invitee_id or invitee_username', () => {
+    const schema = toolSchemas.send_invitation;
+
+    const missingBoth = schema.safeParse({ event_id: 1 });
+    expect(missingBoth.success).toBe(false);
+
+    const withId = schema.safeParse({ event_id: 1, invitee_id: 42 });
+    expect(withId.success).toBe(true);
+
+    const withUsername = schema.safeParse({ event_id: 1, invitee_username: 'bob' });
+    expect(withUsername.success).toBe(true);
+  });
+
   test('passthrough allows extra fields', () => {
     const schema = toolSchemas.get_events;
     const result = schema.safeParse({
