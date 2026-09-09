@@ -38,6 +38,7 @@ const event: CalendarEvent = {
   google_maps_url: 'https://maps.google.com/?q=44.8,20.46',
   location_verified: 1,
   venue_name: null,
+  color: null,
   last_synced_at: null,
   created_at: '',
   updated_at: '',
