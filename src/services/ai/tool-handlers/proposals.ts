@@ -45,7 +45,7 @@ export async function handleProposeCalendarChange(ctx: AgentContext, input: Prop
 
   let dmDelivered = true;
   try {
-    await deliverProposalDm(ctx, calendarProposalRepo, proposal, input.target_telegram_id);
+    dmDelivered = await deliverProposalDm(ctx, calendarProposalRepo, proposal, input.target_telegram_id);
   } catch (err) {
     proposalLogger.error({ err, proposalId: proposal.id }, 'proposal DM delivery failed');
     dmDelivered = false;
@@ -89,8 +89,11 @@ async function deliverProposalDm(
   repo: CalendarProposalRepository,
   proposal: { id: number; summary: string },
   targetId: number,
-): Promise<void> {
-  if (!ctx.sender) return;
+): Promise<boolean> {
+  if (!ctx.sender) {
+    proposalLogger.warn({ proposalId: proposal.id, targetId }, 'Proposal DM delivery skipped: sender not configured');
+    return false;
+  }
 
   const proposerName = ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`;
   const proposerHandle = ctx.user.username ? ` (@${ctx.user.username})` : '';
@@ -125,6 +128,13 @@ async function deliverProposalDm(
   if (result.messageId) {
     repo.setDmMessageId(proposal.id, result.messageId);
   }
+  if (!result.delivered) {
+    proposalLogger.warn(
+      { proposalId: proposal.id, targetId, fallbackSent: result.fallbackSent },
+      'Proposal DM not delivered directly (fallback or total failure)',
+    );
+  }
+  return result.delivered;
 }
 
 async function notifyGroupChat(
@@ -133,7 +143,13 @@ async function notifyGroupChat(
   proposal: { id: number },
   targetId: number,
 ): Promise<void> {
-  if (!ctx.sendMessageToChat) return;
+  if (!ctx.sendMessageToChat) {
+    proposalLogger.warn(
+      { proposalId: proposal.id, targetId },
+      'Proposal group notification skipped: sendMessageToChat not configured',
+    );
+    return;
+  }
   const targetUser = ctx.userRepo.findByTelegramId(targetId);
   const targetName = targetUser?.first_name ?? targetUser?.username ?? `User ${targetId}`;
   const targetHandle = targetUser?.username ? ` (@${targetUser.username})` : '';

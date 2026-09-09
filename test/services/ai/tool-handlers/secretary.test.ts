@@ -127,6 +127,36 @@ test('manage_secretaries invite: success returns awaiting_confirmation', async (
   expect(setDmMessageId).toHaveBeenCalledWith(7, 1);
 });
 
+test('manage_secretaries invite: sender not configured → success but agentHint flags undelivered invite', async () => {
+  // Regression: sendSecretaryInvite used to return void, so a missing ctx.sender
+  // silently produced success:true with no signal that nothing was delivered.
+  const setDmMessageId = mock(() => undefined);
+  const ctx = makeCtx({
+    secretary: {
+      secretaryRepo: {
+        countActive: () => 0,
+        upsert: () => ({ id: 8, owner_id: 1, secretary_id: 999, permission: 'read', status: 'pending' }),
+        setDmMessageId,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
+    userRepo: { findByTelegramId: () => ({ telegram_id: 999, username: 'bob', first_name: 'Bob' }) } as never,
+    sender: undefined,
+  });
+  const result = await handleManageSecretaries(ctx, {
+    action: 'invite',
+    secretary_telegram_id: 999,
+    permission: 'read',
+  });
+  expect(result.success).toBe(true);
+  const out = JSON.parse(result.output!) as { status: string };
+  expect(out.status).toBe('awaiting_confirmation');
+  expect(result.agentHint).toBeDefined();
+  expect(result.agentHint).toContain('could not be delivered');
+  expect(setDmMessageId).not.toHaveBeenCalled();
+});
+
 test('manage_secretaries revoke: updates status to revoked', async () => {
   const mockUpdate = mock(() => true);
   const ctx = makeCtx({
@@ -144,6 +174,28 @@ test('manage_secretaries revoke: updates status to revoked', async () => {
   const result = await handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
   expect(result.success).toBe(true);
   expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+});
+
+test('manage_secretaries revoke: sender not configured → status still revoked, agentHint flags undelivered notification', async () => {
+  // Regression (issue #51): sendSecretaryNotification silently skipped the secretary's
+  // revoke notification when ctx.sender was missing — the caller had no way to know.
+  const mockUpdate = mock(() => true);
+  const ctx = makeCtx({
+    secretary: {
+      secretaryRepo: {
+        findById: () => ({ id: 5, owner_id: 1, secretary_id: 99, status: 'active', permission: 'write' }),
+        updateStatus: mockUpdate,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
+    userRepo: { findByTelegramId: () => ({ telegram_id: 99, username: 'bob', first_name: 'Bob' }) } as never,
+    sender: undefined,
+  });
+  const result = await handleManageSecretaries(ctx, { action: 'revoke', secretary_access_id: 5 });
+  expect(result.success).toBe(true);
+  expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+  expect(result.agentHint).toContain('could not be notified directly');
 });
 
 test('manage_secretaries self_remove: fails if caller is not the secretary', async () => {
@@ -179,6 +231,28 @@ test('manage_secretaries self_remove: succeeds when caller matches secretary_id'
   const result = await handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
   expect(result.success).toBe(true);
   expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+});
+
+test('manage_secretaries self_remove: sender not configured → status still revoked, agentHint flags undelivered notification', async () => {
+  // Regression (issue #51): sendSecretaryNotification silently skipped the owner's
+  // self-remove notification when ctx.sender was missing — the caller had no way to know.
+  const mockUpdate = mock(() => true);
+  const ctx = makeCtx({
+    secretary: {
+      secretaryRepo: {
+        findById: () => ({ id: 5, owner_id: 10, secretary_id: 1, status: 'active' }), // secretary_id == ctx.user.telegram_id (1)
+        updateStatus: mockUpdate,
+      } as never,
+      secretaryForLine: undefined,
+      calendarProposalRepo: undefined as never,
+    },
+    userRepo: { findByTelegramId: () => ({ telegram_id: 10, username: 'alice', first_name: 'Alice' }) } as never,
+    sender: undefined,
+  });
+  const result = await handleManageSecretaries(ctx, { action: 'self_remove', secretary_access_id: 5 });
+  expect(result.success).toBe(true);
+  expect(mockUpdate).toHaveBeenCalledWith(5, 'revoked');
+  expect(result.agentHint).toContain('could not be notified directly');
 });
 
 test('manage_secretaries invite: keyboard is sent via sendMessageWithKeyboard', async () => {
