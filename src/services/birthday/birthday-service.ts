@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { t } from '../../config/constants.ts';
 import type { BirthdayMetadataRepository } from '../../database/repositories/birthday-metadata.repository.ts';
 import type { EventRepository } from '../../database/repositories/event.repository.ts';
 import type { EventReminderRepository } from '../../database/repositories/event-reminder.repository.ts';
@@ -61,7 +62,7 @@ export class BirthdayService {
   }
 
   upsertBirthdayEvent(params: UpsertBirthdayParams): void {
-    const titlePrefix = params.lang === 'ru' ? '\u0414/\u0440 ' : 'Bday ';
+    const titlePrefix = t(params.lang).birthdayTitlePrefix;
     const title = titlePrefix + params.celebrantName;
 
     const now = new Date();

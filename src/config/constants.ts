@@ -947,6 +947,23 @@ export const MSG = {
       changeAllDay: (isAllDay: boolean) => (isAllDay ? '• Now all-day' : '• No longer all-day'),
       changeRecurrence: '• Recurrence changed',
     },
+    middleware: {
+      sceneInProgress: 'Another action in progress. /cancel to cancel.',
+      callbackExpired: 'Action expired.',
+    },
+    duration: {
+      unknown: '?',
+      minutes: (m: number) => `${m}m`,
+      hours: (h: number) => `${h}h`,
+      hoursMinutes: (h: number, m: number) => `${h}h ${m}m`,
+    },
+    dateLabels: {
+      monthsShort: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'],
+      daysShort: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      fullDatePattern: 'EEEE, MMMM d',
+    },
+    birthdayTitlePrefix: 'Bday ',
+    executionLog: '⚙️ <b>Execution log</b>',
   },
   ru: {
     welcome: '🌍 Choose your language / Выберите язык:',
@@ -1763,6 +1780,23 @@ export const MSG = {
       changeAllDay: (isAllDay: boolean) => (isAllDay ? '• Теперь на весь день' : '• Больше не на весь день'),
       changeRecurrence: '• Повторения изменены',
     },
+    middleware: {
+      sceneInProgress: 'Идёт другое действие. /cancel для отмены.',
+      callbackExpired: 'Действие устарело.',
+    },
+    duration: {
+      unknown: '?',
+      minutes: (m: number) => `${m}мин`,
+      hours: (h: number) => `${h}ч`,
+      hoursMinutes: (h: number, m: number) => `${h}ч ${m}мин`,
+    },
+    dateLabels: {
+      monthsShort: ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'],
+      daysShort: ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'],
+      fullDatePattern: 'EEEE, d MMMM',
+    },
+    birthdayTitlePrefix: '\u0414/\u0440 ',
+    executionLog: '⚙️ <b>Ход выполнения</b>',
   },
 } as const;
 

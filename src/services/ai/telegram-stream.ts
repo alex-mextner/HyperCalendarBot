@@ -1,3 +1,4 @@
+import { t, toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
 import { escapeHtml, markdownToHtml, splitMessage } from '../../utils/telegram.ts';
 import type { TelegramSender } from './types.ts';
@@ -364,7 +365,7 @@ export class TelegramStreamWriter {
       // splitting into multiple messages confuses users and can break HTML tags.
       finalText = finalResponse;
       if (this.intermediateChunks.length > 0) {
-        const header = this.lang === 'ru' ? '⚙️ <b>Ход выполнения</b>' : '⚙️ <b>Execution log</b>';
+        const header = t(toLang(this.lang)).executionLog;
         let body = this.intermediateChunks.join('\n');
         // blockquote wrapper + header + separators ≈ 60 chars overhead
         const overhead = `<blockquote expandable>${header}\n</blockquote>\n\n`.length;
