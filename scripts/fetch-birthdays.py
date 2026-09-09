@@ -25,7 +25,20 @@ async def fetch(user_ids: list[int]) -> dict:
     results = {}
     with session_lock():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
-        await app.start()
+        try:
+            await app.start()
+        except EOFError:
+            # No valid session and no TTY to prompt for one (Pyrogram's authorize()
+            # falls back to interactive input, which is impossible under Docker).
+            print(
+                "voice_caller.session is missing or unauthorized — "
+                "run scripts/pyrogram-auth.py to re-authenticate",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        except Exception as e:
+            print(f"Pyrogram session start failed: {e}", file=sys.stderr)
+            sys.exit(1)
         try:
             for uid in user_ids:
                 for attempt in range(2):
