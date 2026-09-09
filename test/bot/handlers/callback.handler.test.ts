@@ -130,6 +130,116 @@ describe('createCallbackHandler', () => {
   });
 });
 
+// ── Event picker pagination: noop label + page: navigation ────────
+describe('event picker pagination callbacks', () => {
+  function makeUpcomingEvents(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      id: i + 1,
+      title: `Event ${i + 1}`,
+      start_at: '2026-03-15T10:00:00Z',
+      end_at: null,
+      recurrence_rule: null,
+    }));
+  }
+
+  test('ed:noop answers without editing the message', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('ed:noop');
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalled();
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('ee:noop answers without editing the message', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('ee:noop');
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalled();
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('invp:noop answers without editing the message', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('invp:noop');
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalled();
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('ev:noop answers without editing the message', async () => {
+    const handler = makeHandler();
+    const ctx = makeCtx('ev:noop');
+    await handler(ctx as never);
+    expect(ctx.answer).toHaveBeenCalled();
+    expect(ctx.editText).not.toHaveBeenCalled();
+  });
+
+  test('ed:page:1 re-renders page 1 of a 15-event delete picker', async () => {
+    const events = makeUpcomingEvents(15);
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const handler = makeHandler({ getUpcoming });
+    const ctx = makeCtx('ed:page:1');
+
+    await handler(ctx as never);
+
+    expect(ctx.answer).toHaveBeenCalled();
+    const args = ctx.editText.mock.calls[0] as unknown[];
+    const kb = JSON.stringify((args[1] as { reply_markup?: unknown }).reply_markup);
+    // page 1 (0-indexed) holds events 11..15 — 5 items, no forward button, has back button
+    expect(kb).toContain('"ed:11"');
+    expect(kb).toContain('"ed:15"');
+    expect(kb).not.toContain('"ed:10"');
+    expect(kb).toContain('◀️');
+    expect(kb).not.toContain('▶️');
+  });
+
+  test('ee:page:1 re-renders page 1 of a 15-event edit picker with a back button and no forward button', async () => {
+    const events = makeUpcomingEvents(15);
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const handler = makeHandler({ getUpcoming });
+    const ctx = makeCtx('ee:page:1');
+
+    await handler(ctx as never);
+
+    const args = ctx.editText.mock.calls[0] as unknown[];
+    const kb = JSON.stringify((args[1] as { reply_markup?: unknown }).reply_markup);
+    expect(kb).toContain('"ee:11"');
+    expect(kb).toContain('◀️');
+    expect(kb).not.toContain('▶️');
+  });
+
+  test('invp:page:1 re-renders page 1 of a 15-event invite picker', async () => {
+    const events = makeUpcomingEvents(15);
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const handler = makeHandler({ getUpcoming });
+    const ctx = makeCtx('invp:page:1');
+
+    await handler(ctx as never);
+
+    const args = ctx.editText.mock.calls[0] as unknown[];
+    const kb = JSON.stringify((args[1] as { reply_markup?: unknown }).reply_markup);
+    expect(kb).toContain('"invp:11"');
+    expect(kb).toContain('◀️');
+  });
+
+  test('ev:page:1:query re-runs the search and renders page-relative results', async () => {
+    const events = makeUpcomingEvents(15);
+    const searchEvents = mock(() => events);
+    const handler = makeHandler({ searchEvents });
+    const ctx = makeCtx('ev:page:1:meeting');
+
+    await handler(ctx as never);
+
+    expect(searchEvents).toHaveBeenCalledWith(100, 'meeting');
+    const args = ctx.editText.mock.calls[0] as unknown[];
+    const text = args[0] as string;
+    const kb = JSON.stringify((args[1] as { reply_markup?: unknown }).reply_markup);
+    expect(text).toContain('1.'); // page-relative numbering restarts at 1
+    expect(kb).toContain('"ev:11"');
+    expect(kb).toContain('◀️');
+  });
+});
+
 // ── editProposal:accept|reject end-to-end callback wiring ─────────
 // Regression coverage: editProposalDeps was never injected in bot/index.ts
 // for an unknown period — the button clicks from `sendEditProposal` reached

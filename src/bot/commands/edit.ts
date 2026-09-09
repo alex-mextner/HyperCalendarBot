@@ -8,7 +8,7 @@ import type { EventService } from '../../services/event/event-service.ts';
 import { formatEventDetail } from '../../services/event/formatters.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { getGroupId, isGroup } from '../group-context.ts';
-import { editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
+import { EVENT_PICKER_PAGE_SIZE, editFieldKeyboard, eventPickerKeyboard, recurringEditKeyboard } from '../keyboards.ts';
 import type { BotCallbackContext, BotCommandContext } from '../types.ts';
 
 export async function handleEdit(
@@ -30,27 +30,39 @@ export async function handleEdit(
       );
       return;
     }
-    const occurrences = eventService.getUpcomingForGroup(groupId, 10);
+    const occurrences = eventService.getUpcomingForGroup(groupId, EVENT_PICKER_PAGE_SIZE + 1);
     if (occurrences.length === 0) {
       await ctx.send(t(lang).no_events);
       return;
     }
     const events = occurrences.map((o) => ({ ...o.event, start_at: o.occurrence_start }));
+    const hasMore = events.length > EVENT_PICKER_PAGE_SIZE;
+    const pageItems = events.slice(0, EVENT_PICKER_PAGE_SIZE);
     await ctx.send(t(lang).edit_pick, {
-      reply_markup: eventPickerKeyboard(events, timezone, CB.EVENT_EDIT, lang),
+      reply_markup: eventPickerKeyboard(pageItems, timezone, CB.EVENT_EDIT, lang, {
+        page: 0,
+        hasMore,
+        onPage: (p) => `${CB.EVENT_EDIT}:page:${p}`,
+      }),
     });
     return;
   }
 
-  const upcoming = eventService.getUpcoming(user.telegram_id, 10);
+  const upcoming = eventService.getUpcoming(user.telegram_id, EVENT_PICKER_PAGE_SIZE + 1);
 
   if (upcoming.length === 0) {
     await ctx.send(t(lang).no_events);
     return;
   }
 
+  const hasMore = upcoming.length > EVENT_PICKER_PAGE_SIZE;
+  const pageItems = upcoming.slice(0, EVENT_PICKER_PAGE_SIZE);
   await ctx.send(t(lang).edit_pick, {
-    reply_markup: eventPickerKeyboard(upcoming, user.timezone, CB.EVENT_EDIT, lang),
+    reply_markup: eventPickerKeyboard(pageItems, user.timezone, CB.EVENT_EDIT, lang, {
+      page: 0,
+      hasMore,
+      onPage: (p) => `${CB.EVENT_EDIT}:page:${p}`,
+    }),
   });
 }
 

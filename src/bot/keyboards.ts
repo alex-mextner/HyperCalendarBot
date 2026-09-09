@@ -114,17 +114,26 @@ export function deleteConfirmKeyboard(eventId: number, lang: 'en' | 'ru'): Inlin
     .text(lang === 'ru' ? 'Отмена' : 'Cancel', `${CB.EVENT_DELETE}:cancel`);
 }
 
+export const EVENT_PICKER_PAGE_SIZE = 10;
+
 export function eventPickerKeyboard(
   events: CalendarEvent[],
   timezone: string,
   prefix: string,
   lang: 'en' | 'ru' = 'en',
+  pagination?: { page: number; hasMore: boolean; onPage: (page: number) => string },
 ): InlineKeyboard {
   const kb = new InlineKeyboard();
-  for (let i = 0; i < events.length && i < 10; i++) {
-    const e = events[i]!;
+  for (const [i, e] of events.entries()) {
     const time = formatTime(e.start_at, timezone);
     kb.text(`${i + 1}. ${time} ${e.title.slice(0, 20)}`, `${prefix}:${e.id}`).row();
+  }
+  if (pagination && (pagination.page > 0 || pagination.hasMore)) {
+    const { page, hasMore, onPage } = pagination;
+    if (page > 0) kb.text('◀️', onPage(page - 1));
+    kb.text(`${page + 1}`, `${prefix}:noop`);
+    if (hasMore) kb.text('▶️', onPage(page + 1));
+    kb.row();
   }
   kb.text(lang === 'ru' ? 'Отмена' : 'Cancel', `${prefix}:cancel`);
   return kb;

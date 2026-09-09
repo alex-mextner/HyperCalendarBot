@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleEdit } from '../../../src/bot/commands/edit.ts';
+import { EVENT_PICKER_PAGE_SIZE } from '../../../src/bot/keyboards.ts';
 import type { CalendarEvent } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -83,6 +84,59 @@ describe('handleEdit', () => {
     expect(args[0]).toContain('edit');
     expect(args[1]).toHaveProperty('reply_markup');
   });
+
+  test('over-fetches by one to detect more pages', async () => {
+    const { handleEdit } = await import('../../../src/bot/commands/edit.ts');
+    const ctx = makeCommandCtx();
+    const eventService = { getUpcoming: mock(() => []) };
+
+    await handleEdit(ctx as never, eventService as never);
+
+    expect(eventService.getUpcoming).toHaveBeenCalledWith(100, EVENT_PICKER_PAGE_SIZE + 1);
+  });
+
+  test('exactly 10 events: no forward pagination button', async () => {
+    const { handleEdit } = await import('../../../src/bot/commands/edit.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 10 }, (_, i) => makeEvent({ id: i + 1 }));
+    const eventService = { getUpcoming: mock(() => events) };
+
+    await handleEdit(ctx as never, eventService as never);
+
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).not.toContain('▶️');
+  });
+
+  test('exactly 11 events (one over the page): shows forward pagination button', async () => {
+    const { handleEdit } = await import('../../../src/bot/commands/edit.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 11 }, (_, i) => makeEvent({ id: i + 1 }));
+    const eventService = { getUpcoming: mock(() => events) };
+
+    await handleEdit(ctx as never, eventService as never);
+
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    expect((kb.match(/"ee:\d+"/g) ?? []).length).toBe(10);
+  });
+
+  test('25 events: over-fetch respects the requested limit and renders only the first page', async () => {
+    const { handleEdit } = await import('../../../src/bot/commands/edit.ts');
+    const ctx = makeCommandCtx();
+    const events = Array.from({ length: 25 }, (_, i) => makeEvent({ id: i + 1 }));
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const eventService = { getUpcoming };
+
+    await handleEdit(ctx as never, eventService as never);
+
+    expect(getUpcoming).toHaveBeenCalledWith(100, EVENT_PICKER_PAGE_SIZE + 1);
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    expect(kb).not.toContain('◀️');
+  });
 });
 
 describe('handleEdit group context', () => {
@@ -116,7 +170,7 @@ describe('handleEdit group context', () => {
       }),
     };
     await handleEdit(ctx as never, eventService as never, groupRepo as never);
-    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(eventService.getUpcomingForGroup).toHaveBeenCalledWith(-100, EVENT_PICKER_PAGE_SIZE + 1);
     expect(eventService.getUpcoming).not.toHaveBeenCalled();
     const kb = JSON.stringify(sentOpts.reply_markup ?? '');
     expect(kb).toContain('5');

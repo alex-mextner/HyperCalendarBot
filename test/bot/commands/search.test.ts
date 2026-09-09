@@ -1,4 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { buildSearchResultsView } from '../../../src/bot/commands/search.ts';
+import { EVENT_PICKER_PAGE_SIZE } from '../../../src/bot/keyboards.ts';
 import type { CalendarEvent } from '../../../src/database/types.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
@@ -11,6 +13,10 @@ function makeCtx(overrides = {}) {
     send: mock(() => Promise.resolve()),
     ...overrides,
   };
+}
+
+function kbButtons(kb: unknown): Array<{ text: string; callback_data?: string }> {
+  return (kb as { keyboard: Array<Array<{ text: string; callback_data?: string }>> }).keyboard.flat();
 }
 
 function makeEvent(overrides: Partial<CalendarEvent> = {}) {
@@ -187,5 +193,71 @@ describe('handleSearch', () => {
     // Falls back -- still returns results without error
     const text = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(text).toContain('Found 1');
+  });
+});
+
+describe('buildSearchResultsView', () => {
+  const events = (count: number) =>
+    Array.from({ length: count }, (_, i) => makeEvent({ id: i + 1, title: `Event ${i + 1}` }));
+
+  test('renders page-relative numbering starting at 1', () => {
+    const { text } = buildSearchResultsView(events(3) as never, 0, 'UTC', 'en', 'meeting');
+    expect(text).toContain('1.');
+    expect(text).toContain('2.');
+    expect(text).toContain('3.');
+  });
+
+  test('page 1 renders items relative to that page, numbered from 1 again', () => {
+    const { text } = buildSearchResultsView(events(15) as never, 1, 'UTC', 'en', 'meeting');
+    // page 1 holds items 11..15 (5 items), numbered 1..5 relative to the page
+    expect(text).toContain('1.');
+    expect(text).not.toContain('11.');
+  });
+
+  test('no pagination row when results fit on one page', () => {
+    const { keyboard } = buildSearchResultsView(events(5) as never, 0, 'UTC', 'en', 'meeting');
+    const buttons = kbButtons(keyboard);
+    expect(buttons.some((b) => b.text === '▶️')).toBe(false);
+  });
+
+  test('shows forward button when results span more than one page', () => {
+    const { keyboard } = buildSearchResultsView(events(EVENT_PICKER_PAGE_SIZE + 1) as never, 0, 'UTC', 'en', 'meeting');
+    const buttons = kbButtons(keyboard);
+    const next = buttons.find((b) => b.text === '▶️');
+    expect(next).toBeDefined();
+    expect(next?.callback_data).toBe('ev:page:1:meeting');
+  });
+
+  test('no forward button on the last page', () => {
+    const { keyboard } = buildSearchResultsView(events(EVENT_PICKER_PAGE_SIZE + 1) as never, 1, 'UTC', 'en', 'meeting');
+    const buttons = kbButtons(keyboard);
+    expect(buttons.some((b) => b.text === '▶️')).toBe(false);
+    expect(buttons.some((b) => b.text === '◀️')).toBe(true);
+  });
+
+  test('64-byte guard: suppresses the forward button for a query long enough to overflow callback_data', () => {
+    const longQuery = 'a'.repeat(60); // 'ev:page:1:' (10 bytes) + 60 bytes = 70 bytes > 64
+    const encoded = new TextEncoder().encode(`ev:page:1:${longQuery}`).length;
+    expect(encoded).toBeGreaterThan(64);
+
+    const { keyboard } = buildSearchResultsView(events(EVENT_PICKER_PAGE_SIZE + 1) as never, 0, 'UTC', 'en', longQuery);
+    const buttons = kbButtons(keyboard);
+    expect(buttons.some((b) => b.text === '▶️')).toBe(false);
+  });
+
+  test('64-byte guard: does not suppress the forward button for a short query', () => {
+    const shortQuery = 'meeting';
+    const encoded = new TextEncoder().encode(`ev:page:1:${shortQuery}`).length;
+    expect(encoded).toBeLessThanOrEqual(64);
+
+    const { keyboard } = buildSearchResultsView(
+      events(EVENT_PICKER_PAGE_SIZE + 1) as never,
+      0,
+      'UTC',
+      'en',
+      shortQuery,
+    );
+    const buttons = kbButtons(keyboard);
+    expect(buttons.some((b) => b.text === '▶️')).toBe(true);
   });
 });
