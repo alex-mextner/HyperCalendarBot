@@ -420,6 +420,12 @@ export const MSG = {
         tooLong: (length: number, limit: number) =>
           `That fact is too long to keep — length ${length}, limit ${limit}. Say the essence in one short sentence, or split it into several facts.`,
       },
+      reaction: {
+        notAvailable: "I can't react to messages right now — reactions are unavailable.",
+        emojiNotSupported: (emoji: string) =>
+          `Reaction "${emoji}" is not supported by Telegram. Try a different emoji.`,
+        noMessageTarget: 'There is no message to react to.',
+      },
       history: {
         notFound: 'No history found.',
       },
@@ -1224,6 +1230,11 @@ export const MSG = {
         // which imports this file, so importing it back would close a cycle.
         tooLong: (length: number, limit: number) =>
           `Этот факт слишком длинный, чтобы его хранить — длина ${length}, лимит ${limit}. Скажи суть одним коротким предложением или раздели на несколько фактов.`,
+      },
+      reaction: {
+        notAvailable: 'Сейчас не могу поставить реакцию — реакции недоступны.',
+        emojiNotSupported: (emoji: string) => `Реакция «${emoji}» не поддерживается Telegram. Попробуй другой эмодзи.`,
+        noMessageTarget: 'Нет сообщения, на которое можно поставить реакцию.',
       },
       history: {
         notFound: 'История не найдена.',

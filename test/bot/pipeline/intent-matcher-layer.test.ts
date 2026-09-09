@@ -113,6 +113,7 @@ function callLayer(
   toolExecutor: ReturnType<typeof makeToolExecutor>,
   sessions: ReturnType<typeof makeWorkflowStore>,
   notifyAdmin?: (text: string) => Promise<void>,
+  onEventMentioned?: (userId: number, eventId: number) => void,
 ) {
   return createIntentMatcherLayer(
     matcher as unknown as Parameters<typeof createIntentMatcherLayer>[0],
@@ -121,6 +122,8 @@ function callLayer(
     toolExecutor,
     sessions,
     notifyAdmin,
+    undefined,
+    onEventMentioned,
   );
 }
 
@@ -219,6 +222,104 @@ describe('createIntentMatcherLayer', () => {
     expect(ctx.send).toHaveBeenCalledWith('Created!');
     // Session must be deleted after use
     expect(workflowSessions.has(userId, userId)).toBe(false);
+  });
+
+  test('resumed workflow failure does not send to user and falls through to AI agent', async () => {
+    const userId = 21;
+    const workflow = { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'remember_user_fact' }] };
+    const notifyAdmin = mock((_text: string) => Promise.resolve());
+    const executor = makeExecutor({ success: false, response: 'Fact too long (612 characters, limit 500)' });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, userId, {
+      intentId: 9,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = callLayer(
+      makeMatcher(null),
+      makeIntentRepo(null),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+      notifyAdmin,
+    );
+
+    const result = await layer(ctx, 'yes');
+    expect(result.handled).toBe(false);
+    expect(ctx.send).not.toHaveBeenCalled();
+    expect(notifyAdmin).toHaveBeenCalledTimes(1);
+    const msg = notifyAdmin.mock.calls[0]![0];
+    expect(msg).toContain('Fact too long (612 characters, limit 500)');
+  });
+
+  test('resumed workflow suspending again keeps the session alive for the next answer', async () => {
+    const userId = 22;
+    const workflow = {
+      steps: [
+        { call: 'ask_user', as: 'day' },
+        { call: 'ask_user', as: 'time' },
+      ],
+    };
+    const executor = makeExecutor({
+      success: false,
+      suspended: true,
+      suspendedAt: 1,
+      stepResults: {},
+      response: 'Which day?',
+    });
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, userId, {
+      intentId: 11,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = callLayer(makeMatcher(null), makeIntentRepo(null), executor, makeToolExecutor(), workflowSessions);
+
+    const result = await layer(ctx, 'tomorrow');
+    expect(ctx.send).toHaveBeenCalledWith('Which day?');
+    expect(result.handled).toBe(true);
+    expect(workflowSessions.has(userId, userId)).toBe(true);
+    expect(workflowSessions.get(userId, userId)!.stepIndex).toBe(1);
+  });
+
+  test('resumed workflow success calls onEventMentioned with the mentioned event id', async () => {
+    const userId = 23;
+    const workflow = { steps: [{ call: 'ask_user', as: 'answer' }, { call: 'get_events' }] };
+    const executor = makeExecutor({ success: true, response: 'done', mentionedEventId: 55 });
+    const onEventMentioned = mock((_u: number, _e: number) => {});
+    const ctx = makeCtx(makeUser({ telegram_id: userId }));
+
+    workflowSessions.set(userId, userId, {
+      intentId: 12,
+      stepIndex: 0,
+      stepResults: {},
+      workflow,
+      captures: {},
+      createdAt: Date.now(),
+    });
+
+    const layer = callLayer(
+      makeMatcher(null),
+      makeIntentRepo(null),
+      executor,
+      makeToolExecutor(),
+      workflowSessions,
+      undefined,
+      onEventMentioned,
+    );
+
+    await layer(ctx, 'yes');
+    expect(onEventMentioned).toHaveBeenCalledWith(userId, 55);
   });
 
   test('formats structured events when a resumed workflow ends in get_events', async () => {

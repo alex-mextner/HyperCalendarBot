@@ -70,6 +70,46 @@ export function createIntentMatcherLayer(
           userAnswer: messageText.trim(),
         },
       );
+
+      // The workflow suspended again on another ask_user — keep the session alive for
+      // the next answer, exactly like the fresh-match path's suspension handling below.
+      if (result.suspended && result.suspendedAt !== undefined) {
+        workflowSessions.set(chatId, userId, {
+          intentId: session.intentId,
+          stepIndex: result.suspendedAt,
+          stepResults: result.stepResults ?? {},
+          workflow: session.workflow,
+          captures: session.captures,
+          createdAt: Date.now(),
+        });
+        if (result.response) {
+          await ctx.send(result.response);
+        }
+        return { handled: true };
+      }
+
+      // A tool error mid-workflow must fall through to the AI agent exactly like a
+      // fresh-match failure does — never deliver the internal error text to the user.
+      if (!result.success) {
+        cmdLogger.warn(
+          { intentId: session.intentId, userId, error: result.response },
+          'Resumed intent workflow step failed, falling through to AI agent',
+        );
+        if (notifyAdmin) {
+          notifyAdmin(
+            `⚠️ Resumed intent failed: intent id=${session.intentId}\nAnswer: "${messageText}"\nError: ${result.response ?? 'no response'}`,
+          ).catch((err: unknown) => {
+            cmdLogger.error({ err: err }, 'Failed to send intent fail report to admin');
+          });
+        }
+        return { handled: false };
+      }
+
+      // Persist last mentioned event for cross-request workflows — the fresh-match path does this too.
+      if (result.mentionedEventId !== undefined) {
+        onEventMentioned?.(userId, result.mentionedEventId);
+      }
+
       if (result.response) {
         // Same formatting as a first-pass match: a resumed workflow can end in a tool
         // whose text output is written for the AI agent, not for the user.
