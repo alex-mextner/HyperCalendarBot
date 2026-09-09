@@ -604,6 +604,11 @@ export function createCallbackHandler(
         return;
       }
     }
+    cmdLogger.warn(
+      { userId: user.telegram_id, subAction, subPayload },
+      'GCAL callback: no matching path (missing dependency or unknown sub-action)',
+    );
+    await ctx.answer();
   });
 
   function agendaView(ctx: BotCallbackContext, user: User) {
@@ -797,7 +802,11 @@ export function createCallbackHandler(
 
   // Invitation actions
   dispatch.set(CB.INVITATION_ACTION, async (ctx, _payload, parts, user) => {
-    if (!invitationService) return;
+    if (!invitationService) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'INVITATION_ACTION callback: invitationService not configured');
+      await ctx.answer();
+      return;
+    }
     const subAction = parts[1];
     const invId = Number(parts[2]);
     const lang = (user.language ?? 'en') as Lang;
@@ -1039,7 +1048,11 @@ export function createCallbackHandler(
   // chat Telegram reports for that message is the real group id, and `recordGroupAttendance`
   // requires an active invitation linking the event to that group before writing anything.
   dispatch.set(CB.GROUP_RSVP, async (ctx, _payload, parts, user) => {
-    if (!invitationService) return;
+    if (!invitationService) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'GROUP_RSVP callback: invitationService not configured');
+      await ctx.answer();
+      return;
+    }
     const lang = (user.language ?? 'en') as Lang;
     const eventId = Number(parts[1]);
     const action = parts[2];
@@ -1070,7 +1083,11 @@ export function createCallbackHandler(
 
   // Edit proposal accept/reject
   dispatch.set(CB.EDIT_PROPOSAL, async (ctx, _payload, parts, user) => {
-    if (!editProposalDeps) return;
+    if (!editProposalDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'EDIT_PROPOSAL callback: editProposalDeps not configured');
+      await ctx.answer();
+      return;
+    }
     const subAction = parts[1];
     const proposalId = Number(parts[2]);
     const lang = (user.language ?? 'en') as Lang;
@@ -1183,6 +1200,9 @@ export function createCallbackHandler(
           .sendMessage(proposal.proposer_id, t(proposerLang).callbackErrors.proposalRejectedNotification(eventTitle))
           .catch(() => {});
       }
+    } else {
+      cmdLogger.warn({ userId: user.telegram_id, proposalId, subAction }, 'EDIT_PROPOSAL callback: unknown subAction');
+      await ctx.answer();
     }
   });
 
@@ -1739,7 +1759,11 @@ export function createCallbackHandler(
 
   // Group settings: timezone picker
   dispatch.set(CB.GROUP_SETTINGS_TZ, async (ctx, payload, _parts, user) => {
-    if (!groupRepo) return;
+    if (!groupRepo) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'GROUP_SETTINGS_TZ callback: groupRepo not configured');
+      await ctx.answer();
+      return;
+    }
     const chatId = ctx.chatId ?? null;
     if (!chatId) {
       await ctx.answer();
@@ -1761,7 +1785,11 @@ export function createCallbackHandler(
 
   // Feedback: admin closes a thread
   dispatch.set('fb_close', async (ctx, payload, _parts, user) => {
-    if (!feedbackDeps) return;
+    if (!feedbackDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'fb_close callback: feedbackDeps not configured');
+      await ctx.answer();
+      return;
+    }
     const lang = (user.language ?? 'en') as Lang;
     if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
@@ -1787,7 +1815,11 @@ export function createCallbackHandler(
 
   // Feedback: admin initiates a reply
   dispatch.set('fb_reply', async (ctx, payload, _parts, user) => {
-    if (!feedbackDeps) return;
+    if (!feedbackDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'fb_reply callback: feedbackDeps not configured');
+      await ctx.answer();
+      return;
+    }
     const lang = (user.language ?? 'en') as Lang;
     if (!feedbackDeps.adminId || user.telegram_id !== feedbackDeps.adminId) {
       await ctx.answer({ text: t(lang).callbackErrors.notAuthorized });
@@ -1884,7 +1916,11 @@ export function createCallbackHandler(
 
   // Intent verification: accept
   dispatch.set('intent_accept', async (ctx, payload, _parts, user) => {
-    if (!intentDeps) return;
+    if (!intentDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'intent_accept callback: intentDeps not configured');
+      await ctx.answer();
+      return;
+    }
     if (intentDeps.intentRepo.isManagedBasis()) {
       await ctx.answer({
         text:
@@ -1909,7 +1945,11 @@ export function createCallbackHandler(
 
   // Intent verification: reject
   dispatch.set('intent_reject', async (ctx, payload, _parts, user) => {
-    if (!intentDeps) return;
+    if (!intentDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'intent_reject callback: intentDeps not configured');
+      await ctx.answer();
+      return;
+    }
     if (intentDeps.intentRepo.isManagedBasis()) {
       await ctx.answer({
         text:
@@ -1933,7 +1973,11 @@ export function createCallbackHandler(
 
   // Intent verification: edit — store admin edit session
   dispatch.set('intent_edit', async (ctx, payload, _parts, user) => {
-    if (!intentDeps) return;
+    if (!intentDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'intent_edit callback: intentDeps not configured');
+      await ctx.answer();
+      return;
+    }
     if (intentDeps.intentRepo.isManagedBasis()) {
       await ctx.answer({
         text:
@@ -1961,7 +2005,11 @@ export function createCallbackHandler(
 
   // Secretary accept/decline
   dispatch.set('sec', async (ctx, _payload, _parts, user, data) => {
-    if (!secretaryDeps) return;
+    if (!secretaryDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'sec callback: secretaryDeps not configured');
+      await ctx.answer();
+      return;
+    }
     if (data.startsWith('sec:accept:')) {
       const id = Number(data.slice('sec:accept:'.length));
       await handleSecretaryAccept(id, user.telegram_id, secretaryDeps);
@@ -1987,12 +2035,22 @@ export function createCallbackHandler(
       const id = Number(data.slice('prop:decline:'.length));
       await handleProposalDecline(id, user.telegram_id, proposalDeps);
       await ctx.answer();
+      return;
     }
+    cmdLogger.warn(
+      { userId: user.telegram_id, data, hasProposalDeps: Boolean(proposalDeps) },
+      'prop callback: no matching action or proposalDeps not configured',
+    );
+    await ctx.answer();
   });
 
   // Snooze reminder — callback data: "snooze:{minutes}:{eventId}"
   dispatch.set('snooze', async (ctx, _payload, parts, user) => {
-    if (!snoozeDeps) return;
+    if (!snoozeDeps) {
+      cmdLogger.warn({ userId: user.telegram_id }, 'snooze callback: snoozeDeps not configured');
+      await ctx.answer();
+      return;
+    }
     const minutes = Number(parts[1]);
     const eventId = Number(parts[2]);
     await handleSnoozeCallback(ctx, user.telegram_id, eventId, minutes, snoozeDeps.reminderRepo, snoozeDeps.eventRepo);

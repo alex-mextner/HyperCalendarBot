@@ -262,7 +262,13 @@ export class IntentLearner {
   }
 
   private sendToAdminForVerification(intentId: number, data: CreateIntentData): void {
-    if (!this.config.adminId || !this.config.sendToAdmin) return;
+    if (!this.config.adminId || !this.config.sendToAdmin) {
+      cmdLogger.warn(
+        { intentId, hasAdminId: Boolean(this.config.adminId), hasSendToAdmin: Boolean(this.config.sendToAdmin) },
+        'Intent verification not sent to admin: admin notification not configured — intent will remain unverified',
+      );
+      return;
+    }
 
     const workflowStr = JSON.stringify(data.workflow, null, 2);
     const lines = [`💡 New intent: ${data.canonical_name}`];

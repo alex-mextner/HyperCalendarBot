@@ -128,6 +128,34 @@ describe('IntentLearner', () => {
     expect(result?.canonical_name).toBe('show_today');
   });
 
+  test('creates intent and logs when admin notification is not configured (issue #51)', async () => {
+    // Regression: sendToAdminForVerification silently returned when adminId/sendToAdmin
+    // were absent — candidate intents piled up unverified with no signal anywhere.
+    const intentPayload = {
+      canonical_name: 'show_today_unverified',
+      phrases: ['что сегодня без админа'],
+      workflow: { tools: [{ name: 'get_events', input: { date: '{{dates.today}}' } }] },
+      format: 'events_list',
+    };
+    const learner = buildLearner(makeStreamStub([JSON.stringify(intentPayload)]));
+
+    const warnSpy = spyOn(cmdLogger, 'warn').mockImplementation(() => {});
+    try {
+      const result = await learner.analyze(
+        'что сегодня без админа',
+        [{ name: 'get_events', input: {} }],
+        [{ success: true }],
+      );
+      expect(result?.canonical_name).toBe('show_today_unverified');
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ hasAdminId: false, hasSendToAdmin: false }),
+        expect.stringContaining('admin notification not configured'),
+      );
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test('returns null silently when stream finishReason is "length" (truncated)', async () => {
     const truncatedJson = '{"canonical_name":"show_today","phrases":["что сегодня"],"workflow":{';
     const learner = buildLearner(makeTruncatedStub(truncatedJson));
