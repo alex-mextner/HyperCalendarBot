@@ -145,6 +145,14 @@ export class WsClient extends EventEmitter {
     }
   }
 
+  sendOAuthToken(accessToken: string, refreshToken: string, expiresAt: number): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'anthropic_oauth_token', accessToken, refreshToken, expiresAt }), (err) => {
+        if (err) log('sendOAuthToken send error', { message: err.message });
+      });
+    }
+  }
+
   close(): void {
     this.closed = true;
     this.stopHeartbeat();

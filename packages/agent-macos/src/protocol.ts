@@ -15,6 +15,16 @@ export interface AgentPairError {
   reason: 'expired' | 'invalid';
 }
 
+// Agent-to-server only: pushes the agent's already-valid Claude Desktop OAuth
+// tokens so the server can store them. The server never uses these to make
+// its own /v1/oauth/token or /v1/messages calls.
+export interface AgentOAuthToken {
+  type: 'anthropic_oauth_token';
+  accessToken: string;
+  refreshToken: string;
+  expiresAt: number;
+}
+
 export type AgentCommand =
   | { id: string; type: 'bash_execute'; payload: { command: string; timeout_ms?: number } }
   | { id: string; type: 'applescript_run'; payload: { script: string; timeout_ms?: number } }
