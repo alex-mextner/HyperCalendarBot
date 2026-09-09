@@ -8,6 +8,7 @@ import { cmdLogger } from '../../utils/logger.ts';
 import { aiStreamRound } from '../ai/streaming.ts';
 import { LEARNER_SYSTEM_PROMPT } from './learner-prompt.ts';
 import { normalize } from './normalizer.ts';
+import { checkPatternSafety } from './regex-safety.ts';
 import { WorkflowSchema } from './workflow-schema.ts';
 import { validateWorkflow } from './workflow-validator.ts';
 
@@ -245,6 +246,25 @@ export class IntentLearner {
         // After all retries failed — skip this intent
         cmdLogger.error({ errors: varErrors }, 'IntentLearner: workflow still invalid after retries, skipping');
         return null;
+      }
+
+      // Validate pattern safety — LLM-generated patterns are compiled and run against every
+      // future message forever; catastrophic backtracking here hangs the whole bot process.
+      if (parsed.pattern) {
+        const safety = checkPatternSafety(parsed.pattern);
+        if (!safety.safe) {
+          cmdLogger.warn({ attempt, reason: safety.reason }, 'IntentLearner pattern failed safety check');
+
+          if (attempt < MAX_RETRIES) {
+            const errorFeedback = `The pattern is unsafe: ${safety.reason}. Regenerate the pattern using simple, non-nested quantifiers (avoid shapes like (x+)+ or (x*)*), or set pattern to null and rely on exact phrase matching instead.`;
+            conversationMessages.push({ role: 'assistant', content: text });
+            conversationMessages.push({ role: 'user', content: errorFeedback });
+            continue;
+          }
+
+          cmdLogger.error({ reason: safety.reason }, 'IntentLearner: pattern still unsafe after retries, skipping');
+          return null;
+        }
       }
 
       return {

@@ -123,4 +123,48 @@ describe('IntentMatcher', () => {
     matcher.load([]);
     expect(matcher.match('hello')).toBeNull();
   });
+
+  test('one intent with a malformed pattern does not abort loading the rest', () => {
+    expect(() =>
+      matcher.load([
+        makeIntent({
+          id: 7,
+          canonical_name: 'broken',
+          trigger_words: '["broken"]',
+          pattern: '(unbalanced',
+        }),
+        makeIntent({
+          id: 8,
+          canonical_name: 'search',
+          trigger_words: '["найди"]',
+          pattern: '^найди\\s+(.+)$',
+        }),
+      ]),
+    ).not.toThrow();
+
+    const result = matcher.match('найди встречу');
+    expect(result).toEqual({ intentId: 8, captures: { $1: 'встречу' } });
+  });
+
+  test('one intent with a catastrophic-backtracking pattern does not abort loading the rest', () => {
+    expect(() =>
+      matcher.load([
+        makeIntent({
+          id: 9,
+          canonical_name: 'unsafe',
+          trigger_words: '["unsafe"]',
+          pattern: '^(a+)+$',
+        }),
+        makeIntent({
+          id: 10,
+          canonical_name: 'search2',
+          trigger_words: '["найди"]',
+          pattern: '^найди\\s+(.+)$',
+        }),
+      ]),
+    ).not.toThrow();
+
+    const result = matcher.match('найди встречу');
+    expect(result).toEqual({ intentId: 10, captures: { $1: 'встречу' } });
+  });
 });

@@ -49,6 +49,7 @@ import { type EventMentionStore, InMemoryEventMentionStore } from '../../service
 import type { IntentExecutor } from '../../services/intent/intent-executor.ts';
 import type { IntentLearner } from '../../services/intent/intent-learner.ts';
 import type { IntentMatcher } from '../../services/intent/intent-matcher.ts';
+import { checkPatternSafety } from '../../services/intent/regex-safety.ts';
 import type { EventSummary } from '../../services/intent/variable-resolver.ts';
 import { type Workflow, WorkflowSchema } from '../../services/intent/workflow-schema.ts';
 import { validateWorkflow } from '../../services/intent/workflow-validator.ts';
@@ -673,6 +674,18 @@ async function handleIntentEditInstruction(
       if (errors.length > 0) {
         cmdLogger.warn({ intentId: session.intentId, errors }, 'Admin intent edit produced an invalid workflow');
         await ctx.send(`❌ Edit rejected — the new workflow is invalid:\n${errors.map((e) => `- ${e}`).join('\n')}`);
+        return;
+      }
+    }
+
+    if (updated.pattern) {
+      const safety = checkPatternSafety(updated.pattern);
+      if (!safety.safe) {
+        cmdLogger.warn(
+          { intentId: session.intentId, reason: safety.reason },
+          'Admin intent edit produced an unsafe pattern',
+        );
+        await ctx.send(`❌ Edit rejected — the new pattern is unsafe: ${safety.reason}`);
         return;
       }
     }
