@@ -454,22 +454,40 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   // Fetch participants once — used for the accepted-push, the declined-skip, and the hint
   const participants = ctx.participantRepo ? ctx.participantRepo.getByEvent(event_id) : [];
   const acceptedParticipants = participants.filter((p) => p.status === 'accepted' && p.user_id !== userId);
+  const declinedMemberIds = new Set(participants.filter((p) => p.status === 'declined').map((p) => p.user_id));
+
+  // Recipients of the group-members fanout below — active members, minus the acting caller
+  // and anyone who explicitly declined — computed once and reused as the exclusion set here:
+  // an accepted participant who is also one of these recipients would otherwise get a second,
+  // redundant 'update' push. An accepted participant NOT among them (not an active group
+  // member, or excluded there only as the acting caller) is not covered by that fanout, so
+  // this block still needs to push to them.
+  const groupPushRecipients =
+    scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group
+      ? ctx.group.groupMemberRepo
+          .getActiveMembers(ctx.groupChatId!)
+          .filter((m) => m.user_id !== ctx.user.telegram_id && !declinedMemberIds.has(m.user_id))
+      : null;
+  const groupPushRecipientIds = groupPushRecipients ? new Set(groupPushRecipients.map((m) => m.user_id)) : null;
+  const acceptedPushTargets = groupPushRecipientIds
+    ? acceptedParticipants.filter((p) => !groupPushRecipientIds.has(p.user_id))
+    : acceptedParticipants;
 
   // Push update to all accepted participants' Google Calendars (parallel).
   // Concurrency note: SQLite ops inside scheduleParticipantPush are sync
   // (bun:sqlite), so only the Redis queue.add runs in parallel — bounded
   // by realistic group sizes (<100 members).
-  if (ctx.google?.scheduleParticipantPush && acceptedParticipants.length > 0) {
+  if (ctx.google?.scheduleParticipantPush && acceptedPushTargets.length > 0) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
     const results = await Promise.allSettled(
-      acceptedParticipants.map((p) => pushParticipant(p.user_id, updated.id, 'update')),
+      acceptedPushTargets.map((p) => pushParticipant(p.user_id, updated.id, 'update')),
     );
     for (let i = 0; i < results.length; i++) {
       if (results[i]!.status === 'rejected') {
         logger.error(
           {
             err: (results[i] as PromiseRejectedResult).reason,
-            participantUserId: acceptedParticipants[i]!.user_id,
+            participantUserId: acceptedPushTargets[i]!.user_id,
             eventId: updated.id,
           },
           'scheduleParticipantPush failed',
@@ -483,17 +501,24 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   // ("Not going") is the opt-out, so members who explicitly declined are skipped
   // — otherwise an edit would re-create the event they removed from their calendar.
   // Members with no RSVP row are undecided, not declined, so they still receive it.
-  if (scope === 'group' && ctx.google?.scheduleParticipantPush && ctx.group) {
+  if (
+    scope === 'group' &&
+    ctx.google?.scheduleParticipantPush &&
+    groupPushRecipients &&
+    groupPushRecipients.length > 0
+  ) {
     const pushParticipant = ctx.google.scheduleParticipantPush;
-    const declinedMemberIds = new Set(participants.filter((p) => p.status === 'declined').map((p) => p.user_id));
-    const members = ctx.group.groupMemberRepo
-      .getActiveMembers(ctx.groupChatId!)
-      .filter((m) => m.user_id !== ctx.user.telegram_id && !declinedMemberIds.has(m.user_id));
-    const results = await Promise.allSettled(members.map((m) => pushParticipant(m.user_id, updated.id, 'update')));
+    const results = await Promise.allSettled(
+      groupPushRecipients.map((m) => pushParticipant(m.user_id, updated.id, 'update')),
+    );
     for (let i = 0; i < results.length; i++) {
       if (results[i]!.status === 'rejected') {
         logger.error(
-          { err: (results[i] as PromiseRejectedResult).reason, userId: members[i]!.user_id, eventId: updated.id },
+          {
+            err: (results[i] as PromiseRejectedResult).reason,
+            userId: groupPushRecipients[i]!.user_id,
+            eventId: updated.id,
+          },
           'scheduleParticipantPush group failed',
         );
       }
