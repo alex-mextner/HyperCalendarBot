@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations';
 import { EventRepository } from '../../../src/database/repositories/event.repository';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository';
 import { SharingSettingsRepository } from '../../../src/database/repositories/sharing-settings.repository';
@@ -249,21 +250,30 @@ describe('InvitationService', () => {
       const invRepo = new InvitationRepository(db);
       const settingsRepo = new SharingSettingsRepository(db);
       const participantRepo = new ParticipantRepository(db);
-      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo);
+      const groupMemberRepo = new GroupMemberRepository(db);
+      const service = new InvitationService(
+        invRepo,
+        eventRepo,
+        settingsRepo,
+        participantRepo,
+        undefined,
+        groupMemberRepo,
+      );
       const event = eventRepo.create({
         user_id: INVITER,
         title: 'Group Party',
         start_at: '2026-03-15T18:00:00Z',
         timezone: 'UTC',
       });
-      return { db, service, invRepo, eventRepo, participantRepo, event };
+      return { db, service, invRepo, eventRepo, participantRepo, groupMemberRepo, event };
     }
 
     const GROUP_ID = -100123;
 
     test('the old inv: path rejects a group invitee_id, recordGroupAttendance accepts it', () => {
-      const { service, invRepo, participantRepo, event } = setupGroup();
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
       const MEMBER = 555;
+      groupMemberRepo.upsert(GROUP_ID, MEMBER);
       // The picker path stored the group chat id as the invitation invitee_id.
       const groupInvitation = invRepo.create({
         event_id: event.id,
@@ -286,10 +296,11 @@ describe('InvitationService', () => {
     });
 
     test('binds the RSVP to the inviting group — an arbitrary event id from another group is rejected (IDOR)', () => {
-      const { service, invRepo, participantRepo, event } = setupGroup();
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
       const OTHER_GROUP = -100999;
       const MEMBER = 555;
       const ATTACKER = 999;
+      groupMemberRepo.upsert(GROUP_ID, MEMBER);
       // The event was genuinely group-invited to GROUP_ID only.
       invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
 
@@ -326,7 +337,9 @@ describe('InvitationService', () => {
     });
 
     test('members RSVP independently — one row per member, no "already changed"', () => {
-      const { service, invRepo, participantRepo, event } = setupGroup();
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
+      groupMemberRepo.upsert(GROUP_ID, 555);
+      groupMemberRepo.upsert(GROUP_ID, 777);
       invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
       const a = service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
       const b = service.recordGroupAttendance(event.id, 777, 'declined', GROUP_ID);
@@ -340,7 +353,8 @@ describe('InvitationService', () => {
     });
 
     test('a member can flip their answer (accepted -> declined updates the same row)', () => {
-      const { service, invRepo, participantRepo, event } = setupGroup();
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
+      groupMemberRepo.upsert(GROUP_ID, 555);
       invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
       service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
       const flip = service.recordGroupAttendance(event.id, 555, 'declined', GROUP_ID);
@@ -377,6 +391,37 @@ describe('InvitationService', () => {
       const result = service.recordGroupAttendance(event.id, 555, 'accepted', GROUP_ID);
       expect(result.success).toBe(false);
     });
+
+    test('a member of the invited group can RSVP (member-allowed)', () => {
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
+      const MEMBER = 555;
+      groupMemberRepo.upsert(GROUP_ID, MEMBER);
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(true);
+      expect(participantRepo.findByEventAndUser(event.id, MEMBER)!.status).toBe('accepted');
+    });
+
+    test('denies a user who was never a member of the invited group, even with a valid invitation (non-member-denied)', () => {
+      const { service, invRepo, participantRepo, event } = setupGroup();
+      const NON_MEMBER = 888;
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      // NON_MEMBER never appears in group_members for GROUP_ID.
+      const result = service.recordGroupAttendance(event.id, NON_MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(event.id, NON_MEMBER)).toBeNull();
+    });
+
+    test('denies a user who left the group after the invitation was created (non-member-denied)', () => {
+      const { service, invRepo, participantRepo, groupMemberRepo, event } = setupGroup();
+      const MEMBER = 555;
+      groupMemberRepo.upsert(GROUP_ID, MEMBER);
+      groupMemberRepo.leave(GROUP_ID, MEMBER);
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(participantRepo.findByEventAndUser(event.id, MEMBER)).toBeNull();
+    });
   });
 
   describe('recordGroupAttendance Google sync (myGroup.rsvp)', () => {
@@ -391,17 +436,19 @@ describe('InvitationService', () => {
       const invRepo = new InvitationRepository(db);
       const settingsRepo = new SharingSettingsRepository(db);
       const participantRepo = new ParticipantRepository(db);
+      const groupMemberRepo = new GroupMemberRepository(db);
       const bus = new DomainEventBus();
       const rsvpEvents: DomainEventMap['myGroup.rsvp'][] = [];
       bus.on('myGroup.rsvp', (payload) => rsvpEvents.push(payload));
-      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo, bus);
+      const service = new InvitationService(invRepo, eventRepo, settingsRepo, participantRepo, bus, groupMemberRepo);
       const event = eventRepo.create({
         user_id: INVITER,
         title: 'Group Party',
         start_at: '2026-03-15T18:00:00Z',
         timezone: 'UTC',
       });
-      return { service, invRepo, participantRepo, event, rsvpEvents };
+      groupMemberRepo.upsert(GROUP_ID, MEMBER);
+      return { service, invRepo, participantRepo, groupMemberRepo, event, rsvpEvents };
     }
 
     test('"going" with an active group invitation emits myGroup.rsvp accepted', () => {
@@ -424,6 +471,16 @@ describe('InvitationService', () => {
       const { service, event, rsvpEvents } = setupGroupWithBus();
       // No invitation links this event to the group.
       const result = service.recordGroupAttendance(event.id, MEMBER, 'accepted', GROUP_ID);
+      expect(result.success).toBe(false);
+      expect(rsvpEvents).toEqual([]);
+    });
+
+    test('non-member: fails and does not emit', () => {
+      const { service, invRepo, event, rsvpEvents } = setupGroupWithBus();
+      const NON_MEMBER = 888;
+      invRepo.create({ event_id: event.id, inviter_id: INVITER, invitee_id: GROUP_ID });
+      // NON_MEMBER never joined GROUP_ID, unlike MEMBER (registered by setupGroupWithBus).
+      const result = service.recordGroupAttendance(event.id, NON_MEMBER, 'accepted', GROUP_ID);
       expect(result.success).toBe(false);
       expect(rsvpEvents).toEqual([]);
     });
