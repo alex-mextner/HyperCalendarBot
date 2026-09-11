@@ -49,10 +49,11 @@ export async function processSessionKeepalive(deps: SessionKeepaliveDeps): Promi
       try {
         const result = await getAuths(tempPath);
         if (!result.success && result.error === 'SESSION_EXPIRED') {
-          deps.sessionRepo.updateStatus(session.user_id, 'expired');
-          deps.onSessionExpired?.(session.user_id);
-          expired++;
-          keepaliveLogger.info({ userId: session.user_id }, 'Session marked expired during keepalive');
+          if (deps.sessionRepo.expireIfCurrent(session.user_id, session.encrypted_session)) {
+            deps.onSessionExpired?.(session.user_id);
+            expired++;
+            keepaliveLogger.info({ userId: session.user_id }, 'Session marked expired during keepalive');
+          }
         } else if (!result.success) {
           keepaliveLogger.warn({ userId: session.user_id, error: result.error }, 'getAuthorizations returned error');
         }

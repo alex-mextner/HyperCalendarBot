@@ -59,6 +59,17 @@ export class TelegramSessionRepository {
       .run(status, userId);
   }
 
+  /** Only expire the credential that the asynchronous operation actually checked. */
+  expireIfCurrent(userId: number, encryptedSession: Uint8Array): boolean {
+    const result = this.db
+      .prepare(
+        `UPDATE user_telegram_sessions SET status = 'expired', updated_at = datetime('now')
+       WHERE user_id = ? AND encrypted_session = ? AND status = 'active'`,
+      )
+      .run(userId, encryptedSession);
+    return result.changes > 0;
+  }
+
   setTzConsentAt(userId: number, at: string | null): void {
     this.db
       .prepare(

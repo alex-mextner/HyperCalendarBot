@@ -20,12 +20,12 @@ function makeSession(userId: number): TelegramSession {
 }
 
 function makeSessionRepo(sessions: TelegramSession[]) {
-  const updateStatus = mock((_userId: number, _status: 'active' | 'expired' | 'revoked') => {});
+  const expireIfCurrent = mock((_userId: number, _credential: Uint8Array) => true);
   const repo = {
     getAllActive: () => sessions,
-    updateStatus,
+    expireIfCurrent,
   };
-  return { repo: repo as unknown as TelegramSessionRepository, updateStatus };
+  return { repo: repo as unknown as TelegramSessionRepository, expireIfCurrent };
 }
 
 const MASTER_KEY = Buffer.alloc(32);
@@ -87,7 +87,7 @@ describe('processSessionKeepalive', () => {
 
   test('marks session expired when getAuthorizations returns SESSION_EXPIRED', async () => {
     const sessions = [makeSession(42)];
-    const { repo, updateStatus } = makeSessionRepo(sessions);
+    const { repo, expireIfCurrent } = makeSessionRepo(sessions);
     const onSessionExpired = mock((_userId: number) => {});
 
     mockGetAuths.mockImplementation(
@@ -105,10 +105,10 @@ describe('processSessionKeepalive', () => {
 
     expect(result.checked).toBe(1);
     expect(result.expired).toBe(1);
-    expect(updateStatus).toHaveBeenCalledTimes(1);
-    const [calledUserId, calledStatus] = updateStatus.mock.calls[0] as unknown as [number, string];
+    expect(expireIfCurrent).toHaveBeenCalledTimes(1);
+    const [calledUserId, checkedCredential] = expireIfCurrent.mock.calls[0]!;
     expect(calledUserId).toBe(42);
-    expect(calledStatus).toBe('expired');
+    expect(checkedCredential).toEqual(sessions[0]!.encrypted_session);
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
     const [notifiedUserId] = onSessionExpired.mock.calls[0] as unknown as [number];
     expect(notifiedUserId).toBe(42);
@@ -116,7 +116,7 @@ describe('processSessionKeepalive', () => {
 
   test('does not mark expired for other bridge errors', async () => {
     const sessions = [makeSession(10)];
-    const { repo, updateStatus } = makeSessionRepo(sessions);
+    const { repo, expireIfCurrent } = makeSessionRepo(sessions);
 
     mockGetAuths.mockImplementation(
       async (): Promise<BridgeResult> => ({
@@ -130,7 +130,7 @@ describe('processSessionKeepalive', () => {
 
     expect(result.checked).toBe(1);
     expect(result.expired).toBe(0);
-    expect(updateStatus).not.toHaveBeenCalled();
+    expect(expireIfCurrent).not.toHaveBeenCalled();
   });
 
   test('continues processing remaining sessions when one throws', async () => {

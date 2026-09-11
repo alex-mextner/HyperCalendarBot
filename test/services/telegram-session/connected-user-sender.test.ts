@@ -27,10 +27,10 @@ function makeMockSessionRepo(activeSession?: { encrypted_session: Buffer }) {
       }
       return null;
     }),
-    updateStatus: mock((_userId: number, _status: string) => {}),
+    expireIfCurrent: mock((_userId: number, _credential: Uint8Array) => true),
   } as unknown as TelegramSessionRepository & {
     getActive: ReturnType<typeof mock>;
-    updateStatus: ReturnType<typeof mock>;
+    expireIfCurrent: ReturnType<typeof mock>;
   };
 }
 
@@ -128,7 +128,7 @@ describe('createConnectedUserSender', () => {
     const result = await sender(100, 200, 'hello');
 
     expect(result).toBe(false);
-    expect(sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'expired');
+    expect(sessionRepo.expireIfCurrent).toHaveBeenCalledWith(100, ENCRYPTED_SESSION);
   });
 
   test('calls onSessionExpired callback on SESSION_EXPIRED', async () => {
@@ -154,7 +154,7 @@ describe('createConnectedUserSender', () => {
     const result = await sender(100, 200, 'hello');
 
     expect(result).toBe(false);
-    expect(sessionRepo.updateStatus).not.toHaveBeenCalled();
+    expect(sessionRepo.expireIfCurrent).not.toHaveBeenCalled();
     expect(onSessionExpired).not.toHaveBeenCalled();
   });
 
@@ -166,7 +166,7 @@ describe('createConnectedUserSender', () => {
     const result = await sender(100, 200, 'hello');
 
     expect(result).toBe(false);
-    expect(sessionRepo.updateStatus).toHaveBeenCalledWith(100, 'expired');
+    expect(sessionRepo.expireIfCurrent).toHaveBeenCalledWith(100, badEncrypted);
   });
 
   test('calls onSessionExpired callback on decryption failure', async () => {
