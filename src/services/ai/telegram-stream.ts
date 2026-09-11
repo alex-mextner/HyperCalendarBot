@@ -468,6 +468,11 @@ export class TelegramStreamWriter {
    * without touching Telegram. Used when the response validator rejects a
    * tool-less answer and the agent wants to discard it and retry cleanly —
    * the rejected text must NOT appear in the final execution log.
+   *
+   * Only safe before `commitIntermediate()` has run for this call: it wipes
+   * `intermediateChunks`, so calling it after a round has already been
+   * committed destroys that round's execution log too. For a mid-stream
+   * provider failover on any round, use `discardIncompleteRound()` instead.
    */
   resetBuffers(): void {
     this.text = '';
@@ -478,6 +483,21 @@ export class TelegramStreamWriter {
     this.intermediateChunks = [];
     this.plainResponseText = '';
     this.discarded = false;
+  }
+
+  /**
+   * Drop only the current, not-yet-committed round's streaming state after a
+   * mid-stream provider failover. Unlike `resetBuffers()`, this leaves
+   * `toolLines` and `intermediateChunks` untouched — earlier rounds may have
+   * already committed their tool activity into the execution log via
+   * `commitIntermediate()`, and that history must survive so the next
+   * provider's retry of this round doesn't erase it.
+   */
+  discardIncompleteRound(): void {
+    this.text = '';
+    this.lastFlushedLength = 0;
+    this.toolLabel = null;
+    this.pendingIndicators = [];
   }
 
   getMessageId(): number | null {

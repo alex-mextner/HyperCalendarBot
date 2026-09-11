@@ -753,7 +753,7 @@ export class CalendarBotAgent {
             writer.setToolLabel(name);
           },
           onProviderSwitch: () => {
-            writer.resetBuffers();
+            writer.discardIncompleteRound();
           },
         };
 
