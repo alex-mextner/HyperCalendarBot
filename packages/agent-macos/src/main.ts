@@ -1,7 +1,7 @@
 import { app, clipboard, dialog, Notification, type Tray } from 'electron';
 import { dispatch } from './dispatcher';
 import { claudeChat, initClaudeCookies } from './actions/claude-bridge';
-import { initOAuth } from './oauth-manager';
+import { getCachedTokens, initOAuth, setOnTokensRefreshed } from './oauth-manager';
 import { loadJwt, saveJwt } from './keychain';
 import { generatePairingCode } from './pairing';
 import { createTray } from './tray';
@@ -34,7 +34,13 @@ async function main(): Promise<void> {
   });
 
   // Pairing flow
-  wsClient.on('connected', () => log('Agent connected to server'));
+  wsClient.on('connected', () => {
+    log('Agent connected to server');
+    const tokens = getCachedTokens();
+    if (tokens) {
+      wsClient.sendOAuthToken(tokens.accessToken, tokens.refreshToken, tokens.expiresAt);
+    }
+  });
   wsClient.on('disconnected', () => log('Agent disconnected from server'));
 
   wsClient.on('paired', (newJwt: string) => {
@@ -78,10 +84,19 @@ async function main(): Promise<void> {
   // Load Claude Desktop cookies into the Electron session before any API calls
   await initClaudeCookies();
 
+  // Push future token refreshes to the server over the agent WebSocket.
+  setOnTokensRefreshed((accessToken, refreshToken, expiresAt) => {
+    wsClient.sendOAuthToken(accessToken, refreshToken, expiresAt);
+  });
+
   // Acquire OAuth tokens (uses sessionKey cookie loaded above)
   try {
     await initOAuth();
     log('OAuth init OK');
+    const tokens = getCachedTokens();
+    if (tokens) {
+      wsClient.sendOAuthToken(tokens.accessToken, tokens.refreshToken, tokens.expiresAt);
+    }
   } catch (err: unknown) {
     log('OAuth init failed', { err: err instanceof Error ? err.message : String(err) });
   }

@@ -225,6 +225,27 @@ let cachedAccessToken: string | null = null;
 let cachedExpiresAt = 0;
 let cachedRefreshToken: string | null = null;
 
+// Notified whenever the cached tokens change (new OAuth flow, refresh, or a
+// stored token being loaded at startup) so callers can push them elsewhere
+// (e.g. the bot server over the agent WebSocket).
+let onTokensRefreshed: ((accessToken: string, refreshToken: string, expiresAt: number) => void) | null = null;
+
+export function setOnTokensRefreshed(cb: typeof onTokensRefreshed): void {
+  onTokensRefreshed = cb;
+}
+
+function notifyTokensRefreshed(): void {
+  if (onTokensRefreshed && cachedAccessToken && cachedRefreshToken) {
+    onTokensRefreshed(cachedAccessToken, cachedRefreshToken, cachedExpiresAt);
+  }
+}
+
+// Read the current cached tokens without triggering a refresh.
+export function getCachedTokens(): { accessToken: string; refreshToken: string; expiresAt: number } | null {
+  if (!cachedAccessToken || !cachedRefreshToken) return null;
+  return { accessToken: cachedAccessToken, refreshToken: cachedRefreshToken, expiresAt: cachedExpiresAt };
+}
+
 // Initialize: try stored tokens first, then full OAuth flow
 export async function initOAuth(): Promise<void> {
   const stored = await loadStoredTokens();
@@ -259,6 +280,8 @@ export async function initOAuth(): Promise<void> {
     await saveTokens(cachedAccessToken, cachedRefreshToken, cachedExpiresAt);
     log('OAuth init complete — new tokens acquired');
   }
+
+  notifyTokensRefreshed();
 }
 
 // Get a valid access token, refreshing if needed
@@ -275,6 +298,7 @@ export async function getAccessToken(): Promise<string> {
       cachedRefreshToken = tokens.refreshToken;
       cachedExpiresAt = tokens.expiresAt;
       await saveTokens(cachedAccessToken, cachedRefreshToken, cachedExpiresAt);
+      notifyTokensRefreshed();
       return cachedAccessToken;
     } catch (err: unknown) {
       log('token refresh failed, falling back to full re-auth', { err: err instanceof Error ? err.message : String(err) });
@@ -287,5 +311,6 @@ export async function getAccessToken(): Promise<string> {
   cachedRefreshToken = tokens.refreshToken;
   cachedExpiresAt = tokens.expiresAt;
   await saveTokens(cachedAccessToken, cachedRefreshToken, cachedExpiresAt);
+  notifyTokensRefreshed();
   return cachedAccessToken;
 }
