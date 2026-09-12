@@ -97,7 +97,13 @@ async def cmd_send_and_sign(args: argparse.Namespace) -> None:
                     print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
                     sys.stdout.flush()
                 except FloodWait as e:
-                    print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
+                    print(
+                        error_json(
+                            "FLOOD_WAIT",
+                            f"Rate limited for {e.value}s",
+                            {"retry_after": e.value},
+                        )
+                    )
                     break
         except PhoneCodeInvalid:
             print(error_json("CODE_INVALID", "Invalid verification code"))
@@ -109,7 +115,11 @@ async def cmd_send_and_sign(args: argparse.Namespace) -> None:
         print(error_json("PHONE_INVALID", "Invalid phone number"))
         sys.exit(1)
     except FloodWait as e:
-        print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
+        print(
+            error_json(
+                "FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}
+            )
+        )
         sys.exit(1)
     finally:
         await client.storage.save()
@@ -127,7 +137,11 @@ async def cmd_check_password(args: argparse.Namespace) -> None:
         print(error_json("PASSWORD_INVALID", "Wrong 2FA password"))
         sys.exit(1)
     except FloodWait as e:
-        print(error_json("FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}))
+        print(
+            error_json(
+                "FLOOD_WAIT", f"Rate limited for {e.value}s", {"retry_after": e.value}
+            )
+        )
         sys.exit(1)
     finally:
         await client.storage.save()
@@ -152,8 +166,8 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
     from pyrogram.raw.functions.account import GetAuthorizations
 
     client = make_client(args.session_path)
-    await client.connect()
     try:
+        await client.connect()
         auths = await client.invoke(GetAuthorizations())
         result = [
             {
@@ -172,11 +186,42 @@ async def cmd_get_authorizations(args: argparse.Namespace) -> None:
         ]
         print(json.dumps({"authorizations": result}))
     except Exception as e:
-        print(error_json("AUTH_QUERY_FAILED", str(e)))
+        reason = getattr(e, "ID", "")
+        fatal = reason in {
+            "SESSION_REVOKED",
+            "SESSION_EXPIRED",
+            "AUTH_KEY_UNREGISTERED",
+            "AUTH_KEY_INVALID",
+            "USER_DEACTIVATED",
+            "USER_DEACTIVATED_BAN",
+            "AUTH_KEY_DUPLICATED",
+        }
+        print(
+            error_json(
+                "SESSION_EXPIRED" if fatal else "AUTH_QUERY_FAILED",
+                type(e).__name__,
+                {
+                    "reason": "revoked"
+                    if reason == "SESSION_REVOKED"
+                    else "account_unavailable"
+                    if reason.startswith("USER_DEACTIVATED")
+                    else "local"
+                    if reason == "AUTH_KEY_DUPLICATED"
+                    else "expired"
+                }
+                if fatal
+                else None,
+            )
+        )
         sys.exit(1)
     finally:
-        await client.storage.save()
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception as cleanup_error:
+            print(
+                f"Session query cleanup: {type(cleanup_error).__name__}",
+                file=sys.stderr,
+            )
 
 
 def main() -> None:

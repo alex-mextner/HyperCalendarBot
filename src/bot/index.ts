@@ -41,6 +41,7 @@ import { InvitationService } from '../services/sharing/invitation-service.ts';
 import { PrivacyService } from '../services/sharing/privacy-service.ts';
 import { SharingService } from '../services/sharing/sharing-service.ts';
 import { createConnectedUserSender } from '../services/telegram-session/connected-user-sender.ts';
+import { formatSessionLoss } from '../services/telegram-session/session-loss.ts';
 import type { SileroTtsService } from '../services/voice/silero-tts-service.ts';
 import type { StressDictionary } from '../services/voice/stress-dictionary.ts';
 import type { TranscriptionService } from '../services/voice/transcription-service.ts';
@@ -261,7 +262,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         notifLogRepo: db.notificationLog,
         getUserTimezone: (userId) => db.users.findByTelegramId(userId)?.timezone ?? 'UTC',
         onTimezoneDetected: (userId, detection) => {
-          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
           const s = t(lang).connectTelegram;
           const kb = new InlineKeyboard()
             .text('\u2705', `${CB.CT_TZ_UPDATE}:${detection.detectedTimezone}`)
@@ -275,7 +276,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz update prompt'));
         },
         onTzConsentNeeded: (userId) => {
-          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
           const s = t(lang).connectTelegram;
           const kb = new InlineKeyboard()
             .text(s.tzConsentYes, CB.CT_TZ_CONSENT_YES)
@@ -288,10 +289,10 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
             })
             .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send tz consent prompt'));
         },
-        onSessionExpired: (userId) => {
-          const lang = (db.users.findByTelegramId(userId)?.language ?? 'en') as 'en' | 'ru';
+        onSessionExpired: (userId, reason) => {
+          const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
           bot.api
-            .sendMessage({ chat_id: userId, text: t(lang).connectTelegram.sessionExpired })
+            .sendMessage({ chat_id: userId, text: formatSessionLoss(lang, reason) })
             .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to send session expired notification'));
         },
       })
