@@ -1,69 +1,73 @@
+import Big from 'big.js';
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?';
 const DURATION_UNITS = 'min|minutes?|h|hr|hours?|d|days?|w|weeks?|mo|months?|y|years?';
 
-function evalArithmetic(expr: string): number {
+function evalArithmetic(expr: string): Big {
+  const normalized = expr.replace(/×/g, '*').replace(/÷/g, '/');
   let pos = 0;
-
   function skipWs(): void {
-    while (pos < expr.length && expr[pos] === ' ') pos++;
+    while (pos < normalized.length && /\s/.test(normalized[pos]!)) pos++;
   }
-
-  function parseNumber(): number {
+  function parseNumber(): Big {
     skipWs();
     const start = pos;
-    if (expr[pos] === '-') pos++;
-    while (pos < expr.length && /[\d.]/.test(expr[pos]!)) pos++;
-    const n = Number(expr.slice(start, pos));
-    if (Number.isNaN(n)) throw new Error(`Invalid number at position ${start}`);
-    return n;
+    if (normalized[pos] === '-') pos++;
+    while (pos < normalized.length && /[\d.]/.test(normalized[pos]!)) pos++;
+    const raw = normalized.slice(start, pos);
+    if (!/^-?\d+(?:\.\d+)?$/.test(raw)) throw new Error(`Invalid number at position ${start}`);
+    return new Big(raw);
   }
-
-  function parseFactor(): number {
+  function parseFactor(): Big {
     skipWs();
-    if (expr[pos] === '(') {
+    if (normalized[pos] === '(') {
       pos++;
-      const val = parseAddSub();
+      const value = parseAddSub();
       skipWs();
-      if (expr[pos] !== ')') throw new Error('Expected )');
+      if (normalized[pos] !== ')') throw new Error('Expected )');
       pos++;
-      return val;
+      return value;
     }
     return parseNumber();
   }
-
-  function parseMulDiv(): number {
+  function parseMulDiv(): Big {
     let left = parseFactor();
     while (true) {
       skipWs();
-      const op = expr[pos];
+      const op = normalized[pos];
       if (op !== '*' && op !== '/') break;
       pos++;
       const right = parseFactor();
-      left = op === '*' ? left * right : left / right;
+      if (op === '/' && right.eq(0)) throw new Error('Division by zero');
+      left = op === '*' ? left.times(right) : left.div(right);
     }
     return left;
   }
-
-  function parseAddSub(): number {
+  function parseAddSub(): Big {
     let left = parseMulDiv();
     while (true) {
       skipWs();
-      const op = expr[pos];
+      const op = normalized[pos];
       if (op !== '+' && op !== '-') break;
       pos++;
       const right = parseMulDiv();
-      left = op === '+' ? left + right : left - right;
+      left = op === '+' ? left.plus(right) : left.minus(right);
     }
     return left;
   }
-
   const result = parseAddSub();
   skipWs();
-  if (pos !== expr.length) throw new Error(`Unexpected character at position ${pos}: ${expr[pos]}`);
+  if (pos !== normalized.length) throw new Error(`Unexpected character at position ${pos}: ${normalized[pos]}`);
   return result;
+}
+
+function formatBig(value: Big): string {
+  return value
+    .toFixed(12)
+    .replace(/(?:\.0+|(?<=\.[0-9]*?)0+)$/, '')
+    .replace(/\.$/, '');
 }
 
 function formatDiffMs(absMs: number): string {
@@ -174,14 +178,22 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     return { success: true, output: `${rh}:${rm}` };
   }
 
-  // Numeric arithmetic: digits, whitespace, operators, parentheses only
-  if (/^[\d\s+\-*/.()]+$/.test(expr)) {
+  // Numeric arithmetic and percentages. Big.js keeps decimal arithmetic exact.
+  if (expr.length > 500) return { success: false, error: 'Expression too long (max 500 chars)' };
+  const pctMatch = expr.match(/^(.+?)\s*([+-])\s*(\d+(?:[.,]\d+)?)%\s*$/);
+  if (pctMatch) {
     try {
-      const result = evalArithmetic(expr);
-      if (!Number.isFinite(result)) {
-        return { success: false, error: 'Result is not a finite number' };
-      }
-      return { success: true, output: String(result) };
+      const base = evalArithmetic(pctMatch[1]!.replace(',', '.'));
+      const pct = new Big(pctMatch[3]!.replace(',', '.')).div(100);
+      const delta = base.times(pct);
+      return { success: true, output: formatBig(pctMatch[2] === '+' ? base.plus(delta) : base.minus(delta)) };
+    } catch {
+      return { success: false, error: `Cannot evaluate: ${expr}` };
+    }
+  }
+  if (/^[\d\s+\-*/×÷.(),]+$/.test(expr)) {
+    try {
+      return { success: true, output: formatBig(evalArithmetic(expr.replace(/,/g, '.'))) };
     } catch {
       return { success: false, error: `Cannot evaluate: ${expr}` };
     }
