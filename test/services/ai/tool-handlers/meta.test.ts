@@ -592,6 +592,29 @@ describe('meta tool handlers', () => {
 });
 
 describe('handleCalculate', () => {
+  test('uses exact decimal arithmetic for money-like math', () => {
+    const r = handleCalculate({ expression: '1.005 * 3' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('3.015');
+  });
+
+  test('supports percentages like the ExpenseSync calculator', () => {
+    const r = handleCalculate({ expression: '100 - 7.5%' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('92.5');
+  });
+
+  test('supports unicode multiplication and division symbols', () => {
+    expect(handleCalculate({ expression: '10 × 3' }).output).toBe('30');
+    expect(handleCalculate({ expression: '100 ÷ 4' }).output).toBe('25');
+  });
+
+  test('rejects excessively long arithmetic expressions before parsing', () => {
+    const r = handleCalculate({ expression: `${'1+'.repeat(300)}1` });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain('500');
+  });
+
   test('adds two integers', async () => {
     const r = handleCalculate({ expression: '2 + 31' });
     expect(r.success).toBe(true);
