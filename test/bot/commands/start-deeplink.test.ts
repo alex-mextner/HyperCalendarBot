@@ -100,7 +100,7 @@ describe('handleStart with deep links', () => {
           getEvent: mock(() => ({ title: 'Party', start_at: '2026-03-15T18:00:00Z', timezone: 'UTC' })),
         } as never,
         invitationRepo: {
-          findById: mock(() => ({ id: 10, inviter_id: 200, invitee_id: 100, status: 'pending' })),
+          findById: mock(() => ({ id: 10, event_id: 42, inviter_id: 200, invitee_id: 100, status: 'pending' })),
         } as never,
         userRepo: {
           findByTelegramId: mock(() => ({ first_name: 'Alex', username: 'alex' })),
@@ -136,7 +136,7 @@ describe('handleStart with deep links', () => {
         } as never,
         eventService: { getEvent: mock(() => null) } as never,
         invitationRepo: {
-          findById: mock(() => ({ id: 10, inviter_id: 200, invitee_id: 100, status: 'accepted' })),
+          findById: mock(() => ({ id: 10, event_id: 42, inviter_id: 200, invitee_id: 100, status: 'accepted' })),
         } as never,
       }),
     );
@@ -168,7 +168,7 @@ describe('handleStart with deep links', () => {
           getEvent: mock(() => ({ title: 'Party', start_at: '2026-03-15T18:00:00Z', timezone: 'UTC' })),
         } as never,
         invitationRepo: {
-          findById: mock(() => ({ id: 10, inviter_id: 200, invitee_id: 100, status: 'pending' })),
+          findById: mock(() => ({ id: 10, event_id: 42, inviter_id: 200, invitee_id: 100, status: 'pending' })),
         } as never,
         userRepo: {
           findByTelegramId: mock(() => ({ first_name: 'Sender' })),
@@ -209,7 +209,7 @@ describe('handleStart with deep links', () => {
         } as never,
         eventService: { getEvent: mock(() => null) } as never,
         invitationRepo: {
-          findById: mock(() => ({ id: 10, inviter_id: 200, invitee_id: 100, status: 'accepted' })),
+          findById: mock(() => ({ id: 10, event_id: 42, inviter_id: 200, invitee_id: 100, status: 'accepted' })),
         } as never,
       }),
     );
