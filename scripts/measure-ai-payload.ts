@@ -16,6 +16,7 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../src/services/ai/token-estimate.ts';
+import { createToolCatalog } from '../src/services/ai/tool-catalog.ts';
 import { getToolDefinitions, type UserCapabilities } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
@@ -114,4 +115,29 @@ function printTable(rows: Row[]): void {
 
 const base = buildBaseContext();
 printTable(buildVariants(base).map(measure));
-console.log('\nToken counts are estimates (±20%), not a tokenizer. Groq TPM limit for this account: 8000.');
+console.log('\nToken counts are estimates (±20%), not a tokenizer or a billing measurement.');
+
+// Discovery-only prototype (#256): runtime routing is not changed by this script.
+// Count the compact index AND selected full schemas; omitting either understates cost.
+const catalog = createToolCatalog(getToolDefinitions('text'));
+const index = catalog.index();
+const promptTokens = estimateTokens(buildSystemPrompt(base));
+console.log(`\nCompact index: ${index.length} chars / ~${estimateTokens(index)} tokens`);
+for (const [label, request] of [
+  ['calendar read', { groups: ['calendar.read'], tools: [] }],
+  ['contacts + invitation', { groups: ['contacts'], tools: ['send_invitation', 'ask_user'] }],
+  ['single calculator', { groups: [], tools: ['calculate'] }],
+] as const) {
+  const result = catalog.describe(request);
+  if (!result.ok || result.unavailable.length > 0 || result.deferred.length > 0) {
+    throw new Error(`Incomplete or invalid measurement fixture: ${label}`);
+  }
+  const schemaTokens = estimateTokens(JSON.stringify(result.tools));
+  console.log(
+    `${label}: ${result.tools.length} schemas; ${result.schemaChars} chars / ~${schemaTokens} tokens; ` +
+      `index + schemas ~${estimateTokens(index) + schemaTokens}; ` +
+      `with unchanged system prompt ~${promptTokens + estimateTokens(index) + schemaTokens}; ` +
+      `deferred ${result.deferred.length}`,
+  );
+}
+console.log('History, real calendar data and discovery instructions are additional. No free-tier fit is implied.');
