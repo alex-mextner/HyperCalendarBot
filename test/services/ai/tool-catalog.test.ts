@@ -6,6 +6,14 @@ const names = (tools: ReturnType<typeof getToolDefinitions>) =>
   tools.flatMap((t) => (t.type === 'function' ? [t.function.name] : []));
 
 describe('capability-scoped batched tool discovery', () => {
+  test('calculate is exposed under explicit calculator group, not interaction', () => {
+    const index = createToolCatalog(getToolDefinitions('text')).index();
+    const calculator = index.split('[calculator]\n')[1]?.split('\n[')[0] ?? '';
+    const interaction = index.split('[interaction]\n')[1]?.split('\n[')[0] ?? '';
+    expect(calculator).toContain('calculate:');
+    expect(interaction).not.toContain('calculate:');
+  });
+
   test('compact index contains names and short descriptions, not parameter schemas', () => {
     const catalog = createToolCatalog(getToolDefinitions('text'));
     const index = catalog.index();
