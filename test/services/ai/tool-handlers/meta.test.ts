@@ -338,6 +338,7 @@ describe('meta tool handlers', () => {
   describe('handleAddContact', () => {
     test('adds new contact', async () => {
       ctx.contactRepo = new ContactRepository(db);
+      ctx.messageText = 'Save Вова @vova123';
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('Вова');
@@ -348,6 +349,7 @@ describe('meta tool handlers', () => {
       const contactRepo = new ContactRepository(db);
       contactRepo.add(USER_ID, 'Вова');
       ctx.contactRepo = contactRepo;
+      ctx.messageText = 'Save Вова @vova123';
       const result = handleAddContact(ctx, { name: 'Вова', username: 'vova123' });
       expect(result.success).toBe(true);
       expect(result.output).toContain('vova123');

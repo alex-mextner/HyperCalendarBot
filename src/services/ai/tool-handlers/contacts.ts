@@ -1,6 +1,7 @@
 import { t } from '../../../config/constants.ts';
 import type { ContactRepository } from '../../../database/repositories/contact.repository.ts';
 import type { Contact } from '../../../database/types.ts';
+import { canResolveRecipientUsername } from '../recipient-identity.ts';
 import type { AgentContext, ContactMatch, ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const MAX_CONTACT_MATCHES = 5;
@@ -91,6 +92,14 @@ export function handleAddContact(
   input: { name: string; username?: string; preferred_name?: string },
 ): ToolResult {
   if (!ctx.contactRepo) return { success: false, error: 'Contacts not configured.' };
+  if (input.username && !canResolveRecipientUsername(ctx, input.username)) {
+    return {
+      success: false,
+      error: t(ctx.user.language).aiTools.meta.recipientUsernameUnconfirmed,
+      agentHint:
+        'Ask for the exact @username before saving it. A guessed username cannot create its own verification evidence.',
+    };
+  }
   let telegramId: number | undefined;
   if (input.username) {
     const user = ctx.userRepo.findByUsername(input.username);
