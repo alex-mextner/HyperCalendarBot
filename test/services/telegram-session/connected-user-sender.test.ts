@@ -141,7 +141,7 @@ describe('createConnectedUserSender', () => {
     await sender(100, 200, 'hello');
 
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
-    expect(onSessionExpired).toHaveBeenCalledWith(100);
+    expect(onSessionExpired).toHaveBeenCalledWith(100, 'expired');
   });
 
   test('returns false on other bridge errors without marking expired', async () => {
@@ -178,7 +178,7 @@ describe('createConnectedUserSender', () => {
     await sender(100, 200, 'hello');
 
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
-    expect(onSessionExpired).toHaveBeenCalledWith(100);
+    expect(onSessionExpired).toHaveBeenCalledWith(100, 'local');
   });
 
   test('cleans up temp file even on crash', async () => {

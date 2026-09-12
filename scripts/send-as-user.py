@@ -35,7 +35,7 @@ async def send_message(session_path: str, user_id: int, text: str, username: str
         await client.send_message(target, text)
         print(json.dumps({"status": "ok"}))
     except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
-        print(json.dumps({"error": "SESSION_EXPIRED", "message": str(e)}))
+        print(json.dumps({"error": "SESSION_EXPIRED", "message": str(e), "reason": "revoked" if isinstance(e, SessionRevoked) else "expired"}))
         sys.exit(1)
     except PeerIdInvalid:
         print(json.dumps({"error": "PEER_INVALID", "message": f"Cannot reach user {user_id}"}))

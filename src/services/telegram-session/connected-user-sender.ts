@@ -35,7 +35,7 @@ export interface ConnectedUserSenderDeps {
   getUserTimezone?: (userId: number) => string;
   onTimezoneDetected?: (userId: number, detection: DetectionResult) => void;
   onTzConsentNeeded?: (userId: number) => void;
-  onSessionExpired?: (userId: number) => void;
+  onSessionExpired?: (userId: number, reason?: import('./session-loss.ts').SessionLossReason) => void;
 }
 
 interface SendMeta {
@@ -101,7 +101,7 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
     } catch (err) {
       senderLogger.error({ err, inviterId }, 'Failed to decrypt session — marking expired');
       if (deps.sessionRepo.expireIfCurrent(inviterId, session.encrypted_session)) {
-        deps.onSessionExpired?.(inviterId);
+        deps.onSessionExpired?.(inviterId, 'local');
       }
       return false;
     }
@@ -135,7 +135,7 @@ export function createConnectedUserSender(deps: ConnectedUserSenderDeps) {
       if (result.error === 'SESSION_EXPIRED') {
         senderLogger.warn({ inviterId }, 'User Telegram session expired — marking');
         if (deps.sessionRepo.expireIfCurrent(inviterId, session.encrypted_session)) {
-          deps.onSessionExpired?.(inviterId);
+          deps.onSessionExpired?.(inviterId, result.reason ?? 'expired');
         }
       } else {
         senderLogger.warn({ inviterId, error: result.error }, 'sendAsConnectedUser failed');

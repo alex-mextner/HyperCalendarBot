@@ -68,6 +68,7 @@ const ErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
   retry_after: z.number().optional(),
+  reason: z.enum(['revoked', 'expired', 'local']).optional(),
 });
 
 const SuccessStringCodec = jsonStringCodec(SuccessSchema);
@@ -85,6 +86,7 @@ export interface BridgeError {
   error: string;
   message: string;
   retryAfter?: number;
+  reason?: import('./session-loss.ts').SessionLossReason;
 }
 
 export type BridgeResult = BridgeSuccess | BridgeError;
@@ -140,6 +142,7 @@ function parseResult(stdout: string, stderr: string, exitCode: number): BridgeRe
         success: false,
         error: parsed.data.error,
         message: parsed.data.message ?? parsed.data.error,
+        ...(parsed.data.reason !== undefined && { reason: parsed.data.reason }),
         ...(parsed.data.retry_after !== undefined && { retryAfter: parsed.data.retry_after }),
       };
     }

@@ -658,15 +658,13 @@ export const MSG = {
         '🌍 The bot can detect your timezone from your Telegram session so events show at the correct local time.\nAllow? (only country/region is read, not messages)',
       tzConsentYes: 'Allow',
       tzConsentNo: 'No',
-      sessionExpired: [
-        '⚠️ Your connected Telegram account has been disconnected.',
-        '',
-        'This usually happens when you change your Telegram password or log out from all sessions.',
-        '',
-        "Without a connected account, invitations go from the bot — people may not recognize who's inviting them.",
-        'Reconnect so invitations come from you personally:',
-        '/connect_telegram',
-      ].join('\n'),
+      revocationConfirmed:
+        'Telegram reported that this connected session was revoked. The exact revocation time and who did it are not available.',
+      connectionUnavailable:
+        'Your Telegram connection is no longer available. Reconnect it to resume sending from your account.',
+      lossObservedAt: (at: string) => `Detected at ${at} (UTC); this is the detection time, not the revocation time.`,
+      sessionExpired:
+        'I cannot send invitations from your account while disconnected. Calendar operations and messages from the bot remain available; some recipients may require a manually forwarded invitation link. Restore personal sending with /connect_telegram.',
       privateOnly: 'This command works only in private messages. Send /connect_telegram to me directly.',
     },
     callbackErrors: {
@@ -1468,15 +1466,13 @@ export const MSG = {
         '🌍 Бот может определять таймзону по твоему Telegram-подключению, чтобы события показывались в правильное время.\nРазрешить? (читается только страна и регион, не сообщения)',
       tzConsentYes: 'Разрешить',
       tzConsentNo: 'Нет',
-      sessionExpired: [
-        '⚠️ Подключённый Telegram-аккаунт был отключён.',
-        '',
-        'Обычно это происходит при смене пароля Telegram или выходе из всех сессий.',
-        '',
-        'Без подключённого аккаунта приглашения идут от бота — получатели могут не понять, кто их приглашает.',
-        'Переподключи аккаунт, чтобы приглашения шли от тебя лично:',
-        '/connect_telegram',
-      ].join('\n'),
+      revocationConfirmed:
+        'Telegram сообщил, что доступ этой сессии отозван. Точное время отзыва и кто это сделал — неизвестно.',
+      connectionUnavailable:
+        'Подключение к твоему Telegram больше недоступно. Переподключи его, чтобы снова отправлять приглашения от твоего имени.',
+      lossObservedAt: (at: string) => `Обнаружено ${at} (UTC). Это время обнаружения, а не точное время отзыва.`,
+      sessionExpired:
+        'Без подключения не смогу отправлять приглашения от твоего имени. Календарь и сообщения от бота остаются доступны; отдельным получателям понадобится переслать ссылку вручную. Восстановить отправку от твоего имени: /connect_telegram.',
       privateOnly: 'Эта команда работает только в личных сообщениях. Отправь /connect_telegram мне в личку.',
     },
     callbackErrors: {

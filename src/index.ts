@@ -1,3 +1,4 @@
+import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
 import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
@@ -718,14 +719,12 @@ if (config.REDIS_URL) {
           await processSessionKeepalive({
             sessionRepo: db.telegramSessions,
             masterKey,
-            onSessionExpired: (userId) => {
+            onSessionExpired: (userId, reason) => {
+              const lang = db.users.findByTelegramId(userId)?.language ?? 'en';
               botRef
-                .sendMessage(
-                  userId,
-                  'Твой подключённый Telegram-аккаунт был отозван или истёк. Подключи его снова командой /connect_telegram.',
-                )
+                .sendMessage(userId, formatSessionLoss(lang, reason))
                 .then(() => {})
-                .catch((err) => botLogger.error({ err, userId }, 'Failed to notify user of expired session'));
+                .catch((err: unknown) => botLogger.warn({ err, userId }, 'Failed to notify user of expired session'));
             },
           });
         }
