@@ -20,7 +20,7 @@ async def main():
     with session_lock():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
         try:
-            await app.start()
+            await app.connect()
             me = await app.get_me()
             print(json.dumps({"ok": True, "user_id": me.id, "username": me.username or ""}), flush=True)
         except Exception as e:
@@ -28,7 +28,7 @@ async def main():
             sys.exit(1)
         finally:
             try:
-                await app.stop()
+                await app.disconnect()
             except Exception:
                 pass
 

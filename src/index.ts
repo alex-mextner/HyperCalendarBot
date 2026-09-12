@@ -1,3 +1,4 @@
+import { isExpectedServiceSession } from './services/telegram-session/service-session-identity.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
@@ -166,6 +167,8 @@ let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Pro
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
   | undefined;
+
+const serviceSessionEnabled = !!(config.MTPROTO_API_ID && config.MTPROTO_API_HASH) && (await verifyMtprotoSession());
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -414,7 +417,7 @@ const { queue: broadcastQueue, enqueuer: broadcastEnqueuer } = createBroadcastQu
 );
 let broadcastQueueCleanup: { close: () => Promise<void> } | undefined;
 
-if (config.REDIS_URL && config.MTPROTO_API_ID && config.MTPROTO_API_HASH && !config.DISABLE_VOICE) {
+if (config.REDIS_URL && serviceSessionEnabled && !config.DISABLE_VOICE) {
   try {
     const { createCallQueue, createCallWorker } = await import('./worker/call-queue.ts');
     const { TtsService } = await import('./services/voice/tts-service.ts');
@@ -799,44 +802,37 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
 // ─── MTProto session helpers ─────────────────────────────────────────────────
 
 async function verifyMtprotoSession(): Promise<boolean> {
+  const expected = config.MTPROTO_SERVICE_USER_ID;
+  if (expected === undefined || !Number.isSafeInteger(expected) || expected <= 0) {
+    botLogger.warn('Shared MTProto disabled: configure the dedicated MTPROTO_SERVICE_USER_ID');
+    return false;
+  }
+  const { existsSync } = await import('node:fs');
+  if (!existsSync('data/voice_caller.session')) return false;
   const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
     env: { ...process.env },
+    stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const [stdout, , exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-  if (exitCode === 0) {
-    botLogger.info({ stdout: stdout.trim() }, 'MTProto session verified');
-    return true;
-  }
-  return false;
-}
-
-async function recoverSessionFromDb(sessionRepo: typeof db.telegramSessions, masterKey: Buffer): Promise<boolean> {
-  const session = sessionRepo.getMostRecentActive();
-  if (!session) {
-    botLogger.warn('No active session in user_telegram_sessions — cannot recover');
-    return false;
-  }
+  const timer = setTimeout(() => proc.kill(), 20_000);
   try {
-    const { decryptBlob } = await import('./services/crypto/session-crypto.ts');
-    const decrypted = decryptBlob(Buffer.from(session.encrypted_session), masterKey);
-    await Bun.write('data/voice_caller.session', decrypted);
-    botLogger.info({ userId: session.user_id, bytes: decrypted.length }, 'Session file restored from DB');
-    return true;
-  } catch (err) {
-    botLogger.error({ err }, 'Failed to decrypt/restore session from DB');
-    return false;
+    const [stdout, , exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    const valid = isExpectedServiceSession(stdout, exitCode, expected);
+    if (!valid) botLogger.error('Shared MTProto identity check failed; user credentials will not be borrowed');
+    return valid;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 // MTProto userbot for delivering messages to users who haven't started the bot
 // Uses the same pyrogram session as voice-call-bridge.py (data/voice_caller.session)
-if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+if (serviceSessionEnabled) {
   const { existsSync } = await import('node:fs');
   if (existsSync('data/voice_caller.session')) {
     mtprotoSendAsUser = async (userId: number, text: string, username?: string): Promise<boolean> => {
@@ -877,28 +873,6 @@ if (config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
       }
       return parseResult.data;
     };
-    // Verify session is alive at startup — auto-recover from user_telegram_sessions if dead
-    let sessionAlive = await verifyMtprotoSession();
-    if (!sessionAlive && config.TELEGRAM_SESSION_MASTER_KEY) {
-      botLogger.warn('MTProto session dead — attempting auto-recovery from user_telegram_sessions');
-      const recovered = await recoverSessionFromDb(
-        db.telegramSessions,
-        Buffer.from(config.TELEGRAM_SESSION_MASTER_KEY, 'hex'),
-      );
-      if (recovered) {
-        sessionAlive = await verifyMtprotoSession();
-        if (sessionAlive) {
-          botLogger.info('MTProto session auto-recovered successfully');
-        } else {
-          botLogger.error('MTProto session recovery failed — restored file is also dead');
-        }
-      }
-    }
-    if (!sessionAlive) {
-      botLogger.error(
-        'MTProto session is DEAD — resolve/send-message/voice calls will fail. No active session in DB to recover from.',
-      );
-    }
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
     botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');

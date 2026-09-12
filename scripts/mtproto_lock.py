@@ -12,7 +12,7 @@ Usage:
     async def main():
         with session_lock():
             app = Client("voice_caller", ...)
-            await app.start()
+            await start_service_session(app)
             try:
                 ...
             finally:

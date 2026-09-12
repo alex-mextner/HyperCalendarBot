@@ -161,27 +161,7 @@ work → `app.stop()` with `save()` → `conn.commit()`. Concurrent writes to th
 without WAL can corrupt session fields (`user_id`, `is_bot` set to NULL), making Pyrogram think the
 session is empty and prompting for phone number. Symptom: `Enter phone number or bot token:` + EOFError.
 Telegram can also revoke auth keys (error 404) for long-inactive sessions.
-Recovery: decrypt the user's active session from `user_telegram_sessions` and write it to
-`data/voice_caller.session`:
-```bash
-docker exec hypercal-bot sh -c "cd /app && bun -e \"
-const { createDecipheriv } = require('crypto');
-const { Database } = require('bun:sqlite');
-const KEY = Buffer.from(process.env.TELEGRAM_SESSION_MASTER_KEY, 'hex');
-const db = new Database('data/calendar.db', { readonly: true });
-const row = db.query('SELECT encrypted_session FROM user_telegram_sessions WHERE status = \\\"active\\\" ORDER BY rowid DESC LIMIT 1').get();
-db.close();
-const blob = Buffer.from(row.encrypted_session);
-const iv = blob.subarray(0, 12);
-const tag = blob.subarray(blob.length - 16);
-const ct = blob.subarray(12, blob.length - 16);
-const d = createDecipheriv('aes-256-gcm', KEY, iv);
-d.setAuthTag(tag);
-const out = Buffer.concat([d.update(ct), d.final()]);
-require('fs').writeFileSync('data/voice_caller.session', out);
-console.log('Restored', out.length, 'bytes');
-\""
-```
+The shared service session is bound to `MTPROTO_SERVICE_USER_ID`. A revoked or wrong-owner session disables its capabilities. Never copy a credential from `user_telegram_sessions` to the shared file. Personal invitation delivery uses only the requesting inviter's own session. Reconnect the dedicated service account through the documented operator flow, not an end-user session recovery shortcut.
 
 ### Database file naming
 

@@ -7,6 +7,7 @@ stdout: JSON object { "<user_id>": {"day": N, "month": N, "year": N} | null, ...
 Exit 0: success (partial results ok — unresolvable users omitted, not set to null)
 Exit 1: hard failure (session error, flood wait exceeded limit)
 """
+from service_session import start_service_session
 import sys
 import os
 import json
@@ -25,7 +26,7 @@ async def fetch(user_ids: list[int]) -> dict:
     results = {}
     with session_lock():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
-        await app.start()
+        await start_service_session(app)
         try:
             for uid in user_ids:
                 for attempt in range(2):
