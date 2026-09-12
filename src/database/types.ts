@@ -778,3 +778,13 @@ export interface CreateUserActionLogData {
   target_user_id?: number;
   success?: boolean;
 }
+
+// --- Agent OAuth Tokens (Claude Desktop pairing push) ---
+
+export interface AgentOauthToken {
+  user_id: number;
+  access_token_enc: string;
+  refresh_token_enc: string;
+  expires_at: number;
+  updated_at: string;
+}

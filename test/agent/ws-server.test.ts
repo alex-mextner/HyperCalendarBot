@@ -1,9 +1,16 @@
+import { Database } from 'bun:sqlite';
 import { expect, jest, test } from 'bun:test';
 import type { ServerWebSocket } from 'bun';
 import { AgentDispatcher } from '../../src/agent/dispatcher.ts';
 import { initPairingSecret, issueAgentJwt, verifyAgentJwt, type WsData } from '../../src/agent/pairing.ts';
 import { AgentRegistry } from '../../src/agent/registry.ts';
 import { createAgentWsHandler, upgradeAgentWs } from '../../src/agent/ws-server.ts';
+import { migrations } from '../../src/database/migrations.ts';
+import { AgentOauthTokenRepository } from '../../src/database/repositories/agent-oauth-token.repository.ts';
+import { UserRepository } from '../../src/database/repositories/user.repository.ts';
+import { runMigrations } from '../../src/database/schema.ts';
+import { OauthTokenStore } from '../../src/services/ai/oauth-token-store.ts';
+import { decrypt } from '../../src/utils/crypto.ts';
 
 const TEST_SECRET = 'test-secret-at-least-32-characters!!';
 initPairingSecret(TEST_SECRET);
@@ -195,4 +202,62 @@ test('open with invalid JWT closes connection with 4001', async () => {
   await handler.open(w);
   expect(registry.isConnected(99)).toBe(false);
   expect(closeCalls[0]!.code).toBe(4001);
+});
+
+test('message: anthropic_oauth_token stores encrypted tokens for authenticated user', () => {
+  const registry = new AgentRegistry();
+  const dispatcher = new AgentDispatcher(registry);
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  const users = new UserRepository(db);
+  users.create({ telegram_id: 42 });
+  const repo = new AgentOauthTokenRepository(db);
+  const encryptionKey = 'a'.repeat(64);
+  const store = new OauthTokenStore(repo, encryptionKey);
+  const handler = createAgentWsHandler(registry, dispatcher, store);
+
+  const w = mockWs(42);
+  handler.message(
+    w,
+    JSON.stringify({
+      type: 'anthropic_oauth_token',
+      accessToken: 'sk-ant-oat-plaintext-access',
+      refreshToken: 'sk-ant-ort-plaintext-refresh',
+      expiresAt: 1_893_456_000_000,
+    }),
+  );
+
+  const row = repo.findByUserId(42);
+  expect(row).not.toBeNull();
+  expect(row!.access_token_enc).not.toBe('sk-ant-oat-plaintext-access');
+  expect(row!.refresh_token_enc).not.toBe('sk-ant-ort-plaintext-refresh');
+  expect(decrypt(row!.access_token_enc, encryptionKey)).toBe('sk-ant-oat-plaintext-access');
+  expect(decrypt(row!.refresh_token_enc, encryptionKey)).toBe('sk-ant-ort-plaintext-refresh');
+  expect(row!.expires_at).toBe(1_893_456_000_000);
+});
+
+test('message: anthropic_oauth_token is ignored when ws is not authenticated', () => {
+  const registry = new AgentRegistry();
+  const dispatcher = new AgentDispatcher(registry);
+  const db = new Database(':memory:');
+  db.exec('PRAGMA foreign_keys = ON');
+  runMigrations(db, migrations);
+  const repo = new AgentOauthTokenRepository(db);
+  const store = new OauthTokenStore(repo, 'b'.repeat(64));
+  const handler = createAgentWsHandler(registry, dispatcher, store);
+
+  const w = mockWs(null);
+  expect(() =>
+    handler.message(
+      w,
+      JSON.stringify({
+        type: 'anthropic_oauth_token',
+        accessToken: 'sk-ant-oat-plaintext-access',
+        refreshToken: 'sk-ant-ort-plaintext-refresh',
+        expiresAt: 1_893_456_000_000,
+      }),
+    ),
+  ).not.toThrow();
+  expect(repo.findByUserId(42)).toBeNull();
 });

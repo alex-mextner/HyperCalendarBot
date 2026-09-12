@@ -141,6 +141,12 @@ export const AgentInboundSchema = z.discriminatedUnion('type', [
     error: z.string(),
   }),
   z.object({ type: z.literal('ping') }),
+  z.object({
+    type: z.literal('anthropic_oauth_token'),
+    accessToken: z.string(),
+    refreshToken: z.string(),
+    expiresAt: z.number(),
+  }),
 ]);
 
 export type AgentInbound = z.infer<typeof AgentInboundSchema>;

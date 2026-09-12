@@ -11,6 +11,7 @@ import type { AlertRepository } from '../database/repositories/alert.repository.
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
 import type { GoogleSyncRepository } from '../database/repositories/google-sync.repository.ts';
 import type { UserRepository } from '../database/repositories/user.repository.ts';
+import type { OauthTokenStore } from '../services/ai/oauth-token-store.ts';
 import type { GoogleOAuthService } from '../services/google/oauth.ts';
 import { webLogger } from '../utils/logger.ts';
 import { handleOAuthCallback } from './oauth-callback.ts';
@@ -25,6 +26,7 @@ export interface WebServerDeps {
   userRepo: UserRepository;
   agentRegistry?: AgentRegistry;
   agentDispatcher?: AgentDispatcher;
+  oauthTokenStore?: OauthTokenStore;
   // Google Calendar — only populated when GOOGLE_CLIENT_ID is configured
   oauthService?: GoogleOAuthService;
   syncRepo?: GoogleSyncRepository;
@@ -288,7 +290,7 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
 
   const agentWs =
     deps.agentRegistry && deps.agentDispatcher
-      ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher)
+      ? createAgentWsHandler(deps.agentRegistry, deps.agentDispatcher, deps.oauthTokenStore)
       : undefined;
 
   function errorResponse(err: unknown): Response {
