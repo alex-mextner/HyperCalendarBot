@@ -294,6 +294,7 @@ describe('executeTool', () => {
     });
 
     test('send_invitation sends invitation for existing event', async () => {
+      sharingCtx.messageText = 'Invite Telegram ID 456';
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Invite Test',
@@ -310,6 +311,7 @@ describe('executeTool', () => {
     });
 
     test('send_invitation returns error for non-existent event', async () => {
+      sharingCtx.messageText = 'Invite Telegram ID 456';
       const result = await executeTool(sharingCtx, 'send_invitation', {
         event_id: 9999,
         invitee_id: 456,

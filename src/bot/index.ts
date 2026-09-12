@@ -130,6 +130,9 @@ export interface CreateBotOpts {
   sileroTts?: SileroTtsService;
   kokoroTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['kokoroTts'];
   fallbackTts?: import('./handlers/message.handler.ts').MessageHandlerDeps['fallbackTts'];
+  mtprotoLookupUser?: (
+    id: number,
+  ) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>;
   mtprotoResolveUsername?: (username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>;
   eventMentionStore?: EventMentionStore;
   domainEventBus?: DomainEventBus;
@@ -164,6 +167,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     kokoroTts,
     fallbackTts,
     mtprotoResolveUsername,
+    mtprotoLookupUser,
     eventMentionStore,
     domainEventBus,
     pushAiMessage,
@@ -400,6 +404,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     botToken: token,
     stressDictionary,
     resolveUsername: mtprotoResolveUsername,
+    lookupTelegramUser: mtprotoLookupUser,
     sileroTts,
     kokoroTts,
     fallbackTts,

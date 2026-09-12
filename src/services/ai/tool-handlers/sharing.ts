@@ -1,3 +1,4 @@
+import { InlineKeyboard } from 'gramio';
 import { type Lang, t } from '../../../config/constants.ts';
 import type {
   EventParticipant,
@@ -7,7 +8,10 @@ import type {
   Visibility,
 } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
+import { escapeHtml } from '../../../utils/telegram.ts';
 import { deliverInvitation, lookupInviteeUsername } from '../invitation-delivery.ts';
+import { issueRecipientApproval } from '../recipient-confirmation.ts';
+import { resolveInvitationRecipient } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 import { handlePickUsers } from './meta.ts';
 import { checkSecretaryAccess } from './secretary-access.ts';
@@ -21,6 +25,7 @@ interface ShareEventInput {
 }
 
 interface SendInvitationInput {
+  force?: boolean;
   event_id: number;
   invitee_id?: number;
   invitee_username?: string;
@@ -76,40 +81,84 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     return { success: false, error: 'Invitations are not configured.' };
   }
 
-  let inviteeId = input.invitee_id;
-  let inviteeUsername = input.invitee_username;
-  let resolvedFirstName: string | undefined;
+  if (input.invitee_id === undefined && !input.invitee_username) {
+    return { success: false, error: t(ctx.user.language).aiTools.meta.recipientMissing };
+  }
 
-  // Resolve invitee_id when only username provided
-  if (!inviteeId && inviteeUsername) {
-    if (!ctx.resolveUsername) {
-      return { success: false, error: 'Cannot resolve @username: username resolution is not available.' };
-    }
-    try {
-      const resolved = await ctx.resolveUsername(inviteeUsername);
-      if (!resolved) {
-        // Username not found — open user picker automatically. Route it to the inviter's
-        // private chat, never ctx.chatId: the same reasoning as fallbackChatId below —
-        // ctx.chatId may be a group the bot was invoked from, and the picker prompt names
-        // the invitee's @username, which would otherwise leak to every group member.
-        const prompt = t(ctx.user.language).invite_resolve_not_found(inviteeUsername);
-        return handlePickUsers({ ...ctx, chatId: ctx.user.telegram_id }, { event_id: input.event_id, prompt });
+  if (!ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id))
+    return { success: false, error: 'Event not found' };
+
+  let recipient: Awaited<ReturnType<typeof resolveInvitationRecipient>>;
+  try {
+    recipient = await resolveInvitationRecipient(ctx, input);
+  } catch (err) {
+    deliveryLogger.warn(
+      { errorName: err instanceof Error ? err.name : 'UnknownError' },
+      'Recipient verification failed',
+    );
+    return {
+      success: false,
+      error: input.invitee_username
+        ? t(ctx.user.language).aiTools.meta.recipientLookupFailed(input.invitee_username.replace(/^@/, ''))
+        : t(ctx.user.language).aiTools.meta.recipientUnverified,
+    };
+  }
+  if (!recipient.ok) {
+    if (
+      !input.force &&
+      !ctx.isGroup &&
+      input.invitee_id !== undefined &&
+      input.invitee_id > 0 &&
+      ctx.sender?.sendMessageWithKeyboard
+    ) {
+      const token = issueRecipientApproval(ctx.user.telegram_id, input.event_id, input.invitee_id);
+      const tr = t(ctx.user.language).aiTools.meta;
+      const saved = ctx.contactRepo?.findByTelegramId(ctx.user.telegram_id, input.invitee_id);
+      const details = [tr.recipientConfirmDetails(input.invitee_id, escapeHtml(input.invitee_username ?? '—'))];
+      if (saved)
+        details.push(tr.recipientSavedProfile(escapeHtml(saved.preferred_name ?? saved.name), input.invitee_id));
+      if (recipient.candidate) {
+        const candidate = recipient.candidate;
+        details.push(
+          tr.recipientResolvedProfile(escapeHtml(candidate.firstName ?? candidate.username ?? '—'), candidate.id),
+        );
       }
-      inviteeId = resolved.id;
-      resolvedFirstName = resolved.firstName;
-      if (resolved.username) inviteeUsername = resolved.username;
-    } catch (err) {
-      deliveryLogger.error({ err, username: inviteeUsername }, 'Failed to resolve username');
+      const text = details.join('\n');
+      await ctx.sender.sendMessageWithKeyboard(
+        ctx.user.telegram_id,
+        text,
+        new InlineKeyboard().text(tr.recipientConfirmButton, `ric:${token}`),
+      );
       return {
         success: false,
-        error: `Failed to resolve @${inviteeUsername}. Try using find_user or pick_users instead.`,
+        stopLoop: true,
+        error: tr.recipientUnverified,
+        output: tr.recipientConfirmationSent,
+        agentHint:
+          'Wait for the actual confirmation callback or use pick_users. force=true alone cannot bypass identity confirmation; it never changes the numeric recipient.',
       };
     }
+    if (recipient.reason === 'not_found' && recipient.username) {
+      const prompt = t(ctx.user.language).invite_resolve_not_found(recipient.username);
+      return handlePickUsers({ ...ctx, chatId: ctx.user.telegram_id }, { event_id: input.event_id, prompt });
+    }
+    const tr = t(ctx.user.language).aiTools.meta;
+    return {
+      success: false,
+      error:
+        recipient.reason === 'conflict'
+          ? tr.recipientIdentityConflict
+          : recipient.reason === 'unavailable'
+            ? tr.recipientResolveUnavailable
+            : tr.recipientUnverified,
+      agentHint:
+        'Use find_contact, an exact user-provided @username, or pick_users. Do not guess or reuse an unverified recipient ID.',
+    };
   }
-
-  if (!inviteeId) {
-    return { success: false, error: 'Either invitee_id or invitee_username must be provided.' };
-  }
+  const inviteeId = recipient.id;
+  const inviteeUsername = recipient.username;
+  const resolvedFirstName = recipient.firstName;
+  const isGroupTarget = recipient.isGroup;
 
   const result = ctx.sharing.invitationService.sendInvitation(
     input.event_id,
@@ -125,16 +174,21 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   const invitation = result.invitation!;
 
   // Auto-add invitee to inviter's contacts
-  if (ctx.contactRepo) {
+  if (ctx.contactRepo && !isGroupTarget && !ctx.contactRepo.findByTelegramId(ctx.user.telegram_id, inviteeId)) {
     const invitee = ctx.userRepo.findByTelegramId(inviteeId);
     const contactName =
-      invitee?.first_name ?? invitee?.username ?? resolvedFirstName ?? inviteeUsername ?? `User ${inviteeId}`;
-    ctx.contactRepo.upsert(
-      ctx.user.telegram_id,
-      contactName,
-      inviteeUsername ?? invitee?.username ?? undefined,
-      inviteeId,
-    );
+      resolvedFirstName ?? invitee?.first_name ?? inviteeUsername ?? invitee?.username ?? `User ${inviteeId}`;
+    try {
+      ctx.contactRepo.upsert(
+        ctx.user.telegram_id,
+        contactName,
+        recipient.profileFresh ? inviteeUsername : (inviteeUsername ?? invitee?.username ?? undefined),
+        inviteeId,
+      );
+    } catch (err) {
+      // The invitation already exists; an address-book conflict must not cancel its delivery.
+      deliveryLogger.warn({ err, invitationId: invitation.id }, 'Invitation recipient was not added to contacts');
+    }
   }
 
   const event = ctx.eventService.getEvent(input.event_id, ctx.user.telegram_id);
@@ -145,12 +199,14 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       eventId: input.event_id,
       inviteeId,
       inviteeUsername:
-        inviteeUsername ??
-        lookupInviteeUsername(
-          { userRepo: ctx.userRepo, contactRepo: ctx.contactRepo },
-          ctx.user.telegram_id,
-          inviteeId,
-        ),
+        input.force || recipient.profileFresh
+          ? inviteeUsername
+          : (inviteeUsername ??
+            lookupInviteeUsername(
+              { userRepo: ctx.userRepo, contactRepo: ctx.contactRepo },
+              ctx.user.telegram_id,
+              inviteeId,
+            )),
       inviterId: ctx.user.telegram_id,
       inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
       inviterUsername: ctx.user.username ?? undefined,
@@ -162,6 +218,8 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       // private chat, never ctx.chatId (which may be a group the bot was invoked from,
       // leaking the invitee's personal invitation to every member).
       fallbackChatId: ctx.user.telegram_id,
+      allowMtproto: !isGroupTarget,
+      isGroupTarget,
       deps: {
         sender: ctx.sender,
         invitationRepo: ctx.sharing.invitationRepo,
@@ -216,6 +274,19 @@ export async function handleResendInvitation(
     return { success: false, error: `Cannot resend — status is "${invitation.status}".` };
   }
 
+  const recipient = await resolveInvitationRecipient(ctx, {
+    invitee_id: invitation.invitee_id,
+    invitee_username:
+      invitation.invitee_id < 0 ? undefined : (input.invitee_username ?? invitation.invitee_username ?? undefined),
+  });
+  if (!recipient.ok) {
+    const tr = t(ctx.user.language).aiTools.meta;
+    return {
+      success: false,
+      error: recipient.reason === 'conflict' ? tr.recipientIdentityConflict : tr.recipientUnverified,
+    };
+  }
+
   // Guard on the sender object (mirrors handleSendInvitation); deliverInvitation itself
   // reports non-delivery when the sender lacks the sendInvitation capability.
   if (ctx.sender) {
@@ -229,14 +300,7 @@ export async function handleResendInvitation(
       invitationId: invitation.id,
       eventId: invitation.event_id,
       inviteeId: invitation.invitee_id,
-      inviteeUsername:
-        input.invitee_username ??
-        invitation.invitee_username ??
-        lookupInviteeUsername(
-          { userRepo: ctx.userRepo, contactRepo: ctx.contactRepo },
-          ctx.user.telegram_id,
-          invitation.invitee_id,
-        ),
+      inviteeUsername: recipient.username,
       inviterId: ctx.user.telegram_id,
       inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
       inviterUsername: ctx.user.username ?? undefined,

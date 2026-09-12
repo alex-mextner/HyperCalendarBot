@@ -168,6 +168,8 @@ const addContactSchema = z
 
 const findContactSchema = z.object({ name: z.string() }).passthrough();
 
+const deleteContactSchema = z.object({ contact_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) }).strict();
+
 const updateContactSchema = z
   .object({
     search: z.string(),
@@ -238,11 +240,21 @@ const shareEventSchema = z
 
 const sendInvitationSchema = z
   .object({
-    event_id: z.number(),
-    invitee_id: z.number().optional(),
-    invitee_username: z.string().optional(),
+    event_id: z.number().int().positive().safe(),
+    force: z.boolean().optional(),
+    invitee_id: z
+      .number()
+      .int()
+      .safe()
+      .refine((id) => id !== 0)
+      .optional(),
+    invitee_username: z
+      .string()
+      .trim()
+      .regex(/^@?[a-zA-Z0-9_]{1,32}$/)
+      .optional(),
   })
-  .passthrough()
+  .strict()
   .refine((value) => value.invitee_id !== undefined || value.invitee_username !== undefined, {
     message: 'Either invitee_id or invitee_username must be provided',
   });
@@ -439,9 +451,11 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   ask_user: askUserSchema,
   pick_users: pickUsersSchema,
   get_contacts: getContactsSchema,
+  get_user_info: z.object({ telegram_id: z.number().int().positive().safe() }),
   add_contact: addContactSchema,
   find_contact: findContactSchema,
   update_contact: updateContactSchema,
+  delete_contact: deleteContactSchema,
 
   // Render tools
   render_day_image: renderDayImageSchema,

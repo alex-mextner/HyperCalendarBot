@@ -66,7 +66,8 @@ describe('sharing tool handlers', () => {
     return {
       user: userRepo.findByTelegramId(USER_ID)!,
       chatId: USER_ID,
-      messageText: '',
+      // Delivery tests exercise a user-supplied recipient, not an invented global ID.
+      messageText: `Invite Telegram ID ${OTHER_USER_ID}`,
       isGroup: false,
       eventService,
       holidayService: new HolidayService(new HolidayRepository(db)),
@@ -459,6 +460,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({
+        messageText: 'Invite @targetuser',
         resolveUsername: async (username: string) => {
           expect(username).toBe('targetuser');
           return { id: 300, firstName: 'Target', username: 'targetuser' };
@@ -481,6 +483,7 @@ describe('sharing tool handlers', () => {
       });
       let pickerPrompt = '';
       const ctx = makeCtx({
+        messageText: 'Invite @nobody',
         resolveUsername: async () => null,
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
@@ -511,6 +514,7 @@ describe('sharing tool handlers', () => {
       });
       let pickerChatId: number | undefined;
       const ctx = makeCtx({
+        messageText: 'Invite @nobody',
         chatId: GROUP_CHAT_ID,
         resolveUsername: async () => null,
         sender: {
@@ -538,6 +542,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({
+        messageText: 'Invite @targetuser',
         resolveUsername: async () => ({ id: 300, firstName: 'Target', username: 'targetuser' }),
       });
 
@@ -580,7 +585,7 @@ describe('sharing tool handlers', () => {
         start_at: '2026-03-20T18:00:00Z',
         timezone: 'UTC',
       });
-      const ctx = makeCtx();
+      const ctx = makeCtx({ messageText: 'Invite @someone' });
       const result = await handleSendInvitation(ctx, {
         event_id: event.id,
         invitee_username: 'someone',
@@ -599,6 +604,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({
+        messageText: 'Invite @resolved_user',
         resolveUsername: async () => ({ id: 400, firstName: 'Resolved', username: 'resolved_user' }),
         contactRepo,
       });
@@ -619,6 +625,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({
+        messageText: 'Invite @nobody',
         resolveUsername: async () => null,
         sender: {
           sendMessage: async () => ({ message_id: 1 }),
@@ -641,6 +648,7 @@ describe('sharing tool handlers', () => {
         timezone: 'UTC',
       });
       const ctx = makeCtx({
+        messageText: 'Invite @broken',
         resolveUsername: async () => {
           throw new Error('MTProto connection failed');
         },

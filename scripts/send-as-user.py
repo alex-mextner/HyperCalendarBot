@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from recipient_identity import RecipientMismatch, send_to_recipient
+
 from pyrogram import Client
 from pyrogram.errors import (
     AuthKeyUnregistered,
@@ -33,8 +35,7 @@ async def send_message(
     )
     try:
         await client.connect()
-        target = username if username else user_id
-        await client.send_message(target, text)
+        await send_to_recipient(client, user_id, text, username)
         print(json.dumps({"status": "ok"}))
     except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
         print(
@@ -50,6 +51,9 @@ async def send_message(
                 }
             )
         )
+        sys.exit(1)
+    except RecipientMismatch as e:
+        print(json.dumps({"error": "RECIPIENT_MISMATCH", "message": str(e)}))
         sys.exit(1)
     except PeerIdInvalid:
         print(

@@ -208,6 +208,12 @@ function isBareCaptureTemplate(value: string): boolean {
  * guaranteed to fail at dispatch. Every other template shape (dot-path variables, mixed text,
  * filters) is exempt: its resolved type cannot be determined before the workflow runs.
  */
+function acceptsCapturedString(schema: z.core.$ZodType): boolean {
+  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable || schema instanceof z.ZodDefault)
+    return acceptsCapturedString(schema.unwrap());
+  return schema instanceof z.ZodString || schema instanceof z.ZodEnum;
+}
+
 function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
   // Free-form schemas (assistant passthrough tools) accept any argument.
   if (!(schema instanceof z.ZodObject)) return [];
@@ -233,6 +239,9 @@ function validateStepParams(call: StepCall, schema: z.ZodType): string[] {
 
     const value = call.input[field]!;
     if (isTemplateValue(value) && !isBareCaptureTemplate(value)) continue;
+    // Capture contents are unknown until execution. Only their string type is
+    // statically known; format/length checks run on the resolved tool arguments.
+    if (isBareCaptureTemplate(value) && acceptsCapturedString(fieldSchema)) continue;
     if (!fieldSchema.safeParse(value).success) {
       errors.push(`step "${call.tool}": parameter "${field}" value "${value}" does not match the expected type`);
     }

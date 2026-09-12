@@ -151,6 +151,7 @@ export interface MessageHandlerDeps {
   downloadVoiceBuffer?: (botToken: string, fileId: string) => Promise<Buffer>;
   stressDictionary?: StressDictionary;
   resolveUsername?: AgentContext['resolveUsername'];
+  lookupTelegramUser?: AgentContext['lookupTelegramUser'];
   sileroTts?: SileroTtsService;
   kokoroTts?: KokoroTtsService;
   fallbackTts?: { synthesize: (text: string, lang: string) => Promise<Buffer> };
@@ -415,6 +416,7 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
       deepLinkService: deps.deepLinkService,
       botUsername: deps.botUsername,
       resolveUsername: deps.resolveUsername,
+      lookupTelegramUser: deps.lookupTelegramUser,
       sendMessageToChat: deps.sendMessageToChat,
       recentEventsWindow: groupInfo?.isGroup
         ? undefined
