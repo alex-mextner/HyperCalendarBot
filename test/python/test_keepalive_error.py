@@ -72,10 +72,12 @@ class Tests(unittest.IsolatedAsyncioTestCase):
     async def test_network_failure_does_not_invalidate_credentials(self):
         result, client = await self.run_failure(ConnectionError("offline"), "invoke")
         self.assertEqual(result["error"], "AUTH_QUERY_FAILED")
+        self.assertNotIn("reason", result)
 
     async def test_flood_wait_is_not_a_session_revocation(self):
         result, client = await self.run_failure(Flood(), "invoke")
         self.assertEqual(result["error"], "AUTH_QUERY_FAILED")
+        self.assertNotIn("reason", result)
 
     async def test_cleanup_failure_preserves_structured_original_failure(self):
         result, client = await self.run_failure(

@@ -31,8 +31,8 @@ async def send_message(
         api_hash=API_HASH,
         workdir=str(p.parent) or ".",
     )
-    await client.connect()
     try:
+        await client.connect()
         target = username if username else user_id
         await client.send_message(target, text)
         print(json.dumps({"status": "ok"}))
@@ -62,7 +62,10 @@ async def send_message(
         print(json.dumps({"error": "FLOOD_WAIT", "retry_after": e.value}))
         sys.exit(1)
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception as cleanup_error:
+            print(f"Session cleanup: {type(cleanup_error).__name__}", file=sys.stderr)
 
 
 def main() -> None:
