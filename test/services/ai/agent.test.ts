@@ -219,6 +219,19 @@ describe('CalendarBotAgent', () => {
       { role: 'tool', tool_call_id: 'call_b', content: 'result b' },
     ];
     ctx.chatHistory.save(USER_ID, 'user', 'Show me');
+    // A stored row still expands, but only a paired call/result block is a
+    // valid provider transcript. The old fixture accidentally relied on the
+    // orphan-result behavior that causes Groq's Harmony renderer to fail.
+    const precedingCalls: OpenAI.ChatCompletionAssistantMessageParam = {
+      role: 'assistant',
+      content: null,
+      tool_calls: ['call_a', 'call_b'].map((id) => ({
+        id,
+        type: 'function',
+        function: { name: 'get_events', arguments: '{}' },
+      })),
+    };
+    ctx.chatHistory.save(USER_ID, 'assistant', JSON.stringify(precedingCalls));
     ctx.chatHistory.save(USER_ID, 'tool', JSON.stringify(toolResults));
     const agent = new CalendarBotAgent(config, sender);
     const history = ctx.chatHistory.getRecent(USER_ID);
@@ -227,6 +240,19 @@ describe('CalendarBotAgent', () => {
     expect(toolMessages).toHaveLength(2);
     expect((toolMessages[0] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_a');
     expect((toolMessages[1] as OpenAI.ChatCompletionToolMessageParam).tool_call_id).toBe('call_b');
+  });
+
+  test('buildMessages drops stored tool results without a preceding call', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'Show me');
+    ctx.chatHistory.save(
+      USER_ID,
+      'tool',
+      JSON.stringify([{ role: 'tool', tool_call_id: 'orphan_a', content: 'result without a call' }]),
+    );
+    const agent = new CalendarBotAgent(config, sender);
+    const { messages } = await agent.buildMessages(ctx, ctx.chatHistory.getRecent(USER_ID));
+    expect(messages.filter((m) => m.role === 'tool')).toHaveLength(0);
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
   });
 
   test('buildMessages drops legacy Anthropic tool_result rows that cannot be mapped', async () => {

@@ -10,6 +10,7 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
+import { sanitizeMessages } from './message-history.ts';
 import { validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
@@ -201,87 +202,6 @@ function isToolMessage(msg: MessageParam): msg is OpenAI.ChatCompletionToolMessa
 function withTimestamp(text: string, createdAt: string, timezone: string): string {
   const local = format(new TZDate(new Date(`${createdAt}Z`), timezone), 'yyyy-MM-dd HH:mm:ss');
   return `[${local}] ${text}`;
-}
-
-/**
- * Sanitize message history before handing it to the model.
- *
- * Two invariants, both enforced to keep OpenAI-compatible providers happy:
- *   1. The first non-system message must be a user message. If the history
- *      begins with an assistant or tool turn (e.g. a leading bot reply after
- *      migration), insert a '...' user placeholder.
- *   2. Every assistant message with `tool_calls` must be followed by one
- *      tool-role message per tool_call_id. If any id is unmatched — usually
- *      because a previous run crashed mid-loop and left an orphaned assistant
- *      turn in `chat_history` — strip the `tool_calls` field entirely and
- *      fall back to the text content (or drop the message if it's empty).
- *      Without this, OpenAI returns `400 - An assistant message with
- *      'tool_calls' must be followed by tool messages`.
- */
-function sanitizeMessages(messages: MessageParam[]): MessageParam[] {
-  const paired: MessageParam[] = [];
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]!;
-    if (
-      msg.role !== 'assistant' ||
-      !('tool_calls' in msg) ||
-      !Array.isArray(msg.tool_calls) ||
-      msg.tool_calls.length === 0
-    ) {
-      paired.push(msg);
-      continue;
-    }
-    // Collect tool_call_ids from the following consecutive tool messages.
-    const expectedIds = new Set(msg.tool_calls.map((tc) => tc.id));
-    const foundIds = new Set<string>();
-    let j = i + 1;
-    while (j < messages.length && messages[j]!.role === 'tool') {
-      const toolMsg = messages[j] as OpenAI.ChatCompletionToolMessageParam;
-      if (toolMsg.tool_call_id) foundIds.add(toolMsg.tool_call_id);
-      j++;
-    }
-    const allPaired = expectedIds.size > 0 && [...expectedIds].every((id) => foundIds.has(id));
-    if (allPaired) {
-      paired.push(msg);
-      continue;
-    }
-    // Orphaned tool_calls — strip them. Preserve any text content as a fallback;
-    // otherwise drop the assistant turn altogether so we don't leave an empty
-    // `assistant` message in the list.
-    const textContent = typeof msg.content === 'string' ? msg.content.trim() : '';
-    if (textContent) {
-      paired.push({ role: 'assistant', content: textContent });
-    }
-    // Note: we intentionally don't skip the orphaned trailing tool messages —
-    // OpenAI rejects tool messages without a matching tool_call above, so we
-    // also filter those out.
-    for (let k = i + 1; k < j; k++) {
-      const toolMsg = messages[k] as OpenAI.ChatCompletionToolMessageParam;
-      // Drop tool messages whose tool_call_id was part of the orphaned set.
-      if (!expectedIds.has(toolMsg.tool_call_id)) {
-        paired.push(messages[k]!);
-      }
-    }
-    i = j - 1; // advance past the orphaned tool block
-  }
-
-  // Second pass: ensure the first non-system message is a user.
-  const result: MessageParam[] = [];
-  let seenNonSystem = false;
-  for (const msg of paired) {
-    if (msg.role === 'system') {
-      result.push(msg);
-      continue;
-    }
-    if (!seenNonSystem) {
-      if (msg.role !== 'user') {
-        result.push({ role: 'user', content: '...' });
-      }
-      seenNonSystem = true;
-    }
-    result.push(msg);
-  }
-  return result;
 }
 
 /** Plain-text fallback for group-chat sender attribution. */
