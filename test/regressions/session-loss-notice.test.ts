@@ -30,3 +30,10 @@ test('English notice explains the affected feature and recovery', () => {
 test('invalid observation time is not shown as a factual timestamp', () => {
   expect(() => formatSessionLoss('en', 'expired', 'not a time')).toThrow();
 });
+
+test('account deactivation has its own diagnosis, not an expired-password accusation', () => {
+  const text = formatSessionLoss('en', 'account_unavailable');
+  expect(text).toContain('account is deactivated');
+  expect(text).not.toContain('undefined');
+  expect(formatSessionLoss('ru', 'account_unavailable')).toContain('аккаунт отключён');
+});

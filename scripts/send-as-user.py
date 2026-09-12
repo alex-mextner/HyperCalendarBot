@@ -21,7 +21,9 @@ API_ID = int(os.environ.get("MTPROTO_API_ID", "0"))
 API_HASH = os.environ.get("MTPROTO_API_HASH", "")
 
 
-async def send_message(session_path: str, user_id: int, text: str, username: str | None) -> None:
+async def send_message(
+    session_path: str, user_id: int, text: str, username: str | None
+) -> None:
     p = Path(session_path)
     client = Client(
         name=p.with_suffix("").name,
@@ -35,10 +37,26 @@ async def send_message(session_path: str, user_id: int, text: str, username: str
         await client.send_message(target, text)
         print(json.dumps({"status": "ok"}))
     except (AuthKeyUnregistered, SessionRevoked, UserDeactivated) as e:
-        print(json.dumps({"error": "SESSION_EXPIRED", "message": str(e), "reason": "revoked" if isinstance(e, SessionRevoked) else "expired"}))
+        print(
+            json.dumps(
+                {
+                    "error": "SESSION_EXPIRED",
+                    "message": str(e),
+                    "reason": "revoked"
+                    if isinstance(e, SessionRevoked)
+                    else "account_unavailable"
+                    if isinstance(e, UserDeactivated)
+                    else "expired",
+                }
+            )
+        )
         sys.exit(1)
     except PeerIdInvalid:
-        print(json.dumps({"error": "PEER_INVALID", "message": f"Cannot reach user {user_id}"}))
+        print(
+            json.dumps(
+                {"error": "PEER_INVALID", "message": f"Cannot reach user {user_id}"}
+            )
+        )
         sys.exit(1)
     except FloodWait as e:
         print(json.dumps({"error": "FLOOD_WAIT", "retry_after": e.value}))

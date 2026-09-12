@@ -658,6 +658,8 @@ export const MSG = {
         '🌍 The bot can detect your timezone from your Telegram session so events show at the correct local time.\nAllow? (only country/region is read, not messages)',
       tzConsentYes: 'Allow',
       tzConsentNo: 'No',
+      accountUnavailable:
+        'Telegram reports that the connected account is deactivated or unavailable. Check that account in Telegram first; reconnect here after access is restored.',
       revocationConfirmed:
         'Telegram reported that this connected session was revoked. The exact revocation time and who did it are not available.',
       connectionUnavailable:
@@ -1466,6 +1468,8 @@ export const MSG = {
         '🌍 Бот может определять таймзону по твоему Telegram-подключению, чтобы события показывались в правильное время.\nРазрешить? (читается только страна и регион, не сообщения)',
       tzConsentYes: 'Разрешить',
       tzConsentNo: 'Нет',
+      accountUnavailable:
+        'Telegram сообщает, что подключённый аккаунт отключён или недоступен. Сначала проверь этот аккаунт в Telegram; переподключай его здесь после восстановления доступа.',
       revocationConfirmed:
         'Telegram сообщил, что доступ этой сессии отозван. Точное время отзыва и кто это сделал — неизвестно.',
       connectionUnavailable:

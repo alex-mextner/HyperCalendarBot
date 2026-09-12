@@ -68,7 +68,7 @@ const ErrorSchema = z.object({
   error: z.string(),
   message: z.string().optional(),
   retry_after: z.number().optional(),
-  reason: z.enum(['revoked', 'expired', 'local']).optional(),
+  reason: z.enum(['revoked', 'expired', 'local', 'account_unavailable']).optional(),
 });
 
 const SuccessStringCodec = jsonStringCodec(SuccessSchema);
