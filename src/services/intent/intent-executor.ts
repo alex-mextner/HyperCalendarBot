@@ -177,6 +177,7 @@ async function runLevel1(
 type ToolResultElement =
   | EventSummary
   | { telegram_id: number; name: string }
+  | { contact_id: number; deleted: boolean }
   | { matches: import('../ai/types.ts').ContactMatch[] }
   | import('../scheduled/types.ts').ScheduledAiCall
   | import('../scheduled/types.ts').Trigger

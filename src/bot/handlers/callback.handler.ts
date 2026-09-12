@@ -1,3 +1,4 @@
+import { confirmRecipientApproval } from '../../services/ai/recipient-confirmation.ts';
 // src/bot/handlers/callback.handler.ts
 
 import { TZDate } from '@date-fns/tz';
@@ -209,6 +210,20 @@ export function createCallbackHandler(
     weatherService,
   } = opts;
   const dispatch = new Map<string, HandlerFn>();
+  dispatch.set('ric', async (ctx, payload, _parts, user) => {
+    const approved = confirmRecipientApproval(payload, ctx.from.id, Number(ctx.chatId));
+    if (!approved) {
+      await ctx.answer({ text: t(user.language).aiTools.meta.recipientUnverified });
+      return;
+    }
+    await ctx.answer();
+    if (!onAiButtonClick) return;
+    await onAiButtonClick(
+      user.telegram_id,
+      user.telegram_id,
+      `Confirmed recipient Telegram ID ${approved.recipientId} for event ${approved.eventId}. Send that invitation with force=true; do not change the ID or use a conflicting username.`,
+    );
+  });
 
   // Scene help — user asked AI for help during wizard
   dispatch.set(CB.SCENE_HELP, async (ctx, _payload, _parts, user) => {

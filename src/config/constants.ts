@@ -434,6 +434,33 @@ export const MSG = {
         foundUserMtproto: (id: number, name: string) =>
           `Found user via MTProto: telegram_id=${id}, name=${name} (not a bot user yet — can only be reached via MTProto)`,
         addressBookEmpty: 'Address book is empty.',
+        invitationLinkUnavailable:
+          'This invitation is not available to your Telegram account. Ask the sender to check the recipient.',
+        recipientMissing: 'Choose a recipient (invitee_id or invitee_username).',
+        recipientResolveUnavailable:
+          'Username resolution is unavailable. Choose a saved contact or use the Telegram picker.',
+        recipientLookupFailed: (username: string) =>
+          `Could not verify @${username}. Choose a saved contact or use the Telegram picker.`,
+        contactDeleteRequiresTool:
+          'Renaming contact fields does not delete the contact. Use the contact deletion operation.',
+        contactDeleted: 'Contact removed from your address book. Events and invitations were not changed.',
+        contactAlreadyAbsent: 'That contact is not in your address book. Nothing else was changed.',
+        contactsPrivateOnly: 'Open our private chat to remove an address-book contact.',
+        recipientNameAmbiguous:
+          'That looks like a saved contact name, not the requested Telegram username. Select the person from your contacts.',
+        recipientUsernameUnconfirmed:
+          'I cannot infer a Telegram username from a name. Choose a saved contact or provide the exact @username.',
+        userInfo: (details: string) => `User details:\n${details}`,
+        recipientConfirmButton: 'Confirm this ID',
+        recipientSavedProfile: (name: string, id: number) => `Saved contact: ${name} (ID ${id}).`,
+        recipientResolvedProfile: (name: string, id: number) => `Username resolves to: ${name} (ID ${id}).`,
+        recipientConfirmationSent: 'Recipient confirmation sent to your private chat.',
+        recipientConfirmDetails: (id: number, username: string) =>
+          `Recipient needs confirmation. Requested Telegram ID: ${id}; username hint: ${username}. These details may identify different accounts. Confirm only if this numeric ID is the person you intended. Otherwise use the Telegram user picker.`,
+        recipientIdentityConflict:
+          'The recipient ID and username identify different people. Choose the intended person again; no invitation was created.',
+        recipientUnverified:
+          'I cannot verify this recipient. Choose the person from your contacts or the Telegram picker; no invitation was created.',
         contactsList: (lines: string) => `Contacts:\n${lines}`,
         contactSaved: (name: string) => `Contact saved: ${name}`,
         contactFound: (data: string) => `Contact found: ${data}`,
@@ -1239,6 +1266,32 @@ export const MSG = {
         foundUserMtproto: (id: number, name: string) =>
           `Пользователь найден через MTProto: telegram_id=${id}, имя=${name} (бот ещё не запускал — доступен только через MTProto)`,
         addressBookEmpty: 'Адресная книга пуста.',
+        invitationLinkUnavailable:
+          'Это приглашение недоступно твоему Telegram-аккаунту. Попроси отправителя проверить получателя.',
+        recipientMissing: 'Выбери получателя (invitee_id или invitee_username).',
+        recipientResolveUnavailable:
+          'Проверка username недоступна. Выбери сохранённый контакт или человека через Telegram.',
+        recipientLookupFailed: (username: string) =>
+          `Не удалось проверить @${username}. Выбери сохранённый контакт или человека через Telegram.`,
+        contactDeleteRequiresTool: 'Изменение полей не удаляет контакт. Для удаления нужна отдельная операция.',
+        contactDeleted: 'Контакт удалён из твоей адресной книги. События и приглашения не менял.',
+        contactAlreadyAbsent: 'Такого контакта в твоей адресной книге нет. Ничего другого не менял.',
+        contactsPrivateOnly: 'Открой нашу личную переписку, чтобы удалить контакт из адресной книги.',
+        recipientNameAmbiguous:
+          'Это похоже на имя сохранённого контакта, а не на указанный Telegram-ник. Выбери человека из контактов.',
+        recipientUsernameUnconfirmed:
+          'Не могу угадывать Telegram-ник по имени. Выбери сохранённый контакт или укажи точный @username.',
+        userInfo: (details: string) => `Данные пользователя:\n${details}`,
+        recipientConfirmButton: 'Подтвердить этот ID',
+        recipientSavedProfile: (name: string, id: number) => `Сохранённый контакт: ${name} (ID ${id}).`,
+        recipientResolvedProfile: (name: string, id: number) => `По username найден: ${name} (ID ${id}).`,
+        recipientConfirmationSent: 'Отправил подтверждение получателя в личные сообщения.',
+        recipientConfirmDetails: (id: number, username: string) =>
+          `Нужно уточнить получателя. Указан Telegram ID: ${id}; подсказка username: ${username}. Эти данные могут относиться к разным аккаунтам. Подтверждай только если этот ID — нужный человек. Иначе выбери человека через список Telegram.`,
+        recipientIdentityConflict:
+          'ID и username получателя указывают на разных людей. Выбери нужного человека ещё раз; приглашение не создавал.',
+        recipientUnverified:
+          'Не могу проверить этого получателя. Выбери человека из контактов или через выбор пользователей Telegram; приглашение не создавал.',
         contactsList: (lines: string) => `Контакты:\n${lines}`,
         contactSaved: (name: string) => `Контакт сохранён: ${name}`,
         contactFound: (data: string) => `Контакт найден: ${data}`,

@@ -83,7 +83,7 @@ const toolDefinitions: ToolDefinition[] = [
         location_abstract: {
           type: 'boolean',
           description:
-            'True when the location is relative rather than a venue or street address ("У Иры", "дома", "на работе", "у метро"). Leave false for concrete places ("Кофемания", "ул. Ленина 10", "Парк Горького"). True stores it as plain text, with no geocoding or Maps link. Default false.',
+            'True for relative locations ("дома", "У Иры"), stored as plain text without geocoding. False for venues/street addresses. Default false.',
         },
         all_day: { type: 'boolean', description: 'Whether this is an all-day event. Optional.' },
         recurrence_rule: {
@@ -380,6 +380,11 @@ const toolDefinitions: ToolDefinition[] = [
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to invite to' },
+        force: {
+          type: 'boolean',
+          description:
+            'Only after the actual recipient confirmation button was clicked. Never bypasses ownership or changes ID.',
+        },
         invitee_id: {
           type: 'number',
           description:
@@ -420,7 +425,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'find_user',
     description:
-      'Find a bot user by Telegram @username and return their telegram_id for send_invitation. Only finds people who have used the bot.',
+      'Resolve an exact Telegram @username supplied by the user or saved in their contacts. Never guess a username from a personal name: use find_contact for names.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -430,9 +435,21 @@ const toolDefinitions: ToolDefinition[] = [
     },
   },
   {
+    name: 'get_user_info',
+    description:
+      'Inspect a saved person by stable Telegram ID: current profile if reachable, stored aliases and actual contact creation time. Refreshes username metadata without changing ID. Private chat only. Unknown facts remain null.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        telegram_id: { type: 'number', description: 'Stable Telegram user ID from contacts or the user.' },
+      },
+      required: ['telegram_id'],
+    },
+  },
+  {
     name: 'get_contacts',
     description:
-      "List all contacts from the user's address book. PRIVATE DATA: in group chats, always use ask_user to clarify what the user wants before calling this (they may mean group members, not personal contacts). Only call with force: true after the user explicitly confirmed they want their private contacts shown in the group.",
+      'List private address-book contacts. In groups first clarify via ask_user: they may mean group members. force:true requires explicit permission to show private contacts in that group.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -468,14 +485,15 @@ const toolDefinitions: ToolDefinition[] = [
     input_schema: {
       type: 'object' as const,
       properties: {
-        name: { type: 'string', description: 'Name to search for' },
+        name: { type: 'string', description: 'Name, @username, or exact Telegram ID to search for' },
       },
       required: ['name'],
     },
   },
   {
     name: 'update_contact',
-    description: "Rename or correct an existing contact's name, preferred_name, or username.",
+    description:
+      "Rename or correct an existing contact's name, preferred_name, or username. Does not delete contacts; use delete_contact for deletion.",
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -485,6 +503,18 @@ const toolDefinitions: ToolDefinition[] = [
         username: { type: 'string', description: 'New Telegram @username without @. Optional.' },
       },
       required: ['search'],
+    },
+  },
+  {
+    name: 'delete_contact',
+    description:
+      'Remove one contact from your private bot address book. Resolve it with find_contact/get_contacts first; ' +
+      'contact_id is the address-book row ID, NOT telegram_id. Does not delete Telegram users, events or invitations. ' +
+      'Use only for an explicit deletion request. Never simulate deletion by setting update_contact fields to null.',
+    input_schema: {
+      type: 'object' as const,
+      properties: { contact_id: { type: 'integer', description: 'Owned contact_id returned by contact lookup.' } },
+      required: ['contact_id'],
     },
   },
   {
@@ -507,7 +537,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'pick_users',
     description:
-      'Open a Telegram user picker modal so the user can select people to invite to an event. Use after creating an event when some participants could not be found in the address book. In the prompt, explain WHO specifically needs to be found and why (e.g., "Вова не найден в контактах. Выберите его из списка контактов Telegram"). After calling, STOP and wait.',
+      'Open the Telegram recipient picker for an event. Name the missing or ambiguous person and explain why selection is needed. Stop and wait after calling. Never invent a username from a display name.',
     input_schema: {
       type: 'object' as const,
       properties: {

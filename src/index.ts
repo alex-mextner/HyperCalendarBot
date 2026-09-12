@@ -164,6 +164,9 @@ let participantPushSchedulerRef:
   | ((participantUserId: number, eventId: number, action: 'create' | 'update' | 'delete') => Promise<void>)
   | undefined;
 let mtprotoSendAsUser: ((userId: number, text: string, username?: string) => Promise<boolean>) | undefined;
+let mtprotoLookupUser:
+  | ((id: number) => Promise<{ id: number; firstName?: string; username?: string; deleted?: boolean } | null>)
+  | undefined;
 let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
   | undefined;
@@ -873,6 +876,34 @@ if (serviceSessionEnabled) {
       }
       return parseResult.data;
     };
+    mtprotoLookupUser = async (id) => {
+      if (!Number.isSafeInteger(id) || id <= 0) return null;
+      const proc = Bun.spawn(['venv/bin/python', 'scripts/get-user-info.py', String(id)], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const timer = setTimeout(() => proc.kill(), 20_000);
+      try {
+        const [stdout, , exit] = await Promise.all([
+          new Response(proc.stdout).text(),
+          new Response(proc.stderr).text(),
+          proc.exited,
+        ]);
+        if (exit !== 0) return null;
+        const result = jsonCodec(
+          z.object({
+            id: z.number().int().positive().safe(),
+            firstName: z.string().optional(),
+            username: z.string().optional(),
+            deleted: z.boolean().optional(),
+          }),
+        ).safeParse(stdout.trim());
+        return result.success && result.data.id === id ? result.data : null;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     botLogger.info('MTProto messenger initialized (pyrogram)');
   } else {
     botLogger.info('Pyrogram session not found, invitation delivery via userbot disabled');
@@ -1012,6 +1043,7 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
       kokoroTts,
       fallbackTts,
       mtprotoResolveUsername,
+      mtprotoLookupUser,
       eventMentionStore,
       domainEventBus,
       nliClassifier,
