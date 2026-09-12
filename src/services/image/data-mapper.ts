@@ -71,7 +71,7 @@ function mapToAgendaEvent(
     startMinutes: toMinutes(occ.occurrence_start, tz),
     endMinutes: occ.occurrence_end ? toMinutes(occ.occurrence_end, tz) : toMinutes(occ.occurrence_start, tz) + 60,
     location: ev.location ?? undefined,
-    calendarColor: isBirthday ? BIRTHDAY_COLOR : colors[colorIdx % colors.length]!,
+    calendarColor: isBirthday ? BIRTHDAY_COLOR : (ev.color ?? colors[colorIdx % colors.length]!),
     isAllDay: ev.all_day === 1,
   };
 }
@@ -157,7 +157,7 @@ export function mapWeeklyOverviewData(params: {
           color:
             o.event.event_type === 'birthday'
               ? BIRTHDAY_COLOR
-              : theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!,
+              : (o.event.color ?? theme.eventColors[occs.indexOf(o) % theme.eventColors.length]!),
           isAllDay: o.event.all_day === 1,
         }),
       ),
@@ -201,7 +201,7 @@ export function mapEventCardData(params: {
     location: ev.location ?? undefined,
     description: ev.description?.slice(0, 200) ?? undefined,
     calendarName: 'HyperCalendar',
-    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : theme.eventColors[0]!,
+    calendarColor: ev.event_type === 'birthday' ? BIRTHDAY_COLOR : (ev.color ?? theme.eventColors[0]!),
     isAllDay: ev.all_day === 1,
     theme,
     locale,
@@ -306,7 +306,7 @@ function makeDay(
         color:
           o.event.event_type === 'birthday'
             ? BIRTHDAY_COLOR
-            : params.theme.eventColors[i % params.theme.eventColors.length]!,
+            : (o.event.color ?? params.theme.eventColors[i % params.theme.eventColors.length]!),
         isAllDay: o.event.all_day === 1,
       }),
     ),

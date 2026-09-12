@@ -1,5 +1,19 @@
 import { syncLogger } from '../../utils/logger.ts';
 
+export const GCAL_EVENT_COLORS: Record<string, string> = {
+  '1': '#D50000', // Tomato
+  '2': '#E67C73', // Flamingo
+  '3': '#F4511E', // Tangerine
+  '4': '#F6BF26', // Banana
+  '5': '#33B679', // Sage
+  '6': '#0B8043', // Basil
+  '7': '#039BE5', // Peacock
+  '8': '#3F51B5', // Blueberry
+  '9': '#7986CB', // Lavender
+  '10': '#8E24AA', // Grape
+  '11': '#616161', // Graphite
+};
+
 interface LocalEventForGoogle {
   id: number;
   title: string;
@@ -32,6 +46,7 @@ export interface GoogleEvent {
   start?: GoogleEventTime;
   end?: GoogleEventTime;
   recurrence?: string[];
+  colorId?: string | null;
   reminders?: {
     useDefault: boolean;
     overrides?: GoogleEventReminder[];
@@ -60,6 +75,7 @@ export interface LocalEventFromGoogle {
   google_event_id: string;
   google_etag: string | null;
   is_cancelled: boolean;
+  color: string | null;
 }
 
 export function localToGoogle(local: LocalEventForGoogle): GoogleEvent {
@@ -132,5 +148,6 @@ export function googleToLocal(gEvent: GoogleEvent, userId: number, googleCalenda
     google_event_id: gEvent.id ?? '',
     google_etag: gEvent.etag ?? null,
     is_cancelled: gEvent.status === 'cancelled',
+    color: gEvent.colorId ? (GCAL_EVENT_COLORS[gEvent.colorId] ?? null) : null,
   };
 }

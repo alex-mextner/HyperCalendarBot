@@ -40,6 +40,7 @@ function makeEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
     google_maps_url: null,
     location_verified: 0,
     venue_name: null,
+    color: null,
     last_synced_at: null,
     created_at: '2026-03-11T08:00:00Z',
     updated_at: '2026-03-11T08:00:00Z',
@@ -162,6 +163,43 @@ describe('mapDailyAgendaData', () => {
     }
   });
 
+  test('per-event color takes precedence over theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: '#D50000' });
+    const result = mapDailyAgendaData({
+      occurrences: [occ],
+      dateIso: '2026-03-11',
+      timezone: 'Europe/Kyiv',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.timedEvents[0]!.calendarColor).toBe('#D50000');
+  });
+
+  test('event without a stored color still falls back to theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: null });
+    const result = mapDailyAgendaData({
+      occurrences: [occ],
+      dateIso: '2026-03-11',
+      timezone: 'Europe/Kyiv',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.timedEvents[0]!.calendarColor).toBe(THEME_LIGHT.eventColors[0]!);
+  });
+
+  test('birthday color wins over a stored per-event color', () => {
+    const bdayOcc = makeBirthdayOcc();
+    bdayOcc.event.color = '#D50000';
+    const result = mapDailyAgendaData({
+      occurrences: [bdayOcc],
+      dateIso: '2026-05-10',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.allDayEvents[0]!.calendarColor).toBe(BIRTHDAY_COLOR);
+  });
+
   test('empty occurrences', () => {
     const result = mapDailyAgendaData({
       occurrences: [],
@@ -270,6 +308,52 @@ describe('mapWeeklyOverviewData', () => {
     expect(result.days[0]!.events[0]!.color).not.toBe(BIRTHDAY_COLOR);
   });
 
+  test('per-event color takes precedence over theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: '#D50000' });
+    const occsByDay = new Map([['2026-03-09', [occ]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.days[0]!.events[0]!.color).toBe('#D50000');
+  });
+
+  test('event without a stored color still falls back to theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: null });
+    const occsByDay = new Map([['2026-03-09', [occ]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.days[0]!.events[0]!.color).toBe(THEME_LIGHT.eventColors[0]!);
+  });
+
+  test('birthday color wins over a stored per-event color', () => {
+    const bdayOcc = makeBirthdayOcc();
+    bdayOcc.event.start_at = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_start = '2026-03-09T00:00:00Z';
+    bdayOcc.occurrence_end = null;
+    bdayOcc.event.color = '#D50000';
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapWeeklyOverviewData({
+      occurrencesByDay: occsByDay,
+      weekStartIso: '2026-03-09',
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.days[0]!.events[0]!.color).toBe(BIRTHDAY_COLOR);
+  });
+
   test('maps weatherByDate to weatherEmoji and weatherTemp', () => {
     const weatherByDate = {
       '2026-03-09': { tempMin: 2, tempMax: 8, conditionCode: 800, description: 'clear', windSpeed: 3 },
@@ -362,6 +446,58 @@ describe('mapMonthlyCalendarData (makeDay)', () => {
     expect(march9.events[0]!.title).toContain('🔁');
     expect(march9.events[0]!.color).not.toBe(BIRTHDAY_COLOR);
   });
+
+  test('per-event color takes precedence over theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: '#D50000' });
+    const occsByDay = new Map([['2026-03-09', [occ]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2,
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.color).toBe('#D50000');
+  });
+
+  test('event without a stored color still falls back to theme rotation', () => {
+    const occ = makeOcc({ id: 1, color: null });
+    const occsByDay = new Map([['2026-03-09', [occ]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2,
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.color).toBe(THEME_LIGHT.eventColors[0]!);
+  });
+
+  test('birthday color wins over a stored per-event color', () => {
+    const bdayOcc = makeBirthdayOcc();
+    bdayOcc.event.color = '#D50000';
+    const occsByDay = new Map([['2026-03-09', [bdayOcc]]]);
+
+    const result = mapMonthlyCalendarData({
+      occurrencesByDay: occsByDay,
+      year: 2026,
+      month: 2,
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+
+    const march9 = result.weeks.flat().find((d) => !d.isOtherMonth && d.dayNumber === 9)!;
+    expect(march9.events[0]!.color).toBe(BIRTHDAY_COLOR);
+  });
 });
 
 describe('mapEventCardData', () => {
@@ -411,5 +547,37 @@ describe('mapEventCardData', () => {
     });
     expect(result.calendarColor).toBe(THEME_LIGHT.eventColors[0]!);
     expect(result.title).toBe('Test Event');
+  });
+
+  test('per-event color takes precedence over theme color', () => {
+    const result = mapEventCardData({
+      occurrence: makeOcc({ color: '#D50000' }),
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.calendarColor).toBe('#D50000');
+  });
+
+  test('event without a stored color still falls back to theme color', () => {
+    const result = mapEventCardData({
+      occurrence: makeOcc({ color: null }),
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.calendarColor).toBe(THEME_LIGHT.eventColors[0]!);
+  });
+
+  test('birthday color wins over a stored per-event color', () => {
+    const bdayOcc = makeBirthdayOcc();
+    bdayOcc.event.color = '#D50000';
+    const result = mapEventCardData({
+      occurrence: bdayOcc,
+      timezone: 'UTC',
+      locale: 'en',
+      theme: THEME_LIGHT,
+    });
+    expect(result.calendarColor).toBe(BIRTHDAY_COLOR);
   });
 });

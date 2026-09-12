@@ -65,6 +65,7 @@ export interface CalendarEvent {
   google_maps_url: string | null;
   location_verified: number; // 0 | 1
   venue_name: string | null;
+  color: string | null;
   last_synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -136,6 +137,7 @@ export interface UpdateEventData {
   google_maps_url?: string | null;
   location_verified?: number;
   venue_name?: string | null;
+  color?: string | null;
 }
 
 export interface ChatHistoryMessage {

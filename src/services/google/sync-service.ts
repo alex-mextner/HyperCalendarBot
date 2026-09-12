@@ -58,6 +58,7 @@ export class SyncService {
             google_event_id: local.google_event_id,
             google_etag: local.google_etag,
             is_cancelled: local.is_cancelled ?? false,
+            color: local.color,
           });
           totalImported++;
         }
@@ -240,6 +241,7 @@ export class SyncService {
           timezone: local.timezone,
           location: local.location,
           recurrence_rule: local.recurrence_rule,
+          color: local.color,
         });
         this.syncRepo.logSync({
           user_id: userId,
@@ -299,6 +301,7 @@ export class SyncService {
           google_event_id: local.google_event_id,
           google_etag: local.google_etag,
           is_cancelled: local.is_cancelled ?? false,
+          color: local.color,
         });
         this.syncRepo.logSync({
           user_id: userId,
