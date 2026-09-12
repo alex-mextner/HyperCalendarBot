@@ -8,7 +8,11 @@ import { SharingSettingsRepository } from '../../src/database/repositories/shari
 import { UserRepository } from '../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../src/database/schema.ts';
 import { _resetToolThrottleForTest, executeTool } from '../../src/services/ai/tool-executor.ts';
-import { handleFindContact, handleGetContacts } from '../../src/services/ai/tool-handlers/contacts.ts';
+import {
+  handleAddContact,
+  handleFindContact,
+  handleGetContacts,
+} from '../../src/services/ai/tool-handlers/contacts.ts';
 import { handleFindUser } from '../../src/services/ai/tool-handlers/meta.ts';
 import { handleResendInvitation, handleSendInvitation } from '../../src/services/ai/tool-handlers/sharing.ts';
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
@@ -64,6 +68,14 @@ describe('recipient and contact tool boundaries', () => {
     const result = handleFindContact(ctx, { name: '5000000001' });
     expect(result.success).toBe(true);
     expect(result.output).toContain('knownalex');
+  });
+
+  test('saving an invented username cannot bootstrap recipient verification', async () => {
+    const saved = handleAddContact(ctx, { name: 'Someone', username: 'invented_handle' });
+    expect(saved.success).toBe(false);
+    expect(ctx.contactRepo!.findByUsername(10, 'invented_handle')).toBeNull();
+    const lookedUp = await handleFindUser(ctx, { username: 'invented_handle' });
+    expect(lookedUp.success).toBe(false);
   });
 
   test('plain name is not silently resolved as an unrelated public username', async () => {
