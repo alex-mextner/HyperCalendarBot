@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleToday } from '../../../src/bot/commands/today.ts';
+import { png } from '../../fixtures/png.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -63,7 +64,8 @@ describe('handleToday', () => {
 
     await handleToday(ctx as never, svc as never, undefined, renderService as never);
 
-    expect(ctx.send).toHaveBeenCalledTimes(1);
+    expect(ctx.send).toHaveBeenCalledTimes(2);
+    expect(ctx.send).toHaveBeenLastCalledWith('Agenda image could not be generated. Choose a shorter date range.');
     expect(ctx.sendPhoto).not.toHaveBeenCalled();
   });
 
@@ -77,7 +79,7 @@ describe('handleToday', () => {
       bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
     };
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.resolve(png())) };
 
     await handleToday(ctx as never, svc as never, undefined, renderService as never);
     await Promise.resolve(); // flush fire-and-forget autoPin

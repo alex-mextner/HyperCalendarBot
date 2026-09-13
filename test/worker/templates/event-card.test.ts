@@ -42,9 +42,9 @@ describe('eventCardTemplate', () => {
     expect(html).not.toContain('location');
   });
 
-  test('renders description', () => {
+  test('never renders descriptions', () => {
     const html = eventCardTemplate.render(makeCardData({ description: 'Review proposals' }));
-    expect(html).toContain('Review proposals');
+    expect(html).not.toContain('Review proposals');
   });
 
   test('renders attendees + overflow', () => {

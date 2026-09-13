@@ -1,3 +1,4 @@
+import { agendaDetailsCSS, renderAgendaDetails } from './agenda-details.ts';
 import { escapeHtml, formatTime } from './helpers.ts';
 import { sharedCSS } from './shared-css.ts';
 import type { MiniEvent, TemplateRenderer, WeeklyOverviewData } from './types.ts';
@@ -146,7 +147,7 @@ function render(data: WeeklyOverviewData): string {
 <html>
 <head>
 <meta charset="utf-8">
-<style>${css(data)}</style>
+<style>${css(data)}${agendaDetailsCSS}</style>
 </head>
 <body>
 <div id="__root">
@@ -156,6 +157,10 @@ function render(data: WeeklyOverviewData): string {
   <div class="week-grid">
     ${columnsHtml}
   </div>
+  ${renderAgendaDetails(
+    data.days.flatMap((day) => day.events.map((event) => ({ ...event, context: `${day.dayName} ${day.dayNumber}` }))),
+    data.locale,
+  )}
   <div class="footer">HyperCalendar</div>
 </div>
 </body>

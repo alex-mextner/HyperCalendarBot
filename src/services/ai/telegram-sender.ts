@@ -55,6 +55,10 @@ export function createTelegramSender(bot: Bot, options?: TelegramSenderOptions):
       });
       return { message_id: result.message_id };
     },
+    async sendDocument(chatId: number, document: File, caption: string) {
+      const result = await bot.api.sendDocument({ chat_id: chatId, document, caption });
+      return { message_id: result.message_id };
+    },
     async sendPhoto(chatId: number, photo: File) {
       const result = await bot.api.sendPhoto({ chat_id: chatId, photo });
       return { message_id: result.message_id };
