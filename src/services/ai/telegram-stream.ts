@@ -189,13 +189,6 @@ export class TelegramStreamWriter {
     this.text += chunk;
   }
 
-  tailText(maxLen: number): void {
-    if (this.text.length > maxLen) {
-      this.text = `\u2026${this.text.slice(-(maxLen - 1))}`;
-      this.lastFlushedLength = 0;
-    }
-  }
-
   getText(): string {
     return this.plainResponseText || this.text;
   }

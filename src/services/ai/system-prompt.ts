@@ -4,7 +4,6 @@ import type { EventOccurrence } from '../../database/types.ts';
 import { formatUtcOffset } from '../../utils/telegram.ts';
 import { collapseToOneLine } from '../../utils/text.ts';
 import { MEMORY_SECTION_MAX_CHARS } from './prompt-sections.ts';
-import type { UserCapabilities } from './tools.ts';
 import type { AgentContext } from './types.ts';
 
 /**
@@ -513,15 +512,6 @@ Rules:
 - Do not call ask_user or pick_users in supplement mode.`;
 }
 
-function buildAssistantSection(caps?: UserCapabilities): string {
-  if (!caps?.assistantEnabled) return '';
-  return `## AI Assistant (Computer Access)
-You can control the user's Mac through the claude_*, bash_execute, playwright_action and applescript_run tools.
-- Confirm before destructive bash commands (rm, overwrite files)
-- Show screenshots when they help explain the result
-- If agent disconnects mid-task, inform the user and suggest retrying`;
-}
-
 function buildScenePausedSection(ctx: AgentContext): string {
   const pause = ctx.scene?.scenePauseState;
   if (!pause) return '';
@@ -538,7 +528,7 @@ You MUST help complete the action. When done:
 - Call cancel_scene if you completed everything via tools (e.g., created the event directly)`;
 }
 
-export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): string {
+export function buildSystemPrompt(ctx: AgentContext): string {
   const durationMins = ctx.user.default_event_duration_minutes ?? 60;
   const utcOffset = formatUtcOffset(ctx.user.timezone);
   const nowLocal = format(new TZDate(new Date(), ctx.user.timezone), 'yyyy-MM-dd EEE HH:mm');
@@ -560,7 +550,6 @@ export function buildSystemPrompt(ctx: AgentContext, caps?: UserCapabilities): s
     buildGroupSection(ctx),
     buildSecretarySection(ctx),
     buildSupplementSection(ctx),
-    buildAssistantSection(caps),
     buildScenePausedSection(ctx),
   ];
 

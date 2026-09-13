@@ -29,5 +29,5 @@
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
   },
-  "exclude": ["packages/**", "test/agent-macos/**", "node_modules"]
+  "exclude": ["node_modules"]
 }

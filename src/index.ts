@@ -4,9 +4,6 @@ import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 
 import type { TelegramInlineKeyboardMarkup, TelegramReplyKeyboardMarkup } from 'gramio';
 import { z } from 'zod';
-import { agentDispatcher } from './agent/dispatcher.ts';
-import { initPairingSecret } from './agent/pairing.ts';
-import { agentRegistry } from './agent/registry.ts';
 import { buildCalendarPickerKeyboard } from './bot/commands/calendars.ts';
 import type { DisconnectDeps } from './bot/commands/disconnect-google.ts';
 import { createBot, type GoogleBotDeps } from './bot/index.ts';
@@ -108,10 +105,6 @@ const historySummarizer = new HistorySummarizer(
   aiStreamRound,
 );
 
-if (config.AGENT_JWT_SECRET) {
-  initPairingSecret(config.AGENT_JWT_SECRET);
-}
-
 type ParseMode = 'HTML' | 'MarkdownV2' | 'Markdown';
 type ReplyMarkup = TelegramInlineKeyboardMarkup | TelegramReplyKeyboardMarkup;
 
@@ -137,8 +130,6 @@ let googleDeps: GoogleBotDeps | undefined;
 const webServerDeps: WebServerDeps = {
   config,
   userRepo: db.users,
-  agentRegistry,
-  agentDispatcher,
   botStarted: false,
   alertRepo: db.alerts,
   adminAlertToken: config.ADMIN_ALERT_TOKEN,
@@ -1021,7 +1012,6 @@ const { bot, agentContextBuilder, agent, intentMatcher, intentExecutor, schedule
         BOT_ADMIN_ID: config.BOT_ADMIN_ID,
         INTENT_LEARNER_DAILY_LIMIT: config.INTENT_LEARNER_DAILY_LIMIT,
         BOT_USERNAME: config.BOT_USERNAME,
-        AGENT_DOWNLOAD_URL: config.AGENT_DOWNLOAD_URL,
         INLINE_BOT_TOKEN: config.INLINE_BOT_TOKEN,
         TELEGRAM_SESSION_MASTER_KEY: config.TELEGRAM_SESSION_MASTER_KEY,
       },

@@ -16,7 +16,7 @@ import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS } from './tool-executor.ts';
 import { toolSchemas } from './tool-schemas.ts';
-import { getToolDefinitions, type UserCapabilities } from './tools.ts';
+import { getToolDefinitions } from './tools.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from './types.ts';
 
 const aiLogger = logger.child({ module: 'ai-agent' });
@@ -521,12 +521,11 @@ export class CalendarBotAgent {
   async buildMessages(
     ctx: AgentContext,
     history: ChatHistoryMessage[],
-    caps?: UserCapabilities,
   ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
     // before the pipeline runs, so by the time agent.run() is called, it is present.
-    const systemPrompt = buildSystemPrompt(ctx, caps);
+    const systemPrompt = buildSystemPrompt(ctx);
 
     const relevantHistory =
       ctx.isGroup && ctx.groupChatId ? ctx.chatHistory.getRecentByChat(ctx.groupChatId, 50) : history;
@@ -654,11 +653,8 @@ export class CalendarBotAgent {
       'Agent run started',
     );
 
-    const caps: UserCapabilities = {
-      assistantEnabled: Boolean(ctx.user.assistant_enabled),
-    };
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, caps);
+    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history);
     const historyMessages = this.summarizer
       ? await this.summarizer.condenseHistory(rawHistoryMessages)
       : rawHistoryMessages;
@@ -698,17 +694,6 @@ export class CalendarBotAgent {
       noPlaceholder: ctx.isGroup,
     });
     await writer.init();
-
-    // Stream macOS agent chunks into the same writer so they appear live
-    // and land in the collapsed blockquote after commitIntermediate().
-    // tailText keeps only the last 3500 chars so Telegram never rejects the edit.
-    if (ctx.agents) {
-      ctx.agents.onAgentChunk = (text: string) => {
-        writer.appendText(text);
-        writer.tailText(3500);
-        writer.flush(false).catch((err) => aiLogger.warn({ err }, 'agent chunk flush failed'));
-      };
-    }
 
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
@@ -761,7 +746,7 @@ export class CalendarBotAgent {
         const result = await this.streamImpl(
           {
             messages: currentMessages,
-            tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+            tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
             maxTokens: 4096,
             temperature: 0.3,
             signal: AbortSignal.timeout(remainingMs),
@@ -903,7 +888,7 @@ export class CalendarBotAgent {
       // Response validation: when no tools were called, verify the response isn't
       // hallucinated. Always on — cheap via the fast chain, and critical for
       // calendar correctness. Skip supplementMode (no user-visible output to validate).
-      const availableTools = getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode);
+      const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
       let rejected = false;
       if (availableTools.length > 0 && allToolCalls.length === 0 && !ctx.supplementMode) {
         // Use the model's actual emitted text, not the writer buffer — tests
@@ -934,7 +919,6 @@ export class CalendarBotAgent {
               responseText,
               writer,
               dbg,
-              caps,
               allToolCalls,
               allToolResults,
               startTime,
@@ -1049,7 +1033,6 @@ export class CalendarBotAgent {
     previousText: string,
     writer: TelegramStreamWriter,
     dbg: AiDebugRunContext | null,
-    caps: UserCapabilities,
     allToolCalls: AgentToolCallRecord[],
     allToolResults: AgentToolResultRecord[],
     startTime: number,
@@ -1103,7 +1086,7 @@ export class CalendarBotAgent {
       const result = await this.streamImpl(
         {
           messages: currentMessages,
-          tools: getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode),
+          tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
           maxTokens: 4096,
           temperature: 0.3,
           signal: AbortSignal.timeout(remainingMs),

@@ -6,8 +6,6 @@ import type { AnyScene } from '@gramio/scenes';
 import { format } from 'date-fns';
 import { InlineKeyboard } from 'gramio';
 import { z } from 'zod';
-import type { AgentDispatcher } from '../../agent/dispatcher.ts';
-import type { AgentRegistry } from '../../agent/registry.ts';
 import { CB, t } from '../../config/constants.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -192,8 +190,6 @@ export interface MessageHandlerDeps {
   featureUsageRepo?: import('../../database/repositories/feature-usage.repository.ts').FeatureUsageRepository;
   domainEvents?: import('../../services/scheduled/domain-event-bus.ts').DomainEventBus;
   chatHistoryIds?: Map<number, number>;
-  agentRegistry?: AgentRegistry;
-  agentDispatcher?: AgentDispatcher;
   scenePauseService?: ScenePauseService;
   scheduledCallService?: import('../../services/scheduled/scheduled-ai-call.service.ts').ScheduledAiCallService;
   triggerService?: { repo: import('../../services/scheduled/trigger.repository.ts').TriggerRepository };
@@ -489,14 +485,6 @@ export function buildAgentContextFactory(deps: MessageHandlerDeps) {
             scheduleParticipantPush: deps.googleScheduleParticipantPush,
           }
         : undefined,
-      agents:
-        deps.agentRegistry && deps.agentDispatcher
-          ? {
-              agentRegistry: deps.agentRegistry,
-              agentDispatcher: deps.agentDispatcher,
-              onAgentChunk: undefined,
-            }
-          : undefined,
       birthday:
         deps.birthdayService && deps.userMemoryRepo
           ? {

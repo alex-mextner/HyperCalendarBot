@@ -105,10 +105,6 @@ export class UserRepository {
       .run(telegramId);
   }
 
-  updateAssistantEnabled(telegramId: number, enabled: boolean): void {
-    this.db.run('UPDATE users SET assistant_enabled = ? WHERE telegram_id = ?', [enabled ? 1 : 0, telegramId]);
-  }
-
   setConnectTelegramDismissedAt(userId: number, at: string | null): void {
     this.db.prepare('UPDATE users SET connect_telegram_dismissed_at = ? WHERE telegram_id = ?').run(at, userId);
   }

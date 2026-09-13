@@ -1,7 +1,5 @@
 // src/bot/index.ts
 import { Bot, InlineKeyboard } from 'gramio';
-import { agentDispatcher } from '../agent/dispatcher.ts';
-import { agentRegistry } from '../agent/registry.ts';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { EnvConfig } from '../config/env.ts';
 import type { DatabaseService } from '../database/index.ts';
@@ -50,12 +48,6 @@ import type { ParseMode } from '../utils/telegram.ts';
 import { handleAdd } from './commands/add.ts';
 import { handleAdminTgSessions } from './commands/admin-tg-sessions.ts';
 import { handleBirthdays } from './commands/birthdays.ts';
-import {
-  createActivateCommand,
-  createConnectCommand,
-  createConnectStatusCommand,
-  createDisconnectCommand,
-} from './commands/connect.command.ts';
 import { handleConnectGoogle } from './commands/connect-google.ts';
 import { handleDelete } from './commands/delete.ts';
 import { type DisconnectDeps, handleDisconnectGoogle } from './commands/disconnect-google.ts';
@@ -140,12 +132,7 @@ export interface CreateBotOpts {
   pendingGeoStore?: import('../services/location/pending-geo-store.ts').PendingGeoStore;
   envConfig?: Pick<
     EnvConfig,
-    | 'BOT_ADMIN_ID'
-    | 'INTENT_LEARNER_DAILY_LIMIT'
-    | 'BOT_USERNAME'
-    | 'AGENT_DOWNLOAD_URL'
-    | 'INLINE_BOT_TOKEN'
-    | 'TELEGRAM_SESSION_MASTER_KEY'
+    'BOT_ADMIN_ID' | 'INTENT_LEARNER_DAILY_LIMIT' | 'BOT_USERNAME' | 'INLINE_BOT_TOKEN' | 'TELEGRAM_SESSION_MASTER_KEY'
   >;
   weatherService?: import('../services/weather/weather-service.ts').WeatherService;
   broadcastEnqueuer?: import('../worker/broadcast-queue.ts').BroadcastEnqueuer;
@@ -449,8 +436,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
     telegramMasterKey: telegramMasterKey ?? undefined,
     featureUsageRepo: db.featureUsage,
     chatHistoryIds,
-    agentRegistry,
-    agentDispatcher,
     // Assigned below, after the scenes plugin is built.
     onboardingScene: undefined,
     scheduledCallService: undefined,
@@ -527,10 +512,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   msgDeps.onboardingScene = scenesSetup.scenes.onboardingScene;
 
   // AI Assistant commands (not in setMyCommands — internal use only)
-  const connectCommand = createConnectCommand(envConfig?.AGENT_DOWNLOAD_URL ?? '');
-  const activateCommand = createActivateCommand(agentRegistry, db.users);
-  const connectStatusCommand = createConnectStatusCommand(agentRegistry);
-  const disconnectCommand = createDisconnectCommand(agentRegistry, db.users);
 
   bot
     .derive(createUserResolver(db))
@@ -1087,42 +1068,6 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         chatShareIo,
       );
     })
-    // AI Assistant commands (not in setMyCommands — internal use only)
-    .command('connect', (ctx) =>
-      connectCommand({
-        user: ctx.dbUser,
-        args: ctx.args,
-        send: async (text: string) => {
-          await ctx.send(text, { parse_mode: 'MarkdownV2' });
-        },
-      }),
-    )
-    .command('activate', (ctx) =>
-      activateCommand({
-        user: ctx.dbUser,
-        args: ctx.args,
-        send: async (text: string) => {
-          await ctx.send(text);
-        },
-      }),
-    )
-    .command('connect_status', (ctx) =>
-      connectStatusCommand({
-        user: ctx.dbUser,
-        send: async (text: string) => {
-          await ctx.send(text);
-        },
-      }),
-    )
-    .command('disconnect', (ctx) =>
-      disconnectCommand({
-        user: ctx.dbUser,
-        args: ctx.args,
-        send: async (text: string) => {
-          await ctx.send(text);
-        },
-      }),
-    )
     // Google Calendar commands (registered in main chain so derived context is available)
     .command('connect_google', (ctx) =>
       googleDeps

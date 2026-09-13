@@ -1,9 +1,7 @@
 import type { z } from 'zod';
-import type { AgentCommand } from '../../agent/protocol.ts';
 import type { FeatureKey } from '../../database/repositories/feature-usage.repository.ts';
 import { logger } from '../../utils/logger.ts';
 import { handleGetActionLog } from './tool-handlers/action-log.ts';
-import { handleAssistantTool } from './tool-handlers/assistant.ts';
 import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
 import {
@@ -192,15 +190,6 @@ export interface ToolInputMap {
   remove_trigger: TriggerIdInput;
   set_reaction: { message_id?: number; emoji: string };
   remember_user_fact: { type: 'append' | 'rewrite'; content: string };
-  claude_chat: AgentCommand['payload'];
-  claude_new_chat: AgentCommand['payload'];
-  claude_list_chats: AgentCommand['payload'];
-  claude_open_chat: AgentCommand['payload'];
-  claude_list_projects: AgentCommand['payload'];
-  claude_artifact: AgentCommand['payload'];
-  bash_execute: AgentCommand['payload'];
-  playwright_action: AgentCommand['payload'];
-  applescript_run: AgentCommand['payload'];
   connect_telegram_status: Record<never, never>;
   dismiss_connect_telegram_prompt: Record<never, never>;
   resume_scene: Record<never, never>;
@@ -710,17 +699,6 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
         return handleSetReaction(ctx, input as ToolInputMap['set_reaction']);
       case 'remember_user_fact':
         return handleRememberUserFact(ctx, input as ToolInputMap['remember_user_fact']);
-
-      case 'claude_chat':
-      case 'claude_new_chat':
-      case 'claude_list_chats':
-      case 'claude_open_chat':
-      case 'claude_list_projects':
-      case 'claude_artifact':
-      case 'bash_execute':
-      case 'playwright_action':
-      case 'applescript_run':
-        return handleAssistantTool(ctx, toolName as AgentCommand['type'], input as AgentCommand['payload']);
 
       case 'resume_scene':
         if (!ctx.scene?.scenePauseService) return { success: false, error: 'Scene pause not available' };

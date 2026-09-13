@@ -1,6 +1,4 @@
 import type { InlineKeyboard, TelegramInlineKeyboardMarkup, TelegramMessage } from 'gramio';
-import type { AgentDispatcher } from '../../agent/dispatcher.ts';
-import type { AgentRegistry } from '../../agent/registry.ts';
 import type { ActionLogRepository } from '../../database/repositories/action-log.repository.ts';
 import type { CalendarProposalRepository } from '../../database/repositories/calendar-proposal.repository.ts';
 import type { ChatHistoryRepository } from '../../database/repositories/chat-history.repository.ts';
@@ -134,12 +132,6 @@ export interface SceneCapability {
   scenePauseService: import('../scene-pause.ts').ScenePauseService;
 }
 
-export interface AgentsCapability {
-  agentRegistry: AgentRegistry;
-  agentDispatcher: AgentDispatcher;
-  onAgentChunk: ((text: string) => void) | undefined;
-}
-
 export interface BirthdayCapability {
   birthdayService: BirthdayService;
   userMemoryRepo: import('../../database/repositories/user-memory.repository.ts').UserMemoryRepository;
@@ -228,7 +220,6 @@ export interface AgentContext {
   feedback?: FeedbackCapability;
   scheduled?: ScheduledCapability;
   scene?: SceneCapability;
-  agents?: AgentsCapability;
   birthday?: BirthdayCapability;
   broadcast?: BroadcastCapability;
   locationVerification?: LocationVerificationService;

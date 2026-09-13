@@ -236,20 +236,9 @@ Optional features that depend on an env var must deactivate gracefully when the 
 ## Coding Guidelines
 
 - **Dependency versions always use `^`** (e.g. `"marked": "^15.0.12"`). Never pin exact versions — it makes routine upgrades a chore and diverges from ecosystem norms. Range `^` is mandatory; `~` and bare exact versions are not acceptable.
-  **Exception**: `electron` in `packages/agent-macos/` must be pinned to an exact version (e.g. `"34.5.8"`). `electron-builder` rejects range versions (`^`) at build time and fails CI.
-- **`electron-builder-squirrel-windows` in `packages/agent-macos/` is not a Windows build.**
-  `app-builder-lib` declares it as a required peer dependency (no `peerDependenciesMeta`
-  marks it optional), so it is installed whether or not a Windows target is ever built.
-  Declaring it explicitly at the version `app-builder-lib` peer-pins is what keeps a single
-  coherent `app-builder-lib` / `builder-util` / `builder-util-runtime` set in the tree. Left
-  undeclared it resolves to whatever the lockfile last held — that is how a stale 25.1.8 kept
-  a vulnerable `app-builder-lib` 25 chain alive under an otherwise-upgraded electron-builder
-  26. Do not remove it in a dependency cleanup: it looks wrong for a macOS-only package and
-  is not.
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
 - **No `object` type** — neither as a standalone type nor as a generic parameter (e.g. `Bun.Server<object>`).
   Use a specific interface, `{ [key: string]: unknown }`, or the correct generic argument.
@@ -614,3 +603,40 @@ files in another terminal. Use `--worktree` if you need isolation.
 - Plans: `docs/plans/` — implementation plans with task breakdowns
 - Original specs (sub-projects 00-08): `docs/specs/00-08`
 - Do NOT use `docs/superpowers/` — all docs go directly in `docs/specs/` or `docs/plans/`
+
+## Retired desktop agent
+
+Computer-control tools, pairing endpoints and the macOS app are removed. Restore from Git history only as an explicit new feature; Telegram account connection is unrelated and remains supported.
+
+Migration `062_retire_desktop_agent` destructively drops `users.assistant_enabled`.
+Rolling back the application binary alone is incompatible with older user-repository
+queries. The flag values cannot be recovered from the migrated database. Calendar
+and user data are retained; rollback restores the legacy flag disabled for every
+user, so it does not silently reactivate desktop access.
+
+Before applying 062, take a consistent SQLite backup (including committed WAL data)
+and verify that it opens. For an application rollback after 062, stop all database
+writers and back up the current database first. On a copy, confirm that migration
+062 is recorded and `PRAGMA table_info(users)` has no `assistant_enabled` column.
+Run the following transaction once, then verify legacy user reads/writes and
+`PRAGMA foreign_key_check` / `PRAGMA integrity_check` before using that database
+with the older binary. Keep retired desktop endpoints and downloads disabled.
+This procedure targets the immediately preceding schema through migration 061;
+other downgrades need their own compatibility review.
+
+<!-- desktop-retirement-rollback -->
+```sql
+BEGIN IMMEDIATE;
+ALTER TABLE users ADD COLUMN assistant_enabled INTEGER NOT NULL DEFAULT 0;
+DELETE FROM migrations WHERE name = '062_retire_desktop_agent';
+COMMIT;
+```
+
+If any statement fails, roll back the transaction and investigate before restarting.
+Do not rerun it on a database where the column already exists. Removing only the
+062 migration record lets a subsequent upgrade apply retirement again; retain all
+other migration records. Prefer this schema repair to restoring the pre-062 backup,
+which would discard subsequent bot writes. Historical capability values, if ever
+needed, require the pre-062 backup and separate explicit authorization to restore
+owned desktop-agent behavior. The regression test executes the SQL above against
+an in-memory database, including post-retirement writes and re-upgrade.

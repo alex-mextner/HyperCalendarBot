@@ -220,9 +220,8 @@ const makeCallSchema = z.object({ text: z.string() }).passthrough();
 const manageSettingsSchema = z
   .object({
     action: z.enum(['get', 'update']),
-    category: z.enum(['general', 'notifications', 'calls', 'privacy', 'voice', 'assistant']).optional(),
+    category: z.enum(['general', 'notifications', 'calls', 'privacy', 'voice']).optional(),
     updates: z.record(z.string(), z.unknown()).optional(),
-    assistantEnabled: z.boolean().optional(),
   })
   .passthrough();
 
@@ -394,10 +393,6 @@ const rememberUserFactSchema = z
   })
   .passthrough();
 
-// ── Assistant tools (passthrough — validated by the agent protocol) ──
-
-const assistantPayloadSchema = z.record(z.string(), z.unknown());
-
 // ── Schema map ──
 
 export const toolSchemas: Record<ToolName, z.ZodType> = {
@@ -490,15 +485,4 @@ export const toolSchemas: Record<ToolName, z.ZodType> = {
   // Memory tools
   set_reaction: setReactionSchema,
   remember_user_fact: rememberUserFactSchema,
-
-  // Assistant tools
-  claude_chat: assistantPayloadSchema,
-  claude_new_chat: assistantPayloadSchema,
-  claude_list_chats: assistantPayloadSchema,
-  claude_open_chat: assistantPayloadSchema,
-  claude_list_projects: assistantPayloadSchema,
-  claude_artifact: assistantPayloadSchema,
-  bash_execute: assistantPayloadSchema,
-  playwright_action: assistantPayloadSchema,
-  applescript_run: assistantPayloadSchema,
 };
