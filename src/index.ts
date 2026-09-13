@@ -1,4 +1,5 @@
-import { isExpectedServiceSession } from './services/telegram-session/service-session-identity.ts';
+import { existsSync } from 'node:fs';
+import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
 
@@ -168,7 +169,15 @@ let mtprotoResolveUsername:
   | ((username: string) => Promise<{ id: number; firstName?: string; username?: string } | null>)
   | undefined;
 
-const serviceSessionEnabled = !!(config.MTPROTO_API_ID && config.MTPROTO_API_HASH) && (await verifyMtprotoSession());
+const serviceSessionEnabled = await bootstrapServiceSession(config, {
+  sessionExists: () => existsSync('data/voice_caller.session'),
+  probe: probeMtprotoSession,
+});
+if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
+  botLogger.warn(
+    'Shared MTProto disabled: dedicated service identity/session check failed; user credentials will not be borrowed',
+  );
+}
 
 if (config.GOOGLE_CLIENT_ID && config.REDIS_URL) {
   const { GoogleOAuthService } = await import('./services/google/oauth.ts');
@@ -801,14 +810,7 @@ if (config.SILERO_PYTHON_PATH && stressDictionary) {
 
 // ─── MTProto session helpers ─────────────────────────────────────────────────
 
-async function verifyMtprotoSession(): Promise<boolean> {
-  const expected = config.MTPROTO_SERVICE_USER_ID;
-  if (expected === undefined || !Number.isSafeInteger(expected) || expected <= 0) {
-    botLogger.warn('Shared MTProto disabled: configure the dedicated MTPROTO_SERVICE_USER_ID');
-    return false;
-  }
-  const { existsSync } = await import('node:fs');
-  if (!existsSync('data/voice_caller.session')) return false;
+async function probeMtprotoSession(): Promise<{ stdout: string; exitCode: number }> {
   const proc = Bun.spawn(['venv/bin/python', 'scripts/check-session.py'], {
     env: { ...process.env },
     stdin: 'ignore',
@@ -822,9 +824,7 @@ async function verifyMtprotoSession(): Promise<boolean> {
       new Response(proc.stderr).text(),
       proc.exited,
     ]);
-    const valid = isExpectedServiceSession(stdout, exitCode, expected);
-    if (!valid) botLogger.error('Shared MTProto identity check failed; user credentials will not be borrowed');
-    return valid;
+    return { stdout, exitCode };
   } finally {
     clearTimeout(timer);
   }
