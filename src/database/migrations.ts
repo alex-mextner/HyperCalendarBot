@@ -1049,4 +1049,10 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    name: '062_retire_desktop_agent',
+    up(db) {
+      db.exec('ALTER TABLE users DROP COLUMN assistant_enabled');
+    },
+  },
 ];

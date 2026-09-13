@@ -52,7 +52,6 @@ const FULL_REQUEST_TOKEN_BUDGETS = {
  * Turning on computer access appends nine more tools, so that catalog is allowed
  * to be larger — but only by those nine, not by unbounded description growth.
  */
-const ASSISTANT_CATALOG_CHAR_BUDGET = 38_500;
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {
   return tools.filter((t) => t.type === 'function').map((t) => t.function.name);
@@ -122,14 +121,8 @@ describe('tool catalog budget', () => {
           // measurement is of a prompt production never sends.
           supplementAutoResponse: 'Записал встречу на завтра в 12:30.',
         }),
-      () => getToolDefinitions('text', undefined, true),
+      () => getToolDefinitions('text', true),
       FULL_REQUEST_TOKEN_BUDGETS.supplement,
-    ],
-    [
-      'computer access',
-      () => makeContext(),
-      () => getToolDefinitions('text', { assistantEnabled: true }),
-      FULL_REQUEST_TOKEN_BUDGETS.computerAccess,
     ],
     [
       'a live call',
@@ -140,25 +133,19 @@ describe('tool catalog budget', () => {
   ])('a whole request stays within its token budget: %s', (_name, context, catalog, budget) => {
     const ctx = context();
     const tools = catalog();
-    const caps = { assistantEnabled: names(tools).includes('bash_execute') };
-    const request = buildSystemPrompt(ctx, caps) + catalogJson(tools) + ctx.messageText;
+    const request = buildSystemPrompt(ctx) + catalogJson(tools) + ctx.messageText;
     expect(estimateTokens(request)).toBeLessThanOrEqual(budget);
   });
 
   test('every other mode stays within the same budget', () => {
     const variants = [
       getToolDefinitions('live_call'),
-      getToolDefinitions('text', undefined, true),
+      getToolDefinitions('text', true),
       getToolDefinitions('voice_message'),
     ];
     for (const tools of variants) {
       expect(catalogJson(tools).length).toBeLessThanOrEqual(TOOL_CATALOG_CHAR_BUDGET);
     }
-  });
-
-  test('the computer-access catalog stays within its own budget', () => {
-    const chars = catalogJson(getToolDefinitions('text', { assistantEnabled: true })).length;
-    expect(chars).toBeLessThanOrEqual(ASSISTANT_CATALOG_CHAR_BUDGET);
   });
 
   test('no single tool is allowed to grow past 2 000 characters', () => {
@@ -192,17 +179,18 @@ describe('per-mode tool availability', () => {
   });
 
   test('supplement mode swaps end_conversation for supplement_skip', () => {
-    const supplement = names(getToolDefinitions('text', undefined, true));
+    const supplement = names(getToolDefinitions('text', true));
     expect(supplement).toContain('supplement_skip');
     expect(supplement).not.toContain('end_conversation');
   });
 
-  test('the computer-control tools appear only when the capability is enabled', () => {
-    const off = names(getToolDefinitions('text', { assistantEnabled: false }));
-    const on = names(getToolDefinitions('text', { assistantEnabled: true }));
-    expect(off).not.toContain('bash_execute');
-    expect(on).toContain('bash_execute');
-    expect(on.length).toBe(off.length + 9);
+  test('no retained mode exposes a retired computer-control tool', () => {
+    for (const mode of ['text', 'live_call', 'voice_message']) {
+      const offered = names(getToolDefinitions(mode));
+      expect(offered).not.toContain('bash_execute');
+      expect(offered).not.toContain('applescript_run');
+      expect(offered).toContain('get_events');
+    }
   });
 });
 

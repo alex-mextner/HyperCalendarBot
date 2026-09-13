@@ -197,7 +197,7 @@ async function runCase(provider: ProviderSpec, testCase: DryRunCase): Promise<Ca
   const request: OpenAI.ChatCompletionCreateParamsNonStreaming = {
     model: provider.model,
     messages: [{ role: 'system', content: buildSystemPrompt(ctx) }, ...buildMessages(testCase)],
-    tools: getToolDefinitions(ctx.inputMode, undefined, ctx.supplementMode),
+    tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
     max_tokens: MAX_COMPLETION_TOKENS,
     temperature: 0,
   };

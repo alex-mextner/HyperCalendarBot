@@ -155,20 +155,20 @@ describe('loadConfig', () => {
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();
-    expect(config.AGENT_JWT_SECRET).toBeUndefined();
+    expect('AGENT_JWT_SECRET' in config).toBe(false);
   });
 
   test('AGENT_DOWNLOAD_URL is optional — bot starts without it', () => {
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();
-    expect(config.AGENT_DOWNLOAD_URL).toBeUndefined();
+    expect('AGENT_DOWNLOAD_URL' in config).toBe(false);
   });
 
-  test('AGENT_JWT_SECRET is loaded when present', () => {
+  test('retired AGENT_JWT_SECRET is ignored when present', () => {
     process.env.AGENT_JWT_SECRET = 'test-agent-secret-at-least-32-chars!!';
     const config = loadConfig();
-    expect(config.AGENT_JWT_SECRET).toBe('test-agent-secret-at-least-32-chars!!');
+    expect('AGENT_JWT_SECRET' in config).toBe(false);
   });
 
   test('returns config with defaults when required vars are set', () => {

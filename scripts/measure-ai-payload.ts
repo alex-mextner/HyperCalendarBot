@@ -16,7 +16,7 @@ import { UserRepository } from '../src/database/repositories/user.repository.ts'
 import { runMigrations } from '../src/database/schema.ts';
 import { buildSystemPrompt } from '../src/services/ai/system-prompt.ts';
 import { estimateTokens } from '../src/services/ai/token-estimate.ts';
-import { getToolDefinitions, type UserCapabilities } from '../src/services/ai/tools.ts';
+import { getToolDefinitions } from '../src/services/ai/tools.ts';
 import type { AgentContext } from '../src/services/ai/types.ts';
 import { ConversationLogger } from '../src/services/conversation-logger.ts';
 import { EventService } from '../src/services/event/event-service.ts';
@@ -25,7 +25,6 @@ import { HolidayService } from '../src/services/holiday/holiday-service.ts';
 interface Variant {
   label: string;
   ctx: AgentContext;
-  caps?: UserCapabilities;
 }
 
 function buildBaseContext(): AgentContext {
@@ -63,7 +62,6 @@ function buildVariants(base: AgentContext): Variant[] {
       label: 'supplement',
       ctx: { ...base, inputMode: 'text', supplementMode: true, supplementAutoResponse: 'Событие создано.' },
     },
-    { label: 'assistantEnabled', ctx: { ...base, inputMode: 'text' }, caps: { assistantEnabled: true } },
   ];
 }
 
@@ -77,10 +75,10 @@ interface Row {
   totalTokens: number;
 }
 
-function measure({ label, ctx, caps }: Variant): Row {
-  const tools = getToolDefinitions(ctx.inputMode, caps, ctx.supplementMode);
+function measure({ label, ctx }: Variant): Row {
+  const tools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
   const toolJson = JSON.stringify(tools);
-  const prompt = buildSystemPrompt(ctx, caps);
+  const prompt = buildSystemPrompt(ctx);
   const toolTokens = estimateTokens(toolJson);
   const promptTokens = estimateTokens(prompt);
   return {

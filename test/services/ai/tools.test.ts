@@ -90,7 +90,7 @@ describe('toolDefinitions', () => {
 
 describe('getToolDefinitions supplement_skip', () => {
   test('supplement_skip is absent when supplementMode is false', () => {
-    const tools = getToolDefinitions(undefined, undefined, false);
+    const tools = getToolDefinitions(undefined, false);
     expect(findTool(tools, 'supplement_skip')).toBeUndefined();
   });
 
@@ -100,14 +100,14 @@ describe('getToolDefinitions supplement_skip', () => {
   });
 
   test('supplement_skip is present when supplementMode is true', () => {
-    const tools = getToolDefinitions(undefined, undefined, true);
+    const tools = getToolDefinitions(undefined, true);
     const tool = findTool(tools, 'supplement_skip');
     expect(tool).toBeDefined();
     expect((tool!.function.parameters as { properties?: unknown }).properties).toEqual({});
   });
 
   test('supplement_skip does not appear in normal text mode', () => {
-    const tools = getToolDefinitions('text', undefined, false);
+    const tools = getToolDefinitions('text', false);
     expect(findTool(tools, 'supplement_skip')).toBeUndefined();
   });
 });
@@ -128,19 +128,12 @@ function toolNames(tools: OpenAI.ChatCompletionTool[]): string[] {
   return tools.filter((t) => t.type === 'function').map((t) => fnTool(t).function.name);
 }
 
-describe('UserCapabilities gating', () => {
-  test('assistant tools hidden when assistantEnabled=false', () => {
-    const names = toolNames(getToolDefinitions('text', { assistantEnabled: false }));
-    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
-  });
-
-  test('assistant tools visible when assistantEnabled=true', () => {
-    const names = toolNames(getToolDefinitions('text', { assistantEnabled: true }));
-    for (const tool of ASSISTANT_TOOLS) expect(names).toContain(tool);
-  });
-
-  test('no caps passed → assistant tools hidden', () => {
-    const names = toolNames(getToolDefinitions('text'));
-    for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
-  });
+describe('retired computer access', () => {
+  for (const mode of ['text', 'live_call', 'voice_message']) {
+    test(`computer-control tools are absent in ${mode}`, () => {
+      const names = toolNames(getToolDefinitions(mode));
+      for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
+      expect(names).toContain('get_events');
+    });
+  }
 });

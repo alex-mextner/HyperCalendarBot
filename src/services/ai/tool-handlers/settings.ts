@@ -46,7 +46,7 @@ interface VoiceUpdates {
 
 // ── Get result interfaces ──
 
-type SettingsCategory = 'general' | 'notifications' | 'calls' | 'privacy' | 'voice' | 'assistant';
+type SettingsCategory = 'general' | 'notifications' | 'calls' | 'privacy' | 'voice';
 
 interface GeneralSettingsResult {
   timezone: string;
@@ -81,7 +81,6 @@ export type ManageSettingsInput =
   | { action: 'update'; category: 'calls'; updates?: CallUpdates }
   | { action: 'update'; category: 'privacy'; updates?: PrivacyUpdates }
   | { action: 'update'; category: 'voice'; updates?: VoiceUpdates }
-  | { action: 'update'; category: 'assistant'; assistantEnabled?: boolean }
   | {
       action: 'update';
       category?: undefined;
@@ -146,18 +145,6 @@ function handleGet(ctx: AgentContext, category?: SettingsCategory): ToolResult {
     };
   }
 
-  if (category === 'assistant') {
-    const connected = ctx.agents?.agentRegistry?.isConnected(ctx.user.telegram_id) ?? false;
-    const enabled = Boolean(ctx.user.assistant_enabled);
-    return {
-      success: true,
-      output:
-        ctx.user.language === 'ru'
-          ? `🤖 AI Ассистент: ${enabled ? 'включён' : 'выключён'}\nАгент: ${connected ? 'подключён ✅' : 'не подключён ❌'}`
-          : `🤖 AI Assistant: ${enabled ? 'enabled' : 'disabled'}\nAgent: ${connected ? '✅ connected' : '❌ not connected'}`,
-    };
-  }
-
   if (category) {
     const resultCategory: ResultCategory = category;
     const categoryResult = result[resultCategory];
@@ -171,10 +158,6 @@ type UpdateInput = Extract<ManageSettingsInput, { action: 'update' }>;
 
 function handleUpdate(ctx: AgentContext, input: UpdateInput): ToolResult {
   if (!input.category) return { success: false, error: 'category is required for update.' };
-
-  if (input.category === 'assistant') {
-    return updateAssistant(ctx, input.assistantEnabled);
-  }
 
   if (!input.updates || Object.keys(input.updates).length === 0) {
     return { success: false, error: 'updates are required for update.' };
@@ -278,21 +261,6 @@ function updatePrivacy(ctx: AgentContext, updates: PrivacyUpdates): ToolResult {
 
   const lines = Object.entries(patch).map(([k, v]) => `${k}: ${v}`);
   return { success: true, output: t(ctx.user.language).aiTools.settings.privacyUpdated(lines.join(', ')) };
-}
-
-function updateAssistant(ctx: AgentContext, assistantEnabled?: boolean): ToolResult {
-  if (typeof assistantEnabled !== 'boolean') {
-    return { success: false, error: 'Unknown action' };
-  }
-  ctx.userRepo.updateAssistantEnabled(ctx.user.telegram_id, assistantEnabled);
-  ctx.user = { ...ctx.user, assistant_enabled: assistantEnabled ? 1 : 0 };
-  return {
-    success: true,
-    output:
-      ctx.user.language === 'ru'
-        ? `AI Ассистент ${assistantEnabled ? 'включён' : 'выключён'}`
-        : `AI Assistant ${assistantEnabled ? 'enabled' : 'disabled'}`,
-  };
 }
 
 function updateVoice(ctx: AgentContext, updates: VoiceUpdates): ToolResult {

@@ -10,7 +10,6 @@ hypercal.invntrm.ru {
 	}
 
 	# Agent download — redirect bare name to .dmg
-	redir /downloads/agent-macos /downloads/agent-macos.dmg 301
 
 	# Agent download — static files from /opt/hypercal/downloads/
 	handle /downloads/* {

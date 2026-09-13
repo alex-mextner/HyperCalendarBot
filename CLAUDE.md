@@ -236,8 +236,6 @@ Optional features that depend on an env var must deactivate gracefully when the 
 ## Coding Guidelines
 
 - **Dependency versions always use `^`** (e.g. `"marked": "^15.0.12"`). Never pin exact versions — it makes routine upgrades a chore and diverges from ecosystem norms. Range `^` is mandatory; `~` and bare exact versions are not acceptable.
-  **Exception**: `electron` in `packages/agent-macos/` must be pinned to an exact version (e.g. `"34.5.8"`). `electron-builder` rejects range versions (`^`) at build time and fails CI.
-- **`electron-builder-squirrel-windows` in `packages/agent-macos/` is not a Windows build.**
   `app-builder-lib` declares it as a required peer dependency (no `peerDependenciesMeta`
   marks it optional), so it is installed whether or not a Windows target is ever built.
   Declaring it explicitly at the version `app-builder-lib` peer-pins is what keeps a single
@@ -249,7 +247,6 @@ Optional features that depend on an env var must deactivate gracefully when the 
 - Principles: YAGNI, KISS, DRY, SOLID. Before creating type/component/util — check if similar exists.
 - **Smallest reasonable changes**: make the minimum change to achieve the outcome.
   Don't refactor surroundings "while you're at it".
-- **No `.ts` extensions in imports inside `packages/agent-macos/`** — that package compiles with tsc, which rejects `.ts` import extensions. Bun (main `src/`) supports them; tsc does not.
 - **No `any`/`as any`/`Function`** — proper typing only.
 - **No `object` type** — neither as a standalone type nor as a generic parameter (e.g. `Bun.Server<object>`).
   Use a specific interface, `{ [key: string]: unknown }`, or the correct generic argument.
@@ -614,3 +611,7 @@ files in another terminal. Use `--worktree` if you need isolation.
 - Plans: `docs/plans/` — implementation plans with task breakdowns
 - Original specs (sub-projects 00-08): `docs/specs/00-08`
 - Do NOT use `docs/superpowers/` — all docs go directly in `docs/specs/` or `docs/plans/`
+
+## Retired desktop agent
+
+Computer-control tools, pairing endpoints and the macOS app are removed. Restore from Git history only as an explicit new feature; Telegram account connection is unrelated and remains supported.

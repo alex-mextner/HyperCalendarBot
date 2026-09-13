@@ -468,11 +468,11 @@ describe('validateWorkflowSteps', () => {
     expect(errors[0]).toContain('get_day_of_week_date');
   });
 
-  test('tools with free-form input schemas accept any parameters', () => {
+  test('retired desktop tools cannot be stored in workflows', () => {
     const workflow: Workflow = {
       steps: [{ call: 'claude_chat', input: { anything: 'goes' } }],
     };
-    expect(validateWorkflowSteps(workflow)).toEqual([]);
+    expect(validateWorkflowSteps(workflow)).toContain('step "claude_chat": no such tool');
   });
 
   test('bash_execute, playwright_action, and applescript_run are never storable in a workflow', () => {

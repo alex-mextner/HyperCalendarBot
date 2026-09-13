@@ -14,6 +14,31 @@ function baseDeps(overrides: Partial<WebServerDeps> = {}): WebServerDeps {
   };
 }
 
+describe('retired desktop-agent endpoints', () => {
+  test('HTTP and WebSocket handshake requests cannot activate retired endpoints', async () => {
+    const server = startWebServer(baseDeps());
+    try {
+      for (const path of ['/ws/agent', '/api/agent/pair', '/agent/download', '/api/agent/activate']) {
+        const response = await fetch(`http://localhost:${server.port}${path}`);
+        expect(response.status).toBe(404);
+        expect(await response.text()).not.toContain('jwt');
+      }
+      const handshake = await fetch(`http://localhost:${server.port}/ws/agent`, {
+        headers: {
+          Upgrade: 'websocket',
+          Connection: 'Upgrade',
+          'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+          'Sec-WebSocket-Version': '13',
+        },
+      });
+      expect(handshake.status).toBe(404);
+      expect((await fetch(`http://localhost:${server.port}/health`)).status).toBe(200);
+    } finally {
+      server.stop();
+    }
+  });
+});
+
 describe('health endpoint', () => {
   test('returns 200 when no healthCheck configured', async () => {
     const deps = baseDeps();
