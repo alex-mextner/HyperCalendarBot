@@ -47,6 +47,7 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'remove_trigger',
   ],
   presentation: ['render_day_image', 'render_week_image', 'render_month_image', 'render_table'],
+  calculator: ['calculate'],
   interaction: [
     'ask_user',
     'pick_users',
@@ -59,7 +60,6 @@ const GROUPS: Readonly<Record<string, readonly string[]>> = {
     'get_bot_info',
     'send_feedback',
     'lookup_stress',
-    'calculate',
   ],
   assistant: [
     'claude_chat',
@@ -80,8 +80,7 @@ const requestSchema = z
     groups: z.array(nameSchema).max(8).default([]),
     tools: z.array(nameSchema).max(24).default([]),
   })
-  .strict()
-  .refine((r) => r.groups.length + r.tools.length > 0);
+  .strict();
 
 interface CatalogLimits {
   maxTools?: number;
@@ -102,6 +101,7 @@ function budget(value: number | undefined, fallback: number, minimum: number, ma
 function rawRequestIsBounded(input: unknown): boolean {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return false;
   const record = input as Record<string, unknown>;
+  if (!Object.hasOwn(record, 'groups') && !Object.hasOwn(record, 'tools')) return false;
   for (const [key, max] of [
     ['groups', 8],
     ['tools', 24],
@@ -130,6 +130,7 @@ export function createToolCatalog(allowed: readonly OpenAI.ChatCompletionTool[],
   for (const tool of allowed) {
     if (tool.type !== 'function') throw new Error('Tool catalog supports function tools only');
     const name = tool.function.name;
+    if (name === 'discover_tools') throw new Error('RESERVED_TOOL_NAME');
     if (!/^[A-Za-z0-9_-]{1,64}$/.test(name) || byName.has(name)) throw new Error('Invalid or duplicate tool name');
     byName.set(name, structuredClone(tool));
     const group = Object.entries(GROUPS).find(([, names]) => names.includes(name))?.[0] ?? 'other';
@@ -139,6 +140,9 @@ export function createToolCatalog(allowed: readonly OpenAI.ChatCompletionTool[],
   }
 
   return {
+    identifiers(): { groups: string[]; tools: string[] } {
+      return { groups: [...byGroup.keys()], tools: [...byName.keys()] };
+    },
     index(): string {
       return [...byGroup]
         .map(([group, names]) => {
