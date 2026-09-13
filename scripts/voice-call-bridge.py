@@ -6,6 +6,7 @@ Env: MTPROTO_API_ID, MTPROTO_API_HASH
 Session: data/voice_caller.session
 """
 from ntgcalls import NTgCalls
+from service_session import start_service_session
 NTgCalls.enable_glib_loop(True)
 
 import sys, os, asyncio, json, struct
@@ -193,7 +194,7 @@ async def main():
         # ------- Start call (lock session file during start/stop) -------
         from mtproto_lock import session_lock
         with session_lock():
-            await app.start()
+            await start_service_session(app)
         await calls.start()
 
         @calls.on_update()

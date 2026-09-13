@@ -166,3 +166,7 @@ venv/bin/python scripts/pyrogram-auth.py
 - macOS arm64 `.dylib` != Linux x86_64 `.so` — binaries are platform-specific
 - `scripts/download-ntgcalls.sh` downloads the UNPATCHED binary — do NOT use it
 - Build deps: CMake 3.20+, git, Python 3.12, 5GB RAM min
+
+## Service identity isolation
+
+Set `MTPROTO_SERVICE_USER_ID` to the explicitly designated service account. Startup checks the authenticated ID; each shared Python consumer checks it again. Missing, revoked or mismatched credentials disable only shared MTProto capabilities. Never restore the shared file from the pool of personal user authorizations. Preserve Bot API and inviter-owned sessions. After configuration changes recreate the bot container; do not rotate or revoke unrelated user sessions.

@@ -93,6 +93,7 @@ export interface EnvConfig {
   BOT_USERNAME?: string;
   MTPROTO_API_ID?: number;
   MTPROTO_API_HASH?: string;
+  MTPROTO_SERVICE_USER_ID?: number;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
   GROQ_FAST_MODEL?: string;
@@ -210,6 +211,9 @@ export function loadConfig(): EnvConfig {
     BOT_USERNAME: process.env.BOT_USERNAME || undefined,
     MTPROTO_API_ID: process.env.MTPROTO_API_ID ? Number(process.env.MTPROTO_API_ID) : undefined,
     MTPROTO_API_HASH: process.env.MTPROTO_API_HASH || undefined,
+    MTPROTO_SERVICE_USER_ID: process.env.MTPROTO_SERVICE_USER_ID
+      ? Number(process.env.MTPROTO_SERVICE_USER_ID)
+      : undefined,
     GROQ_API_KEY: process.env.GROQ_API_KEY || undefined,
     GROQ_MODEL: process.env.GROQ_MODEL || undefined,
     GROQ_FAST_MODEL: process.env.GROQ_FAST_MODEL || undefined,

@@ -103,6 +103,28 @@ venv/bin/python scripts/pyrogram-auth.py
 
 Session file ends up in `data/voice_caller.session`.
 
+Set `MTPROTO_SERVICE_USER_ID` to the numeric Telegram ID of the explicitly
+chosen service account. An ordinary user's stored Telegram authorization is never
+copied into this session or used to enable shared service capabilities.
+
+Shared-session consumer inventory:
+
+- `send-message.py`, `resolve-username.py`, `fetch-birthdays.py`,
+  `get-chat-members.py`, `voice-call-bridge.py`, `debug-call.py`, and the embedded
+  Python in `docker-call-test.sh` use `start_service_session`: public Pyrogram
+  `connect` → `get_me` → expected-ID check → `initialize`. Initialized clients use
+  `stop`; identity rejection disconnects before initialization. The Docker helper
+  mounts this guard read-only and forwards `MTPROTO_SERVICE_USER_ID` explicitly.
+- `check-session.py` is a read-only identity probe (`connect`/`get_me`/`disconnect`,
+  without initialization). `src/index.ts` uses `bootstrapServiceSession` to require
+  service configuration, the existing file, and a successful matching probe before
+  enabling shared messaging, username resolution, or voice capabilities.
+- `pyrogram-auth.py` is the intentional operator authorization bootstrap exception:
+  it interactively creates the chosen service account's session. Run it manually
+  as the operator, never from service startup or as recovery from a user's stored
+  credentials. `mtproto_lock.py` only coordinates access; it does not open a client.
+
+
 ## CI/CD Pipeline
 
 On every push to `main`:

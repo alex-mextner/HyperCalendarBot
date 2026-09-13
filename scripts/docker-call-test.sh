@@ -9,6 +9,9 @@ AUDIO=${2:-/app/test.wav}
 docker run --rm \
   --platform linux/amd64 \
   -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/scripts/service_session.py:/app/service_session.py:ro" \
+  -e PYTHONPATH=/app \
+  -e MTPROTO_SERVICE_USER_ID \
   -v "/tmp/test-tone.wav:/app/test.wav" \
   -e MTPROTO_API_ID="${MTPROTO_API_ID:-31496323}" \
   -e MTPROTO_API_HASH="${MTPROTO_API_HASH:-e345f63982415e960843085806219f2f}" \
@@ -22,6 +25,7 @@ NTgCalls.enable_glib_loop(True)
 
 import asyncio, os
 from pyrogram import Client
+from service_session import start_service_session
 from pytgcalls import PyTgCalls
 from pytgcalls.types import MediaStream
 from ntgcalls import StreamMode
@@ -29,21 +33,23 @@ from ntgcalls import StreamMode
 async def main():
     app = Client('voice_caller', api_id=int(os.environ['MTPROTO_API_ID']), api_hash=os.environ['MTPROTO_API_HASH'], workdir='/app/data')
     calls = PyTgCalls(app)
-    await app.start()
-    await calls.start()
-    binding = calls._binding
-    print('CONNECTED', flush=True)
+    await start_service_session(app)
+    try:
+        await calls.start()
+        binding = calls._binding
+        print('CONNECTED', flush=True)
 
-    await calls.play(${USER_ID}, MediaStream('${AUDIO}', video_flags=MediaStream.Flags.IGNORE))
-    print('PLAYING', flush=True)
+        await calls.play(${USER_ID}, MediaStream('${AUDIO}', video_flags=MediaStream.Flags.IGNORE))
+        print('PLAYING', flush=True)
 
-    for i in range(7):
-        await asyncio.sleep(1)
-        t = await binding.time(${USER_ID}, StreamMode.CAPTURE)
-        print(f'[{i+1}s] capture_time={t}', flush=True)
+        for i in range(7):
+            await asyncio.sleep(1)
+            t = await binding.time(${USER_ID}, StreamMode.CAPTURE)
+            print(f'[{i+1}s] capture_time={t}', flush=True)
 
-    await calls.leave_call(${USER_ID})
-    await app.stop()
+        await calls.leave_call(${USER_ID})
+    finally:
+        await app.stop()
     print('ENDED', flush=True)
 
 asyncio.run(main())

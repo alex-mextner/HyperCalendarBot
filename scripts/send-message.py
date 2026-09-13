@@ -4,6 +4,7 @@ Usage: python send-message.py <user_id> <text> [username]
 Session: data/voice_caller.session (same as voice-call-bridge.py)
 Exit code: 0 on success, 1 on failure
 """
+from service_session import start_service_session
 import sys
 import os
 import asyncio
@@ -72,7 +73,7 @@ async def main():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data",
                      device_model="iPhone 16 Pro", system_version="18.3.2",
                      app_version="11.4", lang_code="en", system_lang_code="en-US")
-        await app.start()
+        await start_service_session(app)
         try:
             ok = await send_with_retry(app)
             sys.exit(0 if ok else 1)

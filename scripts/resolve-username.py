@@ -6,6 +6,7 @@ Output: JSON {"id": 123456, "firstName": "John", "username": "john"} to stdout
 Exit code: 0 on success, 1 on failure
 Session: data/voice_caller.session
 """
+from service_session import start_service_session
 import sys
 import os
 import asyncio
@@ -52,7 +53,7 @@ async def main():
 
     with session_lock():
         app = Client("voice_caller", api_id=API_ID, api_hash=API_HASH, workdir="data")
-        await app.start()
+        await start_service_session(app)
         try:
             result = await resolve_with_retry(app)
             if result is not None:
