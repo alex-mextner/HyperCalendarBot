@@ -1,4 +1,5 @@
 import { Queue, QueueEvents, Worker } from 'bullmq';
+import { planAgendaRaster } from '../utils/agenda-image.ts';
 import { imageLogger } from '../utils/logger.ts';
 import { parseRedisUrl } from '../utils/redis.ts';
 import { playwrightPool } from './playwright-pool.ts';
@@ -48,10 +49,13 @@ export async function processRenderJob(job: ImageRenderJob): Promise<ImageRender
     // @ts-expect-error — page.evaluate callback runs in browser scope; document is unavailable in Node types
     const height = await page.evaluate(() => document.getElementById('__root')?.scrollHeight ?? 800);
 
+    const density = (await page.evaluate('window.devicePixelRatio')) as number;
+    const raster = planAgendaRaster(height, density);
     await page.setViewportSize({ width: 1080, height });
 
     const buffer = await page.screenshot({
       type: 'png',
+      scale: raster.scale,
       clip: { x: 0, y: 0, width: 1080, height },
     });
 
@@ -60,8 +64,8 @@ export async function processRenderJob(job: ImageRenderJob): Promise<ImageRender
 
     return {
       bufferBase64: Buffer.from(buffer).toString('base64'),
-      width: 1080,
-      height,
+      width: raster.width,
+      height: raster.height,
       renderTimeMs,
     };
   } finally {

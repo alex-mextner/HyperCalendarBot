@@ -3,6 +3,7 @@ import { Bot, InlineKeyboard } from 'gramio';
 import { CB, RATE_LIMIT, t } from '../config/constants.ts';
 import type { EnvConfig } from '../config/env.ts';
 import type { DatabaseService } from '../database/index.ts';
+import { AgendaRepository } from '../database/repositories/agenda.repository.ts';
 import { CalendarProposalRepository } from '../database/repositories/calendar-proposal.repository.ts';
 import { FeedbackRepository } from '../database/repositories/feedback.repository.ts';
 import type { GoogleCalendarRepository } from '../database/repositories/google-calendar.repository.ts';
@@ -165,6 +166,7 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
   const materializer = new ReminderMaterializer(db.eventReminders, db.notificationPreferences);
   const eventService = new EventService({
     eventRepo: db.events,
+    agendaRepository: new AgendaRepository(db.db),
     materializer,
     participantRepo: db.participants,
     groupMemberRepo: db.groupMembers,
@@ -817,6 +819,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
                 ...(markup ? { reply_markup: markup } : {}),
               } as Parameters<typeof bot.api.editMessageText>[0])
               .catch(() => {});
+          },
+          sendDocument: async (chatId: number, document: File, caption: string) => {
+            await bot.api.sendDocument({ chat_id: chatId, document, caption });
           },
           sendPhoto: async (chatId: number, photo: File) => {
             await bot.api.sendPhoto({ chat_id: chatId, photo });

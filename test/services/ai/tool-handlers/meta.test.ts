@@ -34,6 +34,7 @@ import type { AgentContext } from '../../../../src/services/ai/types.ts';
 import { EventService } from '../../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../../src/services/holiday/holiday-service.ts';
 import type { ImageRenderJob } from '../../../../src/worker/image-render.queue.ts';
+import { png } from '../../../fixtures/png.ts';
 
 function createTestDb() {
   const db = new Database(':memory:');
@@ -515,7 +516,7 @@ describe('meta tool handlers', () => {
       ctx.renderService = {
         renderDirect(job) {
           renderCalls.push(job as unknown as ImageRenderJob);
-          return Promise.resolve(Buffer.from('png'));
+          return Promise.resolve(png());
         },
       };
       ctx.sender = {

@@ -30,6 +30,8 @@ export function formatLocationHtml(event: LocationFields): string {
   }
 
   const url = event.google_maps_url ?? buildGoogleMapsSearchUrl(event.location);
+  // Encoded Unicode queries can exceed the HTML transport's indivisible tag budget.
+  if (escapeHtml(url).length > 2000) return displayText;
 
   return `<a href="${escapeHtml(url)}">${displayText}</a>`;
 }
