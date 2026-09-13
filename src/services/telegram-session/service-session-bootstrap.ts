@@ -1,4 +1,6 @@
-// Decides whether shared MTProto capabilities may use the designated service session.
+// Gates shared MTProto startup on a dedicated service file and a matching identity probe.
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { isExpectedServiceSession } from './service-session-identity.ts';
 
 interface ServiceConfig {
@@ -12,7 +14,17 @@ interface SessionProbe {
   probe: () => Promise<{ stdout: string; exitCode: number }>;
 }
 
-export async function bootstrapServiceSession(config: ServiceConfig, dependencies: SessionProbe): Promise<boolean> {
+export function bootstrapServiceSession(
+  config: ServiceConfig,
+  dependencies: { dataDirectory: string; probe: SessionProbe['probe'] },
+): Promise<boolean> {
+  return decideServiceSession(config, {
+    sessionExists: () => existsSync(join(dependencies.dataDirectory, 'voice_caller.session')),
+    probe: dependencies.probe,
+  });
+}
+
+export async function decideServiceSession(config: ServiceConfig, dependencies: SessionProbe): Promise<boolean> {
   const expected = config.MTPROTO_SERVICE_USER_ID;
   if (
     !config.MTPROTO_API_ID ||

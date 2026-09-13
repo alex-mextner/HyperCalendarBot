@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
@@ -170,7 +169,7 @@ let mtprotoResolveUsername:
   | undefined;
 
 const serviceSessionEnabled = await bootstrapServiceSession(config, {
-  sessionExists: () => existsSync('data/voice_caller.session'),
+  dataDirectory: 'data',
   probe: probeMtprotoSession,
 });
 if (!serviceSessionEnabled && config.MTPROTO_API_ID && config.MTPROTO_API_HASH) {
