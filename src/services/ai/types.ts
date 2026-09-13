@@ -288,6 +288,15 @@ export interface ToolResult {
   output?: string;
   error?: string;
   stopLoop?: boolean;
+  /** A handoff is independent of the outer tool name (handlers may delegate). */
+  awaitingInput?: { kind: 'chat' } | { kind: 'speech'; question: string };
+  /** Direct execution evidence; never inferred from output or error prose. */
+  mutationState?: 'not_applied' | 'uncertain' | 'confirmed';
+  effect?:
+    | { kind: 'invitation'; delivery: 'delivered' | 'manual_forward' | 'failed' }
+    | { kind: 'attendance_declined' }
+    | { kind: 'event_deleted' };
+
   /**
    * Agent-only instruction appended to the tool result seen by the AI.
    * Never shown to the user — the intent engine ignores this field entirely.

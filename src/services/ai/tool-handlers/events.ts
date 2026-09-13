@@ -572,17 +572,21 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     ctx.secretary?.secretaryRepo ?? null,
     'write',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
 
   if (scope === 'group') {
     if (ctx.groupChatId === undefined) {
-      return { success: false, error: 'Group context required for group scope' };
+      return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
     }
     const event = ctx.eventService.getEventForGroup(input.event_id, ctx.groupChatId);
     if (!event) {
-      return { success: false, error: `Event ${input.event_id} not found in group calendar.` };
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: `Event ${input.event_id} not found in group calendar.`,
+      };
     }
     // Remove from all group members' Google Calendars before deleting (parallel)
     if (ctx.google?.scheduleParticipantPush && ctx.group) {
@@ -603,6 +607,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
     ctx.eventService.deleteEventForGroup(input.event_id, ctx.groupChatId!);
     return {
       success: true,
+      effect: { kind: 'event_deleted' },
       output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
       data: eventToSummary(event, ctx.user.timezone),
     };
@@ -622,12 +627,20 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
           logger.error({ err, userId, eventId: input.event_id }, 'scheduleParticipantPush decline failed');
         }
       }
-      return { success: true, output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id) };
+      return {
+        success: true,
+        effect: { kind: 'attendance_declined' },
+        output: t(ctx.user.language).aiTools.events.eventDeclined(input.event_id),
+      };
     }
   }
 
   if (!event) {
-    return { success: false, error: `Event ${input.event_id} not found or not owned by you.` };
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: `Event ${input.event_id} not found or not owned by you.`,
+    };
   }
 
   // Remove from all participants' Google Calendars before deleting (parallel)
@@ -666,6 +679,7 @@ export async function handleDeleteEvent(ctx: AgentContext, input: DeleteEventInp
 
   return {
     success: true,
+    effect: { kind: 'event_deleted' },
     output: t(ctx.user.language).aiTools.events.eventDeleted(event.title, event.id),
     data: eventToSummary(event, ctx.user.timezone),
   };

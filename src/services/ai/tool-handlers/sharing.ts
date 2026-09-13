@@ -1,4 +1,4 @@
-import { type Lang, t } from '../../../config/constants.ts';
+import { type Lang, t, toLang } from '../../../config/constants.ts';
 import type {
   EventParticipant,
   Invitation,
@@ -175,7 +175,21 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId),
+    mutationState: 'confirmed',
+    effect: {
+      kind: 'invitation',
+      delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+    },
+    output: [
+      ...(ctx.isGroup
+        ? []
+        : [t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId)]),
+      delivery.delivered
+        ? t(toLang(ctx.user.language)).writeOutcomes.invitationDelivered
+        : delivery.viaDeepLink
+          ? t(toLang(ctx.user.language)).writeOutcomes.invitationManual
+          : t(toLang(ctx.user.language)).writeOutcomes.invitationFailed,
+    ].join('\n'),
     agentHint: delivery.delivered
       ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
       : delivery.viaDeepLink
@@ -261,6 +275,10 @@ export async function handleResendInvitation(
     });
     return {
       success: true,
+      effect: {
+        kind: 'invitation',
+        delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+      },
       output: t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
       agentHint: delivery.delivered
         ? 'The invitation reminder was delivered to the invitee. Tell the user it is sent.'

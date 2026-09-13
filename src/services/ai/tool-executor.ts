@@ -316,6 +316,17 @@ const SKIP_ACTION_LOG = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.skipActionLog),
 );
 
+/** Known writes use the same metadata classification as the action log. */
+export const WRITE_TOOLS = new Set(Object.keys(toolSchemas).filter((name) => !SKIP_ACTION_LOG.has(name)));
+
+export function isMutationTool(toolName: string, input: unknown): boolean {
+  if (!WRITE_TOOLS.has(toolName)) return false;
+  return (
+    toolName !== 'manage_settings' ||
+    !(typeof input === 'object' && input !== null && Reflect.get(input, 'action') === 'get')
+  );
+}
+
 /** Derived: tools that always result in [SKIP] — no status message or tool label. */
 export const SILENT_TOOLS = new Set(
   [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.silent),
@@ -373,7 +384,10 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   dismiss_connect_telegram_prompt: 'telegram_connect',
 };
 
-export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
+export type ExecutorDisposition = 'executed' | 'failed' | 'skipped' | 'waiting';
+export type ExecutedToolResult = ToolResult & { disposition: ExecutorDisposition };
+
+export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ExecutedToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
   let validationError: ToolResult | undefined;
@@ -381,7 +395,11 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
   if (schema) {
     const result = schema.safeParse(input);
     if (!result.success) {
-      validationError = { success: false, error: `Invalid input: ${describeIssues(result.error.issues)}` };
+      validationError = {
+        success: false,
+        mutationState: 'not_applied',
+        error: `Invalid input: ${describeIssues(result.error.issues)}`,
+      };
     } else {
       input = result.data;
     }
@@ -404,7 +422,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
         { tool: toolName, chatId: ctx.chatId, sinceMs: now - lastCalledAt },
         'Tool call throttled (identical within 5s)',
       );
-      return { success: true, output: THROTTLE_MARKER };
+      return { success: true, output: THROTTLE_MARKER, disposition: 'skipped' };
     }
   }
 
@@ -466,10 +484,27 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
       }
     }
 
-    return result;
+    return {
+      ...result,
+      mutationState:
+        result.mutationState ??
+        (result.awaitingInput
+          ? 'not_applied'
+          : isMutationTool(toolName, input)
+            ? result.success
+              ? 'confirmed'
+              : 'uncertain'
+            : 'not_applied'),
+      disposition: !result.success ? 'failed' : result.awaitingInput ? 'waiting' : 'executed',
+    };
   } catch (outerError) {
     aiLogger.error({ tool: toolName, err: outerError }, 'Tool execution error');
-    return { success: false, error: `Tool execution failed: ${String(outerError)}` };
+    return {
+      success: false,
+      error: `Tool execution failed: ${String(outerError)}`,
+      disposition: 'failed',
+      mutationState: isMutationTool(toolName, input) ? 'uncertain' : 'not_applied',
+    };
   }
 }
 
