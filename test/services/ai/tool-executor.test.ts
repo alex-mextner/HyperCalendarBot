@@ -27,6 +27,7 @@ function createTestDb() {
 
 describe('executeTool', () => {
   let ctx: AgentContext;
+  let effectDb: Database;
   const USER_ID = 123;
 
   beforeEach(() => {
@@ -34,6 +35,7 @@ describe('executeTool', () => {
     // reuse the same (chatId, toolName, args) tuple.
     _resetToolThrottleForTest();
     const db = createTestDb();
+    effectDb = db;
     const userRepo = new UserRepository(db);
     const eventRepo = new EventRepository(db);
     const eventReminderRepo = new EventReminderRepository(db);
@@ -54,6 +56,34 @@ describe('executeTool', () => {
       eventReminderRepo,
       conversationLogger: null as never,
     };
+  });
+
+  test.each([
+    'delete_event',
+    'update_event',
+  ] as const)('%s accepts canonical string IDs and denies wrong owners', async (name) => {
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      title: 'Synthetic',
+      start_at: '2030-01-01T10:00:00Z',
+      timezone: 'UTC',
+    });
+    effectDb.exec('CREATE TEMP TABLE effects (operation TEXT)');
+    effectDb.exec(
+      "CREATE TEMP TRIGGER count_update AFTER UPDATE ON events BEGIN INSERT INTO effects VALUES ('update'); END",
+    );
+    effectDb.exec(
+      "CREATE TEMP TRIGGER count_delete AFTER DELETE ON events BEGIN INSERT INTO effects VALUES ('delete'); END",
+    );
+    ctx.userRepo.create({ telegram_id: 789, timezone: 'UTC' });
+    const outsider = { ...ctx, user: ctx.userRepo.findByTelegramId(789)!, chatId: 789 };
+    const input = { event_id: String(event.id), title: 'Changed' };
+    expect((await executeTool(outsider, name, input)).success).toBe(false);
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe('Synthetic');
+    expect((await executeTool(ctx, name, input)).success).toBe(true);
+    expect(ctx.eventService.getEvent(event.id, USER_ID)?.title).toBe(name === 'delete_event' ? undefined : 'Changed');
+    await executeTool(ctx, name, { ...input, event_id: event.id });
+    expect(effectDb.query<{ count: number }, []>('SELECT count(*) AS count FROM effects').get()?.count).toBe(1);
   });
 
   test('routes get_events to handler', async () => {
@@ -198,6 +228,7 @@ describe('executeTool', () => {
 
   describe('sharing tools', () => {
     let sharingCtx: AgentContext;
+    let sharingDb: Database;
     let eventRepo: EventRepository;
     let invitationRepo: InvitationRepository;
     let sharingSettingsRepo: SharingSettingsRepository;
@@ -205,6 +236,7 @@ describe('executeTool', () => {
 
     beforeEach(() => {
       const db = createTestDb();
+      sharingDb = db;
       const userRepo = new UserRepository(db);
       eventRepo = new EventRepository(db);
       const eventReminderRepo = new EventReminderRepository(db);
@@ -447,6 +479,26 @@ describe('executeTool', () => {
       expect(result.output).toContain('456');
     });
 
+    test('send_invitation accepts string IDs with one real insertion and owner checks', async () => {
+      const event = sharingCtx.eventService.createEvent({
+        user_id: USER_ID,
+        title: 'Synthetic invitation',
+        start_at: '2030-01-01T10:00:00Z',
+        timezone: 'UTC',
+      });
+      sharingCtx.userRepo.create({ telegram_id: 789, timezone: 'UTC' });
+      const input = { event_id: String(event.id), invitee_id: '789' };
+      const outsider = { ...sharingCtx, user: sharingCtx.userRepo.findByTelegramId(789)!, chatId: 789 };
+      expect((await executeTool(outsider, 'send_invitation', { ...input, invitee_id: '123' })).success).toBe(false);
+      expect(invitationRepo.findActiveByEventAndInvitee(event.id, 789)).toBeNull();
+      expect((await executeTool(sharingCtx, 'send_invitation', input)).success).toBe(true);
+      const invitation = invitationRepo.findActiveByEventAndInvitee(event.id, 789);
+      expect(invitation).not.toBeNull();
+      await executeTool(sharingCtx, 'send_invitation', input);
+      expect(invitationRepo.findActiveByEventAndInvitee(event.id, 789)?.id).toBe(invitation?.id);
+      expect(sharingDb.query<{ count: number }, []>('SELECT count(*) AS count FROM invitations').get()?.count).toBe(1);
+    });
+
     test('set_event_visibility returns error when not configured', async () => {
       const result = await executeTool(ctx, 'set_event_visibility', {
         event_id: 1,
@@ -562,6 +614,14 @@ describe('executeTool', () => {
       const meta = JSON.parse(logs[0]!.metadata!);
       expect(meta.title).toBe('Metadata Test');
       expect(meta.description).toBe('Important meeting');
+    });
+
+    test('invalid IDs are rejected and retained in the failed action log', async () => {
+      const result = await executeTool(actionCtx, 'delete_event', { event_id: null });
+      expect(result.success).toBe(false);
+      const logs = actionLogRepo.query({ user_id: USER_ID, action_name: 'delete_event' });
+      expect(logs).toHaveLength(1);
+      expect(logs[0]?.success).toBe(0);
     });
 
     test('tool call without actionLogRepo does not throw', async () => {

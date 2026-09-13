@@ -9,6 +9,7 @@ import { UserRepository } from '../../../src/database/repositories/user.reposito
 import { runMigrations } from '../../../src/database/schema.ts';
 import { executeTool } from '../../../src/services/ai/tool-executor.ts';
 import { toolSchemas } from '../../../src/services/ai/tool-schemas.ts';
+import { getToolDefinitions } from '../../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../../src/services/ai/types.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
@@ -319,4 +320,51 @@ describe('dispatchTool validation integration', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain('Invalid input');
   });
+});
+
+describe('numeric ID boundary', () => {
+  test.each(['1', '0', '-100123', '9007199254740991'])('normalizes %s losslessly', (id) => {
+    expect(toolSchemas.delete_event.parse({ event_id: id })).toEqual({ event_id: parseInt(id, 10) });
+  });
+  test.each([
+    null,
+    true,
+    false,
+    '',
+    ' ',
+    ' 1',
+    '1 ',
+    '+1',
+    '01',
+    '-0',
+    '1e2',
+    '0x10',
+    '1.0',
+    '1.2',
+    '9007199254740992',
+    9007199254740992,
+    1.5,
+  ])('rejects invalid ID %j', (id) => {
+    expect(toolSchemas.delete_event.safeParse({ event_id: id }).success).toBe(false);
+  });
+  test('leaves unrelated and nested fields alone', () => {
+    expect(toolSchemas.snooze_event.safeParse({ event_id: 1, minutes: '15' }).success).toBe(false);
+    expect(toolSchemas.delete_event.parse({ event_id: 1, arbitrary_id: '2', nested: { event_id: '3' } })).toEqual({
+      event_id: 1,
+      arbitrary_id: '2',
+      nested: { event_id: '3' },
+    });
+    expect(toolSchemas.remove_trigger.parse({ id: '123' })).toEqual({ id: '123' });
+  });
+});
+
+test('advertised numeric ID schema stays numeric', () => {
+  for (const tool of getToolDefinitions()) {
+    if (tool.type !== 'function') continue;
+    const properties = tool.function.parameters?.properties;
+    if (!properties || typeof properties !== 'object') continue;
+    for (const [field, schema] of Object.entries(properties)) {
+      if (field.endsWith('_id')) expect(schema).toMatchObject({ type: 'number' });
+    }
+  }
 });
