@@ -111,29 +111,3 @@ describe('getToolDefinitions supplement_skip', () => {
     expect(findTool(tools, 'supplement_skip')).toBeUndefined();
   });
 });
-
-const ASSISTANT_TOOLS = [
-  'claude_chat',
-  'claude_new_chat',
-  'claude_list_chats',
-  'claude_open_chat',
-  'claude_list_projects',
-  'claude_artifact',
-  'bash_execute',
-  'playwright_action',
-  'applescript_run',
-];
-
-function toolNames(tools: OpenAI.ChatCompletionTool[]): string[] {
-  return tools.filter((t) => t.type === 'function').map((t) => fnTool(t).function.name);
-}
-
-describe('retired computer access', () => {
-  for (const mode of ['text', 'live_call', 'voice_message']) {
-    test(`computer-control tools are absent in ${mode}`, () => {
-      const names = toolNames(getToolDefinitions(mode));
-      for (const tool of ASSISTANT_TOOLS) expect(names).not.toContain(tool);
-      expect(names).toContain('get_events');
-    });
-  }
-});

@@ -37,21 +37,15 @@ const TOOL_CATALOG_TOKEN_BUDGET = 10_500;
  * system prompt travels with it every time. Guarding only the catalog would let
  * the prompt grow back exactly what the catalog gave up, so the request as a
  * whole gets a budget too — one per shape, because they legitimately differ. A
- * group carries its consensus rules, computer access adds nine tools and their
- * instructions, and budgeting only the smallest shape would leave the largest
- * real requests free to grow.
+ * group carries its consensus rules, and budgeting only the smallest shape would
+ * leave the largest real requests free to grow.
  */
 const FULL_REQUEST_TOKEN_BUDGETS = {
   direct: 15_000,
   group: 17_300,
   supplement: 15_200,
-  computerAccess: 15_800,
   liveCall: 14_500,
 } as const;
-/**
- * Turning on computer access appends nine more tools, so that catalog is allowed
- * to be larger — but only by those nine, not by unbounded description growth.
- */
 
 function names(tools: OpenAI.ChatCompletionTool[]): string[] {
   return tools.filter((t) => t.type === 'function').map((t) => t.function.name);
@@ -182,15 +176,6 @@ describe('per-mode tool availability', () => {
     const supplement = names(getToolDefinitions('text', true));
     expect(supplement).toContain('supplement_skip');
     expect(supplement).not.toContain('end_conversation');
-  });
-
-  test('no retained mode exposes a retired computer-control tool', () => {
-    for (const mode of ['text', 'live_call', 'voice_message']) {
-      const offered = names(getToolDefinitions(mode));
-      expect(offered).not.toContain('bash_execute');
-      expect(offered).not.toContain('applescript_run');
-      expect(offered).toContain('get_events');
-    }
   });
 });
 

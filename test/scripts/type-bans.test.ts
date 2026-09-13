@@ -178,12 +178,11 @@ describe('type-ban gate', () => {
     TIMEOUT_MS,
   );
 
-  // packages/agent-macos is compiled, packaged and uploaded by the deploy
-  // workflow, so its src/ ships as surely as the bot's.
+  // Shipped package sources receive the same protection as top-level src/.
   test(
     'covers a package that ships, not only the top-level src',
     async () => {
-      const verdict = await gate('packages/agent-macos/src/main.ts', DOUBLE_CAST);
+      const verdict = await gate('packages/example/src/main.ts', DOUBLE_CAST);
       expect(verdict.blocked).toBe(true);
       expect(verdict.output).toContain('double-cast');
     },

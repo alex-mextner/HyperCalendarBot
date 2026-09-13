@@ -142,7 +142,7 @@ async function handleRequest(
   server: { requestIP(req: Request): { address: string } | null },
   deps: WebServerDeps,
   oauthRateLimiter: IpRateLimiter,
-): Promise<Response | undefined> {
+): Promise<Response> {
   if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/ready')) {
     const notLive = await livenessFailure(deps);
     if (notLive) return notLive;
@@ -281,17 +281,17 @@ export function startWebServer(deps: WebServerDeps): { port: number; stop: () =>
     });
   }
 
-  async function fetchPlain(this: Bun.Server<undefined>, req: Request, server: Bun.Server<undefined>) {
+  async function handleFetch(this: Bun.Server<undefined>, req: Request, server: Bun.Server<undefined>) {
     try {
       const url = new URL(req.url);
       const res = await handleRequest(req, url, server, deps, oauthRateLimiter);
-      return res ? withSecurityHeaders(res) : new Response(null, { status: 204 });
+      return withSecurityHeaders(res);
     } catch (err) {
       return errorResponse(err);
     }
   }
 
-  const server = Bun.serve({ port, fetch: fetchPlain });
+  const server = Bun.serve({ port, fetch: handleFetch });
   const cleanupTimer = setInterval(() => oauthRateLimiter.cleanup(), OAUTH_RATE_LIMIT.windowMs);
 
   webLogger.info({ port }, 'Web server started');

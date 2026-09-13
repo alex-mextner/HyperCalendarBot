@@ -151,14 +151,14 @@ describe('loadConfig', () => {
     expect(() => loadConfig()).toThrow('GEMINI_FAST_MODEL');
   });
 
-  test('AGENT_JWT_SECRET is optional — bot starts without it', () => {
+  test('retired AGENT_JWT_SECRET is absent from config when unset', () => {
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();
     expect('AGENT_JWT_SECRET' in config).toBe(false);
   });
 
-  test('AGENT_DOWNLOAD_URL is optional — bot starts without it', () => {
+  test('retired AGENT_DOWNLOAD_URL is absent from config when unset', () => {
     delete process.env.AGENT_JWT_SECRET;
     delete process.env.AGENT_DOWNLOAD_URL;
     const config = loadConfig();

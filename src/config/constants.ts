@@ -582,22 +582,6 @@ export const MSG = {
         geoPurposeQuestion:
           '📍 Got your location! What is it for?\n1. Update your current city\n2. Set as location for your latest event\n3. Something else (please explain)',
       },
-      agent: {
-        connectMessage: (url: string) =>
-          `🔗 *Connect AI Assistant*\n\n1\\. [Download the agent](${url})\n2\\. Open the \\.dmg and drag the app to Applications\n3\\. Right\\-click the app → *Open* \\(don't double\\-click\\)\n   _If macOS says "damaged" — run in Terminal:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. The app will show an activation command — send it here`,
-        activatePrompt: 'Provide the code from the app: /activate <code>',
-        activated:
-          '✅ Agent connected!\n\nYou can now ask me to run tasks on your Mac:\n• Run terminal commands\n• Chat with Claude Desktop and stream responses\n• Control the browser via Playwright\n• Run AppleScript\n\nJust tell me what to do, e.g. "run ls -la" or "ask Claude what TCP is".',
-        activationFailed: '❌ Code not found or expired. Open the app and copy the command again.',
-        disconnected: '✅ Agent disconnected. AI assistant disabled.',
-        notConnected: 'Agent is not connected.',
-        statusConnected: (connectedAt: string, lastPing: string) =>
-          `🟢 Agent connected\n\nConnected: ${connectedAt}\nLast ping: ${lastPing}`,
-        statusDisconnected:
-          '🔴 Agent not running.\n\nStart the HyperBotAgent app on your Mac. If not installed yet — /connect.',
-        statusDisabledByUser:
-          '⚠️ Agent app is connected but AI assistant tools are disabled.\n\nUse /activate <code> to re-enable.',
-      },
     },
     connectTelegram: {
       consent: [
@@ -1389,22 +1373,6 @@ export const MSG = {
           '📍 Понял. Пин сохранён на 30 минут — просто скажи, к какому событию его привязать, и я сделаю это.',
         geoPurposeQuestion:
           '📍 Получена геолокация! Для чего она?\n1. Обновить город\n2. Задать локацию для последнего события\n3. Другое (напиши пояснение)',
-      },
-      agent: {
-        connectMessage: (url: string) =>
-          `🔗 *Подключить AI Ассистент*\n\n1\\. [Скачать агент](${url})\n2\\. Открой \\.dmg и перетащи приложение в Программы\n3\\. Открой приложение правой кнопкой → *Открыть* \\(не двойным кликом\\)\n   _Если macOS пишет «повреждён» — выполни в Терминале:_\n   \`xattr -cr '/Applications/HyperBotAgent.app'\`\n4\\. Приложение покажет команду активации — отправь её сюда`,
-        activatePrompt: 'Укажи код из приложения: /activate <код>',
-        activated:
-          '✅ Агент подключён!\n\nТеперь можешь просить меня выполнять задачи прямо на твоём Mac:\n• Запускать команды в терминале\n• Общаться с Claude Desktop и получать ответы\n• Управлять браузером через Playwright\n• Выполнять AppleScript\n\nПросто напиши что нужно, например: «запусти ls -la» или «спроси Claude что такое TCP».',
-        activationFailed: '❌ Код не найден или истёк. Открой приложение и скопируй команду заново.',
-        disconnected: '✅ Агент отключён. AI ассистент выключен.',
-        notConnected: 'Агент не подключён.',
-        statusConnected: (connectedAt: string, lastPing: string) =>
-          `🟢 Агент подключён\n\nПодключён: ${connectedAt}\nПоследний пинг: ${lastPing}`,
-        statusDisconnected:
-          '🔴 Агент не запущен.\n\nЗапусти приложение HyperBotAgent на Mac. Если не установлен — /connect.',
-        statusDisabledByUser:
-          '⚠️ Приложение агента подключено, но инструменты AI ассистента отключены.\n\nИспользуй /activate <код> для повторного включения.',
       },
     },
     connectTelegram: {

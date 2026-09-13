@@ -695,10 +695,6 @@ export class CalendarBotAgent {
     });
     await writer.init();
 
-    // Stream macOS agent chunks into the same writer so they appear live
-    // and land in the collapsed blockquote after commitIntermediate().
-    // tailText keeps only the last 3500 chars so Telegram never rejects the edit.
-
     const startTime = Date.now();
     const allToolCalls: AgentToolCallRecord[] = [];
     const allToolResults: AgentToolResultRecord[] = [];
