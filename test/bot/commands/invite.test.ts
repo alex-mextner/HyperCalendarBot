@@ -1,6 +1,7 @@
 // test/bot/commands/invite.test.ts
 import { describe, expect, mock, test } from 'bun:test';
 import { handleInvite } from '../../../src/bot/commands/invite.ts';
+import { EVENT_PICKER_PAGE_SIZE } from '../../../src/bot/keyboards.ts';
 
 const makeEvent = (id: number) => ({
   id,
@@ -113,7 +114,7 @@ describe('handleInvite', () => {
     };
 
     await handleInvite(ctx as never, deps as never);
-    expect(getUpcoming).toHaveBeenCalledWith(42, 10);
+    expect(getUpcoming).toHaveBeenCalledWith(42, EVENT_PICKER_PAGE_SIZE + 1);
   });
 
   test('in group shows group events picker using getUpcomingForGroup', async () => {
@@ -140,7 +141,7 @@ describe('handleInvite', () => {
       sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
     };
     await handleInvite(ctx as never, deps as never);
-    expect(getUpcomingForGroup).toHaveBeenCalledWith(-100, 10);
+    expect(getUpcomingForGroup).toHaveBeenCalledWith(-100, EVENT_PICKER_PAGE_SIZE + 1);
     expect(getUpcoming).not.toHaveBeenCalled();
     expect(ctx.send).toHaveBeenCalledWith(
       expect.stringContaining('Выберите событие'),
@@ -165,5 +166,72 @@ describe('handleInvite', () => {
     await handleInvite(ctx as never, deps as never);
     const msg = (ctx.send.mock.calls[0] as unknown[])[0] as string;
     expect(msg).toContain('No group events');
+  });
+
+  test('exactly 10 events: no forward pagination button', async () => {
+    const events = Array.from({ length: 10 }, (_, i) => makeEvent(i + 1));
+    const ctx = {
+      dbUser: { telegram_id: 42, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {},
+      eventService: { getUpcoming: mock(() => events) },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).not.toContain('▶️');
+  });
+
+  test('exactly 11 events (one over the page): shows forward pagination button', async () => {
+    const events = Array.from({ length: 11 }, (_, i) => makeEvent(i + 1));
+    const ctx = {
+      dbUser: { telegram_id: 42, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {},
+      eventService: { getUpcoming: mock(() => events) },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    expect((kb.match(/"invp:\d+"/g) ?? []).length).toBe(10);
+  });
+
+  test('25 events: over-fetch respects the requested limit and renders only the first page', async () => {
+    const events = Array.from({ length: 25 }, (_, i) => makeEvent(i + 1));
+    const getUpcoming = mock((_id: number, limit: number) => events.slice(0, limit));
+    const ctx = {
+      dbUser: { telegram_id: 42, language: 'en', timezone: 'UTC' },
+      send: mock(() => Promise.resolve()),
+    };
+    const deps = {
+      invitationService: {},
+      eventService: { getUpcoming },
+      invRepo: {},
+      deepLinkService: {},
+      sendMessage: mock(() => Promise.resolve({ message_id: 1 })),
+    };
+
+    await handleInvite(ctx as never, deps as never);
+
+    expect(getUpcoming).toHaveBeenCalledWith(42, EVENT_PICKER_PAGE_SIZE + 1);
+    const opts = (ctx.send.mock.calls[0] as unknown[])[1] as { reply_markup?: unknown };
+    const kb = JSON.stringify(opts.reply_markup);
+    expect(kb).toContain('▶️');
+    expect(kb).not.toContain('◀️');
   });
 });
