@@ -1,4 +1,5 @@
 import type OpenAI from 'openai';
+import { SUPPORTED_CURRENCY_CODES } from '../currency/codes.ts';
 import { MEMORY_FACT_MAX_CHARS } from './prompt-sections.ts';
 
 /**
@@ -752,12 +753,20 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration).',
+      'Decimal and currency calculator. With target_currency, supports ISO currency codes or $/€/£/₽, explicit money +/-, scalar multiplication/division and EXPR +/- N%. Never invent exchange rates. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration).',
     input_schema: {
       type: 'object' as const,
       properties: {
+        target_currency: {
+          type: 'string',
+          enum: [...SUPPORTED_CURRENCY_CODES],
+          description:
+            'Optional ISO target currency for expressions such as 100 USD - 30 EUR. No default currency is assumed. Amounts: up to 30 characters and 18 fractional digits; exact intermediate ratios, final division rounded to 40 places.',
+        },
         expression: {
           type: 'string',
+          minLength: 1,
+          maxLength: 500,
           description:
             'Expression to evaluate, e.g. "2 + 31", "22:34 + 31min", "2026-03-18T22:34:00Z + 2weeks", "2026-03-18 + 1month", "23:50 - 1hour", "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"',
         },

@@ -1,5 +1,5 @@
-import Big from 'big.js';
 import { addMonths, addYears, subMonths, subYears } from 'date-fns';
+import { ExactDecimal as Big } from '../../currency/exact-decimal.ts';
 import type { ToolHandlerMeta, ToolResult } from '../types.ts';
 
 const ISO_DT_RE = '\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2})?(?:\\.\\d+)?(?:Z|[+-]\\d{2}:?\\d{2})?';
@@ -64,10 +64,7 @@ function evalArithmetic(expr: string): Big {
 }
 
 function formatBig(value: Big): string {
-  return value
-    .toFixed(12)
-    .replace(/(?:\.0+|(?<=\.[0-9]*?)0+)$/, '')
-    .replace(/\.$/, '');
+  return value.toFixed();
 }
 
 function formatDiffMs(absMs: number): string {
@@ -83,6 +80,7 @@ function formatDiffMs(absMs: number): string {
 }
 
 export function handleCalculate(input: { expression: string }): ToolResult {
+  if (input.expression.length > 500) return { success: false, error: 'Expression too long (max 500 chars)' };
   const expr = input.expression.trim();
 
   // ISO datetime difference: "2026-03-21T18:00:00Z - 2026-03-21T17:00:00Z"
@@ -178,8 +176,7 @@ export function handleCalculate(input: { expression: string }): ToolResult {
     return { success: true, output: `${rh}:${rm}` };
   }
 
-  // Numeric arithmetic and percentages. Big.js keeps decimal arithmetic exact.
-  if (expr.length > 500) return { success: false, error: 'Expression too long (max 500 chars)' };
+  // Numeric arithmetic and percentages. Keep intermediate ratios exact and round only the final output.
   const pctMatch = expr.match(/^(.+?)\s*([+-])\s*(\d+(?:[.,]\d+)?)%\s*$/);
   if (pctMatch) {
     try {
