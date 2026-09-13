@@ -213,6 +213,69 @@ describe('IntentLearner', () => {
     expect(callCount).toBe(6); // 1 initial + 5 retries
   });
 
+  test('retries when first response has an unsafe pattern, succeeds on second', async () => {
+    const unsafePayload = {
+      canonical_name: 'get_time_in_timezone',
+      phrases: [],
+      trigger_words: ['час', 'время'],
+      pattern: '^(a+)+$',
+      workflow: { steps: [{ call: 'get_timezone_info', input: { timezone: '{{$1}}', at: '{{dates.now}}' } }] },
+      format: 'text',
+    };
+    const safePayload = {
+      canonical_name: 'get_time_in_timezone',
+      phrases: [],
+      trigger_words: ['час', 'время'],
+      pattern: '^(?:который час|время)\\s+(?:в|in)\\s+(.+)$',
+      workflow: { steps: [{ call: 'get_timezone_info', input: { timezone: '{{$1}}', at: '{{dates.now}}' } }] },
+      format: 'text',
+    };
+
+    let callCount = 0;
+    const learner = buildLearner(async () => {
+      callCount++;
+      const payload = callCount === 1 ? unsafePayload : safePayload;
+      const text = JSON.stringify(payload);
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+    });
+
+    const result = await learner.analyze(
+      'который час в москве',
+      [{ name: 'get_timezone_info', input: {} }],
+      [{ success: true }],
+    );
+    expect(result?.pattern).toBe('^(?:который час|время)\\s+(?:в|in)\\s+(.+)$');
+    expect(callCount).toBe(2);
+  });
+
+  test('returns null after all 5 retries fail with an unsafe pattern', async () => {
+    const unsafePayload = {
+      canonical_name: 'get_time_in_timezone',
+      phrases: [],
+      trigger_words: ['час', 'время'],
+      pattern: '^(a+)+$',
+      workflow: { steps: [{ call: 'get_timezone_info', input: { timezone: '{{$1}}', at: '{{dates.now}}' } }] },
+      format: 'text',
+    };
+
+    let callCount = 0;
+    const learner = buildLearner(async () => {
+      callCount++;
+      const text = JSON.stringify(unsafePayload);
+      const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: text };
+      return { text, toolCalls: [], finishReason: 'stop', assistantMessage: msg, providerUsed: 'stub' };
+    });
+
+    const result = await learner.analyze(
+      'который час в москве',
+      [{ name: 'get_timezone_info', input: {} }],
+      [{ success: true }],
+    );
+    expect(result).toBeNull();
+    expect(callCount).toBe(6); // 1 initial + 5 retries
+  });
+
   test('does not crash when AI returns null for optional pattern field', async () => {
     const intentPayload = {
       canonical_name: 'show_today',

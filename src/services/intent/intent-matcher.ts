@@ -5,6 +5,7 @@ import type { Intent } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { normalize, tokenize } from './normalizer.ts';
+import { checkPatternSafety } from './regex-safety.ts';
 
 const StringArrayCodec = jsonCodec(z.array(z.string()));
 
@@ -44,6 +45,14 @@ export class IntentMatcher {
           triggerWords = StringArrayCodec.parse(intent.trigger_words);
         } catch {
           cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON, skipping pattern');
+          continue;
+        }
+        const safety = checkPatternSafety(intent.pattern);
+        if (!safety.safe) {
+          cmdLogger.error(
+            { intentId: intent.id, reason: safety.reason },
+            'Intent pattern failed safety check, skipping pattern',
+          );
           continue;
         }
         const pattern = new RegExp(intent.pattern, 'i');

@@ -7,7 +7,7 @@ Output a single JSON object with these fields:
   - For exact-match intents (no pattern): include 3-8 full phrases.
   - For parameterized intents (with pattern): set to [] (empty array). Phrases are matched by exact equality, NOT substring — a phrase like "который час в" will NEVER match "который час в майами". The pattern + trigger_words handle parameterized matching. Do not generate partial/prefix phrases.
 - trigger_words: string[] — words that MUST be present for regex matching (only if pattern is needed)
-- pattern: string | null — regex pattern for parameterized intents. Use real capturing groups (not (?:...)) to capture values you need in the workflow. Example: "^(?:найди|search)\\\\s+(.+)$" captures the query in $1. null for exact-match-only intents.
+- pattern: string | null — regex pattern for parameterized intents. Use real capturing groups (not (?:...)) to capture values you need in the workflow. Example: "^(?:найди|search)\\\\s+(.+)$" captures the query in $1. null for exact-match-only intents. Avoid nested/stacked quantifiers such as (x+)+, (x*)* or repeated ambiguous alternation like (a|aa)+ — they can hang the bot on adversarial input (catastrophic backtracking); prefer a single top-level quantifier per capturing group.
 - workflow: object — always use { "steps": [...] } format. Every workflow is a list of steps, whether one step or many.
   - Simple single-tool example (show today's events):
     { "steps": [{ "call": "get_events", "input": { "start_date": "{{dates.today}}", "end_date": "{{dates.today}}", "scope": "{{env.scope}}" } }] }
