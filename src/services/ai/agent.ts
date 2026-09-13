@@ -463,6 +463,7 @@ export function toolCallKey(name: string, input: { [key: string]: unknown }): st
   const schema = toolSchemas[name as keyof typeof toolSchemas];
   const knownKeys =
     schema && 'shape' in schema ? Object.keys((schema as { shape: { [key: string]: unknown } }).shape) : null;
+  const parsed = schema?.safeParse(input);
   const filteredKeys = knownKeys
     ? Object.keys(input)
         .filter((k) => knownKeys.includes(k))
@@ -473,7 +474,10 @@ export function toolCallKey(name: string, input: { [key: string]: unknown }): st
   const canonical: { [key: string]: unknown } = {};
   for (const k of filteredKeys) {
     if (input[k] !== null && input[k] !== undefined) {
-      canonical[k] = input[k];
+      canonical[k] =
+        parsed?.success && parsed.data !== null && typeof parsed.data === 'object'
+          ? Reflect.get(parsed.data, k)
+          : input[k];
     }
   }
   return `${name}:${stableStringify(canonical)}`;

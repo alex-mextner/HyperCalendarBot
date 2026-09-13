@@ -376,6 +376,17 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
 export async function executeTool(ctx: AgentContext, toolName: string, input: unknown): Promise<ToolResult> {
   aiLogger.debug({ tool: toolName, input }, 'Executing tool');
 
+  let validationError: ToolResult | undefined;
+  const schema = toolSchemas[toolName as ToolName];
+  if (schema) {
+    const result = schema.safeParse(input);
+    if (!result.success) {
+      validationError = { success: false, error: `Invalid input: ${describeIssues(result.error.issues)}` };
+    } else {
+      input = result.data;
+    }
+  }
+
   // Time throttle: identical tool call within THROTTLE_TTL_MS returns a synthetic
   // THROTTLED result without invoking the handler. Prevents rapid cross-run
   // repeats (the in-run dedup in CalendarBotAgent handles within-run loops).
@@ -384,7 +395,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
   // Build the throttle key before dispatch — used both for the pre-check and
   // the post-success write.
   let throttleKey: string | null = null;
-  if (!THROTTLE_EXEMPT.has(toolName)) {
+  if (!validationError && !THROTTLE_EXEMPT.has(toolName)) {
     const now = Date.now();
     throttleKey = buildThrottleKey(ctx.chatId, toolName, input);
     const lastCalledAt = throttleMap.get(throttleKey);
@@ -398,7 +409,7 @@ export async function executeTool(ctx: AgentContext, toolName: string, input: un
   }
 
   try {
-    const result = await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]);
+    const result = validationError ?? (await dispatchTool(ctx, toolName as ToolName, input as ToolInputMap[ToolName]));
 
     // Record throttle entry only after a successful execution — failed calls
     // must not poison the throttle window so retries get a real attempt.
@@ -510,15 +521,6 @@ function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
 }
 
 async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolInputMap[ToolName]): Promise<ToolResult> {
-  const schema = toolSchemas[toolName];
-  if (schema) {
-    const result = schema.safeParse(input);
-    if (!result.success) {
-      return { success: false, error: `Invalid input: ${describeIssues(result.error.issues)}` };
-    }
-    input = result.data as ToolInputMap[ToolName];
-  }
-
   try {
     switch (toolName) {
       case 'supplement_skip':
