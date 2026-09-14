@@ -17,6 +17,7 @@ Read `CLAUDE.md` and the deployment runbook before changing runtime behavior.
 - Closing or merging a pull request includes cleanup, not just changing its status.
 - Before removal, inspect unique commits, staged/unstaged/untracked files, child branches and active processes. Never remove another active task's workspace.
 - Preserve useful work in the continuing branch/pull request or a verified recovery bundle and patch, with a manifest linking the replacement. Do not publish credentials or private fixtures.
+- Inspect symlinks from surviving worktrees before deleting a target workspace; preserve their original dependency target and verify no broken links remain.
 - After preservation is verified, remove the obsolete worktree and unused local/remote branch. Never force-delete unknown dirty work or branches still used by a stacked pull request.
 
 ## Human-readable progress

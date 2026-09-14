@@ -73,7 +73,7 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
 
 export async function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): Promise<ToolResult> {
   if (!ctx.sharing?.invitationService) {
-    return { success: false, error: 'Invitations are not configured.' };
+    return { success: false, mutationState: 'not_applied', error: 'Invitations are not configured.' };
   }
 
   let inviteeId = input.invitee_id;
@@ -83,7 +83,11 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   // Resolve invitee_id when only username provided
   if (!inviteeId && inviteeUsername) {
     if (!ctx.resolveUsername) {
-      return { success: false, error: 'Cannot resolve @username: username resolution is not available.' };
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: 'Cannot resolve @username: username resolution is not available.',
+      };
     }
     try {
       const resolved = await ctx.resolveUsername(inviteeUsername);
@@ -102,13 +106,18 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       deliveryLogger.error({ err, username: inviteeUsername }, 'Failed to resolve username');
       return {
         success: false,
+        mutationState: 'not_applied',
         error: `Failed to resolve @${inviteeUsername}. Try using find_user or pick_users instead.`,
       };
     }
   }
 
   if (!inviteeId) {
-    return { success: false, error: 'Either invitee_id or invitee_username must be provided.' };
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'Either invitee_id or invitee_username must be provided.',
+    };
   }
 
   const result = ctx.sharing.invitationService.sendInvitation(
@@ -119,7 +128,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   );
 
   if (!result.success) {
-    return { success: false, error: result.error };
+    return { success: false, mutationState: 'not_applied', error: result.error };
   }
 
   const invitation = result.invitation!;

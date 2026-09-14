@@ -23,3 +23,11 @@ The incident happened on 2026-09-13. Model-generated IDs arrived as strings; rej
 ## Completion evidence required
 
 Record exact commit, native full-suite/typecheck/lint, independent reviews and their limitations, normal `gh ship` result, deployed revision and live smoke separately. Keep parent incidents open for any undelivered scope. Never disable checks, falsify status checks or mark deployment complete from source tests alone.
+
+## Review follow-up checkpoint
+
+Implementation is now pushed as PR #275 (initial source commit 341fe2f). The initial full suite passed 4,652 tests with 8 disclosed skips. A further source review identified missing not-applied markers on known create/update/invitation rejections; three real-agent regressions failed before those markers and the interruption text were corrected. The real group-history fixture now sets groupChatId and asserts nonempty persisted receipts.
+Full privacy of raw group-history/tool-label sinks remains in existing #245; final-summary redaction is not a claim those older sinks are fixed. Persistent intent linkage and partial external synchronization are tracked in #274. Expense dependency audit failures are explicitly tracked in ExpenseSyncBot #120 and are not flaky tests.
+The misplaced calendar FX PR #265 was closed. Its 786-file snapshot, diffs and verified bundle are in the private 20260914-pr265 recovery directory; obsolete workspace/local/remote branch were removed after child-PR and active-process checks. The continuing financial work remains intact. A surviving inference worktree dependency symlink was redirected to the same shared node_modules target and verified.
+
+A further real SQLite regression reproduced an update which commits but becomes unreadable after its start time crosses a group-membership visibility boundary. The handler now checks absence before attempting the update and keeps a null post-update read uncertain; it must not label that committed attempt not-applied or replay it. The last narrow fix needs another independent re-review before shipping; passing source tests are not a substitute. Main has meanwhile merged agenda PR #273; validate the combined revision before release.

@@ -270,11 +270,11 @@ export async function handleGetEvents(ctx: AgentContext, input: GetEventsInput):
     ctx.secretary?.secretaryRepo ?? null,
     'read',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
   const tz = ctx.user.timezone;
   const startDate = DATE_ONLY_RE.test(input.start_date) ? expandDateOnly(input.start_date, tz).start : input.start_date;
@@ -323,7 +323,7 @@ export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInp
     ctx.secretary?.secretaryRepo ?? null,
     'write',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   // Block creation of events in the past — force the agent to confirm with the user first
   if (!input.all_day && !input.force) {
@@ -335,6 +335,7 @@ export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInp
       const diffLabel = diffDays >= 1 ? `${diffDays} day(s) ago` : `${Math.round(diffMs / 60_000)} minutes ago`;
       return {
         success: false,
+        mutationState: 'not_applied',
         error:
           `PAST_EVENT: The requested time (${input.start_at}) is ${diffLabel}. ` +
           'You MUST ask the user via ask_user with options like: ' +
@@ -353,7 +354,7 @@ async function executeCreateEvent(ctx: AgentContext, input: CreateEventInput, us
   try {
     const scope = resolveScope(input, ctx);
     if (scope === 'group' && ctx.groupChatId === undefined) {
-      return { success: false, error: 'Group context required for group scope' };
+      return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
     }
     const event = ctx.eventService.createEvent({
       user_id: userId,
@@ -420,12 +421,19 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
     ctx.secretary?.secretaryRepo ?? null,
     'write',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   const { event_id, scope: _, owner_id: _oid, ...updates } = input;
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
+  }
+  const beforeUpdate =
+    scope === 'group'
+      ? ctx.eventService.getEventForGroup(event_id, ctx.groupChatId!)
+      : ctx.eventService.getEvent(event_id, userId);
+  if (!beforeUpdate) {
+    return { success: false, mutationState: 'not_applied', error: `Event ${event_id} not found or not owned by you.` };
   }
   const updated =
     scope === 'group'
@@ -433,7 +441,11 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
       : ctx.eventService.updateEvent(event_id, userId, updates);
 
   if (!updated) {
-    return { success: false, error: `Event ${event_id} not found or not owned by you.` };
+    return {
+      success: false,
+      mutationState: 'uncertain',
+      error: 'Update was attempted but its result could not be read back. Do not replay automatically.',
+    };
   }
 
   const parts = [`id: ${updated.id}`, `title: ${updated.title}`, `start: ${updated.start_at}`];
@@ -692,11 +704,11 @@ export async function handleSearchEvents(ctx: AgentContext, input: SearchEventsI
     ctx.secretary?.secretaryRepo ?? null,
     'read',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
   const events =
     scope === 'group'
@@ -738,13 +750,13 @@ export async function handleGetUpcoming(ctx: AgentContext, input: GetUpcomingInp
     ctx.secretary?.secretaryRepo ?? null,
     'read',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const limit = input.limit ?? 5;
   const scope = resolveScope(input, ctx);
 
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
 
   let upcoming: EventOccurrence[];
@@ -791,11 +803,11 @@ export function handleSnoozeEvent(ctx: AgentContext, input: SnoozeEventInput): T
     ctx.secretary?.secretaryRepo ?? null,
     'write',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
   const event =
     scope === 'group'
@@ -836,11 +848,11 @@ export async function handleGetEvent(ctx: AgentContext, input: GetEventInput): P
     ctx.secretary?.secretaryRepo ?? null,
     'read',
   );
-  if (!access.ok) return { success: false, error: access.error };
+  if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
   const scope = resolveScope(input, ctx);
   if (scope === 'group' && ctx.groupChatId === undefined) {
-    return { success: false, error: 'Group context required for group scope' };
+    return { success: false, mutationState: 'not_applied', error: 'Group context required for group scope' };
   }
   const event =
     scope === 'group'

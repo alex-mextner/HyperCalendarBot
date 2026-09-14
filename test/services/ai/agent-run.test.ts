@@ -8,6 +8,7 @@ import { DeepLinkRepository } from '../../../src/database/repositories/deep-link
 import { EditProposalRepository } from '../../../src/database/repositories/edit-proposal.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
 import { EventReminderRepository } from '../../../src/database/repositories/event-reminder.repository.ts';
+import { GroupMemberRepository } from '../../../src/database/repositories/group-member.repository.ts';
 import { HolidayRepository } from '../../../src/database/repositories/holiday.repository.ts';
 import { InvitationRepository } from '../../../src/database/repositories/invitation.repository.ts';
 import { ParticipantRepository } from '../../../src/database/repositories/participant.repository.ts';
@@ -212,6 +213,67 @@ describe('CalendarBotAgent.run()', () => {
     });
   }
 
+  test.each([
+    'create_event',
+    'update_event',
+    'send_invitation',
+  ])('known preflight rejection is not an uncertain write: %s', async (name) => {
+    const input =
+      name === 'create_event'
+        ? { title: 'Synthetic', start_at: new Date(Date.now() - 3600000).toISOString() }
+        : name === 'update_event'
+          ? { event_id: 999999, title: 'Synthetic' }
+          : { event_id: 999999, invitee_id: 456 };
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const script = makeStreamImpl([
+      { kind: 'tool', callId: 'rejected', name, input },
+      { kind: 'error', error: new Error('Synthetic provider interruption') },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toContain('Not completed:');
+    expect(result.responseText).toContain('request rejected before applying changes');
+    expect(result.responseText).not.toContain('Outcome unknown');
+    expect(result.responseText).not.toContain('Confirmed changes remain');
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  test('post-update loss of read visibility is uncertain, never a pre-apply rejection', async () => {
+    const groupId = -1007755;
+    new GroupMemberRepository(db).upsert(groupId, USER_ID);
+    db.run('UPDATE group_members SET joined_at=? WHERE chat_id=? AND user_id=?', [
+      '2030-01-01T11:00:00Z',
+      groupId,
+      USER_ID,
+    ]);
+    const event = ctx.eventService.createEvent({
+      user_id: USER_ID,
+      owner_type: 'group',
+      group_id: groupId,
+      created_by: USER_ID,
+      title: 'Synthetic group event',
+      start_at: '2030-01-01T12:00:00Z',
+      timezone: 'UTC',
+    });
+    const enqueue = mock(async () => {});
+    ctx.retryEnqueue = enqueue;
+    const script = makeStreamImpl([
+      {
+        kind: 'tool',
+        callId: 'move',
+        name: 'update_event',
+        input: { event_id: event.id, scope: 'personal', start_at: '2030-01-01T10:00:00Z' },
+      },
+      { kind: 'error', error: new Error('Synthetic provider interruption') },
+    ]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: script.impl }).run(ctx);
+    const stored = db.query('SELECT start_at FROM events WHERE id=?').get(event.id) as { start_at: string };
+    expect(stored.start_at).toBe('2030-01-01T10:00:00Z');
+    expect(result.responseText).toContain('Outcome unknown');
+    expect(result.responseText).not.toContain('request rejected before applying changes');
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
   test('nested invitation picker remains a waiting handoff', async () => {
     const event = setupInvitations();
     ctx.resolveUsername = async () => null;
@@ -240,6 +302,7 @@ describe('CalendarBotAgent.run()', () => {
     const event = setupInvitations();
     ctx.isGroup = true;
     ctx.chatId = -1009988;
+    ctx.groupChatId = ctx.chatId;
     ctx.userRepo.create({ telegram_id: 789, timezone: 'UTC', language: 'en' });
     sender.sendInvitation = async () => (delivery === 'delivered' ? { message_id: 55 } : null);
     const privateMessages: string[] = [];
@@ -266,7 +329,12 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).not.toContain('<b>private');
     expect(result.responseText).not.toContain('https://');
     if (delivery === 'manual') expect(privateMessages.join('')).toContain('https://t.me/');
-    expect(JSON.stringify(ctx.chatHistory.getRecentByChat(ctx.chatId))).not.toContain('Everything sent.');
+    const groupHistory = ctx.chatHistory.getRecentByChat(ctx.chatId);
+    expect(groupHistory.some((row) => row.role === 'tool')).toBe(true);
+    expect(JSON.stringify(groupHistory)).toContain(
+      delivery === 'delivered' ? 'Invitation delivered' : 'Invitation created',
+    );
+    expect(JSON.stringify(groupHistory)).not.toContain('Everything sent.');
   });
 
   test('participant delete reports attendance decline while retaining the event', async () => {

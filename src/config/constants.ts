@@ -155,7 +155,7 @@ export const MSG = {
       invitationManual: 'Invitation created; not delivered. Please forward the link sent to your private chat.',
       invitationFailed: 'Invitation created; not delivered.',
       attendanceDeclined: 'Attendance declined; the event remains.',
-      interrupted: 'The request was interrupted. Confirmed changes remain; no automatic replay will run.',
+      interrupted: 'The request was interrupted. Some actions may already have happened; no automatic replay will run.',
       attempts:
         'These are distinct execution attempts, not a list of outstanding requests. Later successes are shown separately.',
       write: 'Write',
@@ -989,7 +989,7 @@ export const MSG = {
       invitationManual: 'Приглашение создано, но не доставлено. Перешли ссылку из личного чата.',
       invitationFailed: 'Приглашение создано, но не доставлено.',
       attendanceDeclined: 'Участие отклонено; событие сохранено.',
-      interrupted: 'Запрос прерван. Подтверждённые изменения сохранены; автоматического повтора не будет.',
+      interrupted: 'Запрос прерван. Часть действий могла уже выполниться; автоматического повтора не будет.',
       attempts:
         'Это отдельные попытки выполнения, а не список невыполненных запросов. Последующие успешные попытки показаны отдельно.',
       write: 'Изменение',
