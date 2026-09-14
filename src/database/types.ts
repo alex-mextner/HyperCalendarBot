@@ -29,7 +29,13 @@ export interface User {
   updated_at: string;
 }
 
+/** Authorized, preformatted view data only; never persisted or fetched by renderers. */
+export interface EventDisplayMetadata {
+  invitationStatus?: string;
+}
+
 export interface CalendarEvent {
+  displayMetadata?: EventDisplayMetadata;
   id: number;
   user_id: number;
   title: string;

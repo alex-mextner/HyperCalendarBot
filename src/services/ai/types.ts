@@ -363,6 +363,7 @@ export interface TelegramSender {
     userId?: number,
   ): Promise<{ message_id: number }>;
   sendUserPicker?(chatId: number, text: string, requestId: number): Promise<{ message_id: number }>;
+  sendDocument?(chatId: number, document: File, caption: string): Promise<{ message_id: number }>;
   sendPhoto?(chatId: number, photo: File): Promise<{ message_id: number }>;
   pinChatMessage?(chatId: number, messageId: number, options: { disable_notification: boolean }): Promise<true>;
   sendInvitation?(

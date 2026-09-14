@@ -1,3 +1,5 @@
+import type { EventDisplayMetadata } from '../../database/types.ts';
+
 export interface TemplateRenderer<TData> {
   render(data: TData): string;
 }
@@ -14,6 +16,7 @@ export interface Theme {
 }
 
 export interface AgendaEvent {
+  displayMetadata?: EventDisplayMetadata;
   id: number;
   title: string;
   startMinutes: number; // minutes since midnight in user TZ
@@ -41,6 +44,8 @@ export interface DailyAgendaData {
 }
 
 export interface MiniEvent {
+  location?: string;
+  displayMetadata?: EventDisplayMetadata;
   title: string;
   startMinutes: number;
   endMinutes: number;
@@ -67,6 +72,7 @@ export interface WeeklyOverviewData {
 }
 
 export interface EventCardData {
+  displayMetadata?: EventDisplayMetadata;
   title: string;
   dateFormatted: string;
   timeFormatted: string;

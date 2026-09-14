@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test';
 import { handleMonth } from '../../../src/bot/commands/month.ts';
+import { png } from '../../fixtures/png.ts';
 
 const user = { telegram_id: 100, language: 'en' as const, timezone: 'UTC' };
 const userRu = { telegram_id: 100, language: 'ru' as const, timezone: 'UTC' };
@@ -112,7 +113,7 @@ describe('handleMonth', () => {
       bot: { api: { pinChatMessage, sendMessage: mock(() => Promise.resolve()) } },
     };
     const svc = makeEventService();
-    const renderService = { renderDirect: mock(() => Promise.resolve(Buffer.from(''))) };
+    const renderService = { renderDirect: mock(() => Promise.resolve(png())) };
 
     // yearMonth undefined -> triggers image render (only on initial /month command)
     await handleMonth(ctx as never, svc as never, undefined, renderService as never);
