@@ -26,6 +26,26 @@ function groupMemberAnySql(alias: string): string {
   ))`;
 }
 
+export const EVENT_UPDATE_FIELDS = [
+  'title',
+  'description',
+  'category',
+  'start_at',
+  'end_at',
+  'all_day',
+  'timezone',
+  'location',
+  'recurrence_rule',
+  'recurrence_end_at',
+  'reminder_overrides',
+  'resolved_address',
+  'latitude',
+  'longitude',
+  'google_maps_url',
+  'location_verified',
+  'venue_name',
+] satisfies readonly (keyof UpdateEventData)[];
+
 export class EventRepository {
   /**
    * Tables that `cascadeCleanupChildren` should wipe when a parent event
@@ -291,30 +311,11 @@ export class EventRepository {
   }
 
   private buildUpdateQuery(data: UpdateEventData): { fields: string[]; values: SQLQueryBindings[] } {
-    const ALLOWED_COLUMNS = new Set([
-      'title',
-      'description',
-      'category',
-      'start_at',
-      'end_at',
-      'all_day',
-      'timezone',
-      'location',
-      'recurrence_rule',
-      'recurrence_end_at',
-      'reminder_overrides',
-      'resolved_address',
-      'latitude',
-      'longitude',
-      'google_maps_url',
-      'location_verified',
-      'venue_name',
-    ]);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
 
     for (const [key, value] of Object.entries(data)) {
-      if (!ALLOWED_COLUMNS.has(key)) continue;
+      if (!EVENT_UPDATE_FIELDS.some((field) => field === key)) continue;
       if (value !== undefined) {
         fields.push(`${key} = ?`);
         values.push(key === 'all_day' ? (value ? 1 : 0) : value);

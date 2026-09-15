@@ -1,4 +1,4 @@
-import { type Lang, t } from '../../../config/constants.ts';
+import { type Lang, t, toLang } from '../../../config/constants.ts';
 import type {
   EventParticipant,
   Invitation,
@@ -73,7 +73,7 @@ export function handleShareEvent(ctx: AgentContext, input: ShareEventInput): Too
 
 export async function handleSendInvitation(ctx: AgentContext, input: SendInvitationInput): Promise<ToolResult> {
   if (!ctx.sharing?.invitationService) {
-    return { success: false, error: 'Invitations are not configured.' };
+    return { success: false, mutationState: 'not_applied', error: 'Invitations are not configured.' };
   }
 
   let inviteeId = input.invitee_id;
@@ -83,7 +83,11 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   // Resolve invitee_id when only username provided
   if (!inviteeId && inviteeUsername) {
     if (!ctx.resolveUsername) {
-      return { success: false, error: 'Cannot resolve @username: username resolution is not available.' };
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: 'Cannot resolve @username: username resolution is not available.',
+      };
     }
     try {
       const resolved = await ctx.resolveUsername(inviteeUsername);
@@ -102,13 +106,18 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       deliveryLogger.error({ err, username: inviteeUsername }, 'Failed to resolve username');
       return {
         success: false,
+        mutationState: 'not_applied',
         error: `Failed to resolve @${inviteeUsername}. Try using find_user or pick_users instead.`,
       };
     }
   }
 
   if (!inviteeId) {
-    return { success: false, error: 'Either invitee_id or invitee_username must be provided.' };
+    return {
+      success: false,
+      mutationState: 'not_applied',
+      error: 'Either invitee_id or invitee_username must be provided.',
+    };
   }
 
   const result = ctx.sharing.invitationService.sendInvitation(
@@ -119,7 +128,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
   );
 
   if (!result.success) {
-    return { success: false, error: result.error };
+    return { success: false, mutationState: 'not_applied', error: result.error };
   }
 
   const invitation = result.invitation!;
@@ -175,7 +184,21 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
 
   return {
     success: true,
-    output: t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId),
+    mutationState: 'confirmed',
+    effect: {
+      kind: 'invitation',
+      delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+    },
+    output: [
+      ...(ctx.isGroup
+        ? []
+        : [t(ctx.user.language).aiTools.sharing.invitationCreated(invitation.id, input.event_id, inviteeId)]),
+      delivery.delivered
+        ? t(toLang(ctx.user.language)).writeOutcomes.invitationDelivered
+        : delivery.viaDeepLink
+          ? t(toLang(ctx.user.language)).writeOutcomes.invitationManual
+          : t(toLang(ctx.user.language)).writeOutcomes.invitationFailed,
+    ].join('\n'),
     agentHint: delivery.delivered
       ? 'The invitation was delivered to the invitee via bot API or MTProto. Tell the user it is sent.'
       : delivery.viaDeepLink
@@ -261,6 +284,10 @@ export async function handleResendInvitation(
     });
     return {
       success: true,
+      effect: {
+        kind: 'invitation',
+        delivery: delivery.delivered ? 'delivered' : delivery.viaDeepLink ? 'manual_forward' : 'failed',
+      },
       output: t(ctx.user.language).aiTools.sharing.invitationReminderQueued(invitation.invitee_id),
       agentHint: delivery.delivered
         ? 'The invitation reminder was delivered to the invitee. Tell the user it is sent.'

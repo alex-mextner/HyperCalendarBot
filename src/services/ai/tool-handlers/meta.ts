@@ -1,4 +1,4 @@
-import { t } from '../../../config/constants.ts';
+import { t, toLang } from '../../../config/constants.ts';
 import { logger } from '../../../utils/logger.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
 
@@ -77,7 +77,11 @@ export async function handleAskUser(
     const optionText = input.options.map((o, i) => `${i + 1}. ${o}`).join(', ');
     return {
       success: true,
-      output: `${input.question} Options: ${optionText}`,
+      output: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(input.question, optionText),
+      awaitingInput: {
+        kind: 'speech',
+        question: t(toLang(ctx.user.language)).writeOutcomes.spokenQuestion(input.question, optionText),
+      },
       stopLoop: true,
     };
   }
@@ -96,6 +100,7 @@ export async function handleAskUser(
   return {
     success: true,
     output: t(ctx.user.language).aiTools.meta.questionSent,
+    awaitingInput: { kind: 'chat' },
     stopLoop: true,
   };
 }
@@ -115,7 +120,12 @@ export async function handlePickUsers(
     metaLogger.error({ err }, 'Failed to send user picker');
     return { success: false, error: 'PICK_USERS_DELIVERY_FAILED: failed to send the user picker.' };
   }
-  return { success: true, output: t(ctx.user.language).aiTools.meta.userPickerSent, stopLoop: true };
+  return {
+    success: true,
+    output: t(ctx.user.language).aiTools.meta.userPickerSent,
+    awaitingInput: { kind: 'chat' },
+    stopLoop: true,
+  };
 }
 handlePickUsers.meta = { skipActionLog: true } satisfies ToolHandlerMeta;
 
