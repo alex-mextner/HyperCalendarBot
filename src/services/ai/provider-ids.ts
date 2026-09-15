@@ -11,6 +11,6 @@
  * list, so a provider added here becomes nameable in AI_SMART_CHAIN with no
  * second edit — and one that is not here cannot be named by accident.
  */
-export const PROVIDER_IDS = ['zai', 'groq', 'gemini', 'hf'] as const;
+export const PROVIDER_IDS = ['zai', 'groq', 'gemini', 'hf', 'mimo'] as const;
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];

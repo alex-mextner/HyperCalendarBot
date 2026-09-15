@@ -53,6 +53,7 @@ interface ModelPreferenceTable {
   groq: ProviderPreferences;
   gemini: ProviderPreferences;
   hf: ProviderPreferences;
+  mimo: ProviderPreferences;
 }
 
 /**
@@ -71,6 +72,7 @@ const PREFERRED_MODELS: ModelPreferenceTable = {
   },
   gemini: { smart: [], fast: [] },
   hf: { smart: [], fast: [] },
+  mimo: { smart: [], fast: [] },
 };
 
 /** Model ids that cannot serve a chat completion, matched case-insensitively. */

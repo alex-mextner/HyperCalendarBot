@@ -39,8 +39,8 @@ describe('loadConfig', () => {
   });
 
   describe('provider chain order', () => {
-    const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
-    const FAST_DEFAULT: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+    const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq', 'mimo'];
+    const FAST_DEFAULT: ProviderId[] = ['zai', 'hf', 'gemini', 'groq', 'mimo'];
 
     test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
       const config = loadConfig();

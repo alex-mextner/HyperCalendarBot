@@ -610,6 +610,7 @@ function envNames(provider: string): ProviderEnvNames {
   const family = providerFamily(provider);
   if (family.startsWith('z.ai')) return { apiKey: 'ZAI_API_KEY', model: 'ZAI_MODEL / ZAI_FAST_MODEL' };
   if (family.startsWith('groq')) return { apiKey: 'GROQ_API_KEY', model: 'GROQ_MODEL / GROQ_FAST_MODEL' };
+  if (family.startsWith('mimo')) return { apiKey: 'MIMO_API_KEY', model: 'MIMO_MODEL / MIMO_FAST_MODEL' };
   if (family.startsWith('gemini')) return { apiKey: 'GEMINI_API_KEY', model: 'GEMINI_MODEL / GEMINI_FAST_MODEL' };
   if (family.startsWith('hf')) return { apiKey: 'HF_TOKEN', model: 'HF_MODEL / HF_FAST_MODEL' };
   return { apiKey: 'the provider API key', model: 'the configured model id' };

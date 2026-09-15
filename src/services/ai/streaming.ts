@@ -2,8 +2,8 @@
 // Unified AI streaming round with automatic provider fallback.
 //
 // Two chains, selected via options.fast:
-//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Groq ${GROQ_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}
-//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL}
+//   SMART_CHAIN (main): z.ai ${ZAI_MODEL}      → Groq ${GROQ_MODEL}      → Gemini ${GEMINI_MODEL}      → HF ${HF_MODEL}      → MiMo ${MIMO_MODEL}
+//   FAST_CHAIN:          z.ai ${ZAI_FAST_MODEL} → Groq ${GROQ_FAST_MODEL} → Gemini ${GEMINI_FAST_MODEL} → HF ${HF_FAST_MODEL} → MiMo ${MIMO_FAST_MODEL}
 //
 // Callers that need live updates (agent.ts) pass `onTextDelta`/`onToolCallStart` callbacks.
 // Callers that just want the final text (validator, intent-learner, city-resolver,
@@ -18,7 +18,7 @@ import {
   reportProviderFailure,
 } from '../../utils/ai-provider-alert.ts';
 import { logger, logOnce } from '../../utils/logger.ts';
-import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
+import { geminiClient, groqClient, hfClient, mimoClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
@@ -337,6 +337,7 @@ export const providerClients = {
   groq: groqClient,
   gemini: geminiClient,
   hf: hfClient,
+  mimo: mimoClient,
 };
 
 const PROVIDER_LABELS: Record<ProviderId, string> = {
@@ -344,6 +345,7 @@ const PROVIDER_LABELS: Record<ProviderId, string> = {
   groq: 'Groq',
   gemini: 'Gemini',
   hf: 'HF',
+  mimo: 'MiMo',
 };
 
 /**
@@ -434,6 +436,7 @@ function buildSmartChain(): ProviderSlot[] {
     groq: { model: cfg.GROQ_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_MODEL, apiKey: cfg.GEMINI_API_KEY },
     hf: { model: cfg.HF_MODEL, apiKey: cfg.HF_TOKEN },
+    mimo: { model: cfg.MIMO_MODEL, apiKey: cfg.MIMO_API_KEY },
   });
 }
 
@@ -444,6 +447,7 @@ function buildFastChain(): ProviderSlot[] {
     groq: { model: cfg.GROQ_FAST_MODEL, apiKey: cfg.GROQ_API_KEY },
     gemini: { model: cfg.GEMINI_FAST_MODEL, apiKey: cfg.GEMINI_API_KEY },
     hf: { model: cfg.HF_FAST_MODEL, apiKey: cfg.HF_TOKEN },
+    mimo: { model: cfg.MIMO_FAST_MODEL, apiKey: cfg.MIMO_API_KEY },
   });
 }
 
@@ -505,8 +509,8 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
  * (used by validator, intent-learner, city-resolver, tts-translation).
  *
  * Chains:
- *   fast=false → z.ai ZAI_MODEL      → Groq GROQ_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
- *   fast=true  → z.ai ZAI_FAST_MODEL → Groq GROQ_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL
+ *   fast=false → z.ai ZAI_MODEL      → Groq GROQ_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL      → MiMo MIMO_MODEL
+ *   fast=true  → z.ai ZAI_FAST_MODEL → Groq GROQ_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL → MiMo MIMO_FAST_MODEL
  *
  * Fallback policy: ANY provider error moves on to the next slot. A 400/401/403/404
  * says that provider cannot serve this request — it never says the request is
