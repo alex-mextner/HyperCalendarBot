@@ -27,14 +27,13 @@ beforeEach(() => {
 });
 
 describe('what a failure implies', () => {
-  // The stated reset is a day away; trusting it literally would bench the
-  // provider past any point where a stale memory is still evidence.
-  test('a stated reset is trusted only up to an hour', () => {
+  test('an explicit quota reset is honoured instead of retrying every hour', () => {
     const block = noteFailureForEligibility('zai', 'smart', false, 429, ZAI_QUOTA, undefined, NOW);
+    const resetAt = Date.parse('2026-09-03T21:15:09Z');
     expect(block?.scope).toBe('all');
-    expect(block?.untilMs).toBe(NOW + 60 * 60 * 1000);
-    expect(isBlocked('zai', 'smart', false, NOW + 59 * 60 * 1000)).toBe(true);
-    expect(isBlocked('zai', 'smart', false, NOW + 61 * 60 * 1000)).toBe(false);
+    expect(block?.untilMs).toBe(resetAt);
+    expect(isBlocked('zai', 'smart', false, resetAt - 1000)).toBe(true);
+    expect(isBlocked('zai', 'smart', false, resetAt + 1000)).toBe(false);
   });
 
   test('a Retry-After header wins over the prose', () => {

@@ -14,9 +14,9 @@
 //   • A skip is not a failure. Nothing here touches the outage records the
 //     readiness endpoint and the admin alerting read — those must keep saying
 //     what actually happened, and silence is not health.
-//   • A block is bounded. The deadline the provider states is trusted only up
-//     to an hour, and anything vaguer gets two minutes: a cooldown that is too
-//     short costs one wasted request, one that is too long is an incident.
+//   • A block is bounded. An explicit provider reset is trusted (up to 32 days)
+//     so a weekly/monthly cap is not retried every hour; a vague rate limit still
+//     gets only two minutes because guessing long is the expensive mistake.
 //   • A block never empties the chain. If every provider is blocked the request
 //     is attempted anyway — a wasted round trip beats no answer at all.
 
@@ -26,8 +26,10 @@ import type { ProviderId } from './provider-ids.ts';
 
 const eligibilityLogger = logger.child({ module: 'ai-eligibility' });
 
-/** Longest a stated reset time is trusted. Beyond it, the state goes stale unnoticed. */
-const MAX_BLOCK_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Longest an explicit provider reset is trusted. Covers monthly billing windows
+ * while still bounding damage from a malformed far-future timestamp. */
+const MAX_EXPLICIT_BLOCK_MS = 32 * DAY_MS;
 /** Applied when the provider says it is rate-limited but not when it recovers. */
 const VAGUE_BLOCK_MS = 2 * 60 * 1000;
 /** How long a size rejection stands. The catalog changes only on deploy. */
@@ -115,9 +117,13 @@ function retryAfterMs(headers: unknown, now: number): number | null {
  * provider for hours. A duration that comes out negative or absurd is discarded.
  */
 function statedResetMs(message: string, now: number): number | null {
-  const stated = message.match(/reset at (\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/);
+  const stated = message.match(
+    /(?:reset|restored)(?:\s+\w+){0,4}\s+(?:at|on)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)/i,
+  );
   if (!stated?.[1]) return null;
-  const parsed = Date.parse(`${stated[1].replace(' ', 'T')}Z`);
+  const iso =
+    stated[1].includes('T') || stated[1].includes(' ') ? `${stated[1].replace(' ', 'T')}Z` : `${stated[1]}T00:00:00Z`;
+  const parsed = Date.parse(iso);
   if (Number.isNaN(parsed)) return null;
   const duration = parsed - now;
   return duration > 0 ? duration : null;
@@ -171,7 +177,7 @@ export function noteFailureForEligibility(
     };
   } else if (isQuotaExhausted(status, message)) {
     const stated = retryAfterMs(headers, now) ?? statedResetMs(message, now);
-    const duration = stated === null ? VAGUE_BLOCK_MS : Math.min(stated, MAX_BLOCK_MS);
+    const duration = stated === null ? VAGUE_BLOCK_MS : Math.min(stated, MAX_EXPLICIT_BLOCK_MS);
     block = {
       untilMs: now + duration,
       scope: 'all',
