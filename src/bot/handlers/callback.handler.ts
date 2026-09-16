@@ -86,11 +86,21 @@ type HandlerFn = (
 /**
  * Parse ai_btn payload into answer text and optional group restriction.
  * Payload format: "{text}" (private) or "{userId}:{text}" (group).
+ *
+ * The format is intentionally interpreted with chat context. Without that, a
+ * perfectly valid private answer such as "19:00" looks exactly like the legacy
+ * group prefix "19:<answer>" and gets truncated to "00". Group callbacks are
+ * the only place where a numeric prefix has authorization meaning.
  */
-export function parseAiBtnPayload(payload: string): { answerText: string; restrictedToUserId?: number } {
-  const colon = payload.indexOf(':');
-  if (colon !== -1 && /^\d+$/.test(payload.slice(0, colon))) {
-    return { answerText: payload.slice(colon + 1), restrictedToUserId: Number(payload.slice(0, colon)) };
+export function parseAiBtnPayload(
+  payload: string,
+  allowUserRestriction = false,
+): { answerText: string; restrictedToUserId?: number } {
+  if (allowUserRestriction) {
+    const colon = payload.indexOf(':');
+    if (colon !== -1 && /^\d+$/.test(payload.slice(0, colon))) {
+      return { answerText: payload.slice(colon + 1), restrictedToUserId: Number(payload.slice(0, colon)) };
+    }
   }
   return { answerText: payload };
 }
@@ -1052,7 +1062,7 @@ export function createCallbackHandler(
   // AI ask_user button responses — trigger AI continuation
   dispatch.set('ai_btn', async (ctx, _payload, _parts, user, data) => {
     const firstColon = data.indexOf(':');
-    const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1));
+    const { answerText, restrictedToUserId } = parseAiBtnPayload(data.slice(firstColon + 1), isGroup(ctx));
     const lang = (user.language ?? 'en') as Lang;
 
     // In groups, only the user who triggered the question can answer
