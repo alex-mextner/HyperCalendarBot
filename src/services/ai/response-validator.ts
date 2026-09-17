@@ -20,6 +20,14 @@ const MAX_USER_MESSAGE_CHARS = 500;
 /** Cap for the assistant response we show the validator. */
 const MAX_RESPONSE_CHARS = 2000;
 
+const SCHEDULE_READ_TOOLS = new Set(['get_events', 'search_events', 'get_upcoming', 'get_event', 'get_free_slots']);
+const CALENDAR_COMPLETENESS_PATTERNS = [
+  /\b(?:nothing|no(?:thing)? else)\b.{0,80}\b(?:scheduled|planned|calendar|events?)\b/i,
+  /\b(?:no|zero)\b.{0,40}\b(?:events?|appointments?|plans?)\b/i,
+  /(?:больше\s+ничего|ничего\s+больше|ничего).{0,60}(?:не\s+)?заплан/i,
+  /(?:нет|не\s+остал(?:ось|ось)).{0,40}(?:событ|встреч|дел|план)/i,
+];
+
 /**
  * Injection point for tests. Same signature as aiStreamRound — tests can
  * pass a scripted impl to avoid real network calls from inside the validator.
@@ -75,6 +83,23 @@ interface ValidationInput {
   response: string;
 }
 
+function hasScheduleRead(toolCalls: string[]): boolean {
+  return toolCalls.some((tool) => SCHEDULE_READ_TOOLS.has(tool));
+}
+
+function claimsCompleteOrEmptySchedule(response: string): boolean {
+  return CALENDAR_COMPLETENESS_PATTERNS.some((pattern) => pattern.test(response));
+}
+
+/**
+ * Keep the normal fast path after tool-backed writes, but re-enable validation
+ * when the final prose claims knowledge that those tools did not provide.
+ */
+export function shouldValidateResponse(toolCalls: string[], response: string): boolean {
+  if (toolCalls.length === 0) return true;
+  return !hasScheduleRead(toolCalls) && claimsCompleteOrEmptySchedule(response);
+}
+
 export type ValidationResult = { approved: true } | { approved: false; reason: string };
 
 /**
@@ -88,6 +113,17 @@ export async function validateResponse(
   input: ValidationInput,
   streamImpl: StreamImpl = aiStreamRound,
 ): Promise<ValidationResult> {
+  if (
+    input.toolCalls.length > 0 &&
+    !hasScheduleRead(input.toolCalls) &&
+    claimsCompleteOrEmptySchedule(input.response)
+  ) {
+    return {
+      approved: false,
+      reason: 'Claimed the complete/empty schedule without a schedule-read tool',
+    };
+  }
+
   const toolCallsSummary = input.toolCalls.length > 0 ? input.toolCalls.join(', ') : '(none — no tools were called)';
 
   // Both user-influenced strings are wrapped in clearly-delimited XML-style
