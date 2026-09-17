@@ -864,6 +864,84 @@ describe('createMessageHandler', () => {
   });
 });
 
+// ─── aiRetryQueue/aiRetryJobStore lazy-read invariant (issue #125) ──────────────
+//
+// msgDeps.aiRetryQueue and msgDeps.aiRetryJobStore are assigned in src/index.ts's
+// REDIS_URL block, which runs AFTER createBot() has already returned and registered its
+// terminal `.on('message', (ctx) => createMessageHandler(msgDeps)(ctx))` handler.
+// createMessageHandler(deps) reads deps.aiRetryQueue/deps.aiRetryJobStore synchronously,
+// once, at the moment IT is called — so the only reason a message arriving well after the
+// REDIS_URL block runs still sees the queue/store is that bot/index.ts calls
+// createMessageHandler(msgDeps) FRESH on every incoming message rather than memoizing the
+// returned handler once at construction time.
+describe('createMessageHandler aiRetryQueue/aiRetryJobStore invariant', () => {
+  test('constructing createMessageHandler(deps) fresh after aiRetryQueue/aiRetryJobStore are assigned wires up retry cancellation', async () => {
+    const deps = makeDeps();
+
+    let capturedRetryEnqueue: ((msg: string) => Promise<void>) | undefined;
+    (deps as never as { agent: { run: ReturnType<typeof mock> } }).agent = {
+      run: mock(async (agentCtx: { retryEnqueue?: (msg: string) => Promise<void> }) => {
+        capturedRetryEnqueue = agentCtx.retryEnqueue;
+      }),
+    };
+
+    // Simulates src/index.ts's REDIS_URL block mutating the same shared deps object after
+    // createBot() has already returned — deps.aiRetryQueue/aiRetryJobStore do not exist yet
+    // when this test starts.
+    const addDelayed = mock(async () => 'job-1');
+    const jobStoreSet = mock(async () => {});
+    (deps as { aiRetryQueue?: unknown }).aiRetryQueue = { addDelayed, removeJobById: mock(async () => {}) };
+    (deps as { aiRetryJobStore?: unknown }).aiRetryJobStore = {
+      get: mock(async () => null),
+      set: jobStoreSet,
+      del: mock(async () => {}),
+      delIfMatch: mock(async () => {}),
+    };
+
+    // This mirrors the real, safe production pattern: construct the handler AFTER the
+    // late assignment (bot/index.ts does this implicitly by calling createMessageHandler
+    // fresh for every message, all of which arrive long after startup finishes).
+    const handler = createMessageHandler(deps as never);
+    await handler(makeCtx() as never);
+    await capturedRetryEnqueue?.('please retry');
+
+    expect(addDelayed).toHaveBeenCalledTimes(1);
+    expect(jobStoreSet).toHaveBeenCalledTimes(1);
+  });
+
+  test('memoizing createMessageHandler(deps) once before aiRetryQueue/aiRetryJobStore are assigned silently drops retry cancellation — the exact regression this guards against', async () => {
+    const deps = makeDeps();
+
+    let capturedRetryEnqueue: ((msg: string) => Promise<void>) | undefined;
+    (deps as never as { agent: { run: ReturnType<typeof mock> } }).agent = {
+      run: mock(async (agentCtx: { retryEnqueue?: (msg: string) => Promise<void> }) => {
+        capturedRetryEnqueue = agentCtx.retryEnqueue;
+      }),
+    };
+
+    // Anti-pattern: build the handler once, e.g. by hoisting
+    // `const messageHandler = createMessageHandler(msgDeps);` out of the per-message
+    // closure in bot/index.ts and registering it directly with `.on('message', messageHandler)`.
+    const memoizedHandler = createMessageHandler(deps as never);
+
+    const addDelayed = mock(async () => 'job-1');
+    (deps as { aiRetryQueue?: unknown }).aiRetryQueue = { addDelayed, removeJobById: mock(async () => {}) };
+    (deps as { aiRetryJobStore?: unknown }).aiRetryJobStore = {
+      get: mock(async () => null),
+      set: mock(async () => {}),
+      del: mock(async () => {}),
+      delIfMatch: mock(async () => {}),
+    };
+
+    await memoizedHandler(makeCtx() as never);
+
+    // The memoized handler's retry wiring was bound before aiRetryQueue existed, so no
+    // retryEnqueue callback is even attached to the agent context — proving why
+    // createMessageHandler must be reconstructed per message, never cached.
+    expect(capturedRetryEnqueue).toBeUndefined();
+  });
+});
+
 describe('toEventSummary', () => {
   const BASE_EVENT = {
     id: 1,
