@@ -653,6 +653,34 @@ describe('handleCalculate', () => {
     expect(r.output).toBe('2026-03-18T23:05:00.000Z');
   });
 
+  test('requires an explicit timezone for datetime arithmetic', () => {
+    const r = handleCalculate({ expression: '2026-09-16T17:40 - 2hours' });
+    expect(r.success).toBe(false);
+    expect(r.error).toContain('explicit Z/offset');
+    expect(r.error).toContain('2026-09-17T10:49:00+02:00 + 2hours');
+  });
+
+  test('production-invalid datetime forms return a self-correcting ISO example', () => {
+    const invalid = [
+      '2026-09-16 17:40 - 2 hours',
+      '2026-09-17 18:30 - 2 hours',
+      '2026-09-16 14:00 UTC+2 to UTC',
+      '2026-09-17 10:49 + 2 hours to UTC',
+    ];
+    for (const expression of invalid) {
+      const r = handleCalculate({ expression });
+      expect(r.success).toBe(false);
+      expect(r.error).toContain('explicit Z/offset');
+      expect(r.error).toContain('do not append "to UTC"');
+    }
+  });
+
+  test('canonical local datetime arithmetic uses the explicit offset and returns UTC', () => {
+    const r = handleCalculate({ expression: '2026-09-17T10:49:00+02:00 + 2hours' });
+    expect(r.success).toBe(true);
+    expect(r.output).toBe('2026-09-17T10:49:00.000Z');
+  });
+
   test('adds days to ISO date', async () => {
     const r = handleCalculate({ expression: '2026-03-18 + 7days' });
     expect(r.success).toBe(true);
