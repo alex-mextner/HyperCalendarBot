@@ -102,7 +102,7 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}
-            chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh
+            chmod +x scripts/backup-db.sh scripts/healthcheck-alert.sh scripts/prepare-runtime-dirs.sh
             echo "$GH_TOKEN" | docker login ghcr.io -u github --password-stdin
             # Clean up old images to prevent "no space left on device"
             docker image prune -f
@@ -118,13 +118,12 @@ jobs:
                 ghcr.io/${{ env.IMAGE_NAME }}:latest bun scripts/generate-stress-dict.ts
               rm -rf /tmp/russian-dictionary
             fi
-            # Ensure data dir is owned by botuser (uid=999) — docker run --rm above
-            # creates files as root, causing SQLITE_READONLY on startup.
-            chown -R 999:999 data/
+            # Bind mounts override image ownership. Prepare both writable runtime
+            # directories for botuser (uid/gid 999) before restarting the container.
+            ./scripts/prepare-runtime-dirs.sh .
 
             echo "📜 Rotating logs before restart..."
             STAMP=$(date +%Y-%m-%d_%H-%M-%S)
-            mkdir -p logs
             for f in healthcheck.log backup.log; do
               if [ -s "logs/$f" ]; then
                 mv "logs/$f" "logs/${f%.log}_${STAMP}.log"
