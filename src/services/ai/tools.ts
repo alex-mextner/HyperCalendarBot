@@ -752,7 +752,7 @@ const toolDefinitions: ToolDefinition[] = [
   {
     name: 'calculate',
     description:
-      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration).',
+      'Arithmetic calculator. ALWAYS use this tool for any math — never compute in your head. Supports: numbers (+,-,*,/), HH:MM ± N min/hours, ISO datetime ± N min/hours/days/weeks/months/years, YYYY-MM-DD ± N days/weeks/months/years, ISO datetime - ISO datetime (returns human-readable duration). For local datetimes, ISO means a T separator plus an explicit Z/offset; include the user offset before doing arithmetic (example: 2026-09-17T10:49:00+02:00 + 2hours). Do not write offset-free YYYY-MM-DD HH:MM, UTC+2 to UTC, or append "to UTC"; results are already returned in UTC.',
     input_schema: {
       type: 'object' as const,
       properties: {
