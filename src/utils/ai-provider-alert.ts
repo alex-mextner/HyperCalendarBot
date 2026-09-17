@@ -23,11 +23,13 @@
 //    different fixes and must not silence each other. The previous code used one
 //    7-day window per provider: one alert, then a week of silence no matter how
 //    the outage changed shape.
-//  * Bursts are coalesced, not dropped. The first failure alerts immediately;
-//    repeats inside the 10-minute digest window are counted and reported as a
-//    single follow-up ("+N more failures"). 10 minutes is long enough to swallow
-//    the retry storm from a handful of user messages, short enough that the admin
-//    still learns the scale while acting on the first alert.
+//  * Hard quota exhaustion is special: the first failure alerts immediately,
+//    then stays silent until recovery. A known weekly/monthly cap does not become
+//    more actionable when repeated; the reset time, when the provider supplies
+//    one, is included in that first alert. Other persistent failures still use
+//    the digest/escalation policy below.
+//  * Bursts of non-quota failures are coalesced, not dropped. Repeats inside the
+//    10-minute digest window are counted and reported as a single follow-up.
 //  * An unresolved outage escalates instead of repeating or disappearing:
 //    re-notification after 15 min, then 1 h, then 4 h, then every 12 h. The first
 //    step confirms "still broken, not a blip" while the operator is likely still
@@ -136,6 +138,16 @@ const AUTH_PATTERNS = [
 
 function matchesAny(lowerMessage: string, patterns: string[]): boolean {
   return patterns.some((pattern) => lowerMessage.includes(pattern));
+}
+
+/** Provider-reported quota reset timestamp, preserved verbatim because vendors
+ * often omit the timezone. We show what the provider actually promised rather
+ * than silently converting it to the server timezone. */
+function quotaResetHint(message: string): string | null {
+  const match = message.match(
+    /(?:reset|restored)(?:\s+\w+){0,4}\s+(?:at|on)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?)/i,
+  );
+  return match?.[1] ?? null;
 }
 
 /**
@@ -487,9 +499,19 @@ function noteFailure(
 
   // An alert the ceiling held back must not count as announced, otherwise the
   // outage would silently move on to the escalation ladder having said nothing.
+  // A hard quota has exactly one operator action: wait for the stated reset
+  // (or top up). Repeating the same warning every few hours adds noise without
+  // new information. Recovery is still announced by resolveOutage().
+  if (state.failureClass === 'quota_exhausted' && state.alertsSent > 0) return;
+
   if (shouldAlertNow(state, now) && sendOutageAlert(state, now)) return;
   state.suppressedSinceAlert += 1;
-  scheduleDigest(key, state);
+  // If the first quota alert was held back by the hourly ceiling, keep a digest
+  // timer so the incident is eventually announced. Once announced, quota
+  // failures never schedule follow-ups.
+  if (state.failureClass !== 'quota_exhausted' || state.alertsSent === 0) {
+    scheduleDigest(key, state);
+  }
 }
 
 /**
@@ -636,12 +658,16 @@ function renderProviderAlert(state: OutageState, now: number): string {
     state.alertsSent > 0
       ? `\nStill broken after ${formatDuration(now - state.firstSeenAt)} — ${countOf(state.occurrences, 'failure')} so far.`
       : '';
+  const reset = state.failureClass === 'quota_exhausted' ? quotaResetHint(failure?.message ?? '') : null;
   return [
     headline,
     '',
     `Provider: <code>${escapeHtml(state.provider)}</code>`,
     failure?.status ? `HTTP status: ${failure.status}` : 'HTTP status: none (network or client-side failure)',
     `Error: <code>${escapeHtml(truncate(failure?.message ?? '', 300))}</code>`,
+    ...(reset
+      ? [`Quota reset: <code>${escapeHtml(reset)}</code> <i>(provider-reported; timezone as supplied)</i>`]
+      : []),
     `Do this: ${escapeHtml(actionHint(state.provider, state.failureClass))}`,
     `The chain fell back to the next provider, so users may still be answered.${repeat}`,
   ].join('\n');
@@ -651,7 +677,9 @@ function renderChainAlert(state: OutageState, now: number): string {
   const lines = state.failures.map((failure) => {
     const failureClass = classifyProviderFailure(failure);
     const status = failure.status ? `HTTP ${failure.status}` : 'no HTTP status';
-    return `• <code>${escapeHtml(failure.provider)}</code> — ${CLASS_HEADLINE[failureClass]} (${status}): <code>${escapeHtml(truncate(failure.message, 200))}</code>`;
+    const reset = failureClass === 'quota_exhausted' ? quotaResetHint(failure.message) : null;
+    const resetSuffix = reset ? `; reset <code>${escapeHtml(reset)}</code>` : '';
+    return `• <code>${escapeHtml(failure.provider)}</code> — ${CLASS_HEADLINE[failureClass]} (${status})${resetSuffix}: <code>${escapeHtml(truncate(failure.message, 200))}</code>`;
   });
   const actions = chainActions(state.failures);
   const repeat =
