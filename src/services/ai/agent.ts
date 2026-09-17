@@ -10,7 +10,7 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
-import { validateResponse } from './response-validator.ts';
+import { shouldValidateResponse, validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
@@ -894,18 +894,25 @@ export class CalendarBotAgent {
         currentMessages = [...currentMessages, result.assistantMessage, ...toolResultMessages];
       }
 
-      // Response validation: when no tools were called, verify the response isn't
-      // hallucinated. Always on — cheap via the fast chain, and critical for
-      // calendar correctness. Skip supplementMode (no user-visible output to validate).
+      // Response validation: always validate tool-less prose, plus factual claims
+      // that the tools used in this run cannot support. The deterministic
+      // prefilter keeps ordinary tool-backed writes on the existing fast path.
       const availableTools = getToolDefinitions(ctx.inputMode, ctx.supplementMode);
       let rejected = false;
-      if (availableTools.length > 0 && allToolCalls.length === 0 && !ctx.supplementMode) {
+      if (availableTools.length > 0 && !ctx.supplementMode) {
         // Use the model's actual emitted text, not the writer buffer — tests
         // with scripted stream impls can produce an assistantMessage without
         // calling onTextDelta, so writer.getText() may be empty even when the
         // model did return content.
         const responseText = pendingResponseText.trim();
-        if (responseText && !isSkipText(responseText)) {
+        if (
+          responseText &&
+          !isSkipText(responseText) &&
+          shouldValidateResponse(
+            allToolCalls.map((tc) => tc.name),
+            responseText,
+          )
+        ) {
           const validation = await validateResponse(
             {
               userMessage: ctx.messageText,
