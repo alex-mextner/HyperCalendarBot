@@ -6,8 +6,11 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type OpenAI from 'openai';
+import { botLogger } from '../../utils/logger.ts';
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 min idle → new file
+
+type DebugLogWriteFailure = (operation: 'mkdir' | 'append', target: string, error: unknown) => void;
 
 export type DebugMessage = OpenAI.ChatCompletionMessageParam;
 
@@ -63,6 +66,7 @@ export class AiDebugRunContext {
     supplementMode: boolean,
     messageText: string,
     supplementAutoResponse?: string,
+    private readonly onWriteFailure?: DebugLogWriteFailure,
   ) {
     const ts = new Date().toISOString();
     const userLabel = [`uid:${userId}`, username ? `@${username}` : null, firstName ?? null].filter(Boolean).join(' ');
@@ -153,8 +157,10 @@ export class AiDebugRunContext {
   flush(): void {
     try {
       appendFileSync(this.file, `${this.parts.join('\n')}\n`);
-    } catch {
-      // Debug logging is non-critical — write failures must not crash the agent
+    } catch (error) {
+      // Debug logging is non-critical — write failures must not crash the agent,
+      // but they must be visible or incident evidence silently disappears.
+      this.onWriteFailure?.('append', this.file, error);
     }
   }
 }
@@ -166,11 +172,22 @@ interface SessionEntry {
 
 export class AiDebugLogger {
   private sessions = new Map<number, SessionEntry>();
+  private reportedFailures = new Set<string>();
 
   constructor(
     private readonly enabled: boolean,
     private readonly logsDir: string,
+    private readonly onWriteFailure: DebugLogWriteFailure = (operation, target, error) => {
+      botLogger.warn({ err: error, operation, target }, 'AI debug log write failed');
+    },
   ) {}
+
+  private reportWriteFailure(operation: 'mkdir' | 'append', target: string, error: unknown): void {
+    const key = `${operation}:${target}`;
+    if (this.reportedFailures.has(key)) return;
+    this.reportedFailures.add(key);
+    this.onWriteFailure(operation, target, error);
+  }
 
   /** Explicitly end the session for a chat (called by end_conversation tool). */
   endSession(chatId: number): void {
@@ -190,8 +207,10 @@ export class AiDebugLogger {
     const dir = path.join(this.logsDir, 'chats', String(chatId));
     try {
       mkdirSync(dir, { recursive: true });
-    } catch {
-      // Non-critical — proceed with whatever file path was computed
+    } catch (error) {
+      // Non-critical — proceed so the caller can still run, but report the
+      // evidence-loss condition once for this chat directory.
+      this.reportWriteFailure('mkdir', dir, error);
     }
 
     const ts = new Date().toISOString().replace('T', '_').replace(/:/g, '-').slice(0, 19); // YYYY-MM-DD_HH-MM-SS
@@ -224,6 +243,7 @@ export class AiDebugLogger {
       supplementMode,
       messageText,
       supplementAutoResponse,
+      (operation, target, error) => this.reportWriteFailure(operation, target, error),
     );
   }
 }
