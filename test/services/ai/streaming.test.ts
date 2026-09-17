@@ -1,7 +1,11 @@
 // test/services/ai/streaming.test.ts
 import { describe, expect, test } from 'bun:test';
 import OpenAI from 'openai';
-import { EmptyProviderResponseError, isTransientProviderError } from '../../../src/services/ai/streaming.ts';
+import {
+  EmptyProviderResponseError,
+  isTransientProviderError,
+  preflightRequestFit,
+} from '../../../src/services/ai/streaming.ts';
 
 function makeApiError(status: number, headers?: Record<string, string>): InstanceType<typeof OpenAI.APIError> {
   return new OpenAI.APIError(status, { error: { message: 'boom' } }, `http ${status}`, new Headers(headers ?? {}));
@@ -56,6 +60,33 @@ describe('isTransientProviderError — classifies a failure for logging and the 
 
   test('false for a plain Error', () => {
     expect(isTransientProviderError(new Error('something else'))).toBe(false);
+  });
+});
+
+describe('preflightRequestFit', () => {
+  test('rejects a Groq gpt-oss request that cannot fit even at the optimistic estimator bound', () => {
+    const result = preflightRequestFit('groq', 'openai/gpt-oss-120b', {
+      messages: [{ role: 'user', content: 'x'.repeat(50_000) }],
+      maxTokens: 200,
+    });
+    expect(result).not.toBeNull();
+    expect(result?.conservativeRequestedTokens).toBeGreaterThan(8_000);
+    expect(result?.limitTokens).toBe(8_000);
+  });
+
+  test('keeps a small Groq request eligible', () => {
+    expect(
+      preflightRequestFit('groq', 'openai/gpt-oss-120b', {
+        messages: [{ role: 'user', content: 'What is on my calendar today?' }],
+        maxTokens: 200,
+      }),
+    ).toBeNull();
+  });
+
+  test('does not invent a budget for providers or Groq models whose limit is unknown', () => {
+    const large = { messages: [{ role: 'user' as const, content: 'x'.repeat(50_000) }], maxTokens: 200 };
+    expect(preflightRequestFit('gemini', 'models/gemini-2.5-flash', large)).toBeNull();
+    expect(preflightRequestFit('groq', 'groq/compound', large)).toBeNull();
   });
 });
 
