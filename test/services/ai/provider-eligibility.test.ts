@@ -82,6 +82,16 @@ describe('what a failure implies', () => {
     expect(block?.untilMs).toBe(NOW + 2 * 60 * 1000);
   });
 
+  test('a 402 exhausted balance is not retried on every agent round', () => {
+    const message =
+      'You have depleted your monthly included credits. Purchase pre-paid credits to continue using Inference Providers.';
+    const block = noteFailureForEligibility('hf', 'smart', true, 402, message, undefined, NOW);
+    expect(block?.scope).toBe('all');
+    expect(block?.untilMs).toBe(NOW + 60 * 60 * 1000);
+    expect(isBlocked('hf', 'smart', true, NOW + 59 * 60 * 1000)).toBe(true);
+    expect(isBlocked('hf', 'smart', false, NOW + 61 * 60 * 1000)).toBe(false);
+  });
+
   // A reset time already in the past says nothing about the future.
   test('a stated reset in the past falls back to the short block', () => {
     const stale = 'Limit Exhausted. Your limit will reset at 2026-09-01 10:00:00';

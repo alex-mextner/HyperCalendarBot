@@ -32,6 +32,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_EXPLICIT_BLOCK_MS = 32 * DAY_MS;
 /** Applied when the provider says it is rate-limited but not when it recovers. */
 const VAGUE_BLOCK_MS = 2 * 60 * 1000;
+/** A 402 means the account balance/credits are exhausted, not a burst limit.
+ * Without a reset timestamp, probe at most hourly so a top-up is discovered
+ * without paying the same guaranteed failure on every agent round. */
+const BALANCE_EXHAUSTED_BLOCK_MS = 60 * 60 * 1000;
 /** How long a size rejection stands. The catalog changes only on deploy. */
 const TOO_LARGE_BLOCK_MS = 60 * 60 * 1000;
 
@@ -146,7 +150,7 @@ export function isRequestTooLarge(status: number | undefined, message: string): 
 
 /** True when the provider said its quota or rate limit is spent. */
 export function isQuotaExhausted(status: number | undefined, message: string): boolean {
-  return status === 429 || saysWithoutStatus(status, message, /rate limit|limit exhausted/i);
+  return status === 402 || status === 429 || saysWithoutStatus(status, message, /rate limit|limit exhausted/i);
 }
 
 /**
@@ -177,11 +181,21 @@ export function noteFailureForEligibility(
     };
   } else if (isQuotaExhausted(status, message)) {
     const stated = retryAfterMs(headers, now) ?? statedResetMs(message, now);
-    const duration = stated === null ? VAGUE_BLOCK_MS : Math.min(stated, MAX_EXPLICIT_BLOCK_MS);
+    const duration =
+      stated !== null
+        ? Math.min(stated, MAX_EXPLICIT_BLOCK_MS)
+        : status === 402
+          ? BALANCE_EXHAUSTED_BLOCK_MS
+          : VAGUE_BLOCK_MS;
     block = {
       untilMs: now + duration,
       scope: 'all',
-      reason: stated === null ? 'rate limited, no stated reset' : 'quota spent until the stated reset',
+      reason:
+        stated !== null
+          ? 'quota spent until the stated reset'
+          : status === 402
+            ? 'balance exhausted, no stated reset'
+            : 'rate limited, no stated reset',
     };
   }
 
