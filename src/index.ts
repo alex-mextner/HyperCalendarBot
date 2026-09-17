@@ -656,6 +656,8 @@ if (config.REDIS_URL) {
     db.birthdayMeta,
     db.eventReminders,
     db.notificationPreferences,
+    'scripts/fetch-birthdays.py',
+    () => serviceSessionEnabled,
   );
 
   const { queue: botTasksQueue, worker: botTasksWorker } = createBotTasksQueue({

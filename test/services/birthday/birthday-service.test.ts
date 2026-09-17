@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { beforeEach, expect, test } from 'bun:test';
+import { beforeEach, expect, spyOn, test } from 'bun:test';
 import { migrations } from '../../../src/database/migrations.ts';
 import { BirthdayMetadataRepository } from '../../../src/database/repositories/birthday-metadata.repository.ts';
 import { EventRepository } from '../../../src/database/repositories/event.repository.ts';
@@ -68,6 +68,34 @@ test('shouldSkipSync returns true when recently synced', () => {
 
 test('shouldSkipSync returns false when never synced', () => {
   expect(service.shouldSkipSync(1)).toBe(false);
+});
+
+test('batch sync does not spawn shared MTProto while service identity is unavailable and resumes later', async () => {
+  let serviceIdentityAvailable = false;
+  const gatedService = new BirthdayService(
+    new EventRepository(db),
+    new BirthdayMetadataRepository(db),
+    new EventReminderRepository(db),
+    new NotificationPreferencesRepository(db),
+    'scripts/fetch-birthdays.py',
+    () => serviceIdentityAvailable,
+  );
+  const spawnMock = spyOn(Bun, 'spawn').mockReturnValue({
+    exited: Promise.resolve(0),
+    stdout: new Blob(['{}']).stream(),
+    stderr: new Blob(['']).stream(),
+  } as never);
+  const users = [{ telegram_id: 1, first_name: 'Alice', language: 'ru', timezone: 'UTC' }];
+
+  await gatedService.runBatchSync(users);
+  expect(spawnMock).not.toHaveBeenCalled();
+  expect(gatedService.shouldSkipSync(1)).toBe(false);
+
+  serviceIdentityAvailable = true;
+  await gatedService.runBatchSync(users);
+  expect(spawnMock).toHaveBeenCalledTimes(1);
+  expect(gatedService.shouldSkipSync(1)).toBe(true);
+  spawnMock.mockRestore();
 });
 
 test('findExistingBirthday returns existing personal calendar entry', () => {
