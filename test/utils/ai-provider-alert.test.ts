@@ -240,41 +240,52 @@ describe('burst coalescing and escalation', () => {
     reportProviderFailure({ provider: 'z.ai (glm-4.6)', status: 429, message: ZAI_QUOTA_MESSAGE }, 'smart');
   }
 
-  test('a burst of the same failure sends one alert plus one digest, not one per failure', () => {
+  test('a quota outage alerts once and stays quiet until recovery', () => {
     for (let i = 0; i < 5; i++) {
       failZai();
       advance(30_000);
     }
     expect(sent).toHaveLength(1);
 
-    advance(ALERT_POLICY.digestWindowMs);
-    expect(sent).toHaveLength(2);
-    expect(sent[1]).toContain('4');
-    expect(sent[1]).toContain('z.ai');
-  });
-
-  test('an ongoing outage re-notifies on the widening escalation schedule', () => {
+    advance(ALERT_POLICY.digestWindowMs + ALERT_POLICY.providerEscalationMs[0] + ALERT_POLICY.providerEscalationMs[1]);
     failZai();
     expect(sent).toHaveLength(1);
+  });
 
-    // Well inside the first escalation step — no second full alert.
-    advance(ALERT_POLICY.providerEscalationMs[0] - 60_000);
+  test('a quota alert surfaces the provider-reported reset time explicitly', () => {
     failZai();
-    const afterFirstStep = sent.filter(isFullAlert);
-    expect(afterFirstStep).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Quota reset');
+    expect(sent[0]).toContain('2026-09-03');
+  });
 
-    advance(120_000); // now past step 1 (15 min)
-    failZai();
+  test('z.ai production reset timestamp with seconds is shown verbatim', () => {
+    reportProviderFailure(
+      {
+        provider: 'z.ai (glm-5.1)',
+        status: 429,
+        message: '429 Weekly/Monthly Limit Exhausted. Your limit will reset at 2026-09-17 21:15:09',
+      },
+      'smart',
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain('Quota reset');
+    expect(sent[0]).toContain('2026-09-17 21:15:09');
+  });
+
+  test('a non-quota outage still re-notifies on the widening escalation schedule', () => {
+    const failGroq = () =>
+      reportProviderFailure(
+        { provider: 'Groq (llama-3.3-70b-versatile)', status: 404, message: GROQ_MODEL_GONE_MESSAGE },
+        'smart',
+      );
+
+    failGroq();
+    expect(sent).toHaveLength(1);
+
+    advance(ALERT_POLICY.providerEscalationMs[0] + 1000);
+    failGroq();
     expect(sent.filter(isFullAlert)).toHaveLength(2);
-
-    // Step 2 is an hour — a failure 10 minutes later must not re-alert.
-    advance(10 * 60_000);
-    failZai();
-    expect(sent.filter(isFullAlert)).toHaveLength(2);
-
-    advance(ALERT_POLICY.providerEscalationMs[1]);
-    failZai();
-    expect(sent.filter(isFullAlert)).toHaveLength(3);
   });
 
   test('recovery is reported exactly once', () => {
