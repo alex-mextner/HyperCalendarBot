@@ -64,6 +64,12 @@ function deployProbeTimeoutSeconds(): number {
   return Number(value);
 }
 
+function deployCopiedFiles(): Set<string> {
+  const source = deployWorkflow.match(/^\s*source:\s*(.+)$/m)?.[1];
+  if (!source) throw new Error('deploy.yml has no scp source list');
+  return new Set(source.split(',').map((entry) => entry.trim()));
+}
+
 /** How long the watchdog waits for a readiness answer, in seconds. */
 function probeTimeoutSeconds(): number {
   const value = watchdog.match(/^PROBE_TIMEOUT=(\d+)/m)?.[1];
@@ -118,6 +124,14 @@ describe('Caddy routing', () => {
   test('every readiness probe waits longer than the proxy retries', () => {
     expect(probeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
     expect(deployProbeTimeoutSeconds()).toBeGreaterThan(proxyRetryWindowSeconds());
+  });
+
+  test('the deploy copies every host-side shell script it references', () => {
+    const copied = deployCopiedFiles();
+    const referencedScripts = new Set(
+      [...deployWorkflow.matchAll(/scripts\/[A-Za-z0-9._-]+\.sh/g)].map((match) => match[0]),
+    );
+    for (const script of referencedScripts) expect(copied.has(script)).toBe(true);
   });
 
   // Routing is applied by a reload the deploy cannot fail on (shared server), so

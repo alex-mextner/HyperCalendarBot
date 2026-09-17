@@ -88,7 +88,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
-          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh
+          source: docker-compose.yml,Caddyfile,scripts/backup-db.sh,scripts/healthcheck-alert.sh,scripts/prepare-runtime-dirs.sh
           target: ${{ secrets.DEPLOY_PATH }}
       - uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         env:
