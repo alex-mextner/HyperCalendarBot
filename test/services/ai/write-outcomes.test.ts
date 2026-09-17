@@ -27,6 +27,46 @@ test('invitations distinguish recipients and never use output prose', () => {
   expect(ledger.finalNotice('en')).toBeNull();
 });
 
+test('a delivered invitation does not replace a normal successful final response with execution jargon', () => {
+  const ledger = new WriteOutcomes(WRITE_TOOLS);
+  ledger.record(
+    'send_invitation',
+    { event_id: 1, invitee_id: 2 },
+    {
+      success: true,
+      disposition: 'executed',
+      mutationState: 'confirmed',
+      effect: { kind: 'invitation', delivery: 'delivered' },
+    },
+  );
+  expect(ledger.finalNotice('en')).toBeNull();
+});
+
+test('an interrupted successful run reports facts without the attempt-debug preamble', () => {
+  const ledger = new WriteOutcomes(WRITE_TOOLS);
+  ledger.record(
+    'create_event',
+    { title: 'Walk' },
+    { success: true, disposition: 'executed', mutationState: 'confirmed' },
+  );
+  ledger.record(
+    'send_invitation',
+    { event_id: 1, invitee_id: 2 },
+    {
+      success: true,
+      disposition: 'executed',
+      mutationState: 'confirmed',
+      effect: { kind: 'invitation', delivery: 'delivered' },
+    },
+  );
+  const notice = ledger.finalNotice('ru', false, true) ?? '';
+  expect(notice).toContain('Выполнено: Создание события');
+  expect(notice).toContain('Приглашение доставлено');
+  expect(notice).toContain('Запрос прерван');
+  expect(notice).not.toContain('Это отдельные попытки выполнения');
+  expect(notice).not.toContain('Попытка 1');
+});
+
 test('read and conversation controls do not become failed writes', () => {
   const ledger = new WriteOutcomes(WRITE_TOOLS);
   for (const operation of ['get_event', 'ask_user', 'supplement_skip', 'end_conversation']) {

@@ -77,11 +77,19 @@ export class WriteOutcomes {
 
   finalNotice(language: string, hideTargets = false, interrupted = false): string | null {
     const outcomes = [...this.outcomes.values()];
-    if (
-      !interrupted &&
-      !outcomes.some((outcome) => !outcome.success || (outcome.effect && outcome.effect.kind !== 'event_deleted'))
-    )
-      return null;
+    const needsGuard = outcomes.some(
+      (outcome) =>
+        !outcome.success ||
+        outcome.effect?.kind === 'attendance_declined' ||
+        (outcome.effect?.kind === 'invitation' && outcome.effect.delivery !== 'delivered'),
+    );
+    if (!interrupted && !needsGuard) return null;
+
+    // Attempt framing is useful only when something actually failed/skipped and
+    // a later receipt may correct it. On a clean success (including an
+    // interrupted run where writes already landed) it reads like internal debug
+    // output and replaced the normal conversational answer in production.
+    const frameAttempts = outcomes.some((outcome) => !outcome.success || outcome.disposition === 'skipped');
     const tr = t(toLang(language)).writeOutcomes;
     const lines = outcomes.map(({ operation, target, field, success, disposition, mutationState, effect, attempt }) => {
       const label = Object.hasOwn(tr.operations, operation) ? Reflect.get(tr.operations, operation) : tr.write;
@@ -104,9 +112,9 @@ export class WriteOutcomes {
           disposition === 'skipped' ? tr.skipped : mutationState === 'not_applied' ? tr.notApplied : tr.failed;
         detail = `${status}: ${label}${!hideTargets && target ? ` ${target}` : ''}${fieldLabel}${success ? '' : ` — ${reason}`}`;
       }
-      return `${tr.attempt(attempt)}: ${detail}`;
+      return frameAttempts ? `${tr.attempt(attempt)}: ${detail}` : detail;
     });
-    if (outcomes.length) lines.unshift(tr.attempts);
+    if (frameAttempts && outcomes.length) lines.unshift(tr.attempts);
     if (interrupted) lines.push(tr.interrupted);
     return lines.join('\n') || null;
   }
