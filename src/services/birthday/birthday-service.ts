@@ -39,12 +39,15 @@ export interface BirthdaysForDisplay {
 }
 
 export class BirthdayService {
+  private sharedMtprotoUnavailableLogged = false;
+
   constructor(
     private eventRepo: EventRepository,
     private metaRepo: BirthdayMetadataRepository,
     private reminderRepo: EventReminderRepository,
     private prefsRepo: NotificationPreferencesRepository,
     private fetchScriptPath = 'scripts/fetch-birthdays.py',
+    private sharedMtprotoAvailable: () => boolean = () => true,
   ) {}
 
   shouldSkipSync(userId: number): boolean {
@@ -152,6 +155,18 @@ export class BirthdayService {
   async runBatchSync(
     users: { telegram_id: number; first_name: string | null; language: string; timezone: string }[],
   ): Promise<void> {
+    if (!this.sharedMtprotoAvailable()) {
+      if (!this.sharedMtprotoUnavailableLogged) {
+        birthdayLogger.warn('Birthday sync skipped: shared MTProto service identity is unavailable');
+        this.sharedMtprotoUnavailableLogged = true;
+      }
+      return;
+    }
+    if (this.sharedMtprotoUnavailableLogged) {
+      birthdayLogger.info('Birthday sync resumed: shared MTProto service identity is available');
+      this.sharedMtprotoUnavailableLogged = false;
+    }
+
     const pending = users.filter((u) => !this.shouldSkipSync(u.telegram_id));
     const ids = pending.map((u) => u.telegram_id);
     if (ids.length === 0) return;
