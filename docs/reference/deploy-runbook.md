@@ -63,17 +63,19 @@ Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
 
 ## Local deploy fallback
 
-Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds on the production x86_64 host from a clean `git archive`; it never copies the working tree.
+Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds Linux amd64 on the local Unix-socket Docker daemon from a clean `git archive`. The production host only loads a checksum-verified image; it never compiles source or runs the test suite.
 
 ```bash
 # Default: fetch and deploy the exact commit at origin/main, with local tests first.
+HYPERCAL_DOCKER_BIN=/opt/homebrew/opt/docker/bin/docker \
+HYPERCAL_DOCKER_CONTEXT=colima HYPERCAL_BUN_BIN=/path/to/bun-1.3.11 \
 scripts/deploy-local-fallback.sh
 
 # If that exact commit already passed the full local gate in this incident/session:
 scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
 ```
 
-The script keeps the previous image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, installs the same host helper/config files as CI, reapplies runtime directory ownership, force-recreates only the bot service, and requires `/health` plus a recognized `/ready` body before reporting success. This is an emergency delivery path, not a replacement for fixing CI/CD.
+The script keeps the actual running image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, preserves host files, reapplies runtime directory ownership and recreates only the bot service. It requires exact `/health=ok`, `/ready=ok` or `ok (unverified)`, and the expected image identity. An unverified readiness response is recorded as such, not a completed live AI test. A failure restores the previous image and host files without overwriting newer calendar writes. Generic rollback is intentionally limited to unchanged migration code: a schema-changing release requires a separately reviewed procedure. No broad prune or shared-proxy reload is performed. The receipt is stored in `/opt/hypercal/releases/current.json`. This does not yet connect every gh-ship invocation to deployment; that remaining orchestration is tracked by #276.
 
 ## Docker
 
