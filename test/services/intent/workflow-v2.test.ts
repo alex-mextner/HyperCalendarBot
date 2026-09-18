@@ -326,3 +326,37 @@ test('small repeated translations remain valid under the resolver operation budg
   expect((await new IntentExecutor().run(flow, {}, context, fn)).success).toBe(true);
   expect(fn).toHaveBeenCalledWith('search_events', { query: 'retained-retained' });
 });
+
+test('noninteractive runner refuses a v2 question workflow before its initial write', async () => {
+  const fn = mock(() => ({ success: true, output: 'done' }));
+  const flow = WorkflowSchema.parse({
+    version: 2,
+    steps: [
+      {
+        call: 'manage_settings',
+        input: { action: 'update', category: 'general', updates: { default_event_duration_minutes: 45 } },
+      },
+      { call: 'ask_user', input: { question: 'Continue?', options: ['Yes', 'No'] } },
+    ],
+  });
+  const result = await new IntentExecutor().run(flow, {}, { ...context, workflowInteraction: 'unavailable' }, fn);
+  expect(result.success).toBe(false);
+  expect(result.errorCode).toBe('INTERACTION_UNAVAILABLE');
+  expect(fn).not.toHaveBeenCalled();
+});
+
+for (const version of [undefined, 1] as const)
+  test(`noninteractive legacy version ${version ?? 'absent'} is refused before any side effect`, async () => {
+    const fn = mock(() => ({ success: true, output: 'done' }));
+    const flow = WorkflowSchema.parse({
+      ...(version ? { version } : {}),
+      steps: [
+        { call: 'create_event', input: { title: 'Synthetic event', start_at: '2030-01-01T10:00:00Z' } },
+        { call: 'ask_user', input: { question: 'Continue?' } },
+      ],
+    });
+    const result = await new IntentExecutor().run(flow, {}, { ...context, workflowInteraction: 'unavailable' }, fn);
+    expect(result.success).toBe(false);
+    expect(result.errorCode).toBe('INTERACTION_UNAVAILABLE');
+    expect(fn).not.toHaveBeenCalled();
+  });

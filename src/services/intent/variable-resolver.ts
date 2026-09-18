@@ -50,6 +50,8 @@ export type EventSummary = {
 };
 
 export interface UserContext {
+  /** Scheduled jobs cannot persist interactive chat questions. */
+  workflowInteraction?: 'chat' | 'unavailable';
   timezone: string;
   language: string;
   /** Telegram @username of the message sender (without @). Undefined if the user has no username. */

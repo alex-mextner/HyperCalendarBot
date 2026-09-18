@@ -74,7 +74,14 @@ export function isBoundedJson(value: unknown): boolean {
 }
 
 export class WorkflowInputError extends Error {
-  constructor(readonly code: 'UNRESOLVED_TEMPLATE' | 'INVALID_INPUT' | 'INVALID_WORKFLOW' | 'INVALID_RESUME') {
+  constructor(
+    readonly code:
+      | 'UNRESOLVED_TEMPLATE'
+      | 'INVALID_INPUT'
+      | 'INVALID_WORKFLOW'
+      | 'INVALID_RESUME'
+      | 'INTERACTION_UNAVAILABLE',
+  ) {
     super(code);
     this.name = 'WorkflowInputError';
   }

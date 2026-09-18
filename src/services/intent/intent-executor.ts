@@ -475,6 +475,17 @@ export class IntentExecutor {
       if (!parsed.success) return { success: false, errorCode: 'INVALID_WORKFLOW' };
       workflow = parsed.data;
     }
+    if (
+      userCtx.workflowInteraction === 'unavailable' &&
+      'steps' in workflow &&
+      workflow.steps.some((step) => step.call === 'ask_user')
+    ) {
+      return {
+        success: false,
+        errorCode: 'INTERACTION_UNAVAILABLE',
+        response: 'This workflow needs a reply in the bot chat before it can run.',
+      };
+    }
     try {
       if ('tools' in workflow)
         return await runLevel1(workflow.tools, captures, userCtx, executeTool, workflow.i18n, version === 2);
