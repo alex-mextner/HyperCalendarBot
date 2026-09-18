@@ -1170,6 +1170,7 @@ if (config.REDIS_URL) {
       if (!workflowResult.success) return { handled: false };
       const workflow: Workflow = workflowResult.data;
       const userCtx = {
+        workflowInteraction: 'unavailable' as const,
         userId: agentCtx.user.telegram_id,
         language: agentCtx.user.language,
         timezone: agentCtx.user.timezone,

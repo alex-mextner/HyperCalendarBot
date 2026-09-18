@@ -57,7 +57,7 @@ const StepResultsSchema = z
     choices: z.array(z.union([z.string(), z.number()])).optional(),
     ask: z.record(z.string(), z.union([z.string(), z.number()])).optional(),
   })
-  .catchall(z.union([z.string(), z.number()]));
+  .catchall(ToolOutputValueSchema);
 
 /**
  * TypeScript type for step results.
@@ -94,6 +94,9 @@ const WorkflowSessionSchema = z.object({
   workflow: WorkflowSchema,
   captures: z.record(z.string(), z.string()),
   createdAt: z.number(),
+  pendingPrompt: z
+    .object({ text: z.string(), options: z.array(z.string()).optional(), delivered: z.boolean() })
+    .optional(),
 });
 
 const WorkflowSessionCodec = jsonCodec(WorkflowSessionSchema);

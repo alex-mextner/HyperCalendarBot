@@ -7,7 +7,10 @@ import type { ToolResult, ToolResultData } from '../ai/types.ts';
 import { evaluate } from './expression-evaluator.ts';
 import { applyFilters, parseFilterChain } from './filter-parser.ts';
 import { type EventSummary, type UserContext as ExecutorUserContext, resolveVariables } from './variable-resolver.ts';
+import { isBoundedJson, readWorkflowVersion, WorkflowInputError } from './workflow-input.ts';
 import type { I18nMap, Level1Tool, Level2Step, Workflow } from './workflow-schema.ts';
+import { WorkflowSchema } from './workflow-schema.ts';
+import { validateResolvedWorkflowInput } from './workflow-validator.ts';
 
 /**
  * Runtime-only extension of StepResults: includes non-serializable function helpers
@@ -98,6 +101,9 @@ interface ExecutorResult {
   responseEvents?: EventSummary[];
   suspended?: boolean;
   suspendedAt?: number;
+  /** v2 choices, already resolved and validated; transport decides how to render. */
+  responseOptions?: string[];
+  errorCode?: string;
   stepResults?: StepResults;
   /** ID of the last event touched in this workflow — for cross-request last_mentioned_event persistence. */
   mentionedEventId?: number;
@@ -138,12 +144,30 @@ function parseToolOutput(output: string): ParsedToolOutput | string {
 /**
  * Execute a Level 1 workflow: { tools: [...], format: "..." }
  */
+function resolveInput(
+  name: string,
+  template: unknown,
+  captures: Record<string, string>,
+  userCtx: ExecutorUserContext,
+  stepResults: StepResults,
+  i18n: I18nMap | undefined,
+  strict: boolean,
+): unknown {
+  const input = resolveVariables(template, captures, userCtx, stepResults, i18n, { strict });
+  if (!strict) return input;
+  if (!isBoundedJson(input)) throw new WorkflowInputError('INVALID_INPUT');
+  const checked = validateResolvedWorkflowInput(name, input);
+  if (!checked.success) throw new WorkflowInputError('INVALID_INPUT');
+  return checked.data;
+}
+
 async function runLevel1(
   tools: Level1Tool[],
   captures: Record<string, string>,
   userCtx: ExecutorUserContext,
   executeTool: ToolExecutorFn,
   i18n?: I18nMap,
+  strict = false,
 ): Promise<ExecutorResult> {
   let lastOutput: string | undefined;
   let lastData: ToolResultData | undefined;
@@ -151,7 +175,7 @@ async function runLevel1(
   const eventCtx = buildEventStepResults(userCtx);
 
   for (const tool of tools) {
-    const resolvedInput = resolveVariables(tool.input, captures, userCtx, eventCtx, i18n);
+    const resolvedInput = resolveInput(tool.name, tool.input, captures, userCtx, eventCtx, i18n, strict);
     const result = await executeTool(tool.name, resolvedInput);
     if (!result.success) {
       cmdLogger.warn({ tool: tool.name, error: result.error }, 'Intent L1 tool step failed');
@@ -220,6 +244,7 @@ async function runLevel2(
   executeTool: ToolExecutorFn,
   resumeState?: ResumeState,
   i18n?: I18nMap,
+  strict = false,
 ): Promise<ExecutorResult> {
   const stepResults: RuntimeStepResults = {
     ...buildEventStepResults(userCtx),
@@ -240,7 +265,35 @@ async function runLevel2(
   // When resuming, store the user answer and auto-accumulate to choices[]
   let startIndex = 0;
   if (resumeState !== undefined) {
+    if (
+      strict &&
+      (!Number.isInteger(resumeState.stepIndex) ||
+        resumeState.stepIndex < 0 ||
+        steps[resumeState.stepIndex]?.call !== 'ask_user')
+    )
+      throw new WorkflowInputError('INVALID_RESUME');
     const suspendedStep = steps[resumeState.stepIndex];
+    if (strict) {
+      const prompt = resolveInput(
+        'ask_user',
+        suspendedStep?.input ?? {},
+        captures,
+        userCtx,
+        stepResults,
+        i18n,
+        true,
+      ) as { question: string; options?: string[] };
+      if (prompt.options && !prompt.options.includes(resumeState.userAnswer.trim())) {
+        return {
+          success: false,
+          suspended: true,
+          suspendedAt: resumeState.stepIndex,
+          stepResults: { ...stepResults },
+          response: prompt.question,
+          responseOptions: prompt.options,
+        };
+      }
+    }
 
     // Determine filtered value (apply `as` filter if present, else raw answer).
     // applyAsFilter returns unknown; narrow to string | number since user answers are always text
@@ -284,8 +337,9 @@ async function runLevel2(
 
     // Respond with text and optionally stop
     if (step.respond !== undefined) {
-      const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n) as string;
-      return { success: true, response: text, mentionedEventId };
+      const text = resolveVariables(step.respond, captures, userCtx, stepResults, i18n, { strict });
+      if (strict && typeof text !== 'string') throw new WorkflowInputError('INVALID_INPUT');
+      return { success: true, response: text as string, mentionedEventId };
     }
 
     // No call — nothing to execute in this step
@@ -293,16 +347,36 @@ async function runLevel2(
 
     // Respond with text from input.message and stop — same as respond: field but explicit call form
     if (step.call === 'respond') {
+      if (strict) {
+        const value = resolveInput('respond', step.input ?? {}, captures, userCtx, stepResults, i18n, true) as {
+          message: string;
+        };
+        return { success: true, response: value.message, mentionedEventId };
+      }
       if (!step.input?.message) {
         cmdLogger.warn({ stepIndex: i }, 'Intent executor: call: respond missing input.message');
         return { success: true, response: undefined, mentionedEventId };
       }
-      const text = resolveVariables(step.input.message, captures, userCtx, stepResults, i18n) as string;
+      const text = resolveVariables(step.input.message, captures, userCtx, stepResults, i18n, { strict }) as string;
       return { success: true, response: text, mentionedEventId };
     }
 
     // Suspend for user input — resolve question text if provided
     if (step.call === 'ask_user') {
+      if (strict) {
+        const checked = resolveInput('ask_user', step.input ?? {}, captures, userCtx, stepResults, i18n, true) as {
+          question: string;
+          options?: string[];
+        };
+        return {
+          success: false,
+          suspended: true,
+          suspendedAt: i,
+          stepResults: { ...stepResults },
+          response: checked.question,
+          responseOptions: checked.options,
+        };
+      }
       const questionTemplate = step.input?.question;
       const question =
         questionTemplate !== undefined
@@ -318,10 +392,15 @@ async function runLevel2(
     }
 
     // Execute tool
-    const resolvedInput = resolveVariables(step.input ?? {}, captures, userCtx, stepResults, i18n) as Record<
-      string,
-      unknown
-    >;
+    const resolvedInput = resolveInput(
+      step.call,
+      step.input ?? {},
+      captures,
+      userCtx,
+      stepResults,
+      i18n,
+      strict,
+    ) as Record<string, unknown>;
 
     const result = await executeTool(step.call, resolvedInput);
     if (!result.success) {
@@ -390,9 +469,32 @@ export class IntentExecutor {
     executeTool: ToolExecutorFn,
     resumeState?: ResumeState,
   ): Promise<ExecutorResult> {
-    if ('tools' in workflow) {
-      return runLevel1(workflow.tools, captures, userCtx, executeTool, workflow.i18n);
+    const version = readWorkflowVersion(workflow);
+    if (version === 'invalid') return { success: false, errorCode: 'INVALID_WORKFLOW' };
+    // This public entry also accepts constructed workflows; revalidation is bounded defense-in-depth.
+    if (version === 2) {
+      const parsed = WorkflowSchema.safeParse(workflow);
+      if (!parsed.success) return { success: false, errorCode: 'INVALID_WORKFLOW' };
+      workflow = parsed.data;
     }
-    return runLevel2(workflow.steps, captures, userCtx, executeTool, resumeState, workflow.i18n);
+    if (
+      userCtx.workflowInteraction === 'unavailable' &&
+      'steps' in workflow &&
+      workflow.steps.some((step) => step.call === 'ask_user')
+    ) {
+      return {
+        success: false,
+        errorCode: 'INTERACTION_UNAVAILABLE',
+        response: 'This workflow needs a reply in the bot chat before it can run.',
+      };
+    }
+    try {
+      if ('tools' in workflow)
+        return await runLevel1(workflow.tools, captures, userCtx, executeTool, workflow.i18n, version === 2);
+      return await runLevel2(workflow.steps, captures, userCtx, executeTool, resumeState, workflow.i18n, version === 2);
+    } catch (error) {
+      if (!(error instanceof WorkflowInputError)) throw error;
+      return { success: false, errorCode: error.code, response: 'The workflow could not safely resolve this step.' };
+    }
   }
 }
