@@ -1,4 +1,4 @@
-import { type Browser, chromium, type Page } from 'playwright';
+import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 import { imageLogger } from '../utils/logger.ts';
 
 interface PoolOptions {
@@ -6,6 +6,8 @@ interface PoolOptions {
   maxUseCount?: number;
   maxAgeMs?: number;
   maxReinitAttempts?: number;
+  /** Instance-scoped launch seam; tests must not replace the global Playwright module. */
+  launchBrowser?: () => Promise<Browser>;
 }
 
 export class PlaywrightPool {
@@ -17,30 +19,49 @@ export class PlaywrightPool {
   private reinitPromise: Promise<void> | null = null;
   private reinitAttempts = 0;
   private dead = false;
+  private stopped = false;
+  private initializationPromise: Promise<void> | null = null;
 
   private readonly maxPages: number;
   private readonly maxUseCount: number;
   private readonly maxAgeMs: number;
   private readonly maxReinitAttempts: number;
+  private readonly launchBrowser: () => Promise<Browser>;
 
   constructor(options: PoolOptions = {}) {
     this.maxPages = options.maxPages ?? 4;
     this.maxUseCount = options.maxUseCount ?? 50;
     this.maxAgeMs = options.maxAgeMs ?? 300_000;
     this.maxReinitAttempts = options.maxReinitAttempts ?? 3;
+    this.launchBrowser = options.launchBrowser ?? (() => chromium.launch({ args: ['--no-sandbox', '--disable-gpu'] }));
   }
 
-  async initialize(): Promise<void> {
-    const browser = await chromium.launch({
-      args: ['--no-sandbox', '--disable-gpu'],
+  initialize(): Promise<void> {
+    if (this.stopped) return Promise.reject(new Error('PlaywrightPool is shut down'));
+    if (this.initializationPromise) return this.initializationPromise;
+    if (this.browser) return Promise.resolve();
+    this.initializationPromise = this.initializeBrowser().finally(() => {
+      this.initializationPromise = null;
     });
+    return this.initializationPromise;
+  }
+
+  private async initializeBrowser(): Promise<void> {
+    const browser = await this.launchBrowser();
     if (!browser) {
       throw new Error('chromium.launch() returned no browser — Playwright browsers may not be installed');
+    }
+    // Shutdown may have begun while the launch was pending. Never publish or
+    // attach recovery listeners to that late browser.
+    if (this.stopped) {
+      await browser.close();
+      return;
     }
     this.browser = browser;
     this.reinitAttempts = 0;
     this.dead = false;
     this.browser.on('disconnected', () => {
+      if (this.stopped) return;
       this.freePages = [];
       this.busyPages.clear();
       this.pageUseCount.clear();
@@ -59,9 +80,10 @@ export class PlaywrightPool {
       this.reinitAttempts++;
       this.reinitPromise = this.initialize()
         .then(() => {
-          imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
+          if (!this.stopped) imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
         })
         .catch((err) => {
+          if (this.stopped) return;
           imageLogger.error(
             { err, attempt: this.reinitAttempts },
             'PlaywrightPool reinit failed after browser disconnect',
@@ -80,10 +102,13 @@ export class PlaywrightPool {
     });
   }
 
+  private assertRunning(): void {
+    if (this.stopped) throw new Error('PlaywrightPool is shut down');
+    if (this.dead) throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
+  }
+
   async acquire(timeoutMs = 10_000): Promise<Page> {
-    if (this.dead) {
-      throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
-    }
+    this.assertRunning();
 
     const deadline = Date.now() + timeoutMs;
 
@@ -92,9 +117,7 @@ export class PlaywrightPool {
         await this.reinitPromise;
       }
 
-      if (this.dead) {
-        throw new Error('PlaywrightPool is permanently disabled after repeated init failures');
-      }
+      this.assertRunning();
 
       // Return a free page if available
       if (this.freePages.length > 0) {
@@ -106,7 +129,20 @@ export class PlaywrightPool {
       // Create a new page if under limit
       const totalPages = this.freePages.length + this.busyPages.size;
       if (totalPages < this.maxPages) {
-        const page = await this.createPage();
+        const { page, browser } = await this.createPage();
+        // Recheck after the helper Promise boundary; register in the same tick.
+        try {
+          this.assertRunning();
+          if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+        } catch (error) {
+          await page
+            .context()
+            .close()
+            .catch(() => {});
+          this.pageUseCount.delete(page);
+          this.pageCreatedAt.delete(page);
+          throw error;
+        }
         this.busyPages.add(page);
         return page;
       }
@@ -123,6 +159,7 @@ export class PlaywrightPool {
 
   async release(page: Page): Promise<void> {
     this.busyPages.delete(page);
+    if (this.stopped) return;
 
     const useCount = (this.pageUseCount.get(page) ?? 0) + 1;
     this.pageUseCount.set(page, useCount);
@@ -143,7 +180,7 @@ export class PlaywrightPool {
 
     try {
       await page.setContent('<html><body></body></html>');
-      this.freePages.push(page);
+      if (!this.stopped) this.freePages.push(page);
     } catch {
       // page is no longer usable; discard it
       this.pageUseCount.delete(page);
@@ -152,6 +189,9 @@ export class PlaywrightPool {
   }
 
   async shutdown(): Promise<void> {
+    // Terminal close: intentional disconnection must never schedule recovery.
+    this.stopped = true;
+    if (this.initializationPromise) await this.initializationPromise.catch(() => {});
     if (this.reinitPromise) {
       await this.reinitPromise.catch(() => {});
     }
@@ -174,18 +214,29 @@ export class PlaywrightPool {
     }
   }
 
-  private async createPage(): Promise<Page> {
-    if (!this.browser) {
-      throw new Error('PlaywrightPool not initialized — call initialize() first');
+  private async createPage(): Promise<{ page: Page; browser: Browser }> {
+    const browser = this.browser;
+    if (!browser) throw new Error('PlaywrightPool not initialized — call initialize() first');
+    let context: BrowserContext | undefined;
+    try {
+      context = await browser.newContext({
+        deviceScaleFactor: 2,
+        viewport: { width: 1080, height: 800 },
+      });
+      this.assertRunning();
+      if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+      const page = await context.newPage();
+      this.assertRunning();
+      if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+      this.pageUseCount.set(page, 0);
+      this.pageCreatedAt.set(page, Date.now());
+      return { page, browser };
+    } catch (error) {
+      if (context) await context.close().catch(() => {});
+      // Normalize lifecycle loss only; ordinary browser failures keep their identity.
+      this.assertRunning();
+      throw error;
     }
-    const context = await this.browser.newContext({
-      deviceScaleFactor: 2,
-      viewport: { width: 1080, height: 800 },
-    });
-    const page = await context.newPage();
-    this.pageUseCount.set(page, 0);
-    this.pageCreatedAt.set(page, Date.now());
-    return page;
   }
 }
 
