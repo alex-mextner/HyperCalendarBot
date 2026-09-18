@@ -237,3 +237,7 @@ Feature specifications live in `docs/specs/`:
 ## License
 
 Private repository.
+
+## Intent seed catalogue
+
+[Предустановленные сценарии и методика сравнения с БД](docs/intent-catalogue.md). Read-only catalogue generation never applies the seed; examples and diagnostics are derived from the same pure source data.
