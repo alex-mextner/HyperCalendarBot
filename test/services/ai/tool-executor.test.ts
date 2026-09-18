@@ -326,6 +326,7 @@ describe('executeTool', () => {
     });
 
     test('send_invitation sends invitation for existing event', async () => {
+      sharingCtx.messageText = 'Invite Telegram ID 456';
       const event = sharingCtx.eventService.createEvent({
         user_id: USER_ID,
         title: 'Invite Test',
@@ -342,6 +343,7 @@ describe('executeTool', () => {
     });
 
     test('send_invitation returns error for non-existent event', async () => {
+      sharingCtx.messageText = 'Invite Telegram ID 456';
       const result = await executeTool(sharingCtx, 'send_invitation', {
         event_id: 9999,
         invitee_id: 456,
@@ -487,6 +489,7 @@ describe('executeTool', () => {
         timezone: 'UTC',
       });
       sharingCtx.userRepo.create({ telegram_id: 789, timezone: 'UTC' });
+      sharingCtx.verifiedRecipientIds = new Set([789]); // User-confirmed recipient; this test targets numeric coercion.
       const input = { event_id: String(event.id), invitee_id: '789' };
       const outsider = { ...sharingCtx, user: sharingCtx.userRepo.findByTelegramId(789)!, chatId: 789 };
       expect((await executeTool(outsider, 'send_invitation', { ...input, invitee_id: '123' })).success).toBe(false);

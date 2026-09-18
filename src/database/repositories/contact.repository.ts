@@ -17,6 +17,10 @@ function scoreField(field: string | null, queryLower: string, normalizedQuery: s
   return Math.min(1 - dist / maxLen, 0.99);
 }
 
+function normalizeUsername(username: string): string {
+  return username.trim().replace(/^@/, '');
+}
+
 export class ContactRepository {
   constructor(private db: Database) {}
 
@@ -77,9 +81,9 @@ export class ContactRepository {
   }
 
   findByUsername(userId: number, username: string): Contact | null {
-    const normalized = username.startsWith('@') ? username.slice(1) : username;
+    const normalized = normalizeUsername(username);
     return this.db
-      .prepare('SELECT * FROM contacts WHERE user_id = ? AND LOWER(username) = LOWER(?)')
+      .prepare("SELECT * FROM contacts WHERE user_id = ? AND LOWER(LTRIM(TRIM(username), '@')) = LOWER(?)")
       .get(userId, normalized) as Contact | null;
   }
 
@@ -87,55 +91,116 @@ export class ContactRepository {
     return this.db.prepare('SELECT * FROM contacts WHERE user_id = ? ORDER BY name').all(userId) as Contact[];
   }
 
-  upsert(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
-    // Dedup: telegram_id → username → strict name. NEVER use fuzzy `findByName`
-    // here — phonetic collapse would merge "Вова" with a freshly-added "Фофа".
-    const existing =
-      (telegramId ? this.findByTelegramId(userId, telegramId) : null) ??
-      (username ? this.findByUsername(userId, username) : null) ??
-      this.findByNameStrict(userId, name);
+  findById(userId: number, id: number): Contact | null {
+    return this.db
+      .query<Contact, [number, number]>(
+        'SELECT id, user_id, name, username, telegram_id, preferred_name, created_at FROM contacts WHERE user_id = ? AND id = ?',
+      )
+      .get(userId, id);
+  }
 
-    if (existing) {
-      const patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string } = {};
-      if (username && !existing.username) patch.username = username;
-      if (telegramId && !existing.telegram_id) patch.telegram_id = telegramId;
+  upsert(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
+    return this.db.transaction(() => {
+      const normalized = username ? normalizeUsername(username) : undefined;
+      // Identity lookup precedes strict-name dedup; fuzzy matches never authorize a merge.
+      const byId = telegramId ? this.findByTelegramId(userId, telegramId) : null;
+      const byUsername = normalized ? this.findByUsername(userId, normalized) : null;
+      if (byId && byUsername && byId.id !== byUsername.id) {
+        throw new Error('CONTACT_IDENTITY_CONFLICT: ID and username identify different contacts');
+      }
+      const existing = byId ?? byUsername ?? this.findByNameStrict(userId, name);
+      if (!existing) return this.add(userId, name, normalized, telegramId, preferredName);
+      if (telegramId && existing.telegram_id && telegramId !== existing.telegram_id) {
+        throw new Error('CONTACT_IDENTITY_CONFLICT: matching name or username has a different Telegram ID');
+      }
+      const sameId = telegramId !== undefined && telegramId === existing.telegram_id;
+      if (
+        normalized &&
+        existing.username &&
+        normalizeUsername(existing.username).toLowerCase() !== normalized.toLowerCase() &&
+        !sameId
+      ) {
+        throw new Error('CONTACT_IDENTITY_CONFLICT: matching name has a different username');
+      }
+      const patch: { username?: string; telegram_id?: number; preferred_name?: string } = {};
+      if (normalized && normalized !== existing.username) patch.username = normalized;
+      if (telegramId) patch.telegram_id = telegramId;
       if (preferredName && !existing.preferred_name) patch.preferred_name = preferredName;
       if (Object.keys(patch).length > 0) this.update(existing.id, patch);
-      return this.findByNameStrict(userId, existing.name) ?? existing;
-    }
-
-    return this.add(userId, name, username, telegramId, preferredName);
+      return this.findById(userId, existing.id) ?? existing;
+    })();
   }
 
   add(userId: number, name: string, username?: string, telegramId?: number, preferredName?: string): Contact {
-    this.db
-      .prepare('INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)')
-      .run(userId, name, username ?? null, telegramId ?? null, preferredName ?? null);
-    return this.findByNameStrict(userId, name)!;
+    const inserted = this.db
+      .query<Contact, [number, string, string | null, number | null, string | null]>(
+        `INSERT INTO contacts (user_id, name, username, telegram_id, preferred_name) VALUES (?, ?, ?, ?, ?)
+       RETURNING id, user_id, name, username, telegram_id, preferred_name, created_at`,
+      )
+      .get(userId, name, username ? normalizeUsername(username) : null, telegramId ?? null, preferredName ?? null);
+    if (!inserted) throw new Error('Contact insert returned no row');
+    return inserted;
   }
 
   update(id: number, patch: { name?: string; username?: string; telegram_id?: number; preferred_name?: string }): void {
-    const fields: string[] = [];
-    const values: (string | number)[] = [];
-    if (patch.name !== undefined) {
-      fields.push('name = ?');
-      values.push(patch.name);
-    }
-    if (patch.username !== undefined) {
-      fields.push('username = ?');
-      values.push(patch.username);
-    }
-    if (patch.telegram_id !== undefined) {
-      fields.push('telegram_id = ?');
-      values.push(patch.telegram_id);
-    }
-    if (patch.preferred_name !== undefined) {
-      fields.push('preferred_name = ?');
-      values.push(patch.preferred_name);
-    }
-    if (fields.length === 0) return;
-    values.push(id);
-    this.db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    this.db.transaction(() => {
+      const current = this.db.query<Contact, [number]>('SELECT * FROM contacts WHERE id = ?').get(id);
+      if (!current) return;
+      const usernameMatch = patch.username ? this.findByUsername(current.user_id, patch.username) : null;
+      const idMatch = patch.telegram_id ? this.findByTelegramId(current.user_id, patch.telegram_id) : null;
+      if ((usernameMatch && usernameMatch.id !== id) || (idMatch && idMatch.id !== id)) {
+        throw new Error('CONTACT_IDENTITY_CONFLICT: update would merge two address-book identities');
+      }
+      if (
+        current.telegram_id !== null &&
+        patch.telegram_id !== undefined &&
+        patch.telegram_id !== current.telegram_id
+      ) {
+        throw new Error('CONTACT_IDENTITY_CONFLICT: changing metadata cannot rebind an established Telegram ID');
+      }
+      const fields: string[] = [];
+      const values: (string | number)[] = [];
+      if (patch.name !== undefined) {
+        fields.push('name = ?');
+        values.push(patch.name);
+      }
+      if (patch.username !== undefined) {
+        fields.push('username = ?');
+        const normalized = normalizeUsername(patch.username);
+        values.push(normalized);
+      }
+      if (patch.telegram_id !== undefined) {
+        fields.push('telegram_id = ?');
+        values.push(patch.telegram_id);
+      }
+      if (patch.preferred_name !== undefined) {
+        fields.push('preferred_name = ?');
+        values.push(patch.preferred_name);
+      }
+      if (fields.length === 0) return;
+      values.push(id);
+      this.db.prepare(`UPDATE contacts SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    })();
+  }
+
+  refreshProfile(userId: number, telegramId: number, profile: { username: string | null; firstName?: string }): void {
+    const username = profile.username ? normalizeUsername(profile.username) : null;
+    this.db.transaction(() => {
+      // Telegram can reassign usernames. Remove stale metadata, never move an ID.
+      if (username)
+        this.db
+          .prepare(
+            "UPDATE contacts SET username = NULL WHERE user_id = ? AND LOWER(LTRIM(TRIM(username), '@')) = LOWER(?) AND (telegram_id IS NULL OR telegram_id <> ?)",
+          )
+          .run(userId, username, telegramId);
+      this.db
+        .prepare('UPDATE contacts SET username = ? WHERE user_id = ? AND telegram_id = ?')
+        .run(username, userId, telegramId);
+    })();
+  }
+
+  deleteOwned(userId: number, id: number): boolean {
+    return this.db.prepare('DELETE FROM contacts WHERE user_id = ? AND id = ?').run(userId, id).changes > 0;
   }
 
   delete(id: number): void {

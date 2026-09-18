@@ -175,8 +175,10 @@ async function runLevel1(
  */
 /** Type guard: checks if a ToolResultData element has the full EventSummary shape. */
 type ToolResultElement =
+  | import('../ai/types.ts').UserInspection
   | EventSummary
   | { telegram_id: number; name: string }
+  | { contact_id: number; deleted: boolean }
   | { matches: import('../ai/types.ts').ContactMatch[] }
   | import('../scheduled/types.ts').ScheduledAiCall
   | import('../scheduled/types.ts').Trigger
