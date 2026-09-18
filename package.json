@@ -9,7 +9,9 @@
     "format": "biome format --write .",
     "start": "bun run src/index.ts",
     "test:call": "bun run scripts/test-call.ts",
-    "postinstall": "lefthook install"
+    "postinstall": "lefthook install",
+    "docs:intents": "bun --no-env-file scripts/generate-intent-docs.ts",
+    "docs:intents:check": "bun --no-env-file scripts/generate-intent-docs.ts --check"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",

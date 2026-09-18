@@ -241,3 +241,8 @@ Private repository.
 ## Intent seed catalogue
 
 [Предустановленные сценарии и методика сравнения с БД](docs/intent-catalogue.md). Read-only catalogue generation never applies the seed; examples and diagnostics are derived from the same pure source data.
+
+## Intent catalogue (generated source documentation)
+
+[Browse the full intent catalogue and current-seed status in GitHub](docs/intents/README.md).
+Run `bun run docs:intents` to regenerate Markdown/HTML/JSON; `bun run docs:intents:check` and the normal test suite detect stale output. Private DB/history snapshots are never required for a public build.
