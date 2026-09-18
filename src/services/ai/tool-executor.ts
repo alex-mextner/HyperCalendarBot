@@ -325,7 +325,9 @@ function getToolMeta(toolName: string): import('./types.ts').ToolHandlerMeta | u
 }
 
 const THROTTLE_EXEMPT = new Set(
-  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.readonly),
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter(
+    (k) => getToolMeta(k)?.readonly || getToolMeta(k)?.throttleExempt,
+  ),
 );
 
 const SKIP_ACTION_LOG = new Set(
@@ -493,6 +495,7 @@ function extractTargetUserId(input: ToolInputMap[ToolName]): number | undefined 
   if ('invitee_id' in input && typeof input.invitee_id === 'number') return input.invitee_id;
   if ('secretary_telegram_id' in input && typeof input.secretary_telegram_id === 'number')
     return input.secretary_telegram_id;
+  if ('telegram_id' in input && typeof input.telegram_id === 'number') return input.telegram_id;
   if ('target_id' in input && typeof input.target_id === 'number') return input.target_id;
   return undefined;
 }

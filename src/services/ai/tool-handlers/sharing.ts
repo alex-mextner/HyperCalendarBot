@@ -9,7 +9,7 @@ import type {
 } from '../../../database/types.ts';
 import { botLogger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
-import { deliverInvitation, lookupInviteeUsername } from '../invitation-delivery.ts';
+import { deliverInvitation } from '../invitation-delivery.ts';
 import { issueRecipientApproval } from '../recipient-confirmation.ts';
 import { resolveInvitationRecipient } from '../recipient-identity.ts';
 import type { AgentContext, ToolHandlerMeta, ToolResult } from '../types.ts';
@@ -179,12 +179,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
     const contactName =
       resolvedFirstName ?? invitee?.first_name ?? inviteeUsername ?? invitee?.username ?? `User ${inviteeId}`;
     try {
-      ctx.contactRepo.upsert(
-        ctx.user.telegram_id,
-        contactName,
-        recipient.profileFresh ? inviteeUsername : (inviteeUsername ?? invitee?.username ?? undefined),
-        inviteeId,
-      );
+      ctx.contactRepo.upsert(ctx.user.telegram_id, contactName, inviteeUsername, inviteeId);
     } catch (err) {
       // The invitation already exists; an address-book conflict must not cancel its delivery.
       deliveryLogger.warn({ err, invitationId: invitation.id }, 'Invitation recipient was not added to contacts');
@@ -198,15 +193,7 @@ export async function handleSendInvitation(ctx: AgentContext, input: SendInvitat
       invitationId: invitation.id,
       eventId: input.event_id,
       inviteeId,
-      inviteeUsername:
-        input.force || recipient.profileFresh
-          ? inviteeUsername
-          : (inviteeUsername ??
-            lookupInviteeUsername(
-              { userRepo: ctx.userRepo, contactRepo: ctx.contactRepo },
-              ctx.user.telegram_id,
-              inviteeId,
-            )),
+      inviteeUsername,
       inviterId: ctx.user.telegram_id,
       inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
       inviterUsername: ctx.user.username ?? undefined,
@@ -274,11 +261,15 @@ export async function handleResendInvitation(
     return { success: false, error: `Cannot resend — status is "${invitation.status}".` };
   }
 
-  const recipient = await resolveInvitationRecipient(ctx, {
-    invitee_id: invitation.invitee_id,
-    invitee_username:
-      invitation.invitee_id < 0 ? undefined : (input.invitee_username ?? invitation.invitee_username ?? undefined),
-  });
+  // The owned pending invitation establishes intent; its historical username is only metadata.
+  const recipient = await resolveInvitationRecipient(
+    ctx,
+    {
+      invitee_id: invitation.invitee_id,
+      invitee_username: invitation.invitee_id < 0 ? undefined : input.invitee_username,
+    },
+    invitation.invitee_id,
+  );
   if (!recipient.ok) {
     const tr = t(ctx.user.language).aiTools.meta;
     return {
