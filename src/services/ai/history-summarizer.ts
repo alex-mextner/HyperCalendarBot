@@ -26,7 +26,7 @@ export class HistorySummarizer {
     private streamFn: StreamFn,
   ) {}
 
-  async condenseMessage(rowId: number, subKey: string, content: string): Promise<string> {
+  async condenseMessage(rowId: number, subKey: string, content: string, streamOverride?: StreamFn): Promise<string> {
     if (content.length <= PER_MSG_CHARS_LIMIT) return content;
 
     const cacheKey = perMsgCacheKey(rowId, subKey);
@@ -36,7 +36,7 @@ export class HistorySummarizer {
     }
 
     try {
-      const result = await this.streamFn(
+      const result = await (streamOverride ?? this.streamFn)(
         {
           messages: [
             {
@@ -72,7 +72,7 @@ export class HistorySummarizer {
     }
   }
 
-  async condenseHistory(messages: MessageParam[]): Promise<MessageParam[]> {
+  async condenseHistory(messages: MessageParam[], streamOverride?: StreamFn): Promise<MessageParam[]> {
     const total = estimateMessageListTokens(messages);
     if (total <= HISTORY_TOKEN_BUDGET) return messages;
 
@@ -107,7 +107,7 @@ export class HistorySummarizer {
       .join('\n');
 
     try {
-      const result = await this.streamFn(
+      const result = await (streamOverride ?? this.streamFn)(
         {
           messages: [
             {

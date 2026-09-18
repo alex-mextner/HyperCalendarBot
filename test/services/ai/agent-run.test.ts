@@ -69,6 +69,26 @@ function asAssistantMessage(round: ScriptedRound): OpenAI.ChatCompletionMessageP
   return { role: 'assistant', content: '' };
 }
 
+function fakeMetrics(provider: 'zai' | 'groq', promptTokens: number, completionTokens: number) {
+  return {
+    provider,
+    model: provider === 'groq' ? 'validator-model' : 'agent-model',
+    chain: provider === 'groq' ? ('fast' as const) : ('smart' as const),
+    firstUsableSinceAttemptMs: 5,
+    providerDurationMs: 10,
+    totalDurationMs: 12,
+    attemptCount: 1,
+    fallbackCount: 0,
+    usage: {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      cachedTokens: null,
+      reasoningTokens: null,
+    },
+  };
+}
+
 function isValidatorCall(opts: StreamRoundOptions): boolean {
   // The response validator always sends a 2-message payload (system + user)
   // whose system prompt starts with "You are a strict QA validator".
@@ -95,6 +115,7 @@ function makeStreamImpl(script: ScriptedRound[]): {
         finishReason: 'stop',
         assistantMessage: validatorMsg,
         providerUsed: 'mock-validator',
+        metrics: fakeMetrics('groq', 10, 2),
       };
     }
 
@@ -115,6 +136,7 @@ function makeStreamImpl(script: ScriptedRound[]): {
         finishReason: 'stop',
         assistantMessage: msg,
         providerUsed: 'mock',
+        metrics: fakeMetrics('zai', 100, 20),
       };
     }
 
@@ -236,6 +258,22 @@ describe('CalendarBotAgent.run()', () => {
     expect(result.responseText).not.toContain('Outcome unknown');
     expect(result.responseText).not.toContain('Confirmed changes remain');
     expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  test('production metrics include hidden validator call and sanitized delivery result', async () => {
+    ctx.chatHistory.save(USER_ID, 'user', 'hello');
+    const scripted = makeStreamImpl([{ kind: 'text', text: 'hello back' }]);
+    const result = await new CalendarBotAgent(config, sender, { streamImpl: scripted.impl }).run(ctx);
+    expect(result.metrics).toMatchObject({
+      modelCalls: 2,
+      modelAttempts: 2,
+      promptTokens: 110,
+      completionTokens: 22,
+      termination: 'normal',
+      deliveryOutcome: 'delivered',
+    });
+    expect(result.metrics?.usagePartialRounds).toBe(2);
+    expect(JSON.stringify(result.metrics)).not.toContain(String(USER_ID));
   });
 
   test('post-update loss of read visibility is uncertain, never a pre-apply rejection', async () => {
@@ -380,6 +418,7 @@ describe('CalendarBotAgent.run()', () => {
           finishReason: 'stop',
           assistantMessage: { role: 'assistant', content: 'REJECT: use tools' },
           providerUsed: 'mock',
+          metrics: fakeMetrics('zai', 100, 20),
         };
       return script.impl(opts, callbacks);
     };

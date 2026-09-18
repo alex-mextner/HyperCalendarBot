@@ -13,7 +13,8 @@ import OpenAI from 'openai';
 type ScriptEvent =
   | { kind: 'text'; text: string }
   | { kind: 'tool'; id: string; name: string; args: string; index?: number }
-  | { kind: 'finish'; reason: string };
+  | { kind: 'finish'; reason: string }
+  | { kind: 'usage'; prompt: number; completion: number; cached?: number; reasoning?: number };
 
 function buildFakeClient(script: ScriptEvent[] | (() => never)) {
   if (typeof script === 'function') {
@@ -59,6 +60,17 @@ function buildFakeClient(script: ScriptEvent[] | (() => never)) {
                 };
               } else if (evt.kind === 'finish') {
                 yield { choices: [{ delta: {}, finish_reason: evt.reason }] };
+              } else if (evt.kind === 'usage') {
+                yield {
+                  choices: [],
+                  usage: {
+                    prompt_tokens: evt.prompt,
+                    completion_tokens: evt.completion,
+                    total_tokens: evt.prompt + evt.completion,
+                    prompt_tokens_details: { cached_tokens: evt.cached ?? 0 },
+                    completion_tokens_details: { reasoning_tokens: evt.reasoning ?? 0 },
+                  },
+                };
               }
             }
           }
@@ -127,10 +139,13 @@ afterEach(() => {
   Object.assign(providerClients, realProviderClients);
 });
 
-const { AllProvidersFailedError, aiStreamRound } = await import('../../../src/services/ai/streaming.ts');
+const { AllProvidersFailedError, aiStreamRound, _resetStreamingUsageCompatibilityForTest } = await import(
+  '../../../src/services/ai/streaming.ts'
+);
 
 describe('aiStreamRound — provider chain fallback', () => {
   beforeEach(() => {
+    _resetStreamingUsageCompatibilityForTest();
     fakeZai = undefined;
     fakeGroq = undefined;
     fakeGemini = undefined;
@@ -162,6 +177,60 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(result.providerUsed).toContain('z.ai');
     expect(fakeZai.chat.completions.create).toHaveBeenCalledTimes(1);
     expect(fakeGemini.chat.completions.create).not.toHaveBeenCalled();
+  });
+
+  test('captures terminal usage-only chunk and requests streaming usage', async () => {
+    fakeZai = buildFakeClient([
+      { kind: 'text', text: 'measured' },
+      { kind: 'finish', reason: 'stop' },
+      { kind: 'usage', prompt: 120, completion: 30, cached: 40, reasoning: 7 },
+    ]);
+    const result = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(result.metrics?.usage).toEqual({
+      promptTokens: 120,
+      completionTokens: 30,
+      totalTokens: 150,
+      cachedTokens: 40,
+      reasoningTokens: 7,
+    });
+    expect(result.metrics?.firstUsableSinceAttemptMs).toBeNumber();
+    expect(fakeZai.chat.completions.create.mock.calls[0]?.[0]?.stream_options).toEqual({ include_usage: true });
+  });
+
+  test('retries same provider without usage telemetry when compatibility rejects stream_options', async () => {
+    let calls = 0;
+    fakeZai = {
+      chat: {
+        completions: {
+          create: mock(async (params: { stream_options?: unknown }) => {
+            calls++;
+            if (params.stream_options) {
+              throw new OpenAI.APIError(
+                400,
+                { error: { message: 'Unknown parameter: stream_options' } },
+                'Unknown parameter: stream_options',
+                new Headers(),
+              );
+            }
+            return buildFakeClient([
+              { kind: 'text', text: 'compat' },
+              { kind: 'finish', reason: 'stop' },
+            ]).chat.completions.create();
+          }),
+        },
+      },
+    };
+    const first = await aiStreamRound({ messages: [{ role: 'user', content: 'hi' }], maxTokens: 100 });
+    expect(first.text).toBe('compat');
+    expect(calls).toBe(2);
+    expect(first.metrics?.attemptCount).toBe(2);
+    expect(first.metrics?.fallbackCount).toBe(0);
+    expect(first.metrics?.usage).toBeNull();
+    const second = await aiStreamRound({ messages: [{ role: 'user', content: 'again' }], maxTokens: 100 });
+    expect(second.text).toBe('compat');
+    expect(calls).toBe(3);
+    expect(second.metrics?.attemptCount).toBe(1);
+    expect(fakeZai.chat.completions.create.mock.calls[2]?.[0]?.stream_options).toBeUndefined();
   });
 
   test('falls through to Gemini on z.ai 500', async () => {
@@ -257,6 +326,9 @@ describe('aiStreamRound — provider chain fallback', () => {
     expect(error.failures.map((f) => f.status)).toEqual([500, 503, 504]);
     expect(error.message).toContain('boom');
     expect(error.message).toContain('gateway');
+    expect(error.roundMetrics.attemptCount).toBe(3);
+    expect(error.roundMetrics.fallbackCount).toBe(2);
+    expect(error.roundMetrics.totalDurationMs).toBeGreaterThanOrEqual(0);
   });
 
   test('4xx with a body falls through — one provider rejecting us never ends the chain', async () => {

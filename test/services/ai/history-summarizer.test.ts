@@ -237,3 +237,14 @@ describe('HistorySummarizer.condenseHistory', () => {
     expect(mockStream).not.toHaveBeenCalled();
   });
 });
+
+describe('HistorySummarizer measured override', () => {
+  test('uses request-scoped stream override for long-message summarization', async () => {
+    const base = mock(async () => makeStreamResult('base'));
+    const override = mock(async () => makeStreamResult('measured'));
+    const s = new HistorySummarizer(null, base);
+    expect(await s.condenseMessage(999, 'call', longContent, override)).toBe('measured');
+    expect(override).toHaveBeenCalledTimes(1);
+    expect(base).not.toHaveBeenCalled();
+  });
+});

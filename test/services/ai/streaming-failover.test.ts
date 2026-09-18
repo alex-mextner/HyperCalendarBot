@@ -527,6 +527,8 @@ describe('aiStreamRound — auto-detecting a live model', () => {
     expect(result.providerUsed).toBe('Groq (openai/gpt-oss-120b)');
     expect(groq.requestedModels).toEqual(['llama-3.3-70b-versatile', 'openai/gpt-oss-120b']);
     expect(gemini.requestedModels).toEqual([]);
+    expect(result.metrics?.attemptCount).toBe(3); // z.ai quota + dead Groq model + replacement Groq request
+    expect(result.metrics?.fallbackCount).toBe(1);
   });
 
   test('the resolved model is cached: the next request skips the dead model and the second probe', async () => {
