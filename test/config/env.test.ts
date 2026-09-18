@@ -40,7 +40,7 @@ describe('loadConfig', () => {
 
   describe('provider chain order', () => {
     const SMART_DEFAULT: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
-    const FAST_DEFAULT: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+    const FAST_DEFAULT: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
 
     test('puts the paid provider first by default, and keeps the small tiers behind it', () => {
       const config = loadConfig();
@@ -49,7 +49,7 @@ describe('loadConfig', () => {
     });
 
     // Each chain carries its own fallback, so one cannot be built with the
-    // other's default — the fast chain keeps Groq last for a reason.
+    // other's default — the fast chain prioritizes short-call latency independently.
     test('the fast chain reads its own variable and keeps its own fallback', () => {
       process.env.AI_FAST_CHAIN = 'gemini,zai';
       const config = loadConfig();
