@@ -742,6 +742,9 @@ describe('sharing tool handlers', () => {
       let mtprotoCalled = false;
       const sentToInviter: number[] = [];
       const ctx = makeCtx({
+        isGroup: true,
+        chatId: GROUP_CHAT_ID,
+        groupChatId: GROUP_CHAT_ID,
         sender: {
           sendMessage: async (chatId) => {
             sentToInviter.push(chatId);

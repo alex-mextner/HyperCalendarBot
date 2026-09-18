@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 import { imageLogger } from '../utils/logger.ts';
 
@@ -13,6 +14,7 @@ interface PoolOptions {
 export class PlaywrightPool {
   private browser: Browser | null = null;
   private freePages: Page[] = [];
+  private readonly pageBrowser = new WeakMap<Page, Browser>();
   private busyPages: Set<Page> = new Set();
   private pageUseCount: Map<Page, number> = new Map();
   private pageCreatedAt: Map<Page, number> = new Map();
@@ -39,7 +41,14 @@ export class PlaywrightPool {
   initialize(): Promise<void> {
     if (this.stopped) return Promise.reject(new Error('PlaywrightPool is shut down'));
     if (this.initializationPromise) return this.initializationPromise;
-    if (this.browser) return Promise.resolve();
+    if (this.browser) {
+      if (this.browser.isConnected()) return Promise.resolve();
+      this.handleBrowserDisconnect(this.browser);
+      return (
+        this.reinitPromise ??
+        Promise.reject(new Error('PlaywrightPool is permanently disabled after repeated init failures'))
+      );
+    }
     this.initializationPromise = this.initializeBrowser().finally(() => {
       this.initializationPromise = null;
     });
@@ -60,46 +69,50 @@ export class PlaywrightPool {
     this.browser = browser;
     this.reinitAttempts = 0;
     this.dead = false;
-    this.browser.on('disconnected', () => {
-      if (this.stopped) return;
-      this.freePages = [];
-      this.busyPages.clear();
-      this.pageUseCount.clear();
-      this.pageCreatedAt.clear();
-      this.browser = null;
+    this.browser.on('disconnected', () => this.handleBrowserDisconnect(browser));
+  }
 
-      if (this.reinitAttempts >= this.maxReinitAttempts) {
-        this.dead = true;
+  private handleBrowserDisconnect(browser: Browser): void {
+    // An old browser may finish emitting after a replacement has been installed.
+    if (this.stopped || this.browser !== browser) return;
+    this.freePages = [];
+    this.busyPages.clear();
+    this.pageUseCount.clear();
+    this.pageCreatedAt.clear();
+    this.browser = null;
+
+    if (this.reinitAttempts >= this.maxReinitAttempts) {
+      this.dead = true;
+      imageLogger.error(
+        { attempts: this.reinitAttempts },
+        'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+      );
+      return;
+    }
+
+    this.reinitAttempts++;
+    const recovery: Promise<void> = this.initialize()
+      .then(() => {
+        if (!this.stopped) imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
+      })
+      .catch((err) => {
+        if (this.stopped) return;
         imageLogger.error(
-          { attempts: this.reinitAttempts },
-          'PlaywrightPool permanently disabled — max reinit attempts exceeded',
+          { err, attempt: this.reinitAttempts },
+          'PlaywrightPool reinit failed after browser disconnect',
         );
-        return;
-      }
-
-      this.reinitAttempts++;
-      this.reinitPromise = this.initialize()
-        .then(() => {
-          if (!this.stopped) imageLogger.info('PlaywrightPool reinit succeeded after browser disconnect');
-        })
-        .catch((err) => {
-          if (this.stopped) return;
+        if (this.reinitAttempts >= this.maxReinitAttempts) {
+          this.dead = true;
           imageLogger.error(
-            { err, attempt: this.reinitAttempts },
-            'PlaywrightPool reinit failed after browser disconnect',
+            { attempts: this.reinitAttempts },
+            'PlaywrightPool permanently disabled — max reinit attempts exceeded',
           );
-          if (this.reinitAttempts >= this.maxReinitAttempts) {
-            this.dead = true;
-            imageLogger.error(
-              { attempts: this.reinitAttempts },
-              'PlaywrightPool permanently disabled — max reinit attempts exceeded',
-            );
-          }
-        })
-        .finally(() => {
-          this.reinitPromise = null;
-        });
-    });
+        }
+      })
+      .finally(() => {
+        if (this.reinitPromise === recovery) this.reinitPromise = null;
+      });
+    this.reinitPromise = recovery;
   }
 
   private assertRunning(): void {
@@ -110,9 +123,11 @@ export class PlaywrightPool {
   async acquire(timeoutMs = 10_000): Promise<Page> {
     this.assertRunning();
 
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
+    let generationRecoveries = 0;
 
     while (true) {
+      if (this.browser && !this.browser.isConnected()) this.handleBrowserDisconnect(this.browser);
       if (this.reinitPromise) {
         await this.reinitPromise;
       }
@@ -129,26 +144,41 @@ export class PlaywrightPool {
       // Create a new page if under limit
       const totalPages = this.freePages.length + this.busyPages.size;
       if (totalPages < this.maxPages) {
-        const { page, browser } = await this.createPage();
-        // Recheck after the helper Promise boundary; register in the same tick.
+        const requestedBrowser = this.browser;
         try {
-          this.assertRunning();
-          if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+          const { page, browser } = await this.createPage();
+          try {
+            this.assertRunning();
+            if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+          } catch (error) {
+            await page
+              .context()
+              .close()
+              .catch(() => {});
+            this.pageUseCount.delete(page);
+            this.pageCreatedAt.delete(page);
+            throw error;
+          }
+          this.busyPages.add(page);
+          return page;
         } catch (error) {
-          await page
-            .context()
-            .close()
-            .catch(() => {});
-          this.pageUseCount.delete(page);
-          this.pageCreatedAt.delete(page);
+          this.assertRunning();
+          // Retry observed browser-generation loss, never ordinary page errors.
+          if (requestedBrowser && (this.browser !== requestedBrowser || !requestedBrowser.isConnected())) {
+            if (++generationRecoveries > this.maxReinitAttempts) {
+              throw new Error('acquire failed: browser recovery limit reached', { cause: error });
+            }
+            if (this.browser === requestedBrowser) this.handleBrowserDisconnect(requestedBrowser);
+            if (performance.now() >= deadline)
+              throw new Error('acquire timeout: browser recovery did not complete', { cause: error });
+            continue;
+          }
           throw error;
         }
-        this.busyPages.add(page);
-        return page;
       }
 
       // Wait or timeout
-      const remaining = deadline - Date.now();
+      const remaining = deadline - performance.now();
       if (remaining <= 0) {
         throw new Error('acquire timeout: no page available within time limit');
       }
@@ -158,14 +188,16 @@ export class PlaywrightPool {
   }
 
   async release(page: Page): Promise<void> {
-    this.busyPages.delete(page);
-    if (this.stopped) return;
+    // Only the current lease owner may release a page, once.
+    if (!this.busyPages.delete(page) || this.stopped) return;
+    const browser = this.pageBrowser.get(page);
+    if (!browser || browser !== this.browser) return;
 
     const useCount = (this.pageUseCount.get(page) ?? 0) + 1;
     this.pageUseCount.set(page, useCount);
 
-    const createdAt = this.pageCreatedAt.get(page) ?? Date.now();
-    const age = Date.now() - createdAt;
+    const createdAt = this.pageCreatedAt.get(page) ?? performance.now();
+    const age = performance.now() - createdAt;
 
     if (useCount >= this.maxUseCount || age >= this.maxAgeMs) {
       try {
@@ -180,7 +212,15 @@ export class PlaywrightPool {
 
     try {
       await page.setContent('<html><body></body></html>');
-      if (!this.stopped) this.freePages.push(page);
+      if (!this.stopped && this.browser === browser) this.freePages.push(page);
+      else {
+        this.pageUseCount.delete(page);
+        this.pageCreatedAt.delete(page);
+        await page
+          .context()
+          .close()
+          .catch(() => {});
+      }
     } catch {
       // page is no longer usable; discard it
       this.pageUseCount.delete(page);
@@ -228,8 +268,9 @@ export class PlaywrightPool {
       const page = await context.newPage();
       this.assertRunning();
       if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+      this.pageBrowser.set(page, browser);
       this.pageUseCount.set(page, 0);
-      this.pageCreatedAt.set(page, Date.now());
+      this.pageCreatedAt.set(page, performance.now());
       return { page, browser };
     } catch (error) {
       if (context) await context.close().catch(() => {});
