@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
 import { resolveInvitationRecipient } from '../../src/services/ai/recipient-identity.ts';
+import { inspectRecipientProfile } from '../../src/services/ai/recipient-profile.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
 
 let db: Database;
@@ -40,16 +41,16 @@ test('verified profile refresh accepts missing username without changing the ID 
 test('numeric invitation to an established contact survives username reassignment', async () => {
   contacts.add(10, 'Alex', 'recycled', 5000000001);
   const ctx = context({ lookupTelegramUser: async () => ({ id: 5000000001, username: 'new', firstName: 'Alex' }) });
+  await inspectRecipientProfile(ctx, 5000000001); // Explicit prior inspection, not hidden work during delivery.
   const result = await resolveInvitationRecipient(ctx, { invitee_id: 5000000001 });
   expect(result).toMatchObject({ ok: true, id: 5000000001, username: 'new' });
   expect(contacts.findByTelegramId(10, 5000000001)?.username).toBe('new');
 });
 test('live ID lookup returning another ID is rejected without changing contact data', async () => {
   contacts.add(10, 'Alex', 'old', 5000000001);
-  const result = await resolveInvitationRecipient(
-    context({ lookupTelegramUser: async () => ({ id: 5000000002, username: 'other' }) }),
-    { invitee_id: 5000000001 },
-  );
+  const ctx = context({ lookupTelegramUser: async () => ({ id: 5000000002, username: 'other' }) });
+  await inspectRecipientProfile(ctx, 5000000001);
+  const result = await resolveInvitationRecipient(ctx, { invitee_id: 5000000001 });
   expect(result.ok).toBe(false);
   expect(contacts.findByTelegramId(10, 5000000001)?.username).toBe('old');
 });
@@ -75,6 +76,7 @@ test('an inferred saved username alone keeps its established numeric contact ide
     resolveUsername: async () => ({ id: 5000000002, username: 'recycled' }),
     lookupTelegramUser: async () => ({ id: 5000000001, username: 'current' }),
   });
+  await inspectRecipientProfile(ctx, 5000000001);
   const result = await resolveInvitationRecipient(ctx, { invitee_username: 'recycled' });
   expect(result).toMatchObject({ ok: true, id: 5000000001, username: 'current' });
 });

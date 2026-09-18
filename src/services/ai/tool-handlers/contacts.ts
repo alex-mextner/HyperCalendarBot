@@ -196,7 +196,19 @@ export function handleUpdateContact(
     if (cachedUser && top.contact.telegram_id === null) patch.telegram_id = cachedUser.telegram_id;
   }
   if (Object.keys(patch).length === 0) return { success: false, error: 'No fields to update provided.' };
-  ctx.contactRepo.update(top.contact.id, patch);
+  try {
+    ctx.contactRepo.update(top.contact.id, patch);
+  } catch (error) {
+    // The repository checks identity conflicts before its transactional UPDATE.
+    if (error instanceof Error && error.message.startsWith('CONTACT_IDENTITY_CONFLICT:')) {
+      return {
+        success: false,
+        mutationState: 'not_applied',
+        error: t(ctx.user.language).aiTools.meta.recipientIdentityConflict,
+      };
+    }
+    throw error;
+  }
   const updatedName = patch.name ?? top.contact.name;
   const updated = ctx.contactRepo.findById(userId, top.contact.id);
   const displayName = updated?.preferred_name ?? updated?.name ?? updatedName;

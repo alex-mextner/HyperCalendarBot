@@ -308,7 +308,9 @@ export async function handleResendInvitation(
       invitationId: invitation.id,
       eventId: invitation.event_id,
       inviteeId: invitation.invitee_id,
-      inviteeUsername: recipient.username,
+      // This is only a peer-cache hint. Python transport rechecks the resolved
+      // peer against inviteeId and always sends to that numeric ID.
+      inviteeUsername: isGroupTarget ? undefined : (recipient.username ?? invitation.invitee_username ?? undefined),
       inviterId: ctx.user.telegram_id,
       inviterName: ctx.user.first_name ?? ctx.user.username ?? `User ${ctx.user.telegram_id}`,
       inviterUsername: ctx.user.username ?? undefined,

@@ -4,10 +4,10 @@ import type { AgentContext } from './types.ts';
 type Profile = NonNullable<Awaited<ReturnType<NonNullable<AgentContext['lookupTelegramUser']>>>> & {
   checkedAt: string;
 };
-type Inspection = { expiresAt: number; pending: Promise<Profile | null> };
+type Inspection = { expiresAt: number; pending: Promise<Profile | null>; result?: Profile | null };
 const inspections = new WeakMap<AgentContext, Map<string, Inspection>>();
 const TTL = 30_000;
-const MAX_INSPECTIONS = 32;
+const MAX_INSPECTIONS = 8;
 
 export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<Profile | null> {
   if (!ctx.lookupTelegramUser) return Promise.resolve(null);
@@ -34,6 +34,17 @@ export function inspectRecipientProfile(ctx: AgentContext, id: number): Promise<
       )
       .finally(() => clearTimeout(timeout));
   });
-  cache.set(key, { expiresAt: now + TTL, pending });
+  const entry: Inspection = { expiresAt: now + TTL, pending };
+  pending.then((result) => {
+    entry.result = result;
+  });
+  cache.set(key, entry);
   return pending;
+}
+
+/** Read only a completed, caller-scoped inspection; never start optional I/O during delivery. */
+export function cachedRecipientProfile(ctx: AgentContext, id: number): Profile | null {
+  const entry = inspections.get(ctx)?.get(`${ctx.user.telegram_id}:${id}`);
+  if (!entry || entry.expiresAt <= Date.now()) return null;
+  return entry.result ?? null;
 }

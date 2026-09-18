@@ -1,5 +1,5 @@
 import { consumeRecipientApproval } from './recipient-confirmation.ts';
-import { inspectRecipientProfile } from './recipient-profile.ts';
+import { cachedRecipientProfile } from './recipient-profile.ts';
 import type { AgentContext } from './types.ts';
 
 export function normalizeRecipientUsername(username: string): string {
@@ -50,7 +50,30 @@ export async function resolveInvitationRecipient(
     (savedByHint && !/^User \d+$/.test(savedByHint.name) ? (savedByHint.telegram_id ?? undefined) : undefined);
   if (id !== undefined && (!Number.isSafeInteger(id) || id === 0)) return { ok: false, reason: 'unverified' };
   if (id !== undefined && id < 0) {
-    return input.invitee_username ? { ok: false, reason: 'conflict' } : { ok: true, id, isGroup: true };
+    if (input.invitee_username) return { ok: false, reason: 'conflict' };
+    let known =
+      establishedInvitationRecipientId === id ||
+      ctx.verifiedRecipientIds?.has(id) === true ||
+      (ctx.isGroup && ctx.groupChatId === id);
+    // Intent evidence and current membership are separate requirements.
+    if (!known) return { ok: false, reason: 'unverified' };
+    if (!(ctx.isGroup && ctx.groupChatId === id)) {
+      if (!ctx.group) return { ok: false, reason: 'unverified' };
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        known = await Promise.race([
+          ctx.group.checkGroupMembership(id, ctx.user.telegram_id),
+          new Promise<boolean>((resolve) => {
+            timer = setTimeout(() => resolve(false), 3000);
+          }),
+        ]);
+      } catch {
+        return { ok: false, reason: 'unverified' };
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    return known ? { ok: true, id, isGroup: true } : { ok: false, reason: 'unverified' };
   }
   if (input.force && id !== undefined && id > 0 && input.event_id !== undefined) {
     if (!consumeRecipientApproval(ctx.user.telegram_id, input.event_id, id)) return { ok: false, reason: 'unverified' };
@@ -93,10 +116,7 @@ export async function resolveInvitationRecipient(
   if (id === undefined || (id !== establishedInvitationRecipientId && !isKnownRecipient(ctx, id)))
     return { ok: false, reason: 'unverified' };
   if (ctx.lookupTelegramUser) {
-    const profile = await Promise.race([
-      inspectRecipientProfile(ctx, id),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 0)),
-    ]);
+    const profile = cachedRecipientProfile(ctx, id);
     if (profile) {
       if (profile.id !== id || profile.deleted) return { ok: false, reason: 'conflict' };
       ctx.contactRepo?.refreshProfile(ctx.user.telegram_id, id, {

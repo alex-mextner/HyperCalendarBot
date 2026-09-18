@@ -6,6 +6,8 @@ import { ActionLogRepository } from '../../src/database/repositories/action-log.
 import { ContactRepository } from '../../src/database/repositories/contact.repository.ts';
 import { DeepLinkRepository } from '../../src/database/repositories/deep-link.repository.ts';
 import { EventRepository } from '../../src/database/repositories/event.repository.ts';
+import { GroupChatRepository } from '../../src/database/repositories/group-chat.repository.ts';
+import { GroupMemberRepository } from '../../src/database/repositories/group-member.repository.ts';
 import { InvitationRepository } from '../../src/database/repositories/invitation.repository.ts';
 import { SharingSettingsRepository } from '../../src/database/repositories/sharing-settings.repository.ts';
 import { UserRepository } from '../../src/database/repositories/user.repository.ts';
@@ -24,6 +26,7 @@ import { handleResendInvitation, handleSendInvitation } from '../../src/services
 import { getToolDefinitions } from '../../src/services/ai/tools.ts';
 import type { AgentContext } from '../../src/services/ai/types.ts';
 import { EventService } from '../../src/services/event/event-service.ts';
+import { GroupMemberService } from '../../src/services/group/member-service.ts';
 import { DeepLinkService } from '../../src/services/sharing/deep-link-service.ts';
 import { InvitationService } from '../../src/services/sharing/invitation-service.ts';
 
@@ -45,6 +48,19 @@ function makeCtx(db: Database, overrides: Partial<AgentContext> = {}): AgentCont
     },
     ...overrides,
   } as unknown as AgentContext;
+}
+
+function groupCapability(
+  db: Database,
+  checkGroupMembership: () => Promise<boolean>,
+): NonNullable<AgentContext['group']> {
+  const groupMemberRepo = new GroupMemberRepository(db);
+  return {
+    checkGroupMembership,
+    groupMemberRepo,
+    groupChatRepo: new GroupChatRepository(db),
+    groupMemberService: new GroupMemberService(groupMemberRepo, new UserRepository(db)),
+  };
 }
 
 describe('recipient and contact tool boundaries', () => {
@@ -132,6 +148,7 @@ describe('recipient and contact tool boundaries', () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(sent).toEqual([5000000001]);
     expect((await pending).success).toBe(true);
+    expect(ctx.lookupTelegramUser).not.toHaveBeenCalled();
   });
 
   test('inspection returns structured metadata and caches only the scoped numeric profile', async () => {
@@ -362,12 +379,12 @@ describe('recipient and contact tool boundaries', () => {
     const ids = Array.from({ length: 33 }, (_, i) => 5000000001 + i);
     ctx.messageText = ids.join(' ');
     for (const telegram_id of ids) await handleGetUserInfo(ctx, { telegram_id });
-    expect(lookup).toHaveBeenCalledTimes(32);
+    expect(lookup).toHaveBeenCalledTimes(8);
     const now = Date.now();
     const clock = spyOn(Date, 'now').mockReturnValue(now + 30_001);
     try {
       await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
-      expect(lookup).toHaveBeenCalledTimes(33);
+      expect(lookup).toHaveBeenCalledTimes(9);
     } finally {
       clock.mockRestore();
     }
@@ -479,6 +496,7 @@ describe('recipient and contact tool boundaries', () => {
 
   test('fresh absence of username survives automatic contact persistence', async () => {
     ctx.lookupTelegramUser = async (id) => ({ id, firstName: 'Current', username: undefined });
+    await handleGetUserInfo(ctx, { telegram_id: 5000000001 });
     const event = ctx.eventService.createEvent({
       user_id: 10,
       title: 'Synthetic',
@@ -537,6 +555,7 @@ describe('recipient and contact tool boundaries', () => {
   });
 
   test('a historical group username cannot turn a resend into a personal identity conflict', async () => {
+    ctx.group = groupCapability(db, async () => true);
     const event = ctx.eventService.createEvent({
       user_id: 10,
       title: 'Synthetic group',
@@ -559,6 +578,8 @@ describe('recipient and contact tool boundaries', () => {
   });
 
   test('initial group delivery uses group RSVP and never adds a personal contact', async () => {
+    ctx.verifiedRecipientIds = new Set([-100001]); // Trusted group selection, not an invented target.
+    ctx.group = groupCapability(db, async () => true);
     const variants: string[] = [];
     ctx.sender = {
       sendMessage: async () => ({ message_id: 1 }),
@@ -615,6 +636,51 @@ describe('recipient and contact tool boundaries', () => {
     });
     expect(result.disposition).toBe('waiting');
     expect(result.mutationState).toBe('not_applied');
+    expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+  });
+  test('an arbitrary negative group ID is not implicit recipient authority', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Group authority',
+      start_at: '2035-01-01T12:00:00Z',
+      timezone: 'UTC',
+    });
+    const send = mock(async () => ({ message_id: 1 }));
+    ctx.sender = { sendMessage: send, editMessageText: async () => {}, sendInvitation: send };
+    const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: -1009999 });
+    expect(result.success).toBe(false);
+    expect(result.mutationState).toBe('not_applied');
+    expect(send).not.toHaveBeenCalled();
+    expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+  });
+  test('noncurrent group requires membership capability even with verified intent', async () => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Membership boundary',
+      start_at: '2035-01-01T12:00:00Z',
+      timezone: 'UTC',
+    });
+    ctx.verifiedRecipientIds = new Set([-100001]);
+    const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: -100001 });
+    expect(result.success).toBe(false);
+    expect(result.mutationState).toBe('not_applied');
+    expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
+  });
+
+  test.each(['revoked', 'outage'])('verified intent never overrides group membership %s', async (mode) => {
+    const event = ctx.eventService.createEvent({
+      user_id: 10,
+      title: 'Membership boundary',
+      start_at: '2035-01-01T12:00:00Z',
+      timezone: 'UTC',
+    });
+    ctx.verifiedRecipientIds = new Set([-100001]);
+    ctx.group = groupCapability(db, async () => {
+      if (mode === 'outage') throw new Error('Synthetic outage');
+      return false;
+    });
+    const result = await handleSendInvitation(ctx, { event_id: event.id, invitee_id: -100001 });
+    expect(result.success).toBe(false);
     expect(ctx.sharing!.invitationRepo.getByEvent(event.id)).toHaveLength(0);
   });
 });
