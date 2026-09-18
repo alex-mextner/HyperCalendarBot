@@ -17,7 +17,7 @@ import {
   elapsedMs,
 } from './request-metrics.ts';
 import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
-import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
+import { AllProvidersFailedError, aiStreamRound, providerFailureMetrics, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
 import { executeTool, SILENT_TOOLS, SKIP_PERSIST_TOOLS, WRITE_TOOLS } from './tool-executor.ts';
@@ -723,6 +723,8 @@ export class CalendarBotAgent {
               completionTokens: metrics?.usage?.completionTokens ?? null,
               reasoningTokens: metrics?.usage?.reasoningTokens ?? null,
               cachedTokens: metrics?.usage?.cachedTokens ?? null,
+              failedProviders: metrics?.failedProviders ?? [],
+              skippedProviders: metrics?.skippedProviders ?? [],
               success: true,
             },
             'AI model call metric',
@@ -742,10 +744,9 @@ export class CalendarBotAgent {
               totalDurationMs: failed?.totalDurationMs ?? elapsedMs(startedAt),
               attemptCount: failed?.attemptCount ?? null,
               fallbackCount: failed?.fallbackCount ?? null,
-              failedProviders:
-                error instanceof AllProvidersFailedError
-                  ? error.failures.map((failure) => ({ provider: failure.providerId, model: failure.model }))
-                  : [],
+              ...(error instanceof AllProvidersFailedError
+                ? providerFailureMetrics(error.failures)
+                : { failedProviders: [], skippedProviders: [] }),
               success: false,
             },
             'AI model call metric',

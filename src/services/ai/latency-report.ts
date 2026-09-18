@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+const metricNumber = z.number().nonnegative();
 const failedProviderSchema = z.object({ provider: z.string(), model: z.string() });
 export const AiLogRowSchema = z
   .object({
@@ -7,34 +8,35 @@ export const AiLogRowSchema = z
     requestId: z.string().optional(),
     userId: z.number().optional(),
     chatId: z.number().optional(),
-    elapsedMs: z.number().optional(),
-    firstVisibleMs: z.number().nullable().optional(),
-    modelDurationMs: z.number().optional(),
-    toolDurationMs: z.number().optional(),
-    deliveryActionMs: z.number().optional(),
-    modelCalls: z.number().optional(),
-    modelAttempts: z.number().optional(),
-    providerFallbacks: z.number().optional(),
-    promptTokens: z.number().optional(),
-    completionTokens: z.number().optional(),
-    reportedTotalTokens: z.number().optional(),
-    reasoningTokens: z.number().optional(),
-    cachedTokens: z.number().optional(),
-    usageMissingRounds: z.number().optional(),
-    usagePartialRounds: z.number().optional(),
+    elapsedMs: metricNumber.optional(),
+    firstVisibleMs: metricNumber.nullable().optional(),
+    modelDurationMs: metricNumber.optional(),
+    toolDurationMs: metricNumber.optional(),
+    deliveryActionMs: metricNumber.optional(),
+    modelCalls: metricNumber.optional(),
+    modelAttempts: metricNumber.optional(),
+    providerFallbacks: metricNumber.optional(),
+    promptTokens: metricNumber.nullable().optional(),
+    completionTokens: metricNumber.nullable().optional(),
+    reportedTotalTokens: metricNumber.optional(),
+    reasoningTokens: metricNumber.nullable().optional(),
+    cachedTokens: metricNumber.nullable().optional(),
+    usageMissingRounds: metricNumber.optional(),
+    usagePartialRounds: metricNumber.optional(),
     termination: z.string().optional(),
     deliveryOutcome: z.string().optional(),
-    provider: z.string().optional(),
-    model: z.string().optional(),
+    provider: z.string().nullable().optional(),
+    model: z.string().nullable().optional(),
     purpose: z.string().optional(),
-    providerDurationMs: z.number().nullable().optional(),
-    totalDurationMs: z.number().nullable().optional(),
-    attemptCount: z.number().optional(),
-    fallbackCount: z.number().optional(),
+    providerDurationMs: metricNumber.nullable().optional(),
+    totalDurationMs: metricNumber.nullable().optional(),
+    attemptCount: metricNumber.nullable().optional(),
+    fallbackCount: metricNumber.nullable().optional(),
     failedProviders: z.array(failedProviderSchema).optional(),
+    skippedProviders: z.array(failedProviderSchema).optional(),
     success: z.boolean().optional(),
     tier: z.string().optional(),
-    durationMs: z.number().optional(),
+    durationMs: metricNumber.optional(),
     fallback: z.boolean().optional(),
   })
   .passthrough();
@@ -57,6 +59,7 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
   const requestRows: AiLogRow[] = [];
   const providerDurations = new Map<string, number[]>();
   const providerFailures = new Map<string, number>();
+  const providerSkips = new Map<string, number>();
   const routeDurations = new Map<string, number[]>();
   const routeFallbacks = new Map<string, number>();
   const outcomes = new Map<string, number>();
@@ -77,6 +80,7 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
         providerDurations.set(key, values);
       }
       for (const failure of row.failedProviders ?? []) inc(providerFailures, `${failure.provider}:${failure.model}`);
+      for (const skip of row.skippedProviders ?? []) inc(providerSkips, `${skip.provider}:${skip.model}`);
       continue;
     }
     if ((row.msg === 'Routing decision' || row.msg === 'Routing decision fallback') && row.tier) {
@@ -130,11 +134,16 @@ export function summarizeAiLogs(rows: readonly AiLogRow[]) {
     },
   );
 
-  const providerKeys = new Set([...providerDurations.keys(), ...providerFailures.keys()]);
+  const providerKeys = new Set([...providerDurations.keys(), ...providerFailures.keys(), ...providerSkips.keys()]);
   const byProvider = Object.fromEntries(
-    [...providerKeys]
-      .sort()
-      .map((key) => [key, { ...stats(providerDurations.get(key) ?? []), failures: providerFailures.get(key) ?? 0 }]),
+    [...providerKeys].sort().map((key) => [
+      key,
+      {
+        ...stats(providerDurations.get(key) ?? []),
+        failures: providerFailures.get(key) ?? 0,
+        skippedBeforeRequest: providerSkips.get(key) ?? 0,
+      },
+    ]),
   );
   const tierKeys = new Set([...routeDurations.keys(), ...routeFallbacks.keys()]);
   const byTier = Object.fromEntries(

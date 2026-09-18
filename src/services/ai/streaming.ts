@@ -77,6 +77,8 @@ export interface StreamRoundMetrics {
   attemptCount: number;
   fallbackCount: number;
   usage: StreamTokenUsage | null;
+  failedProviders?: { provider: ProviderId; model: string }[];
+  skippedProviders?: { provider: ProviderId; model: string }[];
 }
 
 export interface FailedRoundMetrics {
@@ -145,6 +147,7 @@ export class EmptyProviderResponseError extends Error {
 
 /** One provider slot's failure, kept for the aggregate error and the admin alert. */
 export interface ProviderFailure {
+  skippedBeforeRequest?: boolean;
   /** Human-readable provider slot including the model actually requested. */
   provider: string;
   providerId: ProviderId;
@@ -653,6 +656,16 @@ async function runSlot(
   }
 }
 
+export function providerFailureMetrics(failures: readonly ProviderFailure[]) {
+  const failedProviders: { provider: ProviderId; model: string }[] = [];
+  const skippedProviders: { provider: ProviderId; model: string }[] = [];
+  for (const failure of failures) {
+    const list = failure.skippedBeforeRequest ? skippedProviders : failedProviders;
+    list.push({ provider: failure.providerId, model: failure.model });
+  }
+  return { failedProviders, skippedProviders };
+}
+
 function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
   const status = error instanceof OpenAI.APIError && typeof error.status === 'number' ? error.status : undefined;
   const message = error instanceof Error ? error.message : String(error);
@@ -740,7 +753,14 @@ export async function aiStreamRound(
     if (fitRejection) {
       const provider = slotName(slot.label, requestModel);
       const message = `Preflight skipped: conservative request estimate ${fitRejection.conservativeRequestedTokens} tokens exceeds known ${fitRejection.limitTokens} TPM limit`;
-      failures.push({ provider, providerId: slot.provider, model: requestModel, message, transient: false });
+      failures.push({
+        provider,
+        providerId: slot.provider,
+        model: requestModel,
+        message,
+        transient: false,
+        skippedBeforeRequest: true,
+      });
       aiLogger.info(
         { provider, userId: options.userId, ...fitRejection },
         'Skipping provider because the request cannot fit its known token budget',
@@ -767,6 +787,7 @@ export async function aiStreamRound(
           chain: chainKind,
           attemptCount: actualAttempts,
           fallbackCount: failures.length,
+          ...providerFailureMetrics(failures),
           totalDurationMs: Math.max(0, performance.now() - roundStartedAt),
         };
       }
