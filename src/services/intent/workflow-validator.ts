@@ -11,7 +11,9 @@ const TOOL_SCHEMAS_BY_NAME: Record<string, z.ZodType> = { ...toolSchemas };
  * their own minimal schemas instead of any AI-facing `toolSchemas` entry of the same name.
  */
 const WORKFLOW_ONLY_SCHEMAS: Record<string, z.ZodType> = {
-  ask_user: z.object({ question: z.string().min(1) }).passthrough(),
+  ask_user: z
+    .object({ question: z.string().min(1), options: z.array(z.string().min(1).max(128)).min(1).max(12).optional() })
+    .passthrough(),
   respond: z.object({ message: z.string().min(1) }).passthrough(),
 };
 
@@ -167,8 +169,8 @@ function extractStepOutputNames(workflow: Workflow): Set<string> {
 
 interface StepCall {
   tool: string;
-  /** Raw argument values the workflow passes to the tool — always strings until resolved at runtime. */
-  input: Record<string, string>;
+  /** Raw arguments: legacy strings or explicitly versioned JSON/template values. */
+  input: Record<string, unknown>;
 }
 
 /** Collect every tool invocation in a workflow, from Level 1 `tools` or Level 2 `steps`. */
@@ -185,8 +187,10 @@ function extractStepCalls(workflow: Workflow): StepCall[] {
 }
 
 /** Whether a raw input value still holds an unresolved {{...}} template expression. */
-function isTemplateValue(value: string): boolean {
-  return value.includes('{{');
+function isTemplateValue(value: unknown): boolean {
+  if (typeof value === 'string') return value.includes('{{');
+  if (Array.isArray(value)) return value.some(isTemplateValue);
+  return value !== null && typeof value === 'object' && Object.values(value).some(isTemplateValue);
 }
 
 /**
@@ -196,8 +200,8 @@ function isTemplateValue(value: string): boolean {
  * bare dot-path template (e.g. "{{tool_outputs.event.id}}") whose resolved type depends on
  * an earlier tool's output and cannot be known statically.
  */
-function isBareCaptureTemplate(value: string): boolean {
-  return /^\{\{\$\d+\}\}$/.test(value);
+function isBareCaptureTemplate(value: unknown): boolean {
+  return typeof value === 'string' && /^\{\{\$\d+\}\}$/.test(value);
 }
 
 /**
@@ -389,4 +393,19 @@ export function validateWorkflowVariables(workflow: Workflow, pattern: string | 
   }
 
   return errors;
+}
+
+/** Validate fully bound v2 arguments at the execution boundary, including optional fields. */
+export function validateResolvedWorkflowInput(
+  tool: string,
+  input: unknown,
+): { success: true; data: unknown } | { success: false } {
+  if (DENIED_TOOLS.has(tool)) return { success: false };
+  const schema = getOwn(STEP_SCHEMAS_BY_NAME, tool);
+  if (!schema || input === null || typeof input !== 'object' || Array.isArray(input)) return { success: false };
+  if (schema instanceof z.ZodObject && Object.keys(input).some((key) => !Object.hasOwn(schema.shape, key)))
+    return { success: false };
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { success: false };
+  return { success: true, data: parsed.data };
 }

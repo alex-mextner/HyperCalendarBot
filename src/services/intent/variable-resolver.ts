@@ -13,7 +13,14 @@ import {
 import type { StepResults } from '../../database/repositories/workflow-session.repository.ts';
 import { cmdLogger } from '../../utils/logger.ts';
 import { applyFilters, type FilterCall, parseFilterChain } from './filter-parser.ts';
+import { FORBIDDEN_WORKFLOW_KEYS, WORKFLOW_LIMITS, WorkflowInputError } from './workflow-input.ts';
 import type { I18nMap } from './workflow-schema.ts';
+
+interface ResolvePolicy {
+  strict: boolean;
+  translations: Set<string>;
+  outputChars: number;
+}
 
 /**
  * Event summary available as template variables in intent workflows.
@@ -81,6 +88,7 @@ function accessPath(obj: { [key: string]: unknown }, path: string): unknown {
       if (!Array.isArray(current)) return undefined;
       current = (current as unknown[])[seg];
     } else {
+      if (!Object.hasOwn(current, seg) || FORBIDDEN_WORKFLOW_KEYS.has(seg)) return undefined;
       current = (current as { [key: string]: unknown })[seg];
     }
   }
@@ -99,6 +107,7 @@ function resolveVar(
   userCtx: UserContext,
   stepResults?: StepResults,
   i18n?: I18nMap,
+  policy?: ResolvePolicy,
 ): unknown {
   const now = new TZDate(new Date(), userCtx.timezone);
 
@@ -148,16 +157,26 @@ function resolveVar(
       if (name.startsWith('t.') && i18n) {
         const key = name.slice(2);
         const langDict: { [key: string]: string } = i18n[userCtx.language] ?? i18n.en ?? {};
-        const raw = langDict[key];
+        const raw = Object.hasOwn(langDict, key) ? langDict[key] : undefined;
         if (raw === undefined) return undefined;
         // Lazy: resolve any {{}} inside the i18n string with current context
+        if (policy?.strict) {
+          if (policy.translations.has(key) || policy.translations.size >= WORKFLOW_LIMITS.translationDepth)
+            throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+          policy.translations.add(key);
+          try {
+            return resolveInner(raw, captures, userCtx, stepResults, i18n, policy);
+          } finally {
+            policy.translations.delete(key);
+          }
+        }
         return resolveVariables(raw, captures, userCtx, stepResults, i18n);
       }
       break;
   }
 
   // Capture groups: $1, $2, etc.
-  if (name in captures) {
+  if (Object.hasOwn(captures, name)) {
     return captures[name];
   }
 
@@ -175,12 +194,22 @@ function resolveVar(
  * Resolve {{...}} variables in a value. Works on strings (template substitution)
  * and objects (recursively resolve all string values).
  */
-export function resolveVariables(
+function accountOutput(value: unknown, policy?: ResolvePolicy): unknown {
+  if (policy?.strict && typeof value === 'string') {
+    policy.outputChars += value.length;
+    if (value.length > WORKFLOW_LIMITS.stringChars || policy.outputChars > WORKFLOW_LIMITS.totalChars)
+      throw new WorkflowInputError('INVALID_INPUT');
+  }
+  return value;
+}
+
+function resolveInner(
   template: unknown,
   captures: Record<string, string>,
   userCtx: UserContext,
   stepResults?: StepResults,
   i18n?: I18nMap,
+  policy?: ResolvePolicy,
 ): unknown {
   if (typeof template === 'string') {
     const pattern = /\{\{([^}]+)\}\}/g;
@@ -189,47 +218,75 @@ export function resolveVariables(
     // If the entire string is a single variable (no filter), return the raw resolved value
     // (preserves non-string types like numbers)
     if (matches.length === 1 && template === `{{${matches[0]![1]}}}` && !matches[0]![1]!.includes('|')) {
-      const resolved = resolveVar(matches[0]![1]!.trim(), captures, userCtx, stepResults, i18n);
-      return resolved !== undefined ? resolved : template;
+      const resolved = resolveVar(matches[0]![1]!.trim(), captures, userCtx, stepResults, i18n, policy);
+      if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+      return accountOutput(resolved !== undefined ? resolved : template, policy);
     }
 
     // Otherwise do text substitution, converting everything to string
-    return template.replace(pattern, (match, expr: string) => {
+    let outputLength = template.length;
+    const replacement = (value: string, originalLength: number): string => {
+      outputLength += value.length - originalLength;
+      if (policy?.strict && outputLength > WORKFLOW_LIMITS.stringChars) throw new WorkflowInputError('INVALID_INPUT');
+      return value;
+    };
+    const output = template.replace(pattern, (match, expr: string) => {
       const pipeIdx = expr.indexOf('|');
       const varName = (pipeIdx === -1 ? expr : expr.slice(0, pipeIdx)).trim();
       const filterExpr = pipeIdx === -1 ? '' : expr.slice(pipeIdx + 1);
 
-      const resolved = resolveVar(varName, captures, userCtx, stepResults, i18n);
+      const resolved = resolveVar(varName, captures, userCtx, stepResults, i18n, policy);
 
       if (!filterExpr) {
-        return resolved !== undefined ? String(resolved) : match;
+        if (resolved === undefined && policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
+        return replacement(resolved !== undefined ? String(resolved) : match, match.length);
       }
 
       let filters: FilterCall[];
       try {
         filters = parseFilterChain(filterExpr);
       } catch {
+        if (policy?.strict) throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
         cmdLogger.warn({ expr }, 'Invalid filter expression in intent template');
         return match;
       }
 
       // default() can produce a value even when resolved is undefined
+      if (resolved === undefined && policy?.strict && !filters.some((f) => f.name === 'default' && f.args.length === 1))
+        throw new WorkflowInputError('UNRESOLVED_TEMPLATE');
       const result = applyFilters(resolved, filters);
-      return result;
+      return replacement(result, match.length);
     });
+    return accountOutput(output, policy);
   }
 
   if (Array.isArray(template)) {
-    return template.map((item) => resolveVariables(item, captures, userCtx, stepResults, i18n));
+    return template.map((item) => resolveInner(item, captures, userCtx, stepResults, i18n, policy));
   }
 
   if (template !== null && typeof template === 'object') {
     const result: { [key: string]: unknown } = {};
     for (const [key, value] of Object.entries(template as { [key: string]: unknown })) {
-      result[key] = resolveVariables(value, captures, userCtx, stepResults, i18n);
+      result[key] = resolveInner(value, captures, userCtx, stepResults, i18n, policy);
     }
     return result;
   }
 
   return template;
+}
+
+/** v2 strict mode rejects unresolved authored references, not braces supplied as user data. */
+export function resolveVariables(
+  template: unknown,
+  captures: Record<string, string>,
+  userCtx: UserContext,
+  stepResults?: StepResults,
+  i18n?: I18nMap,
+  options?: { strict?: boolean },
+): unknown {
+  return resolveInner(template, captures, userCtx, stepResults, i18n, {
+    strict: options?.strict === true,
+    translations: new Set(),
+    outputChars: 0,
+  });
 }

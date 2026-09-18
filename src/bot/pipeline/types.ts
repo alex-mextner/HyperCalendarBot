@@ -11,6 +11,8 @@ export interface WorkflowSession {
   workflow: Workflow;
   captures: { [key: string]: string };
   createdAt: number;
+  /** Unconfirmed prompt delivery must be retried, never treated as an answer. */
+  pendingPrompt?: { text: string; options?: string[]; delivered: boolean };
 }
 
 export interface WorkflowSessionStore {
