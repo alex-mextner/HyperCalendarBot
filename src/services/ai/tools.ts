@@ -107,24 +107,25 @@ const toolDefinitions: ToolDefinition[] = [
   },
   {
     name: 'update_event',
-    description: 'Update an existing calendar event. Only pass fields that need to change.',
+    description:
+      'Update an existing calendar event. Omitted fields stay unchanged; explicit null clears nullable fields. Only pass intended changes.',
     input_schema: {
       type: 'object' as const,
       properties: {
         event_id: { type: 'number', description: 'ID of the event to update' },
         title: { type: 'string', description: 'New title. Optional.' },
         start_at: { type: 'string', description: 'New start, ISO 8601 UTC. Optional.' },
-        end_at: { type: 'string', description: 'New end, ISO 8601 UTC. null removes it. Optional.' },
-        description: { type: 'string', description: 'New description. null removes it. Optional.' },
+        end_at: { type: ['string', 'null'], description: 'New end, ISO 8601 UTC. null removes it. Optional.' },
+        description: { type: ['string', 'null'], description: 'New description. null removes it. Optional.' },
         location: {
-          type: 'string',
+          type: ['string', 'null'],
           description: 'New place or address for the event. null removes it. Optional.',
         },
         location_abstract: {
           type: 'boolean',
           description: 'True when the new location is relative (see create_event). Skips geocoding. Default false.',
         },
-        recurrence_rule: { type: 'string', description: 'New RRULE. null removes recurrence. Optional.' },
+        recurrence_rule: { type: ['string', 'null'], description: 'New RRULE. null removes recurrence. Optional.' },
         scope: scopeProperty,
         owner_id: ownerIdProperty,
       },
