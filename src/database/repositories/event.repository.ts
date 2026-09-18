@@ -1,5 +1,6 @@
 // src/database/repositories/event.repository.ts
 import type { Database, SQLQueryBindings } from 'bun:sqlite';
+import { assertValidEventTimestamps } from '../../utils/event-timestamps.ts';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
 // SQL fragment: group event visible to user if they are an active member
@@ -86,6 +87,7 @@ export class EventRepository {
   }
 
   create(data: CreateEventData): CalendarEvent {
+    assertValidEventTimestamps(data);
     const result = this.db
       .prepare(`
       INSERT INTO events (user_id, title, description, category, start_at, end_at, all_day, timezone, location, recurrence_rule, recurrence_end_at, owner_type, group_id, created_by, event_type)
@@ -311,6 +313,7 @@ export class EventRepository {
   }
 
   private buildUpdateQuery(data: UpdateEventData): { fields: string[]; values: SQLQueryBindings[] } {
+    assertValidEventTimestamps(data);
     const fields: string[] = [];
     const values: SQLQueryBindings[] = [];
 

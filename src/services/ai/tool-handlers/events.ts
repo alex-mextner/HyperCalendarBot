@@ -4,6 +4,7 @@ import type { Lang } from '../../../config/constants.ts';
 import { t } from '../../../config/constants.ts';
 import type { CalendarEvent, EventOccurrence } from '../../../database/types.ts';
 import { getDayRangeUtc } from '../../../utils/date.ts';
+import { eventTimestampError } from '../../../utils/event-timestamps.ts';
 import { logger } from '../../../utils/logger.ts';
 import { escapeHtml } from '../../../utils/telegram.ts';
 import { formatEventDetail } from '../../event/formatters.ts';
@@ -325,6 +326,8 @@ export async function handleCreateEvent(ctx: AgentContext, input: CreateEventInp
   );
   if (!access.ok) return { success: false, mutationState: 'not_applied', error: access.error };
   const userId = access.effectiveUserId;
+  const timestampError = eventTimestampError(input);
+  if (timestampError) return { success: false, mutationState: 'not_applied', error: timestampError };
   // Block creation of events in the past — force the agent to confirm with the user first
   if (!input.all_day && !input.force) {
     const eventTime = new Date(input.start_at).getTime();
@@ -435,6 +438,8 @@ export async function handleUpdateEvent(ctx: AgentContext, input: UpdateEventInp
   if (!beforeUpdate) {
     return { success: false, mutationState: 'not_applied', error: `Event ${event_id} not found or not owned by you.` };
   }
+  const timestampError = eventTimestampError(input);
+  if (timestampError) return { success: false, mutationState: 'not_applied', error: timestampError };
   const updated =
     scope === 'group'
       ? ctx.eventService.updateEventForGroup(event_id, ctx.groupChatId!, updates)
