@@ -300,8 +300,12 @@ test('pending release from disconnected browser never enters replacement free po
   const old = controlledContext(async () => old.page);
   old.page.setContent = mock(() => reset.promise);
   const next = controlledContext(async () => next.page);
+  const third = controlledContext(async () => third.page);
+  const nextContext = mock(async () => next.context)
+    .mockResolvedValueOnce(next.context)
+    .mockResolvedValue(third.context);
   const first = makeFakeBrowser({ newContext: async () => old.context });
-  const second = makeFakeBrowser({ newContext: async () => next.context });
+  const second = makeFakeBrowser({ newContext: nextContext });
   const launch = mock(async () => first)
     .mockResolvedValueOnce(first)
     .mockResolvedValue(second);
@@ -316,6 +320,8 @@ test('pending release from disconnected browser never enters replacement free po
   try {
     const leased = await pool.acquire();
     expect(leased).not.toBe(prior);
+    expect(leased).not.toBe(replacement);
+    expect(leased).toBe(third.page);
     expect(replacement).toBe(next.page);
   } finally {
     await pool.shutdown();
