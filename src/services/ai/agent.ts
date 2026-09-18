@@ -10,7 +10,12 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
-import { type AgentRequestMetricSnapshot, AgentRequestMetrics, elapsedMs } from './request-metrics.ts';
+import {
+  type AgentRequestMetricSnapshot,
+  AgentRequestMetrics,
+  type AgentTermination,
+  elapsedMs,
+} from './request-metrics.ts';
 import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
@@ -793,7 +798,7 @@ export class CalendarBotAgent {
     // Stays set until a validation retry produces an explicitly approved answer.
     let responseUnverified = false;
     let runError: unknown;
-    let termination: 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'silent' = 'limit';
+    let termination: AgentTermination = 'limit';
     const pendingHistory: MessageParam[] = [];
     const saveAssistant = (message: MessageParam, skipIds?: Set<string>) => {
       if ('tool_calls' in message && message.tool_calls?.length) {
@@ -1089,7 +1094,7 @@ export class CalendarBotAgent {
       }
     }
 
-    if (responseUnverified && termination !== 'waiting') termination = 'error';
+    if (responseUnverified && !runFailed && termination !== 'waiting') termination = 'unverified';
 
     // One evidence guard for every exit, including validation retries and partial streams.
     // Clarification UI is already delivered by the handler; it is never a completed write.
@@ -1103,7 +1108,9 @@ export class CalendarBotAgent {
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
     const validationNotice =
-      responseUnverified && !evidence && termination !== 'waiting' ? unverifiedResponseNotice(ctx.user.language) : null;
+      responseUnverified && !silent && !evidence && termination !== 'waiting'
+        ? unverifiedResponseNotice(ctx.user.language)
+        : null;
     const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
       writer.resetBuffers();
@@ -1121,7 +1128,8 @@ export class CalendarBotAgent {
         this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
-      if (validationNotice && !silent) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
+      // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
+      if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
     if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer);
 

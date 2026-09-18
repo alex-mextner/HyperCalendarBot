@@ -125,14 +125,14 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
 
   test.each(['en', 'ru'])('twice-rejected %s answer is replaced in delivery and history', async (language) => {
     ctx.user.language = language;
-    const script = scripted(
-      [{ text: INITIAL }, { text: UNSUPPORTED }],
-      ['REJECT: no evidence', 'REJECT: no evidence'],
-    );
+    const script = scripted([{ text: INITIAL }, { text: UNSUPPORTED }], ['REJECT: no evidence', 'REJECT: no evidence']);
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
     expect(result.responseText).toBe(unverifiedResponseNotice(language));
-    expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).toContain(unverifiedResponseNotice(language));
+    expect(result.metrics?.termination).toBe('unverified');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).toContain(
+      unverifiedResponseNotice(language),
+    );
     expect(script.counts.model).toBe(2);
   });
 
@@ -187,5 +187,53 @@ describe('validation rejection is terminal for unverified prose (#284)', () => {
     const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
     expectNoRejectedProse(result.responseText);
     expect(result.responseText).toBe(unverifiedResponseNotice('en'));
+  });
+  test('quiet implicit repair failure does not speak or erase an outstanding notice', async () => {
+    ctx.wasExplicitInvocation = false;
+    aiFailureNotices.decide(ctx.user.telegram_id, 'en', { hardOutage: false, willRetry: true });
+    const script = scripted(
+      [{ text: INITIAL }, { text: UNSUPPORTED, error: new Error('Synthetic repair outage') }],
+      ['REJECT: no evidence'],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toBe('');
+    expect(result.metrics?.termination).toBe('error');
+    expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(
+      unverifiedResponseNotice('en'),
+    );
+    expect(JSON.stringify(ctx.chatHistory.getRecent(ctx.user.telegram_id))).not.toContain(UNSUPPORTED);
+    expect(aiFailureNotices.takeNotice(ctx.user.telegram_id)).toBe('stall');
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  test('ordinary write confirmation still uses zero validator calls', async () => {
+    const script = scripted(
+      [
+        {
+          text: '',
+          tool: { name: 'create_event', input: { title: 'Synthetic fast path', start_at: '2035-01-01T12:00:00Z' } },
+        },
+        { text: 'Created the event.' },
+      ],
+      [new Error('Validator must not be called')],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toBe('Created the event.');
+    expect(script.counts).toEqual({ model: 2, validator: 0 });
+  });
+
+  test('validator outage after repair read stays bounded and is not approved', async () => {
+    const script = scripted(
+      [
+        { text: INITIAL },
+        { text: '', tool: { name: 'get_events', input: { start_date: '2035-01-01', end_date: '2035-01-01' } } },
+        { text: 'No events in the requested interval.' },
+      ],
+      ['REJECT: no evidence', new Error('Synthetic validator outage')],
+    );
+    const result = await new CalendarBotAgent({}, sender, { streamImpl: script.impl }).run(ctx);
+    expect(result.responseText).toBe(unverifiedResponseNotice('en'));
+    expect(script.counts).toEqual({ model: 3, validator: 2 });
+    expect(enqueue).not.toHaveBeenCalled();
   });
 });

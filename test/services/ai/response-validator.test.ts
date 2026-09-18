@@ -66,16 +66,14 @@ describe('validateResponse — happy path parsing', () => {
     expect(result.approved).toBe(true);
   });
 
-  test.each(['APPROVE  — looks good', 'APPROVE_NOT', 'APPROVE\nREJECT: missing evidence'])(
-    'non-exact approval %s is rejected',
-    async (verdict) => {
-      const result = await validateResponse(
-        { userMessage: 'hi', toolCalls: [], response: 'hello' },
-        stubText(verdict),
-      );
-      expect(result.approved).toBe(false);
-    },
-  );
+  test.each([
+    'APPROVE  — looks good',
+    'APPROVE_NOT',
+    'APPROVE\nREJECT: missing evidence',
+  ])('non-exact approval %s is rejected', async (verdict) => {
+    const result = await validateResponse({ userMessage: 'hi', toolCalls: [], response: 'hello' }, stubText(verdict));
+    expect(result.approved).toBe(false);
+  });
 
   test('approve (lowercase) → approved (case-insensitive)', async () => {
     const result = await validateResponse({ userMessage: 'hi', toolCalls: [], response: 'hello' }, stubText('approve'));

@@ -1171,12 +1171,15 @@ describe('CalendarBotAgent.run()', () => {
     //   - Round 1: plain text (agent loop)
     //   - Validator call: REJECT
     //   - Round 2 (retry): plain text (no tools — retry loop breaks)
+    //   - Second validator call: APPROVE (a second REJECT must not be persisted)
     let round = 0;
+    let validationCalls = 0;
     const impl = async (opts: StreamRoundOptions) => {
       if (isValidatorCall(opts)) {
-        const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: 'REJECT: no tool used' };
+        const verdict = validationCalls++ === 0 ? 'REJECT: no tool used' : 'APPROVE';
+        const msg: OpenAI.ChatCompletionMessageParam = { role: 'assistant', content: verdict };
         return {
-          text: 'REJECT: no tool used',
+          text: verdict,
           toolCalls: [],
           finishReason: 'stop' as const,
           assistantMessage: msg,
