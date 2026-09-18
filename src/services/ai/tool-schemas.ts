@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { eventTimestampSchema } from '../../utils/event-timestamps.ts';
 import { normalizeNumericId } from './numeric-id.ts';
 import type { ToolName } from './tool-executor.ts';
 
@@ -24,8 +25,8 @@ const getEventsSchema = z
 const createEventSchema = z
   .object({
     title: z.string(),
-    start_at: z.string(),
-    end_at: z.string().optional(),
+    start_at: eventTimestampSchema,
+    end_at: eventTimestampSchema.optional(),
     description: z.string().optional(),
     location: z.string().optional(),
     location_abstract: z.boolean().optional(),
@@ -42,8 +43,8 @@ const updateEventSchema = z
   .object({
     event_id: numericId,
     title: z.string().optional(),
-    start_at: z.string().optional(),
-    end_at: z.string().nullable().optional(),
+    start_at: eventTimestampSchema.optional(),
+    end_at: eventTimestampSchema.nullable().optional(),
     description: z.string().nullable().optional(),
     location: z.string().nullable().optional(),
     location_abstract: z.boolean().optional(),
