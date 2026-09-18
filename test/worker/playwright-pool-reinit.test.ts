@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 
 import { PlaywrightPool } from '../../src/worker/playwright-pool.ts';
@@ -263,4 +263,104 @@ describe('PlaywrightPool reinit', () => {
     gate.reject(new Error('Target closed'));
     expect(await acquired).toContain('shut down');
   });
+});
+
+test('pool deadline cannot stall when wall clock is frozen', async () => {
+  const fixture = controlledContext(async () => fixture.page);
+  const pool = new PlaywrightPool({
+    maxPages: 1,
+    launchBrowser: async () => makeFakeBrowser({ newContext: async () => fixture.context }),
+  });
+  await pool.initialize();
+  await pool.acquire();
+  const clock = spyOn(Date, 'now').mockReturnValue(1234567);
+  const waiting = pool.acquire(25).then(
+    () => 'unexpected page',
+    (error: Error) => error.message,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const outcome = await Promise.race([
+      waiting,
+      new Promise<string>((resolve) => {
+        timer = setTimeout(() => resolve('wall clock stalled'), 250);
+      }),
+    ]);
+    expect(outcome).toContain('acquire timeout');
+  } finally {
+    clock.mockRestore();
+    if (timer) clearTimeout(timer);
+    await pool.shutdown();
+    await waiting;
+  }
+});
+
+test('pending release from disconnected browser never enters replacement free pool', async () => {
+  const reset = deferred<void>();
+  const old = controlledContext(async () => old.page);
+  old.page.setContent = mock(() => reset.promise);
+  const next = controlledContext(async () => next.page);
+  const first = makeFakeBrowser({ newContext: async () => old.context });
+  const second = makeFakeBrowser({ newContext: async () => next.context });
+  const launch = mock(async () => first)
+    .mockResolvedValueOnce(first)
+    .mockResolvedValue(second);
+  const pool = new PlaywrightPool({ maxPages: 2, launchBrowser: launch });
+  await pool.initialize();
+  const prior = await pool.acquire();
+  const releasing = pool.release(prior);
+  await first.close();
+  const replacement = await pool.acquire();
+  reset.resolve();
+  await releasing;
+  try {
+    const leased = await pool.acquire();
+    expect(leased).not.toBe(prior);
+    expect(replacement).toBe(next.page);
+  } finally {
+    await pool.shutdown();
+  }
+});
+
+test('stale disconnect from old browser cannot clear its replacement', async () => {
+  const next = controlledContext(async () => next.page);
+  const first = makeFakeBrowser();
+  const second = makeFakeBrowser({ newContext: async () => next.context });
+  const launch = mock(async () => first)
+    .mockResolvedValueOnce(first)
+    .mockResolvedValue(second);
+  const pool = new PlaywrightPool({ launchBrowser: launch });
+  await pool.initialize();
+  await first.close();
+  await pool.acquire();
+  await first.close();
+  await pool.initialize();
+  try {
+    expect(launch).toHaveBeenCalledTimes(2);
+  } finally {
+    await pool.shutdown();
+  }
+});
+
+test('double release cannot lease the same page to two consumers', async () => {
+  const first = controlledContext(async () => first.page),
+    second = controlledContext(async () => second.page);
+  const contexts = mock(async () => first.context)
+    .mockResolvedValueOnce(first.context)
+    .mockResolvedValue(second.context);
+  const pool = new PlaywrightPool({
+    maxPages: 2,
+    launchBrowser: async () => makeFakeBrowser({ newContext: contexts }),
+  });
+  await pool.initialize();
+  const page = await pool.acquire();
+  await pool.release(page);
+  await pool.release(page);
+  try {
+    const a = await pool.acquire(),
+      b = await pool.acquire();
+    expect(a).not.toBe(b);
+  } finally {
+    await pool.shutdown();
+  }
 });
