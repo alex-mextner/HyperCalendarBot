@@ -45,7 +45,17 @@ function failingStream(error: Error) {
 
 /** A stream impl that answers with plain text — used for the "retry came back" path. */
 function answeringStream(text: string) {
-  return async (_opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+  return async (opts: StreamRoundOptions, cbs: StreamCallbacks = {}): Promise<StreamRoundResult> => {
+    const system = opts.messages[0];
+    if (typeof system?.content === 'string' && system.content.includes('strict QA validator')) {
+      return {
+        text: 'APPROVE',
+        toolCalls: [],
+        finishReason: 'stop',
+        assistantMessage: { role: 'assistant', content: 'APPROVE' },
+        providerUsed: 'mock-validator',
+      };
+    }
     cbs.onTextDelta?.(text);
     return {
       text,

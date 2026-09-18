@@ -10,8 +10,13 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
-import { type AgentRequestMetricSnapshot, AgentRequestMetrics, elapsedMs } from './request-metrics.ts';
-import { shouldValidateResponse, validateResponse } from './response-validator.ts';
+import {
+  type AgentRequestMetricSnapshot,
+  AgentRequestMetrics,
+  type AgentTermination,
+  elapsedMs,
+} from './request-metrics.ts';
+import { shouldValidateResponse, unverifiedResponseNotice, validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import { TelegramStreamWriter } from './telegram-stream.ts';
@@ -790,8 +795,10 @@ export class CalendarBotAgent {
     const systemMessage: MessageParam = { role: 'system', content: systemPrompt };
     let currentMessages: MessageParam[] = [systemMessage, ...historyMessages];
     let runFailed = false;
+    // Stays set until a validation retry produces an explicitly approved answer.
+    let responseUnverified = false;
     let runError: unknown;
-    let termination: 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'silent' = 'limit';
+    let termination: AgentTermination = 'limit';
     const pendingHistory: MessageParam[] = [];
     const saveAssistant = (message: MessageParam, skipIds?: Set<string>) => {
       if ('tool_calls' in message && message.tool_calls?.length) {
@@ -1018,6 +1025,7 @@ export class CalendarBotAgent {
               'Response validation REJECTED — retrying with tools',
             );
             rejected = true;
+            responseUnverified = true;
             pendingAssistantTurn = null;
             const retryOutcome = await this.runRetryAfterRejection(
               ctx,
@@ -1038,10 +1046,9 @@ export class CalendarBotAgent {
 
             if (retryOutcome.hitStopLoop) termination = retryOutcome.waiting ? 'waiting' : 'stop';
 
-            // If the retry ALSO produced a tool-less answer, validate it once
-            // more. If the second pass also rejects, we log and ship anyway —
-            // the alternative is a blank or useless apology and we only get
-            // one retry budget per user request.
+            // A retry is not approval. Keep unverified text out of both delivery
+            // and history on rejection, timeout, exhaustion, or an early stop.
+            // The final evidence guard preserves writes and clarification UI.
             if (!retryOutcome.hitStopLoop && retryOutcome.lastRoundText && !retryOutcome.lastRoundHadToolCalls) {
               const reValidation = await validateResponse(
                 {
@@ -1051,10 +1058,11 @@ export class CalendarBotAgent {
                 },
                 validatorStream,
               );
+              responseUnverified = !reValidation.approved;
               if (!reValidation.approved) {
                 aiLogger.warn(
                   { userId: ctx.user.telegram_id, reason: reValidation.reason },
-                  'Retry response ALSO rejected by validator — shipping anyway, user asked once',
+                  'Retry response rejected by validator — suppressing unverified explanation',
                 );
               }
             }
@@ -1071,8 +1079,10 @@ export class CalendarBotAgent {
       termination = 'error';
       runError = error;
 
-      // Enqueue next retry (or trigger graceful fail after max attempts)
+      // Explanation repair must not replay the original request, even if the
+      // repair provider fails before a mutation. Ordinary execution retries stay unchanged.
       if (
+        !responseUnverified &&
         !writeOutcomes.mayHaveMutated &&
         ctx.retryEnqueue &&
         !ctx.supplementMode &&
@@ -1084,22 +1094,29 @@ export class CalendarBotAgent {
       }
     }
 
+    if (responseUnverified && !runFailed && termination !== 'waiting') termination = 'unverified';
+
     // One evidence guard for every exit, including validation retries and partial streams.
     // Clarification UI is already delivered by the handler; it is never a completed write.
     const evidence = writeOutcomes.finalNotice(
       ctx.user.language,
       ctx.isGroup,
-      runFailed && writeOutcomes.mayHaveMutated,
+      (runFailed || responseUnverified) && writeOutcomes.mayHaveMutated,
     );
     const silent =
       ctx.supplementMode ||
       ctx.wasExplicitInvocation === false ||
       (termination === 'waiting' && !writeOutcomes.speechQuestion);
-    const guarded = evidence !== null || termination === 'waiting' || termination === 'error';
+    const validationNotice =
+      responseUnverified && !silent && !evidence && termination !== 'waiting'
+        ? unverifiedResponseNotice(ctx.user.language)
+        : null;
+    const guarded = responseUnverified || evidence !== null || termination === 'waiting' || termination === 'error';
     if (guarded) {
       writer.resetBuffers();
       if (!silent) {
         if (evidence && termination !== 'waiting') writer.appendText(evidence);
+        if (validationNotice) writer.appendText(validationNotice);
         if (termination === 'waiting' && writeOutcomes.speechQuestion) writer.appendText(writeOutcomes.speechQuestion);
       }
     }
@@ -1111,10 +1128,12 @@ export class CalendarBotAgent {
         this.saveAssistantTurn(ctx, { role: 'assistant', content: writeOutcomes.speechQuestion });
       }
       if (evidence) this.saveAssistantTurn(ctx, { role: 'assistant', content: evidence });
+      // Execution evidence is durable even in quiet mode; a notice is persisted only when delivered.
+      if (validationNotice) this.saveAssistantTurn(ctx, { role: 'assistant', content: validationNotice });
     }
-    if (runFailed && !evidence) this.announceFailure(ctx, runError, writer);
+    if (runFailed && !evidence && !validationNotice) this.announceFailure(ctx, runError, writer);
 
-    if (!runFailed && !ctx.supplementMode) {
+    if (!runFailed && !responseUnverified && !ctx.supplementMode) {
       // The bot answered — any comeback it promised earlier is now settled.
       aiFailureNotices.clear(ctx.user.telegram_id);
     }

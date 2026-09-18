@@ -8,6 +8,7 @@
 //
 // Uses the FAST chain (cheap/fast models) via aiStreamRound({ fast: true }).
 
+import { toLang } from '../../config/constants.ts';
 import { logger } from '../../utils/logger.ts';
 import { aiStreamRound } from './streaming.ts';
 
@@ -102,12 +103,17 @@ export function shouldValidateResponse(toolCalls: string[], response: string): b
 
 export type ValidationResult = { approved: true } | { approved: false; reason: string };
 
+/** A rejected explanation is not a failed mutation or a promise to retry. */
+export function unverifiedResponseNotice(language: string): string {
+  return toLang(language) === 'ru'
+    ? 'Не удалось проверить ответ по данным календаря. Проверьте /today или укажите нужную дату.'
+    : 'I could not verify this answer against the calendar data. Check /today or specify the date.';
+}
+
 /**
- * Validate an agent response. Fails open (approved=true) on transient errors
- * as long as the agent DID call at least one tool — calling-the-tools is the
- * main signal we want to reward. If no tools were called AND the validator
- * itself is unavailable, we fail closed (approved=false) because an untested
- * tool-less answer is the most likely hallucination.
+ * Only an explicit approval verifies a response. A validator outage is not
+ * evidence, even when a tool was called. The agent preserves confirmed writes
+ * and replaces an unverified explanation without replaying the original request.
  */
 export async function validateResponse(
   input: ValidationInput,
@@ -155,15 +161,12 @@ export async function validateResponse(
     const text = result.text.trim();
     aiLogger.info({ result: text, providerUsed: result.providerUsed }, 'Response validation result');
 
-    if (text.toUpperCase().startsWith('APPROVE')) return { approved: true };
+    if (text.toUpperCase() === 'APPROVE') return { approved: true };
 
     const reason = text.replace(/^REJECT:\s*/i, '').trim() || 'Validation failed';
     return { approved: false, reason };
   } catch (err) {
     aiLogger.error({ err }, 'Response validation failed');
-    if (input.toolCalls.length === 0) {
-      return { approved: false, reason: 'Validator unavailable and no tools were called — likely hallucination' };
-    }
-    return { approved: true };
+    return { approved: false, reason: 'Validator unavailable — response could not be verified' };
   }
 }

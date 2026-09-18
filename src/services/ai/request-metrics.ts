@@ -1,6 +1,6 @@
 import type { StreamRoundMetrics } from './streaming.ts';
 
-export type AgentTermination = 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'silent';
+export type AgentTermination = 'normal' | 'waiting' | 'stop' | 'limit' | 'error' | 'unverified' | 'silent';
 export type DeliveryOutcome = 'delivered' | 'fallback' | 'discarded';
 
 export interface AgentRequestMetricSnapshot {
