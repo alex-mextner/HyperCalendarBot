@@ -61,6 +61,20 @@ The server runs multiple PM2 services alongside our Docker containers:
 **Never run `pm2 delete all`, `docker system prune`, or kill PIDs without checking ownership.**
 Port 3001 belongs to HyperCalendarBot Docker. Do not reassign it.
 
+## Local deploy fallback
+
+Use only when GitHub-hosted Actions cannot obtain a runner and the exact commit has been locally verified. The fallback builds on the production x86_64 host from a clean `git archive`; it never copies the working tree.
+
+```bash
+# Default: fetch and deploy the exact commit at origin/main, with local tests first.
+scripts/deploy-local-fallback.sh
+
+# If that exact commit already passed the full local gate in this incident/session:
+scripts/deploy-local-fallback.sh --ref origin/main --skip-tests
+```
+
+The script keeps the previous image under a timestamped rollback tag, takes a WAL-safe DB backup before restart, installs the same host helper/config files as CI, reapplies runtime directory ownership, force-recreates only the bot service, and requires `/health` plus a recognized `/ready` body before reporting success. This is an emergency delivery path, not a replacement for fixing CI/CD.
+
 ## Docker
 
 - Bot + Redis via `docker-compose.yml`, Docker Compose v2 plugin.

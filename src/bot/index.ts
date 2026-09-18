@@ -602,7 +602,9 @@ export function createBot(token: string, db: DatabaseService, aiConfig: AgentCon
         const payload = firstColon >= 0 ? callbackData.slice(firstColon + 1) : '';
 
         if (action === 'ai_btn') {
-          const { answerText } = parseAiBtnPayload(payload);
+          const callbackChatType = context.update?.callback_query?.message?.chat?.type;
+          const isGroupCallback = callbackChatType === 'group' || callbackChatType === 'supergroup';
+          const { answerText } = parseAiBtnPayload(payload, isGroupCallback);
           chatHistoryIds.set(
             user.telegram_id,
             conversationLogger.logUserMessage(user.telegram_id, answerText, logChatId),

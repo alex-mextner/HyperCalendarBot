@@ -212,6 +212,20 @@ describe('aiStreamRound — one broken provider never kills the chain', () => {
     expect(result.text).toBe('answer from Gemini');
   });
 
+  test('known-oversized Groq gpt-oss request is skipped before network dispatch', async () => {
+    process.env.GROQ_MODEL = 'openai/gpt-oss-120b';
+    groq = makeProvider({ behaviors: [{ kind: 'throw', error: new Error('Groq must not be called') }] });
+
+    const result = await aiStreamRound({
+      messages: [{ role: 'user', content: 'x'.repeat(50_000) }],
+      maxTokens: 200,
+    });
+
+    expect(result.text).toBe('answer from Gemini');
+    expect(groq.requestedModels).toEqual([]);
+    expect(gemini.requestedModels).toEqual(['gemini-main']);
+  });
+
   test('every slot failing throws AllProvidersFailedError naming each provider and reason', async () => {
     gemini = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(500, 'gemini overloaded') }] });
     hf = makeProvider({ behaviors: [{ kind: 'throw', error: apiError(503, 'hf unavailable') }] });

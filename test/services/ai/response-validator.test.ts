@@ -1,7 +1,7 @@
 // test/services/ai/response-validator.test.ts
 import { describe, expect, test } from 'bun:test';
 import type OpenAI from 'openai';
-import { validateResponse } from '../../../src/services/ai/response-validator.ts';
+import { shouldValidateResponse, validateResponse } from '../../../src/services/ai/response-validator.ts';
 import type { StreamRoundOptions, StreamRoundResult } from '../../../src/services/ai/streaming.ts';
 
 /** Build a scripted stream impl that returns a fixed text on every call. */
@@ -18,6 +18,44 @@ function stubThrow(err: Error): (opts: StreamRoundOptions) => Promise<StreamRoun
     throw err;
   };
 }
+
+describe('tool-run evidence prefilter', () => {
+  test('production completeness claim is validated after write/image tools', () => {
+    expect(
+      shouldValidateResponse(
+        ['create_event', 'render_day_image'],
+        'Готово. На этот день больше ничего не запланировано.',
+      ),
+    ).toBe(true);
+  });
+
+  test('ordinary write confirmation keeps the no-extra-validator fast path', () => {
+    expect(shouldValidateResponse(['create_event'], 'Готово, добавил событие на 18:30.')).toBe(false);
+  });
+
+  test('a schedule read supplies evidence for a completeness claim', () => {
+    expect(shouldValidateResponse(['create_event', 'get_events'], 'На этот день больше ничего не запланировано.')).toBe(
+      false,
+    );
+  });
+
+  test('unsupported completeness claim is rejected deterministically without another model call', async () => {
+    let called = false;
+    const result = await validateResponse(
+      {
+        userMessage: '18:30 помочь Соне с кошкой',
+        toolCalls: ['create_event', 'render_day_image'],
+        response: 'На этот день больше ничего не запланировано.',
+      },
+      async () => {
+        called = true;
+        return stubText('APPROVE')({ messages: [], maxTokens: 1 });
+      },
+    );
+    expect(result.approved).toBe(false);
+    expect(called).toBe(false);
+  });
+});
 
 describe('validateResponse — happy path parsing', () => {
   test('APPROVE (exact) → approved', async () => {

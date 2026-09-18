@@ -95,11 +95,21 @@ describe('createCallbackHandler', () => {
     expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, 'Да');
   });
 
+  test('ai_btn preserves a private time answer containing a colon', async () => {
+    const onAiButtonClick = mock(() => Promise.resolve());
+    const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
+    const ctx = makeCtx('ai_btn:19:00');
+    await handler(ctx as never);
+    expect(ctx.editText).toHaveBeenCalledWith('✅ 19:00');
+    expect(onAiButtonClick).toHaveBeenCalledWith(100, 100, '19:00');
+  });
+
   test('ai_btn with userId restriction allows matching user', async () => {
     const onAiButtonClick = mock(() => Promise.resolve());
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never, { onAiButtonClick });
     // User 100 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Да', { from: { id: 100 } });
+    ctx.message.chat.type = 'group';
     await handler(ctx as never);
     expect(ctx.editText).toHaveBeenCalledWith('✅ Да');
   });
@@ -108,6 +118,7 @@ describe('createCallbackHandler', () => {
     const handler = createCallbackHandler({} as never, {} as never, {} as never, {} as never);
     // User 200 clicks on button restricted to user 100
     const ctx = makeCtx('ai_btn:100:Нет', { from: { id: 200 } });
+    ctx.message.chat.type = 'group';
     await handler(ctx as never);
     expect(ctx.answer).toHaveBeenCalledWith({ text: 'Не твой вопрос', show_alert: false });
     expect(ctx.editText).not.toHaveBeenCalled();
@@ -451,8 +462,16 @@ describe('parseAiBtnPayload', () => {
     expect(parseAiBtnPayload('Да')).toEqual({ answerText: 'Да' });
   });
 
+  test('private chat — a time with colon is not mistaken for a user restriction', () => {
+    expect(parseAiBtnPayload('19:00')).toEqual({ answerText: '19:00' });
+  });
+
   test('group chat — userId:text payload', () => {
-    expect(parseAiBtnPayload('123:Нет')).toEqual({ answerText: 'Нет', restrictedToUserId: 123 });
+    expect(parseAiBtnPayload('123:Нет', true)).toEqual({ answerText: 'Нет', restrictedToUserId: 123 });
+  });
+
+  test('group chat — answer text may itself contain a colon', () => {
+    expect(parseAiBtnPayload('123:19:00', true)).toEqual({ answerText: '19:00', restrictedToUserId: 123 });
   });
 
   test('non-numeric first segment treated as plain text', () => {

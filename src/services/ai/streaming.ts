@@ -23,6 +23,7 @@ import { geminiClient, groqClient, hfClient, zaiClient } from './clients.ts';
 import { getModelOverride, isModelNotFoundError, resolveModelOverride } from './model-registry.ts';
 import { clearBlock, isBlocked, noteFailureForEligibility } from './provider-eligibility.ts';
 import type { ProviderId } from './provider-ids.ts';
+import { estimateTokens } from './token-estimate.ts';
 
 const aiLogger = logger.child({ module: 'ai-stream' });
 
@@ -92,6 +93,41 @@ export interface StreamRoundResult {
   /** Human-readable provider slot that actually produced the result. */
   providerUsed: string;
   metrics?: StreamRoundMetrics;
+}
+
+const TOKEN_ESTIMATE_ERROR_FRACTION = 0.2;
+const GROQ_ON_DEMAND_TPM_LIMITS = new Map<string, number>([
+  ['openai/gpt-oss-120b', 8_000],
+  ['openai/gpt-oss-20b', 8_000],
+]);
+
+export interface RequestFitRejection {
+  estimatedInputTokens: number;
+  conservativeRequestedTokens: number;
+  limitTokens: number;
+}
+
+/**
+ * Skip only requests that cannot fit even at the optimistic edge of our ±20%
+ * token estimator. This avoids false skips near the boundary while preventing a
+ * guaranteed Groq 413 for the current 8K on-demand gpt-oss tiers.
+ */
+export function preflightRequestFit(
+  provider: ProviderId,
+  model: string,
+  options: Pick<StreamRoundOptions, 'messages' | 'tools' | 'maxTokens'>,
+): RequestFitRejection | null {
+  if (provider !== 'groq') return null;
+  const limitTokens = GROQ_ON_DEMAND_TPM_LIMITS.get(model);
+  if (!limitTokens) return null;
+
+  const serializedInput = JSON.stringify({ messages: options.messages, tools: options.tools ?? [] });
+  const estimatedInputTokens = estimateTokens(serializedInput);
+  const optimisticInputTokens = Math.floor(estimatedInputTokens * (1 - TOKEN_ESTIMATE_ERROR_FRACTION));
+  const conservativeRequestedTokens = optimisticInputTokens + options.maxTokens;
+  if (conservativeRequestedTokens <= limitTokens) return null;
+
+  return { estimatedInputTokens, conservativeRequestedTokens, limitTokens };
 }
 
 /**
@@ -699,6 +735,19 @@ export async function aiStreamRound(
   }
 
   for (const slot of attempts) {
+    const requestModel = getModelOverride(slot.provider, slot.configuredModel) ?? slot.configuredModel;
+    const fitRejection = preflightRequestFit(slot.provider, requestModel, options);
+    if (fitRejection) {
+      const provider = slotName(slot.label, requestModel);
+      const message = `Preflight skipped: conservative request estimate ${fitRejection.conservativeRequestedTokens} tokens exceeds known ${fitRejection.limitTokens} TPM limit`;
+      failures.push({ provider, providerId: slot.provider, model: requestModel, message, transient: false });
+      aiLogger.info(
+        { provider, userId: options.userId, ...fitRejection },
+        'Skipping provider because the request cannot fit its known token budget',
+      );
+      continue;
+    }
+
     try {
       aiLogger.info(
         { provider: slot.label, model: slot.configuredModel, userId: options.userId, requestId: options.requestId },
