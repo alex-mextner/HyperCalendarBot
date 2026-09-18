@@ -8,15 +8,12 @@ import { logger, logOnce } from '../utils/logger.ts';
  * per-minute token cap smaller than one request with the tool catalog in it.
  */
 export const DEFAULT_SMART_CHAIN: ProviderId[] = ['hf', 'zai', 'gemini', 'groq'];
-/**
- * The fast chain carries short requests (summaries, validation), which do fit in
- * the small free tiers, so the cheap and quick providers come first there. Groq
- * is last despite being the quickest: its small model answers 200 with no text
- * and no tool calls often enough to be a liability on a path whose failures are
- * invisible to the user but degrade the next answer — a summary that never
- * arrives means the history reaches the model bluntly truncated instead.
+/** Short requests try responsive providers first. Explicit operator order still wins.
+ * September 18 runtime probes: old order spent 15s on z.ai before a healthy provider;
+ * Groq OSS20B and Gemini each completed independently in under 1s. Empty responses,
+ * exhausted quotas and oversized Groq payloads retain the normal guarded fallback.
  */
-export const DEFAULT_FAST_CHAIN: ProviderId[] = ['zai', 'hf', 'gemini', 'groq'];
+export const DEFAULT_FAST_CHAIN: ProviderId[] = ['groq', 'gemini', 'hf', 'zai'];
 
 /**
  * A chain order together with where it came from. The source is carried rather

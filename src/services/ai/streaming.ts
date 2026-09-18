@@ -452,7 +452,7 @@ function streamingSlot(
       // z.ai coding endpoint returns content='' and only reasoning_content for
       // pure text responses (no tools). If we got 200 OK but nothing usable,
       // treat as provider failure so the chain falls through.
-      if (!text && toolCalls.length === 0) {
+      if (!text.trim() && toolCalls.length === 0) {
         throw new EmptyProviderResponseError(slotName(label, model));
       }
 
@@ -680,7 +680,7 @@ function describeFailure(slot: ProviderSlot, error: unknown): ProviderFailure {
  *
  * Chains:
  *   fast=false → z.ai ZAI_MODEL      → Groq GROQ_MODEL      → Gemini GEMINI_MODEL      → HF HF_MODEL
- *   fast=true  → z.ai ZAI_FAST_MODEL → Groq GROQ_FAST_MODEL → Gemini GEMINI_FAST_MODEL → HF HF_FAST_MODEL
+ *   fast=true  → configured AI_FAST_CHAIN, otherwise the short-call DEFAULT_FAST_CHAIN
  *
  * Fallback policy: ANY provider error moves on to the next slot. A 400/401/403/404
  * says that provider cannot serve this request — it never says the request is
