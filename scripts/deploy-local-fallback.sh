@@ -8,6 +8,9 @@ DEPLOY_PATH="${HYPERCAL_DEPLOY_PATH:-/opt/hypercal}"
 IMAGE="${HYPERCAL_IMAGE:-ghcr.io/alex-mextner/hypercalendarbot}"
 REF="origin/main"
 SKIP_TESTS=false
+DOCKER_CONTEXT="${HYPERCAL_DOCKER_CONTEXT:-colima}"
+DOCKER="${HYPERCAL_DOCKER_BIN:-docker}"
+BUN="${HYPERCAL_BUN_BIN:-bun}"
 
 usage() {
   cat <<'EOF'
@@ -34,112 +37,48 @@ if [[ "$REF" == origin/* ]]; then
 fi
 SHA="$(git rev-parse "${REF}^{commit}")"
 SHORT_SHA="${SHA:0:12}"
+[[ "$SHA" =~ ^[a-f0-9]{40}$ ]] || { echo 'Expected exact SHA' >&2; exit 2; }
+git merge-base --is-ancestor "$SHA" origin/main
+[[ "$(git rev-parse origin/main)" == "$SHA" ]] || { echo 'Ref is not current origin/main' >&2; exit 2; }
+[[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_/-]+$ && "$DEPLOY_PATH" != / && "$DEPLOY_PATH" != *..* ]] || exit 2
+[[ "$HOST" =~ ^[a-zA-Z0-9_@.-]+$ ]] || exit 2
+[[ "$IMAGE" =~ ^[a-z0-9][a-z0-9./_-]*$ ]] || exit 2
 REMOTE_SRC="/tmp/hypercal-source-${SHORT_SHA}-$$"
+LOCAL_SRC="$(mktemp -d)"
+trap 'rm -rf "$LOCAL_SRC"' EXIT
+# A remote Docker context is not a local build. Require the operator's Unix-socket daemon.
+endpoint="$("$DOCKER" context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}')"
+[[ "$endpoint" == unix://* ]] || { echo 'Local Unix-socket Docker context required' >&2; exit 2; }
+docker_local() { "$DOCKER" --context "$DOCKER_CONTEXT" "$@"; }
+git archive "$SHA" | tar -xf - -C "$LOCAL_SRC"
 
 if [[ "$SKIP_TESTS" == false ]]; then
   echo "== Local verification for $SHA =="
-  bun test
-  bun run lint
-  bunx tsc --noEmit
+  # Verify the exact source, never a dirty current working tree.
+  [[ "$("$BUN" --version)" == 1.3.11 ]] || { echo 'Use the pinned Bun 1.3.11' >&2; exit 2; }
+  (cd "$LOCAL_SRC" && "$BUN" install --ignore-scripts && "$BUN" --no-env-file test ./test/ && "$BUN" run lint && "$BUN" node_modules/typescript/bin/tsc --noEmit)
 fi
 
 cleanup_remote() {
   ssh -o BatchMode=yes "$HOST" "rm -rf '$REMOTE_SRC'" >/dev/null 2>&1 || true
+  rm -rf "$LOCAL_SRC"
 }
 trap cleanup_remote EXIT
+
+echo "== Building Linux amd64 locally for $SHA =="
+docker_local build --platform linux/amd64 --label "org.opencontainers.image.revision=$SHA" -t "$IMAGE:$SHA" "$LOCAL_SRC"
+docker_local save "$IMAGE:$SHA" | gzip -1 > "$LOCAL_SRC/image.tar.gz"
+python3 "$LOCAL_SRC/scripts/release-artifact.py" "$LOCAL_SRC/image.tar.gz" "$SHA" "$IMAGE:$SHA" > "$LOCAL_SRC/artifact.json"
+ARCHIVE_SUM="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["archive_sha256"])' "$LOCAL_SRC/artifact.json")"
+CONFIG_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["config_digest"])' "$LOCAL_SRC/artifact.json")"
 
 ssh -o BatchMode=yes "$HOST" "mkdir -p '$REMOTE_SRC'"
 echo "== Uploading exact git archive $SHA =="
 git archive "$SHA" | ssh -o BatchMode=yes "$HOST" "tar -xf - -C '$REMOTE_SRC'"
 
-echo "== Building and deploying $SHA on $HOST =="
-ssh -o BatchMode=yes "$HOST" bash -s -- "$DEPLOY_PATH" "$REMOTE_SRC" "$IMAGE" "$SHA" <<'REMOTE'
-set -euo pipefail
-
-DEPLOY_PATH="$1"
-REMOTE_SRC="$2"
-IMAGE="$3"
-SHA="$4"
-SHORT_SHA="${SHA:0:12}"
-STAMP="$(date +%Y-%m-%d_%H-%M-%S)"
-trap 'rm -rf "$REMOTE_SRC"' EXIT
-if [[ "$(uname -m)" != "x86_64" ]]; then
-  echo "Refusing fallback build on non-x86_64 host: $(uname -m)" >&2
-  exit 1
-fi
-
-CURRENT_IMAGE_ID="$(docker image inspect "$IMAGE:latest" --format '{{.Id}}' 2>/dev/null || true)"
-if [[ -n "$CURRENT_IMAGE_ID" ]]; then
-  ROLLBACK_TAG="$IMAGE:rollback-$STAMP"
-  docker tag "$CURRENT_IMAGE_ID" "$ROLLBACK_TAG"
-  echo "Rollback image: $ROLLBACK_TAG ($CURRENT_IMAGE_ID)"
-fi
-
-echo "Building $IMAGE:$SHA"
-docker build \
-  --label "org.opencontainers.image.revision=$SHA" \
-  -t "$IMAGE:$SHA" \
-  "$REMOTE_SRC"
-
-# Back up the live DB before replacing any deployed host files or container.
-"$DEPLOY_PATH/scripts/backup-db.sh"
-
-install -d -m 0755 "$DEPLOY_PATH/scripts"
-install -m 0644 "$REMOTE_SRC/docker-compose.yml" "$DEPLOY_PATH/docker-compose.yml"
-install -m 0644 "$REMOTE_SRC/Caddyfile" "$DEPLOY_PATH/Caddyfile"
-for script in backup-db.sh healthcheck-alert.sh prepare-runtime-dirs.sh; do
-  install -m 0755 "$REMOTE_SRC/scripts/$script" "$DEPLOY_PATH/scripts/$script"
-done
-
-"$DEPLOY_PATH/scripts/prepare-runtime-dirs.sh" "$DEPLOY_PATH"
-
-echo "Rotating host logs before restart"
-for file in healthcheck.log backup.log; do
-  if [[ -s "$DEPLOY_PATH/logs/$file" ]]; then
-    mv "$DEPLOY_PATH/logs/$file" "$DEPLOY_PATH/logs/${file%.log}_${STAMP}.log"
-    gzip "$DEPLOY_PATH/logs/${file%.log}_${STAMP}.log"
-  fi
-done
-
-# Move latest only after build, backup and host-file preparation have all succeeded.
-docker tag "$IMAGE:$SHA" "$IMAGE:latest"
-
-cd "$DEPLOY_PATH"
-docker compose up -d --no-deps --force-recreate bot
-caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
-
-EXPECTED_IMAGE_ID="$(docker image inspect "$IMAGE:$SHA" --format '{{.Id}}')"
-ACTUAL_IMAGE_ID="$(docker inspect hypercal-bot --format '{{.Image}}')"
-if [[ "$ACTUAL_IMAGE_ID" != "$EXPECTED_IMAGE_ID" ]]; then
-  echo "Container image mismatch: running=$ACTUAL_IMAGE_ID expected=$EXPECTED_IMAGE_ID" >&2
-  exit 1
-fi
-
-HEALTH=""
-READY=""
-for _ in $(seq 1 15); do
-  HEALTH="$(curl -fsS --max-time 20 https://hypercal.invntrm.ru/health 2>/dev/null || true)"
-  READY="$(curl -sS --max-time 20 https://hypercal.invntrm.ru/ready 2>/dev/null || true)"
-  case "$READY" in
-    ok|"ok (unverified)"|"ai chain down")
-      [[ -n "$HEALTH" ]] && break
-      ;;
-  esac
-  sleep 4
-done
-
-if [[ -z "$HEALTH" ]]; then
-  echo "Health check failed after deploy" >&2
-  exit 1
-fi
-case "$READY" in
-  ok|"ok (unverified)"|"ai chain down") ;;
-  *) echo "Readiness path is not returning a bot response: ${READY:-<empty>}" >&2; exit 1 ;;
-esac
-
-REVISION="$(docker image inspect "$IMAGE:$SHA" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
-printf 'DEPLOYED sha=%s image=%s health=%s ready=%s\n' "$REVISION" "$ACTUAL_IMAGE_ID" "$HEALTH" "$READY"
-REMOTE
+scp -q -o BatchMode=yes "$LOCAL_SRC/image.tar.gz" "$HOST:$REMOTE_SRC/image.tar.gz"
+echo "== Loading and deploying verified prebuilt $SHA on $HOST =="
+ssh -o BatchMode=yes "$HOST" bash "$REMOTE_SRC/scripts/deploy-prebuilt-image.sh" "$DEPLOY_PATH" "$REMOTE_SRC" "$IMAGE" "$SHA" "$ARCHIVE_SUM" "$CONFIG_ID"
 
 trap - EXIT
 cleanup_remote
