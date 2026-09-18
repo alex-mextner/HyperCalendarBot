@@ -9,7 +9,7 @@ import { HolidayRepository } from '../../../src/database/repositories/holiday.re
 import { UserRepository } from '../../../src/database/repositories/user.repository.ts';
 import { runMigrations } from '../../../src/database/schema.ts';
 import type { ChatHistoryMessage } from '../../../src/database/types.ts';
-import { CalendarBotAgent } from '../../../src/services/ai/agent.ts';
+import { CalendarBotAgent, toolCallKey } from '../../../src/services/ai/agent.ts';
 import type { AgentConfig, AgentContext, TelegramSender } from '../../../src/services/ai/types.ts';
 import { ConversationLogger } from '../../../src/services/conversation-logger.ts';
 import { EventService } from '../../../src/services/event/event-service.ts';
@@ -386,6 +386,50 @@ describe('CalendarBotAgent', () => {
       expect(messages[0]!.role).toBe('user');
       expect(messages[1]!.role).toBe('assistant');
       expect(messages[2]!.role).toBe('user');
+    });
+  });
+
+  describe('toolCallKey', () => {
+    // Regression: update_event's location/end_at/description/recurrence_rule are
+    // documented as "null removes it" — a distinct instruction from "field left
+    // untouched". The dedup key must treat them as different calls.
+    test('explicit null on a nullable field produces a different key than the field being omitted', () => {
+      const omitted = toolCallKey('update_event', { event_id: 5, title: 'New Title' });
+      const explicitlyCleared = toolCallKey('update_event', { event_id: 5, title: 'New Title', location: null });
+      expect(omitted).not.toBe(explicitlyCleared);
+    });
+
+    test('explicit null is stable and distinct per nullable field cleared', () => {
+      const clearLocation = toolCallKey('update_event', { event_id: 5, location: null });
+      const clearDescription = toolCallKey('update_event', { event_id: 5, description: null });
+      expect(clearLocation).not.toBe(clearDescription);
+    });
+
+    test('two calls that both explicitly clear the same field still dedup (same key)', () => {
+      const first = toolCallKey('update_event', { event_id: 5, title: 'New Title', location: null });
+      const second = toolCallKey('update_event', { event_id: 5, title: 'New Title', location: null });
+      expect(first).toBe(second);
+    });
+
+    test('a field with no nullable schema still treats explicit null as omitted (unchanged behavior)', () => {
+      // search_events' `event_type` is a plain optional enum, not nullable — a stray
+      // null from the model carries no "clear" meaning here, so the old
+      // strip-null-as-omitted behavior must still hold for it.
+      const withNull = toolCallKey('search_events', { query: 'x', event_type: null });
+      const omitted = toolCallKey('search_events', { query: 'x' });
+      expect(withNull).toBe(omitted);
+    });
+
+    test('dedup key normalizes argument key order (unchanged behavior)', () => {
+      const a = toolCallKey('get_events', { start_date: '2026-04-16', end_date: '2026-04-16' });
+      const b = toolCallKey('get_events', { end_date: '2026-04-16', start_date: '2026-04-16' });
+      expect(a).toBe(b);
+    });
+
+    test('extra keys not in the schema are stripped (unchanged behavior)', () => {
+      const a = toolCallKey('get_events', { start_date: '2026-04-16', end_date: '2026-04-16' });
+      const b = toolCallKey('get_events', { start_date: '2026-04-16', end_date: '2026-04-16', _nonce: 'abc' });
+      expect(a).toBe(b);
     });
   });
 
