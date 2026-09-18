@@ -3,6 +3,10 @@ import type { Database, SQLQueryBindings } from 'bun:sqlite';
 import { assertValidEventTimestamps } from '../../utils/event-timestamps.ts';
 import type { CalendarEvent, CreateEventData, UpdateEventData } from '../types.ts';
 
+// Compare actual instants in SQL: persisted ISO offsets/millisecond spellings and
+// SQLite membership timestamps are not lexicographically interchangeable.
+// No stored event values are rewritten by these read predicates.
+
 // SQL fragment: group event visible to user if they are an active member
 // and the event starts on or after the day they joined. For one-off events.
 // Expects 1 bind param (userId).
@@ -12,7 +16,7 @@ function groupVisibleSql(alias: string): string {
     SELECT 1 FROM group_members gm
     WHERE gm.chat_id = ${col}group_id AND gm.user_id = ?
       AND gm.left_at IS NULL
-      AND ${col}start_at >= gm.joined_at
+      AND julianday(${col}start_at) >= julianday(gm.joined_at)
   ))`;
 }
 
@@ -240,11 +244,11 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE start_at >= ? AND start_at <= ?
+      WHERE julianday(start_at) >= julianday(?) AND julianday(start_at) <= julianday(?)
         AND is_cancelled = 0 AND is_deleted = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
         AND ((user_id = ? AND (owner_type IS NULL OR owner_type = 'user'))
           OR ${groupVisibleSql('')})
-      ORDER BY start_at
+      ORDER BY julianday(start_at), id
     `)
       .all(startUtc, endUtc, userId, userId) as CalendarEvent[];
   }
@@ -290,7 +294,7 @@ export class EventRepository {
       SELECT DISTINCT e.* FROM events e
       WHERE e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.parent_event_id IS NULL
-        AND (e.start_at > ? OR e.recurrence_rule IS NOT NULL)
+        AND (julianday(e.start_at) > julianday(?) OR e.recurrence_rule IS NOT NULL)
         AND (
           (e.user_id = ? AND (e.owner_type IS NULL OR e.owner_type = 'user'))
           OR ${groupVisibleSql('e')}
@@ -299,7 +303,7 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           )
         )
-      ORDER BY e.start_at
+      ORDER BY julianday(e.start_at), e.id
       LIMIT ?
     `,
       )
@@ -398,7 +402,7 @@ export class EventRepository {
       .prepare(
         `
       SELECT DISTINCT e.* FROM events e
-      WHERE e.start_at >= ? AND e.start_at < ?
+      WHERE julianday(e.start_at) >= julianday(?) AND julianday(e.start_at) < julianday(?)
         AND e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
@@ -410,7 +414,7 @@ export class EventRepository {
             WHERE user_id = ? AND status = 'accepted'
           )
         )
-      ORDER BY e.start_at
+      ORDER BY julianday(e.start_at), e.id
     `,
       )
       .all(startUtc, endUtc, userId, userId, userId) as CalendarEvent[];
@@ -438,7 +442,7 @@ export class EventRepository {
             SELECT event_id FROM event_participants
             WHERE user_id = ? AND status = 'accepted'
           ))
-      ORDER BY start_at ASC
+      ORDER BY julianday(start_at), id
       LIMIT ?
     `)
       .all(`%${this.escapeLike(query)}%`, userId, userId, userId, limit) as CalendarEvent[];
@@ -450,8 +454,8 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE user_id = ? AND is_cancelled = 0 AND is_deleted = 0 AND parent_event_id IS NULL
-        AND (start_at > ? OR recurrence_rule IS NOT NULL)
-      ORDER BY start_at
+        AND (julianday(start_at) > julianday(?) OR recurrence_rule IS NOT NULL)
+      ORDER BY julianday(start_at), id
       LIMIT ?
     `)
       .all(userId, nowIso, limit) as CalendarEvent[];
@@ -487,19 +491,23 @@ export class EventRepository {
 
   getExceptionsFrom(parentEventId: number, fromDate: string): CalendarEvent[] {
     return this.db
-      .prepare('SELECT * FROM events WHERE parent_event_id = ? AND original_start_at >= ? AND is_deleted = 0')
+      .prepare(
+        'SELECT * FROM events WHERE parent_event_id = ? AND julianday(original_start_at) >= julianday(?) AND is_deleted = 0',
+      )
       .all(parentEventId, fromDate) as CalendarEvent[];
   }
 
   reparentExceptions(oldTemplateId: number, newTemplateId: number, fromDate: string): void {
     this.db
-      .prepare('UPDATE events SET parent_event_id = ? WHERE parent_event_id = ? AND original_start_at >= ?')
+      .prepare(
+        'UPDATE events SET parent_event_id = ? WHERE parent_event_id = ? AND julianday(original_start_at) >= julianday(?)',
+      )
       .run(newTemplateId, oldTemplateId, fromDate);
   }
 
   deleteExceptionsFrom(parentEventId: number, fromDate: string): void {
     this.db
-      .prepare('DELETE FROM events WHERE parent_event_id = ? AND original_start_at >= ?')
+      .prepare('DELETE FROM events WHERE parent_event_id = ? AND julianday(original_start_at) >= julianday(?)')
       .run(parentEventId, fromDate);
   }
 
@@ -634,10 +642,10 @@ export class EventRepository {
       WHERE e.is_cancelled = 0 AND e.is_deleted = 0
         AND e.recurrence_rule IS NULL
         AND e.parent_event_id IS NULL
-        AND e.start_at < ?
+        AND julianday(e.start_at) < julianday(?)
         AND (
-          e.end_at > ?
-          OR (e.end_at IS NULL AND strftime('%Y-%m-%dT%H:%M:%SZ', e.start_at, '+30 minutes') > ?)
+          julianday(e.end_at) > julianday(?)
+          OR (e.end_at IS NULL AND julianday(e.start_at, '+30 minutes') > julianday(?))
         )
         AND (
           e.user_id = ?
@@ -647,7 +655,7 @@ export class EventRepository {
           )
         )
         ${privacyClause}
-      ORDER BY e.start_at
+      ORDER BY julianday(e.start_at), e.id
     `;
     const params: (string | number)[] = [endUtc, startUtc, startUtc, userId, userId];
     if (applyPrivacy) params.push(requesterId as number);
@@ -658,7 +666,7 @@ export class EventRepository {
     const row = this.db
       .prepare(`
       SELECT COUNT(*) as count FROM events
-      WHERE user_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND is_deleted = 0
+      WHERE user_id = ? AND julianday(start_at) >= julianday(?) AND julianday(start_at) <= julianday(?) AND is_cancelled = 0 AND is_deleted = 0
         AND (owner_type IS NULL OR owner_type = 'user')
     `)
       .get(userId, startUtc, endUtc) as { count: number };
@@ -676,7 +684,7 @@ export class EventRepository {
   getByDateRangeForGroup(groupId: number, startUtc: string, endUtc: string): CalendarEvent[] {
     return this.db
       .prepare(
-        "SELECT * FROM events WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ? AND is_cancelled = 0 AND is_deleted = 0 ORDER BY start_at",
+        "SELECT * FROM events WHERE owner_type = 'group' AND group_id = ? AND julianday(start_at) >= julianday(?) AND julianday(start_at) <= julianday(?) AND is_cancelled = 0 AND is_deleted = 0 ORDER BY julianday(start_at), id",
       )
       .all(groupId, startUtc, endUtc) as CalendarEvent[];
   }
@@ -685,9 +693,9 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE owner_type = 'group' AND group_id = ? AND start_at >= ? AND start_at <= ?
+      WHERE owner_type = 'group' AND group_id = ? AND julianday(start_at) >= julianday(?) AND julianday(start_at) <= julianday(?)
         AND is_cancelled = 0 AND is_deleted = 0 AND recurrence_rule IS NULL AND parent_event_id IS NULL
-      ORDER BY start_at
+      ORDER BY julianday(start_at), id
     `)
       .all(groupId, startUtc, endUtc) as CalendarEvent[];
   }
@@ -707,7 +715,7 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE owner_type = 'group' AND group_id = ? AND title LIKE ? ESCAPE '\\' AND is_cancelled = 0 AND is_deleted = 0
-      ORDER BY start_at ASC
+      ORDER BY julianday(start_at), id
       LIMIT ?
     `)
       .all(groupId, `%${this.escapeLike(query)}%`, limit) as CalendarEvent[];
@@ -719,8 +727,8 @@ export class EventRepository {
       .prepare(`
       SELECT * FROM events
       WHERE owner_type = 'group' AND group_id = ? AND is_cancelled = 0 AND is_deleted = 0 AND parent_event_id IS NULL
-        AND (start_at > ? OR recurrence_rule IS NOT NULL)
-      ORDER BY start_at
+        AND (julianday(start_at) > julianday(?) OR recurrence_rule IS NOT NULL)
+      ORDER BY julianday(start_at), id
       LIMIT ?
     `)
       .all(groupId, nowIso, limit) as CalendarEvent[];
@@ -765,7 +773,7 @@ export class EventRepository {
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE e.user_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0 AND e.is_deleted = 0
            AND (e.owner_type IS NULL OR e.owner_type = 'user')
-         ORDER BY e.start_at`,
+         ORDER BY julianday(e.start_at), e.id`,
       )
       .all(userId) as CalendarEvent[];
   }
@@ -777,7 +785,7 @@ export class EventRepository {
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
          WHERE e.group_id = ? AND e.event_type = 'birthday' AND e.is_cancelled = 0 AND e.is_deleted = 0
            AND e.owner_type = 'group'
-         ORDER BY e.start_at`,
+         ORDER BY julianday(e.start_at), e.id`,
       )
       .all(groupId) as CalendarEvent[];
   }
@@ -811,7 +819,7 @@ export class EventRepository {
       .prepare(
         `SELECT e.*, m.birth_year, m.celebrant_id FROM events e
          LEFT JOIN birth_event_metadata m ON m.event_id = e.id
-         WHERE ${conditions.join(' AND ')} ORDER BY e.start_at`,
+         WHERE ${conditions.join(' AND ')} ORDER BY julianday(e.start_at), e.id`,
       )
       .all(...params) as CalendarEvent[];
   }
@@ -831,11 +839,11 @@ export class EventRepository {
     return this.db
       .prepare(`
       SELECT * FROM events
-      WHERE start_at >= ? AND start_at <= ?
+      WHERE julianday(start_at) >= julianday(?) AND julianday(start_at) <= julianday(?)
       AND all_day = 0
       AND recurrence_rule IS NULL
       AND is_cancelled = 0 AND is_deleted = 0
-      ORDER BY start_at ASC
+      ORDER BY julianday(start_at), id
     `)
       .all(now, until) as CalendarEvent[];
   }
