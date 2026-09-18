@@ -86,8 +86,22 @@ describe('AI production latency report', () => {
       attempts: 4,
       calls: 3,
     });
-    expect(summary.byProvider['groq:qwen']).toEqual({ n: 2, p50: 80, p90: 100, p95: 100, failures: 0 });
-    expect(summary.byProvider['zai:glm']).toEqual({ n: 0, p50: null, p90: null, p95: null, failures: 1 });
+    expect(summary.byProvider['groq:qwen']).toEqual({
+      n: 2,
+      p50: 80,
+      p90: 100,
+      p95: 100,
+      failures: 0,
+      skippedBeforeRequest: 0,
+    });
+    expect(summary.byProvider['zai:glm']).toEqual({
+      n: 0,
+      p50: null,
+      p90: null,
+      p95: null,
+      failures: 1,
+      skippedBeforeRequest: 0,
+    });
     expect(summary.outcomes).toEqual({ delivered: 1, fallback: 1 });
     expect(summarizeAiLogs([])).toMatchObject({
       requests: 0,
@@ -98,4 +112,23 @@ describe('AI production latency report', () => {
     expect(JSON.stringify(summary)).not.toContain('123');
     expect(JSON.stringify(summary)).not.toContain('456');
   });
+});
+
+test('preflight skips are separate from actual provider failures', () => {
+  const summary = summarizeAiLogs([
+    {
+      msg: 'AI model call metric',
+      requestId: 'a',
+      provider: 'gemini',
+      model: 'winner',
+      providerDurationMs: 30,
+      totalDurationMs: 100,
+      failedProviders: [{ provider: 'zai', model: 'failed' }],
+      skippedProviders: [{ provider: 'groq', model: 'oversized' }],
+      success: true,
+    },
+  ]);
+  expect(summary.byProvider['groq:oversized']).toMatchObject({ n: 0, failures: 0, skippedBeforeRequest: 1 });
+  expect(summary.byProvider['zai:failed']).toMatchObject({ n: 0, failures: 1, skippedBeforeRequest: 0 });
+  expect(summary.byProvider['gemini:winner']).toMatchObject({ p50: 30, failures: 0, skippedBeforeRequest: 0 });
 });

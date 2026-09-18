@@ -281,6 +281,7 @@ describe('aiStreamRound — provider chain fallback', () => {
     });
 
     expect(result.text).toBe('gemini to the rescue');
+    expect(result.metrics).toMatchObject({ failedProviders: [{ provider: 'zai', model: 'zai-main' }] });
     expect(result.providerUsed).toContain('Gemini');
   });
 
