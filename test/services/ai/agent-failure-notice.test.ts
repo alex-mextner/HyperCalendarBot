@@ -157,9 +157,30 @@ describe('agent failure notices', () => {
   // cheerful "one second" and then silence.
   test('every provider dead → honest message, not a comeback promise', async () => {
     const dead = new AllProvidersFailedError([
-      { provider: 'z.ai (glm-5.1)', status: 429, message: 'Weekly/Monthly Limit Exhausted', transient: false },
-      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist', transient: false },
-      { provider: 'Gemini (models/gemini-2.5-flash)', status: 401, message: 'invalid key', transient: false },
+      {
+        provider: 'z.ai (glm-5.1)',
+        providerId: 'zai',
+        model: 'synthetic',
+        status: 429,
+        message: 'Weekly/Monthly Limit Exhausted',
+        transient: false,
+      },
+      {
+        provider: 'Groq (openai/gpt-oss-120b)',
+        providerId: 'groq',
+        model: 'synthetic',
+        status: 404,
+        message: 'model does not exist',
+        transient: false,
+      },
+      {
+        provider: 'Gemini (models/gemini-2.5-flash)',
+        providerId: 'gemini',
+        model: 'synthetic',
+        status: 401,
+        message: 'invalid key',
+        transient: false,
+      },
     ]);
     const agent = new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(dead) });
 
@@ -180,9 +201,18 @@ describe('agent failure notices', () => {
   // rejected keys carries no such phrase anywhere.
   test('every provider dead with no quota wording → still an honest message', async () => {
     const dead = new AllProvidersFailedError([
-      { provider: 'Groq (openai/gpt-oss-120b)', status: 404, message: 'model does not exist', transient: false },
+      {
+        provider: 'Groq (openai/gpt-oss-120b)',
+        providerId: 'groq',
+        model: 'synthetic',
+        status: 404,
+        message: 'model does not exist',
+        transient: false,
+      },
       {
         provider: 'HF (meta-llama/Llama-3.3-70B-Instruct)',
+        providerId: 'hf',
+        model: 'synthetic',
         status: 401,
         message: 'Invalid username or password.',
         transient: false,
@@ -204,8 +234,22 @@ describe('agent failure notices', () => {
   // stall phrase is honest there and must survive.
   test('whole chain transiently down → stall phrase, because a retry can still succeed', async () => {
     const flaky = new AllProvidersFailedError([
-      { provider: 'z.ai (glm-5.1)', status: 503, message: 'overloaded', transient: true },
-      { provider: 'Gemini (models/gemini-2.5-flash)', status: 500, message: 'internal error', transient: true },
+      {
+        provider: 'z.ai (glm-5.1)',
+        providerId: 'zai',
+        model: 'synthetic',
+        status: 503,
+        message: 'overloaded',
+        transient: true,
+      },
+      {
+        provider: 'Gemini (models/gemini-2.5-flash)',
+        providerId: 'gemini',
+        model: 'synthetic',
+        status: 500,
+        message: 'internal error',
+        transient: true,
+      },
     ]);
     const agent = new CalendarBotAgent(config, probe.sender, { streamImpl: failingStream(flaky) });
 

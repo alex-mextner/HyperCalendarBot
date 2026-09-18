@@ -10,6 +10,7 @@ import { logger } from '../../utils/logger.ts';
 import { type ActivityEvent, formatActivityEvent } from './activity-event.ts';
 import type { AiDebugLogger, AiDebugRunContext } from './debug-logger.ts';
 import type { HistorySummarizer } from './history-summarizer.ts';
+import { type AgentRequestMetricSnapshot, AgentRequestMetrics, elapsedMs } from './request-metrics.ts';
 import { validateResponse } from './response-validator.ts';
 import { AllProvidersFailedError, aiStreamRound, type StreamCallbacks } from './streaming.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
@@ -504,6 +505,8 @@ export interface AgentRunResult {
   toolCalls: AgentToolCallRecord[];
   toolResults: AgentToolResultRecord[];
   endCall?: boolean;
+  /** Structured latency/cost telemetry; contains no user text, tool args or actor ids. */
+  metrics?: AgentRequestMetricSnapshot;
 }
 
 export class CalendarBotAgent {
@@ -526,6 +529,7 @@ export class CalendarBotAgent {
   async buildMessages(
     ctx: AgentContext,
     history: ChatHistoryMessage[],
+    measuredStream?: typeof aiStreamRound,
   ): Promise<{ systemPrompt: string; messages: MessageParam[] }> {
     // IMPORTANT: history must already contain the current user message.
     // The universal GramIO middleware in bot/index.ts saves it via ConversationLogger
@@ -543,7 +547,12 @@ export class CalendarBotAgent {
 
       for (let msg of parsedMessages) {
         if (this.summarizer && isToolMessage(msg) && typeof msg.content === 'string') {
-          const condensed = await this.summarizer.condenseMessage(row.id, msg.tool_call_id, msg.content);
+          const condensed = await this.summarizer.condenseMessage(
+            row.id,
+            msg.tool_call_id,
+            msg.content,
+            measuredStream,
+          );
           if (condensed !== msg.content) {
             msg = { ...msg, content: condensed };
           }
@@ -648,8 +657,11 @@ export class CalendarBotAgent {
   }
 
   async run(ctx: AgentContext): Promise<AgentRunResult> {
+    const requestMetrics = new AgentRequestMetrics();
+    const requestId = requestMetrics.requestId;
     aiLogger.info(
       {
+        requestId,
         userId: ctx.user.telegram_id,
         chatId: ctx.chatId,
         supplementMode: !!ctx.supplementMode,
@@ -658,10 +670,70 @@ export class CalendarBotAgent {
       'Agent run started',
     );
 
+    const measuredStream =
+      (purpose: 'history' | 'agent' | 'validator' | 'retry') =>
+      async (...args: Parameters<typeof aiStreamRound>): ReturnType<typeof aiStreamRound> => {
+        const [options, callbacks] = args;
+        const startedAt = performance.now();
+        try {
+          const result = await this.streamImpl({ ...options, requestId }, callbacks);
+          requestMetrics.recordRound(result.metrics);
+          const metrics = result.metrics;
+          aiLogger.info(
+            {
+              requestId,
+              purpose,
+              provider: metrics?.provider ?? null,
+              model: metrics?.model ?? null,
+              chain: metrics?.chain ?? null,
+              firstUsableSinceAttemptMs: metrics?.firstUsableSinceAttemptMs ?? null,
+              providerDurationMs: metrics?.providerDurationMs ?? null,
+              totalDurationMs: metrics?.totalDurationMs ?? elapsedMs(startedAt),
+              attemptCount: metrics?.attemptCount ?? null,
+              fallbackCount: metrics?.fallbackCount ?? null,
+              promptTokens: metrics?.usage?.promptTokens ?? null,
+              completionTokens: metrics?.usage?.completionTokens ?? null,
+              reasoningTokens: metrics?.usage?.reasoningTokens ?? null,
+              cachedTokens: metrics?.usage?.cachedTokens ?? null,
+              success: true,
+            },
+            'AI model call metric',
+          );
+          return result;
+        } catch (error) {
+          const failed = error instanceof AllProvidersFailedError ? error.roundMetrics : null;
+          requestMetrics.recordFailedRound(
+            failed?.totalDurationMs ?? elapsedMs(startedAt),
+            failed?.attemptCount ?? 0,
+            failed?.fallbackCount ?? 0,
+          );
+          aiLogger.info(
+            {
+              requestId,
+              purpose,
+              totalDurationMs: failed?.totalDurationMs ?? elapsedMs(startedAt),
+              attemptCount: failed?.attemptCount ?? null,
+              fallbackCount: failed?.fallbackCount ?? null,
+              failedProviders:
+                error instanceof AllProvidersFailedError
+                  ? error.failures.map((failure) => ({ provider: failure.providerId, model: failure.model }))
+                  : [],
+              success: false,
+            },
+            'AI model call metric',
+          );
+          throw error;
+        }
+      };
+    const summaryStream = measuredStream('history');
+    const agentStream = measuredStream('agent');
+    const validatorStream = measuredStream('validator');
+    const retryStream = measuredStream('retry');
+
     const history = ctx.chatHistory.getRecent(ctx.user.telegram_id, 30);
-    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history);
+    const { systemPrompt, messages: rawHistoryMessages } = await this.buildMessages(ctx, history, summaryStream);
     const historyMessages = this.summarizer
-      ? await this.summarizer.condenseHistory(rawHistoryMessages)
+      ? await this.summarizer.condenseHistory(rawHistoryMessages, summaryStream)
       : rawHistoryMessages;
 
     const dbg: AiDebugRunContext | null =
@@ -745,11 +817,13 @@ export class CalendarBotAgent {
 
         const callbacks: StreamCallbacks = {
           onTextDelta: (text) => {
+            requestMetrics.markVisible();
             writer.appendText(text);
             writer.flush(false).catch(() => {});
           },
           onToolCallStart: (name) => {
             if (SILENT_TOOLS.has(name)) return;
+            requestMetrics.markVisible();
             // Only set the label — don't flush. The tool loop flushes
             // sequentially with full input details. Fire-and-forget flush
             // here raced with the tool loop in noPlaceholder (group) mode,
@@ -762,7 +836,7 @@ export class CalendarBotAgent {
         };
 
         const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-        const result = await this.streamImpl(
+        const result = await agentStream(
           {
             messages: currentMessages,
             tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
@@ -774,10 +848,13 @@ export class CalendarBotAgent {
           callbacks,
         );
 
+        const roundMetrics = result.metrics;
         aiLogger.info(
           {
-            userId: ctx.user.telegram_id,
-            provider: result.providerUsed,
+            requestId,
+            provider: roundMetrics?.provider ?? null,
+            model: roundMetrics?.model ?? null,
+            chain: roundMetrics?.chain ?? null,
             round,
             toolCount: result.toolCalls.length,
           },
@@ -844,7 +921,20 @@ export class CalendarBotAgent {
             await writer.flush(true);
           }
 
+          const toolStartedAt = performance.now();
           const toolResult = await executeTool(ctx, tc.name, input);
+          const toolElapsedMs = elapsedMs(toolStartedAt);
+          requestMetrics.recordTool(toolElapsedMs);
+          aiLogger.info(
+            {
+              requestId,
+              tool: tc.name,
+              durationMs: toolElapsedMs,
+              success: toolResult.success,
+              disposition: toolResult.disposition,
+            },
+            'Tool call complete',
+          );
           writeOutcomes.record(tc.name, input, toolResult);
 
           // Record dedup key only after a successful execution — failed calls
@@ -912,7 +1002,7 @@ export class CalendarBotAgent {
               toolCalls: allToolCalls.map((tc) => tc.name),
               response: responseText,
             },
-            this.streamImpl,
+            validatorStream,
           );
 
           if (!validation.approved) {
@@ -935,6 +1025,8 @@ export class CalendarBotAgent {
               writeOutcomes,
               saveAssistant,
               saveResults,
+              retryStream,
+              requestMetrics,
             );
 
             if (retryOutcome.hitStopLoop) termination = retryOutcome.waiting ? 'waiting' : 'stop';
@@ -950,7 +1042,7 @@ export class CalendarBotAgent {
                   toolCalls: allToolCalls.map((tc) => tc.name),
                   response: retryOutcome.lastRoundText,
                 },
-                this.streamImpl,
+                validatorStream,
               );
               if (!reValidation.approved) {
                 aiLogger.warn(
@@ -1030,10 +1122,12 @@ export class CalendarBotAgent {
 
     aiLogger.info(
       {
+        requestId,
         userId: ctx.user.telegram_id,
         chatId: ctx.chatId,
         toolCount: allToolCalls.length,
         supplementMode: !!ctx.supplementMode,
+        termination,
       },
       'Agent run complete',
     );
@@ -1041,16 +1135,24 @@ export class CalendarBotAgent {
     // A failed run with nothing to show must not leave the ⏳ placeholder edited
     // into a bare "..." — that is the silence the user reads as being ignored.
     if ((silent && guarded) || isSkipText(finalText) || (runFailed && finalText.length === 0)) {
+      const deliveryStartedAt = performance.now();
       await writer.discard();
-      return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults };
+      const metrics = requestMetrics.snapshot(termination, 'discarded', elapsedMs(deliveryStartedAt));
+      aiLogger.info(metrics, 'AI request metric');
+      return { responseText: '', toolCalls: allToolCalls, toolResults: allToolResults, metrics };
     }
 
+    let deliveryOutcome: 'delivered' | 'fallback' = 'delivered';
+    const deliveryStartedAt = performance.now();
     try {
       await writer.finalize();
     } catch (finalizeErr) {
+      deliveryOutcome = 'fallback';
       aiLogger.error({ err: finalizeErr, userId: ctx.user.telegram_id }, 'Writer finalize failed');
       await writer.sendErrorFallback(t(ctx.user.language).ai_send_error);
     }
+    const metrics = requestMetrics.snapshot(termination, deliveryOutcome, elapsedMs(deliveryStartedAt));
+    aiLogger.info(metrics, 'AI request metric');
 
     const msgId = writer.getMessageId();
     if (ctx.onBotResponse && msgId !== null) {
@@ -1062,6 +1164,7 @@ export class CalendarBotAgent {
       toolCalls: allToolCalls,
       toolResults: allToolResults,
       endCall: ctx.callEndRequested === true,
+      metrics,
     };
   }
 
@@ -1088,6 +1191,8 @@ export class CalendarBotAgent {
     writeOutcomes: WriteOutcomes,
     saveAssistant: (message: MessageParam, skipIds?: Set<string>) => void,
     saveResults: (messages: MessageParam[], skipIds?: Set<string>) => void,
+    retryStream: typeof aiStreamRound,
+    requestMetrics: AgentRequestMetrics,
   ): Promise<{
     hitStopLoop: boolean;
     waiting?: boolean;
@@ -1125,17 +1230,20 @@ export class CalendarBotAgent {
 
       const callbacks: StreamCallbacks = {
         onTextDelta: (text) => {
+          requestMetrics.markVisible();
           writer.appendText(text);
           writer.flush(false).catch(() => {});
         },
         onToolCallStart: (name) => {
+          if (SILENT_TOOLS.has(name)) return;
+          requestMetrics.markVisible();
           writer.setToolLabel(name);
           writer.flush(true).catch(() => {});
         },
       };
 
       const remainingMs = Math.max(1000, TIMEOUT_MS - (Date.now() - startTime));
-      const result = await this.streamImpl(
+      const result = await retryStream(
         {
           messages: currentMessages,
           tools: getToolDefinitions(ctx.inputMode, ctx.supplementMode),
@@ -1190,7 +1298,9 @@ export class CalendarBotAgent {
         writer.setToolLabel(tc.name, input);
         await writer.flush(true);
 
+        const toolStartedAt = performance.now();
         const toolResult = await executeTool(ctx, tc.name, input);
+        requestMetrics.recordTool(elapsedMs(toolStartedAt));
         writeOutcomes.record(tc.name, input, toolResult);
 
         // Record dedup key only on success — failed calls must not block retries.
