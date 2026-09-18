@@ -364,7 +364,7 @@ test('advertised numeric ID schema stays numeric', () => {
     const properties = tool.function.parameters?.properties;
     if (!properties || typeof properties !== 'object') continue;
     for (const [field, schema] of Object.entries(properties)) {
-      if (field.endsWith('_id')) expect(schema).toMatchObject({ type: 'number' });
+      if (field.endsWith('_id')) expect(['number', 'integer']).toContain(Reflect.get(schema, 'type'));
     }
   }
 });

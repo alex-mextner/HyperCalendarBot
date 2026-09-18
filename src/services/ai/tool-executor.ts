@@ -6,8 +6,10 @@ import { handleCreateBirthdayEvent } from './tool-handlers/birthdays.ts';
 import { handleCalculate } from './tool-handlers/calculate.ts';
 import {
   handleAddContact,
+  handleDeleteContact,
   handleFindContact,
   handleGetContacts,
+  handleGetUserInfo,
   handleUpdateContact,
 } from './tool-handlers/contacts.ts';
 import {
@@ -138,6 +140,8 @@ export interface ToolInputMap {
   ask_user: { question: string; options: string[] };
   pick_users: { event_id: number; prompt: string };
   get_contacts: { force?: boolean };
+  get_user_info: { telegram_id: number };
+  delete_contact: { contact_id: number };
   add_contact: { name: string; username?: string };
   find_contact: { name: string };
   update_contact: { search: string; name?: string; preferred_name?: string; username?: string };
@@ -150,7 +154,7 @@ export interface ToolInputMap {
   get_holidays: { limit?: number };
   manage_settings: ManageSettingsInput;
   share_event: { event_id: number; target_type: 'user' | 'group'; target_id: number };
-  send_invitation: { event_id: number; invitee_id?: number; invitee_username?: string };
+  send_invitation: { event_id: number; invitee_id?: number; invitee_username?: string; force?: boolean };
   get_invitation_status: { event_id: number };
   share_agenda: { period: 'today' | 'tomorrow' | 'week'; target_type: 'user' | 'group'; target_id: number };
   set_event_visibility: { event_id: number; visibility: 'private' | 'free_busy' | 'full'; owner_id?: number };
@@ -268,6 +272,7 @@ const HANDLER_MAP: { [tool: string]: { meta?: import('./types.ts').ToolHandlerMe
   search_events: handleSearchEvents,
   get_reminders: handleGetReminders,
   get_contacts: handleGetContacts,
+  get_user_info: handleGetUserInfo,
   find_contact: handleFindContact,
   find_user: handleFindUser,
   get_history: handleGetHistory,
@@ -309,7 +314,9 @@ function getToolMeta(toolName: string): import('./types.ts').ToolHandlerMeta | u
 }
 
 const THROTTLE_EXEMPT = new Set(
-  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter((k) => getToolMeta(k)?.readonly),
+  [...Object.keys(HANDLER_MAP), ...Object.keys(INLINE_TOOL_META)].filter(
+    (k) => getToolMeta(k)?.readonly || getToolMeta(k)?.throttleExempt,
+  ),
 );
 
 const SKIP_ACTION_LOG = new Set(
@@ -362,9 +369,11 @@ const TOOL_FEATURE_MAP: { [tool: string]: FeatureKey } = {
   get_invitation_status: 'sharing',
   notify_participants: 'sharing',
   get_contacts: 'contacts',
+  get_user_info: 'contacts',
   add_contact: 'contacts',
   find_contact: 'contacts',
   update_contact: 'contacts',
+  delete_contact: 'contacts',
   get_holidays: 'holidays',
   get_google_calendar_status: 'google_calendar',
   list_google_calendars: 'google_calendar',
@@ -521,6 +530,7 @@ function extractTargetUserId(input: ToolInputMap[ToolName]): number | undefined 
   if ('invitee_id' in input && typeof input.invitee_id === 'number') return input.invitee_id;
   if ('secretary_telegram_id' in input && typeof input.secretary_telegram_id === 'number')
     return input.secretary_telegram_id;
+  if ('telegram_id' in input && typeof input.telegram_id === 'number') return input.telegram_id;
   if ('target_id' in input && typeof input.target_id === 'number') return input.target_id;
   return undefined;
 }
@@ -615,6 +625,9 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
       case 'pick_users':
         return handlePickUsers(ctx, input as ToolInputMap['pick_users']);
 
+      case 'get_user_info':
+        return handleGetUserInfo(ctx, input as ToolInputMap['get_user_info']);
+
       case 'get_contacts':
         return handleGetContacts(ctx, input as ToolInputMap['get_contacts']);
 
@@ -626,6 +639,12 @@ async function dispatchTool(ctx: AgentContext, toolName: ToolName, input: ToolIn
 
       case 'update_contact':
         return handleUpdateContact(ctx, input as ToolInputMap['update_contact']);
+
+      case 'delete_contact':
+        if ('contact_id' in input && typeof input.contact_id === 'number') {
+          return handleDeleteContact(ctx, { contact_id: input.contact_id });
+        }
+        return { success: false, error: 'A contact_id from your address book is required.' };
 
       case 'render_day_image':
         return handleRenderDayImage(ctx, input as ToolInputMap['render_day_image']);
