@@ -292,3 +292,37 @@ test('respond field also rejects object-valued entire-template results', async (
   expect(result.errorCode).toBe('INVALID_INPUT');
   expect(fn).toHaveBeenCalledTimes(1);
 });
+
+test('translation fan-out is bounded even when every expansion returns empty text', async () => {
+  let timezoneReads = 0;
+  const guardedContext = {
+    ...context,
+    get timezone() {
+      if (++timezoneReads > 8_300) throw new Error('test canary: resolver work was not bounded');
+      return 'UTC';
+    },
+  };
+  const flow = WorkflowSchema.parse({
+    version: 2,
+    tools: [{ name: 'search_events', input: { query: '{{t.a}}' } }],
+    i18n: { en: { a: '{{t.b}}'.repeat(24), b: '{{t.c}}'.repeat(24), c: '{{t.d}}'.repeat(24), d: '' } },
+  });
+  const fn = mock(() => ({ success: true, output: 'must not dispatch' }));
+  await expect(new IntentExecutor().run(flow, {}, guardedContext, fn)).resolves.toMatchObject({
+    success: false,
+    errorCode: 'INVALID_INPUT',
+  });
+  expect(fn).not.toHaveBeenCalled();
+  expect(timezoneReads).toBeLessThan(8_300);
+});
+
+test('small repeated translations remain valid under the resolver operation budget', async () => {
+  const flow = WorkflowSchema.parse({
+    version: 2,
+    tools: [{ name: 'search_events', input: { query: '{{t.a}}' } }],
+    i18n: { en: { a: '{{t.b}}-{{t.b}}', b: 'retained' } },
+  });
+  const fn = mock(() => ({ success: true, output: 'ok' }));
+  expect((await new IntentExecutor().run(flow, {}, context, fn)).success).toBe(true);
+  expect(fn).toHaveBeenCalledWith('search_events', { query: 'retained-retained' });
+});

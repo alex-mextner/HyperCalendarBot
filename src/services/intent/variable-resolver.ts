@@ -20,6 +20,7 @@ interface ResolvePolicy {
   strict: boolean;
   translations: Set<string>;
   outputChars: number;
+  operations: number;
 }
 
 /**
@@ -109,6 +110,7 @@ function resolveVar(
   i18n?: I18nMap,
   policy?: ResolvePolicy,
 ): unknown {
+  consumeResolution(policy);
   const now = new TZDate(new Date(), userCtx.timezone);
 
   switch (name) {
@@ -194,6 +196,12 @@ function resolveVar(
  * Resolve {{...}} variables in a value. Works on strings (template substitution)
  * and objects (recursively resolve all string values).
  */
+/** Output length and cycle depth do not bound empty-string translation fan-out. */
+function consumeResolution(policy?: ResolvePolicy): void {
+  if (policy?.strict && ++policy.operations > WORKFLOW_LIMITS.resolutionSteps)
+    throw new WorkflowInputError('INVALID_INPUT');
+}
+
 function accountOutput(value: unknown, policy?: ResolvePolicy): unknown {
   if (policy?.strict && typeof value === 'string') {
     policy.outputChars += value.length;
@@ -211,6 +219,7 @@ function resolveInner(
   i18n?: I18nMap,
   policy?: ResolvePolicy,
 ): unknown {
+  consumeResolution(policy);
   if (typeof template === 'string') {
     const pattern = /\{\{([^}]+)\}\}/g;
     const matches = [...template.matchAll(pattern)];
@@ -288,5 +297,6 @@ export function resolveVariables(
     strict: options?.strict === true,
     translations: new Set(),
     outputChars: 0,
+    operations: 0,
   });
 }

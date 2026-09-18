@@ -6,6 +6,7 @@ export const WORKFLOW_LIMITS = {
   totalChars: 131072,
   steps: 64,
   translationDepth: 16,
+  resolutionSteps: 8192,
 } as const;
 export type WorkflowInputValue =
   | string

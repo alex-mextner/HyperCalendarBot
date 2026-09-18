@@ -18,6 +18,7 @@ import { EventService } from '../../../src/services/event/event-service.ts';
 import { HolidayService } from '../../../src/services/holiday/holiday-service.ts';
 import { IntentExecutor } from '../../../src/services/intent/intent-executor.ts';
 import { IntentMatcher } from '../../../src/services/intent/intent-matcher.ts';
+import { escapeHtml } from '../../../src/utils/telegram.ts';
 
 let db: Database;
 beforeEach(() => {
@@ -27,7 +28,7 @@ beforeEach(() => {
   runMigrations(db, migrations);
 });
 afterEach(() => db.close());
-function setup(options: { initialWrite?: boolean; promptText?: string } = {}) {
+function setup(options: { initialWrite?: boolean; promptText?: string; terminalText?: string } = {}) {
   const users = new UserRepository(db);
   const user = users.create({ telegram_id: 890010001, timezone: 'UTC', language: 'en' });
   users.create({ telegram_id: 890010002, timezone: 'UTC', language: 'en' });
@@ -61,7 +62,7 @@ function setup(options: { initialWrite?: boolean; promptText?: string } = {}) {
         call: 'manage_settings',
         input: { action: 'update', category: 'general', updates: { default_event_duration_minutes: 60 } },
       },
-      { respond: 'Updated.' },
+      { respond: options.terminalText ?? 'Updated.' },
     ],
   };
   db.query('INSERT INTO intents (canonical_name,phrases,trigger_words,workflow,status,format) VALUES(?,?,?,?,?,?)').run(
@@ -166,4 +167,41 @@ test('long escaped prompts split safely and attach choices only to the final del
     if (index < send.mock.calls.length - 1) expect(entry[1]).not.toHaveProperty('reply_markup');
     else expect(entry[1]).toMatchObject({ reply_markup: { keyboard: [[{ text: '30' }], [{ text: '60' }]] } });
   }
+});
+
+test('v2 terminal text escapes literal user markup and splits without losing content', async () => {
+  const terminalText = `${'<A&B>'.repeat(650)} final`;
+  const { layer, ctx, send, users, user, store } = setup({ terminalText });
+  await layer(ctx, 'configure duration');
+  await layer(ctx, '30');
+  const before = send.mock.calls.length;
+  await layer(ctx, 'Yes');
+  const replies = send.mock.calls.slice(before);
+  expect(replies.length).toBeGreaterThan(1);
+  expect(replies.map(([text]) => text).join('')).toBe(escapeHtml(terminalText));
+  for (const [text, options] of replies) {
+    expect(text.length).toBeLessThanOrEqual(4000);
+    expect(text).not.toContain('<A');
+    expect(options).toMatchObject({ parse_mode: 'HTML' });
+  }
+  expect(replies.at(-1)?.[1]).toMatchObject({ reply_markup: { remove_keyboard: true } });
+  expect(users.findByTelegramId(user.telegram_id)?.default_event_duration_minutes).toBe(30);
+  expect(store.get(user.telegram_id, user.telegram_id)).toBeNull();
+});
+
+test('first-pass v2 response also escapes and splits before the supplement', async () => {
+  const { layer, ctx, send, call } = setup();
+  const payload = '<Long&Title>'.repeat(600);
+  db.query('UPDATE intents SET workflow=? WHERE canonical_name=?').run(
+    JSON.stringify({ version: 2, steps: [{ respond: payload }] }),
+    'synthetic_version2',
+  );
+  expect(await layer(ctx, 'configure duration')).toMatchObject({
+    handled: true,
+    needsSupplement: true,
+    supplementAutoResponse: payload,
+  });
+  expect(send.mock.calls.length).toBeGreaterThan(1);
+  expect(send.mock.calls.map(([text]) => text).join('')).toBe(escapeHtml(payload));
+  expect(call).not.toHaveBeenCalled();
 });

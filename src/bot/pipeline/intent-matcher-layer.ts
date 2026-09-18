@@ -37,6 +37,17 @@ export function createIntentMatcherLayer(
   actionLogRepo?: ActionLogRepository,
 ) {
   type Result = Awaited<ReturnType<IntentExecutor['run']>>;
+  async function deliverResponse(ctx: BotCommandContext, plainText: string, removeKeyboard = false): Promise<void> {
+    // formatResponse returns display text, not a trusted Telegram HTML document.
+    const chunks = splitMessage(escapeHtml(plainText), 4000, 'HTML');
+    for (const [index, chunk] of chunks.entries())
+      await ctx.send(chunk, {
+        parse_mode: 'HTML',
+        ...(removeKeyboard && index === chunks.length - 1
+          ? { reply_markup: { remove_keyboard: true, selective: true } }
+          : {}),
+      });
+  }
   async function deliverPrompt(
     ctx: BotCommandContext,
     chatId: number,
@@ -136,12 +147,7 @@ export function createIntentMatcherLayer(
         const format = intentRepo.getById(session.intentId)?.format ?? 'text';
         const text = formatResponse(format, result.response, user.timezone, user.language, result.responseEvents);
         if (session.workflow.version === 2) {
-          const chunks = splitMessage(text, 4000, 'HTML');
-          for (const [index, chunk] of chunks.entries())
-            await ctx.send(chunk, {
-              parse_mode: 'HTML',
-              ...(index === chunks.length - 1 ? { reply_markup: { remove_keyboard: true, selective: true } } : {}),
-            });
+          await deliverResponse(ctx, text, true);
         } else await ctx.send(text);
       }
       return { handled: true };
@@ -243,7 +249,8 @@ export function createIntentMatcherLayer(
       );
       // ctx.send is wrapped in bot/index.ts and already writes this to chat history;
       // the supplement agent reads the text from supplementAutoResponse, not from history.
-      await ctx.send(formatted);
+      if (workflow.version === 2) await deliverResponse(ctx, formatted);
+      else await ctx.send(formatted);
       return { handled: true, needsSupplement: true, supplementAutoResponse: formatted };
     }
 
