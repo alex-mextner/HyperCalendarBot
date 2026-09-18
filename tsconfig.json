@@ -10,7 +10,7 @@
 
     // Bundler mode
     "moduleResolution": "bundler",
-    // Resolve dependency-local type references from the real package in Bun's isolated store.
+    // Follow package symlinks so transitive Bun/Fetch types resolve in a clean isolated install.
     "preserveSymlinks": false,
     "customConditions": ["bun"],
     "allowImportingTsExtensions": true,

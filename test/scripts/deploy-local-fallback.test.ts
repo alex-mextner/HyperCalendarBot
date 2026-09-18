@@ -13,6 +13,9 @@ describe('local deploy transport contracts (behavior exercised in Python harness
     expect(script).toContain('"$endpoint" == unix://*');
     expect(remote).not.toMatch(/docker build|bun test|bun install/);
   });
+  test('clean release installation cannot rewrite the committed dependency lock', () => {
+    expect(script).toContain('install --frozen-lockfile --ignore-scripts');
+  });
   test('source, artifact and container have explicit identity checks', () => {
     expect(script).toContain('Ref is not current origin/main');
     expect(remote).toContain('Archive checksum mismatch');
