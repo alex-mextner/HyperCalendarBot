@@ -1,3 +1,4 @@
+import { performance } from 'node:perf_hooks';
 import { type Browser, type BrowserContext, chromium, type Page } from 'playwright';
 import { imageLogger } from '../utils/logger.ts';
 
@@ -13,6 +14,7 @@ interface PoolOptions {
 export class PlaywrightPool {
   private browser: Browser | null = null;
   private freePages: Page[] = [];
+  private readonly pageBrowser = new WeakMap<Page, Browser>();
   private busyPages: Set<Page> = new Set();
   private pageUseCount: Map<Page, number> = new Map();
   private pageCreatedAt: Map<Page, number> = new Map();
@@ -61,7 +63,8 @@ export class PlaywrightPool {
     this.reinitAttempts = 0;
     this.dead = false;
     this.browser.on('disconnected', () => {
-      if (this.stopped) return;
+      // An old browser may finish emitting after a replacement has been installed.
+      if (this.stopped || this.browser !== browser) return;
       this.freePages = [];
       this.busyPages.clear();
       this.pageUseCount.clear();
@@ -110,7 +113,7 @@ export class PlaywrightPool {
   async acquire(timeoutMs = 10_000): Promise<Page> {
     this.assertRunning();
 
-    const deadline = Date.now() + timeoutMs;
+    const deadline = performance.now() + timeoutMs;
 
     while (true) {
       if (this.reinitPromise) {
@@ -148,7 +151,7 @@ export class PlaywrightPool {
       }
 
       // Wait or timeout
-      const remaining = deadline - Date.now();
+      const remaining = deadline - performance.now();
       if (remaining <= 0) {
         throw new Error('acquire timeout: no page available within time limit');
       }
@@ -158,14 +161,16 @@ export class PlaywrightPool {
   }
 
   async release(page: Page): Promise<void> {
-    this.busyPages.delete(page);
-    if (this.stopped) return;
+    // Only the current lease owner may release a page, once.
+    if (!this.busyPages.delete(page) || this.stopped) return;
+    const browser = this.pageBrowser.get(page);
+    if (!browser || browser !== this.browser) return;
 
     const useCount = (this.pageUseCount.get(page) ?? 0) + 1;
     this.pageUseCount.set(page, useCount);
 
-    const createdAt = this.pageCreatedAt.get(page) ?? Date.now();
-    const age = Date.now() - createdAt;
+    const createdAt = this.pageCreatedAt.get(page) ?? performance.now();
+    const age = performance.now() - createdAt;
 
     if (useCount >= this.maxUseCount || age >= this.maxAgeMs) {
       try {
@@ -180,7 +185,15 @@ export class PlaywrightPool {
 
     try {
       await page.setContent('<html><body></body></html>');
-      if (!this.stopped) this.freePages.push(page);
+      if (!this.stopped && this.browser === browser) this.freePages.push(page);
+      else {
+        this.pageUseCount.delete(page);
+        this.pageCreatedAt.delete(page);
+        await page
+          .context()
+          .close()
+          .catch(() => {});
+      }
     } catch {
       // page is no longer usable; discard it
       this.pageUseCount.delete(page);
@@ -228,8 +241,9 @@ export class PlaywrightPool {
       const page = await context.newPage();
       this.assertRunning();
       if (this.browser !== browser) throw new Error('PlaywrightPool browser changed during page creation');
+      this.pageBrowser.set(page, browser);
       this.pageUseCount.set(page, 0);
-      this.pageCreatedAt.set(page, Date.now());
+      this.pageCreatedAt.set(page, performance.now());
       return { page, browser };
     } catch (error) {
       if (context) await context.close().catch(() => {});

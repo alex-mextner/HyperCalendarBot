@@ -15,14 +15,11 @@ const child = spawnSync(process.execPath, ['--no-env-file', 'test', fixture], {
   maxBuffer: 4 * 1024 * 1024,
 });
 const output = stripVTControlCharacters(`${child.stdout ?? ''}\n${child.stderr ?? ''}`).trim();
-// Coupled to the pinned Bun 1.3.11 reporter; incomplete summaries fail below.
+// Coupled to the pinned Bun 1.3.11 reporter; incomplete and skipped child suites fail below.
+// Browser absence is not permission to certify a release without real rendering checks.
 const count = (kind: 'pass' | 'skip' | 'fail') =>
   Number(output.match(new RegExp(`^\\s*(\\d+) ${kind}\\s*$`, 'm'))?.[1] ?? 0);
-const unavailable =
-  !child.error && child.status === 0 && count('pass') === 0 && count('fail') === 0 && count('skip') >= 6;
-const run = unavailable ? test.skip : test;
-
-run('real browser pool: six isolated acceptance scenarios', () => {
+test('real browser pool: six isolated acceptance scenarios', () => {
   if (child.error || child.status !== 0) {
     throw new Error(
       `Browser child status=${child.status} signal=${child.signal}: ${child.error?.message ?? ''}\n${output}`,
