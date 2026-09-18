@@ -4,46 +4,35 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
 const script = readFileSync(join(ROOT, 'scripts/deploy-local-fallback.sh'), 'utf8');
+const remote = readFileSync(join(ROOT, 'scripts/deploy-prebuilt-image.sh'), 'utf8');
 
-function position(fragment: string): number {
-  const index = script.indexOf(fragment);
-  if (index < 0) throw new Error(`deploy fallback is missing: ${fragment}`);
-  return index;
-}
-
-describe('local deploy fallback contract', () => {
-  test('deploys an exact git commit archive instead of the working tree', () => {
-    expect(script).toMatch(/git rev-parse "\$\{REF\}\^\{commit\}"/);
+describe('local deploy transport contracts (behavior exercised in Python harness)', () => {
+  test('local Unix daemon builds exact archive as linux/amd64', () => {
     expect(script).toContain('git archive "$SHA"');
-    expect(script).not.toContain('rsync');
+    expect(script).toContain('docker_local build --platform linux/amd64');
+    expect(script).toContain('"$endpoint" == unix://*');
+    expect(remote).not.toMatch(/docker build|bun test|bun install/);
   });
-
-  test('builds and tags the exact revision while retaining a rollback image', () => {
-    expect(script).toContain('-t "$IMAGE:$SHA"');
-    expect(script).toContain('docker tag "$IMAGE:$SHA" "$IMAGE:latest"');
-    expect(script).toContain('rollback-$STAMP');
-    expect(script).toContain('org.opencontainers.image.revision=$SHA');
+  test('source, artifact and container have explicit identity checks', () => {
+    expect(script).toContain('Ref is not current origin/main');
+    expect(remote).toContain('Archive checksum mismatch');
+    expect(remote).toContain('Loaded config identity mismatch');
+    expect(remote).toContain('"$REVISION" == "$SHA"');
   });
-
-  test('backs up before restart and reapplies runtime ownership', () => {
-    const backup = position('"$DEPLOY_PATH/scripts/backup-db.sh"');
-    const prepare = position('"$DEPLOY_PATH/scripts/prepare-runtime-dirs.sh" "$DEPLOY_PATH"');
-    const latestTag = position('docker tag "$IMAGE:$SHA" "$IMAGE:latest"');
-    const restart = position('docker compose up -d --no-deps --force-recreate bot');
-    expect(backup).toBeLessThan(latestTag);
-    expect(prepare).toBeLessThan(latestTag);
-    expect(latestTag).toBeLessThan(restart);
+  test('only unchanged migration code uses generic image rollback', () => {
+    expect(remote).toContain('"$old_schema" == "$new_schema"');
+    expect(remote).toContain('never restoring an older user database');
+    expect(remote.indexOf('Schema-changing release')).toBeLessThan(remote.indexOf('scripts/backup-db.sh"'));
   });
-
-  test('verifies the running image and both public health contracts', () => {
-    expect(script).toContain('ACTUAL_IMAGE_ID="$(docker inspect hypercal-bot');
-    expect(script).toContain('https://hypercal.invntrm.ru/health');
-    expect(script).toContain('https://hypercal.invntrm.ru/ready');
-    expect(script).toContain('ok|"ok (unverified)"|"ai chain down"');
+  test('readiness must be healthy, not just routed to a bot', () => {
+    expect(remote).toContain('"$HEALTH" == ok');
+    expect(remote).toContain('ok|"ok (unverified)")');
+    expect(remote).not.toContain('"ai chain down"');
+    expect(remote).toContain('--no-build --pull never');
   });
-
-  test('does not use broad prune commands on the shared server', () => {
-    expect(script).not.toContain('docker system prune');
-    expect(script).not.toContain('docker image prune');
+  test('shared server and personal registry credentials are not modified', () => {
+    expect(script).not.toMatch(/docker (system|image) prune|docker login|docker logout|pm2 delete/);
+    expect(remote).not.toContain('caddy reload');
+    expect(remote).toContain('data=preserved');
   });
 });

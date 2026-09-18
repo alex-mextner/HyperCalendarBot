@@ -48,7 +48,8 @@ test('six shipped definitions are import-safe and actual schema issues are visib
   ]);
   expect(auditDefinition(seedIntents[0]!).schemaValid).toBe(true);
   expect(auditDefinition(seedIntents[5]!).schemaValid).toBe(false);
-  expect(auditDefinition(seedIntents[4]!).examplesMissingCaptures).toBe(3);
+  expect(auditDefinition(seedIntents[4]!).examplesMissingCaptures).toBe(0);
+  expect(auditDefinition(seedIntents[4]!).examplesMatched).toBe(3);
 });
 
 test('snapshot is read-only, distinguishes missing from zero and never equates match with success', () => {

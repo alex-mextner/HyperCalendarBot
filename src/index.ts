@@ -1,3 +1,4 @@
+import { createNotificationSender } from './services/notification/worker.ts';
 import { bootstrapServiceSession } from './services/telegram-session/service-session-bootstrap.ts';
 import { formatSessionLoss } from './services/telegram-session/session-loss.ts';
 // src/index.ts
@@ -606,11 +607,7 @@ if (config.REDIS_URL) {
   const notifWorker = createNotificationWorker(
     config.REDIS_URL,
     db.notificationLog,
-    (telegramId, text) =>
-      botRef
-        .sendMessage(telegramId, text, 'HTML')
-        .then(() => {})
-        .catch((err) => botLogger.error({ err, telegramId }, 'Failed to send notification')),
+    createNotificationSender(botRef),
     scheduler,
   );
 

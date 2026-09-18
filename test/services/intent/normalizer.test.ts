@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { normalize, tokenize } from '../../../src/services/intent/normalizer.ts';
+import { normalize, normalizeWithOffsets, tokenize } from '../../../src/services/intent/normalizer.ts';
 
 describe('normalize', () => {
   test('lowercases and trims', () => {
@@ -30,4 +30,17 @@ describe('tokenize', () => {
   test('returns empty set for empty string', () => {
     expect(tokenize('')).toEqual(new Set());
   });
+});
+
+test('offset normalization stays equivalent for contextual lowercase and Unicode spans', () => {
+  for (const text of ['ΟΣ', 'ΟΣ ΣΟΣ', 'İstanbul 19:30', '  🔔 Node.js — завтра\nв 10:00  ', '«ПЛАН»', 'А\t\tБ']) {
+    const mapped = normalizeWithOffsets(text);
+    expect(mapped.text).toBe(normalize(text));
+    expect(mapped.spans.length).toBe(mapped.text.length);
+    for (const span of mapped.spans) {
+      expect(span.start).toBeGreaterThanOrEqual(0);
+      expect(span.end).toBeLessThanOrEqual(text.length);
+      expect(span.end).toBeGreaterThan(span.start);
+    }
+  }
 });

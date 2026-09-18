@@ -1,108 +1,175 @@
-// src/services/intent/intent-matcher.ts
-
 import { z } from 'zod';
 import type { Intent } from '../../database/types.ts';
 import { jsonCodec } from '../../utils/json-codec.ts';
 import { cmdLogger } from '../../utils/logger.ts';
-import { normalize, tokenize } from './normalizer.ts';
+import { parseFilterChain } from './filter-parser.ts';
+import { normalize, normalizeWithOffsets, tokenize } from './normalizer.ts';
 
 const StringArrayCodec = jsonCodec(z.array(z.string()));
-
-interface MatchResult {
+export interface MatchResult {
   intentId: number;
   captures: Record<string, string>;
 }
-
-interface TriggerEntry {
+export type MatchDecision =
+  | { kind: 'matched'; strategy: 'exact' | 'pattern'; result: MatchResult }
+  | { kind: 'abstain'; reason: 'no_match' | 'ambiguous' | 'missing_capture' | 'input_too_long'; candidates: number[] };
+interface IntentEntry {
   intentId: number;
-  pattern: RegExp;
+  pattern?: RegExp;
+  required: string[];
+  parameterized: boolean;
+}
+
+const MAX_INPUT_CHARS = 16000;
+const MAX_WORKFLOW_NODES = 4096;
+const MAX_WORKFLOW_CHARS = 65536;
+interface MatchInput {
+  raw: string;
+  normalized: () => ReturnType<typeof normalizeWithOffsets>;
+}
+
+function captureRequirements(workflow: string): { required: string[]; parameterized: boolean } | null {
+  if (workflow.length > MAX_WORKFLOW_CHARS) return null;
+  const required = new Set<string>();
+  let parameterized = false;
+  let root: unknown;
+  try {
+    root = JSON.parse(workflow);
+  } catch {
+    root = workflow;
+  }
+  const pending: unknown[] = [root];
+  for (let visited = 0; pending.length && visited < MAX_WORKFLOW_NODES; visited++) {
+    const value = pending.pop();
+    if (typeof value === 'string') {
+      for (const match of value.matchAll(/\{\{\s*(\$\d+)\s*(?:\|([^}]*))?\}\}/g)) {
+        parameterized = true;
+        let hasDefault = false;
+        if (match[2]) {
+          try {
+            hasDefault = parseFilterChain(match[2]).some(
+              (filter) => filter.name === 'default' && filter.args.length === 1,
+            );
+          } catch {
+            /* Invalid filters do not relax capture requirements. */
+          }
+        }
+        if (!hasDefault) required.add(match[1]!);
+      }
+    } else if (value && typeof value === 'object') pending.push(...Object.values(value));
+  }
+  return pending.length ? null : { required: [...required], parameterized };
+}
+
+function extract(entry: IntentEntry, input: MatchInput): MatchResult | null {
+  if (!entry.pattern) return entry.parameterized ? null : { intentId: entry.intentId, captures: {} };
+  const raw = input.raw;
+  let match = entry.pattern.exec(raw);
+  let offsets: ReturnType<typeof normalizeWithOffsets> | undefined;
+  if (!match || match.index !== 0 || match[0].length !== raw.length) {
+    offsets = input.normalized();
+    match = entry.pattern.exec(offsets.text);
+    if (!match || match.index !== 0 || match[0].length !== offsets.text.length) return null;
+  }
+  const captures: Record<string, string> = {};
+  for (let i = 1; i < match.length; i++) {
+    if (match[i] === undefined) continue;
+    const range = match.indices?.[i];
+    if (!offsets) captures[`$${i}`] = match[i]!;
+    else if (range && range[1] > range[0]) {
+      const first = offsets.spans[range[0]],
+        last = offsets.spans[range[1] - 1];
+      if (first && last) captures[`$${i}`] = raw.slice(first.start, last.end);
+    } else captures[`$${i}`] = '';
+  }
+  return entry.required.some((key) => captures[key] === undefined || captures[key] === '')
+    ? null
+    : { intentId: entry.intentId, captures };
 }
 
 export class IntentMatcher {
-  private phraseMap: Map<string, number> = new Map();
-  private triggerIndex: Map<string, TriggerEntry[]> = new Map();
+  constructor(private readonly mapInput: typeof normalizeWithOffsets = normalizeWithOffsets) {}
+  private phraseMap = new Map<string, IntentEntry[]>();
+  private triggerIndex = new Map<string, IntentEntry[]>();
 
-  /** Load approved intents into memory indexes */
+  /** Index only approved rules. Oversized or uninspectable slot requirements fail closed. */
   load(intents: Intent[]): void {
-    this.phraseMap = new Map();
-    this.triggerIndex = new Map();
-
+    this.phraseMap.clear();
+    this.triggerIndex.clear();
     for (const intent of intents) {
-      let phrases: string[] = [];
-      try {
-        phrases = StringArrayCodec.parse(intent.phrases);
-      } catch {
-        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON');
+      if (intent.status !== 'approved') continue;
+      const requirements = captureRequirements(intent.workflow);
+      if (!requirements) {
+        cmdLogger.warn({ intentId: intent.id }, 'Intent workflow exceeds inspection bound; not indexed');
+        continue;
       }
-      for (const phrase of phrases) {
-        this.phraseMap.set(normalize(phrase), intent.id);
-      }
-
+      const entry: IntentEntry = { intentId: intent.id, ...requirements };
       if (intent.pattern) {
-        let triggerWords: string[];
         try {
-          triggerWords = StringArrayCodec.parse(intent.trigger_words);
+          entry.pattern = new RegExp(intent.pattern, 'di');
         } catch {
-          cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON, skipping pattern');
-          continue;
-        }
-        const pattern = new RegExp(intent.pattern, 'i');
-        const entry: TriggerEntry = { intentId: intent.id, pattern };
-        for (const word of triggerWords) {
-          const key = normalize(word);
-          const existing = this.triggerIndex.get(key);
-          if (existing) {
-            existing.push(entry);
-          } else {
-            this.triggerIndex.set(key, [entry]);
-          }
+          cmdLogger.warn({ intentId: intent.id }, 'Intent pattern is invalid; argument extraction unavailable');
         }
       }
+      const phrases = StringArrayCodec.safeParse(intent.phrases);
+      if (!phrases.success) cmdLogger.error({ intentId: intent.id }, 'Intent has invalid phrases JSON');
+      else
+        for (const key of new Set(phrases.data.map(normalize))) {
+          if (!key) continue;
+          const rows = this.phraseMap.get(key) ?? [];
+          rows.push(entry);
+          this.phraseMap.set(key, rows);
+        }
+      const triggers = StringArrayCodec.safeParse(intent.trigger_words);
+      if (!triggers.success) {
+        cmdLogger.error({ intentId: intent.id }, 'Intent has invalid trigger_words JSON');
+        continue;
+      }
+      if (entry.pattern)
+        for (const key of new Set(triggers.data.map(normalize))) {
+          if (!key) continue;
+          const rows = this.triggerIndex.get(key) ?? [];
+          rows.push(entry);
+          this.triggerIndex.set(key, rows);
+        }
     }
   }
 
-  /** Try to match message text against loaded intents.
-   *  1. Normalize → exact lookup in phraseMap → return if found
-   *  2. Tokenize → look up trigger words → collect candidate regexes
-   *  3. Test candidates → return first match with captures
-   *  4. Return null if nothing matches
-   */
+  /** Compatible convenience API. Ambiguity is not permission to choose the first write. */
   match(text: string): MatchResult | null {
-    const normalized = normalize(text);
+    const decision = this.explain(text);
+    return decision.kind === 'matched' ? decision.result : null;
+  }
 
-    const exactId = this.phraseMap.get(normalized);
-    if (exactId !== undefined) {
-      return { intentId: exactId, captures: {} };
+  /** Deterministic selection diagnostics; no generated confidence score or execution side effect. */
+  explain(text: string): MatchDecision {
+    if (text.length > MAX_INPUT_CHARS) return { kind: 'abstain', reason: 'input_too_long', candidates: [] };
+    let normalizedInput: ReturnType<typeof normalizeWithOffsets> | undefined;
+    const raw = text.trim();
+    const input: MatchInput = { raw, normalized: () => (normalizedInput ??= this.mapInput(raw)) };
+    const exact = this.phraseMap.get(normalize(text));
+    if (exact?.length) {
+      if (exact.length !== 1)
+        return { kind: 'abstain', reason: 'ambiguous', candidates: exact.map((e) => e.intentId).sort((a, b) => a - b) };
+      const entry = exact[0]!;
+      const result = entry.parameterized ? extract(entry, input) : { intentId: entry.intentId, captures: {} };
+      return result
+        ? { kind: 'matched', strategy: 'exact', result }
+        : { kind: 'abstain', reason: 'missing_capture', candidates: [entry.intentId] };
     }
-
-    const words = tokenize(text);
-    const seen = new Set<number>();
-    const candidates: TriggerEntry[] = [];
-
-    for (const word of words) {
-      const entries = this.triggerIndex.get(word);
-      if (!entries) continue;
-      for (const entry of entries) {
-        if (!seen.has(entry.intentId)) {
-          seen.add(entry.intentId);
-          candidates.push(entry);
-        }
-      }
+    const candidates = new Map<number, IntentEntry>();
+    for (const word of tokenize(text))
+      for (const entry of this.triggerIndex.get(word) ?? []) candidates.set(entry.intentId, entry);
+    const results: MatchResult[] = [];
+    for (const entry of candidates.values()) {
+      const result = extract(entry, input);
+      if (result) results.push(result);
     }
-
-    for (const { intentId, pattern } of candidates) {
-      const m = pattern.exec(normalized);
-      if (m) {
-        const captures: Record<string, string> = {};
-        for (let i = 1; i < m.length; i++) {
-          if (m[i] !== undefined) {
-            captures[`$${i}`] = m[i]!;
-          }
-        }
-        return { intentId, captures };
-      }
-    }
-
-    return null;
+    if (results.length === 1) return { kind: 'matched', strategy: 'pattern', result: results[0]! };
+    return {
+      kind: 'abstain',
+      reason: results.length ? 'ambiguous' : 'no_match',
+      candidates: results.map((r) => r.intentId).sort((a, b) => a - b),
+    };
   }
 }
